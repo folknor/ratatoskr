@@ -81,6 +81,7 @@ function extractInlineImages(html: string): {
   const images: InlineImage[] = [];
   const processed = html.replace(
     /<img([^>]*)\ssrc="data:([^;]+);base64,([^"]+)"([^>]*)>/g,
+    // biome-ignore lint/complexity/useMaxParams: regex replace callback requires all capture groups
     (_match, before: string, mime: string, data: string, after: string) => {
       const cid = `inline_${Date.now()}_${images.length}@velomail`;
       images.push({ cid, mimeType: mime, base64: data });
@@ -181,7 +182,7 @@ export function buildRawEmail(draft: EmailDraft): string {
     if (hasAttachments) {
       lines.push("");
       // Attachment parts
-      for (const att of draft.attachments!) {
+      for (const att of draft.attachments ?? []) {
         lines.push(`--${mixedBoundary}`);
         lines.push(`Content-Type: ${att.mimeType}; name="${att.filename}"`);
         lines.push("Content-Transfer-Encoding: base64");

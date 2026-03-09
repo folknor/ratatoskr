@@ -53,7 +53,7 @@ function getKeys(obj: Record<string, unknown>, prefix = ""): string[] {
       keys.push(fullKey);
     }
   }
-  return keys.sort();
+  return keys.sort((a, b) => a.localeCompare(b));
 }
 
 describe("Translation completeness", () => {

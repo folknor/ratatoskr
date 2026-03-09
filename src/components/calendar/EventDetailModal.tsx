@@ -1,4 +1,5 @@
 import { Clock, MapPin, Pencil, Trash2, User } from "lucide-react";
+import type React from "react";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/Button";
@@ -23,7 +24,7 @@ export function EventDetailModal({
   accountId,
   onClose,
   onUpdated,
-}: EventDetailModalProps) {
+}: EventDetailModalProps): React.ReactNode {
   const { t } = useTranslation("calendar");
   const [editing, setEditing] = useState(false);
   const [summary, setSummary] = useState(event.summary ?? "");
@@ -103,7 +104,7 @@ export function EventDetailModal({
     }
   }, [accountId, calendar, event, onUpdated]);
 
-  const formatTime = (ts: number) =>
+  const formatTime = (ts: number): string =>
     new Date(ts * 1000).toLocaleString(undefined, {
       weekday: "short",
       month: "short",
@@ -132,6 +133,7 @@ export function EventDetailModal({
             label={t("title")}
             type="text"
             value={summary}
+            // biome-ignore lint/nursery/useExplicitType: inline callback
             onChange={(e) => setSummary(e.target.value)}
             autoFocus
           />
@@ -141,12 +143,14 @@ export function EventDetailModal({
               label={t("start")}
               type="datetime-local"
               value={startTime}
+              // biome-ignore lint/nursery/useExplicitType: inline callback
               onChange={(e) => setStartTime(e.target.value)}
             />
             <TextField
               label={t("end")}
               type="datetime-local"
               value={endTime}
+              // biome-ignore lint/nursery/useExplicitType: inline callback
               onChange={(e) => setEndTime(e.target.value)}
             />
           </div>
@@ -155,16 +159,22 @@ export function EventDetailModal({
             label={t("location")}
             type="text"
             value={location}
+            // biome-ignore lint/nursery/useExplicitType: inline callback
             onChange={(e) => setLocation(e.target.value)}
             placeholder={t("addLocation")}
           />
 
           <div>
-            <label className="text-xs text-text-secondary block mb-1">
+            <label
+              className="text-xs text-text-secondary block mb-1"
+              htmlFor="edit-event-description"
+            >
               {t("description")}
             </label>
             <textarea
+              id="edit-event-description"
               value={description}
+              // biome-ignore lint/nursery/useExplicitType: inline callback
               onChange={(e) => setDescription(e.target.value)}
               placeholder={t("addDescription")}
               rows={3}
@@ -176,7 +186,7 @@ export function EventDetailModal({
             <Button
               variant="secondary"
               size="md"
-              onClick={() => setEditing(false)}
+              onClick={(): void => setEditing(false)}
             >
               {t("cancel")}
             </Button>
@@ -222,14 +232,14 @@ export function EventDetailModal({
           </div>
         </div>
 
-        {event.location && (
+        {event.location != null && (
           <div className="flex items-start gap-2.5 text-sm text-text-secondary">
             <MapPin size={14} className="mt-0.5 shrink-0 text-text-tertiary" />
             <span>{event.location}</span>
           </div>
         )}
 
-        {event.description && (
+        {event.description != null && (
           <div className="text-sm text-text-secondary whitespace-pre-wrap border-t border-border-primary pt-3">
             {event.description}
           </div>
@@ -241,9 +251,9 @@ export function EventDetailModal({
               {t("attendees")}
             </div>
             <div className="space-y-1">
-              {attendees.map((a, i) => (
+              {attendees.map((a) => (
                 <div
-                  key={i}
+                  key={a.email}
                   className="flex items-center gap-2 text-sm text-text-secondary"
                 >
                   <User size={12} className="text-text-tertiary" />
@@ -269,7 +279,7 @@ export function EventDetailModal({
               <Button
                 variant="secondary"
                 size="xs"
-                onClick={() => setConfirmDelete(false)}
+                onClick={(): void => setConfirmDelete(false)}
               >
                 {t("cancel")}
               </Button>
@@ -279,7 +289,7 @@ export function EventDetailModal({
               variant="ghost"
               size="sm"
               icon={<Trash2 size={14} />}
-              onClick={() => setConfirmDelete(true)}
+              onClick={(): void => setConfirmDelete(true)}
             >
               {t("delete")}
             </Button>
@@ -288,7 +298,7 @@ export function EventDetailModal({
             variant="secondary"
             size="sm"
             icon={<Pencil size={14} />}
-            onClick={() => setEditing(true)}
+            onClick={(): void => setEditing(true)}
           >
             {t("edit")}
           </Button>
@@ -299,6 +309,6 @@ export function EventDetailModal({
 }
 
 function toLocalISOString(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
+  const pad = (n: number): string => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }

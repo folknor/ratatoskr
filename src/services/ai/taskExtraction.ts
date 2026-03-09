@@ -9,7 +9,7 @@ export interface ExtractedTask {
   priority: TaskPriority;
 }
 
-const VALID_PRIORITIES = new Set<TaskPriority>([
+const VALID_PRIORITIES: Set<TaskPriority> = new Set<TaskPriority>([
   "none",
   "low",
   "medium",

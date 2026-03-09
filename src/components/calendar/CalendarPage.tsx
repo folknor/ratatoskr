@@ -1,3 +1,4 @@
+import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -29,7 +30,7 @@ import { EventDetailModal } from "./EventDetailModal";
 import { MonthView } from "./MonthView";
 import { WeekView } from "./WeekView";
 
-export function CalendarPage() {
+export function CalendarPage(): React.ReactNode {
   const { t } = useTranslation("calendar");
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
   const accounts = useAccountStore((s) => s.accounts);
@@ -186,8 +187,8 @@ export function CalendarPage() {
   }, [activeAccountId, getRange]);
 
   useEffect(() => {
-    loadCalendars();
-    loadEvents();
+    void loadCalendars();
+    void loadEvents();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadCalendars, loadEvents]);
 
@@ -271,7 +272,7 @@ export function CalendarPage() {
         );
 
         setShowCreate(false);
-        loadEvents();
+        void loadEvents();
       } catch (err) {
         console.error("Failed to create event:", err);
       }
@@ -285,7 +286,7 @@ export function CalendarPage() {
 
   const handleEventUpdated = useCallback(() => {
     setSelectedEvent(null);
-    loadEvents();
+    void loadEvents();
   }, [loadEvents]);
 
   if (!activeAccountId) {
@@ -316,25 +317,25 @@ export function CalendarPage() {
         onNext={handleNext}
         onToday={handleToday}
         onViewChange={setView}
-        onCreateEvent={() => setShowCreate(true)}
-        onToggleCalendarList={() => setShowCalendarList((v) => !v)}
+        onCreateEvent={(): void => setShowCreate(true)}
+        onToggleCalendarList={(): void => setShowCalendarList((v) => !v)}
         showCalendarListButton={calendars.length > 1}
       />
 
-      {needsReauth && activeAccount && (
+      {needsReauth && activeAccount != null && (
         <CalendarReauthBanner
           accountId={activeAccount.id}
           email={activeAccount.email}
-          onReauthSuccess={() => {
+          onReauthSuccess={(): void => {
             reauthDoneRef.current = true;
             setNeedsReauth(false);
             setCalendarError(null);
-            loadEvents();
+            void loadEvents();
           }}
         />
       )}
 
-      {calendarError && !needsReauth && (
+      {calendarError != null && !needsReauth && (
         <div className="mx-6 my-4 p-4 rounded-lg bg-danger/10 border border-danger/30 flex items-start gap-3">
           <div>
             <p className="text-sm font-medium text-text-primary">
@@ -355,13 +356,14 @@ export function CalendarPage() {
         {showCalendarList && calendars.length > 1 && (
           <CalendarList
             calendars={calendars}
+            // biome-ignore lint/nursery/useExplicitType: inline callback
             onVisibilityChange={async (calendarId, visible) => {
               const { setCalendarVisibility } = await import(
                 "@/services/db/calendars"
               );
               await setCalendarVisibility(calendarId, visible);
               await loadCalendars();
-              loadEvents();
+              void loadEvents();
             }}
           />
         )}
@@ -391,20 +393,20 @@ export function CalendarPage() {
         </div>
       </div>
 
-      {showCreate && (
+      {showCreate === true && (
         <EventCreateModal
           calendars={calendars}
-          onClose={() => setShowCreate(false)}
+          onClose={(): void => setShowCreate(false)}
           onCreate={handleCreateEvent}
         />
       )}
 
-      {selectedEvent && (
+      {selectedEvent != null && (
         <EventDetailModal
           event={selectedEvent}
           calendars={calendars}
           accountId={activeAccountId}
-          onClose={() => setSelectedEvent(null)}
+          onClose={(): void => setSelectedEvent(null)}
           onUpdated={handleEventUpdated}
         />
       )}

@@ -21,7 +21,7 @@ export interface SearchResult {
 export async function searchMessages(
   query: string,
   accountId?: string,
-  limit = 50,
+  limit: number = 50,
 ): Promise<SearchResult[]> {
   const db = await getDb();
 

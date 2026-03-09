@@ -1,3 +1,4 @@
+import type React from "react";
 import { useEffect, useState } from "react";
 import { Composer } from "./components/composer/Composer";
 import { UndoSendToast } from "./components/composer/UndoSendToast";
@@ -13,7 +14,7 @@ import { useAccountStore } from "./stores/accountStore";
 import type { Thread } from "./stores/threadStore";
 import { useUIStore } from "./stores/uiStore";
 
-export default function ThreadWindow() {
+export default function ThreadWindow(): React.ReactNode {
   const { setTheme, setFontScale, setColorTheme } = useUIStore();
   const { setAccounts } = useAccountStore();
   const [thread, setThread] = useState<Thread | null>(null);
@@ -31,7 +32,7 @@ export default function ThreadWindow() {
       return;
     }
 
-    async function init() {
+    async function init(): Promise<void> {
       try {
         await runMigrations();
 
@@ -82,20 +83,20 @@ export default function ThreadWindow() {
         setAccounts(mapped);
 
         // Set active account to the thread's account (without persisting to settings)
-        useAccountStore.setState({ activeAccountId: accountId! });
+        useAccountStore.setState({ activeAccountId: accountId });
 
         // Initialize Gmail clients
         await initializeClients();
 
         // Fetch thread
-        const dbThread = await getThreadById(accountId!, threadId!);
+        const dbThread = await getThreadById(accountId, threadId);
         if (!dbThread) {
           setError("Thread not found");
           setLoading(false);
           return;
         }
 
-        const labelIds = await getThreadLabelIds(accountId!, threadId!);
+        const labelIds = await getThreadLabelIds(accountId, threadId);
         setThread({
           id: dbThread.id,
           accountId: dbThread.account_id,
@@ -119,7 +120,7 @@ export default function ThreadWindow() {
       setLoading(false);
     }
 
-    init();
+    void init();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- store setters are stable references
   }, [setAccounts, setColorTheme, setFontScale, setTheme]);
 
@@ -133,19 +134,19 @@ export default function ThreadWindow() {
       root.classList.remove("dark");
     } else {
       const mq = window.matchMedia("(prefers-color-scheme: dark)");
-      const apply = () => {
+      const apply = (): void => {
         if (mq.matches) root.classList.add("dark");
         else root.classList.remove("dark");
       };
       apply();
       mq.addEventListener("change", apply);
-      return () => mq.removeEventListener("change", apply);
+      return (): void => mq.removeEventListener("change", apply);
     }
   }, [theme]);
 
   // Sync font-scale class to <html>
   const fontScale = useUIStore((s) => s.fontScale);
-  useEffect(() => {
+  useEffect((): void => {
     const root = document.documentElement;
     root.classList.remove(
       "font-scale-small",
@@ -168,7 +169,7 @@ export default function ThreadWindow() {
       "--color-sidebar-active",
     ];
 
-    const apply = () => {
+    const apply = (): void => {
       if (colorTheme === "indigo") {
         for (const p of props) root.style.removeProperty(p);
         return;
@@ -191,7 +192,7 @@ export default function ThreadWindow() {
     if (theme === "system") {
       const mq = window.matchMedia("(prefers-color-scheme: dark)");
       mq.addEventListener("change", apply);
-      return () => mq.removeEventListener("change", apply);
+      return (): void => mq.removeEventListener("change", apply);
     }
   }, [colorTheme, theme]);
 

@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import { generateVEvent, parseVEvent } from "./icalHelper";
 import type { CreateEventInput } from "./types";
 
@@ -244,7 +245,7 @@ describe("parseVEvent", () => {
     const result = parseVEvent(ical);
 
     expect(result.attendeesJson).not.toBeNull();
-    const attendees = JSON.parse(result.attendeesJson!);
+    const attendees = JSON.parse(result.attendeesJson ?? "[]");
     expect(attendees).toHaveLength(2);
     expect(attendees[0]).toEqual({
       email: "alice@example.com",
@@ -449,7 +450,7 @@ describe("parseVEvent", () => {
     ].join("\r\n");
 
     const result = parseVEvent(ical);
-    const attendees = JSON.parse(result.attendeesJson!);
+    const attendees = JSON.parse(result.attendeesJson ?? "[]");
 
     expect(attendees).toHaveLength(1);
     expect(attendees[0].email).toBe("plain@example.com");
@@ -511,7 +512,7 @@ describe("round-trip: generateVEvent -> parseVEvent", () => {
     const ical = generateVEvent(input, "att-rt");
     const parsed = parseVEvent(ical);
 
-    const attendees = JSON.parse(parsed.attendeesJson!);
+    const attendees = JSON.parse(parsed.attendeesJson ?? "[]");
     expect(attendees).toHaveLength(2);
     expect(attendees[0].email).toBe("dev@example.com");
     expect(attendees[1].email).toBe("pm@example.com");

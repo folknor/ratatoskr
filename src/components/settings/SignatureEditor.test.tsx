@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockSetContent = vi.fn();
@@ -98,9 +99,9 @@ describe("SignatureEditor", () => {
     expect(screen.getByTitle("Switch to visual editor")).toBeInTheDocument();
 
     // Textarea should have the editor's HTML content
-    const textarea = document.querySelector("textarea")!;
+    const textarea = document.querySelector("textarea");
     expect(textarea).toBeInTheDocument();
-    expect(textarea.value).toBe("<p>editor html</p>");
+    expect(textarea?.value).toBe("<p>editor html</p>");
   });
 
   it("switches back to WYSIWYG when toggled again", () => {
@@ -111,8 +112,11 @@ describe("SignatureEditor", () => {
     fireEvent.click(screen.getByTitle("Edit HTML source"));
 
     // Edit the raw HTML
-    const textarea = document.querySelector("textarea")!;
-    fireEvent.change(textarea, { target: { value: "<b>custom html</b>" } });
+    const textarea = document.querySelector("textarea");
+    expect(textarea).toBeTruthy();
+    fireEvent.change(textarea as HTMLTextAreaElement, {
+      target: { value: "<b>custom html</b>" },
+    });
 
     // Toggle back to WYSIWYG
     fireEvent.click(screen.getByTitle("Switch to visual editor"));
@@ -135,8 +139,9 @@ describe("SignatureEditor", () => {
     fireEvent.click(screen.getByTitle("Edit HTML source"));
 
     // Edit the raw HTML
-    const textarea = document.querySelector("textarea")!;
-    fireEvent.change(textarea, {
+    const textarea = document.querySelector("textarea");
+    expect(textarea).toBeTruthy();
+    fireEvent.change(textarea as HTMLTextAreaElement, {
       target: { value: "<table><tr><td>Sig</td></tr></table>" },
     });
 

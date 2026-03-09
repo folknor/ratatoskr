@@ -1,4 +1,5 @@
 import { Paperclip, X } from "lucide-react";
+import type React from "react";
 import { useRef } from "react";
 import {
   type ComposerAttachment,
@@ -7,9 +8,9 @@ import {
 import { formatFileSize } from "@/utils/fileTypeHelpers";
 import { readFileAsBase64 } from "@/utils/fileUtils";
 
-const MAX_TOTAL_SIZE = 24 * 1024 * 1024; // 24MB
+const MAX_TOTAL_SIZE: number = 24 * 1024 * 1024; // 24MB
 
-export function AttachmentPicker() {
+export function AttachmentPicker(): React.ReactNode {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const attachments = useComposerStore((s) => s.attachments);
   const addAttachment = useComposerStore((s) => s.addAttachment);
@@ -17,7 +18,7 @@ export function AttachmentPicker() {
 
   const totalSize = attachments.reduce((sum, a) => sum + a.size, 0);
 
-  const handleFiles = async (files: FileList) => {
+  const handleFiles = async (files: FileList): Promise<void> => {
     for (const file of Array.from(files)) {
       if (totalSize + file.size > MAX_TOTAL_SIZE) {
         console.warn("Attachment size limit exceeded (24MB)");
@@ -45,8 +46,9 @@ export function AttachmentPicker() {
         type="file"
         multiple
         className="hidden"
+        // biome-ignore lint/nursery/useExplicitType: inline callback
         onChange={(e) => {
-          if (e.target.files) handleFiles(e.target.files);
+          if (e.target.files) void handleFiles(e.target.files);
         }}
       />
 
@@ -73,6 +75,7 @@ export function AttachmentPicker() {
               {formatFileSize(att.size)}
             </span>
             <button
+              type="button"
               onClick={() => removeAttachment(att.id)}
               className="text-text-tertiary hover:text-text-primary"
             >

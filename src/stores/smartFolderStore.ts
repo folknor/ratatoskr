@@ -1,3 +1,4 @@
+import type { StoreApi, UseBoundStore } from "zustand";
 import { create } from "zustand";
 import { getDb } from "@/services/db/connection";
 import {
@@ -53,84 +54,101 @@ interface SmartFolderState {
   refreshUnreadCounts: (accountId: string) => Promise<void>;
 }
 
-export const useSmartFolderStore = create<SmartFolderState>((set, get) => ({
-  folders: [],
-  unreadCounts: {},
-  isLoading: false,
+export const useSmartFolderStore: UseBoundStore<StoreApi<SmartFolderState>> =
+  create<SmartFolderState>((set, get) => ({
+    folders: [],
+    unreadCounts: {},
+    isLoading: false,
 
-  loadFolders: async (accountId?: string) => {
-    set({ isLoading: true });
-    try {
-      const dbFolders = await getSmartFolders(accountId);
-      set({ folders: dbFolders.map(mapDbFolder) });
-    } catch (err) {
-      console.error("Failed to load smart folders:", err);
-    } finally {
-      set({ isLoading: false });
-    }
-  },
-
-  createFolder: async (name, query, accountId?, icon?, color?) => {
-    const id = await insertSmartFolder({ name, query, accountId, icon, color });
-    const { folders } = get();
-    set({
-      folders: [
-        ...folders,
-        {
-          id,
-          accountId: accountId ?? null,
-          name,
-          query,
-          icon: icon ?? "Search",
-          color: color ?? null,
-          isDefault: false,
-          sortOrder: folders.length,
-        },
-      ],
-    });
-    return id;
-  },
-
-  updateFolder: async (id, updates) => {
-    await updateSmartFolderDb(id, updates);
-    const { folders } = get();
-    set({
-      folders: folders.map((f) => (f.id === id ? { ...f, ...updates } : f)),
-    });
-  },
-
-  deleteFolder: async (id) => {
-    await deleteSmartFolderDb(id);
-    const { folders, unreadCounts } = get();
-    const newCounts = { ...unreadCounts };
-    delete newCounts[id];
-    set({
-      folders: folders.filter((f) => f.id !== id),
-      unreadCounts: newCounts,
-    });
-  },
-
-  refreshUnreadCounts: async (accountId: string) => {
-    const { folders } = get();
-    const counts: Record<string, number> = {};
-
-    try {
-      const db = await getDb();
-      for (const folder of folders) {
-        try {
-          const { sql, params } = getSmartFolderUnreadCount(
-            folder.query,
-            accountId,
-          );
-          const rows = await db.select<{ count: number }[]>(sql, params);
-          counts[folder.id] = rows[0]?.count ?? 0;
-        } catch {
-          counts[folder.id] = 0;
-        }
+    loadFolders: async (accountId?: string) => {
+      set({ isLoading: true });
+      try {
+        const dbFolders = await getSmartFolders(accountId);
+        set({ folders: dbFolders.map(mapDbFolder) });
+      } catch (err) {
+        console.error("Failed to load smart folders:", err);
+      } finally {
+        set({ isLoading: false });
       }
-      set({ unreadCounts: counts });
-    } catch (err) {
-      console.error("Failed to refresh smart folder unread counts:", err);
-    }
-  },
-}));
+    },
+
+    // biome-ignore lint/complexity/useMaxParams: matches interface signature with tightly coupled folder creation params
+    createFolder: async (
+      name: string,
+      query: string,
+      accountId?: string,
+      icon?: string,
+      color?: string,
+    ) => {
+      const id = await insertSmartFolder({
+        name,
+        query,
+        accountId,
+        icon,
+        color,
+      });
+      const { folders } = get();
+      set({
+        folders: [
+          ...folders,
+          {
+            id,
+            accountId: accountId ?? null,
+            name,
+            query,
+            icon: icon ?? "Search",
+            color: color ?? null,
+            isDefault: false,
+            sortOrder: folders.length,
+          },
+        ],
+      });
+      return id;
+    },
+
+    updateFolder: async (
+      id: string,
+      updates: { name?: string; query?: string; icon?: string; color?: string },
+    ) => {
+      await updateSmartFolderDb(id, updates);
+      const { folders } = get();
+      set({
+        folders: folders.map((f) => (f.id === id ? { ...f, ...updates } : f)),
+      });
+    },
+
+    deleteFolder: async (id: string) => {
+      await deleteSmartFolderDb(id);
+      const { folders, unreadCounts } = get();
+      const newCounts = { ...unreadCounts };
+      delete newCounts[id];
+      set({
+        folders: folders.filter((f) => f.id !== id),
+        unreadCounts: newCounts,
+      });
+    },
+
+    refreshUnreadCounts: async (accountId: string) => {
+      const { folders } = get();
+      const counts: Record<string, number> = {};
+
+      try {
+        const db = await getDb();
+        for (const folder of folders) {
+          try {
+            const { sql, params } = getSmartFolderUnreadCount(
+              folder.query,
+              accountId,
+            );
+            const rows = await db.select<{ count: number }[]>(sql, params);
+            counts[folder.id] = rows[0]?.count ?? 0;
+          } catch {
+            counts[folder.id] = 0;
+          }
+        }
+        set({ unreadCounts: counts });
+      } catch (err) {
+        console.error("Failed to refresh smart folder unread counts:", err);
+      }
+    },
+  }));

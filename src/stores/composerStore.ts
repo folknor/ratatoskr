@@ -1,3 +1,4 @@
+import type { StoreApi, UseBoundStore } from "zustand";
 import { create } from "zustand";
 
 export type ComposerMode = "new" | "reply" | "replyAll" | "forward";
@@ -66,90 +67,102 @@ export interface ComposerState {
   setSignatureId: (id: string | null) => void;
 }
 
-export const useComposerStore = create<ComposerState>((set) => ({
-  isOpen: false,
-  mode: "new",
-  to: [],
-  cc: [],
-  bcc: [],
-  subject: "",
-  bodyHtml: "",
-  threadId: null,
-  inReplyToMessageId: null,
-  showCcBcc: false,
-  draftId: null,
-  undoSendTimer: null,
-  undoSendVisible: false,
-  attachments: [],
-  viewMode: "modal",
-  fromEmail: null,
-  lastSavedAt: null,
-  isSaving: false,
-  signatureHtml: "",
-  signatureId: null,
+export const useComposerStore: UseBoundStore<StoreApi<ComposerState>> =
+  create<ComposerState>((set) => ({
+    isOpen: false,
+    mode: "new",
+    to: [],
+    cc: [],
+    bcc: [],
+    subject: "",
+    bodyHtml: "",
+    threadId: null,
+    inReplyToMessageId: null,
+    showCcBcc: false,
+    draftId: null,
+    undoSendTimer: null,
+    undoSendVisible: false,
+    attachments: [],
+    viewMode: "modal",
+    fromEmail: null,
+    lastSavedAt: null,
+    isSaving: false,
+    signatureHtml: "",
+    signatureId: null,
 
-  openComposer: (opts) =>
-    set({
-      isOpen: true,
-      mode: opts?.mode ?? "new",
-      to: opts?.to ?? [],
-      cc: opts?.cc ?? [],
-      bcc: opts?.bcc ?? [],
-      subject: opts?.subject ?? "",
-      bodyHtml: opts?.bodyHtml ?? "",
-      threadId: opts?.threadId ?? null,
-      inReplyToMessageId: opts?.inReplyToMessageId ?? null,
-      showCcBcc: (opts?.cc?.length ?? 0) > 0 || (opts?.bcc?.length ?? 0) > 0,
-      draftId: opts?.draftId ?? null,
-      viewMode: "modal",
-      fromEmail: null,
-      attachments: [],
-      lastSavedAt: null,
-      isSaving: false,
-      signatureHtml: "",
-      signatureId: null,
-    }),
-  closeComposer: () =>
-    set({
-      isOpen: false,
-      mode: "new",
-      to: [],
-      cc: [],
-      bcc: [],
-      subject: "",
-      bodyHtml: "",
-      threadId: null,
-      inReplyToMessageId: null,
-      showCcBcc: false,
-      draftId: null,
-      viewMode: "modal",
-      fromEmail: null,
-      attachments: [],
-      lastSavedAt: null,
-      isSaving: false,
-      signatureHtml: "",
-      signatureId: null,
-    }),
-  setTo: (to) => set({ to }),
-  setCc: (cc) => set({ cc }),
-  setBcc: (bcc) => set({ bcc }),
-  setSubject: (subject) => set({ subject }),
-  setBodyHtml: (bodyHtml) => set({ bodyHtml }),
-  setShowCcBcc: (showCcBcc) => set({ showCcBcc }),
-  setDraftId: (draftId) => set({ draftId }),
-  setUndoSendTimer: (undoSendTimer) => set({ undoSendTimer }),
-  setUndoSendVisible: (undoSendVisible) => set({ undoSendVisible }),
-  addAttachment: (attachment) =>
-    set((state) => ({ attachments: [...state.attachments, attachment] })),
-  removeAttachment: (id) =>
-    set((state) => ({
-      attachments: state.attachments.filter((a) => a.id !== id),
-    })),
-  clearAttachments: () => set({ attachments: [] }),
-  setLastSavedAt: (lastSavedAt) => set({ lastSavedAt }),
-  setIsSaving: (isSaving) => set({ isSaving }),
-  setFromEmail: (fromEmail) => set({ fromEmail }),
-  setViewMode: (viewMode) => set({ viewMode }),
-  setSignatureHtml: (signatureHtml) => set({ signatureHtml }),
-  setSignatureId: (signatureId) => set({ signatureId }),
-}));
+    openComposer: (opts?: {
+      mode?: ComposerMode;
+      to?: string[];
+      cc?: string[];
+      bcc?: string[];
+      subject?: string;
+      bodyHtml?: string;
+      threadId?: string | null;
+      inReplyToMessageId?: string | null;
+      draftId?: string | null;
+    }) =>
+      set({
+        isOpen: true,
+        mode: opts?.mode ?? "new",
+        to: opts?.to ?? [],
+        cc: opts?.cc ?? [],
+        bcc: opts?.bcc ?? [],
+        subject: opts?.subject ?? "",
+        bodyHtml: opts?.bodyHtml ?? "",
+        threadId: opts?.threadId ?? null,
+        inReplyToMessageId: opts?.inReplyToMessageId ?? null,
+        showCcBcc: (opts?.cc?.length ?? 0) > 0 || (opts?.bcc?.length ?? 0) > 0,
+        draftId: opts?.draftId ?? null,
+        viewMode: "modal",
+        fromEmail: null,
+        attachments: [],
+        lastSavedAt: null,
+        isSaving: false,
+        signatureHtml: "",
+        signatureId: null,
+      }),
+    closeComposer: () =>
+      set({
+        isOpen: false,
+        mode: "new",
+        to: [],
+        cc: [],
+        bcc: [],
+        subject: "",
+        bodyHtml: "",
+        threadId: null,
+        inReplyToMessageId: null,
+        showCcBcc: false,
+        draftId: null,
+        viewMode: "modal",
+        fromEmail: null,
+        attachments: [],
+        lastSavedAt: null,
+        isSaving: false,
+        signatureHtml: "",
+        signatureId: null,
+      }),
+    setTo: (to: string[]) => set({ to }),
+    setCc: (cc: string[]) => set({ cc }),
+    setBcc: (bcc: string[]) => set({ bcc }),
+    setSubject: (subject: string) => set({ subject }),
+    setBodyHtml: (bodyHtml: string) => set({ bodyHtml }),
+    setShowCcBcc: (showCcBcc: boolean) => set({ showCcBcc }),
+    setDraftId: (draftId: string | null) => set({ draftId }),
+    setUndoSendTimer: (undoSendTimer: ReturnType<typeof setTimeout> | null) =>
+      set({ undoSendTimer }),
+    setUndoSendVisible: (undoSendVisible: boolean) => set({ undoSendVisible }),
+    addAttachment: (attachment: ComposerAttachment) =>
+      set((state) => ({ attachments: [...state.attachments, attachment] })),
+    removeAttachment: (id: string) =>
+      set((state) => ({
+        attachments: state.attachments.filter((a) => a.id !== id),
+      })),
+    clearAttachments: () => set({ attachments: [] }),
+    setLastSavedAt: (lastSavedAt: number | null) => set({ lastSavedAt }),
+    setIsSaving: (isSaving: boolean) => set({ isSaving }),
+    setFromEmail: (fromEmail: string | null) => set({ fromEmail }),
+    setViewMode: (viewMode: ComposerViewMode) => set({ viewMode }),
+    setSignatureHtml: (signatureHtml: string) => set({ signatureHtml }),
+    setSignatureId: (signatureId: string | null) => set({ signatureId }),
+  }));

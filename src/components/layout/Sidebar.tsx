@@ -30,6 +30,7 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useActiveCategory, useActiveLabel } from "@/hooks/useRouteNavigation";
@@ -91,11 +92,12 @@ function DroppableNavItem({
   onContextMenu?: (e: React.MouseEvent) => void;
   title?: string;
   children: (isOver: boolean) => React.ReactNode;
-}) {
+}): React.ReactNode {
   const { setNodeRef, isOver } = useDroppable({ id });
 
   return (
     <button
+      type="button"
       ref={setNodeRef}
       onClick={onClick}
       onContextMenu={onContextMenu}
@@ -129,13 +131,14 @@ function DroppableLabelItem({
   onClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
   onEditClick: () => void;
-}) {
+}): React.ReactNode {
   const { t } = useTranslation("sidebar");
   const { setNodeRef, isOver } = useDroppable({ id: label.id });
   const initial = (label.name[0] ?? "?").toUpperCase();
 
   return (
     <button
+      type="button"
       ref={setNodeRef}
       onClick={onClick}
       onContextMenu={onContextMenu}
@@ -175,13 +178,16 @@ function DroppableLabelItem({
             <Tag size={14} className="shrink-0" />
           )}
           <span className="flex-1 truncate">{label.name}</span>
+          {/* biome-ignore lint/a11y/useSemanticElements: nested inside a button, can't use <button> */}
           <span
             role="button"
             tabIndex={0}
+            // biome-ignore lint/nursery/useExplicitType: inline callback
             onClick={(e) => {
               e.stopPropagation();
               onEditClick();
             }}
+            // biome-ignore lint/nursery/useExplicitType: inline callback
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
@@ -232,7 +238,10 @@ function getSmartFolderIcon(iconName: string): LucideIcon {
 
 const LABELS_COLLAPSED_COUNT = 3;
 
-export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
+export function Sidebar({
+  collapsed,
+  onAddAccount,
+}: SidebarProps): React.ReactNode {
   const { t } = useTranslation("sidebar");
   const activeLabel = useActiveLabel();
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
@@ -279,8 +288,9 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
         labelsVisible = entry.visible;
         continue;
       }
-      if (entry.visible && itemMap.has(entry.id)) {
-        result.push(itemMap.get(entry.id)!);
+      if (entry.visible) {
+        const item = itemMap.get(entry.id);
+        if (item) result.push(item);
       }
     }
     // Append any new items not present in the saved config
@@ -329,18 +339,18 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
   // Reload labels and smart folder counts on sync completion (debounced to avoid waterfall from multiple emitters)
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const handler = () => {
+    const handler = (): void => {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
+      timer = setTimeout((): void => {
         if (activeAccountId) {
-          loadLabels(activeAccountId);
-          refreshSmartFolderCounts(activeAccountId);
+          void loadLabels(activeAccountId);
+          void refreshSmartFolderCounts(activeAccountId);
         }
         useUIStore.getState().setSyncingFolder(null);
       }, 500);
     };
     window.addEventListener("velo-sync-done", handler);
-    return () => {
+    return (): void => {
       window.removeEventListener("velo-sync-done", handler);
       if (timer) clearTimeout(timer);
     };
@@ -411,7 +421,8 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
       {/* Compose button */}
       <div className="px-3 py-2">
         <button
-          onClick={() => openComposer()}
+          type="button"
+          onClick={(): void => openComposer()}
           className="w-full flex items-center justify-center gap-2 bg-accent hover:bg-accent-hover text-white rounded-lg py-2 text-sm font-medium interactive-btn"
         >
           {collapsed ? <Plus size={16} /> : t("compose")}
@@ -434,13 +445,14 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
                     : activeLabel === item.id
                 }
                 collapsed={collapsed}
-                onClick={() => {
+                onClick={(): void => {
                   if (isInbox && inboxViewMode === "split") {
                     navigateToLabel(item.id, { category: "Primary" });
                   } else {
                     navigateToLabel(item.id);
                   }
                 }}
+                // biome-ignore lint/nursery/useExplicitType: inline callback
                 onContextMenu={(e) => handleNavContextMenu(e, item.id)}
                 title={
                   collapsed
@@ -448,7 +460,7 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
                     : undefined
                 }
               >
-                {() => (
+                {(): React.ReactNode => (
                   <>
                     {isSyncingFolder === item.id ? (
                       <Loader2
@@ -471,15 +483,18 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
                         </span>
                       )}
                     {isInbox && !collapsed && (
+                      // biome-ignore lint/a11y/useSemanticElements: nested inside a button, can't use <button>
                       <span
                         role="button"
                         tabIndex={0}
+                        // biome-ignore lint/nursery/useExplicitType: inline callback
                         onClick={(e) => {
                           e.stopPropagation();
                           setInboxViewMode(
                             inboxViewMode === "split" ? "unified" : "split",
                           );
                         }}
+                        // biome-ignore lint/nursery/useExplicitType: inline callback
                         onKeyDown={(e) => {
                           if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault();
@@ -515,8 +530,9 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
                       activeLabel === "inbox" && activeCategory === cat.id;
                     return (
                       <button
+                        type="button"
                         key={cat.id}
-                        onClick={() => {
+                        onClick={(): void => {
                           navigateToLabel("inbox", { category: cat.id });
                         }}
                         className={`flex items-center gap-2 w-full py-1.5 pl-7 pr-3 text-left text-[0.8125rem] transition-colors ${
@@ -547,6 +563,7 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
                   {t("smartFolders")}
                 </span>
                 <button
+                  type="button"
                   onClick={handleAddSmartFolder}
                   className="p-0.5 text-sidebar-text/40 hover:text-sidebar-text transition-colors"
                   title={t("addSmartFolder")}
@@ -564,8 +581,11 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
                 : folder.name;
               return (
                 <button
+                  type="button"
                   key={folder.id}
-                  onClick={() => navigateToLabel(`smart-folder:${folder.id}`)}
+                  onClick={(): void =>
+                    navigateToLabel(`smart-folder:${folder.id}`)
+                  }
                   title={collapsed ? displayName : undefined}
                   className={`flex items-center w-full py-2 text-sm transition-colors press-scale ${
                     collapsed ? "justify-center px-0" : "gap-3 px-3 text-left"
@@ -605,6 +625,7 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
                   {t("labels")}
                 </span>
                 <button
+                  type="button"
                   onClick={handleAddLabel}
                   className="p-0.5 text-sidebar-text/40 hover:text-sidebar-text transition-colors"
                   title={t("addLabel")}
@@ -621,7 +642,9 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
                   isActive={activeLabel === label.id}
                   collapsed={collapsed}
                   onClick={() => navigateToLabel(label.id)}
-                  onContextMenu={(e) => handleLabelContextMenu(e, label.id)}
+                  onContextMenu={(e: React.MouseEvent): void =>
+                    handleLabelContextMenu(e, label.id)
+                  }
                   onEditClick={() => handleEditLabel(label.id)}
                 />
                 {editingLabelId === label.id &&
@@ -649,7 +672,7 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
                         isActive={activeLabel === label.id}
                         collapsed={collapsed}
                         onClick={() => navigateToLabel(label.id)}
-                        onContextMenu={(e) =>
+                        onContextMenu={(e: React.MouseEvent): void =>
                           handleLabelContextMenu(e, label.id)
                         }
                         onEditClick={() => handleEditLabel(label.id)}
@@ -671,7 +694,10 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
             )}
             {!collapsed && labels.length > LABELS_COLLAPSED_COUNT && (
               <button
-                onClick={() => setLabelsExpanded((v) => !v)}
+                type="button"
+                onClick={(): void =>
+                  setLabelsExpanded((v: boolean): boolean => !v)
+                }
                 className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-sidebar-text/60 hover:text-sidebar-text transition-colors"
               >
                 {labelsExpanded ? (
@@ -708,7 +734,8 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
         className={`py-2 border-t border-border-primary flex ${collapsed ? "flex-col items-center gap-1 px-2" : "items-center gap-1 px-3"}`}
       >
         <button
-          onClick={() => navigateToLabel("settings")}
+          type="button"
+          onClick={(): void => navigateToLabel("settings")}
           className={`flex items-center text-sm rounded-md transition-colors ${
             collapsed
               ? "p-2 justify-center"
@@ -724,7 +751,8 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
           {!collapsed && <span>{t("settings")}</span>}
         </button>
         <button
-          onClick={() => navigateToLabel("help")}
+          type="button"
+          onClick={(): void => navigateToLabel("help")}
           className={`flex items-center text-sm rounded-md transition-colors ${
             collapsed ? "p-2 justify-center" : "p-2"
           } ${
@@ -737,6 +765,7 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
           <HelpCircle size={18} className="shrink-0" />
         </button>
         <button
+          type="button"
           onClick={toggleSidebar}
           className="p-2 text-sidebar-text/60 hover:text-sidebar-text hover:bg-sidebar-hover rounded-md transition-colors"
           title={collapsed ? t("expandSidebar") : t("collapseSidebar")}
@@ -752,7 +781,7 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
       <InputDialog
         isOpen={showSmartFolderModal}
         onClose={() => setShowSmartFolderModal(false)}
-        onSubmit={(values) => {
+        onSubmit={(values: Record<string, string>): void => {
           createSmartFolder(
             values.name?.trim(),
             values.query?.trim(),
@@ -780,7 +809,11 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
   );
 }
 
-function PendingOpsIndicator({ collapsed }: { collapsed: boolean }) {
+function PendingOpsIndicator({
+  collapsed,
+}: {
+  collapsed: boolean;
+}): React.ReactNode {
   const { t } = useTranslation("sidebar");
   const pendingOpsCount = useUIStore((s) => s.pendingOpsCount);
   if (pendingOpsCount <= 0) return null;

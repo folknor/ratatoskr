@@ -1,3 +1,4 @@
+import type React from "react";
 import { useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { setSecureSetting, setSetting } from "@/services/db/settings";
@@ -7,12 +8,15 @@ interface SetupClientIdProps {
   onCancel: () => void;
 }
 
-export function SetupClientId({ onComplete, onCancel }: SetupClientIdProps) {
+export function SetupClientId({
+  onComplete,
+  onCancel,
+}: SetupClientIdProps): React.ReactNode {
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const handleSave = async () => {
+  const handleSave = async (): Promise<void> => {
     const trimmedId = clientId.trim();
     const trimmedSecret = clientSecret.trim();
     if (!(trimmedId && trimmedSecret)) return;
@@ -59,7 +63,9 @@ export function SetupClientId({ onComplete, onCancel }: SetupClientIdProps) {
         <input
           type="text"
           value={clientId}
-          onChange={(e) => setClientId(e.target.value)}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+            setClientId(e.target.value)
+          }
           placeholder="Paste your Client ID here..."
           className="w-full px-3 py-2 bg-bg-secondary border border-border-primary rounded-lg text-sm mb-3 outline-none focus:border-accent"
         />
@@ -67,7 +73,9 @@ export function SetupClientId({ onComplete, onCancel }: SetupClientIdProps) {
         <input
           type="password"
           value={clientSecret}
-          onChange={(e) => setClientSecret(e.target.value)}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+            setClientSecret(e.target.value)
+          }
           placeholder="Paste your Client Secret here..."
           className="w-full px-3 py-2 bg-bg-secondary border border-border-primary rounded-lg text-sm mb-1 outline-none focus:border-accent"
         />
@@ -77,12 +85,14 @@ export function SetupClientId({ onComplete, onCancel }: SetupClientIdProps) {
 
         <div className="flex gap-3 justify-end">
           <button
+            type="button"
             onClick={onCancel}
             className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
           >
             Cancel
           </button>
           <button
+            type="button"
             onClick={handleSave}
             disabled={!(clientId.trim() && clientSecret.trim()) || saving}
             className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"

@@ -7,6 +7,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
+import type React from "react";
 import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { addThreadLabel, removeThreadLabel } from "@/services/emailActions";
@@ -66,7 +67,7 @@ interface DndProviderProps {
   children: ReactNode;
 }
 
-export function DndProvider({ children }: DndProviderProps) {
+export function DndProvider({ children }: DndProviderProps): React.ReactNode {
   const { t } = useTranslation("common");
   const [dragData, setDragData] = useState<DragData | null>(null);
   const removeThreads = useThreadStore((s) => s.removeThreads);
@@ -78,14 +79,14 @@ export function DndProvider({ children }: DndProviderProps) {
     }),
   );
 
-  const handleDragStart = (event: DragStartEvent) => {
+  const handleDragStart = (event: DragStartEvent): void => {
     const data = event.active.data.current as DragData | undefined;
     if (data) {
       setDragData(data);
     }
   };
 
-  const handleDragEnd = async (event: DragEndEvent) => {
+  const handleDragEnd = async (event: DragEndEvent): Promise<void> => {
     const { over } = event;
     setDragData(null);
 
@@ -119,7 +120,7 @@ export function DndProvider({ children }: DndProviderProps) {
     >
       {children}
       <DragOverlay dropAnimation={null}>
-        {dragData && (
+        {dragData != null && (
           <div className="bg-accent text-white text-sm font-medium px-3 py-1.5 rounded-lg shadow-lg pointer-events-none">
             {t("conversations", { count: dragData.threadIds.length })}
           </div>

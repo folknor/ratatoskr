@@ -1,3 +1,4 @@
+import type { StoreApi, UseBoundStore } from "zustand";
 import { create } from "zustand";
 import { getDefaultKeyMap } from "@/constants/shortcuts";
 import { getSetting, setSetting } from "@/services/db/settings";
@@ -17,7 +18,7 @@ interface ShortcutState {
 
 const SETTINGS_KEY = "custom_shortcuts";
 
-function persistKeyMap(customKeys: Record<string, string>) {
+function persistKeyMap(customKeys: Record<string, string>): void {
   const defaults = getDefaultKeyMap();
   // Only persist non-default bindings
   const overrides: Record<string, string> = {};
@@ -29,41 +30,42 @@ function persistKeyMap(customKeys: Record<string, string>) {
   setSetting(SETTINGS_KEY, JSON.stringify(overrides)).catch(() => {});
 }
 
-export const useShortcutStore = create<ShortcutState>((set, get) => ({
-  keyMap: getDefaultKeyMap(),
+export const useShortcutStore: UseBoundStore<StoreApi<ShortcutState>> =
+  create<ShortcutState>((set, get) => ({
+    keyMap: getDefaultKeyMap(),
 
-  loadKeyMap: async () => {
-    const defaults = getDefaultKeyMap();
-    try {
-      const raw = await getSetting(SETTINGS_KEY);
-      if (raw) {
-        const overrides = JSON.parse(raw) as Record<string, string>;
-        set({ keyMap: { ...defaults, ...overrides } });
+    loadKeyMap: async () => {
+      const defaults = getDefaultKeyMap();
+      try {
+        const raw = await getSetting(SETTINGS_KEY);
+        if (raw) {
+          const overrides = JSON.parse(raw) as Record<string, string>;
+          set({ keyMap: { ...defaults, ...overrides } });
+        }
+      } catch {
+        // Use defaults on parse error
       }
-    } catch {
-      // Use defaults on parse error
-    }
-  },
+    },
 
-  setKey: (id, keys) => {
-    const updated = { ...get().keyMap, [id]: keys };
-    set({ keyMap: updated });
-    persistKeyMap(updated);
-  },
-
-  resetKey: (id) => {
-    const defaults = getDefaultKeyMap();
-    const defaultKey = defaults[id];
-    if (defaultKey) {
-      const updated = { ...get().keyMap, [id]: defaultKey };
+    setKey: (id: string, keys: string) => {
+      const updated = { ...get().keyMap, [id]: keys };
       set({ keyMap: updated });
       persistKeyMap(updated);
-    }
-  },
+    },
 
-  resetAll: () => {
-    const defaults = getDefaultKeyMap();
-    set({ keyMap: defaults });
-    setSetting(SETTINGS_KEY, "{}").catch(() => {});
-  },
-}));
+    resetKey: (id: string) => {
+      const defaults = getDefaultKeyMap();
+      const defaultKey = defaults[id];
+      if (defaultKey) {
+        const updated = { ...get().keyMap, [id]: defaultKey };
+        set({ keyMap: updated });
+        persistKeyMap(updated);
+      }
+    },
+
+    resetAll: () => {
+      const defaults = getDefaultKeyMap();
+      set({ keyMap: defaults });
+      setSetting(SETTINGS_KEY, "{}").catch(() => {});
+    },
+  }));

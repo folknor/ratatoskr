@@ -1,6 +1,7 @@
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
 import { Download, Eye } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import {
@@ -40,7 +41,7 @@ export function AttachmentList({
   messageId,
   attachments,
   referencedCids,
-}: AttachmentListProps) {
+}: AttachmentListProps): React.ReactNode {
   const [preview, setPreview] = useState<DbAttachment | null>(null);
 
   // Filter out CID images rendered in the email body and true inline parts, then dedup
@@ -66,6 +67,7 @@ export function AttachmentList({
         <div className="flex flex-wrap gap-2">
           {fileAttachments.map((att) => (
             <button
+              type="button"
               key={att.id}
               onClick={() => setPreview(att)}
               className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border border-border-primary hover:bg-bg-hover transition-colors"
@@ -86,7 +88,7 @@ export function AttachmentList({
         </div>
       </div>
 
-      {preview && (
+      {preview != null && (
         <AttachmentPreview
           attachment={preview}
           accountId={accountId}
@@ -108,7 +110,7 @@ export function AttachmentPreview({
   accountId: string;
   messageId: string;
   onClose: () => void;
-}) {
+}): React.ReactNode {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
@@ -120,11 +122,10 @@ export function AttachmentPreview({
   const fetchData = useCallback(async (): Promise<Uint8Array> => {
     if (bytesRef.current) return bytesRef.current;
 
+    const attachmentId = attachment.gmail_attachment_id;
+    if (!attachmentId) throw new Error("No attachment ID");
     const provider = await getEmailProvider(accountId);
-    const response = await provider.fetchAttachment(
-      messageId,
-      attachment.gmail_attachment_id!,
-    );
+    const response = await provider.fetchAttachment(messageId, attachmentId);
 
     // Normalize URL-safe base64 (Gmail API) to standard base64
     const base64 = response.data.replace(/-/g, "+").replace(/_/g, "/");
@@ -161,11 +162,11 @@ export function AttachmentPreview({
   // Trigger preview load for previewable types
   useEffect(() => {
     if (isPreviewable && !blobUrl && !loading && !error) {
-      handlePreviewLoad();
+      void handlePreviewLoad();
     }
   }, [isPreviewable, blobUrl, loading, error, handlePreviewLoad]);
 
-  const handleDownload = async () => {
+  const handleDownload = async (): Promise<void> => {
     if (!attachment.gmail_attachment_id || saving) return;
 
     setSaving(true);
@@ -189,7 +190,7 @@ export function AttachmentPreview({
     }
   };
 
-  const handleClose = () => {
+  const handleClose = (): void => {
     if (blobUrl) URL.revokeObjectURL(blobUrl);
     onClose();
   };
@@ -209,6 +210,7 @@ export function AttachmentPreview({
       </div>
       <div className="flex items-center gap-2 shrink-0 ml-4">
         <button
+          type="button"
           onClick={handleDownload}
           disabled={saving}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-50"
@@ -217,6 +219,7 @@ export function AttachmentPreview({
           {saving ? "Saving..." : "Download"}
         </button>
         <button
+          type="button"
           onClick={handleClose}
           className="text-text-tertiary hover:text-text-primary text-lg leading-none"
         >
@@ -240,17 +243,19 @@ export function AttachmentPreview({
         className="flex-1 overflow-auto min-h-[200px] flex items-center justify-center p-4"
         data-native-context-menu
       >
-        {loading && (
+        {loading === true && (
           <p className="text-sm text-text-tertiary">Loading preview...</p>
         )}
-        {error && <p className="text-sm text-text-tertiary">{error}</p>}
-        {!(loading || error) && blobUrl && isImage(attachment.mime_type) && (
-          <img
-            src={blobUrl}
-            alt={attachment.filename ?? "Attachment"}
-            className="max-w-full max-h-[70vh] object-contain rounded"
-          />
-        )}
+        {error != null && <p className="text-sm text-text-tertiary">{error}</p>}
+        {!(loading || error) &&
+          blobUrl != null &&
+          isImage(attachment.mime_type) && (
+            <img
+              src={blobUrl}
+              alt={attachment.filename ?? "Attachment"}
+              className="max-w-full max-h-[70vh] object-contain rounded"
+            />
+          )}
         {!(loading || error) &&
           blobUrl &&
           isPdf(attachment.mime_type, attachment.filename) && (
@@ -275,7 +280,7 @@ export function AttachmentPreview({
   );
 }
 
-function TextPreview({ url }: { url: string }) {
+function TextPreview({ url }: { url: string }): React.ReactNode {
   const [text, setText] = useState<string | null>(null);
 
   useEffect(() => {

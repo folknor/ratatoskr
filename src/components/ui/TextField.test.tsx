@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { vi } from "vitest";
 import { TextField } from "./TextField";
 
 describe("TextField", () => {

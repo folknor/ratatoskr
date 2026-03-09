@@ -1,3 +1,4 @@
+import type React from "react";
 import { useTranslation } from "react-i18next";
 import type { DbCalendar } from "@/services/db/calendars";
 
@@ -9,7 +10,7 @@ interface CalendarListProps {
 export function CalendarList({
   calendars,
   onVisibilityChange,
-}: CalendarListProps) {
+}: CalendarListProps): React.ReactNode {
   const { t } = useTranslation("calendar");
   return (
     <div className="w-52 border-r border-border-primary p-3 overflow-y-auto shrink-0">
@@ -25,6 +26,7 @@ export function CalendarList({
             <input
               type="checkbox"
               checked={Boolean(cal.is_visible)}
+              // biome-ignore lint/nursery/useExplicitType: inline callback
               onChange={(e) => onVisibilityChange(cal.id, e.target.checked)}
               className="sr-only"
             />
@@ -41,7 +43,14 @@ export function CalendarList({
               }
             >
               {Boolean(cal.is_visible) && (
-                <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                <svg
+                  width="8"
+                  height="8"
+                  viewBox="0 0 8 8"
+                  fill="none"
+                  role="img"
+                >
+                  <title>Checkmark</title>
                   <path
                     d="M1.5 4L3 5.5L6.5 2"
                     stroke="white"

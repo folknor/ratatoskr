@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import { discoverCalDavSettings, testCalDavConnection } from "./autoDiscovery";
 
 vi.mock("tsdav", () => ({

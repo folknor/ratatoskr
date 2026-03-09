@@ -32,7 +32,7 @@ export interface DbTaskTag {
 
 export async function getTasksForAccount(
   accountId: string | null,
-  includeCompleted = false,
+  includeCompleted: boolean = false,
 ): Promise<DbTask[]> {
   const db = await getDb();
   if (includeCompleted) {

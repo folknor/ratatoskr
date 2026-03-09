@@ -1,4 +1,5 @@
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/Button";
@@ -15,7 +16,10 @@ interface CalDavSettingsProps {
   onSaved: () => void;
 }
 
-export function CalDavSettings({ account, onSaved }: CalDavSettingsProps) {
+export function CalDavSettings({
+  account,
+  onSaved,
+}: CalDavSettingsProps): React.ReactNode {
   const { t } = useTranslation("settings");
   const [caldavUrl, setCaldavUrl] = useState(account.caldav_url ?? "");
   const [username, setUsername] = useState(
@@ -34,7 +38,7 @@ export function CalDavSettings({ account, onSaved }: CalDavSettingsProps) {
   useEffect(() => {
     if (!(account.caldav_url || discovered)) {
       setDiscovered(true);
-      discoverCalDavSettings(account.email).then((result) => {
+      void discoverCalDavSettings(account.email).then((result) => {
         if (result.caldavUrl) {
           setCaldavUrl(result.caldavUrl);
         }
@@ -42,7 +46,7 @@ export function CalDavSettings({ account, onSaved }: CalDavSettingsProps) {
     }
   }, [account.email, account.caldav_url, discovered]);
 
-  const handleTest = useCallback(async () => {
+  const handleTest = useCallback(async (): Promise<void> => {
     setTesting(true);
     setTestResult(null);
     const result = await testCalDavConnection(caldavUrl, username, password);
@@ -50,7 +54,7 @@ export function CalDavSettings({ account, onSaved }: CalDavSettingsProps) {
     setTesting(false);
   }, [caldavUrl, username, password]);
 
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(async (): Promise<void> => {
     setSaving(true);
     try {
       await updateAccountCalDav(account.id, {
@@ -68,7 +72,7 @@ export function CalDavSettings({ account, onSaved }: CalDavSettingsProps) {
     }
   }, [account.id, caldavUrl, username, password, onSaved]);
 
-  const handleRemove = useCallback(async () => {
+  const handleRemove = useCallback(async (): Promise<void> => {
     setSaving(true);
     try {
       await updateAccountCalDav(account.id, {
@@ -96,7 +100,7 @@ export function CalDavSettings({ account, onSaved }: CalDavSettingsProps) {
         <h4 className="text-sm font-medium text-text-primary">
           {t("caldavEditor.heading")}
         </h4>
-        {isConfigured && (
+        {isConfigured === true && (
           <span className="text-xs text-success font-medium">
             {t("caldavEditor.connected")}
           </span>
@@ -110,7 +114,9 @@ export function CalDavSettings({ account, onSaved }: CalDavSettingsProps) {
         label={t("caldavEditor.serverUrl")}
         type="url"
         value={caldavUrl}
-        onChange={(e) => setCaldavUrl(e.target.value)}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+          setCaldavUrl(e.target.value)
+        }
         placeholder={t("caldavEditor.serverUrlPlaceholder")}
       />
 
@@ -118,7 +124,9 @@ export function CalDavSettings({ account, onSaved }: CalDavSettingsProps) {
         label={t("caldavEditor.username")}
         type="text"
         value={username}
-        onChange={(e) => setUsername(e.target.value)}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+          setUsername(e.target.value)
+        }
         placeholder={t("caldavEditor.usernamePlaceholder")}
       />
 
@@ -126,11 +134,13 @@ export function CalDavSettings({ account, onSaved }: CalDavSettingsProps) {
         label={t("caldavEditor.password")}
         type="password"
         value={password}
-        onChange={(e) => setPassword(e.target.value)}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+          setPassword(e.target.value)
+        }
         placeholder={t("caldavEditor.passwordPlaceholder")}
       />
 
-      {testResult && (
+      {testResult != null && (
         <div
           className={`flex items-center gap-2 text-xs ${testResult.success ? "text-success" : "text-danger"}`}
         >
@@ -150,7 +160,7 @@ export function CalDavSettings({ account, onSaved }: CalDavSettingsProps) {
           onClick={handleTest}
           disabled={testing || !caldavUrl || !password}
         >
-          {testing && <Loader2 size={14} className="animate-spin" />}
+          {testing === true && <Loader2 size={14} className="animate-spin" />}
           {testing
             ? t("caldavEditor.testing")
             : t("caldavEditor.testConnection")}
@@ -165,7 +175,7 @@ export function CalDavSettings({ account, onSaved }: CalDavSettingsProps) {
           {saving ? t("caldavEditor.saving") : t("caldavEditor.save")}
         </Button>
 
-        {isConfigured && (
+        {isConfigured === true && (
           <Button
             variant="ghost"
             size="sm"

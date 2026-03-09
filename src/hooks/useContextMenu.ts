@@ -11,7 +11,7 @@ import {
 export function useContextMenu(
   menuType: ContextMenuType,
   getData?: () => Record<string, unknown>,
-) {
+): (e: React.MouseEvent) => void {
   const openMenu = useContextMenuStore((s) => s.openMenu);
 
   const onContextMenu = useCallback(

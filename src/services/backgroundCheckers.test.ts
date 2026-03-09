@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import { createBackgroundChecker } from "./backgroundCheckers";
 
 describe("createBackgroundChecker", () => {

@@ -39,7 +39,7 @@ import { useUIStore } from "@/stores/uiStore";
  */
 function matchesKey(binding: string, e: KeyboardEvent): boolean {
   const parts = binding.split("+");
-  const key = parts[parts.length - 1]!;
+  const key = parts[parts.length - 1] ?? "";
   const needsCtrl = parts.some((p) => p === "Ctrl" || p === "Cmd");
   const needsShift = parts.some((p) => p === "Shift");
   const needsAlt = parts.some((p) => p === "Alt");
@@ -109,12 +109,12 @@ function getCachedReverseMap(
  * Global keyboard shortcuts handler (Superhuman-inspired).
  * Uses customizable key bindings from the shortcut store.
  */
-export function useKeyboardShortcuts() {
+export function useKeyboardShortcuts(): void {
   const pendingKeyRef = useRef<string | null>(null);
   const pendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    const handleKeyDown = async (e: KeyboardEvent) => {
+    const handleKeyDown = async (e: KeyboardEvent): Promise<void> => {
       // Close context menu on Escape before any other handling
       if (e.key === "Escape" && useContextMenuStore.getState().menuType) {
         e.preventDefault();
@@ -141,10 +141,10 @@ export function useKeyboardShortcuts() {
         )
           return;
 
-        for (const [actionId, binding] of ctrlCombos) {
+        for (const [ctrlActionId, binding] of ctrlCombos) {
           if (matchesKey(binding, e)) {
             e.preventDefault();
-            await executeAction(actionId);
+            await executeAction(ctrlActionId);
             return;
           }
         }
@@ -190,10 +190,10 @@ export function useKeyboardShortcuts() {
           clearTimeout(pendingTimerRef.current);
           pendingTimerRef.current = null;
         }
-        const actionId = twoKeySequences.get(key);
-        if (actionId) {
+        const seqActionId = twoKeySequences.get(key);
+        if (seqActionId) {
           e.preventDefault();
-          executeAction(actionId);
+          void executeAction(seqActionId);
           return;
         }
       }
@@ -234,7 +234,9 @@ export function useKeyboardShortcuts() {
     };
 
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    return (): void => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
   }, []);
 }
 
@@ -458,8 +460,8 @@ async function executeAction(actionId: string): Promise<void> {
         try {
           const msgs = await getMessagesForThread(activeAccountId, selectedId);
           const unsubMsg = msgs.find((m) => m.list_unsubscribe);
-          if (unsubMsg) {
-            const url = parseUnsubscribeUrl(unsubMsg.list_unsubscribe!);
+          if (unsubMsg?.list_unsubscribe) {
+            const url = parseUnsubscribeUrl(unsubMsg.list_unsubscribe);
             if (url) {
               await openUrl(url);
               await archiveThread(activeAccountId, selectedId, []);

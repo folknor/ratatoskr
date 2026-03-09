@@ -1,3 +1,4 @@
+import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CSSTransition } from "react-transition-group";
 import {
@@ -6,7 +7,7 @@ import {
   setUpdateCallback,
 } from "@/services/updateManager";
 
-export function UpdateToast() {
+export function UpdateToast(): React.ReactNode {
   const [version, setVersion] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
   const toastRef = useRef<HTMLDivElement>(null);
@@ -52,6 +53,7 @@ export function UpdateToast() {
           </p>
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={handleDismiss}
               disabled={installing}
               className="text-xs text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
@@ -59,6 +61,7 @@ export function UpdateToast() {
               Later
             </button>
             <button
+              type="button"
               onClick={handleInstall}
               disabled={installing}
               className="text-xs font-medium text-accent hover:text-accent-hover transition-colors disabled:opacity-50"

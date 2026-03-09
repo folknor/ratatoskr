@@ -1,4 +1,5 @@
 import { Pencil, Trash2 } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -11,7 +12,7 @@ import {
 import { useAccountStore } from "@/stores/accountStore";
 import { useSmartFolderStore } from "@/stores/smartFolderStore";
 
-export function SmartFolderEditor() {
+export function SmartFolderEditor(): React.ReactNode {
   const { t } = useTranslation("settings");
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
   const reloadStore = useSmartFolderStore((s) => s.loadFolders);
@@ -25,17 +26,17 @@ export function SmartFolderEditor() {
   const [icon, setIcon] = useState("Search");
   const [color, setColor] = useState("");
 
-  const loadFolders = useCallback(async () => {
+  const loadFolders = useCallback(async (): Promise<void> => {
     const f = await getSmartFolders(activeAccountId ?? undefined);
     setFolders(f);
   }, [activeAccountId]);
 
   useEffect(() => {
-    loadFolders();
+    void loadFolders();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadFolders is stable, only re-run on activeAccountId change
   }, [loadFolders]);
 
-  const resetForm = useCallback(() => {
+  const resetForm = useCallback((): void => {
     setName("");
     setQuery("");
     setIcon("Search");
@@ -44,7 +45,7 @@ export function SmartFolderEditor() {
     setShowForm(false);
   }, []);
 
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(async (): Promise<void> => {
     if (!(name.trim() && query.trim())) return;
 
     if (editingId) {
@@ -79,7 +80,7 @@ export function SmartFolderEditor() {
     reloadStore,
   ]);
 
-  const handleEdit = useCallback((folder: DbSmartFolder) => {
+  const handleEdit = useCallback((folder: DbSmartFolder): void => {
     setEditingId(folder.id);
     setName(folder.name);
     setQuery(folder.query);
@@ -89,7 +90,7 @@ export function SmartFolderEditor() {
   }, []);
 
   const handleDelete = useCallback(
-    async (id: string) => {
+    async (id: string): Promise<void> => {
       await deleteSmartFolder(id);
       if (editingId === id) resetForm();
       await loadFolders();
@@ -120,7 +121,8 @@ export function SmartFolderEditor() {
           </div>
           <div className="flex items-center gap-1">
             <button
-              onClick={() => handleEdit(folder)}
+              type="button"
+              onClick={(): void => handleEdit(folder)}
               className="p-1 text-text-tertiary hover:text-text-primary"
               title={t("smartFolderEditor.edit")}
             >
@@ -128,7 +130,8 @@ export function SmartFolderEditor() {
             </button>
             {folder.is_default !== 1 && (
               <button
-                onClick={() => handleDelete(folder.id)}
+                type="button"
+                onClick={(): void => void handleDelete(folder.id)}
                 className="p-1 text-text-tertiary hover:text-danger"
                 title={t("smartFolderEditor.delete")}
               >
@@ -144,26 +147,33 @@ export function SmartFolderEditor() {
           <input
             type="text"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+              setName(e.target.value)
+            }
             placeholder={t("smartFolderEditor.folderName")}
             className="w-full px-3 py-1.5 bg-bg-tertiary border border-border-primary rounded text-sm text-text-primary outline-none focus:border-accent"
           />
           <input
             type="text"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+              setQuery(e.target.value)
+            }
             placeholder={t("smartFolderEditor.searchQuery")}
             className="w-full px-3 py-1.5 bg-bg-tertiary border border-border-primary rounded text-sm text-text-primary outline-none focus:border-accent"
           />
           <div className="flex gap-3">
             <div className="flex-1">
+              {/* biome-ignore lint/a11y/noLabelWithoutControl: label text is descriptive, input follows immediately */}
               <label className="text-xs text-text-secondary block mb-1">
                 {t("smartFolderEditor.iconName")}
               </label>
               <input
                 type="text"
                 value={icon}
-                onChange={(e) => setIcon(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                  setIcon(e.target.value)
+                }
                 placeholder={t("smartFolderEditor.iconSearch")}
                 className="w-full px-3 py-1 bg-bg-tertiary border border-border-primary rounded text-xs text-text-primary outline-none focus:border-accent"
               />
@@ -172,13 +182,16 @@ export function SmartFolderEditor() {
               </p>
             </div>
             <div className="flex-1">
+              {/* biome-ignore lint/a11y/noLabelWithoutControl: label text is descriptive, input follows immediately */}
               <label className="text-xs text-text-secondary block mb-1">
                 {t("smartFolderEditor.colorOptional")}
               </label>
               <input
                 type="text"
                 value={color}
-                onChange={(e) => setColor(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                  setColor(e.target.value)
+                }
                 placeholder={t("smartFolderEditor.colorPlaceholder")}
                 className="w-full px-3 py-1 bg-bg-tertiary border border-border-primary rounded text-xs text-text-primary outline-none focus:border-accent"
               />
@@ -187,7 +200,8 @@ export function SmartFolderEditor() {
 
           <div className="flex items-center gap-2">
             <button
-              onClick={handleSave}
+              type="button"
+              onClick={(): void => void handleSave()}
               disabled={!(name.trim() && query.trim())}
               className="px-3 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-50"
             >
@@ -196,6 +210,7 @@ export function SmartFolderEditor() {
                 : t("smartFolderEditor.save")}
             </button>
             <button
+              type="button"
               onClick={resetForm}
               className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary rounded-md transition-colors"
             >
@@ -205,7 +220,8 @@ export function SmartFolderEditor() {
         </div>
       ) : (
         <button
-          onClick={() => setShowForm(true)}
+          type="button"
+          onClick={(): void => setShowForm(true)}
           className="text-xs text-accent hover:text-accent-hover"
         >
           {t("smartFolderEditor.addSmartFolder")}

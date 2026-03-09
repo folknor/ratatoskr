@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import { vi } from "vitest";
 import type { DbAttachment } from "@/services/db/attachments";
 import { InlineAttachmentPreview } from "./InlineAttachmentPreview";
 

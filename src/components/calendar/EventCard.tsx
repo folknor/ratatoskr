@@ -1,3 +1,4 @@
+import type React from "react";
 import { useTranslation } from "react-i18next";
 import type { DbCalendarEvent } from "@/services/db/calendarEvents";
 
@@ -7,7 +8,11 @@ interface EventCardProps {
   onClick?: () => void;
 }
 
-export function EventCard({ event, compact, onClick }: EventCardProps) {
+export function EventCard({
+  event,
+  compact,
+  onClick,
+}: EventCardProps): React.ReactNode {
   const { t } = useTranslation("calendar");
   const startDate = new Date(event.start_time * 1000);
   const timeStr = event.is_all_day
@@ -17,6 +22,7 @@ export function EventCard({ event, compact, onClick }: EventCardProps) {
   if (compact) {
     return (
       <button
+        type="button"
         onClick={onClick}
         className="w-full text-left text-[0.625rem] px-1 py-0.5 rounded bg-accent/10 text-accent truncate hover:bg-accent/20 transition-colors"
         title={event.summary ?? t("event")}
@@ -28,6 +34,7 @@ export function EventCard({ event, compact, onClick }: EventCardProps) {
 
   return (
     <button
+      type="button"
       onClick={onClick}
       className="w-full text-left px-3 py-2 rounded-md border border-border-secondary hover:bg-bg-hover transition-colors"
     >
@@ -39,7 +46,7 @@ export function EventCard({ event, compact, onClick }: EventCardProps) {
           </div>
           <div className="text-xs text-text-tertiary mt-0.5">
             {timeStr}
-            {event.location && ` · ${event.location}`}
+            {event.location != null && ` · ${event.location}`}
           </div>
         </div>
       </div>

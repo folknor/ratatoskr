@@ -1,3 +1,4 @@
+import type React from "react";
 import { useTranslation } from "react-i18next";
 import { DateTimePickerDialog } from "@/components/ui/DateTimePickerDialog";
 
@@ -7,7 +8,12 @@ interface FollowUpDialogProps {
   onClose: () => void;
 }
 
-function getFollowUpTimestamps() {
+function getFollowUpTimestamps(): {
+  oneDay: number;
+  twoDays: number;
+  threeDays: number;
+  oneWeek: number;
+} {
   const now = new Date();
 
   // In 1 day
@@ -42,7 +48,7 @@ export function FollowUpDialog({
   isOpen = true,
   onSetReminder,
   onClose,
-}: FollowUpDialogProps) {
+}: FollowUpDialogProps): React.ReactNode {
   const { t } = useTranslation("email");
   const ts = getFollowUpTimestamps();
   const presets = [

@@ -1,4 +1,5 @@
 import { CheckCircle2, CheckSquare, Search, Trash2 } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -30,7 +31,7 @@ const PRIORITY_ORDER: Record<TaskPriority, number> = {
   none: 4,
 };
 
-export function TasksPage() {
+export function TasksPage(): React.ReactNode {
   const { t } = useTranslation("tasks");
   const accounts = useAccountStore((s) => s.accounts);
   const activeAccount = accounts.find((a) => a.isActive);
@@ -63,13 +64,13 @@ export function TasksPage() {
   }, [accountId, filterStatus, setTasks]);
 
   useEffect(() => {
-    loadTasks();
+    void loadTasks();
   }, [loadTasks]);
 
   // Load subtasks
   useEffect(() => {
     let cancelled = false;
-    async function load() {
+    async function load(): Promise<void> {
       const map: Record<string, DbTask[]> = {};
       for (const task of tasks) {
         const subs = await getSubtasks(task.id);
@@ -77,7 +78,7 @@ export function TasksPage() {
       }
       if (!cancelled) setSubtaskMap(map);
     }
-    load();
+    void load();
     return () => {
       cancelled = true;
     };
@@ -88,21 +89,21 @@ export function TasksPage() {
     let result = tasks;
 
     if (filterStatus === "completed") {
-      result = result.filter((t) => t.is_completed);
+      result = result.filter((task) => task.is_completed);
     } else if (filterStatus === "incomplete") {
-      result = result.filter((t) => !t.is_completed);
+      result = result.filter((task) => !task.is_completed);
     }
 
     if (filterPriority !== "all") {
-      result = result.filter((t) => t.priority === filterPriority);
+      result = result.filter((task) => task.priority === filterPriority);
     }
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(
-        (t) =>
-          t.title.toLowerCase().includes(q) ||
-          t.description?.toLowerCase().includes(q),
+        (task) =>
+          task.title.toLowerCase().includes(q) ||
+          task.description?.toLowerCase().includes(q),
       );
     }
 
@@ -174,7 +175,7 @@ export function TasksPage() {
       });
     }
 
-    return entries.map(([label, tasks]) => ({ label, tasks }));
+    return entries.map(([label, groupTasks]) => ({ label, tasks: groupTasks }));
   }, [filteredTasks, groupBy, t]);
 
   const handleAddTask = useCallback(
@@ -189,7 +190,7 @@ export function TasksPage() {
   const handleToggleComplete = useCallback(
     async (id: string, completed: boolean) => {
       if (completed) {
-        const task = tasks.find((t) => t.id === id);
+        const task = tasks.find((tk) => tk.id === id);
         if (task?.recurrence_rule) {
           await handleRecurringTaskCompletion(id);
         } else {
@@ -253,6 +254,7 @@ export function TasksPage() {
             <input
               type="text"
               value={searchQuery}
+              // biome-ignore lint/nursery/useExplicitType: inline callback
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={t("searchTasks")}
               className="w-48 pl-8 pr-3 py-1.5 bg-bg-tertiary border border-border-primary rounded-lg text-xs text-text-primary outline-none focus:border-accent"
@@ -262,6 +264,7 @@ export function TasksPage() {
           {/* Filters */}
           <select
             value={filterStatus}
+            // biome-ignore lint/nursery/useExplicitType: inline callback
             onChange={(e) =>
               setFilterStatus(e.target.value as TaskFilterStatus)
             }
@@ -274,6 +277,7 @@ export function TasksPage() {
 
           <select
             value={filterPriority}
+            // biome-ignore lint/nursery/useExplicitType: inline callback
             onChange={(e) =>
               setFilterPriority(e.target.value as TaskPriority | "all")
             }
@@ -290,6 +294,7 @@ export function TasksPage() {
           {/* Group by */}
           <select
             value={groupBy}
+            // biome-ignore lint/nursery/useExplicitType: inline callback
             onChange={(e) => setGroupBy(e.target.value as TaskGroupBy)}
             className="bg-bg-tertiary text-text-primary text-xs px-2.5 py-1.5 rounded-lg border border-border-primary"
           >
@@ -308,20 +313,23 @@ export function TasksPage() {
             {selectedIds.size} {t("common:selected")}
           </span>
           <button
-            onClick={handleBulkComplete}
+            type="button"
+            onClick={() => void handleBulkComplete()}
             className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover"
           >
             <CheckCircle2 size={13} />
             {t("complete")}
           </button>
           <button
-            onClick={handleBulkDelete}
+            type="button"
+            onClick={() => void handleBulkDelete()}
             className="flex items-center gap-1 text-xs text-danger hover:opacity-80"
           >
             <Trash2 size={13} />
             {t("common:delete")}
           </button>
           <button
+            type="button"
             onClick={() => setSelectedIds(new Set())}
             className="text-xs text-text-tertiary hover:text-text-primary ml-auto"
           >
@@ -342,14 +350,14 @@ export function TasksPage() {
             <CheckSquare size={48} className="text-text-tertiary/30 mb-4" />
             <p className="text-sm text-text-secondary mb-1">{t("noTasks")}</p>
             <p className="text-xs text-text-tertiary">
-              {searchQuery ? t("tryDifferentSearch") : t("addTaskHint")}
+              {searchQuery !== "" ? t("tryDifferentSearch") : t("addTaskHint")}
             </p>
           </div>
         ) : (
           <div className="space-y-4">
             {groupedTasks.map((group) => (
               <div key={group.label || "__ungrouped"}>
-                {group.label && (
+                {group.label !== "" && (
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-text-tertiary mb-2 px-3">
                     {group.label}
                   </h3>

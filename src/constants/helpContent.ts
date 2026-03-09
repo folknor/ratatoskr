@@ -119,6 +119,7 @@ export type SettingsTabId = (typeof VALID_SETTINGS_TABS)[number];
 
 // ---------- Helper to build card with i18n keys ----------
 
+// biome-ignore lint/complexity/useMaxParams: builder helper with tightly coupled parameters
 function card(
   id: string,
   icon: LucideIcon,
@@ -811,8 +812,8 @@ export function getAllCards(): (HelpCard & {
   categoryLabel: string;
 })[] {
   return HELP_CATEGORIES.flatMap((cat) =>
-    cat.cards.map((card) => ({
-      ...card,
+    cat.cards.map((helpCard) => ({
+      ...helpCard,
       categoryId: cat.id,
       categoryLabel: cat.label,
     })),

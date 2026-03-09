@@ -49,7 +49,7 @@ export function buildDynamicUpdate(
 let txQueue: Promise<void> = Promise.resolve();
 
 export async function withTransaction(
-  fn: (db: Database) => Promise<void>,
+  fn: (database: Database) => Promise<void>,
 ): Promise<void> {
   // Queue this transaction behind any currently-running one.
   // This serialises all transactions without blocking non-transactional reads.
@@ -84,8 +84,8 @@ export async function selectFirstBy<T>(
   query: string,
   params: unknown[] = [],
 ): Promise<T | null> {
-  const db = await getDb();
-  const rows = await db.select<T[]>(query, params);
+  const database = await getDb();
+  const rows = await database.select<T[]>(query, params);
   return rows[0] ?? null;
 }
 
@@ -96,8 +96,8 @@ export async function existsBy(
   query: string,
   params: unknown[] = [],
 ): Promise<boolean> {
-  const db = await getDb();
-  const rows = await db.select<{ count: number }[]>(query, params);
+  const database = await getDb();
+  const rows = await database.select<{ count: number }[]>(query, params);
   return (rows[0]?.count ?? 0) > 0;
 }
 

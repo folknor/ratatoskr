@@ -1,5 +1,6 @@
 import type { Editor } from "@tiptap/react";
 import { Sparkles } from "lucide-react";
+import type React from "react";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { InputDialog } from "@/components/ui/InputDialog";
@@ -14,18 +15,18 @@ export function EditorToolbar({
   editor,
   onToggleAiAssist,
   aiAssistOpen,
-}: EditorToolbarProps) {
+}: EditorToolbarProps): React.ReactNode {
   const { t } = useTranslation("composer");
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const [showLinkDialog, setShowLinkDialog] = useState(false);
 
   if (!editor) return null;
 
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>): void => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = (): void => {
       const dataUrl = reader.result as string;
       editor.chain().focus().setImage({ src: dataUrl }).run();
     };
@@ -38,7 +39,7 @@ export function EditorToolbar({
     isActive: boolean,
     onClick: () => void,
     title?: string,
-  ) => (
+  ): React.ReactNode => (
     <button
       type="button"
       onClick={onClick}
@@ -135,7 +136,7 @@ export function EditorToolbar({
 
       <div className="flex-1" />
 
-      {onToggleAiAssist && (
+      {onToggleAiAssist != null && (
         <button
           type="button"
           onClick={onToggleAiAssist}
@@ -156,6 +157,7 @@ export function EditorToolbar({
       <InputDialog
         isOpen={showLinkDialog}
         onClose={() => setShowLinkDialog(false)}
+        // biome-ignore lint/nursery/useExplicitType: inline callback
         onSubmit={(values) => {
           if (values.url) {
             editor.chain().focus().setLink({ href: values.url }).run();

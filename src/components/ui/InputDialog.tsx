@@ -1,3 +1,4 @@
+import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "./Button";
 import { Modal } from "./Modal";
@@ -26,7 +27,7 @@ export function InputDialog({
   title,
   fields,
   submitLabel = "Save",
-}: InputDialogProps) {
+}: InputDialogProps): React.ReactNode {
   const buildInitial = useCallback(
     () => Object.fromEntries(fields.map((f) => [f.key, f.defaultValue ?? ""])),
     [fields],
@@ -49,13 +50,13 @@ export function InputDialog({
     return !required || values[f.key]?.trim();
   });
 
-  const handleSubmit = () => {
+  const handleSubmit = (): void => {
     if (!isValid) return;
     onSubmit(values);
     onClose();
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent): void => {
     if (e.key === "Enter" && fields.length === 1 && isValid) {
       e.preventDefault();
       handleSubmit();
@@ -64,16 +65,22 @@ export function InputDialog({
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={title} width="w-96">
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: keyDown handler for form submission */}
       <div className="p-4 space-y-3" onKeyDown={handleKeyDown}>
         {fields.map((field, i) => (
           <div key={field.key}>
-            <label className="block text-xs font-medium text-text-secondary mb-1">
+            <label
+              htmlFor={`input-dialog-${field.key}`}
+              className="block text-xs font-medium text-text-secondary mb-1"
+            >
               {field.label}
             </label>
             <input
+              id={`input-dialog-${field.key}`}
               ref={i === 0 ? firstInputRef : undefined}
               type="text"
               value={values[field.key] ?? ""}
+              // biome-ignore lint/nursery/useExplicitType: inline callback
               onChange={(e) =>
                 setValues((prev) => ({ ...prev, [field.key]: e.target.value }))
               }

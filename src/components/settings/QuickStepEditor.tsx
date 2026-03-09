@@ -1,4 +1,5 @@
 import { ChevronDown, GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { type DbLabel, getLabelsForAccount } from "@/services/db/labels";
@@ -24,10 +25,10 @@ function describeActions(actionsJson: string, invalidLabel: string): string {
     return actions
       .map((a) => {
         const meta = ACTION_TYPE_METADATA.find((m) => m.type === a.type);
-        let label = meta?.label ?? a.type;
-        if (a.params?.labelId) label += ` (${a.params.labelId})`;
-        if (a.params?.category) label += ` (${a.params.category})`;
-        return label;
+        let actionLabel = meta?.label ?? a.type;
+        if (a.params?.labelId) actionLabel += ` (${a.params.labelId})`;
+        if (a.params?.category) actionLabel += ` (${a.params.category})`;
+        return actionLabel;
       })
       .join(" -> ");
   } catch {
@@ -35,7 +36,7 @@ function describeActions(actionsJson: string, invalidLabel: string): string {
   }
 }
 
-export function QuickStepEditor() {
+export function QuickStepEditor(): React.ReactNode {
   const { t } = useTranslation("settings");
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
   const [quickSteps, setQuickSteps] = useState<DbQuickStep[]>([]);
@@ -51,7 +52,7 @@ export function QuickStepEditor() {
   const [continueOnError, setContinueOnError] = useState(false);
   const [actions, setActions] = useState<QuickStepAction[]>([]);
 
-  const loadQuickSteps = useCallback(async () => {
+  const loadQuickSteps = useCallback(async (): Promise<void> => {
     if (!activeAccountId) return;
     // Seed defaults if needed
     await seedDefaultQuickSteps(activeAccountId);
@@ -61,14 +62,14 @@ export function QuickStepEditor() {
 
   useEffect(() => {
     if (!activeAccountId) return;
-    loadQuickSteps();
-    getLabelsForAccount(activeAccountId).then((l) =>
+    void loadQuickSteps();
+    void getLabelsForAccount(activeAccountId).then((l) =>
       setLabels(l.filter((lb) => lb.type === "user")),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadQuickSteps is stable, only re-run on activeAccountId change
   }, [activeAccountId, loadQuickSteps]);
 
-  const resetForm = useCallback(() => {
+  const resetForm = useCallback((): void => {
     setName("");
     setDescription("");
     setShortcut("");
@@ -79,7 +80,7 @@ export function QuickStepEditor() {
     setShowForm(false);
   }, []);
 
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(async (): Promise<void> => {
     if (!(activeAccountId && name.trim()) || actions.length === 0) return;
 
     if (editingId) {
@@ -118,7 +119,7 @@ export function QuickStepEditor() {
     loadQuickSteps,
   ]);
 
-  const handleEdit = useCallback((qs: DbQuickStep) => {
+  const handleEdit = useCallback((qs: DbQuickStep): void => {
     setEditingId(qs.id);
     setName(qs.name);
     setDescription(qs.description ?? "");
@@ -136,7 +137,7 @@ export function QuickStepEditor() {
   }, []);
 
   const handleDelete = useCallback(
-    async (id: string) => {
+    async (id: string): Promise<void> => {
       await deleteQuickStep(id);
       if (editingId === id) resetForm();
       await loadQuickSteps();
@@ -145,23 +146,23 @@ export function QuickStepEditor() {
   );
 
   const handleToggleEnabled = useCallback(
-    async (qs: DbQuickStep) => {
+    async (qs: DbQuickStep): Promise<void> => {
       await updateQuickStep(qs.id, { isEnabled: qs.is_enabled !== 1 });
       await loadQuickSteps();
     },
     [loadQuickSteps],
   );
 
-  const addAction = useCallback(() => {
+  const addAction = useCallback((): void => {
     setActions((prev) => [...prev, { type: "archive" }]);
   }, []);
 
-  const removeAction = useCallback((index: number) => {
+  const removeAction = useCallback((index: number): void => {
     setActions((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
   const updateAction = useCallback(
-    (index: number, type: QuickStepActionType) => {
+    (index: number, type: QuickStepActionType): void => {
       setActions((prev) => {
         const next = [...prev];
         const meta = ACTION_TYPE_METADATA.find((m) => m.type === type);
@@ -173,7 +174,7 @@ export function QuickStepEditor() {
   );
 
   const updateActionParams = useCallback(
-    (index: number, params: QuickStepAction["params"]) => {
+    (index: number, params: QuickStepAction["params"]): void => {
       setActions((prev) => {
         const next = [...prev];
         const existing = next[index];
@@ -201,7 +202,7 @@ export function QuickStepEditor() {
             <div className="flex-1 min-w-0">
               <div className="text-sm font-medium text-text-primary flex items-center gap-2">
                 {qs.name}
-                {qs.shortcut && (
+                {qs.shortcut != null && (
                   <kbd className="text-[0.625rem] bg-bg-tertiary text-text-tertiary px-1.5 py-0.5 rounded border border-border-primary font-mono">
                     {qs.shortcut}
                   </kbd>
@@ -222,7 +223,8 @@ export function QuickStepEditor() {
           </div>
           <div className="flex items-center gap-1">
             <button
-              onClick={() => handleToggleEnabled(qs)}
+              type="button"
+              onClick={(): void => void handleToggleEnabled(qs)}
               className={`w-8 h-4 rounded-full transition-colors relative ${
                 qs.is_enabled === 1 ? "bg-accent" : "bg-bg-tertiary"
               }`}
@@ -239,13 +241,15 @@ export function QuickStepEditor() {
               />
             </button>
             <button
-              onClick={() => handleEdit(qs)}
+              type="button"
+              onClick={(): void => handleEdit(qs)}
               className="p-1 text-text-tertiary hover:text-text-primary"
             >
               <Pencil size={13} />
             </button>
             <button
-              onClick={() => handleDelete(qs.id)}
+              type="button"
+              onClick={(): void => void handleDelete(qs.id)}
               className="p-1 text-text-tertiary hover:text-danger"
             >
               <Trash2 size={13} />
@@ -259,39 +263,49 @@ export function QuickStepEditor() {
           <input
             type="text"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+              setName(e.target.value)
+            }
             placeholder={t("quickStepEditor.quickStepName")}
             className="w-full px-3 py-1.5 bg-bg-tertiary border border-border-primary rounded text-sm text-text-primary outline-none focus:border-accent"
           />
           <input
             type="text"
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+              setDescription(e.target.value)
+            }
             placeholder={t("quickStepEditor.descriptionOptional")}
             className="w-full px-3 py-1 bg-bg-tertiary border border-border-primary rounded text-xs text-text-primary outline-none focus:border-accent"
           />
 
           <div className="flex gap-3">
             <div className="flex-1">
+              {/* biome-ignore lint/a11y/noLabelWithoutControl: label text is descriptive, input follows immediately */}
               <label className="text-xs text-text-secondary block mb-1">
                 {t("quickStepEditor.shortcutOptional")}
               </label>
               <input
                 type="text"
                 value={shortcut}
-                onChange={(e) => setShortcut(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                  setShortcut(e.target.value)
+                }
                 placeholder={t("quickStepEditor.shortcutPlaceholder")}
                 className="w-full px-3 py-1 bg-bg-tertiary border border-border-primary rounded text-xs text-text-primary outline-none focus:border-accent font-mono"
               />
             </div>
             <div className="flex-1">
+              {/* biome-ignore lint/a11y/noLabelWithoutControl: label text is descriptive, input follows immediately */}
               <label className="text-xs text-text-secondary block mb-1">
                 {t("quickStepEditor.iconOptional")}
               </label>
               <input
                 type="text"
                 value={icon}
-                onChange={(e) => setIcon(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                  setIcon(e.target.value)
+                }
                 placeholder={t("quickStepEditor.iconPlaceholder")}
                 className="w-full px-3 py-1 bg-bg-tertiary border border-border-primary rounded text-xs text-text-primary outline-none focus:border-accent"
               />
@@ -310,6 +324,7 @@ export function QuickStepEditor() {
                 const needsSnoozeDuration = action.type === "snooze";
 
                 return (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: actions have no stable id, index is the only key
                   <div key={index} className="flex items-start gap-2">
                     <span className="text-xs text-text-tertiary mt-1.5 w-5 text-right shrink-0">
                       {index + 1}.
@@ -318,7 +333,9 @@ export function QuickStepEditor() {
                       <div className="relative">
                         <select
                           value={action.type}
-                          onChange={(e) =>
+                          onChange={(
+                            e: React.ChangeEvent<HTMLSelectElement>,
+                          ): void =>
                             updateAction(
                               index,
                               e.target.value as QuickStepActionType,
@@ -340,7 +357,9 @@ export function QuickStepEditor() {
                       {needsLabelParam && labels.length > 0 && (
                         <select
                           value={action.params?.labelId ?? ""}
-                          onChange={(e) =>
+                          onChange={(
+                            e: React.ChangeEvent<HTMLSelectElement>,
+                          ): void =>
                             updateActionParams(index, {
                               labelId: e.target.value,
                             })
@@ -360,7 +379,9 @@ export function QuickStepEditor() {
                       {needsCategoryParam && (
                         <select
                           value={action.params?.category ?? ""}
-                          onChange={(e) =>
+                          onChange={(
+                            e: React.ChangeEvent<HTMLSelectElement>,
+                          ): void =>
                             updateActionParams(index, {
                               category: e.target.value,
                             })
@@ -380,7 +401,9 @@ export function QuickStepEditor() {
                       {needsSnoozeDuration && (
                         <select
                           value={action.params?.snoozeDuration ?? ""}
-                          onChange={(e) =>
+                          onChange={(
+                            e: React.ChangeEvent<HTMLSelectElement>,
+                          ): void =>
                             updateActionParams(index, {
                               snoozeDuration: Number(e.target.value),
                             })
@@ -409,7 +432,8 @@ export function QuickStepEditor() {
                       )}
                     </div>
                     <button
-                      onClick={() => removeAction(index)}
+                      type="button"
+                      onClick={(): void => removeAction(index)}
                       className="p-1 text-text-tertiary hover:text-danger mt-0.5"
                       title={t("quickStepEditor.removeAction")}
                     >
@@ -420,6 +444,7 @@ export function QuickStepEditor() {
               })}
             </div>
             <button
+              type="button"
               onClick={addAction}
               className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover mt-2"
             >
@@ -432,7 +457,9 @@ export function QuickStepEditor() {
             <input
               type="checkbox"
               checked={continueOnError}
-              onChange={(e) => setContinueOnError(e.target.checked)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                setContinueOnError(e.target.checked)
+              }
               className="rounded"
             />
             {t("quickStepEditor.continueOnError")}
@@ -440,7 +467,8 @@ export function QuickStepEditor() {
 
           <div className="flex items-center gap-2">
             <button
-              onClick={handleSave}
+              type="button"
+              onClick={(): void => void handleSave()}
               disabled={!name.trim() || actions.length === 0}
               className="px-3 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-50"
             >
@@ -449,6 +477,7 @@ export function QuickStepEditor() {
                 : t("quickStepEditor.save")}
             </button>
             <button
+              type="button"
               onClick={resetForm}
               className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary rounded-md transition-colors"
             >
@@ -458,7 +487,8 @@ export function QuickStepEditor() {
         </div>
       ) : (
         <button
-          onClick={() => setShowForm(true)}
+          type="button"
+          onClick={(): void => setShowForm(true)}
           className="text-xs text-accent hover:text-accent-hover"
         >
           {t("quickStepEditor.addQuickStep")}

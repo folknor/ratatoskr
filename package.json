@@ -10,7 +10,8 @@
 		"preview": "vite preview",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"tauri": "tauri"
+		"tauri": "tauri",
+		"lint": "pnpm exec biome check --max-diagnostics=none --reporter=github --formatter-enabled=true --linter-enabled=true --assist-enabled=true"
 	},
 	"dependencies": {
 		"@anthropic-ai/sdk": "^0.78.0",

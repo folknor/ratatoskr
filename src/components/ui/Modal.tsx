@@ -25,12 +25,12 @@ export function Modal({
   zIndex = "z-50",
   panelClassName,
   renderHeader,
-}: ModalProps) {
+}: ModalProps): ReactNode {
   const nodeRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent): void => {
       if (e.key === "Escape") onClose();
     };
     document.addEventListener("keydown", handleKeyDown);
@@ -45,11 +45,15 @@ export function Modal({
       unmountOnExit
       nodeRef={nodeRef}
     >
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: modal overlay */}
       <div
         ref={nodeRef}
         className={`fixed inset-0 ${zIndex} flex items-center justify-center`}
+        // biome-ignore lint/nursery/useExplicitType: inline callback
         onContextMenu={(e) => e.stopPropagation()}
       >
+        {/* biome-ignore lint/a11y/useKeyWithClickEvents: backdrop click-to-close, Escape handled separately */}
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop */}
         <div
           className="absolute inset-0 bg-black/20 glass-backdrop"
           onClick={onClose}
@@ -65,6 +69,7 @@ export function Modal({
                 {title}
               </h3>
               <button
+                type="button"
                 onClick={onClose}
                 className="text-text-tertiary hover:text-text-primary text-lg leading-none"
               >

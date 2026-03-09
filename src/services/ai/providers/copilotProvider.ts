@@ -2,15 +2,16 @@ import OpenAI from "openai";
 import { createProviderFactory } from "../providerFactory";
 import type { AiCompletionRequest, AiProviderClient } from "../types";
 
-const factory = createProviderFactory(
-  (apiKey) =>
-    new OpenAI({
-      apiKey,
-      baseURL: "https://models.github.ai/inference",
-      defaultHeaders: { "X-GitHub-Api-Version": "2022-11-28" },
-      dangerouslyAllowBrowser: true,
-    }),
-);
+const factory: ReturnType<typeof createProviderFactory<OpenAI>> =
+  createProviderFactory(
+    (apiKey) =>
+      new OpenAI({
+        apiKey,
+        baseURL: "https://models.github.ai/inference",
+        defaultHeaders: { "X-GitHub-Api-Version": "2022-11-28" },
+        dangerouslyAllowBrowser: true,
+      }),
+  );
 
 export function createCopilotProvider(
   apiKey: string,

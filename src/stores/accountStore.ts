@@ -1,3 +1,4 @@
+import type { StoreApi, UseBoundStore } from "zustand";
 import { create } from "zustand";
 import { setSetting } from "../services/db/settings";
 
@@ -19,38 +20,39 @@ interface AccountState {
   removeAccount: (id: string) => void;
 }
 
-export const useAccountStore = create<AccountState>((set) => ({
-  accounts: [],
-  activeAccountId: null,
+export const useAccountStore: UseBoundStore<StoreApi<AccountState>> =
+  create<AccountState>((set) => ({
+    accounts: [],
+    activeAccountId: null,
 
-  setAccounts: (accounts, restoredId) => {
-    const activeId =
-      restoredId && accounts.some((a) => a.id === restoredId)
-        ? restoredId
-        : (accounts[0]?.id ?? null);
-    set({ accounts, activeAccountId: activeId });
-  },
+    setAccounts: (accounts: Account[], restoredId?: string | null) => {
+      const activeId =
+        restoredId && accounts.some((a) => a.id === restoredId)
+          ? restoredId
+          : (accounts[0]?.id ?? null);
+      set({ accounts, activeAccountId: activeId });
+    },
 
-  setActiveAccount: (activeAccountId) => {
-    setSetting("active_account_id", activeAccountId).catch(() => {});
-    set({ activeAccountId });
-  },
+    setActiveAccount: (activeAccountId: string) => {
+      setSetting("active_account_id", activeAccountId).catch(() => {});
+      set({ activeAccountId });
+    },
 
-  addAccount: (account) =>
-    set((state) => ({
-      accounts: [...state.accounts, account],
-      activeAccountId: state.activeAccountId ?? account.id,
-    })),
+    addAccount: (account: Account) =>
+      set((state) => ({
+        accounts: [...state.accounts, account],
+        activeAccountId: state.activeAccountId ?? account.id,
+      })),
 
-  removeAccount: (id) =>
-    set((state) => {
-      const accounts = state.accounts.filter((a) => a.id !== id);
-      return {
-        accounts,
-        activeAccountId:
-          state.activeAccountId === id
-            ? (accounts[0]?.id ?? null)
-            : state.activeAccountId,
-      };
-    }),
-}));
+    removeAccount: (id: string) =>
+      set((state) => {
+        const accounts = state.accounts.filter((a) => a.id !== id);
+        return {
+          accounts,
+          activeAccountId:
+            state.activeAccountId === id
+              ? (accounts[0]?.id ?? null)
+              : state.activeAccountId,
+        };
+      }),
+  }));

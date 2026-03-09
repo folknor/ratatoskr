@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { vi } from "vitest";
 import { RawMessageModal } from "./RawMessageModal";
 
 vi.mock("@/services/email/providerFactory", () => ({

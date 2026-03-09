@@ -11,6 +11,7 @@ import {
   Send,
   X,
 } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -46,7 +47,7 @@ export function InlineReply({
   accountId,
   noReply,
   onSent,
-}: InlineReplyProps) {
+}: InlineReplyProps): React.ReactNode {
   const { t } = useTranslation("email");
   const [mode, setMode] = useState<ReplyMode | null>(null);
   const [sending, setSending] = useState(false);
@@ -119,7 +120,7 @@ export function InlineReply({
 
       // Trigger auto-draft for reply/replyAll (not forward)
       if (newMode === "reply" || newMode === "replyAll") {
-        loadAutoDraft(newMode);
+        void loadAutoDraft(newMode);
       }
     },
     [editor, loadAutoDraft],
@@ -134,7 +135,7 @@ export function InlineReply({
 
   // Listen for inline reply events from keyboard shortcuts
   useEffect(() => {
-    const handler = (e: Event) => {
+    const handler = (e: Event): void => {
       const detail = (e as CustomEvent).detail as
         | { mode: ReplyMode }
         | undefined;
@@ -143,7 +144,9 @@ export function InlineReply({
       }
     };
     window.addEventListener("velo-inline-reply", handler);
-    return () => window.removeEventListener("velo-inline-reply", handler);
+    return (): void => {
+      window.removeEventListener("velo-inline-reply", handler);
+    };
   }, [activateMode]);
 
   // Scroll into view when activated
@@ -168,17 +171,19 @@ export function InlineReply({
     const allTo = new Set<string>();
     if (replyTo) allTo.add(replyTo);
     if (lastMessage.to_addresses) {
-      lastMessage.to_addresses.split(",").forEach((a) => allTo.add(a.trim()));
+      for (const a of lastMessage.to_addresses.split(",")) {
+        allTo.add(a.trim());
+      }
     }
     // Remove self from recipients
     if (activeAccount?.email) allTo.delete(activeAccount.email);
 
     const ccList: string[] = [];
     if (lastMessage.cc_addresses) {
-      lastMessage.cc_addresses.split(",").forEach((a) => {
+      for (const a of lastMessage.cc_addresses.split(",")) {
         const trimmed = a.trim();
         if (trimmed && trimmed !== activeAccount?.email) ccList.push(trimmed);
-      });
+      }
     }
 
     return { to: Array.from(allTo), cc: ccList };
@@ -192,8 +197,8 @@ export function InlineReply({
 
   const handleSend = useCallback(async () => {
     if (!(activeAccount && editor) || sending) return;
-    const { to, cc } = getRecipients();
-    if (to.length === 0 && mode !== "forward") return;
+    const { to: sendTo, cc: sendCc } = getRecipients();
+    if (sendTo.length === 0 && mode !== "forward") return;
 
     setSending(true);
     try {
@@ -204,8 +209,8 @@ export function InlineReply({
 
       const raw = buildRawEmail({
         from: activeAccount.email,
-        to,
-        cc: cc.length > 0 ? cc : undefined,
+        to: sendTo,
+        cc: sendCc.length > 0 ? sendCc : undefined,
         subject: getSubject(),
         htmlBody: html,
         inReplyTo: lastMessage?.id,
@@ -234,7 +239,7 @@ export function InlineReply({
           }
 
           // Update contacts frequency
-          for (const addr of [...to, ...cc]) {
+          for (const addr of [...sendTo, ...sendCc]) {
             await upsertContact(addr, null);
           }
         } catch (err) {
@@ -270,8 +275,9 @@ export function InlineReply({
   ]);
 
   const handleExpandToComposer = useCallback(() => {
+    // biome-ignore lint/nursery/noUnnecessaryConditions: editor can be null from useEditor()
     if (!(editor && lastMessage)) return;
-    const { to, cc } = getRecipients();
+    const { to: expandTo, cc: expandCc } = getRecipients();
     const bodyHtml = editor.getHTML();
 
     openComposer({
@@ -281,8 +287,8 @@ export function InlineReply({
           : mode === "replyAll"
             ? "replyAll"
             : "reply",
-      to,
-      cc,
+      to: expandTo,
+      cc: expandCc,
       subject: getSubject(),
       bodyHtml,
       threadId: thread.id,
@@ -303,6 +309,7 @@ export function InlineReply({
   ]);
 
   const handleRegenerateDraft = useCallback(async () => {
+    // biome-ignore lint/nursery/noUnnecessaryConditions: editor can be null from useEditor()
     if (!(editor && mode) || mode === "forward") return;
     autoDraftAbortRef.current = false;
     setAutoDraftLoading(true);
@@ -333,20 +340,20 @@ export function InlineReply({
   // Abort auto-draft on user typing
   useEffect(() => {
     if (!editor) return;
-    const onUpdate = () => {
+    const onUpdate = (): void => {
       if (autoDraftLoading) {
         autoDraftAbortRef.current = true;
       }
     };
     editor.on("update", onUpdate);
-    return () => {
+    return (): void => {
       editor.off("update", onUpdate);
     };
   }, [editor, autoDraftLoading]);
 
   // Cleanup focus timer on unmount
   useEffect(
-    () => () => {
+    (): (() => void) => (): void => {
       if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
       autoDraftAbortRef.current = true;
     },
@@ -356,10 +363,10 @@ export function InlineReply({
   // Handle Ctrl+Enter to send, Escape to close
   useEffect(() => {
     if (!mode) return;
-    const handler = (e: KeyboardEvent) => {
+    const handler = (e: KeyboardEvent): void => {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        handleSend();
+        void handleSend();
       }
       if (e.key === "Escape") {
         e.preventDefault();
@@ -370,7 +377,9 @@ export function InlineReply({
       }
     };
     window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    return (): void => {
+      window.removeEventListener("keydown", handler);
+    };
   }, [mode, handleSend, editor]);
 
   if (!lastMessage) return null;
@@ -380,6 +389,7 @@ export function InlineReply({
     return (
       <div ref={containerRef} className="mx-4 my-3 flex items-center gap-2">
         <button
+          type="button"
           onClick={() => activateMode("reply")}
           disabled={noReply}
           title={noReply ? "This sender does not accept replies" : undefined}
@@ -389,6 +399,7 @@ export function InlineReply({
           {t("inlineReply.reply")}
         </button>
         <button
+          type="button"
           onClick={() => activateMode("replyAll")}
           disabled={noReply}
           title={noReply ? "This sender does not accept replies" : undefined}
@@ -398,6 +409,7 @@ export function InlineReply({
           {t("inlineReply.replyAll")}
         </button>
         <button
+          type="button"
           onClick={() => activateMode("forward")}
           className="flex items-center gap-1.5 px-4 py-2 text-xs text-text-secondary border border-border-primary rounded-lg hover:bg-bg-hover hover:text-text-primary transition-colors"
         >
@@ -428,6 +440,7 @@ export function InlineReply({
           <div className="flex items-center gap-1">
             {(["reply", "replyAll", "forward"] as const).map((m) => (
               <button
+                type="button"
                 key={m}
                 onClick={() => setMode(m)}
                 className={`px-2 py-1 text-[0.6875rem] rounded transition-colors ${
@@ -451,6 +464,7 @@ export function InlineReply({
           )}
         </div>
         <button
+          type="button"
           onClick={() => setMode(null)}
           className="text-xs text-text-tertiary hover:text-text-primary transition-colors"
         >
@@ -461,7 +475,7 @@ export function InlineReply({
       {/* Editor */}
       <div className="relative">
         <EditorContent editor={editor} />
-        {autoDraftLoading && (
+        {autoDraftLoading === true && (
           <div className="absolute inset-0 flex items-center justify-center bg-bg-primary/60 backdrop-blur-[1px]">
             <div className="flex items-center gap-2 text-xs text-text-secondary">
               <Loader2 size={14} className="animate-spin" />
@@ -475,6 +489,7 @@ export function InlineReply({
       <div className="flex items-center justify-between px-3 py-2 border-t border-border-secondary bg-bg-secondary">
         <div className="flex items-center gap-1">
           <button
+            type="button"
             onClick={handleExpandToComposer}
             title={t("inlineReply.expandToComposer")}
             className="flex items-center gap-1.5 px-2 py-1 text-xs text-text-tertiary hover:text-text-primary transition-colors"
@@ -482,9 +497,10 @@ export function InlineReply({
             <Maximize2 size={12} />
             {t("inlineReply.expand")}
           </button>
-          {hasAutoDraft && mode !== "forward" && (
+          {hasAutoDraft === true && mode !== "forward" && (
             <>
               <button
+                type="button"
                 onClick={handleRegenerateDraft}
                 disabled={autoDraftLoading}
                 title={t("inlineReply.regenerateDraft")}
@@ -494,6 +510,7 @@ export function InlineReply({
                 {t("inlineReply.regenerate")}
               </button>
               <button
+                type="button"
                 onClick={handleClearDraft}
                 title={t("inlineReply.clearDraft")}
                 className="flex items-center gap-1 px-2 py-1 text-xs text-text-tertiary hover:text-danger transition-colors"
@@ -505,6 +522,7 @@ export function InlineReply({
           )}
         </div>
         <button
+          type="button"
           onClick={handleSend}
           disabled={sending || (to.length === 0 && mode !== "forward")}
           className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"

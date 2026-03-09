@@ -121,7 +121,7 @@ export function parseVEvent(
         break;
       case "ORGANIZER": {
         const mailto = value.match(/mailto:(.+)/i);
-        if (mailto) organizerEmail = mailto[1]!;
+        if (mailto?.[1]) organizerEmail = mailto[1];
         break;
       }
       case "ATTENDEE": {
@@ -130,7 +130,7 @@ export function parseVEvent(
           const cnMatch = nameWithParams.match(/CN=([^;]+)/i);
           const statusMatch = nameWithParams.match(/PARTSTAT=([^;]+)/i);
           attendees.push({
-            email: attendeeMailto[1]!,
+            email: attendeeMailto[1] ?? "",
             displayName: cnMatch?.[1]?.replace(/^"(.*)"$/, "$1"),
             responseStatus: statusMatch?.[1]?.toLowerCase(),
           });

@@ -33,7 +33,7 @@ export interface MessageScanResult {
 
 // ── Constants ──────────────────────────────────────────────────────
 
-const SUSPICIOUS_TLDS_TIER1 = new Set([
+const SUSPICIOUS_TLDS_TIER1: Set<string> = new Set([
   ".zip",
   ".mov",
   ".top",
@@ -45,7 +45,7 @@ const SUSPICIOUS_TLDS_TIER1 = new Set([
   ".cf",
   ".gq",
 ]);
-const SUSPICIOUS_TLDS_TIER2 = new Set([
+const SUSPICIOUS_TLDS_TIER2: Set<string> = new Set([
   ".xyz",
   ".work",
   ".rest",
@@ -56,7 +56,7 @@ const SUSPICIOUS_TLDS_TIER2 = new Set([
   ".sbs",
   ".cfd",
 ]);
-const SUSPICIOUS_TLDS_TIER3 = new Set([
+const SUSPICIOUS_TLDS_TIER3: Set<string> = new Set([
   ".info",
   ".online",
   ".site",
@@ -67,7 +67,7 @@ const SUSPICIOUS_TLDS_TIER3 = new Set([
   ".live",
 ]);
 
-const URL_SHORTENERS = new Set([
+const URL_SHORTENERS: Set<string> = new Set([
   "bit.ly",
   "t.co",
   "tinyurl.com",
@@ -78,7 +78,7 @@ const URL_SHORTENERS = new Set([
   "rebrand.ly",
 ]);
 
-const SUSPICIOUS_PATH_KEYWORDS = [
+const SUSPICIOUS_PATH_KEYWORDS: string[] = [
   "login",
   "signin",
   "verify",
@@ -94,14 +94,14 @@ const SUSPICIOUS_PATH_KEYWORDS = [
   "authenticate",
 ];
 
-const DANGEROUS_PROTOCOLS = new Set([
+const DANGEROUS_PROTOCOLS: Set<string> = new Set([
   "data:",
   "javascript:",
   "vbscript:",
   "blob:",
 ]);
 
-const IMPERSONATED_BRANDS = [
+const IMPERSONATED_BRANDS: string[] = [
   "paypal",
   "amazon",
   "apple",

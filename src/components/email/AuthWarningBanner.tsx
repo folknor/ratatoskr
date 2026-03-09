@@ -1,4 +1,5 @@
 import { ShieldX, X } from "lucide-react";
+import type React from "react";
 import { useTranslation } from "react-i18next";
 import type { AuthResult } from "@/services/gmail/authParser";
 
@@ -12,7 +13,7 @@ export function AuthWarningBanner({
   authResults,
   senderAddress,
   onDismiss,
-}: AuthWarningBannerProps) {
+}: AuthWarningBannerProps): React.ReactNode {
   const { t } = useTranslation("email");
 
   if (!authResults) return null;
@@ -40,6 +41,7 @@ export function AuthWarningBanner({
         </p>
       </div>
       <button
+        type="button"
         onClick={onDismiss}
         className="shrink-0 p-0.5 rounded hover:bg-danger/10 text-text-tertiary hover:text-text-secondary transition-colors"
         aria-label={t("authWarningBanner.dismiss")}

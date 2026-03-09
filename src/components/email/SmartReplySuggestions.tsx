@@ -1,4 +1,5 @@
 import { RefreshCw, Sparkles } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { generateSmartReplies } from "@/services/ai/aiService";
@@ -19,7 +20,7 @@ export function SmartReplySuggestions({
   accountId,
   messages,
   noReply,
-}: SmartReplySuggestionsProps) {
+}: SmartReplySuggestionsProps): React.ReactNode {
   const { t } = useTranslation("email");
   const [replies, setReplies] = useState<string[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -58,7 +59,7 @@ export function SmartReplySuggestions({
       loadingRef.current
     )
       return;
-    loadReplies();
+    void loadReplies();
   }, [available, messages.length, replies, loadReplies]);
 
   const handleRefresh = useCallback(async () => {
@@ -103,6 +104,7 @@ export function SmartReplySuggestions({
           {t("smartReplies.title")}
         </span>
         <button
+          type="button"
           onClick={handleRefresh}
           className="p-0.5 text-text-tertiary hover:text-accent transition-colors"
           title={t("smartReplies.refresh")}
@@ -116,11 +118,12 @@ export function SmartReplySuggestions({
           <span className="text-xs">{t("smartReplies.generating")}</span>
         </div>
       )}
-      {replies && (
+      {replies != null && (
         <div className="flex flex-wrap gap-2">
-          {replies.map((reply, i) => (
+          {replies.map((reply) => (
             <button
-              key={i}
+              type="button"
+              key={reply}
               onClick={() => handleReplyClick(reply)}
               className="px-3 py-1.5 text-xs text-text-primary bg-bg-primary border border-border-primary rounded-full hover:bg-bg-hover hover:border-accent/40 transition-colors max-w-[280px] truncate"
               title={reply}

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { vi } from "vitest";
 import { InputDialog } from "./InputDialog";
 
 describe("InputDialog", () => {
@@ -105,7 +106,9 @@ describe("InputDialog", () => {
     render(<InputDialog {...baseProps} />);
     const input = screen.getByPlaceholderText("Enter name");
     fireEvent.change(input, { target: { value: "Test" } });
-    fireEvent.keyDown(input.closest("div[class]")!, { key: "Enter" });
+    const wrapper = input.closest("div[class]");
+    expect(wrapper).toBeTruthy();
+    if (wrapper) fireEvent.keyDown(wrapper, { key: "Enter" });
     expect(baseProps.onSubmit).toHaveBeenCalledWith({ name: "Test" });
   });
 });

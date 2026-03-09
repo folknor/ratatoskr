@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import { createProviderFactory } from "./providerFactory";
 
 describe("createProviderFactory", () => {

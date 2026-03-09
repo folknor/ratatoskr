@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import type { DbMessage } from "@/services/db/messages";
 import { extractTask } from "./taskExtraction";
 

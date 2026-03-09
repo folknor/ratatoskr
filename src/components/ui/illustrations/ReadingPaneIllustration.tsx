@@ -1,9 +1,14 @@
+import type React from "react";
+
 interface Props {
   size?: number;
   className?: string;
 }
 
-export function ReadingPaneIllustration({ size = 140, className }: Props) {
+export function ReadingPaneIllustration({
+  size = 140,
+  className,
+}: Props): React.ReactNode {
   return (
     <svg
       width={size}
@@ -12,6 +17,7 @@ export function ReadingPaneIllustration({ size = 140, className }: Props) {
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
+      aria-label="Reading pane"
     >
       {/* Letter peeking out */}
       <rect

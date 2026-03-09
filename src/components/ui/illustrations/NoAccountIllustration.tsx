@@ -1,9 +1,14 @@
+import type React from "react";
+
 interface Props {
   size?: number;
   className?: string;
 }
 
-export function NoAccountIllustration({ size = 140, className }: Props) {
+export function NoAccountIllustration({
+  size = 140,
+  className,
+}: Props): React.ReactNode {
   return (
     <svg
       width={size}
@@ -12,6 +17,7 @@ export function NoAccountIllustration({ size = 140, className }: Props) {
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
+      aria-label="No account"
     >
       {/* Person silhouette circle */}
       <circle

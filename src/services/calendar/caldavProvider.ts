@@ -78,7 +78,7 @@ export class CalDAVProvider implements CalendarProvider {
     return objects
       .filter((obj) => obj.data)
       .map((obj) => {
-        const event = parseVEvent(obj.data!, obj.url);
+        const event = parseVEvent(obj.data ?? "", obj.url);
         event.etag = obj.etag ?? null;
         return event;
       });

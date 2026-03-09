@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { vi } from "vitest";
 import type { DbTask } from "@/services/db/tasks";
 import { TaskItem } from "./TaskItem";
 
@@ -52,7 +53,9 @@ describe("TaskItem", () => {
     render(<TaskItem task={makeTask()} onToggleComplete={onToggle} />);
     // Click the circle button (first button in the component)
     const buttons = screen.getAllByRole("button");
-    fireEvent.click(buttons[0]!);
+    const firstButton = buttons[0];
+    expect(firstButton).toBeDefined();
+    if (firstButton) fireEvent.click(firstButton);
     expect(onToggle).toHaveBeenCalledWith("t1", true);
   });
 

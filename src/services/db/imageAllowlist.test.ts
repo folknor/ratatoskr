@@ -54,7 +54,7 @@ describe("imageAllowlist service", () => {
       await getAllowlistedSenders("acc-1", ["a@example.com", "b@example.com"]);
 
       expect(mockDb.select).toHaveBeenCalledTimes(1);
-      const [sql, params] = mockDb.select.mock.calls[0]!;
+      const [sql, params] = mockDb.select.mock.calls[0] ?? [];
       expect(sql).toContain("IN");
       expect(params).toEqual(["acc-1", "a@example.com", "b@example.com"]);
     });

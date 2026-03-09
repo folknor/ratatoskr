@@ -121,6 +121,7 @@ export async function startProviderOAuthFlow(
   return { tokens, userInfo };
 }
 
+// biome-ignore lint/complexity/useMaxParams: OAuth token exchange requires all these parameters
 async function exchangeCode(
   provider: OAuthProviderConfig,
   code: string,

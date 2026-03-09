@@ -1,3 +1,4 @@
+import type React from "react";
 import { useEffect, useState } from "react";
 import { Composer } from "./components/composer/Composer";
 import { UndoSendToast } from "./components/composer/UndoSendToast";
@@ -12,7 +13,7 @@ import type { ComposerMode } from "./stores/composerStore";
 import { useComposerStore } from "./stores/composerStore";
 import { useUIStore } from "./stores/uiStore";
 
-export default function ComposerWindow() {
+export default function ComposerWindow(): React.ReactNode {
   const { setTheme, setFontScale, setColorTheme } = useUIStore();
   const { setAccounts } = useAccountStore();
   const [loading, setLoading] = useState(true);
@@ -21,7 +22,7 @@ export default function ComposerWindow() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
 
-    async function init() {
+    async function init(): Promise<void> {
       try {
         await runMigrations();
 
@@ -121,7 +122,7 @@ export default function ComposerWindow() {
       setLoading(false);
     }
 
-    init();
+    void init();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- store setters are stable references
   }, [setAccounts, setColorTheme, setFontScale, setTheme]);
 
@@ -135,19 +136,19 @@ export default function ComposerWindow() {
       root.classList.remove("dark");
     } else {
       const mq = window.matchMedia("(prefers-color-scheme: dark)");
-      const apply = () => {
+      const apply = (): void => {
         if (mq.matches) root.classList.add("dark");
         else root.classList.remove("dark");
       };
       apply();
       mq.addEventListener("change", apply);
-      return () => mq.removeEventListener("change", apply);
+      return (): void => mq.removeEventListener("change", apply);
     }
   }, [theme]);
 
   // Sync font-scale class to <html>
   const fontScale = useUIStore((s) => s.fontScale);
-  useEffect(() => {
+  useEffect((): void => {
     const root = document.documentElement;
     root.classList.remove(
       "font-scale-small",
@@ -170,7 +171,7 @@ export default function ComposerWindow() {
       "--color-sidebar-active",
     ];
 
-    const apply = () => {
+    const apply = (): void => {
       if (colorTheme === "indigo") {
         for (const p of props) root.style.removeProperty(p);
         return;
@@ -193,7 +194,7 @@ export default function ComposerWindow() {
     if (theme === "system") {
       const mq = window.matchMedia("(prefers-color-scheme: dark)");
       mq.addEventListener("change", apply);
-      return () => mq.removeEventListener("change", apply);
+      return (): void => mq.removeEventListener("change", apply);
     }
   }, [colorTheme, theme]);
 

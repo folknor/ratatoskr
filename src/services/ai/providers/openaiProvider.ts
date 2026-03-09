@@ -2,9 +2,10 @@ import OpenAI from "openai";
 import { createProviderFactory } from "../providerFactory";
 import type { AiCompletionRequest, AiProviderClient } from "../types";
 
-const factory = createProviderFactory(
-  (apiKey) => new OpenAI({ apiKey, dangerouslyAllowBrowser: true }),
-);
+const factory: ReturnType<typeof createProviderFactory<OpenAI>> =
+  createProviderFactory(
+    (apiKey) => new OpenAI({ apiKey, dangerouslyAllowBrowser: true }),
+  );
 
 export function createOpenAIProvider(
   apiKey: string,

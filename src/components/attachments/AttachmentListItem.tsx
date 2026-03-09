@@ -1,4 +1,5 @@
 import { Download, ExternalLink, Eye } from "lucide-react";
+import type React from "react";
 import { useTranslation } from "react-i18next";
 import type { AttachmentWithContext } from "@/services/db/attachments";
 import {
@@ -28,7 +29,7 @@ export function AttachmentListItem({
   onPreview,
   onDownload,
   onJumpToEmail,
-}: AttachmentListItemProps) {
+}: AttachmentListItemProps): React.ReactNode {
   const { t } = useTranslation("attachments");
   const previewable = canPreview(attachment.mime_type, attachment.filename);
   const senderName =
@@ -71,6 +72,7 @@ export function AttachmentListItem({
       <div className="flex gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
         {previewable && (
           <button
+            type="button"
             onClick={onPreview}
             className="p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-secondary transition-colors"
             title={t("preview")}
@@ -79,6 +81,7 @@ export function AttachmentListItem({
           </button>
         )}
         <button
+          type="button"
           onClick={onDownload}
           className="p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-secondary transition-colors"
           title={t("download")}
@@ -86,6 +89,7 @@ export function AttachmentListItem({
           <Download size={14} />
         </button>
         <button
+          type="button"
           onClick={onJumpToEmail}
           className="p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-secondary transition-colors"
           title={t("jumpToEmail")}

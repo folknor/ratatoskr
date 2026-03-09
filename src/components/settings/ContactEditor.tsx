@@ -1,4 +1,5 @@
 import { Check, Pencil, Search, Trash2, X } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -8,24 +9,24 @@ import {
   updateContact,
 } from "@/services/db/contacts";
 
-export function ContactEditor() {
+export function ContactEditor(): React.ReactNode {
   const { t } = useTranslation("settings");
   const [contacts, setContacts] = useState<DbContact[]>([]);
   const [search, setSearch] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
 
-  const loadContacts = useCallback(async () => {
+  const loadContacts = useCallback(async (): Promise<void> => {
     const all = await getAllContacts();
     setContacts(all);
   }, []);
 
   useEffect(() => {
-    loadContacts();
+    void loadContacts();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadContacts is stable (no deps), run once on mount
   }, [loadContacts]);
 
-  const filtered = useMemo(() => {
+  const filtered = useMemo((): DbContact[] => {
     if (!search) return contacts;
     const q = search.toLowerCase();
     return contacts.filter(
@@ -35,19 +36,19 @@ export function ContactEditor() {
     );
   }, [contacts, search]);
 
-  const handleEdit = (contact: DbContact) => {
+  const handleEdit = (contact: DbContact): void => {
     setEditingId(contact.id);
     setEditName(contact.display_name ?? "");
   };
 
-  const handleSaveEdit = async () => {
+  const handleSaveEdit = async (): Promise<void> => {
     if (!editingId) return;
     await updateContact(editingId, editName || null);
     setEditingId(null);
     await loadContacts();
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: string): Promise<void> => {
     await deleteContact(id);
     await loadContacts();
   };
@@ -62,7 +63,9 @@ export function ContactEditor() {
         <input
           type="text"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+            setSearch(e.target.value)
+          }
           placeholder={t("contactEditor.searchPlaceholder")}
           className="w-full pl-8 pr-3 py-1.5 bg-bg-tertiary border border-border-primary rounded text-sm text-text-primary outline-none focus:border-accent"
         />
@@ -86,22 +89,28 @@ export function ContactEditor() {
                   <input
                     type="text"
                     value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleSaveEdit();
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                      setEditName(e.target.value)
+                    }
+                    onKeyDown={(
+                      e: React.KeyboardEvent<HTMLInputElement>,
+                    ): void => {
+                      if (e.key === "Enter") void handleSaveEdit();
                       if (e.key === "Escape") setEditingId(null);
                     }}
                     className="flex-1 min-w-0 px-2 py-0.5 bg-bg-tertiary border border-border-primary rounded text-sm text-text-primary outline-none focus:border-accent"
                     placeholder={t("contactEditor.displayName")}
                   />
                   <button
-                    onClick={handleSaveEdit}
+                    type="button"
+                    onClick={(): void => void handleSaveEdit()}
                     className="p-1 text-success hover:bg-bg-hover rounded"
                   >
                     <Check size={14} />
                   </button>
                   <button
-                    onClick={() => setEditingId(null)}
+                    type="button"
+                    onClick={(): void => setEditingId(null)}
                     className="p-1 text-text-tertiary hover:text-text-primary hover:bg-bg-hover rounded"
                   >
                     <X size={14} />
@@ -113,7 +122,7 @@ export function ContactEditor() {
                     <div className="text-sm text-text-primary truncate">
                       {contact.display_name ?? contact.email}
                     </div>
-                    {contact.display_name && (
+                    {contact.display_name != null && (
                       <div className="text-xs text-text-tertiary truncate">
                         {contact.email}
                       </div>
@@ -124,14 +133,16 @@ export function ContactEditor() {
                       {contact.frequency}x
                     </span>
                     <button
-                      onClick={() => handleEdit(contact)}
+                      type="button"
+                      onClick={(): void => handleEdit(contact)}
                       className="p-1 text-text-tertiary hover:text-text-primary opacity-0 group-hover:opacity-100 transition-opacity"
                       title={t("contactEditor.editName")}
                     >
                       <Pencil size={13} />
                     </button>
                     <button
-                      onClick={() => handleDelete(contact.id)}
+                      type="button"
+                      onClick={(): void => void handleDelete(contact.id)}
                       className="p-1 text-text-tertiary hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity"
                       title={t("contactEditor.deleteContact")}
                     >

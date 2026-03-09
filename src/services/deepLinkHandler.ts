@@ -35,7 +35,7 @@ export async function initDeepLinkHandler(): Promise<() => void> {
   try {
     const unlistenOpenUrl = await onOpenUrl((urls) => {
       for (const url of urls) {
-        handleUrl(url);
+        void handleUrl(url);
       }
     });
     cleanups.push(unlistenOpenUrl);
@@ -50,7 +50,7 @@ export async function initDeepLinkHandler(): Promise<() => void> {
       (event) => {
         for (const arg of event.payload) {
           if (arg.startsWith("mailto:")) {
-            handleUrl(arg);
+            void handleUrl(arg);
           }
         }
       },

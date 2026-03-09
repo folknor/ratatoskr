@@ -1,3 +1,4 @@
+import type React from "react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { DbCalendarEvent } from "@/services/db/calendarEvents";
@@ -13,7 +14,7 @@ export function MonthView({
   currentDate,
   events,
   onEventClick,
-}: MonthViewProps) {
+}: MonthViewProps): React.ReactNode {
   const { t } = useTranslation("calendar");
   const dayNames = [
     t("daysShort.sun"),
@@ -73,6 +74,7 @@ export function MonthView({
           if (day === null) {
             return (
               <div
+                // biome-ignore lint/suspicious/noArrayIndexKey: empty calendar grid cells have no stable ID
                 key={`empty-${idx}`}
                 className="border-b border-r border-border-secondary bg-bg-tertiary/30"
               />
@@ -99,7 +101,7 @@ export function MonthView({
                     key={event.id}
                     event={event}
                     compact
-                    onClick={() => onEventClick(event)}
+                    onClick={(): void => onEventClick(event)}
                   />
                 ))}
                 {dayEvents.length > 3 && (

@@ -231,6 +231,7 @@ export function discoverSettings(
  * Get the default SMTP port for a given security type.
  */
 export function getDefaultSmtpPort(security: SecurityType): number {
+  // biome-ignore lint/nursery/noUnnecessaryConditions: exhaustive switch on union type
   switch (security) {
     case "ssl":
       return 465;
@@ -245,6 +246,7 @@ export function getDefaultSmtpPort(security: SecurityType): number {
  * Get the default IMAP port for a given security type.
  */
 export function getDefaultImapPort(security: SecurityType): number {
+  // biome-ignore lint/nursery/noUnnecessaryConditions: exhaustive switch on union type
   switch (security) {
     case "ssl":
       return 993;

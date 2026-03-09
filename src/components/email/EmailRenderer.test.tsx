@@ -1,4 +1,5 @@
 import { render, waitFor } from "@testing-library/react";
+import { vi } from "vitest";
 import type { DbAttachment } from "@/services/db/attachments";
 import { EmailRenderer } from "./EmailRenderer";
 

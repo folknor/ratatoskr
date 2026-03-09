@@ -1,4 +1,5 @@
 import { Plus } from "lucide-react";
+import type React from "react";
 import { useCallback, useRef, useState } from "react";
 
 interface TaskQuickAddProps {
@@ -9,11 +10,11 @@ interface TaskQuickAddProps {
 export function TaskQuickAdd({
   onAdd,
   placeholder = "Add a task...",
-}: TaskQuickAddProps) {
+}: TaskQuickAddProps): React.ReactNode {
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback((): void => {
     const trimmed = value.trim();
     if (!trimmed) return;
     onAdd(trimmed);
@@ -28,7 +29,9 @@ export function TaskQuickAdd({
         ref={inputRef}
         type="text"
         value={value}
+        // biome-ignore lint/nursery/useExplicitType: inline callback
         onChange={(e) => setValue(e.target.value)}
+        // biome-ignore lint/nursery/useExplicitType: inline callback
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();

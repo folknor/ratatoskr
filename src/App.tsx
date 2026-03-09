@@ -1,5 +1,6 @@
 import { Outlet } from "@tanstack/react-router";
 import { invoke } from "@tauri-apps/api/core";
+import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AddAccount } from "./components/accounts/AddAccount";
@@ -84,7 +85,7 @@ import { formatSyncError } from "./utils/networkErrors";
  * thread ID to the threadStore so that range-select and other multi-select
  * logic can use it as an anchor.
  */
-function useRouterSyncBridge() {
+function useRouterSyncBridge(): void {
   useEffect(
     () =>
       router.subscribe("onResolved", () => {
@@ -99,7 +100,7 @@ function useRouterSyncBridge() {
 
 import { useThreadStore } from "./stores/threadStore";
 
-export default function App() {
+export default function App(): React.ReactNode {
   const { t } = useTranslation();
   const theme = useUIStore((s) => s.theme);
   const fontScale = useUIStore((s) => s.fontScale);
@@ -130,18 +131,18 @@ export default function App() {
     const { setOnline } = useUIStore.getState();
     setOnline(navigator.onLine);
 
-    const handleOnline = () => {
+    const handleOnline = (): void => {
       setOnline(true);
-      triggerQueueFlush();
+      void triggerQueueFlush();
       const accounts = useAccountStore.getState().accounts;
       const activeIds = accounts.filter((a) => a.isActive).map((a) => a.id);
-      if (activeIds.length > 0) triggerSync(activeIds);
+      if (activeIds.length > 0) void triggerSync(activeIds);
     };
-    const handleOffline = () => setOnline(false);
+    const handleOffline = (): void => setOnline(false);
 
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
-    return () => {
+    return (): void => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
     };
@@ -150,21 +151,21 @@ export default function App() {
   // Suppress default browser context menu globally (Tauri app should feel native)
   // Elements with data-native-context-menu opt out so the browser menu is available
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
+    const handler = (e: MouseEvent): void => {
       if ((e.target as HTMLElement).closest?.("[data-native-context-menu]"))
         return;
       e.preventDefault();
     };
     document.addEventListener("contextmenu", handler);
-    return () => document.removeEventListener("contextmenu", handler);
+    return (): void => document.removeEventListener("contextmenu", handler);
   }, []);
 
   // Listen for command palette / shortcuts help toggle events
   useEffect(() => {
-    const togglePalette = () => setShowCommandPalette((p) => !p);
-    const toggleHelp = () => setShowShortcutsHelp((p) => !p);
-    const toggleAskInbox = () => setShowAskInbox((p) => !p);
-    const handleMoveToFolder = (e: Event) => {
+    const togglePalette = (): void => setShowCommandPalette((p) => !p);
+    const toggleHelp = (): void => setShowShortcutsHelp((p) => !p);
+    const toggleAskInbox = (): void => setShowAskInbox((p) => !p);
+    const handleMoveToFolder = (e: Event): void => {
       const detail = (e as CustomEvent<{ threadIds: string[] }>).detail;
       setMoveToFolderState({ open: true, threadIds: detail.threadIds });
     };
@@ -172,7 +173,7 @@ export default function App() {
     window.addEventListener("velo-toggle-shortcuts-help", toggleHelp);
     window.addEventListener("velo-toggle-ask-inbox", toggleAskInbox);
     window.addEventListener("velo-move-to-folder", handleMoveToFolder);
-    return () => {
+    return (): void => {
       window.removeEventListener("velo-toggle-command-palette", togglePalette);
       window.removeEventListener("velo-toggle-shortcuts-help", toggleHelp);
       window.removeEventListener("velo-toggle-ask-inbox", toggleAskInbox);
@@ -183,25 +184,25 @@ export default function App() {
   // Listen for tray "Check for Mail" button
   useEffect(() => {
     let unlisten: (() => void) | undefined;
-    import("@tauri-apps/api/event").then(({ listen }) => {
-      listen("tray-check-mail", () => {
+    void import("@tauri-apps/api/event").then(({ listen }) => {
+      void listen("tray-check-mail", () => {
         const accounts = useAccountStore.getState().accounts;
         const activeIds = accounts.filter((a) => a.isActive).map((a) => a.id);
         if (activeIds.length > 0) {
-          triggerSync(activeIds);
+          void triggerSync(activeIds);
         }
       }).then((fn) => {
         unlisten = fn;
       });
     });
-    return () => {
+    return (): void => {
       unlisten?.();
     };
   }, []);
 
   // Initialize database, load accounts, start sync
   useEffect(() => {
-    async function init() {
+    async function init(): Promise<void> {
       try {
         await runMigrations();
 
@@ -307,7 +308,7 @@ export default function App() {
         const savedColorTheme = await getSetting("color_theme");
         if (
           savedColorTheme &&
-          COLOR_THEMES.some((t) => t.id === savedColorTheme)
+          COLOR_THEMES.some((ct) => ct.id === savedColorTheme)
         ) {
           ui.setColorTheme(savedColorTheme as ColorThemeId);
         }
@@ -423,9 +424,9 @@ export default function App() {
       invoke("close_splashscreen").catch(() => {});
     }
 
-    init();
+    void init();
 
-    return () => {
+    return (): void => {
       stopBackgroundSync();
       stopSnoozeChecker();
       stopScheduledSendChecker();
@@ -434,7 +435,7 @@ export default function App() {
       stopQueueProcessor();
       stopPreCacheManager();
       stopUpdateChecker();
-      unregisterComposeShortcut();
+      void unregisterComposeShortcut();
       deepLinkCleanupRef.current?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- store setters are stable references
@@ -463,7 +464,7 @@ export default function App() {
       } else if (status === "done") {
         setSyncStatus(null);
         window.dispatchEvent(new Event("velo-sync-done"));
-        updateBadgeCount();
+        void updateBadgeCount();
 
         // Backfill uncategorized threads after first successful sync
         if (!backfillDoneRef.current) {
@@ -496,7 +497,7 @@ export default function App() {
       root.classList.remove("dark");
     } else {
       const mq = window.matchMedia("(prefers-color-scheme: dark)");
-      const apply = () => {
+      const apply = (): void => {
         if (mq.matches) {
           root.classList.add("dark");
         } else {
@@ -505,12 +506,12 @@ export default function App() {
       };
       apply();
       mq.addEventListener("change", apply);
-      return () => mq.removeEventListener("change", apply);
+      return (): void => mq.removeEventListener("change", apply);
     }
   }, [theme]);
 
   // Sync font-scale class to <html> element
-  useEffect(() => {
+  useEffect((): void => {
     const root = document.documentElement;
     root.classList.remove(
       "font-scale-small",
@@ -522,7 +523,7 @@ export default function App() {
   }, [fontScale]);
 
   // Sync reduce-motion class to <html> element
-  useEffect(() => {
+  useEffect((): void => {
     const root = document.documentElement;
     root.classList.toggle("reduce-motion", reduceMotion);
   }, [reduceMotion]);
@@ -538,7 +539,7 @@ export default function App() {
       "--color-sidebar-active",
     ];
 
-    const apply = () => {
+    const apply = (): void => {
       if (colorTheme === "indigo") {
         // Default theme — remove inline overrides, let CSS handle it
         for (const p of props) root.style.removeProperty(p);
@@ -562,7 +563,7 @@ export default function App() {
     if (theme === "system") {
       const mq = window.matchMedia("(prefers-color-scheme: dark)");
       mq.addEventListener("change", apply);
-      return () => mq.removeEventListener("change", apply);
+      return (): void => mq.removeEventListener("change", apply);
     }
   }, [colorTheme, theme]);
 
@@ -640,7 +641,7 @@ export default function App() {
           <ErrorBoundary name="Sidebar">
             <Sidebar
               collapsed={sidebarCollapsed}
-              onAddAccount={() => setShowAddAccount(true)}
+              onAddAccount={(): void => setShowAddAccount(true)}
             />
           </ErrorBoundary>
           <Outlet />
@@ -648,7 +649,7 @@ export default function App() {
       </div>
 
       {/* Sync status bar */}
-      {showSyncStatusBar && syncStatus && (
+      {showSyncStatusBar && syncStatus != null && (
         <div
           className={`fixed bottom-0 right-0 glass-panel text-white text-xs px-4 py-1.5 text-center z-40 transition-all duration-200 ${syncStatus.startsWith("Sync failed") ? "bg-danger/90" : "bg-accent/90"}`}
           style={{ left: sidebarCollapsed ? "4rem" : "15rem" }}
@@ -657,9 +658,9 @@ export default function App() {
         </div>
       )}
 
-      {showAddAccount && (
+      {showAddAccount === true && (
         <AddAccount
-          onClose={() => setShowAddAccount(false)}
+          onClose={(): void => setShowAddAccount(false)}
           onSuccess={handleAddAccountSuccess}
         />
       )}
@@ -672,24 +673,26 @@ export default function App() {
       <ErrorBoundary name="CommandPalette">
         <CommandPalette
           isOpen={showCommandPalette}
-          onClose={() => setShowCommandPalette(false)}
+          onClose={(): void => setShowCommandPalette(false)}
         />
       </ErrorBoundary>
       <ShortcutsHelp
         isOpen={showShortcutsHelp}
-        onClose={() => setShowShortcutsHelp(false)}
+        onClose={(): void => setShowShortcutsHelp(false)}
       />
       <ErrorBoundary name="AskInbox">
         <AskInbox
           isOpen={showAskInbox}
-          onClose={() => setShowAskInbox(false)}
+          onClose={(): void => setShowAskInbox(false)}
         />
       </ErrorBoundary>
       <ContextMenuPortal />
       <MoveToFolderDialog
         isOpen={moveToFolderState.open}
         threadIds={moveToFolderState.threadIds}
-        onClose={() => setMoveToFolderState({ open: false, threadIds: [] })}
+        onClose={(): void =>
+          setMoveToFolderState({ open: false, threadIds: [] })
+        }
       />
     </div>
   );

@@ -5,7 +5,7 @@ const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const OAUTH_CALLBACK_PORT = 17248;
 
-const SCOPES = [
+const SCOPES: string[] = [
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/gmail.modify",
   "https://www.googleapis.com/auth/gmail.send",
@@ -136,6 +136,7 @@ export async function startOAuthFlow(
   return { tokens, userInfo };
 }
 
+// biome-ignore lint/complexity/useMaxParams: OAuth token exchange requires all these parameters
 async function exchangeCodeForTokens(
   code: string,
   clientId: string,

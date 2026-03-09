@@ -1,4 +1,5 @@
 import { ExternalLink, Send, Sparkles, X } from "lucide-react";
+import type React from "react";
 import { useCallback, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { navigateToLabel } from "@/router/navigate";
@@ -10,14 +11,14 @@ interface AskInboxProps {
   onClose: () => void;
 }
 
-export function AskInbox({ isOpen, onClose }: AskInboxProps) {
+export function AskInbox({ isOpen, onClose }: AskInboxProps): React.ReactNode {
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AskInboxResult | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
 
-  const handleAsk = useCallback(async () => {
+  const handleAsk = useCallback(async (): Promise<void> => {
     if (!(question.trim() && activeAccountId) || loading) return;
     setLoading(true);
     setResult(null);
@@ -37,10 +38,10 @@ export function AskInbox({ isOpen, onClose }: AskInboxProps) {
   }, [question, activeAccountId, loading]);
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
+    (e: React.KeyboardEvent): void => {
       if (e.key === "Enter") {
         e.preventDefault();
-        handleAsk();
+        void handleAsk();
       } else if (e.key === "Escape") {
         onClose();
       }
@@ -49,14 +50,14 @@ export function AskInbox({ isOpen, onClose }: AskInboxProps) {
   );
 
   const handleNavigateToThread = useCallback(
-    (threadId: string) => {
+    (threadId: string): void => {
       navigateToLabel("all", { threadId });
       onClose();
     },
     [onClose],
   );
 
-  const handleClear = useCallback(() => {
+  const handleClear = useCallback((): void => {
     setQuestion("");
     setResult(null);
     inputRef.current?.focus();
@@ -66,6 +67,8 @@ export function AskInbox({ isOpen, onClose }: AskInboxProps) {
 
   return createPortal(
     <div className="fixed inset-0 z-[60] flex items-start justify-center pt-[10vh]">
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: backdrop click to close */}
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: backdrop click to close */}
       <div
         className="absolute inset-0 bg-black/30 glass-backdrop"
         onClick={onClose}
@@ -78,6 +81,7 @@ export function AskInbox({ isOpen, onClose }: AskInboxProps) {
             Ask My Inbox
           </span>
           <button
+            type="button"
             onClick={onClose}
             className="text-text-tertiary hover:text-text-primary transition-colors"
           >
@@ -91,12 +95,15 @@ export function AskInbox({ isOpen, onClose }: AskInboxProps) {
             ref={inputRef}
             type="text"
             value={question}
-            onChange={(e) => setQuestion(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+              setQuestion(e.target.value)
+            }
             onKeyDown={handleKeyDown}
             placeholder="Ask a question about your emails..."
             className="flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-tertiary"
           />
           <button
+            type="button"
             onClick={handleAsk}
             disabled={!question.trim() || loading}
             className="p-1.5 text-accent hover:text-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -107,14 +114,14 @@ export function AskInbox({ isOpen, onClose }: AskInboxProps) {
 
         {/* Results */}
         <div className="flex-1 overflow-y-auto">
-          {loading && (
+          {loading === true && (
             <div className="flex items-center gap-2 px-4 py-6 text-text-tertiary justify-center">
               <div className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
               <span className="text-sm">Searching your inbox...</span>
             </div>
           )}
 
-          {result && (
+          {result != null && (
             <div className="p-4 space-y-4">
               {/* Answer */}
               <div className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">
@@ -130,8 +137,11 @@ export function AskInbox({ isOpen, onClose }: AskInboxProps) {
                   <div className="space-y-1.5">
                     {result.sourceMessages.slice(0, 5).map((msg) => (
                       <button
+                        type="button"
                         key={msg.message_id}
-                        onClick={() => handleNavigateToThread(msg.thread_id)}
+                        onClick={(): void =>
+                          handleNavigateToThread(msg.thread_id)
+                        }
                         className="w-full text-left px-3 py-2 rounded-md bg-bg-secondary hover:bg-bg-hover transition-colors group"
                       >
                         <div className="flex items-center justify-between">
@@ -157,6 +167,7 @@ export function AskInbox({ isOpen, onClose }: AskInboxProps) {
 
               {/* Ask again */}
               <button
+                type="button"
                 onClick={handleClear}
                 className="text-xs text-accent hover:text-accent-hover transition-colors"
               >

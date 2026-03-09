@@ -1,4 +1,5 @@
 import { FolderPlus, Search, X } from "lucide-react";
+import type React from "react";
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { InputDialog } from "@/components/ui/InputDialog";
@@ -7,7 +8,7 @@ import { useAccountStore } from "@/stores/accountStore";
 import { useSmartFolderStore } from "@/stores/smartFolderStore";
 import { useThreadStore } from "@/stores/threadStore";
 
-export function SearchBar() {
+export function SearchBar(): React.ReactNode {
   const { t } = useTranslation("search");
   const searchQuery = useThreadStore((s) => s.searchQuery);
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
@@ -16,13 +17,13 @@ export function SearchBar() {
 
   const [showSaveModal, setShowSaveModal] = useState(false);
 
-  const handleSaveAsSmartFolder = useCallback(() => {
+  const handleSaveAsSmartFolder = useCallback((): void => {
     if (useThreadStore.getState().searchQuery.trim().length < 2) return;
     setShowSaveModal(true);
   }, []);
 
   const handleChange = useCallback(
-    (value: string) => {
+    (value: string): void => {
       const { setSearch } = useThreadStore.getState();
       setSearch(value, useThreadStore.getState().searchThreadIds);
 
@@ -50,12 +51,12 @@ export function SearchBar() {
     [activeAccountId],
   );
 
-  const handleClear = useCallback(() => {
+  const handleClear = useCallback((): void => {
     useThreadStore.getState().clearSearch();
     inputRef.current?.focus();
   }, []);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent): void => {
     if (e.key === "Escape") {
       useThreadStore.getState().clearSearch();
       inputRef.current?.blur();
@@ -72,15 +73,18 @@ export function SearchBar() {
         ref={inputRef}
         type="text"
         value={searchQuery}
-        onChange={(e) => handleChange(e.target.value)}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+          handleChange(e.target.value)
+        }
         onKeyDown={handleKeyDown}
         placeholder={t("searchPlaceholder")}
         className="w-full bg-bg-tertiary text-text-primary text-sm pl-8 pr-14 py-1.5 rounded-md border border-border-primary focus:border-accent focus:outline-none placeholder:text-text-tertiary"
       />
-      {searchQuery && (
+      {searchQuery != null && searchQuery !== "" && (
         <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
           {searchQuery.trim().length >= 2 && (
             <button
+              type="button"
               onClick={handleSaveAsSmartFolder}
               className="text-text-tertiary hover:text-accent transition-colors"
               title={t("saveAsSmartFolder")}
@@ -89,6 +93,7 @@ export function SearchBar() {
             </button>
           )}
           <button
+            type="button"
             onClick={handleClear}
             className="text-text-tertiary hover:text-text-primary transition-colors"
           >
@@ -98,8 +103,8 @@ export function SearchBar() {
       )}
       <InputDialog
         isOpen={showSaveModal}
-        onClose={() => setShowSaveModal(false)}
-        onSubmit={(values) => {
+        onClose={(): void => setShowSaveModal(false)}
+        onSubmit={(values: Record<string, string>): void => {
           useSmartFolderStore
             .getState()
             .createFolder(

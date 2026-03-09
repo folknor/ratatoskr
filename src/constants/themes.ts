@@ -182,8 +182,9 @@ export const COLOR_THEMES: ColorTheme[] = [
 export const DEFAULT_COLOR_THEME: ColorThemeId = "indigo";
 
 export function getThemeById(id: string): ColorTheme {
-  return (
+  const theme =
     COLOR_THEMES.find((t) => t.id === id) ??
-    COLOR_THEMES.find((t) => t.id === DEFAULT_COLOR_THEME)!
-  );
+    COLOR_THEMES.find((t) => t.id === DEFAULT_COLOR_THEME);
+  // biome-ignore lint/style/noNonNullAssertion: DEFAULT_COLOR_THEME ("indigo") is always present in COLOR_THEMES
+  return theme!;
 }

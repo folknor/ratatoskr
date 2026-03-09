@@ -1,4 +1,5 @@
 import { Pencil, Trash2 } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { TextField } from "@/components/ui/TextField";
@@ -14,7 +15,7 @@ import {
 import { type DbLabel, getLabelsForAccount } from "@/services/db/labels";
 import { useAccountStore } from "@/stores/accountStore";
 
-export function FilterEditor() {
+export function FilterEditor(): React.ReactNode {
   const { t } = useTranslation("settings");
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
   const [filters, setFilters] = useState<DbFilterRule[]>([]);
@@ -35,7 +36,7 @@ export function FilterEditor() {
   const [actionMarkRead, setActionMarkRead] = useState(false);
   const [actionTrash, setActionTrash] = useState(false);
 
-  const loadFilters = useCallback(async () => {
+  const loadFilters = useCallback(async (): Promise<void> => {
     if (!activeAccountId) return;
     const f = await getFiltersForAccount(activeAccountId);
     setFilters(f);
@@ -43,14 +44,14 @@ export function FilterEditor() {
 
   useEffect(() => {
     if (!activeAccountId) return;
-    loadFilters();
-    getLabelsForAccount(activeAccountId).then((l) =>
+    void loadFilters();
+    void getLabelsForAccount(activeAccountId).then((l) =>
       setLabels(l.filter((lb) => lb.type === "user")),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadFilters is stable, only re-run on activeAccountId change
   }, [activeAccountId, loadFilters]);
 
-  const resetForm = useCallback(() => {
+  const resetForm = useCallback((): void => {
     setName("");
     setCriteriaFrom("");
     setCriteriaTo("");
@@ -66,7 +67,7 @@ export function FilterEditor() {
     setShowForm(false);
   }, []);
 
-  const buildCriteria = (): FilterCriteria => {
+  const buildCriteria = useCallback((): FilterCriteria => {
     const c: FilterCriteria = {};
     if (criteriaFrom.trim()) c.from = criteriaFrom.trim();
     if (criteriaTo.trim()) c.to = criteriaTo.trim();
@@ -74,9 +75,15 @@ export function FilterEditor() {
     if (criteriaBody.trim()) c.body = criteriaBody.trim();
     if (criteriaHasAttachment) c.hasAttachment = true;
     return c;
-  };
+  }, [
+    criteriaFrom,
+    criteriaTo,
+    criteriaSubject,
+    criteriaBody,
+    criteriaHasAttachment,
+  ]);
 
-  const buildActions = (): FilterActions => {
+  const buildActions = useCallback((): FilterActions => {
     const a: FilterActions = {};
     if (actionLabel) a.applyLabel = actionLabel;
     if (actionArchive) a.archive = true;
@@ -84,9 +91,9 @@ export function FilterEditor() {
     if (actionMarkRead) a.markRead = true;
     if (actionTrash) a.trash = true;
     return a;
-  };
+  }, [actionLabel, actionArchive, actionStar, actionMarkRead, actionTrash]);
 
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(async (): Promise<void> => {
     if (!(activeAccountId && name.trim())) return;
     const criteria = buildCriteria();
     const actions = buildActions();
@@ -114,19 +121,19 @@ export function FilterEditor() {
     buildCriteria,
   ]);
 
-  const handleEdit = useCallback((filter: DbFilterRule) => {
+  const handleEdit = useCallback((filter: DbFilterRule): void => {
     setEditingId(filter.id);
     setName(filter.name);
 
     let criteria: FilterCriteria = {};
     let actions: FilterActions = {};
     try {
-      criteria = JSON.parse(filter.criteria_json);
+      criteria = JSON.parse(filter.criteria_json) as FilterCriteria;
     } catch {
       /* empty */
     }
     try {
-      actions = JSON.parse(filter.actions_json);
+      actions = JSON.parse(filter.actions_json) as FilterActions;
     } catch {
       /* empty */
     }
@@ -145,7 +152,7 @@ export function FilterEditor() {
   }, []);
 
   const handleDelete = useCallback(
-    async (id: string) => {
+    async (id: string): Promise<void> => {
       await deleteFilter(id);
       if (editingId === id) resetForm();
       await loadFilters();
@@ -154,14 +161,14 @@ export function FilterEditor() {
   );
 
   const handleToggleEnabled = useCallback(
-    async (filter: DbFilterRule) => {
+    async (filter: DbFilterRule): Promise<void> => {
       await updateFilter(filter.id, { isEnabled: filter.is_enabled !== 1 });
       await loadFilters();
     },
     [loadFilters],
   );
 
-  const filterDescriptions = useMemo(() => {
+  const filterDescriptions = useMemo((): Map<string, string> => {
     const map = new Map<string, string>();
     for (const filter of filters) {
       try {
@@ -203,7 +210,8 @@ export function FilterEditor() {
           </div>
           <div className="flex items-center gap-1">
             <button
-              onClick={() => handleToggleEnabled(filter)}
+              type="button"
+              onClick={(): void => void handleToggleEnabled(filter)}
               className={`w-8 h-4 rounded-full transition-colors relative ${
                 filter.is_enabled === 1 ? "bg-accent" : "bg-bg-tertiary"
               }`}
@@ -220,13 +228,15 @@ export function FilterEditor() {
               />
             </button>
             <button
-              onClick={() => handleEdit(filter)}
+              type="button"
+              onClick={(): void => handleEdit(filter)}
               className="p-1 text-text-tertiary hover:text-text-primary"
             >
               <Pencil size={13} />
             </button>
             <button
-              onClick={() => handleDelete(filter.id)}
+              type="button"
+              onClick={(): void => void handleDelete(filter.id)}
               className="p-1 text-text-tertiary hover:text-danger"
             >
               <Trash2 size={13} />
@@ -240,7 +250,9 @@ export function FilterEditor() {
           <TextField
             type="text"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+              setName(e.target.value)
+            }
             placeholder={t("filterEditor.filterName")}
           />
 
@@ -252,32 +264,42 @@ export function FilterEditor() {
               <TextField
                 type="text"
                 value={criteriaFrom}
-                onChange={(e) => setCriteriaFrom(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                  setCriteriaFrom(e.target.value)
+                }
                 placeholder={t("filterEditor.fromPlaceholder")}
               />
               <TextField
                 type="text"
                 value={criteriaTo}
-                onChange={(e) => setCriteriaTo(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                  setCriteriaTo(e.target.value)
+                }
                 placeholder={t("filterEditor.toPlaceholder")}
               />
               <TextField
                 type="text"
                 value={criteriaSubject}
-                onChange={(e) => setCriteriaSubject(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                  setCriteriaSubject(e.target.value)
+                }
                 placeholder={t("filterEditor.subjectPlaceholder")}
               />
               <TextField
                 type="text"
                 value={criteriaBody}
-                onChange={(e) => setCriteriaBody(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                  setCriteriaBody(e.target.value)
+                }
                 placeholder={t("filterEditor.bodyPlaceholder")}
               />
               <label className="flex items-center gap-1.5 text-xs text-text-secondary">
                 <input
                   type="checkbox"
                   checked={criteriaHasAttachment}
-                  onChange={(e) => setCriteriaHasAttachment(e.target.checked)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                    setCriteriaHasAttachment(e.target.checked)
+                  }
                   className="rounded"
                 />
                 {t("filterEditor.hasAttachment")}
@@ -297,7 +319,9 @@ export function FilterEditor() {
                   </span>
                   <select
                     value={actionLabel}
-                    onChange={(e) => setActionLabel(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>): void =>
+                      setActionLabel(e.target.value)
+                    }
                     className="flex-1 bg-bg-tertiary text-text-primary text-xs px-2 py-1 rounded border border-border-primary"
                   >
                     <option value="">{t("filterEditor.none")}</option>
@@ -314,7 +338,9 @@ export function FilterEditor() {
                   <input
                     type="checkbox"
                     checked={actionArchive}
-                    onChange={(e) => setActionArchive(e.target.checked)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                      setActionArchive(e.target.checked)
+                    }
                     className="rounded"
                   />
                   {t("filterEditor.archive")}
@@ -323,7 +349,9 @@ export function FilterEditor() {
                   <input
                     type="checkbox"
                     checked={actionStar}
-                    onChange={(e) => setActionStar(e.target.checked)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                      setActionStar(e.target.checked)
+                    }
                     className="rounded"
                   />
                   {t("filterEditor.star")}
@@ -332,7 +360,9 @@ export function FilterEditor() {
                   <input
                     type="checkbox"
                     checked={actionMarkRead}
-                    onChange={(e) => setActionMarkRead(e.target.checked)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                      setActionMarkRead(e.target.checked)
+                    }
                     className="rounded"
                   />
                   {t("filterEditor.markAsRead")}
@@ -341,7 +371,9 @@ export function FilterEditor() {
                   <input
                     type="checkbox"
                     checked={actionTrash}
-                    onChange={(e) => setActionTrash(e.target.checked)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                      setActionTrash(e.target.checked)
+                    }
                     className="rounded"
                   />
                   {t("filterEditor.trash")}
@@ -352,13 +384,15 @@ export function FilterEditor() {
 
           <div className="flex items-center gap-2">
             <button
-              onClick={handleSave}
+              type="button"
+              onClick={(): void => void handleSave()}
               disabled={!name.trim()}
               className="px-3 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-50"
             >
               {editingId ? t("filterEditor.update") : t("filterEditor.save")}
             </button>
             <button
+              type="button"
               onClick={resetForm}
               className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary rounded-md transition-colors"
             >
@@ -368,7 +402,8 @@ export function FilterEditor() {
         </div>
       ) : (
         <button
-          onClick={() => setShowForm(true)}
+          type="button"
+          onClick={(): void => setShowForm(true)}
           className="text-xs text-accent hover:text-accent-hover"
         >
           {t("filterEditor.addFilter")}

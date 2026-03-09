@@ -1,4 +1,5 @@
 import type { LucideIcon } from "lucide-react";
+import type React from "react";
 import type { ComponentType } from "react";
 
 type EmptyStateProps = {
@@ -12,7 +13,11 @@ type EmptyStateProps = {
     }
 );
 
-export function EmptyState({ title, subtitle, ...rest }: EmptyStateProps) {
+export function EmptyState({
+  title,
+  subtitle,
+  ...rest
+}: EmptyStateProps): React.ReactNode {
   return (
     <div className="flex flex-col items-center justify-center h-full text-text-tertiary px-4">
       {"illustration" in rest && rest.illustration ? (
@@ -24,7 +29,9 @@ export function EmptyState({ title, subtitle, ...rest }: EmptyStateProps) {
         })()
       ) : null}
       <p className="text-sm font-medium">{title}</p>
-      {subtitle && <p className="text-xs mt-1 text-center">{subtitle}</p>}
+      {subtitle != null && (
+        <p className="text-xs mt-1 text-center">{subtitle}</p>
+      )}
     </div>
   );
 }

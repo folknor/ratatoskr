@@ -1,4 +1,5 @@
 import { Check, Copy } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { getEmailProvider } from "@/services/email/providerFactory";
@@ -15,7 +16,7 @@ export function RawMessageModal({
   onClose,
   messageId,
   accountId,
-}: RawMessageModalProps) {
+}: RawMessageModalProps): React.ReactNode {
   const [raw, setRaw] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -77,8 +78,9 @@ export function RawMessageModal({
             Message Source
           </h3>
           <div className="flex items-center gap-2">
-            {raw && (
+            {raw != null && (
               <button
+                type="button"
                 onClick={handleCopy}
                 className="flex items-center gap-1 text-xs text-text-secondary hover:text-text-primary px-2 py-1 rounded hover:bg-bg-hover transition-colors"
                 title="Copy to clipboard"
@@ -88,6 +90,7 @@ export function RawMessageModal({
               </button>
             )}
             <button
+              type="button"
               onClick={onClose}
               className="text-text-tertiary hover:text-text-primary text-lg leading-none"
             >
@@ -98,17 +101,17 @@ export function RawMessageModal({
       }
     >
       <div className="max-h-[70vh] overflow-y-auto p-4">
-        {loading && (
+        {loading === true && (
           <div className="flex items-center justify-center py-12 text-text-tertiary text-sm">
             Loading message source...
           </div>
         )}
-        {error && (
+        {error != null && (
           <div className="text-danger text-sm py-4">
             Failed to load message source: {error}
           </div>
         )}
-        {raw && (
+        {raw != null && (
           <pre className="text-xs font-mono text-text-secondary whitespace-pre-wrap break-all select-text">
             {raw}
           </pre>

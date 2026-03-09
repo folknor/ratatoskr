@@ -1,3 +1,4 @@
+import type React from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "@/components/ui/Modal";
 import { SHORTCUTS } from "@/constants/shortcuts";
@@ -8,7 +9,10 @@ interface ShortcutsHelpProps {
   onClose: () => void;
 }
 
-export function ShortcutsHelp({ isOpen, onClose }: ShortcutsHelpProps) {
+export function ShortcutsHelp({
+  isOpen,
+  onClose,
+}: ShortcutsHelpProps): React.ReactNode {
   const { t } = useTranslation("search");
   const keyMap = useShortcutStore((s) => s.keyMap);
 

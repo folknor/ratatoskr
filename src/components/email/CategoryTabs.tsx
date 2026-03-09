@@ -6,6 +6,7 @@ import {
   Tag,
   Users,
 } from "lucide-react";
+import type React from "react";
 import {
   useCallback,
   useEffect,
@@ -49,7 +50,7 @@ export function CategoryTabs({
   activeCategory,
   onCategoryChange,
   unreadCounts,
-}: CategoryTabsProps) {
+}: CategoryTabsProps): React.ReactNode {
   const { t } = useTranslation("sidebar");
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const tabRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
@@ -74,7 +75,7 @@ export function CategoryTabs({
     const ro = new ResizeObserver(checkOverflow);
     ro.observe(el);
     el.addEventListener("scroll", checkOverflow, { passive: true });
-    return () => {
+    return (): void => {
       ro.disconnect();
       el.removeEventListener("scroll", checkOverflow);
     };
@@ -91,11 +92,11 @@ export function CategoryTabs({
   return (
     <div className="relative border-b border-border-secondary shrink-0">
       {/* Left fade */}
-      {canScrollLeft && (
+      {canScrollLeft === true && (
         <div className="absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r from-bg-secondary to-transparent z-10 pointer-events-none" />
       )}
       {/* Right fade */}
-      {canScrollRight && (
+      {canScrollRight === true && (
         <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-bg-secondary to-transparent z-10 pointer-events-none" />
       )}
       <div
@@ -105,14 +106,17 @@ export function CategoryTabs({
         {ALL_CATEGORIES.map((cat) => {
           const Icon = CATEGORY_ICONS[cat];
           const count = unreadCounts?.[cat] ?? 0;
+          const i18nKey = CATEGORY_I18N_KEYS[cat];
+          const label = i18nKey != null ? t(i18nKey) : cat;
           return (
             <button
+              type="button"
               key={cat}
-              ref={(el) => {
+              ref={(el: HTMLButtonElement | null): void => {
                 if (el) tabRefs.current.set(cat, el);
                 else tabRefs.current.delete(cat);
               }}
-              onClick={(e) => {
+              onClick={(e: React.MouseEvent<HTMLButtonElement>): void => {
                 onCategoryChange(cat);
                 e.currentTarget.scrollIntoView({
                   behavior: "smooth",
@@ -126,8 +130,8 @@ export function CategoryTabs({
                   : "text-text-tertiary hover:text-text-primary"
               }`}
             >
-              {Icon && <Icon size={13} />}
-              {CATEGORY_I18N_KEYS[cat] ? t(CATEGORY_I18N_KEYS[cat]) : cat}
+              {Icon != null && <Icon size={13} />}
+              {label}
               {count > 0 && (
                 <span className="text-[0.625rem] bg-accent/15 text-accent px-1.5 rounded-full leading-normal">
                   {count}
@@ -137,7 +141,7 @@ export function CategoryTabs({
           );
         })}
         {/* Sliding indicator */}
-        {indicatorStyle && (
+        {indicatorStyle != null && (
           <span
             className="absolute bottom-0 h-0.5 bg-accent rounded-full transition-all duration-200 ease-out pointer-events-none"
             style={{ left: indicatorStyle.left, width: indicatorStyle.width }}

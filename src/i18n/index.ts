@@ -82,7 +82,7 @@ async function detectSystemLanguage(): Promise<string> {
     const { locale } = await import("@tauri-apps/plugin-os");
     const osLocale = await locale();
     if (osLocale) {
-      return osLocale.split("-")[0]!;
+      return osLocale.split("-")[0] ?? "en";
     }
   } catch {
     // Tauri not available (tests, plain browser)

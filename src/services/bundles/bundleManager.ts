@@ -1,5 +1,8 @@
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
-import { createBackgroundChecker } from "../backgroundCheckers";
+import {
+  type BackgroundChecker,
+  createBackgroundChecker,
+} from "../backgroundCheckers";
 import { getAllAccounts } from "../db/accounts";
 import {
   type DeliverySchedule,
@@ -64,6 +67,9 @@ async function checkBundleDelivery(): Promise<void> {
   }
 }
 
-const bundleChecker = createBackgroundChecker("Bundle", checkBundleDelivery);
-export const startBundleChecker = bundleChecker.start;
-export const stopBundleChecker = bundleChecker.stop;
+const bundleChecker: BackgroundChecker = createBackgroundChecker(
+  "Bundle",
+  checkBundleDelivery,
+);
+export const startBundleChecker: () => void = bundleChecker.start;
+export const stopBundleChecker: () => void = bundleChecker.stop;

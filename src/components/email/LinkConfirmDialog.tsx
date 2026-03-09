@@ -1,4 +1,5 @@
 import { ExternalLink, ShieldAlert } from "lucide-react";
+import type React from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "@/components/ui/Modal";
 import type { LinkAnalysis } from "@/utils/phishingDetector";
@@ -13,7 +14,7 @@ export function LinkConfirmDialog({
   linkAnalysis,
   onCancel,
   onConfirm,
-}: LinkConfirmDialogProps) {
+}: LinkConfirmDialogProps): React.ReactNode {
   const { t } = useTranslation("email");
   const isHigh = linkAnalysis.riskLevel === "high";
   const borderColor = isHigh ? "border-danger/40" : "border-warning/40";
@@ -47,9 +48,9 @@ export function LinkConfirmDialog({
       <div className="px-4 py-3 space-y-3">
         {/* URL display */}
         <div>
-          <label className="text-xs text-text-tertiary block mb-1">
+          <span className="text-xs text-text-tertiary block mb-1">
             {t("linkConfirm.fullUrl")}
-          </label>
+          </span>
           <div className="flex items-start gap-2 p-2 bg-bg-tertiary rounded-md">
             <ExternalLink
               size={14}
@@ -62,11 +63,11 @@ export function LinkConfirmDialog({
         </div>
 
         {/* Display text if different */}
-        {linkAnalysis.displayText && (
+        {linkAnalysis.displayText != null && (
           <div>
-            <label className="text-xs text-text-tertiary block mb-1">
+            <span className="text-xs text-text-tertiary block mb-1">
               {t("linkConfirm.linkText")}
-            </label>
+            </span>
             <p className="text-xs text-text-secondary px-2">
               {linkAnalysis.displayText}
             </p>
@@ -76,11 +77,11 @@ export function LinkConfirmDialog({
         {/* Triggered rules */}
         {linkAnalysis.triggeredRules.length > 0 && (
           <div>
-            <label className="text-xs text-text-tertiary block mb-1.5">
+            <span className="text-xs text-text-tertiary block mb-1.5">
               {t("linkConfirm.issuesDetected", {
                 count: linkAnalysis.triggeredRules.length,
               })}
-            </label>
+            </span>
             <ul className="space-y-1.5">
               {linkAnalysis.triggeredRules.map((rule) => (
                 <li
@@ -115,12 +116,14 @@ export function LinkConfirmDialog({
       {/* Actions */}
       <div className="px-4 py-3 border-t border-border-primary flex items-center justify-end gap-2">
         <button
+          type="button"
           onClick={onCancel}
           className="px-3 py-1.5 text-xs font-medium bg-accent text-white rounded-md hover:bg-accent-hover transition-colors"
         >
           {t("linkConfirm.goBack")}
         </button>
         <button
+          type="button"
           onClick={onConfirm}
           className="px-3 py-1.5 text-xs text-text-secondary bg-bg-tertiary border border-border-primary rounded-md hover:bg-bg-hover transition-colors"
         >

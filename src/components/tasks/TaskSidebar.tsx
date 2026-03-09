@@ -1,4 +1,5 @@
 import { ExternalLink, X } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { navigateToLabel } from "@/router/navigate";
 import type { DbTask } from "@/services/db/tasks";
@@ -21,14 +22,17 @@ interface TaskSidebarProps {
   threadId: string;
 }
 
-export function TaskSidebar({ accountId, threadId }: TaskSidebarProps) {
+export function TaskSidebar({
+  accountId,
+  threadId,
+}: TaskSidebarProps): React.ReactNode {
   const threadTasks = useTaskStore((s) => s.threadTasks);
   const setThreadTasks = useTaskStore((s) => s.setThreadTasks);
   const toggleTaskSidebar = useUIStore((s) => s.toggleTaskSidebar);
 
   useEffect(() => {
     let cancelled = false;
-    getTasksForThread(accountId, threadId).then((tasks) => {
+    void getTasksForThread(accountId, threadId).then((tasks) => {
       if (!cancelled) setThreadTasks(tasks);
     });
     return () => {
@@ -94,7 +98,7 @@ export function TaskSidebar({ accountId, threadId }: TaskSidebarProps) {
 
   useEffect(() => {
     let cancelled = false;
-    async function loadSubtasks() {
+    async function loadSubtasks(): Promise<void> {
       const map: Record<string, DbTask[]> = {};
       for (const task of threadTasks) {
         const subs = await getSubtasks(task.id);
@@ -102,7 +106,7 @@ export function TaskSidebar({ accountId, threadId }: TaskSidebarProps) {
       }
       if (!cancelled) setSubtaskMap(map);
     }
-    loadSubtasks();
+    void loadSubtasks();
     return () => {
       cancelled = true;
     };
@@ -115,6 +119,7 @@ export function TaskSidebar({ accountId, threadId }: TaskSidebarProps) {
         <h3 className="text-sm font-semibold text-text-primary">Tasks</h3>
         <div className="flex items-center gap-1">
           <button
+            type="button"
             onClick={() => navigateToLabel("tasks")}
             title="Open tasks page"
             className="p-1 text-text-tertiary hover:text-text-primary transition-colors"
@@ -122,6 +127,7 @@ export function TaskSidebar({ accountId, threadId }: TaskSidebarProps) {
             <ExternalLink size={13} />
           </button>
           <button
+            type="button"
             onClick={toggleTaskSidebar}
             className="p-1 text-text-tertiary hover:text-text-primary transition-colors"
           >

@@ -1,5 +1,6 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ImageOff } from "lucide-react";
+import type React from "react";
 import {
   useCallback,
   useEffect,
@@ -35,7 +36,7 @@ export function EmailRenderer({
   senderAllowlisted = false,
   messageId,
   inlineAttachments,
-}: EmailRendererProps) {
+}: EmailRendererProps): React.ReactNode {
   const { t } = useTranslation("email");
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
@@ -62,7 +63,7 @@ export function EmailRenderer({
 
     let cancelled = false;
 
-    (async () => {
+    void (async () => {
       try {
         const { getEmailProvider } = await import(
           "@/services/email/providerFactory"
@@ -73,15 +74,18 @@ export function EmailRenderer({
         await Promise.all(
           cidAttachments.map(async (att) => {
             try {
+              const attachmentId = att.gmail_attachment_id;
+              const contentId = att.content_id;
+              if (!(attachmentId && contentId)) return;
               const response = await provider.fetchAttachment(
                 messageId,
-                att.gmail_attachment_id!,
+                attachmentId,
               );
               const base64 = response.data
                 .replace(/-/g, "+")
                 .replace(/_/g, "/");
               resolved.set(
-                att.content_id!,
+                contentId,
                 `data:${att.mime_type ?? "image/png"};base64,${base64}`,
               );
             } catch {
@@ -98,7 +102,7 @@ export function EmailRenderer({
       }
     })();
 
-    return () => {
+    return (): void => {
       cancelled = true;
     };
   }, [accountId, messageId, inlineAttachments]);
@@ -184,7 +188,7 @@ export function EmailRenderer({
     doc.close();
 
     // Calculate and set height synchronously before paint
-    const applyHeight = () => {
+    const applyHeight = (): void => {
       if (!doc.body) return;
       const h = doc.body.scrollHeight;
       if (h > 0) {
@@ -202,7 +206,7 @@ export function EmailRenderer({
     observerRef.current = resizeObserver;
 
     // Open links in external browser via Tauri opener
-    const handleClick = (e: MouseEvent) => {
+    const handleClick = (e: MouseEvent): void => {
       const target = e.target as HTMLElement;
       const anchor = target.closest("a");
       if (anchor?.href) {
@@ -214,7 +218,7 @@ export function EmailRenderer({
     };
     doc.addEventListener("click", handleClick);
 
-    return () => {
+    return (): void => {
       doc.removeEventListener("click", handleClick);
       observerRef.current?.disconnect();
       cancelAnimationFrame(rafRef.current);
@@ -239,13 +243,15 @@ export function EmailRenderer({
           <ImageOff size={14} className="text-text-tertiary shrink-0" />
           <span className="text-text-secondary">{t("imagesBlocked")}</span>
           <button
+            type="button"
             onClick={handleLoadImages}
             className="text-accent hover:text-accent-hover font-medium"
           >
             {t("loadImages")}
           </button>
-          {senderAddress && accountId && (
+          {senderAddress != null && accountId != null && (
             <button
+              type="button"
               onClick={handleAlwaysLoad}
               className="text-accent hover:text-accent-hover font-medium"
             >

@@ -26,6 +26,7 @@ import type {
   DeltaCheckRequest,
   DeltaCheckResult,
   ImapConfig,
+  ImapFetchResult,
   ImapMessage,
 } from "./tauriCommands";
 import {
@@ -224,6 +225,7 @@ export function imapMessageToParsedMessage(
 /**
  * Store threads and their messages into the local DB.
  */
+// biome-ignore lint/complexity/useMaxParams: sync requires all these data maps
 async function storeThreadsAndMessages(
   accountId: string,
   threadGroups: ThreadGroup[],
@@ -270,8 +272,9 @@ async function storeThreadsAndMessages(
         // Sort by date ascending
         messages.sort((a, b) => a.date - b.date);
 
-        const firstMessage = messages[0]!;
-        const lastMessage = messages[messages.length - 1]!;
+        const firstMessage = messages[0];
+        const lastMessage = messages[messages.length - 1];
+        if (!(firstMessage && lastMessage)) continue;
 
         // Collect all label IDs across messages in this thread.
         // Also include labels from duplicate folder copies (same RFC Message-ID
@@ -414,7 +417,7 @@ async function fetchMessagesInBatches(
  */
 export async function imapInitialSync(
   accountId: string,
-  daysBack = 365,
+  daysBack: number = 365,
   onProgress?: ImapSyncProgressCallback,
 ): Promise<SyncResult> {
   const account = await getAccount(accountId);
@@ -475,8 +478,8 @@ export async function imapInitialSync(
   const folderErrors: string[] = [];
 
   for (let folderIdx = 0; folderIdx < syncableFolders.length; folderIdx++) {
-    const folder = syncableFolders[folderIdx]!;
-    if (folder.exists === 0) continue;
+    const folder = syncableFolders[folderIdx];
+    if (!folder || folder.exists === 0) continue;
 
     // Circuit breaker: skip remaining folders after too many consecutive failures
     if (consecutiveFailures >= CIRCUIT_BREAKER_MAX_FAILURES) {
@@ -537,7 +540,7 @@ export async function imapInitialSync(
           chunkStart,
           chunkStart + CHUNK_SIZE,
         );
-        let chunkResult;
+        let chunkResult: ImapFetchResult | undefined;
         try {
           chunkResult = await imapFetchMessages(
             config,
@@ -802,8 +805,9 @@ export async function imapInitialSync(
         // Sort by date ascending
         messages.sort((a, b) => a.date - b.date);
 
-        const firstMessage = messages[0]!;
-        const lastMessage = messages[messages.length - 1]!;
+        const firstMessage = messages[0];
+        const lastMessage = messages[messages.length - 1];
+        if (!(firstMessage && lastMessage)) continue;
 
         // Collect all label IDs including cross-folder copies
         const allLabelIds = new Set<string>();
@@ -906,7 +910,7 @@ export async function imapInitialSync(
  */
 export async function imapDeltaSync(
   accountId: string,
-  daysBack = 365,
+  daysBack: number = 365,
 ): Promise<SyncResult> {
   const account = await getAccount(accountId);
   if (!account) {
@@ -1004,6 +1008,7 @@ export async function imapDeltaSync(
   // Falls back to per-folder checks if the batch command fails.
   if (existingFolders.length > 0) {
     const deltaRequests: DeltaCheckRequest[] = existingFolders.map((folder) => {
+      // biome-ignore lint/style/noNonNullAssertion: existingFolders are only folders that exist in syncStateMap
       const savedState = syncStateMap.get(folder.raw_path)!;
       return {
         folder: folder.raw_path,
@@ -1027,6 +1032,7 @@ export async function imapDeltaSync(
       );
       deltaResultMap = new Map();
       for (const folder of existingFolders) {
+        // biome-ignore lint/style/noNonNullAssertion: existingFolders are only folders that exist in syncStateMap
         const savedState = syncStateMap.get(folder.raw_path)!;
         try {
           const currentStatus = await imapGetFolderStatus(
@@ -1068,6 +1074,7 @@ export async function imapDeltaSync(
 
     for (const folder of existingFolders) {
       const folderMapping = mapFolderToLabel(folder);
+      // biome-ignore lint/style/noNonNullAssertion: existingFolders are only folders that exist in syncStateMap
       const savedState = syncStateMap.get(folder.raw_path)!;
       const deltaResult = deltaResultMap.get(folder.raw_path);
 
@@ -1089,13 +1096,14 @@ export async function imapDeltaSync(
           );
           if (searchResult.uids.length === 0) continue;
 
-          const { messages, lastUid } = await fetchMessagesInBatches(
-            config,
-            folder.raw_path,
-            searchResult.uids,
-          );
+          const { messages: resyncMessages, lastUid: resyncLastUid } =
+            await fetchMessagesInBatches(
+              config,
+              folder.raw_path,
+              searchResult.uids,
+            );
 
-          for (const msg of messages) {
+          for (const msg of resyncMessages) {
             const { parsed, threadable } = imapMessageToParsedMessage(
               msg,
               accountId,
@@ -1110,7 +1118,7 @@ export async function imapDeltaSync(
             account_id: accountId,
             folder_path: folder.raw_path,
             uidvalidity: searchResult.folder_status.uidvalidity,
-            last_uid: lastUid,
+            last_uid: resyncLastUid,
             modseq: null,
             last_sync_at: Math.floor(Date.now() / 1000),
           });
@@ -1120,13 +1128,17 @@ export async function imapDeltaSync(
         // Normal delta: fetch the new UIDs returned by delta check
         if (deltaResult.new_uids.length === 0) continue;
 
-        const { messages, lastUid, uidvalidity } = await fetchMessagesInBatches(
+        const {
+          messages: deltaMessages,
+          lastUid: deltaLastUid,
+          uidvalidity,
+        } = await fetchMessagesInBatches(
           config,
           folder.raw_path,
           deltaResult.new_uids,
         );
 
-        for (const msg of messages) {
+        for (const msg of deltaMessages) {
           const { parsed, threadable } = imapMessageToParsedMessage(
             msg,
             accountId,
@@ -1141,7 +1153,7 @@ export async function imapDeltaSync(
           account_id: accountId,
           folder_path: folder.raw_path,
           uidvalidity,
-          last_uid: Math.max(savedState.last_uid, lastUid),
+          last_uid: Math.max(savedState.last_uid, deltaLastUid),
           modseq: null,
           last_sync_at: Math.floor(Date.now() / 1000),
         });

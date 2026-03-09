@@ -1,4 +1,5 @@
 import { Calendar, Flag, Loader2, Sparkles, X } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { extractTask } from "@/services/ai/taskExtraction";
 import type { DbMessage } from "@/services/db/messages";
@@ -32,7 +33,7 @@ export function AiTaskExtractDialog({
   messages,
   onClose,
   onCreated,
-}: AiTaskExtractDialogProps) {
+}: AiTaskExtractDialogProps): React.ReactNode {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -43,7 +44,7 @@ export function AiTaskExtractDialog({
 
   useEffect(() => {
     let cancelled = false;
-    async function extract() {
+    async function extract(): Promise<void> {
       try {
         const result = await extractTask(threadId, accountId, messages);
         if (cancelled) return;
@@ -61,7 +62,7 @@ export function AiTaskExtractDialog({
         if (!cancelled) setLoading(false);
       }
     }
-    extract();
+    void extract();
     return () => {
       cancelled = true;
     };
@@ -107,6 +108,8 @@ export function AiTaskExtractDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: backdrop dismiss */}
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: backdrop dismiss */}
       <div
         className="absolute inset-0 bg-black/40 backdrop-blur-[2px]"
         onClick={onClose}
@@ -121,6 +124,7 @@ export function AiTaskExtractDialog({
             </h3>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="p-1 text-text-tertiary hover:text-text-primary"
           >
@@ -137,7 +141,7 @@ export function AiTaskExtractDialog({
                 Extracting task from email...
               </p>
             </div>
-          ) : error && !title ? (
+          ) : error != null && !title ? (
             <div className="text-center py-8">
               <p className="text-sm text-danger">{error}</p>
             </div>
@@ -145,12 +149,17 @@ export function AiTaskExtractDialog({
             <>
               {/* Title */}
               <div>
-                <label className="block text-xs font-medium text-text-secondary mb-1.5">
+                <label
+                  htmlFor="ai-task-title"
+                  className="block text-xs font-medium text-text-secondary mb-1.5"
+                >
                   Title
                 </label>
                 <input
+                  id="ai-task-title"
                   type="text"
                   value={title}
+                  // biome-ignore lint/nursery/useExplicitType: inline callback
                   onChange={(e) => setTitle(e.target.value)}
                   className="w-full px-3 py-2 bg-bg-tertiary border border-border-primary rounded-lg text-sm text-text-primary outline-none focus:border-accent"
                 />
@@ -158,11 +167,16 @@ export function AiTaskExtractDialog({
 
               {/* Description */}
               <div>
-                <label className="block text-xs font-medium text-text-secondary mb-1.5">
+                <label
+                  htmlFor="ai-task-desc"
+                  className="block text-xs font-medium text-text-secondary mb-1.5"
+                >
                   Description
                 </label>
                 <textarea
+                  id="ai-task-desc"
                   value={description}
+                  // biome-ignore lint/nursery/useExplicitType: inline callback
                   onChange={(e) => setDescription(e.target.value)}
                   rows={3}
                   className="w-full px-3 py-2 bg-bg-tertiary border border-border-primary rounded-lg text-sm text-text-primary outline-none focus:border-accent resize-none"
@@ -172,12 +186,17 @@ export function AiTaskExtractDialog({
               {/* Priority + Due Date */}
               <div className="flex gap-4">
                 <div className="flex-1">
-                  <label className="block text-xs font-medium text-text-secondary mb-1.5">
+                  <label
+                    htmlFor="ai-task-priority"
+                    className="block text-xs font-medium text-text-secondary mb-1.5"
+                  >
                     <Flag size={11} className="inline mr-1" />
                     Priority
                   </label>
                   <select
+                    id="ai-task-priority"
                     value={priority}
+                    // biome-ignore lint/nursery/useExplicitType: inline callback
                     onChange={(e) =>
                       setPriority(e.target.value as TaskPriority)
                     }
@@ -191,35 +210,42 @@ export function AiTaskExtractDialog({
                   </select>
                 </div>
                 <div className="flex-1">
-                  <label className="block text-xs font-medium text-text-secondary mb-1.5">
+                  <label
+                    htmlFor="ai-task-due"
+                    className="block text-xs font-medium text-text-secondary mb-1.5"
+                  >
                     <Calendar size={11} className="inline mr-1" />
                     Due date
                   </label>
                   <input
+                    id="ai-task-due"
                     type="date"
                     value={dueDate}
+                    // biome-ignore lint/nursery/useExplicitType: inline callback
                     onChange={(e) => setDueDate(e.target.value)}
                     className="w-full px-3 py-2 bg-bg-tertiary border border-border-primary rounded-lg text-sm text-text-primary outline-none focus:border-accent"
                   />
                 </div>
               </div>
 
-              {error && <p className="text-xs text-danger">{error}</p>}
+              {error != null && <p className="text-xs text-danger">{error}</p>}
             </>
           )}
         </div>
 
         {/* Footer */}
-        {!loading && title && (
+        {!loading && title !== "" && (
           <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border-secondary">
             <button
+              type="button"
               onClick={onClose}
               className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
             >
               Cancel
             </button>
             <button
-              onClick={handleCreate}
+              type="button"
+              onClick={() => void handleCreate()}
               disabled={!title.trim() || creating}
               className="px-4 py-2 text-sm font-medium text-white bg-accent hover:bg-accent-hover rounded-lg transition-colors disabled:opacity-50"
             >

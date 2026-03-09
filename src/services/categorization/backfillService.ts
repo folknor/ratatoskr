@@ -16,7 +16,7 @@ import { categorizeByRules } from "./ruleEngine";
  */
 export async function backfillUncategorizedThreads(
   accountId: string,
-  batchSize = 50,
+  batchSize: number = 50,
 ): Promise<number> {
   let totalCategorized = 0;
   let batch: Awaited<ReturnType<typeof getUncategorizedInboxThreadIds>>;

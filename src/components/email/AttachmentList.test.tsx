@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { vi } from "vitest";
 import type { DbAttachment } from "@/services/db/attachments";
 import { AttachmentList } from "./AttachmentList";
 

@@ -60,18 +60,18 @@ describe("messages service", () => {
       expect(mockDb.execute).toHaveBeenCalledTimes(3);
 
       // First chunk: 500 messages
-      const firstCall = mockDb.execute.mock.calls[0]!;
-      const firstPlaceholders = (firstCall[0] as string).match(/\$\d+/g)!;
+      const firstCall = mockDb.execute.mock.calls[0] ?? [];
+      const firstPlaceholders = (firstCall[0] as string).match(/\$\d+/g) ?? [];
       // $1 (threadId) + $2 (accountId) + 500 message placeholders = 502
       expect(firstPlaceholders).toHaveLength(502);
       expect(firstCall[1]).toHaveLength(502); // threadId + accountId + 500 IDs
 
       // Second chunk: 500 messages
-      const secondCall = mockDb.execute.mock.calls[1]!;
+      const secondCall = mockDb.execute.mock.calls[1] ?? [];
       expect(secondCall[1]).toHaveLength(502);
 
       // Third chunk: 200 messages
-      const thirdCall = mockDb.execute.mock.calls[2]!;
+      const thirdCall = mockDb.execute.mock.calls[2] ?? [];
       expect(thirdCall[1]).toHaveLength(202); // threadId + accountId + 200 IDs
     });
 
@@ -95,7 +95,7 @@ describe("messages service", () => {
       expect(mockDb.execute).toHaveBeenCalledTimes(2);
 
       // Second chunk should have just 1 message
-      const secondCall = mockDb.execute.mock.calls[1]!;
+      const secondCall = mockDb.execute.mock.calls[1] ?? [];
       expect(secondCall[1]).toHaveLength(3); // threadId + accountId + 1 ID
     });
   });

@@ -3,6 +3,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { ChevronDown, Pencil, Trash2 } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { EditorToolbar } from "@/components/composer/EditorToolbar";
@@ -16,7 +17,7 @@ import {
 import { useAccountStore } from "@/stores/accountStore";
 import { TEMPLATE_VARIABLES } from "@/utils/templateVariables";
 
-export function TemplateEditor() {
+export function TemplateEditor(): React.ReactNode {
   const { t } = useTranslation("settings");
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
   const [templates, setTemplates] = useState<DbTemplate[]>([]);
@@ -44,18 +45,18 @@ export function TemplateEditor() {
     },
   });
 
-  const loadTemplates = useCallback(async () => {
+  const loadTemplates = useCallback(async (): Promise<void> => {
     if (!activeAccountId) return;
     const tmpls = await getTemplatesForAccount(activeAccountId);
     setTemplates(tmpls);
   }, [activeAccountId]);
 
   useEffect(() => {
-    loadTemplates();
+    void loadTemplates();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadTemplates is stable, only re-run on activeAccountId change
   }, [loadTemplates]);
 
-  const resetForm = useCallback(() => {
+  const resetForm = useCallback((): void => {
     setName("");
     setSubject("");
     setShortcut("");
@@ -64,7 +65,7 @@ export function TemplateEditor() {
     editor?.commands.setContent("");
   }, [editor]);
 
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(async (): Promise<void> => {
     if (!(activeAccountId && editor && name.trim())) return;
 
     const bodyHtml = editor.getHTML();
@@ -100,7 +101,7 @@ export function TemplateEditor() {
   ]);
 
   const handleEdit = useCallback(
-    (tmpl: DbTemplate) => {
+    (tmpl: DbTemplate): void => {
       setEditingId(tmpl.id);
       setName(tmpl.name);
       setSubject(tmpl.subject ?? "");
@@ -112,7 +113,7 @@ export function TemplateEditor() {
   );
 
   const handleDelete = useCallback(
-    async (id: string) => {
+    async (id: string): Promise<void> => {
       await deleteTemplate(id);
       if (editingId === id) resetForm();
       await loadTemplates();
@@ -130,13 +131,13 @@ export function TemplateEditor() {
           <div className="flex-1 min-w-0">
             <div className="text-sm font-medium text-text-primary flex items-center gap-2">
               {tmpl.name}
-              {tmpl.shortcut && (
+              {tmpl.shortcut != null && (
                 <kbd className="text-[0.625rem] bg-bg-tertiary text-text-tertiary px-1.5 py-0.5 rounded">
                   {tmpl.shortcut}
                 </kbd>
               )}
             </div>
-            {tmpl.subject && (
+            {tmpl.subject != null && (
               <div className="text-xs text-text-tertiary truncate">
                 {tmpl.subject}
               </div>
@@ -144,13 +145,15 @@ export function TemplateEditor() {
           </div>
           <div className="flex items-center gap-1">
             <button
-              onClick={() => handleEdit(tmpl)}
+              type="button"
+              onClick={(): void => handleEdit(tmpl)}
               className="p-1 text-text-tertiary hover:text-text-primary"
             >
               <Pencil size={13} />
             </button>
             <button
-              onClick={() => handleDelete(tmpl.id)}
+              type="button"
+              onClick={(): void => void handleDelete(tmpl.id)}
               className="p-1 text-text-tertiary hover:text-danger"
             >
               <Trash2 size={13} />
@@ -164,14 +167,18 @@ export function TemplateEditor() {
           <input
             type="text"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+              setName(e.target.value)
+            }
             placeholder={t("templateEditor.templateName")}
             className="w-full px-3 py-1.5 bg-bg-tertiary border border-border-primary rounded text-sm text-text-primary outline-none focus:border-accent"
           />
           <input
             type="text"
             value={subject}
-            onChange={(e) => setSubject(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+              setSubject(e.target.value)
+            }
             placeholder={t("templateEditor.subjectOptional")}
             className="w-full px-3 py-1.5 bg-bg-tertiary border border-border-primary rounded text-sm text-text-primary outline-none focus:border-accent"
           />
@@ -180,20 +187,23 @@ export function TemplateEditor() {
             <EditorContent editor={editor} />
           </div>
           <InsertVariableDropdown
-            onInsert={(variable) => {
+            onInsert={(variable: string): void => {
               editor?.chain().focus().insertContent(variable).run();
             }}
           />
           <input
             type="text"
             value={shortcut}
-            onChange={(e) => setShortcut(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+              setShortcut(e.target.value)
+            }
             placeholder={t("templateEditor.shortcutOptional")}
             className="w-full px-3 py-1.5 bg-bg-tertiary border border-border-primary rounded text-sm text-text-primary outline-none focus:border-accent"
           />
           <div className="flex items-center gap-2">
             <button
-              onClick={handleSave}
+              type="button"
+              onClick={(): void => void handleSave()}
               disabled={!name.trim()}
               className="px-3 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-50"
             >
@@ -202,6 +212,7 @@ export function TemplateEditor() {
                 : t("templateEditor.save")}
             </button>
             <button
+              type="button"
               onClick={resetForm}
               className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary rounded-md transition-colors"
             >
@@ -211,7 +222,8 @@ export function TemplateEditor() {
         </div>
       ) : (
         <button
-          onClick={() => setShowForm(true)}
+          type="button"
+          onClick={(): void => setShowForm(true)}
           className="text-xs text-accent hover:text-accent-hover"
         >
           {t("templateEditor.addTemplate")}
@@ -225,7 +237,7 @@ function InsertVariableDropdown({
   onInsert,
 }: {
   onInsert: (variable: string) => void;
-}) {
+}): React.ReactNode {
   const { t } = useTranslation("settings");
   const [open, setOpen] = useState(false);
 
@@ -233,7 +245,7 @@ function InsertVariableDropdown({
     <div className="relative">
       <button
         type="button"
-        onClick={() => setOpen(!open)}
+        onClick={(): void => setOpen(!open)}
         className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover transition-colors"
       >
         {t("templateEditor.insertVariable")}
@@ -244,13 +256,13 @@ function InsertVariableDropdown({
           }
         />
       </button>
-      {open && (
+      {open === true && (
         <div className="absolute left-0 top-full mt-1 z-10 bg-bg-primary border border-border-primary rounded-md shadow-lg py-1 min-w-[220px]">
           {TEMPLATE_VARIABLES.map((v) => (
             <button
               key={v.key}
               type="button"
-              onClick={() => {
+              onClick={(): void => {
                 onInsert(v.key);
                 setOpen(false);
               }}

@@ -1,4 +1,5 @@
 import { FileText } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DbAttachment } from "@/services/db/attachments";
@@ -30,7 +31,7 @@ export function InlineAttachmentPreview({
   attachments,
   referencedCids,
   onAttachmentClick,
-}: InlineAttachmentPreviewProps) {
+}: InlineAttachmentPreviewProps): React.ReactNode {
   // Filter to previewable non-inline attachments, dedup, exclude CID-referenced
   const previewableAttachments = dedup(
     attachments.filter((a) => {
@@ -70,6 +71,7 @@ export function InlineAttachmentPreview({
         <div className="space-y-1">
           {pdfs.map((att) => (
             <button
+              type="button"
               key={att.id}
               onClick={() => onAttachmentClick(att)}
               className="flex items-center gap-2 px-3 py-2 rounded-md bg-bg-tertiary/50 hover:bg-bg-hover transition-colors w-full text-left"
@@ -103,7 +105,7 @@ function ImageThumbnail({
   accountId: string;
   messageId: string;
   onClick: () => void;
-}) {
+}): React.ReactNode {
   const { t } = useTranslation("email");
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -149,7 +151,7 @@ function ImageThumbnail({
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting) {
-          loadThumbnail();
+          void loadThumbnail();
           observer.disconnect();
         }
       },
@@ -162,7 +164,7 @@ function ImageThumbnail({
 
   // Cleanup blob URL
   useEffect(
-    () => () => {
+    (): (() => void) => (): void => {
       if (thumbnailUrl) URL.revokeObjectURL(thumbnailUrl);
     },
     [thumbnailUrl],
@@ -171,18 +173,19 @@ function ImageThumbnail({
   return (
     <div ref={observerRef}>
       <button
+        type="button"
         onClick={onClick}
         className="block rounded-md overflow-hidden border border-border-secondary hover:border-accent transition-colors"
         title={attachment.filename ?? t("inlineAttachment.image")}
       >
-        {loading && (
+        {loading === true && (
           <div className="w-[200px] h-[120px] bg-bg-tertiary animate-pulse flex items-center justify-center">
             <span className="text-xs text-text-tertiary">
               {t("inlineAttachment.loading")}
             </span>
           </div>
         )}
-        {thumbnailUrl && (
+        {thumbnailUrl != null && (
           <img
             src={thumbnailUrl}
             alt={attachment.filename ?? t("inlineAttachment.image")}

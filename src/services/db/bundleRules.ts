@@ -45,6 +45,7 @@ export async function getBundleRule(
   );
 }
 
+// biome-ignore lint/complexity/useMaxParams: DB operation requires all fields as separate params
 export async function setBundleRule(
   accountId: string,
   category: string,

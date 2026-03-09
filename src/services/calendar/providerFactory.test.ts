@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import type { DbAccount } from "@/services/db/accounts";
 import {
   createMockGmailAccount,

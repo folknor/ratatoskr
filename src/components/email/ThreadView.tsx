@@ -1,4 +1,5 @@
 import { VolumeX } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AiTaskExtractDialog } from "@/components/tasks/AiTaskExtractDialog";
@@ -28,7 +29,7 @@ interface ThreadViewProps {
   thread: Thread;
 }
 
-async function handlePopOut(thread: Thread) {
+async function handlePopOut(thread: Thread): Promise<void> {
   try {
     const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
     const windowLabel = `thread-${thread.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
@@ -58,7 +59,7 @@ async function handlePopOut(thread: Thread) {
   }
 }
 
-export function ThreadView({ thread }: ThreadViewProps) {
+export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
   const { t } = useTranslation("email");
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
   const contactSidebarVisible = useUIStore((s) => s.contactSidebarVisible);
@@ -107,7 +108,7 @@ export function ThreadView({ thread }: ThreadViewProps) {
       if (!cancelled) setAllowlistedSenders(allowed);
     });
 
-    return () => {
+    return (): void => {
       cancelled = true;
     };
   }, [activeAccountId, messages]);
@@ -123,16 +124,18 @@ export function ThreadView({ thread }: ThreadViewProps) {
       return;
     if (markAsReadBehavior === "manual") return;
 
-    const markRead = () => {
+    const markRead = (): void => {
       markedReadRef.current = thread.id;
-      markThreadRead(activeAccountId, thread.id, [], true).catch((err) => {
-        console.error("Failed to mark thread as read:", err);
-      });
+      markThreadRead(activeAccountId, thread.id, [], true).catch(
+        (err: unknown) => {
+          console.error("Failed to mark thread as read:", err);
+        },
+      );
     };
 
     if (markAsReadBehavior === "2s") {
       const timer = setTimeout(markRead, 2000);
-      return () => clearTimeout(timer);
+      return (): void => clearTimeout(timer);
     }
 
     // instant
@@ -180,13 +183,15 @@ export function ThreadView({ thread }: ThreadViewProps) {
     const allRecipients = new Set<string>();
     if (replyTo) allRecipients.add(replyTo);
     if (lastMessage.to_addresses) {
-      lastMessage.to_addresses
-        .split(",")
-        .forEach((a) => allRecipients.add(a.trim()));
+      for (const a of lastMessage.to_addresses.split(",")) {
+        allRecipients.add(a.trim());
+      }
     }
     const ccList: string[] = [];
     if (lastMessage.cc_addresses) {
-      lastMessage.cc_addresses.split(",").forEach((a) => ccList.push(a.trim()));
+      for (const a of lastMessage.cc_addresses.split(",")) {
+        ccList.push(a.trim());
+      }
     }
     openComposer({
       mode: "replyAll",
@@ -296,7 +301,7 @@ export function ThreadView({ thread }: ThreadViewProps) {
   useEffect(() => {
     if (readingPanePosition !== "hidden") return;
 
-    const handler = (e: KeyboardEvent) => {
+    const handler = (e: KeyboardEvent): void => {
       const target = e.target as HTMLElement;
       const isInputFocused =
         target.tagName === "INPUT" ||
@@ -306,20 +311,20 @@ export function ThreadView({ thread }: ThreadViewProps) {
 
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setFocusedMsgIdx((prev) => {
+        setFocusedMsgIdx((prev: number): number => {
           const next = prev + 1;
           return next < messages.length ? next : prev;
         });
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        setFocusedMsgIdx((prev) => {
+        setFocusedMsgIdx((prev: number): number => {
           const next = prev - 1;
           return next >= 0 ? next : prev;
         });
       }
     };
     window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    return (): void => window.removeEventListener("keydown", handler);
   }, [messages.length, readingPanePosition]);
 
   const [rawMessageTarget, setRawMessageTarget] = useState<{
@@ -329,7 +334,7 @@ export function ThreadView({ thread }: ThreadViewProps) {
 
   // Listen for "View Source" event from context menu
   useEffect(() => {
-    const handler = (e: Event) => {
+    const handler = (e: Event): void => {
       const detail = (e as CustomEvent).detail as {
         messageId: string;
         accountId: string;
@@ -337,12 +342,13 @@ export function ThreadView({ thread }: ThreadViewProps) {
       setRawMessageTarget(detail);
     };
     window.addEventListener("velo-view-raw-message", handler);
-    return () => window.removeEventListener("velo-view-raw-message", handler);
+    return (): void =>
+      window.removeEventListener("velo-view-raw-message", handler);
   }, []);
 
   // Listen for extract-task event from keyboard shortcut
   useEffect(() => {
-    const handler = (e: Event) => {
+    const handler = (e: Event): void => {
       const detail = (e as CustomEvent).detail as
         | { threadId: string }
         | undefined;
@@ -351,7 +357,7 @@ export function ThreadView({ thread }: ThreadViewProps) {
       }
     };
     window.addEventListener("velo-extract-task", handler);
-    return () => window.removeEventListener("velo-extract-task", handler);
+    return (): void => window.removeEventListener("velo-extract-task", handler);
   }, [thread.id]);
 
   const handleMessageContextMenu = useCallback(
@@ -464,7 +470,7 @@ export function ThreadView({ thread }: ThreadViewProps) {
         <div className="px-6 py-3 border-b border-border-primary">
           <h1 className="text-lg font-semibold text-text-primary flex items-center gap-2">
             {thread.subject ?? t("common:noSubject")}
-            {thread.isMuted && (
+            {thread.isMuted === true && (
               <span className="text-warning shrink-0" title={t("muted")}>
                 <VolumeX size={16} />
               </span>
@@ -490,7 +496,7 @@ export function ThreadView({ thread }: ThreadViewProps) {
             {messages.map((msg, i) => (
               <MessageItem
                 key={msg.id}
-                ref={(el) => {
+                ref={(el: HTMLDivElement | null) => {
                   messageRefs.current[i] = el;
                 }}
                 message={msg}
@@ -503,7 +509,9 @@ export function ThreadView({ thread }: ThreadViewProps) {
                     : false
                 }
                 isSpam={thread.labelIds.includes("SPAM")}
-                onContextMenu={(e) => handleMessageContextMenu(e, msg)}
+                onContextMenu={(e: React.MouseEvent) =>
+                  handleMessageContextMenu(e, msg)
+                }
               />
             ))}
           </ErrorBoundary>
@@ -537,31 +545,35 @@ export function ThreadView({ thread }: ThreadViewProps) {
       </div>
 
       {/* Contact sidebar — overlay at narrow widths, inline at wide */}
-      {contactSidebarVisible && primarySender && activeAccountId && (
-        <>
-          {/* Backdrop for overlay mode (narrow widths) */}
-          <div
-            className="absolute inset-0 z-10 bg-black/20 @[640px]:hidden"
-            onClick={toggleContactSidebar}
-          />
-          <div className="absolute right-0 top-0 bottom-0 z-20 shadow-xl @[640px]:relative @[640px]:z-auto @[640px]:shadow-none">
-            <ContactSidebar
-              email={primarySender}
-              name={primarySenderName}
-              accountId={activeAccountId}
-              onClose={toggleContactSidebar}
+      {contactSidebarVisible === true &&
+        primarySender != null &&
+        activeAccountId != null && (
+          <>
+            {/* Backdrop for overlay mode (narrow widths) */}
+            {/* biome-ignore lint/a11y/useKeyWithClickEvents: backdrop dismiss, keyboard handled elsewhere */}
+            {/* biome-ignore lint/a11y/noStaticElementInteractions: backdrop overlay for dismiss */}
+            <div
+              className="absolute inset-0 z-10 bg-black/20 @[640px]:hidden"
+              onClick={toggleContactSidebar}
             />
-          </div>
-        </>
-      )}
+            <div className="absolute right-0 top-0 bottom-0 z-20 shadow-xl @[640px]:relative @[640px]:z-auto @[640px]:shadow-none">
+              <ContactSidebar
+                email={primarySender}
+                name={primarySenderName}
+                accountId={activeAccountId}
+                onClose={toggleContactSidebar}
+              />
+            </div>
+          </>
+        )}
 
       {/* Task sidebar */}
-      {taskSidebarVisible && activeAccountId && (
+      {taskSidebarVisible === true && activeAccountId != null && (
         <TaskSidebar accountId={activeAccountId} threadId={thread.id} />
       )}
 
       {/* Raw message source modal */}
-      {rawMessageTarget && (
+      {rawMessageTarget != null && (
         <RawMessageModal
           isOpen={true}
           onClose={() => setRawMessageTarget(null)}
@@ -571,7 +583,7 @@ export function ThreadView({ thread }: ThreadViewProps) {
       )}
 
       {/* AI Task Extraction Dialog */}
-      {showTaskExtract && activeAccountId && (
+      {showTaskExtract === true && activeAccountId != null && (
         <AiTaskExtractDialog
           threadId={thread.id}
           accountId={activeAccountId}

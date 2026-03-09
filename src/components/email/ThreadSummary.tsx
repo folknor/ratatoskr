@@ -1,4 +1,5 @@
 import { ChevronDown, ChevronUp, RefreshCw, Sparkles } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { summarizeThread } from "@/services/ai/aiService";
@@ -16,7 +17,7 @@ export function ThreadSummary({
   threadId,
   accountId,
   messages,
-}: ThreadSummaryProps) {
+}: ThreadSummaryProps): React.ReactNode {
   const { t } = useTranslation("email");
   const [summary, setSummary] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -57,7 +58,7 @@ export function ThreadSummary({
       loadingRef.current
     )
       return;
-    loadSummary();
+    void loadSummary();
   }, [available, messages.length, summary, loadSummary]);
 
   const handleRefresh = useCallback(async () => {
@@ -79,6 +80,7 @@ export function ThreadSummary({
   return (
     <div className="mx-4 my-2 p-3 rounded-lg bg-accent/5 border border-accent/20">
       <button
+        type="button"
         onClick={() => setCollapsed(!collapsed)}
         className="flex items-center gap-2 w-full text-left"
       >
@@ -86,26 +88,26 @@ export function ThreadSummary({
         <span className="text-xs font-medium text-accent flex-1">
           {t("threadSummary.title")}
         </span>
-        {summary && (
-          <span
-            role="button"
+        {summary != null && (
+          <button
+            type="button"
             tabIndex={0}
-            onClick={(e) => {
+            onClick={(e: React.MouseEvent) => {
               e.stopPropagation();
-              handleRefresh();
+              void handleRefresh();
             }}
-            onKeyDown={(e) => {
+            onKeyDown={(e: React.KeyboardEvent) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.stopPropagation();
                 e.preventDefault();
-                handleRefresh();
+                void handleRefresh();
               }
             }}
             className="p-0.5 text-text-tertiary hover:text-accent transition-colors cursor-pointer"
             title={t("threadSummary.refresh")}
           >
             <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
-          </span>
+          </button>
         )}
         {collapsed ? (
           <ChevronDown size={14} className="text-text-tertiary" />
@@ -121,7 +123,9 @@ export function ThreadSummary({
               <span className="text-xs">{t("threadSummary.generating")}</span>
             </div>
           )}
-          {summary && <p className="text-xs leading-relaxed">{summary}</p>}
+          {summary != null && (
+            <p className="text-xs leading-relaxed">{summary}</p>
+          )}
         </div>
       )}
     </div>

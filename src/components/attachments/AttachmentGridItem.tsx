@@ -1,4 +1,5 @@
 import { Download, ExternalLink, Eye } from "lucide-react";
+import type React from "react";
 import { useTranslation } from "react-i18next";
 import type { AttachmentWithContext } from "@/services/db/attachments";
 import {
@@ -33,7 +34,7 @@ export function AttachmentGridItem({
   onPreview,
   onDownload,
   onJumpToEmail,
-}: AttachmentGridItemProps) {
+}: AttachmentGridItemProps): React.ReactNode {
   const { t } = useTranslation("attachments");
   const previewable = canPreview(attachment.mime_type, attachment.filename);
   const senderName =
@@ -43,6 +44,7 @@ export function AttachmentGridItem({
     <div className="group relative flex flex-col border border-border-primary rounded-lg hover:border-border-secondary hover:bg-bg-hover transition-colors overflow-hidden">
       {/* Icon area */}
       <button
+        type="button"
         onClick={previewable ? onPreview : onDownload}
         className="flex items-center justify-center h-24 bg-bg-secondary text-3xl"
       >
@@ -67,7 +69,7 @@ export function AttachmentGridItem({
           {attachment.size != null && (
             <span>{formatFileSize(attachment.size)}</span>
           )}
-          {attachment.date && (
+          {attachment.date != null && (
             <span>{formatRelativeDate(attachment.date)}</span>
           )}
         </div>
@@ -77,6 +79,7 @@ export function AttachmentGridItem({
       <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         {previewable && (
           <button
+            type="button"
             onClick={onPreview}
             className="p-1.5 rounded-md bg-bg-primary/90 border border-border-primary text-text-secondary hover:text-text-primary transition-colors"
             title={t("preview")}
@@ -85,6 +88,7 @@ export function AttachmentGridItem({
           </button>
         )}
         <button
+          type="button"
           onClick={onDownload}
           className="p-1.5 rounded-md bg-bg-primary/90 border border-border-primary text-text-secondary hover:text-text-primary transition-colors"
           title={t("download")}
@@ -92,6 +96,7 @@ export function AttachmentGridItem({
           <Download size={13} />
         </button>
         <button
+          type="button"
           onClick={onJumpToEmail}
           className="p-1.5 rounded-md bg-bg-primary/90 border border-border-primary text-text-secondary hover:text-text-primary transition-colors"
           title={t("jumpToEmail")}

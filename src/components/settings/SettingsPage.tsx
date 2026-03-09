@@ -23,6 +23,7 @@ import {
   UserCircle,
   Users,
 } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import appIcon from "@/assets/icon.png";
@@ -128,7 +129,7 @@ const TAB_LABEL_KEYS = {
   about: "tabAbout",
 } as const;
 
-export function SettingsPage() {
+export function SettingsPage(): React.ReactNode {
   const { t } = useTranslation("settings");
   const theme = useUIStore((s) => s.theme);
   const setTheme = useUIStore((s) => s.setTheme);
@@ -158,7 +159,7 @@ export function SettingsPage() {
   const activeTab = (
     tab && TAB_IDS.includes(tab as SettingsTab) ? tab : "general"
   ) as SettingsTab;
-  const setActiveTab = (tabId: SettingsTab) => navigateToSettings(tabId);
+  const setActiveTab = (tabId: SettingsTab): void => navigateToSettings(tabId);
   const [languageOverride, setLanguageOverride] = useState<string | null>(null);
   const [languageLoaded, setLanguageLoaded] = useState(false);
   const [systemLanguageName, setSystemLanguageName] = useState("English");
@@ -228,7 +229,7 @@ export function SettingsPage() {
 
   // Load settings from DB
   useEffect(() => {
-    async function load() {
+    async function load(): Promise<void> {
       const notif = await getSetting("notifications_enabled");
       setNotificationsEnabled(notif !== "false");
       const delay = await getSetting("undo_send_delay_seconds");
@@ -360,21 +361,24 @@ export function SettingsPage() {
       setSystemLanguageName(sysLang);
       setLanguageLoaded(true);
     }
-    load();
+    void load();
   }, [accounts.find]);
 
-  const handleNotificationsToggle = useCallback(async () => {
+  const handleNotificationsToggle = useCallback(async (): Promise<void> => {
     const newVal = !notificationsEnabled;
     setNotificationsEnabled(newVal);
     await setSetting("notifications_enabled", newVal ? "true" : "false");
   }, [notificationsEnabled]);
 
-  const handleUndoDelayChange = useCallback(async (value: string) => {
-    setUndoSendDelay(value);
-    await setSetting("undo_send_delay_seconds", value);
-  }, []);
+  const handleUndoDelayChange = useCallback(
+    async (value: string): Promise<void> => {
+      setUndoSendDelay(value);
+      await setSetting("undo_send_delay_seconds", value);
+    },
+    [],
+  );
 
-  const handleSaveApiSettings = useCallback(async () => {
+  const handleSaveApiSettings = useCallback(async (): Promise<void> => {
     const trimmedId = clientId.trim();
     if (trimmedId) {
       await setSetting("google_client_id", trimmedId);
@@ -387,7 +391,7 @@ export function SettingsPage() {
     setTimeout(() => setApiSettingsSaved(false), 2000);
   }, [clientId, clientSecret]);
 
-  const handleManualSync = useCallback(async () => {
+  const handleManualSync = useCallback(async (): Promise<void> => {
     const activeIds = accounts.filter((a) => a.isActive).map((a) => a.id);
     if (activeIds.length === 0) return;
     setIsSyncing(true);
@@ -398,7 +402,7 @@ export function SettingsPage() {
     }
   }, [accounts]);
 
-  const handleForceFullSync = useCallback(async () => {
+  const handleForceFullSync = useCallback(async (): Promise<void> => {
     const activeIds = accounts.filter((a) => a.isActive).map((a) => a.id);
     if (activeIds.length === 0) return;
     setIsSyncing(true);
@@ -409,7 +413,7 @@ export function SettingsPage() {
     }
   }, [accounts]);
 
-  const handleAutostartToggle = useCallback(async () => {
+  const handleAutostartToggle = useCallback(async (): Promise<void> => {
     try {
       const { enable, disable } = await import("@tauri-apps/plugin-autostart");
       if (autostartEnabled) {
@@ -424,7 +428,7 @@ export function SettingsPage() {
   }, [autostartEnabled]);
 
   const handleRemoveAccount = useCallback(
-    async (accountId: string) => {
+    async (accountId: string): Promise<void> => {
       removeClient(accountId);
       await deleteAccount(accountId);
       removeAccountFromStore(accountId);
@@ -433,7 +437,7 @@ export function SettingsPage() {
   );
 
   const handleReauthorizeAccount = useCallback(
-    async (accountId: string, email: string) => {
+    async (accountId: string, email: string): Promise<void> => {
       setReauthStatus((prev) => ({ ...prev, [accountId]: "authorizing" }));
       try {
         await reauthorizeAccount(accountId, email);
@@ -452,29 +456,33 @@ export function SettingsPage() {
     [],
   );
 
-  const handleResyncAccount = useCallback(async (accountId: string) => {
-    setResyncStatus((prev) => ({ ...prev, [accountId]: "syncing" }));
-    try {
-      await resyncAccount(accountId);
-      setResyncStatus((prev) => ({ ...prev, [accountId]: "done" }));
-      setTimeout(() => {
-        setResyncStatus((prev) => ({ ...prev, [accountId]: "idle" }));
-      }, 3000);
-    } catch (err) {
-      console.error("Resync failed:", err);
-      setResyncStatus((prev) => ({ ...prev, [accountId]: "error" }));
-      setTimeout(() => {
-        setResyncStatus((prev) => ({ ...prev, [accountId]: "idle" }));
-      }, 3000);
-    }
-  }, []);
+  const handleResyncAccount = useCallback(
+    async (accountId: string): Promise<void> => {
+      setResyncStatus((prev) => ({ ...prev, [accountId]: "syncing" }));
+      try {
+        await resyncAccount(accountId);
+        setResyncStatus((prev) => ({ ...prev, [accountId]: "done" }));
+        setTimeout(() => {
+          setResyncStatus((prev) => ({ ...prev, [accountId]: "idle" }));
+        }, 3000);
+      } catch (err) {
+        console.error("Resync failed:", err);
+        setResyncStatus((prev) => ({ ...prev, [accountId]: "error" }));
+        setTimeout(() => {
+          setResyncStatus((prev) => ({ ...prev, [accountId]: "idle" }));
+        }, 3000);
+      }
+    },
+    [],
+  );
 
   return (
     <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-bg-primary/50">
       {/* Header */}
       <div className="flex items-center gap-3 px-5 py-3 border-b border-border-primary shrink-0 bg-bg-primary/60 backdrop-blur-sm">
         <button
-          onClick={() => navigateToLabel("inbox")}
+          type="button"
+          onClick={(): void => navigateToLabel("inbox")}
           className="p-1.5 -ml-1 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
           title={t("backToInbox")}
         >
@@ -494,8 +502,9 @@ export function SettingsPage() {
             const isActive = activeTab === tabId;
             return (
               <button
+                type="button"
                 key={tabId}
-                onClick={() => setActiveTab(tabId)}
+                onClick={(): void => setActiveTab(tabId)}
                 className={`flex items-center gap-2.5 w-full px-4 py-2 text-[0.8125rem] transition-colors ${
                   isActive
                     ? "bg-bg-selected text-accent font-medium"
@@ -530,7 +539,9 @@ export function SettingsPage() {
                             ? (languageOverride ?? "system")
                             : "system"
                         }
-                        onChange={async (e) => {
+                        onChange={async (
+                          e: React.ChangeEvent<HTMLSelectElement>,
+                        ): Promise<void> => {
                           const val = e.target.value;
                           if (val === "system") {
                             setLanguageOverride(null);
@@ -560,7 +571,9 @@ export function SettingsPage() {
                     <SettingRow label={t("theme")}>
                       <select
                         value={theme}
-                        onChange={(e) => {
+                        onChange={(
+                          e: React.ChangeEvent<HTMLSelectElement>,
+                        ): void => {
                           const val = e.target.value as
                             | "light"
                             | "dark"
@@ -578,7 +591,9 @@ export function SettingsPage() {
                     <SettingRow label={t("readingPane")}>
                       <select
                         value={readingPanePosition}
-                        onChange={(e) => {
+                        onChange={(
+                          e: React.ChangeEvent<HTMLSelectElement>,
+                        ): void => {
                           setReadingPanePosition(
                             e.target.value as "right" | "bottom" | "hidden",
                           );
@@ -593,7 +608,9 @@ export function SettingsPage() {
                     <SettingRow label={t("emailDensity")}>
                       <select
                         value={emailDensity}
-                        onChange={(e) => {
+                        onChange={(
+                          e: React.ChangeEvent<HTMLSelectElement>,
+                        ): void => {
                           setEmailDensity(
                             e.target.value as
                               | "compact"
@@ -611,7 +628,9 @@ export function SettingsPage() {
                     <SettingRow label={t("fontSize")}>
                       <select
                         value={fontScale}
-                        onChange={(e) => {
+                        onChange={(
+                          e: React.ChangeEvent<HTMLSelectElement>,
+                        ): void => {
                           setFontScale(
                             e.target.value as
                               | "small"
@@ -634,8 +653,9 @@ export function SettingsPage() {
                           const isSelected = colorTheme === ct.id;
                           return (
                             <button
+                              type="button"
                               key={ct.id}
-                              onClick={() => setColorTheme(ct.id)}
+                              onClick={(): void => setColorTheme(ct.id)}
                               title={ct.name}
                               className={`relative w-7 h-7 rounded-full transition-all ${
                                 isSelected
@@ -663,7 +683,9 @@ export function SettingsPage() {
                     <SettingRow label={t("inboxViewMode")}>
                       <select
                         value={inboxViewMode}
-                        onChange={(e) => {
+                        onChange={(
+                          e: React.ChangeEvent<HTMLSelectElement>,
+                        ): void => {
                           setInboxViewMode(
                             e.target.value as "unified" | "split",
                           );
@@ -726,11 +748,13 @@ export function SettingsPage() {
                         );
                       }}
                     />
-                    {phishingDetectionEnabled && (
+                    {phishingDetectionEnabled === true && (
                       <SettingRow label={t("detectionSensitivity")}>
                         <select
                           value={phishingSensitivity}
-                          onChange={async (e) => {
+                          onChange={async (
+                            e: React.ChangeEvent<HTMLSelectElement>,
+                          ): Promise<void> => {
                             const val = e.target.value as
                               | "low"
                               | "default"
@@ -787,7 +811,9 @@ export function SettingsPage() {
                     <SettingRow label={t("maxCacheSize")}>
                       <select
                         value={cacheMaxMb}
-                        onChange={async (e) => {
+                        onChange={async (
+                          e: React.ChangeEvent<HTMLSelectElement>,
+                        ): Promise<void> => {
                           const val = e.target.value;
                           setCacheMaxMb(val);
                           await setSetting("attachment_cache_max_mb", val);
@@ -828,7 +854,7 @@ export function SettingsPage() {
                     />
                   </Section>
 
-                  {smartNotifications && (
+                  {smartNotifications === true && (
                     <>
                       <Section title={t("notifyForCategories")}>
                         <div>
@@ -846,8 +872,9 @@ export function SettingsPage() {
                               ] as const
                             ).map((cat) => (
                               <button
+                                type="button"
                                 key={cat}
-                                onClick={async () => {
+                                onClick={async (): Promise<void> => {
                                   const next = new Set(notifyCategories);
                                   if (next.has(cat)) next.delete(cat);
                                   else next.add(cat);
@@ -886,7 +913,8 @@ export function SettingsPage() {
                                   : vip.email_address}
                               </span>
                               <button
-                                onClick={async () => {
+                                type="button"
+                                onClick={async (): Promise<void> => {
                                   const activeId = accounts.find(
                                     (a) => a.isActive,
                                   )?.id;
@@ -916,10 +944,14 @@ export function SettingsPage() {
                           <input
                             type="email"
                             value={newVipEmail}
-                            onChange={(e) => setNewVipEmail(e.target.value)}
+                            onChange={(
+                              e: React.ChangeEvent<HTMLInputElement>,
+                            ): void => setNewVipEmail(e.target.value)}
                             placeholder={t("vipPlaceholder")}
                             className="flex-1 px-3 py-1.5 bg-bg-tertiary border border-border-primary rounded-md text-xs text-text-primary outline-none focus:border-accent"
-                            onKeyDown={async (e) => {
+                            onKeyDown={async (
+                              e: React.KeyboardEvent<HTMLInputElement>,
+                            ): Promise<void> => {
                               if (e.key !== "Enter" || !newVipEmail.trim())
                                 return;
                               const activeId = accounts.find(
@@ -982,7 +1014,9 @@ export function SettingsPage() {
                     <SettingRow label={t("undoSendDelay")}>
                       <select
                         value={undoSendDelay}
-                        onChange={(e) => handleUndoDelayChange(e.target.value)}
+                        onChange={(
+                          e: React.ChangeEvent<HTMLSelectElement>,
+                        ): void => handleUndoDelayChange(e.target.value)}
                         className="w-48 bg-bg-tertiary text-text-primary text-sm px-3 py-1.5 rounded-md border border-border-primary focus:border-accent outline-none"
                       >
                         <option value="5">{t("delay5s")}</option>
@@ -1002,7 +1036,9 @@ export function SettingsPage() {
                     <SettingRow label={t("defaultReplyAction")}>
                       <select
                         value={defaultReplyMode}
-                        onChange={(e) => {
+                        onChange={(
+                          e: React.ChangeEvent<HTMLSelectElement>,
+                        ): void => {
                           setDefaultReplyMode(
                             e.target.value as "reply" | "replyAll",
                           );
@@ -1016,7 +1052,9 @@ export function SettingsPage() {
                     <SettingRow label={t("markAsRead")}>
                       <select
                         value={markAsReadBehavior}
-                        onChange={(e) => {
+                        onChange={(
+                          e: React.ChangeEvent<HTMLSelectElement>,
+                        ): void => {
                           setMarkAsReadBehavior(
                             e.target.value as "instant" | "2s" | "manual",
                           );
@@ -1148,8 +1186,9 @@ export function SettingsPage() {
                                 </div>
                                 <div className="flex items-center gap-3">
                                   <button
-                                    onClick={() =>
-                                      handleReauthorizeAccount(
+                                    type="button"
+                                    onClick={(): void =>
+                                      void handleReauthorizeAccount(
                                         account.id,
                                         account.email,
                                       )
@@ -1170,8 +1209,9 @@ export function SettingsPage() {
                                       t("reauthorize")}
                                   </button>
                                   <button
-                                    onClick={() =>
-                                      handleResyncAccount(account.id)
+                                    type="button"
+                                    onClick={(): void =>
+                                      void handleResyncAccount(account.id)
                                     }
                                     disabled={
                                       resyncStatus[account.id] === "syncing"
@@ -1189,8 +1229,9 @@ export function SettingsPage() {
                                       t("resync")}
                                   </button>
                                   <button
-                                    onClick={() =>
-                                      handleRemoveAccount(account.id)
+                                    type="button"
+                                    onClick={(): void =>
+                                      void handleRemoveAccount(account.id)
                                     }
                                     className="text-xs text-danger hover:text-danger/80 transition-colors"
                                   >
@@ -1226,7 +1267,10 @@ export function SettingsPage() {
                                 </div>
                               </div>
                               <button
-                                onClick={() => handleRemoveAccount(account.id)}
+                                type="button"
+                                onClick={(): void =>
+                                  void handleRemoveAccount(account.id)
+                                }
                                 className="text-xs text-danger hover:text-danger/80 transition-colors"
                               >
                                 {t("remove")}
@@ -1248,7 +1292,9 @@ export function SettingsPage() {
                         size="md"
                         type="text"
                         value={clientId}
-                        onChange={(e) => setClientId(e.target.value)}
+                        onChange={(
+                          e: React.ChangeEvent<HTMLInputElement>,
+                        ): void => setClientId(e.target.value)}
                         placeholder={t("googleClientId")}
                       />
                       <TextField
@@ -1256,7 +1302,9 @@ export function SettingsPage() {
                         size="md"
                         type="password"
                         value={clientSecret}
-                        onChange={(e) => setClientSecret(e.target.value)}
+                        onChange={(
+                          e: React.ChangeEvent<HTMLInputElement>,
+                        ): void => setClientSecret(e.target.value)}
                         placeholder={t("googleClientSecret")}
                       />
                       <Button
@@ -1321,7 +1369,9 @@ export function SettingsPage() {
                     <SettingRow label={t("syncEmailsFrom")}>
                       <select
                         value={syncPeriodDays}
-                        onChange={async (e) => {
+                        onChange={async (
+                          e: React.ChangeEvent<HTMLSelectElement>,
+                        ): Promise<void> => {
                           const val = e.target.value;
                           setSyncPeriodDays(val);
                           await setSetting("sync_period_days", val);
@@ -1354,7 +1404,9 @@ export function SettingsPage() {
                     <SettingRow label={t("aiProvider")}>
                       <select
                         value={aiProvider}
-                        onChange={async (e) => {
+                        onChange={async (
+                          e: React.ChangeEvent<HTMLSelectElement>,
+                        ): Promise<void> => {
                           const val = e.target.value as
                             | "claude"
                             | "openai"
@@ -1398,14 +1450,18 @@ export function SettingsPage() {
                           label={t("serverUrl")}
                           size="md"
                           value={ollamaServerUrl}
-                          onChange={(e) => setOllamaServerUrl(e.target.value)}
+                          onChange={(
+                            e: React.ChangeEvent<HTMLInputElement>,
+                          ): void => setOllamaServerUrl(e.target.value)}
                           placeholder={t("localServerPlaceholder")}
                         />
                         <TextField
                           label={t("modelName")}
                           size="md"
                           value={ollamaModel}
-                          onChange={(e) => setOllamaModel(e.target.value)}
+                          onChange={(
+                            e: React.ChangeEvent<HTMLInputElement>,
+                          ): void => setOllamaModel(e.target.value)}
                           placeholder={t("modelPlaceholder")}
                         />
                         <div className="flex items-center gap-2">
@@ -1497,7 +1553,9 @@ export function SettingsPage() {
                                   ? copilotApiKey
                                   : geminiApiKey
                           }
-                          onChange={(e) => {
+                          onChange={(
+                            e: React.ChangeEvent<HTMLInputElement>,
+                          ): void => {
                             if (aiProvider === "claude")
                               setClaudeApiKey(e.target.value);
                             else if (aiProvider === "openai")
@@ -1527,7 +1585,9 @@ export function SettingsPage() {
                                     ? copilotModel
                                     : geminiModel
                             }
-                            onChange={async (e) => {
+                            onChange={async (
+                              e: React.ChangeEvent<HTMLSelectElement>,
+                            ): Promise<void> => {
                               const val = e.target.value;
                               const modelSettingMap = {
                                 claude: "claude_model",
@@ -1718,7 +1778,7 @@ export function SettingsPage() {
                         );
                       }}
                     />
-                    {aiWritingStyleEnabled && (
+                    {aiWritingStyleEnabled === true && (
                       <div className="flex items-center justify-between">
                         <div>
                           <span className="text-sm text-text-secondary">
@@ -1829,7 +1889,7 @@ export function SettingsPage() {
   );
 }
 
-function SendAsAliasesSection() {
+function SendAsAliasesSection(): React.ReactNode {
   const { t } = useTranslation("settings");
   const accounts = useAccountStore((s) => s.accounts);
   const [aliases, setAliases] = useState<SendAsAlias[]>([]);
@@ -1842,14 +1902,14 @@ function SendAsAliasesSection() {
       if (cancelled) return;
       setAliases(dbAliases.map(mapDbAlias));
     });
-    return () => {
+    return (): void => {
       cancelled = true;
     };
   }, [accounts]);
 
   const activeAccount = accounts.find((a) => a.isActive);
 
-  const handleSetDefault = async (alias: SendAsAlias) => {
+  const handleSetDefault = async (alias: SendAsAlias): Promise<void> => {
     if (!activeAccount) return;
     await setDefaultAlias(activeAccount.id, alias.id);
     setAliases((prev) =>
@@ -1883,12 +1943,12 @@ function SendAsAliasesSection() {
                       : alias.email}
                   </div>
                   <div className="flex items-center gap-2 mt-0.5">
-                    {alias.isPrimary && (
+                    {alias.isPrimary === true && (
                       <span className="text-[0.625rem] bg-accent/15 text-accent px-1.5 py-0.5 rounded-full">
                         {t("primaryAlias")}
                       </span>
                     )}
-                    {alias.isDefault && (
+                    {alias.isDefault === true && (
                       <span className="text-[0.625rem] bg-success/15 text-success px-1.5 py-0.5 rounded-full">
                         {t("defaultAlias")}
                       </span>
@@ -1903,7 +1963,8 @@ function SendAsAliasesSection() {
               </div>
               {!alias.isDefault && (
                 <button
-                  onClick={() => handleSetDefault(alias)}
+                  onClick={(): void => void handleSetDefault(alias)}
+                  type="button"
                   className="text-xs text-accent hover:text-accent-hover transition-colors shrink-0 ml-3"
                 >
                   {t("setAsDefault")}
@@ -1917,13 +1978,13 @@ function SendAsAliasesSection() {
   );
 }
 
-function SyncOfflineSection() {
+function SyncOfflineSection(): React.ReactNode {
   const { t } = useTranslation("settings");
   const [pendingCount, setPendingCount] = useState(0);
   const [failedCount, setFailedCount] = useState(0);
   const [loading, setLoading] = useState(false);
 
-  const loadCounts = useCallback(async () => {
+  const loadCounts = useCallback(async (): Promise<void> => {
     const { getPendingOpsCount, getFailedOpsCount } = await import(
       "@/services/db/pendingOperations"
     );
@@ -1932,10 +1993,10 @@ function SyncOfflineSection() {
   }, []);
 
   useEffect(() => {
-    loadCounts();
+    void loadCounts();
   }, [loadCounts]);
 
-  const handleRetryFailed = async () => {
+  const handleRetryFailed = async (): Promise<void> => {
     setLoading(true);
     try {
       const { retryFailedOperations } = await import(
@@ -1948,7 +2009,7 @@ function SyncOfflineSection() {
     }
   };
 
-  const handleClearFailed = async () => {
+  const handleClearFailed = async (): Promise<void> => {
     setLoading(true);
     try {
       const { clearFailedOperations } = await import(
@@ -1994,14 +2055,16 @@ function SyncOfflineSection() {
             {failedCount > 0 && (
               <>
                 <button
-                  onClick={handleRetryFailed}
+                  type="button"
+                  onClick={(): void => void handleRetryFailed()}
                   disabled={loading}
                   className="text-xs text-accent hover:text-accent-hover transition-colors disabled:opacity-50"
                 >
                   {t("retry")}
                 </button>
                 <button
-                  onClick={handleClearFailed}
+                  type="button"
+                  onClick={(): void => void handleClearFailed()}
                   disabled={loading}
                   className="text-xs text-danger hover:opacity-80 transition-colors disabled:opacity-50"
                 >
@@ -2016,7 +2079,7 @@ function SyncOfflineSection() {
   );
 }
 
-function DeveloperTab() {
+function DeveloperTab(): React.ReactNode {
   const { t } = useTranslation("settings");
   const [appVersion, setAppVersion] = useState("");
   const [tauriVersion, setTauriVersion] = useState("");
@@ -2028,7 +2091,7 @@ function DeveloperTab() {
   const [installingUpdate, setInstallingUpdate] = useState(false);
 
   useEffect(() => {
-    async function load() {
+    async function load(): Promise<void> {
       const { getVersion, getTauriVersion } = await import(
         "@tauri-apps/api/app"
       );
@@ -2067,10 +2130,10 @@ function DeveloperTab() {
       const existing = getAvailableUpdate();
       if (existing) setUpdateVersion(existing.version);
     }
-    load();
+    void load();
   }, []);
 
-  const handleCheckForUpdate = async () => {
+  const handleCheckForUpdate = async (): Promise<void> => {
     setCheckingForUpdate(true);
     setUpdateCheckDone(false);
     setUpdateVersion(null);
@@ -2090,7 +2153,7 @@ function DeveloperTab() {
     }
   };
 
-  const handleInstallUpdate = async () => {
+  const handleInstallUpdate = async (): Promise<void> => {
     setInstallingUpdate(true);
     try {
       const { installUpdate } = await import("@/services/updateManager");
@@ -2116,7 +2179,7 @@ function DeveloperTab() {
             <span className="text-sm text-text-secondary">
               {t("softwareUpdates")}
             </span>
-            {updateVersion && (
+            {updateVersion != null && (
               <p className="text-xs text-accent mt-0.5">
                 v{updateVersion} {t("available")}
               </p>
@@ -2170,7 +2233,7 @@ function DeveloperTab() {
           <Button
             variant="secondary"
             size="md"
-            onClick={async () => {
+            onClick={async (): Promise<void> => {
               const { invoke } = await import("@tauri-apps/api/core");
               await invoke("open_devtools");
             }}
@@ -2184,17 +2247,17 @@ function DeveloperTab() {
   );
 }
 
-function AboutTab() {
+function AboutTab(): React.ReactNode {
   const { t } = useTranslation("settings");
   const [appVersion, setAppVersion] = useState("");
 
   useEffect(() => {
-    import("@tauri-apps/api/app").then(({ getVersion }) =>
+    void import("@tauri-apps/api/app").then(({ getVersion }) =>
       getVersion().then(setAppVersion),
     );
   }, []);
 
-  const openExternal = async (url: string) => {
+  const openExternal = async (url: string): Promise<void> => {
     const { openUrl } = await import("@tauri-apps/plugin-opener");
     await openUrl(url);
   };
@@ -2219,7 +2282,8 @@ function AboutTab() {
       <Section title={t("links")}>
         <div className="space-y-1">
           <button
-            onClick={() => openExternal("https://velomail.app")}
+            type="button"
+            onClick={(): void => void openExternal("https://velomail.app")}
             className="flex items-center gap-3 w-full px-4 py-2.5 rounded-lg bg-bg-secondary hover:bg-bg-hover transition-colors text-left"
           >
             <Globe size={16} className="text-text-tertiary shrink-0" />
@@ -2231,8 +2295,9 @@ function AboutTab() {
           </button>
 
           <button
-            onClick={() =>
-              openExternal("https://github.com/avihaymenahem/velo")
+            type="button"
+            onClick={(): void =>
+              void openExternal("https://github.com/avihaymenahem/velo")
             }
             className="flex items-center gap-3 w-full px-4 py-2.5 rounded-lg bg-bg-secondary hover:bg-bg-hover transition-colors text-left"
           >
@@ -2247,7 +2312,8 @@ function AboutTab() {
           </button>
 
           <button
-            onClick={() => openExternal("mailto:info@velomail.app")}
+            type="button"
+            onClick={(): void => void openExternal("mailto:info@velomail.app")}
             className="flex items-center gap-3 w-full px-4 py-2.5 rounded-lg bg-bg-secondary hover:bg-bg-hover transition-colors text-left"
           >
             <Mail size={16} className="text-text-tertiary shrink-0" />
@@ -2271,8 +2337,9 @@ function AboutTab() {
           <p className="text-xs text-text-secondary leading-relaxed mb-3">
             {t("licenseDescription")}{" "}
             <button
-              onClick={() =>
-                openExternal("https://www.apache.org/licenses/LICENSE-2.0")
+              type="button"
+              onClick={(): void =>
+                void openExternal("https://www.apache.org/licenses/LICENSE-2.0")
               }
               className="text-accent hover:text-accent-hover transition-colors"
             >
@@ -2288,7 +2355,13 @@ function AboutTab() {
   );
 }
 
-function InfoRow({ label, value }: { label: string; value: string }) {
+function InfoRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}): React.ReactNode {
   return (
     <div className="flex items-center justify-between">
       <span className="text-sm text-text-secondary">{label}</span>
@@ -2297,7 +2370,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ShortcutsTab() {
+function ShortcutsTab(): React.ReactNode {
   const { t } = useTranslation("settings");
   const keyMap = useShortcutStore((s) => s.keyMap);
   const setKey = useShortcutStore((s) => s.setKey);
@@ -2396,10 +2469,11 @@ function ShortcutsTab() {
               {composeShortcut}
             </kbd>
             <button
+              type="button"
               ref={globalRecorderRef}
-              onClick={() => setRecordingGlobal(true)}
+              onClick={(): void => setRecordingGlobal(true)}
               onKeyDown={handleGlobalRecord}
-              onBlur={() => setRecordingGlobal(false)}
+              onBlur={(): void => setRecordingGlobal(false)}
               className={`text-xs px-2.5 py-1 rounded-md transition-colors ${
                 recordingGlobal
                   ? "bg-accent text-white"
@@ -2416,6 +2490,7 @@ function ShortcutsTab() {
         <p className="text-sm text-text-tertiary">{t("clickToRebind")}</p>
         {hasCustom && (
           <button
+            type="button"
             onClick={resetAll}
             className="text-xs text-accent hover:text-accent-hover transition-colors shrink-0 ml-4"
           >
@@ -2444,13 +2519,14 @@ function ShortcutsTab() {
                   </span>
                   <div className="flex items-center gap-2 ml-4 shrink-0">
                     <button
-                      onClick={() =>
+                      type="button"
+                      onClick={(): void =>
                         setRecordingId(isRecording ? null : item.id)
                       }
-                      onKeyDown={(e) => {
+                      onKeyDown={(e: React.KeyboardEvent): void => {
                         if (isRecording) handleKeyRecord(e, item.id);
                       }}
-                      onBlur={() => {
+                      onBlur={(): void => {
                         if (isRecording) setRecordingId(null);
                       }}
                       className={`text-xs px-2.5 py-1 rounded-md font-mono transition-colors ${
@@ -2459,11 +2535,13 @@ function ShortcutsTab() {
                           : "bg-bg-tertiary text-text-tertiary hover:text-text-primary border border-border-primary"
                       }`}
                     >
+                      {/* biome-ignore lint/nursery/noLeakedRender: isRecording is a boolean (strict equality check) */}
                       {isRecording ? t("pressKey") : currentKey}
                     </button>
                     {!isDefault && (
                       <button
-                        onClick={() => resetKey(item.id)}
+                        type="button"
+                        onClick={(): void => resetKey(item.id)}
                         className="text-xs text-text-tertiary hover:text-text-primary"
                         title={t("resetKeyTo", { key: defaults[item.id] })}
                       >
@@ -2481,7 +2559,7 @@ function ShortcutsTab() {
   );
 }
 
-function ImapCalDavSection() {
+function ImapCalDavSection(): React.ReactNode {
   const { t } = useTranslation("settings");
   const accounts = useAccountStore((s) => s.accounts);
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
@@ -2491,9 +2569,9 @@ function ImapCalDavSection() {
 
   useEffect(() => {
     if (!activeAccountId) return;
-    import("@/services/db/accounts").then(({ getAccount }) => {
-      getAccount(activeAccountId).then(setAccount);
-    });
+    void import("@/services/db/accounts").then(({ getAccount }) =>
+      getAccount(activeAccountId).then(setAccount),
+    );
   }, [activeAccountId]);
 
   const activeUiAccount = accounts.find((a) => a.id === activeAccountId);
@@ -2505,11 +2583,11 @@ function ImapCalDavSection() {
     <Section title={t("calendarCaldav")}>
       <CalDavSettingsInline
         account={account}
-        onSaved={() => {
+        onSaved={(): void => {
           // Reload account
-          import("@/services/db/accounts").then(({ getAccount }) => {
-            getAccount(account.id).then(setAccount);
-          });
+          void import("@/services/db/accounts").then(({ getAccount }) =>
+            getAccount(account.id).then(setAccount),
+          );
         }}
       />
     </Section>
@@ -2522,14 +2600,14 @@ function CalDavSettingsInline({
 }: {
   account: import("@/services/db/accounts").DbAccount;
   onSaved: () => void;
-}) {
+}): React.ReactNode {
   const { t } = useTranslation("settings");
   const [CalDav, setCalDav] = useState<
     typeof import("@/components/settings/CalDavSettings").CalDavSettings | null
   >(null);
 
   useEffect(() => {
-    import("@/components/settings/CalDavSettings").then((m) =>
+    void import("@/components/settings/CalDavSettings").then((m) =>
       setCalDav(() => m.CalDavSettings),
     );
   }, []);
@@ -2540,7 +2618,7 @@ function CalDavSettingsInline({
   return <CalDav account={account} onSaved={onSaved} />;
 }
 
-function SidebarNavEditor() {
+function SidebarNavEditor(): React.ReactNode {
   const { t } = useTranslation("settings");
   const sidebarNavConfig = useUIStore((s) => s.sidebarNavConfig);
   const setSidebarNavConfig = useUIStore((s) => s.setSidebarNavConfig);
@@ -2557,7 +2635,7 @@ function SidebarNavEditor() {
   })();
   const navLookup = new Map(ALL_NAV_ITEMS.map((n) => [n.id, n]));
 
-  const moveItem = (index: number, direction: -1 | 1) => {
+  const moveItem = (index: number, direction: -1 | 1): void => {
     const next = [...items];
     const target = index + direction;
     if (target < 0 || target >= next.length) return;
@@ -2569,7 +2647,7 @@ function SidebarNavEditor() {
     setSidebarNavConfig(next);
   };
 
-  const toggleItem = (index: number) => {
+  const toggleItem = (index: number): void => {
     const next = [...items];
     const current = next[index];
     // Inbox cannot be hidden
@@ -2578,7 +2656,7 @@ function SidebarNavEditor() {
     setSidebarNavConfig(next);
   };
 
-  const resetToDefaults = () => {
+  const resetToDefaults = (): void => {
     setSidebarNavConfig(
       ALL_NAV_ITEMS.map((i) => ({ id: i.id, visible: true })),
     );
@@ -2607,7 +2685,8 @@ function SidebarNavEditor() {
               }`}
             >
               <button
-                onClick={() => moveItem(index, -1)}
+                type="button"
+                onClick={(): void => moveItem(index, -1)}
                 disabled={index === 0}
                 className="p-0.5 rounded text-text-tertiary hover:text-text-primary disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
                 title={t("moveUp")}
@@ -2615,7 +2694,8 @@ function SidebarNavEditor() {
                 <ChevronUp size={14} />
               </button>
               <button
-                onClick={() => moveItem(index, 1)}
+                type="button"
+                onClick={(): void => moveItem(index, 1)}
                 disabled={index === items.length - 1}
                 className="p-0.5 rounded text-text-tertiary hover:text-text-primary disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
                 title={t("moveDown")}
@@ -2629,7 +2709,8 @@ function SidebarNavEditor() {
                 )}
               </span>
               <button
-                onClick={() => toggleItem(index)}
+                type="button"
+                onClick={(): void => toggleItem(index)}
                 disabled={isInbox}
                 className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ${
                   isInbox
@@ -2658,6 +2739,7 @@ function SidebarNavEditor() {
       </div>
       {!isDefault && (
         <button
+          type="button"
           onClick={resetToDefaults}
           className="flex items-center gap-1.5 text-xs text-accent hover:text-accent-hover mt-2 transition-colors"
         >
@@ -2675,7 +2757,7 @@ function Section({
 }: {
   title: string;
   children: React.ReactNode;
-}) {
+}): React.ReactNode {
   return (
     <div>
       <h3 className="text-xs font-semibold uppercase tracking-wider text-text-tertiary mb-3">
@@ -2692,16 +2774,16 @@ function SettingRow({
 }: {
   label: string;
   children: React.ReactNode;
-}) {
+}): React.ReactNode {
   return (
     <div className="flex items-center justify-between">
-      <label className="text-sm text-text-secondary">{label}</label>
+      <span className="text-sm text-text-secondary">{label}</span>
       {children}
     </div>
   );
 }
 
-function BundleSettings() {
+function BundleSettings(): React.ReactNode {
   const { t } = useTranslation("settings");
   const DAY_NAMES = [
     t("sun"),
@@ -2729,32 +2811,34 @@ function BundleSettings() {
 
   useEffect(() => {
     if (!activeAccountId) return;
-    import("@/services/db/bundleRules").then(async ({ getBundleRules }) => {
-      const dbRules = await getBundleRules(activeAccountId);
-      const map: typeof rules = {};
-      for (const r of dbRules) {
-        let schedule = { days: [6], hour: 9, minute: 0 };
-        try {
-          if (r.delivery_schedule) schedule = JSON.parse(r.delivery_schedule);
-        } catch {
-          /* use defaults */
+    void import("@/services/db/bundleRules").then(
+      async ({ getBundleRules }) => {
+        const dbRules = await getBundleRules(activeAccountId);
+        const map: typeof rules = {};
+        for (const r of dbRules) {
+          let schedule = { days: [6], hour: 9, minute: 0 };
+          try {
+            if (r.delivery_schedule) schedule = JSON.parse(r.delivery_schedule);
+          } catch {
+            /* use defaults */
+          }
+          map[r.category] = {
+            bundled: r.is_bundled === 1,
+            delivery: r.delivery_enabled === 1,
+            days: schedule.days,
+            hour: schedule.hour,
+            minute: schedule.minute,
+          };
         }
-        map[r.category] = {
-          bundled: r.is_bundled === 1,
-          delivery: r.delivery_enabled === 1,
-          days: schedule.days,
-          hour: schedule.hour,
-          minute: schedule.minute,
-        };
-      }
-      setRules(map);
-    });
+        setRules(map);
+      },
+    );
   }, [activeAccountId]);
 
   const saveRule = async (
     category: string,
     update: Partial<(typeof rules)[string]>,
-  ) => {
+  ): Promise<void> => {
     if (!activeAccountId) return;
     const current = rules[category] ?? {
       bundled: false,
@@ -2796,8 +2880,10 @@ function BundleSettings() {
                     <input
                       type="checkbox"
                       checked={rule?.bundled ?? false}
-                      onChange={() =>
-                        saveRule(cat, { bundled: !(rule?.bundled ?? false) })
+                      onChange={(): void =>
+                        void saveRule(cat, {
+                          bundled: !(rule?.bundled ?? false),
+                        })
                       }
                       className="accent-accent"
                     />
@@ -2807,8 +2893,10 @@ function BundleSettings() {
                     <input
                       type="checkbox"
                       checked={rule?.delivery ?? false}
-                      onChange={() =>
-                        saveRule(cat, { delivery: !(rule?.delivery ?? false) })
+                      onChange={(): void =>
+                        void saveRule(cat, {
+                          delivery: !(rule?.delivery ?? false),
+                        })
                       }
                       className="accent-accent"
                     />
@@ -2816,17 +2904,20 @@ function BundleSettings() {
                   </label>
                 </div>
               </div>
-              {rule?.delivery && (
+              {rule?.delivery === true && (
                 <div className="space-y-2 pt-1">
                   <div className="flex gap-1">
                     {DAY_NAMES.map((name, idx) => (
                       <button
+                        type="button"
                         key={name}
-                        onClick={() => {
+                        onClick={(): void => {
                           const days = rule.days.includes(idx)
-                            ? rule.days.filter((d) => d !== idx)
+                            ? rule.days.filter(
+                                (d: number): boolean => d !== idx,
+                              )
                             : [...rule.days, idx].sort();
-                          saveRule(cat, { days });
+                          void saveRule(cat, { days });
                         }}
                         className={`w-8 h-7 text-[0.625rem] rounded transition-colors ${
                           rule.days.includes(idx)
@@ -2845,9 +2936,11 @@ function BundleSettings() {
                     <input
                       type="time"
                       value={`${String(rule.hour).padStart(2, "0")}:${String(rule.minute).padStart(2, "0")}`}
-                      onChange={(e) => {
+                      onChange={(
+                        e: React.ChangeEvent<HTMLInputElement>,
+                      ): void => {
                         const [h, m] = e.target.value.split(":").map(Number);
-                        saveRule(cat, { hour: h ?? 9, minute: m ?? 0 });
+                        void saveRule(cat, { hour: h ?? 9, minute: m ?? 0 });
                       }}
                       className="bg-bg-tertiary text-text-primary text-xs px-2 py-1 rounded border border-border-primary"
                     />
@@ -2872,16 +2965,17 @@ function ToggleRow({
   description?: string;
   checked: boolean;
   onToggle: () => void;
-}) {
+}): React.ReactNode {
   return (
     <div className="flex items-center justify-between">
       <div>
         <span className="text-sm text-text-secondary">{label}</span>
-        {description && (
+        {description != null && (
           <p className="text-xs text-text-tertiary mt-0.5">{description}</p>
         )}
       </div>
       <button
+        type="button"
         onClick={onToggle}
         className={`w-10 h-5 rounded-full transition-colors relative shrink-0 ml-4 ${
           checked ? "bg-accent" : "bg-bg-tertiary"

@@ -1,4 +1,5 @@
 import { ChevronDown, ChevronUp, Loader2, Pencil, Trash2 } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { TextField } from "@/components/ui/TextField";
@@ -14,7 +15,7 @@ import {
 import { backfillSmartLabels } from "@/services/smartLabels/backfillService";
 import { useAccountStore } from "@/stores/accountStore";
 
-export function SmartLabelEditor() {
+export function SmartLabelEditor(): React.ReactNode {
   const { t } = useTranslation("settings");
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
   const [rules, setRules] = useState<DbSmartLabelRule[]>([]);
@@ -34,7 +35,7 @@ export function SmartLabelEditor() {
   const [criteriaBody, setCriteriaBody] = useState("");
   const [criteriaHasAttachment, setCriteriaHasAttachment] = useState(false);
 
-  const loadRules = useCallback(async () => {
+  const loadRules = useCallback(async (): Promise<void> => {
     if (!activeAccountId) return;
     const r = await getSmartLabelRulesForAccount(activeAccountId);
     setRules(r);
@@ -42,14 +43,14 @@ export function SmartLabelEditor() {
 
   useEffect(() => {
     if (!activeAccountId) return;
-    loadRules();
-    getLabelsForAccount(activeAccountId).then((l) =>
+    void loadRules();
+    void getLabelsForAccount(activeAccountId).then((l) =>
       setLabels(l.filter((lb) => lb.type === "user")),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadRules is stable
   }, [activeAccountId, loadRules]);
 
-  const resetForm = useCallback(() => {
+  const resetForm = useCallback((): void => {
     setLabelId("");
     setAiDescription("");
     setCriteriaFrom("");
@@ -62,7 +63,7 @@ export function SmartLabelEditor() {
     setShowForm(false);
   }, []);
 
-  const buildCriteria = (): FilterCriteria | undefined => {
+  const buildCriteria = useCallback((): FilterCriteria | undefined => {
     const c: FilterCriteria = {};
     if (criteriaFrom.trim()) c.from = criteriaFrom.trim();
     if (criteriaTo.trim()) c.to = criteriaTo.trim();
@@ -70,9 +71,15 @@ export function SmartLabelEditor() {
     if (criteriaBody.trim()) c.body = criteriaBody.trim();
     if (criteriaHasAttachment) c.hasAttachment = true;
     return Object.keys(c).length > 0 ? c : undefined;
-  };
+  }, [
+    criteriaFrom,
+    criteriaTo,
+    criteriaSubject,
+    criteriaBody,
+    criteriaHasAttachment,
+  ]);
 
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(async (): Promise<void> => {
     if (!(activeAccountId && labelId && aiDescription.trim())) return;
     const criteria = buildCriteria();
 
@@ -103,7 +110,7 @@ export function SmartLabelEditor() {
     buildCriteria,
   ]);
 
-  const handleEdit = useCallback((rule: DbSmartLabelRule) => {
+  const handleEdit = useCallback((rule: DbSmartLabelRule): void => {
     setEditingId(rule.id);
     setLabelId(rule.label_id);
     setAiDescription(rule.ai_description);
@@ -111,7 +118,7 @@ export function SmartLabelEditor() {
     let criteria: FilterCriteria = {};
     if (rule.criteria_json) {
       try {
-        criteria = JSON.parse(rule.criteria_json);
+        criteria = JSON.parse(rule.criteria_json) as FilterCriteria;
       } catch {
         /* empty */
       }
@@ -127,7 +134,7 @@ export function SmartLabelEditor() {
   }, []);
 
   const handleDelete = useCallback(
-    async (id: string) => {
+    async (id: string): Promise<void> => {
       await deleteSmartLabelRule(id);
       if (editingId === id) resetForm();
       await loadRules();
@@ -136,14 +143,14 @@ export function SmartLabelEditor() {
   );
 
   const handleToggleEnabled = useCallback(
-    async (rule: DbSmartLabelRule) => {
+    async (rule: DbSmartLabelRule): Promise<void> => {
       await updateSmartLabelRule(rule.id, { isEnabled: rule.is_enabled !== 1 });
       await loadRules();
     },
     [loadRules],
   );
 
-  const handleBackfill = useCallback(async () => {
+  const handleBackfill = useCallback(async (): Promise<void> => {
     if (!activeAccountId || backfilling) return;
     setBackfilling(true);
     setBackfillResult(null);
@@ -159,7 +166,7 @@ export function SmartLabelEditor() {
   }, [activeAccountId, backfilling, t]);
 
   const getLabelName = useCallback(
-    (id: string) => labels.find((l) => l.id === id)?.name ?? id,
+    (id: string): string => labels.find((l) => l.id === id)?.name ?? id,
     [labels],
   );
 
@@ -167,18 +174,21 @@ export function SmartLabelEditor() {
     <div className="space-y-3">
       {rules.length > 0 && (
         <button
-          onClick={handleBackfill}
+          type="button"
+          onClick={(): void => void handleBackfill()}
           disabled={backfilling}
           className="text-xs text-accent hover:text-accent-hover disabled:opacity-50 flex items-center gap-1.5"
         >
-          {backfilling && <Loader2 size={12} className="animate-spin" />}
+          {backfilling === true && (
+            <Loader2 size={12} className="animate-spin" />
+          )}
           {backfilling
             ? t("smartLabelEditor.applying")
             : t("smartLabelEditor.applyToExisting")}
         </button>
       )}
 
-      {backfillResult && (
+      {backfillResult != null && (
         <div className="text-xs text-text-tertiary">{backfillResult}</div>
       )}
 
@@ -202,7 +212,8 @@ export function SmartLabelEditor() {
           </div>
           <div className="flex items-center gap-1">
             <button
-              onClick={() => handleToggleEnabled(rule)}
+              type="button"
+              onClick={(): void => void handleToggleEnabled(rule)}
               className={`w-8 h-4 rounded-full transition-colors relative ${
                 rule.is_enabled === 1 ? "bg-accent" : "bg-bg-tertiary"
               }`}
@@ -219,13 +230,15 @@ export function SmartLabelEditor() {
               />
             </button>
             <button
-              onClick={() => handleEdit(rule)}
+              type="button"
+              onClick={(): void => handleEdit(rule)}
               className="p-1 text-text-tertiary hover:text-text-primary"
             >
               <Pencil size={13} />
             </button>
             <button
-              onClick={() => handleDelete(rule.id)}
+              type="button"
+              onClick={(): void => void handleDelete(rule.id)}
               className="p-1 text-text-tertiary hover:text-danger"
             >
               <Trash2 size={13} />
@@ -243,7 +256,9 @@ export function SmartLabelEditor() {
               </div>
               <select
                 value={labelId}
-                onChange={(e) => setLabelId(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>): void =>
+                  setLabelId(e.target.value)
+                }
                 className="w-full bg-bg-tertiary text-text-primary text-xs px-2 py-1.5 rounded border border-border-primary"
               >
                 <option value="">{t("smartLabelEditor.selectLabel")}</option>
@@ -266,7 +281,9 @@ export function SmartLabelEditor() {
             </div>
             <textarea
               value={aiDescription}
-              onChange={(e) => setAiDescription(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>): void =>
+                setAiDescription(e.target.value)
+              }
               placeholder={t("smartLabelEditor.aiDescriptionPlaceholder")}
               rows={2}
               className="w-full bg-bg-tertiary text-text-primary text-xs px-2 py-1.5 rounded border border-border-primary resize-none placeholder:text-text-tertiary"
@@ -275,7 +292,8 @@ export function SmartLabelEditor() {
 
           <div>
             <button
-              onClick={() => setShowCriteria(!showCriteria)}
+              type="button"
+              onClick={(): void => setShowCriteria(!showCriteria)}
               className="flex items-center gap-1 text-xs text-text-secondary hover:text-text-primary"
             >
               {showCriteria ? (
@@ -286,37 +304,47 @@ export function SmartLabelEditor() {
               {t("smartLabelEditor.optionalCriteria")}
             </button>
 
-            {showCriteria && (
+            {showCriteria === true && (
               <div className="mt-2 space-y-1.5">
                 <TextField
                   type="text"
                   value={criteriaFrom}
-                  onChange={(e) => setCriteriaFrom(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                    setCriteriaFrom(e.target.value)
+                  }
                   placeholder={t("smartLabelEditor.fromPlaceholder")}
                 />
                 <TextField
                   type="text"
                   value={criteriaTo}
-                  onChange={(e) => setCriteriaTo(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                    setCriteriaTo(e.target.value)
+                  }
                   placeholder={t("smartLabelEditor.toPlaceholder")}
                 />
                 <TextField
                   type="text"
                   value={criteriaSubject}
-                  onChange={(e) => setCriteriaSubject(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                    setCriteriaSubject(e.target.value)
+                  }
                   placeholder={t("smartLabelEditor.subjectPlaceholder")}
                 />
                 <TextField
                   type="text"
                   value={criteriaBody}
-                  onChange={(e) => setCriteriaBody(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                    setCriteriaBody(e.target.value)
+                  }
                   placeholder={t("smartLabelEditor.bodyPlaceholder")}
                 />
                 <label className="flex items-center gap-1.5 text-xs text-text-secondary">
                   <input
                     type="checkbox"
                     checked={criteriaHasAttachment}
-                    onChange={(e) => setCriteriaHasAttachment(e.target.checked)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                      setCriteriaHasAttachment(e.target.checked)
+                    }
                     className="rounded"
                   />
                   {t("smartLabelEditor.hasAttachment")}
@@ -327,7 +355,8 @@ export function SmartLabelEditor() {
 
           <div className="flex items-center gap-2">
             <button
-              onClick={handleSave}
+              type="button"
+              onClick={(): void => void handleSave()}
               disabled={!(labelId && aiDescription.trim())}
               className="px-3 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-50"
             >
@@ -336,6 +365,7 @@ export function SmartLabelEditor() {
                 : t("smartLabelEditor.save")}
             </button>
             <button
+              type="button"
               onClick={resetForm}
               className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary rounded-md transition-colors"
             >
@@ -345,7 +375,8 @@ export function SmartLabelEditor() {
         </div>
       ) : (
         <button
-          onClick={() => setShowForm(true)}
+          type="button"
+          onClick={(): void => setShowForm(true)}
           className="text-xs text-accent hover:text-accent-hover"
         >
           {t("smartLabelEditor.addSmartLabel")}

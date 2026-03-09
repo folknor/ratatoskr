@@ -1,5 +1,8 @@
 import { buildRawEmail, type EmailAttachment } from "@/utils/emailBuilder";
-import { createBackgroundChecker } from "../backgroundCheckers";
+import {
+  type BackgroundChecker,
+  createBackgroundChecker,
+} from "../backgroundCheckers";
 import { getAccount } from "../db/accounts";
 import {
   getPendingScheduledEmails,
@@ -73,9 +76,9 @@ async function checkScheduledEmails(): Promise<void> {
   }
 }
 
-const scheduledSendChecker = createBackgroundChecker(
+const scheduledSendChecker: BackgroundChecker = createBackgroundChecker(
   "ScheduledSend",
   checkScheduledEmails,
 );
-export const startScheduledSendChecker = scheduledSendChecker.start;
-export const stopScheduledSendChecker = scheduledSendChecker.stop;
+export const startScheduledSendChecker: () => void = scheduledSendChecker.start;
+export const stopScheduledSendChecker: () => void = scheduledSendChecker.stop;

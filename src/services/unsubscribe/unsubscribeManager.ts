@@ -46,6 +46,7 @@ export function parseUnsubscribeHeaders(
  * 2. mailto via Gmail API
  * 3. Fallback: open URL in browser
  */
+// biome-ignore lint/complexity/useMaxParams: unsubscribe requires all context fields
 export async function executeUnsubscribe(
   accountId: string,
   threadId: string,
@@ -85,7 +86,7 @@ export async function executeUnsubscribe(
         // Extract subject from mailto params if present
         const subjectMatch = parsed.mailtoAddress.match(/subject=([^&]+)/i);
         const subject = subjectMatch
-          ? decodeURIComponent(subjectMatch[1]!)
+          ? decodeURIComponent(subjectMatch[1] ?? "")
           : "unsubscribe";
 
         const { getAccount } = await import("../db/accounts");
@@ -131,6 +132,7 @@ export async function executeUnsubscribe(
   return { method, success };
 }
 
+// biome-ignore lint/complexity/useMaxParams: DB record requires all fields as separate params
 async function recordUnsubscribeAction(
   accountId: string,
   threadId: string,

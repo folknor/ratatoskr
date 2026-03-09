@@ -42,6 +42,7 @@ export type SyncProgressCallback = (progress: SyncProgress) => void;
  * Store a fetched thread's data (messages, labels, attachments) into the local DB.
  * Optionally pass autoArchiveCategories and client to enable auto-archiving.
  */
+// biome-ignore lint/complexity/useMaxParams: sync operation requires all context parameters
 async function processAndStoreThread(
   thread: { id: string },
   accountId: string,
@@ -49,8 +50,9 @@ async function processAndStoreThread(
   client?: GmailClient,
   autoArchiveCategories?: Set<string>,
 ): Promise<void> {
-  const lastMessage = parsedMessages[parsedMessages.length - 1]!;
-  const firstMessage = parsedMessages[0]!;
+  const lastMessage = parsedMessages[parsedMessages.length - 1];
+  const firstMessage = parsedMessages[0];
+  if (!(lastMessage && firstMessage)) return;
 
   const allLabelIds = new Set<string>();
   for (const msg of parsedMessages) {
@@ -207,7 +209,7 @@ export async function syncLabels(
 export async function initialSync(
   client: GmailClient,
   accountId: string,
-  daysBack = 365,
+  daysBack: number = 365,
   onProgress?: SyncProgressCallback,
 ): Promise<void> {
   // Phase 1: Sync labels
@@ -252,7 +254,7 @@ export async function initialSync(
 
   let progress = 0;
   await parallelLimit(
-    threadStubs.map((stub) => async () => {
+    threadStubs.map((stub) => async (): Promise<void> => {
       onProgress?.({
         phase: "messages",
         current: ++progress,
@@ -399,7 +401,7 @@ export async function deltaSync(
     // Re-fetch affected threads in parallel (max 5 concurrent)
     const threadIds = [...affectedThreadIds];
     await parallelLimit(
-      threadIds.map((threadId) => async () => {
+      threadIds.map((threadId) => async (): Promise<void> => {
         try {
           // Skip metadata overwrite for threads with pending local changes
           const pendingOps = await getPendingOpsForResource(

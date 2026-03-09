@@ -21,7 +21,7 @@ function setStoreWithLabels(
     colorFg: string | null;
     sortOrder: number;
   }[],
-) {
+): void {
   useLabelStore.setState({
     labels,
     isLoading: false,
@@ -133,7 +133,8 @@ describe("LabelEditor", () => {
 
     // Click the edit button (pencil icon)
     const editButtons = screen.getAllByTitle("Edit");
-    fireEvent.click(editButtons[0]!);
+    const firstEditButton = editButtons[0];
+    if (firstEditButton) fireEvent.click(firstEditButton);
 
     const input = screen.getByPlaceholderText("Label name") as HTMLInputElement;
     expect(input.value).toBe("Work");
@@ -155,7 +156,8 @@ describe("LabelEditor", () => {
     ]);
     render(<LabelEditor />);
 
-    fireEvent.click(screen.getAllByTitle("Edit")[0]!);
+    const firstEditButton = screen.getAllByTitle("Edit")[0];
+    if (firstEditButton) fireEvent.click(firstEditButton);
     fireEvent.change(screen.getByPlaceholderText("Label name"), {
       target: { value: "Updated" },
     });
@@ -184,7 +186,8 @@ describe("LabelEditor", () => {
     ]);
     render(<LabelEditor />);
 
-    fireEvent.click(screen.getAllByTitle("Delete")[0]!);
+    const firstDeleteButton = screen.getAllByTitle("Delete")[0];
+    if (firstDeleteButton) fireEvent.click(firstDeleteButton);
 
     await waitFor(() => {
       expect(mockDeleteLabel).toHaveBeenCalledWith("acc1", "L1");
@@ -217,10 +220,15 @@ describe("LabelEditor", () => {
     const moveUpButtons = screen.getAllByTitle("Move up");
     const moveDownButtons = screen.getAllByTitle("Move down");
 
-    expect(moveUpButtons[0]!).toBeDisabled();
-    expect(moveDownButtons[1]!).toBeDisabled();
-    expect(moveDownButtons[0]!).not.toBeDisabled();
-    expect(moveUpButtons[1]!).not.toBeDisabled();
+    const firstMoveUp = moveUpButtons[0];
+    const lastMoveDown = moveDownButtons[1];
+    const firstMoveDown = moveDownButtons[0];
+    const lastMoveUp = moveUpButtons[1];
+
+    expect(firstMoveUp).toBeDisabled();
+    expect(lastMoveDown).toBeDisabled();
+    expect(firstMoveDown).not.toBeDisabled();
+    expect(lastMoveUp).not.toBeDisabled();
   });
 
   it("calls reorderLabels when move down is clicked", async () => {
@@ -248,7 +256,8 @@ describe("LabelEditor", () => {
     render(<LabelEditor />);
 
     const moveDownButtons = screen.getAllByTitle("Move down");
-    fireEvent.click(moveDownButtons[0]!);
+    const firstMoveDown = moveDownButtons[0];
+    if (firstMoveDown) fireEvent.click(firstMoveDown);
 
     await waitFor(() => {
       expect(mockReorderLabels).toHaveBeenCalledWith("acc1", ["L2", "L1"]);
@@ -269,7 +278,8 @@ describe("LabelEditor", () => {
       },
     ]);
     render(<LabelEditor />);
-    fireEvent.click(screen.getAllByTitle("Delete")[0]!);
+    const firstDeleteButton = screen.getAllByTitle("Delete")[0];
+    if (firstDeleteButton) fireEvent.click(firstDeleteButton);
 
     await waitFor(() => {
       expect(screen.getByText("API error")).toBeInTheDocument();
@@ -318,7 +328,8 @@ describe("LabelEditor", () => {
     render(<LabelEditor />);
 
     // Click edit on the first label
-    fireEvent.click(screen.getAllByTitle("Edit")[0]!);
+    const firstEditButton = screen.getAllByTitle("Edit")[0];
+    if (firstEditButton) fireEvent.click(firstEditButton);
 
     // Form should be visible
     const input = screen.getByPlaceholderText("Label name") as HTMLInputElement;

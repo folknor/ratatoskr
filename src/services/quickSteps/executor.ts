@@ -127,7 +127,12 @@ async function executeSingleAction(
       if (action.params?.category) {
         await Promise.all(
           threadIds.map((id) =>
-            setThreadCategory(accountId, id, action.params?.category!, true),
+            setThreadCategory(
+              accountId,
+              id,
+              action.params?.category ?? "",
+              true,
+            ),
           ),
         );
         window.dispatchEvent(new Event("velo-sync-done"));
@@ -206,7 +211,8 @@ export async function executeQuickStep(
   let shouldRemoveThreads = false;
 
   for (let i = 0; i < quickStep.actions.length; i++) {
-    const action = quickStep.actions[i]!;
+    const action = quickStep.actions[i];
+    if (!action) continue;
 
     try {
       await executeSingleAction(action, threadIds, accountId);

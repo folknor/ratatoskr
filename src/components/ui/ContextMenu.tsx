@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import { Check, ChevronRight } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useClickOutside } from "@/hooks/useClickOutside";
 
@@ -22,7 +23,11 @@ interface ContextMenuProps {
   onClose: () => void;
 }
 
-export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
+export function ContextMenu({
+  items,
+  position,
+  onClose,
+}: ContextMenuProps): React.ReactNode {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const [submenuOpenId, setSubmenuOpenId] = useState<string | null>(null);
@@ -59,7 +64,7 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
 
   // Keyboard navigation
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent): void => {
       switch (e.key) {
         case "ArrowDown": {
           e.preventDefault();
@@ -174,7 +179,7 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
   // Close submenu when clicking outside both menu and submenu
   useEffect(() => {
     if (!submenuOpenId) return;
-    const handleMouseDown = (e: MouseEvent) => {
+    const handleMouseDown = (e: MouseEvent): void => {
       const target = e.target as Node;
       // If click is inside the main menu, let normal handlers deal with it
       if (menuRef.current?.contains(target)) return;
@@ -189,6 +194,7 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
 
   // Clean up timers
   useEffect(
+    // biome-ignore lint/nursery/useExplicitType: useEffect cleanup
     () => () => {
       if (submenuTimerRef.current) clearTimeout(submenuTimerRef.current);
     },
@@ -214,9 +220,8 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
         {items.map((item, index) => {
           if (item.separator) {
             return (
-              <div
+              <hr
                 key={item.id}
-                role="separator"
                 className="my-1 border-t border-border-secondary"
               />
             );
@@ -230,7 +235,9 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
           return (
             <div key={item.id}>
               <button
+                type="button"
                 role="menuitem"
+                // biome-ignore lint/nursery/useExplicitType: inline ref callback
                 ref={(el) => {
                   if (el && hasSubmenu) {
                     itemRectsRef.current.set(
@@ -282,7 +289,7 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
       </div>
 
       {/* Render submenu as a fixed-position sibling to avoid overflow clipping */}
-      {openItem?.children && submenuAnchor && (
+      {openItem?.children != null && submenuAnchor != null && (
         <Submenu
           items={openItem.children}
           anchorRect={submenuAnchor}
@@ -304,7 +311,7 @@ function Submenu({
   anchorRect: DOMRect;
   onClose: () => void;
   onMouseEnter?: () => void;
-}) {
+}): React.ReactNode {
   const submenuRef = useRef<HTMLDivElement | null>(null);
   const [position, setPosition] = useState<{ left: number; top: number }>({
     left: anchorRect.right,
@@ -349,6 +356,7 @@ function Submenu({
         const Icon = item.icon;
         return (
           <button
+            type="button"
             key={item.id}
             role="menuitem"
             disabled={item.disabled}

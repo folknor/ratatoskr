@@ -1,4 +1,5 @@
 import { CalendarDays, ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import type React from "react";
 import { useTranslation } from "react-i18next";
 
 export type CalendarView = "day" | "week" | "month";
@@ -25,7 +26,7 @@ export function CalendarToolbar({
   onCreateEvent,
   onToggleCalendarList,
   showCalendarListButton,
-}: CalendarToolbarProps) {
+}: CalendarToolbarProps): React.ReactNode {
   const { t } = useTranslation("calendar");
 
   const monthKeys = [
@@ -73,18 +74,21 @@ export function CalendarToolbar({
         <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
         <div className="flex items-center gap-1">
           <button
+            type="button"
             onClick={onPrev}
             className="p-1.5 text-text-secondary hover:text-text-primary hover:bg-bg-hover rounded transition-colors"
           >
             <ChevronLeft size={16} />
           </button>
           <button
+            type="button"
             onClick={onToday}
             className="px-2.5 py-1 text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-bg-hover rounded transition-colors"
           >
             {t("today")}
           </button>
           <button
+            type="button"
             onClick={onNext}
             className="p-1.5 text-text-secondary hover:text-text-primary hover:bg-bg-hover rounded transition-colors"
           >
@@ -94,8 +98,9 @@ export function CalendarToolbar({
       </div>
 
       <div className="flex items-center gap-2">
-        {showCalendarListButton && onToggleCalendarList && (
+        {Boolean(showCalendarListButton) && onToggleCalendarList != null && (
           <button
+            type="button"
             onClick={onToggleCalendarList}
             className="p-1.5 text-text-secondary hover:text-text-primary hover:bg-bg-hover rounded transition-colors"
             title="Toggle calendar list"
@@ -106,8 +111,9 @@ export function CalendarToolbar({
         <div className="flex bg-bg-tertiary rounded-md p-0.5">
           {(["day", "week", "month"] as CalendarView[]).map((v) => (
             <button
+              type="button"
               key={v}
-              onClick={() => onViewChange(v)}
+              onClick={(): void => onViewChange(v)}
               className={`px-3 py-1 text-xs font-medium rounded transition-colors capitalize ${
                 view === v
                   ? "bg-bg-primary text-text-primary shadow-sm"
@@ -119,6 +125,7 @@ export function CalendarToolbar({
           ))}
         </div>
         <button
+          type="button"
           onClick={onCreateEvent}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors"
         >

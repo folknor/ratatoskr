@@ -92,11 +92,7 @@ import {
 describe("imapMessageToParsedMessage", () => {
   it("converts basic IMAP message to ParsedMessage format", () => {
     const msg = createMockImapMessage();
-    const { parsed, threadable } = imapMessageToParsedMessage(
-      msg,
-      "acc-1",
-      "INBOX",
-    );
+    const { parsed } = imapMessageToParsedMessage(msg, "acc-1", "INBOX");
 
     expect(parsed.id).toBe("imap-acc-1-INBOX-42");
     expect(parsed.fromAddress).toBe("sender@example.com");
@@ -369,8 +365,8 @@ describe("imapInitialSync", () => {
     // Each placeholder thread must be created before its corresponding message.
     // Verify by checking that the nth thread call preceded the nth message call.
     for (let i = 0; i < 2; i++) {
-      const threadOrder = mockUpsertThread.mock.invocationCallOrder[i]!;
-      const messageOrder = mockUpsertMessage.mock.invocationCallOrder[i]!;
+      const threadOrder = mockUpsertThread.mock.invocationCallOrder[i] ?? 0;
+      const messageOrder = mockUpsertMessage.mock.invocationCallOrder[i] ?? 0;
       expect(threadOrder).toBeLessThan(messageOrder);
     }
 
@@ -398,7 +394,7 @@ describe("imapInitialSync", () => {
     // Thread IDs should be batch-updated via updateMessageThreadIds
     expect(mockUpdateMessageThreadIds).toHaveBeenCalledTimes(1);
     const [accountId, messageIds, threadId] =
-      mockUpdateMessageThreadIds.mock.calls[0]!;
+      mockUpdateMessageThreadIds.mock.calls[0] ?? [];
     expect(accountId).toBe("acc-1");
     expect(messageIds).toHaveLength(1);
     expect(threadId).toBeTruthy();

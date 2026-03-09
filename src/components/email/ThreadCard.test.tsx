@@ -76,7 +76,7 @@ describe("ThreadCard", () => {
         onClick={onClick}
       />,
     );
-    const button = container.querySelector("button")!;
+    const button = container.querySelector("button") as Element;
     expect(button.className).toContain("bg-red-500/8");
   });
 
@@ -88,7 +88,7 @@ describe("ThreadCard", () => {
         onClick={onClick}
       />,
     );
-    const button = container.querySelector("button")!;
+    const button = container.querySelector("button") as Element;
     expect(button.className).not.toContain("bg-red-500");
   });
 
@@ -100,7 +100,7 @@ describe("ThreadCard", () => {
         onClick={onClick}
       />,
     );
-    const button = container.querySelector("button")!;
+    const button = container.querySelector("button") as Element;
     expect(button.className).toContain("bg-red-500/8");
   });
 });

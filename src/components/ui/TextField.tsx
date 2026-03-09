@@ -1,4 +1,5 @@
-import type { InputHTMLAttributes } from "react";
+import type React from "react";
+import type { InputHTMLAttributes, RefObject } from "react";
 
 interface TextFieldProps
   extends Omit<InputHTMLAttributes<HTMLInputElement>, "size"> {
@@ -15,7 +16,9 @@ export const TextField = function TextField({
   id,
   ref,
   ...rest
-}: TextFieldProps & { ref?: RefObject<HTMLInputElement | null> }) {
+}: TextFieldProps & {
+  ref?: RefObject<HTMLInputElement | null>;
+}): React.ReactNode {
   const inputId =
     id ?? (label ? label.toLowerCase().replace(/\s+/g, "-") : undefined);
 
@@ -26,7 +29,7 @@ export const TextField = function TextField({
 
   return (
     <div className={className}>
-      {label && (
+      {label != null && label !== "" && (
         <label
           htmlFor={inputId}
           className="text-sm text-text-secondary block mb-1.5"
@@ -40,7 +43,9 @@ export const TextField = function TextField({
         className={`w-full ${sizes[size]} bg-bg-tertiary border ${error ? "border-danger" : "border-border-primary"} rounded text-text-primary outline-none focus:border-accent`}
         {...rest}
       />
-      {error && <p className="text-xs text-danger mt-1">{error}</p>}
+      {error != null && error !== "" && (
+        <p className="text-xs text-danger mt-1">{error}</p>
+      )}
     </div>
   );
 };

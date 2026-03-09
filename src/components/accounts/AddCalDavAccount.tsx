@@ -6,6 +6,7 @@ import {
   Loader2,
   XCircle,
 } from "lucide-react";
+import type React from "react";
 import { useCallback, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { TextField } from "@/components/ui/TextField";
@@ -28,7 +29,7 @@ export function AddCalDavAccount({
   onClose,
   onSuccess,
   onBack,
-}: AddCalDavAccountProps) {
+}: AddCalDavAccountProps): React.ReactNode {
   const addAccount = useAccountStore((s) => s.addAccount);
   const [step, setStep] = useState<Step>("basic");
 
@@ -52,7 +53,7 @@ export function AddCalDavAccount({
   // Creating account
   const [creating, setCreating] = useState(false);
 
-  const handleDiscoverAndNext = useCallback(async () => {
+  const handleDiscoverAndNext = useCallback(async (): Promise<void> => {
     if (!email.trim()) return;
     setUsername(email);
 
@@ -65,7 +66,7 @@ export function AddCalDavAccount({
     setStep("server");
   }, [email]);
 
-  const handleTest = useCallback(async () => {
+  const handleTest = useCallback(async (): Promise<void> => {
     setTesting(true);
     setTestResult(null);
 
@@ -75,7 +76,7 @@ export function AddCalDavAccount({
     setTesting(false);
   }, [caldavUrl, username, password]);
 
-  const handleCreate = useCallback(async () => {
+  const handleCreate = useCallback(async (): Promise<void> => {
     setCreating(true);
     try {
       const id = crypto.randomUUID();
@@ -133,7 +134,9 @@ export function AddCalDavAccount({
               label="Email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                setEmail(e.target.value)
+              }
               placeholder="your@email.com"
               autoFocus
             />
@@ -142,12 +145,15 @@ export function AddCalDavAccount({
               label="Display Name (optional)"
               type="text"
               value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                setDisplayName(e.target.value)
+              }
               placeholder="My Calendar"
             />
 
             <div className="flex justify-between pt-2">
               <button
+                type="button"
                 onClick={onBack}
                 className="flex items-center gap-1 text-sm text-text-secondary hover:text-text-primary transition-colors"
               >
@@ -155,6 +161,7 @@ export function AddCalDavAccount({
                 Back
               </button>
               <button
+                type="button"
                 onClick={handleDiscoverAndNext}
                 disabled={!email.trim()}
                 className="flex items-center gap-1 px-4 py-2 text-sm font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-50"
@@ -168,13 +175,13 @@ export function AddCalDavAccount({
 
         {step === "server" && (
           <div className="space-y-4">
-            {providerName && (
+            {providerName != null && (
               <div className="text-xs text-accent font-medium">
                 Detected: {providerName}
               </div>
             )}
 
-            {needsAppPassword && (
+            {needsAppPassword === true && (
               <div className="p-3 bg-warning/10 border border-warning/30 rounded text-xs text-text-secondary">
                 This provider requires an app-specific password. Generate one in
                 your provider's security settings.
@@ -185,7 +192,9 @@ export function AddCalDavAccount({
               label="CalDAV Server URL"
               type="url"
               value={caldavUrl}
-              onChange={(e) => setCaldavUrl(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                setCaldavUrl(e.target.value)
+              }
               placeholder="https://caldav.example.com/"
             />
 
@@ -193,7 +202,9 @@ export function AddCalDavAccount({
               label="Username"
               type="text"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                setUsername(e.target.value)
+              }
               placeholder="your@email.com"
             />
 
@@ -201,7 +212,9 @@ export function AddCalDavAccount({
               label={needsAppPassword ? "App Password" : "Password"}
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                setPassword(e.target.value)
+              }
               placeholder={
                 needsAppPassword ? "App-specific password" : "Password"
               }
@@ -209,16 +222,18 @@ export function AddCalDavAccount({
 
             <div className="flex justify-between pt-2">
               <button
-                onClick={() => setStep("basic")}
+                type="button"
+                onClick={(): void => setStep("basic")}
                 className="flex items-center gap-1 text-sm text-text-secondary hover:text-text-primary transition-colors"
               >
                 <ArrowLeft size={14} />
                 Back
               </button>
               <button
-                onClick={() => {
+                type="button"
+                onClick={(): void => {
                   setStep("test");
-                  handleTest();
+                  void handleTest();
                 }}
                 disabled={!(caldavUrl && password)}
                 className="flex items-center gap-1 px-4 py-2 text-sm font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-50"
@@ -233,7 +248,7 @@ export function AddCalDavAccount({
         {step === "test" && (
           <div className="space-y-4">
             <div className="text-center py-6">
-              {testing && (
+              {testing === true && (
                 <>
                   <Loader2
                     size={32}
@@ -245,7 +260,7 @@ export function AddCalDavAccount({
                 </>
               )}
 
-              {!testing && testResult?.success && (
+              {!testing && testResult?.success === true && (
                 <>
                   <CheckCircle2
                     size={32}
@@ -263,7 +278,7 @@ export function AddCalDavAccount({
                 </>
               )}
 
-              {!testing && testResult && !testResult.success && (
+              {!testing && testResult != null && !testResult.success && (
                 <>
                   <XCircle size={32} className="text-danger mx-auto mb-3" />
                   <p className="text-sm font-medium text-text-primary">
@@ -278,7 +293,8 @@ export function AddCalDavAccount({
 
             <div className="flex justify-between pt-2">
               <button
-                onClick={() => {
+                type="button"
+                onClick={(): void => {
                   setStep("server");
                   setTestResult(null);
                 }}
@@ -288,8 +304,9 @@ export function AddCalDavAccount({
                 Back
               </button>
 
-              {testResult?.success ? (
+              {testResult?.success === true ? (
                 <button
+                  type="button"
                   onClick={handleCreate}
                   disabled={creating}
                   className="flex items-center gap-1 px-4 py-2 text-sm font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-50"
@@ -298,6 +315,7 @@ export function AddCalDavAccount({
                 </button>
               ) : !testing ? (
                 <button
+                  type="button"
                   onClick={handleTest}
                   className="flex items-center gap-1 px-4 py-2 text-sm font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors"
                 >
@@ -318,6 +336,7 @@ export function AddCalDavAccount({
               Your calendars will sync automatically.
             </p>
             <button
+              type="button"
               onClick={onSuccess}
               className="mt-4 px-4 py-2 text-sm font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors"
             >

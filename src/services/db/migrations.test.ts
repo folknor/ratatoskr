@@ -10,16 +10,16 @@ function splitStatements(sql: string): string[] {
   for (let i = 0; i < sql.length; i++) {
     if (
       upper.startsWith("BEGIN", i) &&
-      (i === 0 || /\W/.test(sql[i - 1]!)) &&
-      (i + 5 >= sql.length || /\W/.test(sql[i + 5]!))
+      (i === 0 || /\W/.test(sql[i - 1] ?? "")) &&
+      (i + 5 >= sql.length || /\W/.test(sql[i + 5] ?? ""))
     ) {
       depth++;
     }
 
     if (
       upper.startsWith("END", i) &&
-      (i === 0 || /\W/.test(sql[i - 1]!)) &&
-      (i + 3 >= sql.length || /\W/.test(sql[i + 3]!)) &&
+      (i === 0 || /\W/.test(sql[i - 1] ?? "")) &&
+      (i + 3 >= sql.length || /\W/.test(sql[i + 3] ?? "")) &&
       depth > 0
     ) {
       depth--;

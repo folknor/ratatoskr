@@ -12,7 +12,7 @@ interface BuiltQuery {
 export function buildSearchQuery(
   parsed: ParsedSearchQuery,
   accountId?: string,
-  limit = 50,
+  limit: number = 50,
 ): BuiltQuery {
   const params: unknown[] = [];
   let paramIdx = 1;

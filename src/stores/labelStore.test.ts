@@ -156,8 +156,7 @@ describe("labelStore", () => {
       type: "user",
       color: { backgroundColor: "#fb4c2f", textColor: "#ffffff" },
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockGetGmailClient.mockResolvedValue(mockClient as any);
+    mockGetGmailClient.mockResolvedValue(mockClient);
     mockUpsertLabel.mockResolvedValue(undefined);
     mockGetLabels.mockResolvedValue([]);
 
@@ -189,8 +188,7 @@ describe("labelStore", () => {
       type: "user",
       color: { backgroundColor: "#16a765", textColor: "#ffffff" },
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockGetGmailClient.mockResolvedValue(mockClient as any);
+    mockGetGmailClient.mockResolvedValue(mockClient);
     mockUpsertLabel.mockResolvedValue(undefined);
     mockGetLabels.mockResolvedValue([]);
 
@@ -209,8 +207,7 @@ describe("labelStore", () => {
   it("should delete a label via Gmail API and DB", async () => {
     const mockClient = createMockGmailClient();
     mockClient.deleteLabel.mockResolvedValue(undefined);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockGetGmailClient.mockResolvedValue(mockClient as any);
+    mockGetGmailClient.mockResolvedValue(mockClient);
     mockDbDeleteLabel.mockResolvedValue(undefined);
     mockGetLabels.mockResolvedValue([]);
 

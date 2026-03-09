@@ -19,7 +19,7 @@ export function createProviderFactory<TClient>(
       }
       return instance;
     },
-    clear() {
+    clear(): void {
       instance = null;
       cachedKey = null;
     },

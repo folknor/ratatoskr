@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import { getAccount } from "../db/accounts";
 import { getGmailClient } from "../gmail/tokenManager";
 import { GmailApiProvider } from "./gmailProvider";

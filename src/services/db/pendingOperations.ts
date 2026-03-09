@@ -32,7 +32,7 @@ export async function enqueuePendingOperation(
 
 export async function getPendingOperations(
   accountId?: string,
-  limit = 50,
+  limit: number = 50,
 ): Promise<PendingOperation[]> {
   const db = await getDb();
   const now = Math.floor(Date.now() / 1000);
@@ -71,7 +71,7 @@ export async function deleteOperation(id: string): Promise<void> {
   await db.execute(`DELETE FROM pending_operations WHERE id = $1`, [id]);
 }
 
-const BACKOFF_SCHEDULE = [60, 300, 900, 3600];
+const BACKOFF_SCHEDULE: number[] = [60, 300, 900, 3600];
 
 export async function incrementRetry(id: string): Promise<void> {
   const db = await getDb();
@@ -92,7 +92,7 @@ export async function incrementRetry(id: string): Promise<void> {
   }
 
   const backoffIdx = Math.min(newCount - 1, BACKOFF_SCHEDULE.length - 1);
-  const delaySec = BACKOFF_SCHEDULE[backoffIdx]!;
+  const delaySec = BACKOFF_SCHEDULE[backoffIdx] ?? 3600;
   const nextRetryAt = Math.floor(Date.now() / 1000) + delaySec;
 
   await db.execute(
@@ -172,15 +172,16 @@ export async function compactQueue(accountId?: string): Promise<number> {
       );
       // If two ops with opposite values exist, remove both
       while (toggleOps.length >= 2) {
-        const a = toggleOps.shift()!;
-        const b = toggleOps.shift()!;
-        const paramsA = JSON.parse(a.params);
-        const paramsB = JSON.parse(b.params);
+        const opA = toggleOps.shift();
+        const opB = toggleOps.shift();
+        if (!(opA && opB)) break;
+        const paramsA = JSON.parse(opA.params);
+        const paramsB = JSON.parse(opB.params);
         if (
           (toggleType === "star" && paramsA.starred !== paramsB.starred) ||
           (toggleType === "markRead" && paramsA.read !== paramsB.read)
         ) {
-          toDelete.push(a.id, b.id);
+          toDelete.push(opA.id, opB.id);
         }
       }
     }

@@ -1,5 +1,6 @@
 import { useParams } from "@tanstack/react-router";
 import { ArrowLeft, Search } from "lucide-react";
+import type React from "react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -12,7 +13,7 @@ import { HelpCardGrid } from "./HelpCardGrid";
 import { HelpSearchBar } from "./HelpSearchBar";
 import { HelpSidebar } from "./HelpSidebar";
 
-export function HelpPage() {
+export function HelpPage(): React.ReactNode {
   const { t } = useTranslation("help");
   const { topic } = useParams({ strict: false }) as { topic?: string };
   const activeTopic =
@@ -23,7 +24,7 @@ export function HelpPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedCardId, setExpandedCardId] = useState<string | null>(null);
 
-  const handleToggleCard = (cardId: string) => {
+  const handleToggleCard = (cardId: string): void => {
     setExpandedCardId((prev) => (prev === cardId ? null : cardId));
   };
 
@@ -63,7 +64,8 @@ export function HelpPage() {
       {/* Header */}
       <div className="flex items-center gap-3 px-5 py-3 border-b border-border-primary shrink-0 bg-bg-primary/60 backdrop-blur-sm">
         <button
-          onClick={() => navigateToLabel("inbox")}
+          type="button"
+          onClick={(): void => navigateToLabel("inbox")}
           className="p-1.5 -ml-1 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
           title={t("backToInbox")}
         >
@@ -83,7 +85,7 @@ export function HelpPage() {
           <div className="max-w-3xl px-8 py-6">
             <HelpSearchBar query={searchQuery} onChange={setSearchQuery} />
 
-            {groupedResults ? (
+            {groupedResults != null ? (
               // Search results mode
               Object.keys(groupedResults).length > 0 ? (
                 <div className="space-y-6">
@@ -92,7 +94,8 @@ export function HelpPage() {
                     return (
                       <div key={categoryId}>
                         <h2 className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-3">
-                          {cat ? t(cat.label) : categoryId}
+                          {/* biome-ignore lint/nursery/noLeakedRender: ternary always produces a string */}
+                          {cat !== undefined ? t(cat.label) : categoryId}
                         </h2>
                         <HelpCardGrid
                           cards={cards}
@@ -114,7 +117,7 @@ export function HelpPage() {
               )
             ) : (
               // Active topic mode
-              activeCategory && (
+              activeCategory != null && (
                 <div>
                   <h2 className="text-lg font-semibold text-text-primary mb-4">
                     {t(activeCategory.label)}

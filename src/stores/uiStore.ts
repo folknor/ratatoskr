@@ -1,3 +1,4 @@
+import type { StoreApi, UseBoundStore } from "zustand";
 import { create } from "zustand";
 import type { ColorThemeId } from "@/constants/themes";
 import { setSetting } from "@/services/db/settings";
@@ -63,107 +64,113 @@ interface UIState {
   setSyncingFolder: (folder: string | null) => void;
 }
 
-export const useUIStore = create<UIState>((set) => ({
-  theme: "system",
-  sidebarCollapsed: false,
-  contactSidebarVisible: true,
-  readingPanePosition: "right",
-  readFilter: "all",
-  emailListWidth: 320,
-  emailDensity: "default",
-  defaultReplyMode: "reply",
-  markAsReadBehavior: "instant",
-  fontScale: "default",
-  colorTheme: "indigo",
-  sendAndArchive: false,
-  inboxViewMode: "unified",
-  taskSidebarVisible: false,
-  sidebarNavConfig: null,
-  reduceMotion: false,
-  showSyncStatusBar: true,
-  isOnline: true,
-  pendingOpsCount: 0,
-  isSyncingFolder: null,
+export const useUIStore: UseBoundStore<StoreApi<UIState>> = create<UIState>(
+  (set) => ({
+    theme: "system",
+    sidebarCollapsed: false,
+    contactSidebarVisible: true,
+    readingPanePosition: "right",
+    readFilter: "all",
+    emailListWidth: 320,
+    emailDensity: "default",
+    defaultReplyMode: "reply",
+    markAsReadBehavior: "instant",
+    fontScale: "default",
+    colorTheme: "indigo",
+    sendAndArchive: false,
+    inboxViewMode: "unified",
+    taskSidebarVisible: false,
+    sidebarNavConfig: null,
+    reduceMotion: false,
+    showSyncStatusBar: true,
+    isOnline: true,
+    pendingOpsCount: 0,
+    isSyncingFolder: null,
 
-  setTheme: (theme) => set({ theme }),
-  toggleSidebar: () =>
-    set((state) => {
-      const collapsed = !state.sidebarCollapsed;
-      setSetting("sidebar_collapsed", String(collapsed)).catch(() => {});
-      return { sidebarCollapsed: collapsed };
-    }),
-  setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
-  toggleContactSidebar: () =>
-    set((state) => {
-      const visible = !state.contactSidebarVisible;
-      setSetting("contact_sidebar_visible", String(visible)).catch(() => {});
-      return { contactSidebarVisible: visible };
-    }),
-  setContactSidebarVisible: (contactSidebarVisible) =>
-    set({ contactSidebarVisible }),
-  setReadingPanePosition: (readingPanePosition) => {
-    setSetting("reading_pane_position", readingPanePosition).catch(() => {});
-    set({ readingPanePosition });
-  },
-  setReadFilter: (readFilter) => {
-    setSetting("read_filter", readFilter).catch(() => {});
-    set({ readFilter });
-  },
-  setEmailListWidth: (emailListWidth) => {
-    setSetting("email_list_width", String(emailListWidth)).catch(() => {});
-    set({ emailListWidth });
-  },
-  setEmailDensity: (emailDensity) => {
-    setSetting("email_density", emailDensity).catch(() => {});
-    set({ emailDensity });
-  },
-  setDefaultReplyMode: (defaultReplyMode) => {
-    setSetting("default_reply_mode", defaultReplyMode).catch(() => {});
-    set({ defaultReplyMode });
-  },
-  setMarkAsReadBehavior: (markAsReadBehavior) => {
-    setSetting("mark_as_read_behavior", markAsReadBehavior).catch(() => {});
-    set({ markAsReadBehavior });
-  },
-  setFontScale: (fontScale) => {
-    setSetting("font_size", fontScale).catch(() => {});
-    set({ fontScale });
-  },
-  setColorTheme: (colorTheme) => {
-    setSetting("color_theme", colorTheme).catch(() => {});
-    set({ colorTheme });
-  },
-  setSendAndArchive: (sendAndArchive) => {
-    setSetting("send_and_archive", String(sendAndArchive)).catch(() => {});
-    set({ sendAndArchive });
-  },
-  setInboxViewMode: (inboxViewMode) => {
-    setSetting("inbox_view_mode", inboxViewMode).catch(() => {});
-    set({ inboxViewMode });
-  },
-  toggleTaskSidebar: () =>
-    set((state) => {
-      const visible = !state.taskSidebarVisible;
-      setSetting("task_sidebar_visible", String(visible)).catch(() => {});
-      return { taskSidebarVisible: visible };
-    }),
-  setTaskSidebarVisible: (taskSidebarVisible) => set({ taskSidebarVisible }),
-  setSidebarNavConfig: (sidebarNavConfig) => {
-    setSetting("sidebar_nav_config", JSON.stringify(sidebarNavConfig)).catch(
-      () => {},
-    );
-    set({ sidebarNavConfig });
-  },
-  restoreSidebarNavConfig: (sidebarNavConfig) => set({ sidebarNavConfig }),
-  setReduceMotion: (reduceMotion) => {
-    setSetting("reduce_motion", String(reduceMotion)).catch(() => {});
-    set({ reduceMotion });
-  },
-  setShowSyncStatusBar: (showSyncStatusBar) => {
-    setSetting("show_sync_status", String(showSyncStatusBar)).catch(() => {});
-    set({ showSyncStatusBar });
-  },
-  setOnline: (isOnline) => set({ isOnline }),
-  setPendingOpsCount: (pendingOpsCount) => set({ pendingOpsCount }),
-  setSyncingFolder: (isSyncingFolder) => set({ isSyncingFolder }),
-}));
+    setTheme: (theme: Theme) => set({ theme }),
+    toggleSidebar: () =>
+      set((state) => {
+        const collapsed = !state.sidebarCollapsed;
+        setSetting("sidebar_collapsed", String(collapsed)).catch(() => {});
+        return { sidebarCollapsed: collapsed };
+      }),
+    setSidebarCollapsed: (sidebarCollapsed: boolean) =>
+      set({ sidebarCollapsed }),
+    toggleContactSidebar: () =>
+      set((state) => {
+        const visible = !state.contactSidebarVisible;
+        setSetting("contact_sidebar_visible", String(visible)).catch(() => {});
+        return { contactSidebarVisible: visible };
+      }),
+    setContactSidebarVisible: (contactSidebarVisible: boolean) =>
+      set({ contactSidebarVisible }),
+    setReadingPanePosition: (readingPanePosition: ReadingPanePosition) => {
+      setSetting("reading_pane_position", readingPanePosition).catch(() => {});
+      set({ readingPanePosition });
+    },
+    setReadFilter: (readFilter: ReadFilter) => {
+      setSetting("read_filter", readFilter).catch(() => {});
+      set({ readFilter });
+    },
+    setEmailListWidth: (emailListWidth: number) => {
+      setSetting("email_list_width", String(emailListWidth)).catch(() => {});
+      set({ emailListWidth });
+    },
+    setEmailDensity: (emailDensity: EmailDensity) => {
+      setSetting("email_density", emailDensity).catch(() => {});
+      set({ emailDensity });
+    },
+    setDefaultReplyMode: (defaultReplyMode: DefaultReplyMode) => {
+      setSetting("default_reply_mode", defaultReplyMode).catch(() => {});
+      set({ defaultReplyMode });
+    },
+    setMarkAsReadBehavior: (markAsReadBehavior: MarkAsReadBehavior) => {
+      setSetting("mark_as_read_behavior", markAsReadBehavior).catch(() => {});
+      set({ markAsReadBehavior });
+    },
+    setFontScale: (fontScale: FontScale) => {
+      setSetting("font_size", fontScale).catch(() => {});
+      set({ fontScale });
+    },
+    setColorTheme: (colorTheme: ColorThemeId) => {
+      setSetting("color_theme", colorTheme).catch(() => {});
+      set({ colorTheme });
+    },
+    setSendAndArchive: (sendAndArchive: boolean) => {
+      setSetting("send_and_archive", String(sendAndArchive)).catch(() => {});
+      set({ sendAndArchive });
+    },
+    setInboxViewMode: (inboxViewMode: InboxViewMode) => {
+      setSetting("inbox_view_mode", inboxViewMode).catch(() => {});
+      set({ inboxViewMode });
+    },
+    toggleTaskSidebar: () =>
+      set((state) => {
+        const visible = !state.taskSidebarVisible;
+        setSetting("task_sidebar_visible", String(visible)).catch(() => {});
+        return { taskSidebarVisible: visible };
+      }),
+    setTaskSidebarVisible: (taskSidebarVisible: boolean) =>
+      set({ taskSidebarVisible }),
+    setSidebarNavConfig: (sidebarNavConfig: SidebarNavItem[]) => {
+      setSetting("sidebar_nav_config", JSON.stringify(sidebarNavConfig)).catch(
+        () => {},
+      );
+      set({ sidebarNavConfig });
+    },
+    restoreSidebarNavConfig: (sidebarNavConfig: SidebarNavItem[]) =>
+      set({ sidebarNavConfig }),
+    setReduceMotion: (reduceMotion: boolean) => {
+      setSetting("reduce_motion", String(reduceMotion)).catch(() => {});
+      set({ reduceMotion });
+    },
+    setShowSyncStatusBar: (showSyncStatusBar: boolean) => {
+      setSetting("show_sync_status", String(showSyncStatusBar)).catch(() => {});
+      set({ showSyncStatusBar });
+    },
+    setOnline: (isOnline: boolean) => set({ isOnline }),
+    setPendingOpsCount: (pendingOpsCount: number) => set({ pendingOpsCount }),
+    setSyncingFolder: (isSyncingFolder: string | null) =>
+      set({ isSyncingFolder }),
+  }),
+);

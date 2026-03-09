@@ -29,9 +29,9 @@ function parseDateToTimestamp(dateStr: string): number | undefined {
   const normalized = dateStr.replace(/-/g, "/");
   const parts = normalized.split("/");
   if (parts.length !== 3) return;
-  const year = parseInt(parts[0]!, 10);
-  const month = parseInt(parts[1]!, 10);
-  const day = parseInt(parts[2]!, 10);
+  const year = parseInt(parts[0] ?? "", 10);
+  const month = parseInt(parts[1] ?? "", 10);
+  const day = parseInt(parts[2] ?? "", 10);
   if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) return;
   const date = new Date(year, month - 1, day);
   if (Number.isNaN(date.getTime())) return;
@@ -50,7 +50,11 @@ export function parseSearchQuery(input: string): ParsedSearchQuery {
 
   const matches: { start: number; end: number }[] = [];
 
-  while ((match = OPERATOR_REGEX.exec(input)) !== null) {
+  for (
+    match = OPERATOR_REGEX.exec(input);
+    match !== null;
+    match = OPERATOR_REGEX.exec(input)
+  ) {
     const operator = match[1]?.toLowerCase();
     const value = match[2] ?? match[3] ?? "";
 
@@ -104,7 +108,8 @@ export function parseSearchQuery(input: string): ParsedSearchQuery {
   // Process matches in reverse to preserve indices
   remaining = input;
   for (let i = matches.length - 1; i >= 0; i--) {
-    const m = matches[i]!;
+    const m = matches[i];
+    if (!m) continue;
     remaining = remaining.slice(0, m.start) + remaining.slice(m.end);
   }
 

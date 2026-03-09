@@ -1,5 +1,8 @@
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
-import { createBackgroundChecker } from "../backgroundCheckers";
+import {
+  type BackgroundChecker,
+  createBackgroundChecker,
+} from "../backgroundCheckers";
 import { getDb, withTransaction } from "../db/connection";
 
 /**
@@ -65,6 +68,9 @@ export async function snoozeThread(
   });
 }
 
-const snoozeChecker = createBackgroundChecker("Snooze", checkSnoozedThreads);
-export const startSnoozeChecker = snoozeChecker.start;
-export const stopSnoozeChecker = snoozeChecker.stop;
+const snoozeChecker: BackgroundChecker = createBackgroundChecker(
+  "Snooze",
+  checkSnoozedThreads,
+);
+export const startSnoozeChecker: () => void = snoozeChecker.start;
+export const stopSnoozeChecker: () => void = snoozeChecker.stop;

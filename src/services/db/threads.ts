@@ -22,8 +22,8 @@ export interface DbThread {
 export async function getThreadsForAccount(
   accountId: string,
   labelId?: string,
-  limit = 50,
-  offset = 0,
+  limit: number = 50,
+  offset: number = 0,
 ): Promise<DbThread[]> {
   const db = await getDb();
   if (labelId) {
@@ -52,8 +52,8 @@ export async function getThreadsForAccount(
 export async function getThreadsForCategory(
   accountId: string,
   category: string,
-  limit = 50,
-  offset = 0,
+  limit: number = 50,
+  offset: number = 0,
 ): Promise<DbThread[]> {
   const db = await getDb();
   if (category === "Primary") {

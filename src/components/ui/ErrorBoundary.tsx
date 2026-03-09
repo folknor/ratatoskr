@@ -45,6 +45,8 @@ export class ErrorBoundary extends Component<
             {this.state.error?.message ?? "An unexpected error occurred"}
           </p>
           <button
+            type="button"
+            // biome-ignore lint/nursery/useExplicitType: inline callback
             onClick={() => this.setState({ hasError: false, error: null })}
             className="px-3 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors"
           >

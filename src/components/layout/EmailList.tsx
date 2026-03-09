@@ -8,6 +8,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CSSTransition } from "react-transition-group";
@@ -81,7 +82,7 @@ export function EmailList({
 }: {
   width?: number;
   listRef?: React.Ref<HTMLDivElement>;
-}) {
+}): React.ReactNode {
   const { t } = useTranslation("email");
   const threads = useThreadStore((s) => s.threads);
   const selectedThreadId = useSelectedThreadId();
@@ -116,8 +117,8 @@ export function EmailList({
   const activeCategory = inboxViewMode === "split" ? routerCategory : "All";
   const setActiveCategory =
     inboxViewMode === "split"
-      ? (cat: string) => navigateToLabel("inbox", { category: cat })
-      : () => {};
+      ? (cat: string): void => navigateToLabel("inbox", { category: cat })
+      : (): void => {};
 
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -222,7 +223,7 @@ export function EmailList({
   const handleThreadClick = useCallback(
     (thread: Thread) => {
       if (activeLabel === "drafts") {
-        handleDraftClick(thread);
+        void handleDraftClick(thread);
       } else {
         navigateToThread(thread.id);
       }
@@ -230,7 +231,7 @@ export function EmailList({
     [activeLabel, handleDraftClick],
   );
 
-  const handleBulkDelete = async () => {
+  const handleBulkDelete = async (): Promise<void> => {
     if (!activeAccountId || multiSelectCount === 0) return;
     const isTrashView = activeLabel === "trash";
     const ids = [...selectedThreadIds];
@@ -252,7 +253,7 @@ export function EmailList({
     }
   };
 
-  const handleBulkArchive = async () => {
+  const handleBulkArchive = async (): Promise<void> => {
     if (!activeAccountId || multiSelectCount === 0) return;
     const ids = [...selectedThreadIds];
     removeThreads(ids);
@@ -266,7 +267,7 @@ export function EmailList({
     }
   };
 
-  const handleBulkSpam = async () => {
+  const handleBulkSpam = async (): Promise<void> => {
     if (!activeAccountId || multiSelectCount === 0) return;
     const ids = [...selectedThreadIds];
     const isSpamView = activeLabel === "spam";
@@ -292,11 +293,12 @@ export function EmailList({
     let filtered = threads;
     // Apply search filter
     if (searchThreadIds !== null) {
-      filtered = filtered.filter((t) => searchThreadIds.has(t.id));
+      filtered = filtered.filter((th) => searchThreadIds.has(th.id));
     }
     // Apply read filter
-    if (readFilter === "unread") filtered = filtered.filter((t) => !t.isRead);
-    else if (readFilter === "read") filtered = filtered.filter((t) => t.isRead);
+    if (readFilter === "unread") filtered = filtered.filter((th) => !th.isRead);
+    else if (readFilter === "read")
+      filtered = filtered.filter((th) => th.isRead);
     // Category filtering is now server-side (Phase 4) — no client-side filter needed
     return filtered;
   }, [threads, readFilter, searchThreadIds]);
@@ -311,10 +313,10 @@ export function EmailList({
   const visibleThreads = useMemo(() => {
     if (activeLabel !== "inbox" || activeCategory !== "All")
       return filteredThreads;
-    return filteredThreads.filter((t) => {
-      const cat = categoryMap.get(t.id);
+    return filteredThreads.filter((th) => {
+      const cat = categoryMap.get(th.id);
       if (cat && bundledCategorySet.has(cat)) return false;
-      if (heldThreadIds.has(t.id)) return false;
+      if (heldThreadIds.has(th.id)) return false;
       return true;
     });
   }, [
@@ -331,23 +333,23 @@ export function EmailList({
       dbThreads: Awaited<ReturnType<typeof getThreadsForAccount>>,
     ): Promise<Thread[]> =>
       Promise.all(
-        dbThreads.map(async (t) => {
-          const labelIds = await getThreadLabelIds(t.account_id, t.id);
+        dbThreads.map(async (row) => {
+          const labelIds = await getThreadLabelIds(row.account_id, row.id);
           return {
-            id: t.id,
-            accountId: t.account_id,
-            subject: t.subject,
-            snippet: t.snippet,
-            lastMessageAt: t.last_message_at ?? 0,
-            messageCount: t.message_count,
-            isRead: t.is_read === 1,
-            isStarred: t.is_starred === 1,
-            isPinned: t.is_pinned === 1,
-            isMuted: t.is_muted === 1,
-            hasAttachments: t.has_attachments === 1,
+            id: row.id,
+            accountId: row.account_id,
+            subject: row.subject,
+            snippet: row.snippet,
+            lastMessageAt: row.last_message_at ?? 0,
+            messageCount: row.message_count,
+            isRead: row.is_read === 1,
+            isStarred: row.is_starred === 1,
+            isPinned: row.is_pinned === 1,
+            isMuted: row.is_muted === 1,
+            hasAttachments: row.has_attachments === 1,
             labelIds,
-            fromName: t.from_name,
-            fromAddress: t.from_address,
+            fromName: row.from_name,
+            fromAddress: row.from_address,
           };
         }),
       ),
@@ -379,7 +381,7 @@ export function EmailList({
         setThreads(mapped);
         setHasMore(false); // Smart folders load all at once
       } else {
-        let dbThreads;
+        let dbThreads: Awaited<ReturnType<typeof getThreadsForAccount>>;
         // Server-side category filtering for inbox
         if (activeLabel === "inbox" && activeCategory !== "All") {
           dbThreads = await getThreadsForCategory(
@@ -425,7 +427,7 @@ export function EmailList({
     setLoadingMore(true);
     try {
       const offset = threads.length;
-      let dbThreads;
+      let dbThreads: Awaited<ReturnType<typeof getThreadsForAccount>>;
       if (activeLabel === "inbox" && activeCategory !== "All") {
         dbThreads = await getThreadsForCategory(
           activeAccountId,
@@ -465,12 +467,12 @@ export function EmailList({
   ]);
 
   useEffect(() => {
-    loadThreads();
+    void loadThreads();
   }, [loadThreads]);
 
   // Stable thread ID key — only changes when the actual set of thread IDs changes, not on every array reference
   const threadIdKey = useMemo(
-    () => threads.map((t) => t.id).join(","),
+    () => threads.map((th) => th.id).join(","),
     [threads],
   );
 
@@ -492,7 +494,7 @@ export function EmailList({
     const isInbox = activeLabel === "inbox";
     const isAllCategory = activeCategory === "All";
 
-    const loadMetadata = async () => {
+    const loadMetadata = async (): Promise<void> => {
       try {
         // Build all promises based on current view
         const promises: Promise<void>[] = [];
@@ -580,8 +582,8 @@ export function EmailList({
       }
     };
 
-    loadMetadata();
-    return () => {
+    void loadMetadata();
+    return (): void => {
       cancelled = true;
     };
   }, [threadIdKey, activeLabel, activeCategory, activeAccountId]);
@@ -600,12 +602,12 @@ export function EmailList({
   // Listen for sync completion to reload (debounced to avoid waterfall from multiple emitters)
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const handler = () => {
+    const handler = (): void => {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => loadThreads(), 500);
+      timer = setTimeout(() => void loadThreads(), 500);
     };
     window.addEventListener("velo-sync-done", handler);
-    return () => {
+    return (): void => {
       window.removeEventListener("velo-sync-done", handler);
       if (timer) clearTimeout(timer);
     };
@@ -616,15 +618,15 @@ export function EmailList({
     const container = scrollContainerRef.current;
     if (!container) return;
 
-    const handleScroll = () => {
+    const handleScroll = (): void => {
       const { scrollTop, scrollHeight, clientHeight } = container;
       if (scrollHeight - scrollTop - clientHeight < 200) {
-        loadMore();
+        void loadMore();
       }
     };
 
     container.addEventListener("scroll", handleScroll, { passive: true });
-    return () => container.removeEventListener("scroll", handleScroll);
+    return (): void => container.removeEventListener("scroll", handleScroll);
   }, [loadMore]);
 
   return (
@@ -672,6 +674,7 @@ export function EmailList({
         </div>
         <select
           value={readFilter}
+          // biome-ignore lint/nursery/useExplicitType: inline callback
           onChange={(e) =>
             setReadFilter(e.target.value as "all" | "read" | "unread")
           }
@@ -710,6 +713,7 @@ export function EmailList({
             </span>
             {multiSelectCount < filteredThreads.length && (
               <button
+                type="button"
                 onClick={selectAll}
                 className="text-xs text-accent hover:text-accent-hover transition-colors"
               >
@@ -719,6 +723,7 @@ export function EmailList({
           </div>
           <div className="flex items-center gap-1">
             <button
+              type="button"
               onClick={handleBulkArchive}
               title={t("archiveSelected")}
               className="p-1.5 text-text-secondary hover:text-text-primary hover:bg-bg-hover rounded transition-colors"
@@ -726,6 +731,7 @@ export function EmailList({
               <Archive size={14} />
             </button>
             <button
+              type="button"
               onClick={handleBulkDelete}
               title={t("deleteSelected")}
               className="p-1.5 text-text-secondary hover:text-error hover:bg-bg-hover rounded transition-colors"
@@ -733,6 +739,7 @@ export function EmailList({
               <Trash2 size={14} />
             </button>
             <button
+              type="button"
               onClick={handleBulkSpam}
               title={activeLabel === "spam" ? t("notSpam") : t("reportSpam")}
               className="p-1.5 text-text-secondary hover:text-text-primary hover:bg-bg-hover rounded transition-colors"
@@ -740,6 +747,7 @@ export function EmailList({
               <Ban size={14} />
             </button>
             <button
+              type="button"
               onClick={clearMultiSelect}
               title={t("common:clearSelection")}
               className="p-1.5 text-text-secondary hover:text-text-primary hover:bg-bg-hover rounded transition-colors"
@@ -773,13 +781,14 @@ export function EmailList({
                 const isExpanded = expandedBundles.has(rule.category);
                 const bundledThreads = isExpanded
                   ? filteredThreads.filter(
-                      (t) => categoryMap.get(t.id) === rule.category,
+                      (th) => categoryMap.get(th.id) === rule.category,
                     )
                   : [];
                 return (
                   <div key={`bundle-${rule.category}`}>
                     <button
-                      onClick={() => {
+                      type="button"
+                      onClick={(): void => {
                         setExpandedBundles((prev) => {
                           const next = new Set(prev);
                           if (next.has(rule.category))
@@ -803,7 +812,8 @@ export function EmailList({
                           </span>
                         </div>
                         <span className="text-xs text-text-tertiary truncate block mt-0.5">
-                          {summary.latestSender && `${summary.latestSender}: `}
+                          {summary.latestSender != null &&
+                            `${summary.latestSender}: `}
                           {summary.latestSubject ?? ""}
                         </span>
                       </div>
@@ -830,7 +840,8 @@ export function EmailList({
               })}
             {visibleThreads.map((thread, idx) => {
               const prevThread = idx > 0 ? filteredThreads[idx - 1] : undefined;
-              const showDivider = prevThread?.isPinned && !thread.isPinned;
+              const showDivider =
+                Boolean(prevThread?.isPinned) && !thread.isPinned;
               return (
                 <div
                   key={thread.id}
@@ -840,7 +851,7 @@ export function EmailList({
                     idx < 15 ? { animationDelay: `${idx * 30}ms` } : undefined
                   }
                 >
-                  {showDivider && (
+                  {showDivider === true && (
                     <div className="px-4 py-1.5 text-xs font-medium text-text-tertiary uppercase tracking-wider bg-bg-tertiary/50 border-b border-border-secondary">
                       {t("otherEmails")}
                     </div>
@@ -859,7 +870,7 @@ export function EmailList({
                 </div>
               );
             })}
-            {loadingMore && (
+            {loadingMore === true && (
               <div className="px-4 py-3 text-center text-xs text-text-tertiary">
                 {t("common:loadingMore")}
               </div>
@@ -888,7 +899,7 @@ function EmptyStateForContext({
   activeLabel: string;
   readFilter: string;
   activeCategory: string;
-}) {
+}): React.ReactNode {
   const { t } = useTranslation("email");
 
   if (searchQuery) {

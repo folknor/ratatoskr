@@ -1,4 +1,5 @@
 import { Calendar, Mail } from "lucide-react";
+import type React from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "@/components/ui/Modal";
@@ -18,7 +19,10 @@ interface AddAccountProps {
 
 type View = "select-provider" | "gmail" | "imap" | "caldav";
 
-export function AddAccount({ onClose, onSuccess }: AddAccountProps) {
+export function AddAccount({
+  onClose,
+  onSuccess,
+}: AddAccountProps): React.ReactNode {
   const { t } = useTranslation("accounts");
   const [view, setView] = useState<View>("select-provider");
   const [status, setStatus] = useState<
@@ -28,7 +32,7 @@ export function AddAccount({ onClose, onSuccess }: AddAccountProps) {
   const [needsSetup, setNeedsSetup] = useState(false);
   const addAccount = useAccountStore((s) => s.addAccount);
 
-  const handleAddGmailAccount = async () => {
+  const handleAddGmailAccount = async (): Promise<void> => {
     setStatus("checking");
     setError(null);
 
@@ -76,7 +80,7 @@ export function AddAccount({ onClose, onSuccess }: AddAccountProps) {
   if (needsSetup) {
     return (
       <SetupClientId
-        onComplete={() => {
+        onComplete={(): void => {
           setNeedsSetup(false);
           setStatus("idle");
         }}
@@ -90,7 +94,7 @@ export function AddAccount({ onClose, onSuccess }: AddAccountProps) {
       <AddCalDavAccount
         onClose={onClose}
         onSuccess={onSuccess}
-        onBack={() => setView("select-provider")}
+        onBack={(): void => setView("select-provider")}
       />
     );
   }
@@ -100,7 +104,7 @@ export function AddAccount({ onClose, onSuccess }: AddAccountProps) {
       <AddImapAccount
         onClose={onClose}
         onSuccess={onSuccess}
-        onBack={() => setView("select-provider")}
+        onBack={(): void => setView("select-provider")}
       />
     );
   }
@@ -118,7 +122,7 @@ export function AddAccount({ onClose, onSuccess }: AddAccountProps) {
             {t("gmailSignInDescription")}
           </p>
 
-          {error && (
+          {error != null && (
             <div className="bg-danger/10 border border-danger/20 rounded-lg p-3 mb-4 text-sm text-danger">
               {error}
             </div>
@@ -135,7 +139,8 @@ export function AddAccount({ onClose, onSuccess }: AddAccountProps) {
 
           <div className="flex gap-3 justify-between">
             <button
-              onClick={() => {
+              type="button"
+              onClick={(): void => {
                 setView("select-provider");
                 setStatus("idle");
                 setError(null);
@@ -146,12 +151,14 @@ export function AddAccount({ onClose, onSuccess }: AddAccountProps) {
             </button>
             <div className="flex gap-3">
               <button
+                type="button"
                 onClick={onClose}
                 className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
               >
                 {t("common:cancel")}
               </button>
               <button
+                type="button"
                 onClick={handleAddGmailAccount}
                 disabled={status === "authenticating" || status === "checking"}
                 className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -184,11 +191,16 @@ export function AddAccount({ onClose, onSuccess }: AddAccountProps) {
 
         <div className="space-y-3">
           <button
-            onClick={() => setView("gmail")}
+            type="button"
+            onClick={(): void => setView("gmail")}
             className="w-full flex items-center gap-4 p-4 rounded-lg border border-border-primary bg-bg-secondary hover:bg-bg-hover transition-colors text-left group"
           >
             <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-bg-tertiary flex items-center justify-center">
-              <svg className="w-5 h-5" viewBox="0 0 24 24">
+              <svg
+                className="w-5 h-5"
+                viewBox="0 0 24 24"
+                aria-label="Google logo"
+              >
                 <path
                   d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
                   fill="#4285F4"
@@ -218,7 +230,8 @@ export function AddAccount({ onClose, onSuccess }: AddAccountProps) {
           </button>
 
           <button
-            onClick={() => setView("imap")}
+            type="button"
+            onClick={(): void => setView("imap")}
             className="w-full flex items-center gap-4 p-4 rounded-lg border border-border-primary bg-bg-secondary hover:bg-bg-hover transition-colors text-left group"
           >
             <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-bg-tertiary flex items-center justify-center">
@@ -235,7 +248,8 @@ export function AddAccount({ onClose, onSuccess }: AddAccountProps) {
           </button>
 
           <button
-            onClick={() => setView("caldav")}
+            type="button"
+            onClick={(): void => setView("caldav")}
             className="w-full flex items-center gap-4 p-4 rounded-lg border border-border-primary bg-bg-secondary hover:bg-bg-hover transition-colors text-left group"
           >
             <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-bg-tertiary flex items-center justify-center">
@@ -254,6 +268,7 @@ export function AddAccount({ onClose, onSuccess }: AddAccountProps) {
 
         <div className="flex justify-end mt-4">
           <button
+            type="button"
             onClick={onClose}
             className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
           >

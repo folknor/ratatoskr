@@ -49,7 +49,7 @@ export async function getThreadCategoryWithManual(
 
 export async function getRecentRuleCategorizedThreadIds(
   accountId: string,
-  limit = 20,
+  limit: number = 20,
 ): Promise<
   { id: string; subject: string; snippet: string; fromAddress: string }[]
 > {
@@ -95,7 +95,7 @@ export async function setThreadCategory(
   accountId: string,
   threadId: string,
   category: string,
-  isManual = false,
+  isManual: boolean = false,
 ): Promise<void> {
   const db = await getDb();
   await db.execute(
@@ -148,7 +148,7 @@ export async function getCategoryUnreadCounts(
 
 export async function getUncategorizedInboxThreadIds(
   accountId: string,
-  limit = 20,
+  limit: number = 20,
 ): Promise<
   { id: string; subject: string; snippet: string; fromAddress: string }[]
 > {

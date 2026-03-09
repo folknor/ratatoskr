@@ -16,7 +16,9 @@ const KEY_FILE_NAME = "velo.key";
 const ALGORITHM = "AES-GCM";
 const KEY_LENGTH = 256;
 const IV_LENGTH = 12;
-const FS_OPTIONS = { baseDir: BaseDirectory.AppData };
+const FS_OPTIONS: { baseDir: BaseDirectory } = {
+  baseDir: BaseDirectory.AppData,
+};
 
 let cachedKey: CryptoKey | null = null;
 
@@ -138,10 +140,13 @@ export function isEncrypted(value: string): boolean {
   const parts = value.split(":");
   if (parts.length !== 2) return false;
   try {
-    atob(parts[0]!);
-    atob(parts[1]!);
+    const part0 = parts[0];
+    const part1 = parts[1];
+    if (!(part0 && part1)) return false;
+    atob(part0);
+    atob(part1);
     // Encrypted values have a 12-byte IV (16 chars base64) and substantial ciphertext
-    return parts[0]?.length === 16;
+    return part0.length === 16;
   } catch {
     return false;
   }

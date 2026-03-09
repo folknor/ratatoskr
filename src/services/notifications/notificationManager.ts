@@ -23,7 +23,10 @@ interface NotificationContext {
 }
 
 let lastNotificationContext: NotificationContext | null = null;
-const recentContexts = new Map<string, NotificationContext>();
+const recentContexts: Map<string, NotificationContext> = new Map<
+  string,
+  NotificationContext
+>();
 
 async function showAndFocusMainWindow(): Promise<void> {
   const mainWindow = await WebviewWindow.getByLabel("main");
@@ -72,31 +75,33 @@ export async function initNotifications(): Promise<void> {
       },
     ]);
 
-    await onAction(async (event) => {
-      const actionId = event.actionTypeId;
-      const ctx = lastNotificationContext;
+    await onAction((event) => {
+      void (async (): Promise<void> => {
+        const actionId = event.actionTypeId;
+        const ctx = lastNotificationContext;
 
-      if (actionId === "reply" && ctx?.threadId && ctx?.accountId) {
-        await showAndFocusMainWindow();
-        useComposerStore.getState().openComposer({
-          mode: "reply",
-          to: ctx.fromAddress ? [ctx.fromAddress] : [],
-          subject: ctx.subject ? `Re: ${ctx.subject}` : "",
-          threadId: ctx.threadId,
-        });
-      } else if (actionId === "archive" && ctx?.threadId && ctx?.accountId) {
-        try {
-          const { archiveThread } = await import("../emailActions");
-          await archiveThread(ctx.accountId, ctx.threadId, []);
-        } catch (err) {
-          console.error("Failed to archive from notification:", err);
+        if (actionId === "reply" && ctx?.threadId && ctx?.accountId) {
+          await showAndFocusMainWindow();
+          useComposerStore.getState().openComposer({
+            mode: "reply",
+            to: ctx.fromAddress ? [ctx.fromAddress] : [],
+            subject: ctx.subject ? `Re: ${ctx.subject}` : "",
+            threadId: ctx.threadId,
+          });
+        } else if (actionId === "archive" && ctx?.threadId && ctx?.accountId) {
+          try {
+            const { archiveThread } = await import("../emailActions");
+            await archiveThread(ctx.accountId, ctx.threadId, []);
+          } catch (err) {
+            console.error("Failed to archive from notification:", err);
+          }
+        } else {
+          await showAndFocusMainWindow();
+          if (ctx?.threadId) {
+            navigateToLabel("inbox", { threadId: ctx.threadId });
+          }
         }
-      } else {
-        await showAndFocusMainWindow();
-        if (ctx?.threadId) {
-          navigateToLabel("inbox", { threadId: ctx.threadId });
-        }
-      }
+      })();
     });
   } catch {
     // registerActionTypes/onAction not available on this platform (e.g. Windows)
@@ -110,6 +115,7 @@ export async function initNotifications(): Promise<void> {
 let pendingCount = 0;
 let notifyTimer: ReturnType<typeof setTimeout> | null = null;
 
+// biome-ignore lint/complexity/useMaxParams: notification context requires multiple independent fields
 export function queueNewEmailNotification(
   from: string,
   subject: string,
@@ -151,6 +157,7 @@ export function queueNewEmailNotification(
  * Determine if a new email should trigger a notification based on smart notification settings.
  * Pure function — no I/O, all config is passed in from the sync cycle.
  */
+// biome-ignore lint/complexity/useMaxParams: notification filter requires all these criteria
 export function shouldNotifyForMessage(
   smartEnabled: boolean,
   allowedCategories: Set<string>,

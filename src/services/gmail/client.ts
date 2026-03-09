@@ -96,6 +96,7 @@ export class GmailClient {
         : INITIAL_BACKOFF_MS * 2 ** attempt;
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
+    // biome-ignore lint/style/noNonNullAssertion: lastResponse is always assigned after at least one loop iteration
     return lastResponse!;
   }
 

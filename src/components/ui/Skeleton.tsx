@@ -1,4 +1,6 @@
-export function ThreadCardSkeleton() {
+import type React from "react";
+
+export function ThreadCardSkeleton(): React.ReactNode {
   return (
     <div className="px-4 py-3 border-b border-border-secondary animate-pulse">
       <div className="flex items-start gap-3">
@@ -16,17 +18,22 @@ export function ThreadCardSkeleton() {
   );
 }
 
-export function EmailListSkeleton({ count = 8 }: { count?: number }) {
+export function EmailListSkeleton({
+  count = 8,
+}: {
+  count?: number;
+}): React.ReactNode {
   return (
     <>
       {Array.from({ length: count }).map((_, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: skeleton placeholders have no identity
         <ThreadCardSkeleton key={i} />
       ))}
     </>
   );
 }
 
-export function MessageSkeleton() {
+export function MessageSkeleton(): React.ReactNode {
   return (
     <div className="px-6 py-4 animate-pulse space-y-4">
       <div className="flex items-center gap-3">

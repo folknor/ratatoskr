@@ -1,3 +1,4 @@
+import type React from "react";
 import { useTranslation } from "react-i18next";
 import { DateTimePickerDialog } from "@/components/ui/DateTimePickerDialog";
 
@@ -6,7 +7,11 @@ interface ScheduleSendDialogProps {
   onClose: () => void;
 }
 
-function getScheduleTimestamps() {
+function getScheduleTimestamps(): {
+  tomorrowMorning: Date;
+  tomorrowAfternoon: Date;
+  monday: Date;
+} {
   const now = new Date();
   const today = new Date(now);
 
@@ -33,7 +38,7 @@ function getScheduleTimestamps() {
 export function ScheduleSendDialog({
   onSchedule,
   onClose,
-}: ScheduleSendDialogProps) {
+}: ScheduleSendDialogProps): React.ReactNode {
   const { t } = useTranslation("composer");
   const { tomorrowMorning, tomorrowAfternoon, monday } =
     getScheduleTimestamps();

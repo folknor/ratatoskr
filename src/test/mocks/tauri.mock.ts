@@ -4,7 +4,10 @@ import { vi } from "vitest";
  * Creates a mock for @tauri-apps/plugin-fs that simulates file operations
  * using an in-memory Map store. All operations use baseDir option (not absolute paths).
  */
-export function createMockTauriFs() {
+export function createMockTauriFs(): {
+  store: Map<string, string>;
+  mock: Record<string, unknown>;
+} {
   const store = new Map<string, string>();
 
   return {
@@ -27,7 +30,10 @@ export function createMockTauriFs() {
 /**
  * Creates a mock for @tauri-apps/api/path with simple join behavior.
  */
-export function createMockTauriPath() {
+export function createMockTauriPath(): {
+  join: ReturnType<typeof vi.fn>;
+  appDataDir: ReturnType<typeof vi.fn>;
+} {
   return {
     join: vi.fn(async (...parts: string[]) => parts.join("/")),
     appDataDir: vi.fn(async () => "/mock/app/data/"),

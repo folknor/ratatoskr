@@ -3,6 +3,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Code, Pencil, Trash2 } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { EditorToolbar } from "@/components/composer/EditorToolbar";
@@ -16,7 +17,7 @@ import {
 } from "@/services/db/signatures";
 import { useAccountStore } from "@/stores/accountStore";
 
-export function SignatureEditor() {
+export function SignatureEditor(): React.ReactNode {
   const { t } = useTranslation("settings");
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
   const [signatures, setSignatures] = useState<DbSignature[]>([]);
@@ -45,18 +46,18 @@ export function SignatureEditor() {
     },
   });
 
-  const loadSignatures = useCallback(async () => {
+  const loadSignatures = useCallback(async (): Promise<void> => {
     if (!activeAccountId) return;
     const sigs = await getSignaturesForAccount(activeAccountId);
     setSignatures(sigs);
   }, [activeAccountId]);
 
   useEffect(() => {
-    loadSignatures();
+    void loadSignatures();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadSignatures is stable, only re-run on activeAccountId change
   }, [loadSignatures]);
 
-  const resetForm = useCallback(() => {
+  const resetForm = useCallback((): void => {
     setName("");
     setIsDefault(false);
     setEditingId(null);
@@ -66,7 +67,7 @@ export function SignatureEditor() {
     editor?.commands.setContent("");
   }, [editor]);
 
-  const toggleHtmlMode = useCallback(() => {
+  const toggleHtmlMode = useCallback((): void => {
     if (!editor) return;
     if (isHtmlMode) {
       // HTML → WYSIWYG: push rawHtml into editor
@@ -78,7 +79,7 @@ export function SignatureEditor() {
     setIsHtmlMode(!isHtmlMode);
   }, [editor, isHtmlMode, rawHtml]);
 
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(async (): Promise<void> => {
     if (!(activeAccountId && editor && name.trim())) return;
 
     const bodyHtml = isHtmlMode ? rawHtml : editor.getHTML();
@@ -113,7 +114,7 @@ export function SignatureEditor() {
   ]);
 
   const handleEdit = useCallback(
-    (sig: DbSignature) => {
+    (sig: DbSignature): void => {
       setEditingId(sig.id);
       setName(sig.name);
       setIsDefault(sig.is_default === 1);
@@ -124,7 +125,7 @@ export function SignatureEditor() {
   );
 
   const handleDelete = useCallback(
-    async (id: string) => {
+    async (id: string): Promise<void> => {
       await deleteSignature(id);
       if (editingId === id) resetForm();
       await loadSignatures();
@@ -151,13 +152,15 @@ export function SignatureEditor() {
           </div>
           <div className="flex items-center gap-1">
             <button
-              onClick={() => handleEdit(sig)}
+              type="button"
+              onClick={(): void => handleEdit(sig)}
               className="p-1 text-text-tertiary hover:text-text-primary"
             >
               <Pencil size={13} />
             </button>
             <button
-              onClick={() => handleDelete(sig.id)}
+              type="button"
+              onClick={(): void => void handleDelete(sig.id)}
               className="p-1 text-text-tertiary hover:text-danger"
             >
               <Trash2 size={13} />
@@ -171,7 +174,9 @@ export function SignatureEditor() {
           <TextField
             type="text"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+              setName(e.target.value)
+            }
             placeholder={t("signatureEditor.signatureName")}
           />
           <div className="border border-border-primary rounded overflow-hidden bg-bg-tertiary">
@@ -199,7 +204,9 @@ export function SignatureEditor() {
             {isHtmlMode ? (
               <textarea
                 value={rawHtml}
-                onChange={(e) => setRawHtml(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>): void =>
+                  setRawHtml(e.target.value)
+                }
                 className="w-full px-3 py-2 min-h-[80px] bg-bg-tertiary text-text-primary text-xs font-mono focus:outline-none resize-y"
                 spellCheck={false}
               />
@@ -212,7 +219,9 @@ export function SignatureEditor() {
               <input
                 type="checkbox"
                 checked={isDefault}
-                onChange={(e) => setIsDefault(e.target.checked)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                  setIsDefault(e.target.checked)
+                }
                 className="rounded"
               />
               {t("signatureEditor.setAsDefault")}
@@ -220,7 +229,8 @@ export function SignatureEditor() {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={handleSave}
+              type="button"
+              onClick={(): void => void handleSave()}
               disabled={!name.trim()}
               className="px-3 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-50"
             >
@@ -229,6 +239,7 @@ export function SignatureEditor() {
                 : t("signatureEditor.save")}
             </button>
             <button
+              type="button"
               onClick={resetForm}
               className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary rounded-md transition-colors"
             >
@@ -238,7 +249,8 @@ export function SignatureEditor() {
         </div>
       ) : (
         <button
-          onClick={() => setShowForm(true)}
+          type="button"
+          onClick={(): void => setShowForm(true)}
           className="text-xs text-accent hover:text-accent-hover"
         >
           {t("signatureEditor.addSignature")}

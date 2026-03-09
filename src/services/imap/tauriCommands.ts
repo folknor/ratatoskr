@@ -195,6 +195,7 @@ export async function imapFetchMessageBody(
  * @param flags - Flag names (e.g. "Seen", "Flagged", "Draft"). Backslash prefix is added automatically.
  * @param add - true to add flags, false to remove them.
  */
+// biome-ignore lint/complexity/useMaxParams: Tauri command wrapper maps directly to Rust function signature
 export async function imapSetFlags(
   config: ImapConfig,
   folder: string,

@@ -1,4 +1,5 @@
 import { HelpCircle } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -10,7 +11,10 @@ interface HelpTooltipProps {
   size?: number;
 }
 
-export function HelpTooltip({ contextId, size = 14 }: HelpTooltipProps) {
+export function HelpTooltip({
+  contextId,
+  size = 14,
+}: HelpTooltipProps): React.ReactNode {
   const { t } = useTranslation("help");
   const tip = CONTEXTUAL_TIPS[contextId];
   const [open, setOpen] = useState(false);
@@ -19,27 +23,28 @@ export function HelpTooltip({ contextId, size = 14 }: HelpTooltipProps) {
   const closeTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(
-    () => () => {
+    () => (): void => {
       clearTimeout(closeTimeout.current);
     },
     [],
   );
 
+  const handleLearnMore = useCallback((): void => {
+    if (!tip) return;
+    setOpen(false);
+    navigateToHelp(tip.helpTopic);
+  }, [tip]);
+
   if (!tip) return null;
 
-  const show = () => {
+  const show = (): void => {
     clearTimeout(closeTimeout.current);
     setOpen(true);
   };
 
-  const hide = () => {
+  const hide = (): void => {
     closeTimeout.current = setTimeout(() => setOpen(false), 150);
   };
-
-  const handleLearnMore = useCallback(() => {
-    setOpen(false);
-    navigateToHelp(tip.helpTopic);
-  }, [tip.helpTopic]);
 
   const rect = iconRef.current?.getBoundingClientRect();
 
@@ -50,15 +55,16 @@ export function HelpTooltip({ contextId, size = 14 }: HelpTooltipProps) {
         type="button"
         onMouseEnter={show}
         onMouseLeave={hide}
-        onClick={() => setOpen((v) => !v)}
+        onClick={(): void => setOpen((v) => !v)}
         className="inline-flex items-center text-text-tertiary hover:text-text-secondary transition-colors"
         aria-label={t(tip.title)}
       >
         <HelpCircle size={size} />
       </button>
-      {open &&
-        rect &&
+      {open === true &&
+        rect != null &&
         createPortal(
+          // biome-ignore lint/a11y/noStaticElementInteractions: tooltip popover hover zone
           <div
             ref={popoverRef}
             onMouseEnter={show}
@@ -74,6 +80,7 @@ export function HelpTooltip({ contextId, size = 14 }: HelpTooltipProps) {
               {t(tip.body)}
             </p>
             <button
+              type="button"
               onClick={handleLearnMore}
               className="mt-2 text-xs text-accent hover:text-accent-hover transition-colors"
             >

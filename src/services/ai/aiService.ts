@@ -166,7 +166,7 @@ export async function askInbox(
   return callAi(ASK_INBOX_PROMPT, userContent);
 }
 
-const VALID_CATEGORIES = new Set([
+const VALID_CATEGORIES: Set<string> = new Set([
   "Primary",
   "Updates",
   "Promotions",

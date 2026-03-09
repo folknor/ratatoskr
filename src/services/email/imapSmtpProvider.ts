@@ -9,6 +9,7 @@ import type { ParsedMessage } from "../gmail/messageParser";
 import { getSyncableFolders, mapFolderToLabel } from "../imap/folderMapper";
 import { buildImapConfig, buildSmtpConfig } from "../imap/imapConfigBuilder";
 import {
+  type ImapSyncProgress,
   imapDeltaSync,
   imapInitialSync,
   imapMessageToParsedMessage,
@@ -74,7 +75,7 @@ function parseBasicHeaders(raw: string): Map<string, string> {
 /**
  * Extract a plain-text snippet from a raw RFC 2822 email body.
  */
-function extractSnippet(raw: string, maxLen = 200): string {
+function extractSnippet(raw: string, maxLen: number = 200): string {
   const bodyStart = raw.indexOf("\r\n\r\n");
   if (bodyStart === -1) return "";
 
@@ -84,7 +85,7 @@ function extractSnippet(raw: string, maxLen = 200): string {
   const contentType = parseBasicHeaders(raw).get("content-type") ?? "";
   const boundaryMatch = contentType.match(/boundary="?([^";\s]+)"?/);
   if (boundaryMatch) {
-    const boundary = boundaryMatch[1]!;
+    const boundary = boundaryMatch[1] ?? "";
     const parts = body.split(`--${boundary}`);
     for (const part of parts) {
       if (part.toLowerCase().includes("content-type: text/plain")) {
@@ -218,7 +219,7 @@ export class ImapSmtpProvider implements EmailProvider {
       this.accountId,
       daysBack,
       onProgress
-        ? (p) => {
+        ? (p: ImapSyncProgress): void => {
             onProgress(p.phase, p.current, p.total);
           }
         : undefined,

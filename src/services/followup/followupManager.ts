@@ -1,4 +1,7 @@
-import { createBackgroundChecker } from "../backgroundCheckers";
+import {
+  type BackgroundChecker,
+  createBackgroundChecker,
+} from "../backgroundCheckers";
 import { getDb } from "../db/connection";
 import {
   getPendingFollowUpReminders,
@@ -50,9 +53,9 @@ async function checkFollowUpReminders(): Promise<void> {
   window.dispatchEvent(new Event("velo-sync-done"));
 }
 
-const followUpChecker = createBackgroundChecker(
+const followUpChecker: BackgroundChecker = createBackgroundChecker(
   "FollowUp",
   checkFollowUpReminders,
 );
-export const startFollowUpChecker = followUpChecker.start;
-export const stopFollowUpChecker = followUpChecker.stop;
+export const startFollowUpChecker: () => void = followUpChecker.start;
+export const stopFollowUpChecker: () => void = followUpChecker.stop;

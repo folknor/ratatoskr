@@ -1,4 +1,5 @@
 import { Archive, Ban, Folder, Inbox, Search, Tag, Trash2 } from "lucide-react";
+import type React from "react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CSSTransition } from "react-transition-group";
@@ -44,7 +45,7 @@ export function MoveToFolderDialog({
   isOpen,
   threadIds,
   onClose,
-}: MoveToFolderDialogProps) {
+}: MoveToFolderDialogProps): React.ReactNode {
   const { t } = useTranslation("email");
   const [query, setQuery] = useState("");
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -112,7 +113,7 @@ export function MoveToFolderDialog({
             // Remove INBOX to complete the "move" semantics
             const thread = useThreadStore
               .getState()
-              .threads.find((t) => t.id === threadId);
+              .threads.find((th) => th.id === threadId);
             if (thread?.labelIds.includes("INBOX")) {
               await removeThreadLabel(activeAccountId, threadId, "INBOX");
             }
@@ -126,18 +127,25 @@ export function MoveToFolderDialog({
     [activeAccountId, threadIds, isImap, onClose],
   );
 
+  const scrollToIndex = useCallback((index: number): void => {
+    const list = listRef.current;
+    if (!list) return;
+    const item = list.children[index] as HTMLElement | undefined;
+    item?.scrollIntoView?.({ block: "nearest" });
+  }, []);
+
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
+    (e: React.KeyboardEvent): void => {
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setSelectedIdx((prev) => {
+        setSelectedIdx((prev: number): number => {
           const next = Math.min(prev + 1, filtered.length - 1);
           scrollToIndex(next);
           return next;
         });
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        setSelectedIdx((prev) => {
+        setSelectedIdx((prev: number): number => {
           const next = Math.max(prev - 1, 0);
           scrollToIndex(next);
           return next;
@@ -146,7 +154,7 @@ export function MoveToFolderDialog({
         e.preventDefault();
         const dest = filtered[selectedIdx];
         if (dest) {
-          handleSelect(dest);
+          void handleSelect(dest);
         }
       } else if (e.key === "Escape") {
         e.preventDefault();
@@ -156,19 +164,11 @@ export function MoveToFolderDialog({
     [filtered, selectedIdx, handleSelect, onClose, scrollToIndex],
   );
 
-  const scrollToIndex = (index: number) => {
-    const list = listRef.current;
-    if (!list) return;
-    const item = list.children[index] as HTMLElement | undefined;
-    item?.scrollIntoView?.({ block: "nearest" });
-  };
-
-  // Reset state when dialog opens/closes
-  const handleEntered = () => {
+  const handleEntered = useCallback((): void => {
     setQuery("");
     setSelectedIdx(0);
     inputRef.current?.focus();
-  };
+  }, []);
 
   return (
     <CSSTransition
@@ -179,14 +179,17 @@ export function MoveToFolderDialog({
       nodeRef={overlayRef}
       onEntered={handleEntered}
     >
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: overlay backdrop dismiss */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: overlay backdrop */}
       <div
         ref={overlayRef}
         className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh]"
-        onClick={(e) => {
+        onClick={(e: React.MouseEvent): void => {
           if (e.target === e.currentTarget) onClose();
         }}
       >
         <div className="glass-backdrop absolute inset-0" />
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: keyDown handler for keyboard nav within dialog */}
         <div
           className="relative bg-bg-primary border border-border-primary rounded-lg glass-modal w-full max-w-md overflow-hidden"
           onKeyDown={handleKeyDown}
@@ -198,7 +201,7 @@ export function MoveToFolderDialog({
               ref={inputRef}
               type="text"
               value={query}
-              onChange={(e) => {
+              onChange={(e: React.ChangeEvent<HTMLInputElement>): void => {
                 setQuery(e.target.value);
                 setSelectedIdx(0);
               }}
@@ -223,6 +226,7 @@ export function MoveToFolderDialog({
               const isSelected = idx === selectedIdx;
               return (
                 <button
+                  type="button"
                   key={dest.id}
                   role="option"
                   aria-selected={isSelected}
@@ -231,8 +235,10 @@ export function MoveToFolderDialog({
                       ? "bg-bg-selected text-text-primary"
                       : "text-text-secondary hover:bg-bg-hover"
                   }`}
-                  onClick={() => handleSelect(dest)}
-                  onMouseEnter={() => setSelectedIdx(idx)}
+                  onClick={(): void => {
+                    void handleSelect(dest);
+                  }}
+                  onMouseEnter={(): void => setSelectedIdx(idx)}
                 >
                   <Icon
                     size={15}

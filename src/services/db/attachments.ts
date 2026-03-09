@@ -65,8 +65,8 @@ export interface AttachmentWithContext {
 
 export async function getAttachmentsForAccount(
   accountId: string,
-  limit = 200,
-  offset = 0,
+  limit: number = 200,
+  offset: number = 0,
 ): Promise<AttachmentWithContext[]> {
   const db = await getDb();
   return db.select<AttachmentWithContext[]>(

@@ -1,4 +1,5 @@
 import { AlertTriangle, Loader2 } from "lucide-react";
+import type React from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { reauthorizeAccount } from "@/services/gmail/tokenManager";
@@ -13,14 +14,14 @@ export function CalendarReauthBanner({
   accountId,
   email,
   onReauthSuccess,
-}: CalendarReauthBannerProps) {
+}: CalendarReauthBannerProps): React.ReactNode {
   const { t } = useTranslation("calendar");
   const [status, setStatus] = useState<"idle" | "authorizing" | "error">(
     "idle",
   );
   const [error, setError] = useState<string | null>(null);
 
-  const handleReauthorize = async () => {
+  const handleReauthorize = async (): Promise<void> => {
     setStatus("authorizing");
     setError(null);
     try {
@@ -42,8 +43,9 @@ export function CalendarReauthBanner({
         <p className="text-xs text-text-secondary mt-1">
           {t("reauthDescription")}
         </p>
-        {error && <p className="text-xs text-danger mt-1.5">{error}</p>}
+        {error != null && <p className="text-xs text-danger mt-1.5">{error}</p>}
         <button
+          type="button"
           onClick={handleReauthorize}
           disabled={status === "authorizing"}
           className="mt-2.5 px-3 py-1.5 text-xs font-medium bg-accent text-white rounded-md hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"

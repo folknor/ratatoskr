@@ -1,4 +1,4 @@
-const NO_REPLY_PATTERNS = [
+const NO_REPLY_PATTERNS: string[] = [
   "noreply",
   "no-reply",
   "no_reply",

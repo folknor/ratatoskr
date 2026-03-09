@@ -43,7 +43,7 @@ describe("attachments DB service", () => {
       const result = await getAttachmentsForAccount("acc-1");
 
       expect(mockDb.select).toHaveBeenCalledTimes(1);
-      const [sql, params] = mockDb.select.mock.calls[0]!;
+      const [sql, params] = mockDb.select.mock.calls[0] ?? [];
       expect(sql).toContain("JOIN messages m");
       expect(sql).toContain("a.account_id = $1");
       expect(sql).toContain("filename IS NOT NULL");
@@ -57,7 +57,7 @@ describe("attachments DB service", () => {
 
       await getAttachmentsForAccount("acc-1", 50, 100);
 
-      const [, params] = mockDb.select.mock.calls[0]!;
+      const [, params] = mockDb.select.mock.calls[0] ?? [];
       expect(params).toEqual(["acc-1", 50, 100]);
     });
   });
@@ -72,7 +72,7 @@ describe("attachments DB service", () => {
       const result = await getAttachmentSenders("acc-1");
 
       expect(mockDb.select).toHaveBeenCalledTimes(1);
-      const [sql, params] = mockDb.select.mock.calls[0]!;
+      const [sql, params] = mockDb.select.mock.calls[0] ?? [];
       expect(sql).toContain("GROUP BY m.from_address");
       expect(sql).toContain("ORDER BY count DESC");
       expect(params).toEqual(["acc-1"]);
@@ -95,7 +95,7 @@ describe("attachments DB service", () => {
       });
 
       expect(mockDb.execute).toHaveBeenCalledTimes(1);
-      const [sql, params] = mockDb.execute.mock.calls[0]!;
+      const [sql, params] = mockDb.execute.mock.calls[0] ?? [];
       expect(sql).toContain("INSERT INTO attachments");
       expect(sql).toContain("ON CONFLICT");
       expect(params).toEqual([

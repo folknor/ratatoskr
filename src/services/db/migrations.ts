@@ -1,6 +1,6 @@
 import { getDb } from "./connection";
 
-const MIGRATIONS = [
+const MIGRATIONS: { version: number; description: string; sql: string }[] = [
   {
     version: 1,
     description: "Initial schema",
@@ -793,8 +793,8 @@ function splitStatements(sql: string): string[] {
     // Check for BEGIN keyword at word boundary
     if (
       upper.startsWith("BEGIN", i) &&
-      (i === 0 || /\W/.test(sql[i - 1]!)) &&
-      (i + 5 >= sql.length || /\W/.test(sql[i + 5]!))
+      (i === 0 || /\W/.test(sql[i - 1] ?? "")) &&
+      (i + 5 >= sql.length || /\W/.test(sql[i + 5] ?? ""))
     ) {
       depth++;
     }
@@ -802,8 +802,8 @@ function splitStatements(sql: string): string[] {
     // Check for END keyword at word boundary
     if (
       upper.startsWith("END", i) &&
-      (i === 0 || /\W/.test(sql[i - 1]!)) &&
-      (i + 3 >= sql.length || /\W/.test(sql[i + 3]!)) &&
+      (i === 0 || /\W/.test(sql[i - 1] ?? "")) &&
+      (i + 3 >= sql.length || /\W/.test(sql[i + 3] ?? "")) &&
       depth > 0
     ) {
       depth--;

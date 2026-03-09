@@ -1,4 +1,5 @@
 import { ChevronRight } from "lucide-react";
+import type React from "react";
 import { useTranslation } from "react-i18next";
 import type { HelpCard as HelpCardData } from "@/constants/helpContent";
 import { navigateToSettings } from "@/router/navigate";
@@ -9,7 +10,11 @@ interface HelpCardProps {
   onToggle: () => void;
 }
 
-export function HelpCard({ card, isExpanded, onToggle }: HelpCardProps) {
+export function HelpCard({
+  card,
+  isExpanded,
+  onToggle,
+}: HelpCardProps): React.ReactNode {
   const { t } = useTranslation("help");
   const Icon = card.icon;
 
@@ -17,6 +22,7 @@ export function HelpCard({ card, isExpanded, onToggle }: HelpCardProps) {
     <div className="rounded-lg border border-border-secondary bg-bg-primary/60 overflow-hidden transition-colors hover:border-border-primary">
       {/* Collapsed header: icon + title + summary + chevron */}
       <button
+        type="button"
         onClick={onToggle}
         className="flex items-center gap-3 w-full px-4 py-3 text-left cursor-pointer"
       >
@@ -51,18 +57,18 @@ export function HelpCard({ card, isExpanded, onToggle }: HelpCardProps) {
               {t(card.description)}
             </p>
 
-            {card.tips && card.tips.length > 0 && (
+            {card.tips != null && card.tips.length > 0 && (
               <ul className="space-y-1.5">
-                {card.tips.map((tip, i) => (
+                {card.tips.map((tip, _i) => (
                   <li
-                    key={i}
+                    key={tip.text}
                     className="flex items-start gap-2 text-xs text-text-secondary"
                   >
                     <span className="text-text-tertiary mt-0.5 shrink-0">
                       •
                     </span>
                     <span className="flex-1">{t(tip.text)}</span>
-                    {tip.shortcut && (
+                    {tip.shortcut != null && (
                       <kbd className="shrink-0 px-1.5 py-0.5 text-[0.625rem] bg-bg-secondary border border-border-secondary rounded text-text-tertiary font-mono">
                         {tip.shortcut}
                       </kbd>
@@ -72,11 +78,14 @@ export function HelpCard({ card, isExpanded, onToggle }: HelpCardProps) {
               </ul>
             )}
 
-            {card.relatedSettingsTab && (
+            {card.relatedSettingsTab != null && (
               <button
-                onClick={(e) => {
+                type="button"
+                onClick={(e: React.MouseEvent): void => {
                   e.stopPropagation();
-                  navigateToSettings(card.relatedSettingsTab!);
+                  if (card.relatedSettingsTab) {
+                    navigateToSettings(card.relatedSettingsTab);
+                  }
                 }}
                 className="text-xs text-accent hover:text-accent-hover transition-colors"
               >

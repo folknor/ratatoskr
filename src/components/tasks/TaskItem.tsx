@@ -9,6 +9,7 @@ import {
   RepeatIcon,
   Trash2,
 } from "lucide-react";
+import type React from "react";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DbTask, TaskPriority } from "@/services/db/tasks";
@@ -75,7 +76,7 @@ export function TaskItem({
   onDelete,
   isSelected,
   compact,
-}: TaskItemProps) {
+}: TaskItemProps): React.ReactNode {
   const { t } = useTranslation("tasks");
   const [expanded, setExpanded] = useState(false);
   const tags: string[] = (() => {
@@ -86,7 +87,7 @@ export function TaskItem({
     }
   })();
 
-  const hasSubtasks = subtasks && subtasks.length > 0;
+  const hasSubtasks = subtasks != null && subtasks.length > 0;
   const completedSubtasks = subtasks?.filter((s) => s.is_completed).length ?? 0;
   const hasRecurrence = Boolean(task.recurrence_rule);
 
@@ -108,6 +109,8 @@ export function TaskItem({
 
   return (
     <div>
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: task item row selection */}
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: task item row selection */}
       <div
         onClick={() => onSelect?.(task.id)}
         className={`group flex items-start gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors ${
@@ -117,7 +120,11 @@ export function TaskItem({
         } ${task.is_completed ? "opacity-60" : ""}`}
       >
         {/* Checkbox */}
-        <button onClick={handleToggle} className="mt-0.5 shrink-0">
+        <button
+          type="button"
+          onClick={handleToggle}
+          className="mt-0.5 shrink-0"
+        >
           {task.is_completed ? (
             <CheckCircle2 size={16} className="text-success" />
           ) : (
@@ -146,7 +153,7 @@ export function TaskItem({
 
           {!compact && (
             <div className="flex items-center gap-2 mt-1 flex-wrap">
-              {task.due_date && (
+              {task.due_date != null && (
                 <span
                   className={`inline-flex items-center gap-1 text-[0.6875rem] px-1.5 py-0.5 rounded ${getDueDateColor(task.due_date)}`}
                 >
@@ -159,12 +166,12 @@ export function TaskItem({
                   <RepeatIcon size={10} />
                 </span>
               )}
-              {task.thread_id && (
+              {task.thread_id != null && (
                 <span className="inline-flex items-center gap-0.5 text-[0.6875rem] text-accent/70">
                   <Link2 size={10} />
                 </span>
               )}
-              {hasSubtasks && (
+              {hasSubtasks === true && (
                 <span className="text-[0.6875rem] text-text-tertiary">
                   {completedSubtasks}/{subtasks.length}
                 </span>
@@ -183,8 +190,10 @@ export function TaskItem({
 
         {/* Actions */}
         <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-          {hasSubtasks && (
+          {hasSubtasks === true && (
             <button
+              type="button"
+              // biome-ignore lint/nursery/useExplicitType: inline callback
               onClick={(e) => {
                 e.stopPropagation();
                 setExpanded(!expanded);
@@ -198,8 +207,9 @@ export function TaskItem({
               )}
             </button>
           )}
-          {onDelete && (
+          {onDelete != null && (
             <button
+              type="button"
               onClick={handleDelete}
               className="p-0.5 text-text-tertiary hover:text-danger transition-colors"
             >
@@ -210,7 +220,7 @@ export function TaskItem({
       </div>
 
       {/* Subtasks */}
-      {expanded && hasSubtasks && (
+      {expanded === true && hasSubtasks === true && (
         <div className="ml-7 mt-0.5 space-y-0.5">
           {subtasks.map((sub) => (
             <TaskItem

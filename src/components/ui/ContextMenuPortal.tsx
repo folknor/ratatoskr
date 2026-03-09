@@ -21,6 +21,7 @@ import {
   VolumeX,
   Zap,
 } from "lucide-react";
+import type React from "react";
 import { useEffect, useState } from "react";
 import { getActiveLabel } from "@/router/navigate";
 import { getMessagesForThread } from "@/services/db/messages";
@@ -91,7 +92,7 @@ function buildForwardQuote(msg: {
   return `<br><br>---------- Forwarded message ---------<br>From: ${msg.from_name ?? ""} &lt;${msg.from_address ?? ""}&gt;<br>Date: ${date}<br>Subject: ${msg.subject ?? ""}<br>To: ${msg.to_addresses ?? ""}<br><br>${msg.body_html ?? msg.body_text ?? ""}`;
 }
 
-export function ContextMenuPortal() {
+export function ContextMenuPortal(): React.ReactNode {
   const menuType = useContextMenuStore((s) => s.menuType);
   const position = useContextMenuStore((s) => s.position);
   const data = useContextMenuStore((s) => s.data);
@@ -105,7 +106,7 @@ export function ContextMenuPortal() {
     if (snoozeTarget) {
       return (
         <SnoozeDialog
-          onSnooze={async (until) => {
+          onSnooze={async (until: number) => {
             for (const id of snoozeTarget.threadIds) {
               await snoozeThread(snoozeTarget.accountId, id, until);
               useThreadStore.getState().removeThread(id);
@@ -138,9 +139,9 @@ export function ContextMenuPortal() {
       {menuType === "message" && (
         <MessageMenu position={position} data={data} onClose={closeMenu} />
       )}
-      {snoozeTarget && (
+      {snoozeTarget != null && (
         <SnoozeDialog
-          onSnooze={async (until) => {
+          onSnooze={async (until: number) => {
             for (const id of snoozeTarget.threadIds) {
               await snoozeThread(snoozeTarget.accountId, id, until);
               useThreadStore.getState().removeThread(id);
@@ -162,12 +163,12 @@ function SidebarLabelMenu({
   position: { x: number; y: number };
   data: Record<string, unknown>;
   onClose: () => void;
-}) {
+}): React.ReactNode {
   const onEdit = data["onEdit"] as (() => void) | undefined;
   const onDelete = data["onDelete"] as (() => void) | undefined;
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
 
-  const handleSync = () => {
+  const handleSync = (): void => {
     if (!activeAccountId) return;
     const labelId = data["labelId"] as string | undefined;
     useUIStore.getState().setSyncingFolder(labelId ?? "label");
@@ -208,11 +209,11 @@ function SidebarNavMenu({
   position: { x: number; y: number };
   data: Record<string, unknown>;
   onClose: () => void;
-}) {
+}): React.ReactNode {
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
   const navId = data["navId"] as string;
 
-  const handleSync = () => {
+  const handleSync = (): void => {
     if (!activeAccountId) return;
     useUIStore.getState().setSyncingFolder(navId);
     triggerSync([activeAccountId]);
@@ -240,7 +241,7 @@ function ThreadMenu({
   data: Record<string, unknown>;
   onClose: () => void;
   onSnooze: (target: { threadIds: string[]; accountId: string }) => void;
-}) {
+}): React.ReactNode {
   const threadId = data["threadId"] as string;
   const threads = useThreadStore((s) => s.threads);
   const selectedThreadIds = useThreadStore((s) => s.selectedThreadIds);
@@ -282,7 +283,7 @@ function ThreadMenu({
   const isPinned = isMulti ? false : thread.isPinned;
   const isMuted = isMulti ? false : thread.isMuted;
 
-  const handleReply = async () => {
+  const handleReply = async (): Promise<void> => {
     const messages = await getMessagesForThread(activeAccountId, thread.id);
     const lastMessage = messages[messages.length - 1];
     if (!lastMessage) return;
@@ -297,7 +298,7 @@ function ThreadMenu({
     });
   };
 
-  const handleReplyAll = async () => {
+  const handleReplyAll = async (): Promise<void> => {
     const messages = await getMessagesForThread(activeAccountId, thread.id);
     const lastMessage = messages[messages.length - 1];
     if (!lastMessage) return;
@@ -305,13 +306,15 @@ function ThreadMenu({
     const allRecipients = new Set<string>();
     if (replyTo) allRecipients.add(replyTo);
     if (lastMessage.to_addresses) {
-      lastMessage.to_addresses
-        .split(",")
-        .forEach((a) => allRecipients.add(a.trim()));
+      for (const a of lastMessage.to_addresses.split(",")) {
+        allRecipients.add(a.trim());
+      }
     }
     const ccList: string[] = [];
     if (lastMessage.cc_addresses) {
-      lastMessage.cc_addresses.split(",").forEach((a) => ccList.push(a.trim()));
+      for (const a of lastMessage.cc_addresses.split(",")) {
+        ccList.push(a.trim());
+      }
     }
     openComposer({
       mode: "replyAll",
@@ -324,7 +327,7 @@ function ThreadMenu({
     });
   };
 
-  const handleForward = async () => {
+  const handleForward = async (): Promise<void> => {
     const messages = await getMessagesForThread(activeAccountId, thread.id);
     const lastMessage = messages[messages.length - 1];
     if (!lastMessage) return;
@@ -338,13 +341,13 @@ function ThreadMenu({
     });
   };
 
-  const handleArchive = async () => {
+  const handleArchive = async (): Promise<void> => {
     for (const id of targetIds) {
       await archiveThread(activeAccountId, id, []);
     }
   };
 
-  const handleDelete = async () => {
+  const handleDelete = async (): Promise<void> => {
     for (const id of targetIds) {
       if (isTrashView) {
         await permanentDeleteThread(activeAccountId, id, []);
@@ -363,7 +366,7 @@ function ThreadMenu({
     }
   };
 
-  const handleToggleRead = async () => {
+  const handleToggleRead = async (): Promise<void> => {
     for (const id of targetIds) {
       const t = threads.find((th) => th.id === id);
       if (!t) continue;
@@ -371,7 +374,7 @@ function ThreadMenu({
     }
   };
 
-  const handleToggleStar = async () => {
+  const handleToggleStar = async (): Promise<void> => {
     for (const id of targetIds) {
       const t = threads.find((th) => th.id === id);
       if (!t) continue;
@@ -379,7 +382,7 @@ function ThreadMenu({
     }
   };
 
-  const handleTogglePin = async () => {
+  const handleTogglePin = async (): Promise<void> => {
     for (const id of targetIds) {
       const t = threads.find((th) => th.id === id);
       if (!t) continue;
@@ -393,17 +396,17 @@ function ThreadMenu({
     }
   };
 
-  const handleSpam = async () => {
+  const handleSpam = async (): Promise<void> => {
     for (const id of targetIds) {
       await spamThread(activeAccountId, id, [], !isSpamView);
     }
   };
 
-  const handleSnooze = () => {
+  const handleSnooze = (): void => {
     onSnooze({ threadIds: [...targetIds], accountId: activeAccountId });
   };
 
-  const handleToggleMute = async () => {
+  const handleToggleMute = async (): Promise<void> => {
     for (const id of targetIds) {
       const t = threads.find((th) => th.id === id);
       if (!t) continue;
@@ -418,7 +421,7 @@ function ThreadMenu({
     }
   };
 
-  const handlePopOut = async () => {
+  const handlePopOut = async (): Promise<void> => {
     try {
       const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
       const windowLabel = `thread-${thread.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
@@ -444,7 +447,7 @@ function ThreadMenu({
     }
   };
 
-  const handleToggleLabel = async (labelId: string) => {
+  const handleToggleLabel = async (labelId: string): Promise<void> => {
     for (const id of targetIds) {
       const t = useThreadStore.getState().threads.find((th) => th.id === id);
       if (!t) continue;
@@ -657,7 +660,7 @@ function MessageMenu({
   position: { x: number; y: number };
   data: Record<string, unknown>;
   onClose: () => void;
-}) {
+}): React.ReactNode {
   const openComposer = useComposerStore((s) => s.openComposer);
 
   const messageId = data["messageId"] as string;
@@ -683,7 +686,7 @@ function MessageMenu({
     to_addresses: toAddresses,
   };
 
-  const handleReply = () => {
+  const handleReply = (): void => {
     const replyAddr = replyTo ?? fromAddress;
     openComposer({
       mode: "reply",
@@ -695,16 +698,20 @@ function MessageMenu({
     });
   };
 
-  const handleReplyAll = () => {
+  const handleReplyAll = (): void => {
     const replyAddr = replyTo ?? fromAddress;
     const allRecipients = new Set<string>();
     if (replyAddr) allRecipients.add(replyAddr);
     if (toAddresses) {
-      toAddresses.split(",").forEach((a) => allRecipients.add(a.trim()));
+      for (const a of toAddresses.split(",")) {
+        allRecipients.add(a.trim());
+      }
     }
     const ccList: string[] = [];
     if (ccAddresses) {
-      ccAddresses.split(",").forEach((a) => ccList.push(a.trim()));
+      for (const a of ccAddresses.split(",")) {
+        ccList.push(a.trim());
+      }
     }
     openComposer({
       mode: "replyAll",
@@ -717,7 +724,7 @@ function MessageMenu({
     });
   };
 
-  const handleForward = () => {
+  const handleForward = (): void => {
     openComposer({
       mode: "forward",
       to: [],
@@ -728,7 +735,7 @@ function MessageMenu({
     });
   };
 
-  const handleCopy = async () => {
+  const handleCopy = async (): Promise<void> => {
     const text = bodyText ?? "";
     try {
       await navigator.clipboard.writeText(text);

@@ -2,9 +2,8 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createProviderFactory } from "../providerFactory";
 import type { AiCompletionRequest, AiProviderClient } from "../types";
 
-const factory = createProviderFactory(
-  (apiKey) => new GoogleGenerativeAI(apiKey),
-);
+const factory: ReturnType<typeof createProviderFactory<GoogleGenerativeAI>> =
+  createProviderFactory((apiKey) => new GoogleGenerativeAI(apiKey));
 
 export function createGeminiProvider(
   apiKey: string,

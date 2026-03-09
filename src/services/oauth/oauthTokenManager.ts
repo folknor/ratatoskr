@@ -4,7 +4,7 @@ import { refreshProviderToken } from "./oauthFlow";
 import { getOAuthProvider } from "./providers";
 
 /** Buffer before expiry to trigger a refresh (5 minutes) */
-const REFRESH_BUFFER_MS = 5 * 60 * 1000;
+const REFRESH_BUFFER_MS: number = 5 * 60 * 1000;
 
 /**
  * Ensure the account has a fresh OAuth2 access token.

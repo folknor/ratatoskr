@@ -6,7 +6,7 @@ export interface ClassifiedError {
   message: string;
 }
 
-const NETWORK_PATTERNS = [
+const NETWORK_PATTERNS: string[] = [
   "failed to fetch",
   "network",
   "timeout",
@@ -25,7 +25,7 @@ const NETWORK_PATTERNS = [
   "tls handshake",
 ];
 
-const AUTH_PATTERNS = [
+const AUTH_PATTERNS: string[] = [
   "authentication failed",
   "login failed",
   "invalid credentials",
@@ -40,7 +40,7 @@ export function classifyError(error: unknown): ClassifiedError {
 
   // Check for HTTP status codes in the message
   const statusMatch = lower.match(/\b(4\d{2}|5\d{2})\b/);
-  const statusCode = statusMatch ? parseInt(statusMatch[1]!, 10) : null;
+  const statusCode = statusMatch?.[1] ? parseInt(statusMatch[1], 10) : null;
 
   if (statusCode === 401 || statusCode === 403) {
     return { type: "auth", isRetryable: false, message };

@@ -1,3 +1,4 @@
+import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CSSTransition } from "react-transition-group";
@@ -30,7 +31,10 @@ interface CommandPaletteProps {
   onClose: () => void;
 }
 
-export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
+export function CommandPalette({
+  isOpen,
+  onClose,
+}: CommandPaletteProps): React.ReactNode {
   const { t } = useTranslation("search");
   const [query, setQuery] = useState("");
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -45,7 +49,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
 
   useEffect(() => {
     if (!(isOpen && activeAccountId)) return;
-    getTemplatesForAccount(activeAccountId).then(setTemplates);
+    void getTemplatesForAccount(activeAccountId).then(setTemplates);
   }, [isOpen, activeAccountId]);
 
   const commands: Command[] = useMemo(
@@ -56,7 +60,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         label: t("goToInbox"),
         shortcut: "g i",
         category: t("categoryNavigation"),
-        action: () => {
+        action: (): void => {
           navigateToLabel("inbox");
           onClose();
         },
@@ -66,7 +70,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         label: t("goToStarred"),
         shortcut: "g s",
         category: t("categoryNavigation"),
-        action: () => {
+        action: (): void => {
           navigateToLabel("starred");
           onClose();
         },
@@ -76,7 +80,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         label: t("goToSent"),
         shortcut: "g t",
         category: t("categoryNavigation"),
-        action: () => {
+        action: (): void => {
           navigateToLabel("sent");
           onClose();
         },
@@ -86,7 +90,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         label: t("goToDrafts"),
         shortcut: "g d",
         category: t("categoryNavigation"),
-        action: () => {
+        action: (): void => {
           navigateToLabel("drafts");
           onClose();
         },
@@ -95,7 +99,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         id: "go-snoozed",
         label: t("goToSnoozed"),
         category: t("categoryNavigation"),
-        action: () => {
+        action: (): void => {
           navigateToLabel("snoozed");
           onClose();
         },
@@ -104,7 +108,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         id: "go-trash",
         label: t("goToTrash"),
         category: t("categoryNavigation"),
-        action: () => {
+        action: (): void => {
           navigateToLabel("trash");
           onClose();
         },
@@ -113,7 +117,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         id: "go-all",
         label: t("goToAllMail"),
         category: t("categoryNavigation"),
-        action: () => {
+        action: (): void => {
           navigateToLabel("all");
           onClose();
         },
@@ -125,7 +129,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         label: t("composeNewEmail"),
         shortcut: "c",
         category: t("categoryActions"),
-        action: () => {
+        action: (): void => {
           openComposer();
           onClose();
         },
@@ -135,7 +139,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         label: t("closeThread"),
         shortcut: "Esc",
         category: t("categoryActions"),
-        action: () => {
+        action: (): void => {
           navigateBack();
           onClose();
         },
@@ -146,7 +150,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
           activeLabel === "spam" ? t("email:notSpam") : t("email:reportSpam"),
         shortcut: "!",
         category: t("categoryActions"),
-        action: async () => {
+        action: async (): Promise<void> => {
           onClose();
           const selectedId = getSelectedThreadId();
           const accountId = useAccountStore.getState().activeAccountId;
@@ -170,7 +174,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         id: "task-create",
         label: t("createTask"),
         category: t("categoryTasks"),
-        action: () => {
+        action: (): void => {
           onClose();
           useUIStore.getState().setTaskSidebarVisible(true);
         },
@@ -180,7 +184,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         label: t("createTaskFromEmail"),
         shortcut: "t",
         category: t("categoryTasks"),
-        action: () => {
+        action: (): void => {
           onClose();
           const threadId = getSelectedThreadId();
           if (threadId) {
@@ -195,7 +199,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         label: t("viewTasks"),
         shortcut: "g k",
         category: t("categoryTasks"),
-        action: () => {
+        action: (): void => {
           navigateToLabel("tasks");
           onClose();
         },
@@ -204,7 +208,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         id: "task-toggle-panel",
         label: t("toggleTaskPanel"),
         category: t("categoryTasks"),
-        action: () => {
+        action: (): void => {
           useUIStore.getState().toggleTaskSidebar();
           onClose();
         },
@@ -215,7 +219,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         id: "ask-ai",
         label: t("askAiInbox"),
         category: t("categoryAi"),
-        action: () => {
+        action: (): void => {
           onClose();
           window.dispatchEvent(new Event("velo-toggle-ask-inbox"));
         },
@@ -227,7 +231,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         label: t("toggleSidebar"),
         shortcut: "Ctrl+Shift+E",
         category: t("categorySettings"),
-        action: () => {
+        action: (): void => {
           toggleSidebar();
           onClose();
         },
@@ -236,7 +240,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         id: "theme-light",
         label: t("switchToLightTheme"),
         category: t("categorySettings"),
-        action: () => {
+        action: (): void => {
           setTheme("light");
           onClose();
         },
@@ -245,7 +249,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         id: "theme-dark",
         label: t("switchToDarkTheme"),
         category: t("categorySettings"),
-        action: () => {
+        action: (): void => {
           setTheme("dark");
           onClose();
         },
@@ -254,7 +258,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         id: "theme-system",
         label: t("useSystemTheme"),
         category: t("categorySettings"),
-        action: () => {
+        action: (): void => {
           setTheme("system");
           onClose();
         },
@@ -265,7 +269,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         id: `template-${tmpl.id}`,
         label: t("insertTemplate", { name: tmpl.name }),
         category: t("categoryTemplates"),
-        action: () => {
+        action: (): void => {
           openComposer({
             mode: "new" as const,
             to: [],
@@ -288,7 +292,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
     : commands;
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
+    (e: React.KeyboardEvent): void => {
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setSelectedIdx((p) => Math.min(p + 1, filtered.length - 1));
@@ -305,9 +309,11 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
   );
 
   // Build index map and group by category
-  const filteredIndexMap = useMemo(() => {
+  const filteredIndexMap = useMemo((): Map<string, number> => {
     const map = new Map<string, number>();
-    filtered.forEach((cmd, idx) => map.set(cmd.id, idx));
+    filtered.forEach((cmd, idx) => {
+      map.set(cmd.id, idx);
+    });
     return map;
   }, [filtered]);
   const categories = useMemo(
@@ -327,6 +333,8 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         ref={overlayRef}
         className="fixed inset-0 z-[60] flex items-start justify-center pt-[15vh]"
       >
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: backdrop click to close */}
+        {/* biome-ignore lint/a11y/useKeyWithClickEvents: backdrop click to close */}
         <div
           className="absolute inset-0 bg-black/30 glass-backdrop"
           onClick={onClose}
@@ -338,7 +346,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
               ref={inputRef}
               type="text"
               value={query}
-              onChange={(e) => {
+              onChange={(e: React.ChangeEvent<HTMLInputElement>): void => {
                 setQuery(e.target.value);
                 setSelectedIdx(0);
               }}
@@ -366,6 +374,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
                       const globalIdx = filteredIndexMap.get(cmd.id) ?? -1;
                       return (
                         <button
+                          type="button"
                           key={cmd.id}
                           onClick={cmd.action}
                           className={`w-full text-left px-4 py-2 flex items-center justify-between hover:bg-bg-hover text-sm ${
@@ -373,7 +382,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
                           }`}
                         >
                           <span className="text-text-primary">{cmd.label}</span>
-                          {cmd.shortcut && (
+                          {cmd.shortcut != null && (
                             <kbd className="text-[0.625rem] text-text-tertiary bg-bg-tertiary px-1.5 py-0.5 rounded">
                               {cmd.shortcut}
                             </kbd>

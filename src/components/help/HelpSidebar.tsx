@@ -1,3 +1,4 @@
+import type React from "react";
 import { useTranslation } from "react-i18next";
 import { HELP_CATEGORIES } from "@/constants/helpContent";
 import { navigateToHelp } from "@/router/navigate";
@@ -6,7 +7,9 @@ interface HelpSidebarProps {
   activeTopic: string;
 }
 
-export function HelpSidebar({ activeTopic }: HelpSidebarProps) {
+export function HelpSidebar({
+  activeTopic,
+}: HelpSidebarProps): React.ReactNode {
   const { t } = useTranslation("help");
 
   return (
@@ -16,8 +19,9 @@ export function HelpSidebar({ activeTopic }: HelpSidebarProps) {
         const isActive = activeTopic === category.id;
         return (
           <button
+            type="button"
             key={category.id}
-            onClick={() => navigateToHelp(category.id)}
+            onClick={(): void => navigateToHelp(category.id)}
             className={`flex items-start gap-2.5 w-full px-4 py-2 text-[0.8125rem] text-left transition-colors ${
               isActive
                 ? "bg-bg-selected text-accent font-medium"

@@ -29,7 +29,7 @@ export interface SameDomainContact {
  */
 export async function searchContacts(
   query: string,
-  limit = 10,
+  limit: number = 10,
 ): Promise<DbContact[]> {
   const db = await getDb();
   const pattern = `%${query}%`;
@@ -46,8 +46,8 @@ export async function searchContacts(
  * Get all contacts, ordered by frequency descending.
  */
 export async function getAllContacts(
-  limit = 500,
-  offset = 0,
+  limit: number = 500,
+  offset: number = 0,
 ): Promise<DbContact[]> {
   const db = await getDb();
   return db.select<DbContact[]>(
@@ -135,7 +135,7 @@ export async function getContactStats(email: string): Promise<ContactStats> {
 
 export async function getRecentThreadsWithContact(
   email: string,
-  limit = 5,
+  limit: number = 5,
 ): Promise<
   {
     thread_id: string;
@@ -185,7 +185,7 @@ export async function updateContactNotes(
  */
 export async function getAttachmentsFromContact(
   email: string,
-  limit = 5,
+  limit: number = 5,
 ): Promise<ContactAttachment[]> {
   const db = await getDb();
   return db.select<ContactAttachment[]>(
@@ -199,7 +199,7 @@ export async function getAttachmentsFromContact(
   );
 }
 
-const PUBLIC_DOMAINS = new Set([
+const PUBLIC_DOMAINS: Set<string> = new Set([
   "gmail.com",
   "googlemail.com",
   "outlook.com",
@@ -226,7 +226,7 @@ const PUBLIC_DOMAINS = new Set([
  */
 export async function getContactsFromSameDomain(
   email: string,
-  limit = 5,
+  limit: number = 5,
 ): Promise<SameDomainContact[]> {
   const normalized = normalizeEmail(email);
   const atIdx = normalized.indexOf("@");

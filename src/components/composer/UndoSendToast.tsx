@@ -1,3 +1,4 @@
+import type React from "react";
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { CSSTransition } from "react-transition-group";
@@ -5,7 +6,7 @@ import { useComposerStore } from "@/stores/composerStore";
 
 const UNDO_DELAY_SECONDS = 5;
 
-export function UndoSendToast() {
+export function UndoSendToast(): React.ReactNode {
   const { t } = useTranslation("composer");
   const {
     undoSendVisible,
@@ -15,7 +16,7 @@ export function UndoSendToast() {
   } = useComposerStore();
   const toastRef = useRef<HTMLDivElement>(null);
 
-  const handleUndo = () => {
+  const handleUndo = (): void => {
     if (undoSendTimer) {
       clearTimeout(undoSendTimer);
       setUndoSendTimer(null);
@@ -38,6 +39,7 @@ export function UndoSendToast() {
         <div className="px-4 py-2.5 flex items-center gap-3">
           <span className="text-sm">{t("sendingEmail")}</span>
           <button
+            type="button"
             onClick={handleUndo}
             className="text-sm font-medium text-accent hover:text-accent-hover underline"
           >

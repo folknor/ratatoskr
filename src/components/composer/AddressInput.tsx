@@ -1,3 +1,4 @@
+import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { type DbContact, searchContacts } from "@/services/db/contacts";
@@ -14,7 +15,7 @@ export function AddressInput({
   addresses,
   onChange,
   placeholder,
-}: AddressInputProps) {
+}: AddressInputProps): React.ReactNode {
   const { t } = useTranslation("composer");
   const resolvedPlaceholder = placeholder ?? t("addRecipients");
   const [inputValue, setInputValue] = useState("");
@@ -26,6 +27,7 @@ export function AddressInput({
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(
+    // biome-ignore lint/nursery/useExplicitType: cleanup effect
     () => () => {
       if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
@@ -33,7 +35,7 @@ export function AddressInput({
     [],
   );
 
-  const handleInputChange = useCallback((value: string) => {
+  const handleInputChange = useCallback((value: string): void => {
     setInputValue(value);
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     if (value.length >= 2) {
@@ -70,7 +72,7 @@ export function AddressInput({
     [addresses, onChange],
   );
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent): void => {
     if (e.key === "Enter" || e.key === "Tab" || e.key === ",") {
       e.preventDefault();
       if (showSuggestions && selectedIdx >= 0) {
@@ -104,6 +106,7 @@ export function AddressInput({
           >
             {addr}
             <button
+              type="button"
               onClick={() => onChange(addresses.filter((a) => a !== addr))}
               className="hover:text-danger text-[0.625rem] leading-none"
             >
@@ -115,6 +118,7 @@ export function AddressInput({
           ref={inputRef}
           type="text"
           value={inputValue}
+          // biome-ignore lint/nursery/useExplicitType: inline callback
           onChange={(e) => handleInputChange(e.target.value)}
           onKeyDown={handleKeyDown}
           onBlur={() => {
@@ -132,11 +136,13 @@ export function AddressInput({
         />
 
         {/* Autocomplete dropdown */}
-        {showSuggestions && (
+        {showSuggestions === true && (
           <div className="absolute top-full left-0 mt-1 w-full bg-bg-primary border border-border-primary rounded-md shadow-lg z-50 py-1">
             {suggestions.map((contact, i) => (
               <button
+                type="button"
                 key={contact.id}
+                // biome-ignore lint/nursery/useExplicitType: inline callback
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => addAddress(contact.email)}
                 className={`w-full text-left px-3 py-1.5 text-sm hover:bg-bg-hover ${
@@ -146,7 +152,7 @@ export function AddressInput({
                 <div className="text-text-primary">
                   {contact.display_name ?? contact.email}
                 </div>
-                {contact.display_name && (
+                {contact.display_name != null && (
                   <div className="text-xs text-text-tertiary">
                     {contact.email}
                   </div>

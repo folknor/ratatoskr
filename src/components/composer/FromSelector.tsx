@@ -1,3 +1,4 @@
+import type React from "react";
 import type { SendAsAlias } from "@/services/db/sendAsAliases";
 
 interface FromSelectorProps {
@@ -14,7 +15,7 @@ export function FromSelector({
   aliases,
   selectedEmail,
   onChange,
-}: FromSelectorProps) {
+}: FromSelectorProps): React.ReactNode {
   if (aliases.length <= 1) return null;
 
   return (
@@ -22,6 +23,7 @@ export function FromSelector({
       <span className="text-xs text-text-tertiary w-8 shrink-0">From</span>
       <select
         value={selectedEmail}
+        // biome-ignore lint/nursery/useExplicitType: inline callback
         onChange={(e) => {
           const alias = aliases.find((a) => a.email === e.target.value);
           if (alias) onChange(alias);

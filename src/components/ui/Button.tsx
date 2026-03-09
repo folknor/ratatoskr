@@ -19,7 +19,7 @@ export function Button({
   disabled,
   ref,
   ...rest
-}: ButtonProps) {
+}: ButtonProps): ReactNode {
   const base =
     "inline-flex items-center justify-center font-medium rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
 

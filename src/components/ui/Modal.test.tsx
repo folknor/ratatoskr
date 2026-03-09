@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { vi } from "vitest";
 import { Modal } from "./Modal";
 
 describe("Modal", () => {
@@ -45,7 +46,8 @@ describe("Modal", () => {
     // The backdrop has the glass-backdrop class
     const backdrop = document.querySelector(".glass-backdrop");
     expect(backdrop).not.toBeNull();
-    fireEvent.click(backdrop!);
+    expect(backdrop).toBeTruthy();
+    if (backdrop) fireEvent.click(backdrop);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

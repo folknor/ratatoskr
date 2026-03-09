@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { type Label, useLabelStore } from "@/stores/labelStore";
@@ -43,7 +44,7 @@ export function LabelForm({
   label,
   onDone,
   variant = "settings",
-}: LabelFormProps) {
+}: LabelFormProps): React.ReactNode {
   const { t } = useTranslation("settings");
   const { createLabel, updateLabel } = useLabelStore();
   const [name, setName] = useState(label?.name ?? "");
@@ -63,7 +64,7 @@ export function LabelForm({
     inputRef.current?.focus();
   }, []);
 
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(async (): Promise<void> => {
     if (!name.trim() || isSaving) return;
     setIsSaving(true);
     setError(null);
@@ -99,9 +100,9 @@ export function LabelForm({
   ]);
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
+    (e: React.KeyboardEvent): void => {
       if (e.key === "Enter" && name.trim() && !isSaving) {
-        handleSave();
+        void handleSave();
       } else if (e.key === "Escape") {
         onDone();
       }
@@ -112,18 +113,23 @@ export function LabelForm({
   const isSidebar = variant === "sidebar";
 
   return (
-    <div
+    <form
       className={
         isSidebar
           ? "px-2 py-2 space-y-2"
           : "border border-border-primary rounded-md p-3 space-y-3"
       }
+      onSubmit={(e: React.FormEvent): void => e.preventDefault()}
       onKeyDown={handleKeyDown}
     >
-      {error && (
+      {error != null && (
         <div className="flex items-center gap-2 px-2 py-1 bg-danger/10 text-danger text-xs rounded">
           <span className="flex-1 truncate">{error}</span>
-          <button onClick={() => setError(null)} className="shrink-0">
+          <button
+            type="button"
+            onClick={(): void => setError(null)}
+            className="shrink-0"
+          >
             <X size={10} />
           </button>
         </div>
@@ -133,7 +139,9 @@ export function LabelForm({
         ref={inputRef}
         type="text"
         value={name}
-        onChange={(e) => setName(e.target.value)}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+          setName(e.target.value)
+        }
         placeholder={t("labelForm.labelName")}
         className={
           isSidebar
@@ -148,7 +156,8 @@ export function LabelForm({
           className={`flex flex-wrap gap-1 ${isSidebar ? "gap-1" : "gap-1.5"}`}
         >
           <button
-            onClick={() => setSelectedColor(null)}
+            type="button"
+            onClick={(): void => setSelectedColor(null)}
             className={`${isSidebar ? "w-4 h-4" : "w-5 h-5"} rounded-full border-2 transition-colors ${
               selectedColor === null
                 ? "border-accent ring-1 ring-accent"
@@ -163,8 +172,9 @@ export function LabelForm({
           </button>
           {GMAIL_LABEL_COLORS.map((color) => (
             <button
+              type="button"
               key={color.bg}
-              onClick={() => setSelectedColor(color)}
+              onClick={(): void => setSelectedColor(color)}
               className={`${isSidebar ? "w-4 h-4" : "w-5 h-5"} rounded-full border-2 transition-colors ${
                 selectedColor?.bg === color.bg
                   ? "border-accent ring-1 ring-accent"
@@ -179,6 +189,7 @@ export function LabelForm({
 
       <div className="flex items-center gap-2">
         <button
+          type="button"
           onClick={handleSave}
           disabled={!name.trim() || isSaving}
           className={`${
@@ -192,6 +203,7 @@ export function LabelForm({
               : t("labelForm.save")}
         </button>
         <button
+          type="button"
           onClick={onDone}
           className={`${
             isSidebar ? "px-2 py-1 text-[0.625rem]" : "px-3 py-1.5 text-xs"
@@ -200,6 +212,6 @@ export function LabelForm({
           {t("labelForm.cancel")}
         </button>
       </div>
-    </div>
+    </form>
   );
 }

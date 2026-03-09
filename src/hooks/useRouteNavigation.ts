@@ -4,8 +4,9 @@ import { useMatches } from "@tanstack/react-router";
  * Safely call useMatches — returns [] when no router context is available
  * (e.g. in pop-out ThreadWindow which has no RouterProvider).
  */
-function useMatchesSafe() {
+function useMatchesSafe(): ReturnType<typeof useMatches> {
   try {
+    // biome-ignore lint/correctness/useHookAtTopLevel: intentionally wrapped in try-catch for pop-out windows without RouterProvider
     return useMatches();
   } catch {
     return [];

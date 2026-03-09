@@ -1,3 +1,4 @@
+import type React from "react";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/Button";
@@ -22,7 +23,7 @@ export function EventCreateModal({
   calendars,
   onClose,
   onCreate,
-}: EventCreateModalProps) {
+}: EventCreateModalProps): React.ReactNode {
   const { t } = useTranslation("calendar");
   const [summary, setSummary] = useState("");
   const [description, setDescription] = useState("");
@@ -61,6 +62,7 @@ export function EventCreateModal({
           label={t("title")}
           type="text"
           value={summary}
+          // biome-ignore lint/nursery/useExplicitType: inline callback
           onChange={(e) => setSummary(e.target.value)}
           placeholder={t("eventTitle")}
           autoFocus
@@ -68,11 +70,16 @@ export function EventCreateModal({
 
         {calendars && calendars.length > 1 && (
           <div>
-            <label className="text-xs text-text-secondary block mb-1">
+            <label
+              className="text-xs text-text-secondary block mb-1"
+              htmlFor="calendar-select"
+            >
               {t("calendar")}
             </label>
             <select
+              id="calendar-select"
               value={calendarId}
+              // biome-ignore lint/nursery/useExplicitType: inline callback
               onChange={(e) => setCalendarId(e.target.value)}
               className="w-full px-3 py-1.5 bg-bg-tertiary border border-border-primary rounded text-sm text-text-primary outline-none focus:border-accent"
             >
@@ -91,12 +98,14 @@ export function EventCreateModal({
             label={t("start")}
             type="datetime-local"
             value={startTime}
+            // biome-ignore lint/nursery/useExplicitType: inline callback
             onChange={(e) => setStartTime(e.target.value)}
           />
           <TextField
             label={t("end")}
             type="datetime-local"
             value={endTime}
+            // biome-ignore lint/nursery/useExplicitType: inline callback
             onChange={(e) => setEndTime(e.target.value)}
           />
         </div>
@@ -105,16 +114,22 @@ export function EventCreateModal({
           label={t("location")}
           type="text"
           value={location}
+          // biome-ignore lint/nursery/useExplicitType: inline callback
           onChange={(e) => setLocation(e.target.value)}
           placeholder={t("addLocation")}
         />
 
         <div>
-          <label className="text-xs text-text-secondary block mb-1">
+          <label
+            className="text-xs text-text-secondary block mb-1"
+            htmlFor="event-description"
+          >
             {t("description")}
           </label>
           <textarea
+            id="event-description"
             value={description}
+            // biome-ignore lint/nursery/useExplicitType: inline callback
             onChange={(e) => setDescription(e.target.value)}
             placeholder={t("addDescription")}
             rows={3}
@@ -155,6 +170,6 @@ function getDefaultEnd(): string {
 }
 
 function toLocalISOString(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
+  const pad = (n: number): string => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }

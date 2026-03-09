@@ -26,7 +26,9 @@ export async function initGlobalShortcut(): Promise<void> {
   try {
     const alreadyRegistered = await isRegistered(shortcut);
     if (!alreadyRegistered) {
-      await register(shortcut, handleComposeShortcut);
+      await register(shortcut, () => {
+        void handleComposeShortcut();
+      });
     }
     currentShortcut = shortcut;
   } catch (err) {
@@ -43,7 +45,9 @@ export async function registerComposeShortcut(shortcut: string): Promise<void> {
     }
   }
 
-  await register(shortcut, handleComposeShortcut);
+  await register(shortcut, () => {
+    void handleComposeShortcut();
+  });
   currentShortcut = shortcut;
   await setSetting("global_compose_shortcut", shortcut);
 }

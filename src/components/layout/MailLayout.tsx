@@ -1,10 +1,11 @@
+import type React from "react";
 import { useCallback, useRef } from "react";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { useUIStore } from "@/stores/uiStore";
 import { EmailList } from "./EmailList";
 import { ReadingPane } from "./ReadingPane";
 
-function ResizableEmailLayout() {
+function ResizableEmailLayout(): React.ReactNode {
   const emailListWidth = useUIStore((s) => s.emailListWidth);
   const setEmailListWidth = useUIStore((s) => s.setEmailListWidth);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -16,13 +17,13 @@ function ResizableEmailLayout() {
       const startX = e.clientX;
       const startWidth = listRef.current?.offsetWidth ?? emailListWidth;
 
-      const handleMouseMove = (ev: MouseEvent) => {
+      const handleMouseMove = (ev: MouseEvent): void => {
         const delta = ev.clientX - startX;
         const newWidth = Math.min(800, Math.max(240, startWidth + delta));
         if (listRef.current) listRef.current.style.width = `${newWidth}px`;
       };
 
-      const handleMouseUp = (ev: MouseEvent) => {
+      const handleMouseUp = (ev: MouseEvent): void => {
         document.removeEventListener("mousemove", handleMouseMove);
         document.removeEventListener("mouseup", handleMouseUp);
         document.body.style.cursor = "";
@@ -43,6 +44,7 @@ function ResizableEmailLayout() {
   return (
     <div ref={containerRef} className="flex flex-1 min-w-0 flex-row">
       <EmailList width={emailListWidth} listRef={listRef} />
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: resize handle requires mouse interaction */}
       <div
         onMouseDown={handleMouseDown}
         className="w-1 cursor-col-resize bg-border-primary hover:bg-accent/50 active:bg-accent transition-colors shrink-0"
@@ -52,7 +54,7 @@ function ResizableEmailLayout() {
   );
 }
 
-export function MailLayout() {
+export function MailLayout(): React.ReactNode {
   const readingPanePosition = useUIStore((s) => s.readingPanePosition);
 
   if (readingPanePosition === "right") {

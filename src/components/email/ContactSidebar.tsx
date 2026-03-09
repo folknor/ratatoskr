@@ -13,6 +13,7 @@ import {
   UserPlus,
   X,
 } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { navigateToThread } from "@/router/navigate";
@@ -56,7 +57,7 @@ export function ContactSidebar({
   name,
   accountId,
   onClose,
-}: ContactSidebarProps) {
+}: ContactSidebarProps): React.ReactNode {
   const { t } = useTranslation("email");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [stats, setStats] = useState<ContactStats | null>(null);
@@ -142,8 +143,8 @@ export function ContactSidebar({
     });
 
     // Load recent threads
-    getRecentThreadsWithContact(email).then((t) => {
-      if (!cancelled) setRecentThreads(t);
+    getRecentThreadsWithContact(email).then((threads) => {
+      if (!cancelled) setRecentThreads(threads);
     });
 
     // Load VIP status
@@ -166,7 +167,7 @@ export function ContactSidebar({
       if (!cancelled) setAuthResults(r);
     });
 
-    return () => {
+    return (): void => {
       cancelled = true;
     };
   }, [email, accountId]);
@@ -237,7 +238,7 @@ export function ContactSidebar({
 
   // Cleanup all timers on unmount
   useEffect(
-    () => () => {
+    () => (): void => {
       if (notesTimerRef.current) clearTimeout(notesTimerRef.current);
       if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
       if (addedTimerRef.current) clearTimeout(addedTimerRef.current);
@@ -255,6 +256,7 @@ export function ContactSidebar({
         {/* Close button */}
         <div className="flex justify-end -mt-1 -mr-1 mb-1">
           <button
+            type="button"
             onClick={onClose}
             title={t("closeContactSidebar")}
             className="p-1 text-text-tertiary hover:text-text-primary hover:bg-bg-hover rounded transition-colors"
@@ -283,14 +285,17 @@ export function ContactSidebar({
               <input
                 type="text"
                 value={editNameValue}
-                onChange={(e) => setEditNameValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSaveEditName();
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setEditNameValue(e.target.value)
+                }
+                onKeyDown={(e: React.KeyboardEvent): void => {
+                  if (e.key === "Enter") void handleSaveEditName();
                   if (e.key === "Escape") setEditingName(false);
                 }}
                 className="w-36 text-sm text-center bg-bg-primary border border-border-primary rounded px-1.5 py-0.5 text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
               />
               <button
+                type="button"
                 onClick={handleSaveEditName}
                 title={t("saveName")}
                 className="p-0.5 text-success hover:text-success/80 transition-colors"
@@ -311,6 +316,7 @@ export function ContactSidebar({
         {/* Quick Actions Row */}
         <div className="flex items-center justify-center gap-3 mb-4">
           <button
+            type="button"
             onClick={handleCompose}
             title={t("sendEmail")}
             className="p-2 text-text-secondary hover:text-accent hover:bg-bg-hover rounded-lg transition-colors"
@@ -318,6 +324,7 @@ export function ContactSidebar({
             <Send size={16} />
           </button>
           <button
+            type="button"
             onClick={handleCopyEmail}
             title={copyFeedback ? t("copied") : t("copyEmail")}
             className="p-2 text-text-secondary hover:text-accent hover:bg-bg-hover rounded-lg transition-colors"
@@ -329,6 +336,7 @@ export function ContactSidebar({
             )}
           </button>
           <button
+            type="button"
             onClick={handleToggleVip}
             title={isVip ? t("removeVip") : t("markAsVip")}
             className={`p-2 rounded-lg transition-colors ${
@@ -344,6 +352,7 @@ export function ContactSidebar({
         {/* Add / Edit Contact */}
         {!contact ? (
           <button
+            type="button"
             onClick={handleAddContact}
             className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-accent border border-accent/30 rounded-md hover:bg-accent/10 transition-colors mb-4"
           >
@@ -361,6 +370,7 @@ export function ContactSidebar({
           </button>
         ) : !editingName ? (
           <button
+            type="button"
             onClick={handleStartEditName}
             className="w-full flex items-center justify-center gap-1.5 px-3 py-1 text-xs text-text-tertiary hover:text-text-secondary transition-colors mb-4"
           >
@@ -370,7 +380,7 @@ export function ContactSidebar({
         ) : null}
 
         {/* Stats */}
-        {stats && (
+        {stats != null && (
           <div className="space-y-2 mb-4">
             <div className="flex items-center gap-2 text-xs text-text-secondary">
               <Mail size={12} className="text-text-tertiary shrink-0" />
@@ -378,7 +388,7 @@ export function ContactSidebar({
                 {stats.emailCount} {t("emails")}
               </span>
             </div>
-            {stats.firstEmail && (
+            {stats.firstEmail != null && (
               <div className="flex items-center gap-2 text-xs text-text-secondary">
                 <Clock size={12} className="text-text-tertiary shrink-0" />
                 <span>
@@ -387,7 +397,7 @@ export function ContactSidebar({
                 </span>
               </div>
             )}
-            {stats.lastEmail && (
+            {stats.lastEmail != null && (
               <div className="flex items-center gap-2 text-xs text-text-secondary">
                 <Clock size={12} className="text-text-tertiary shrink-0" />
                 <span>
@@ -400,9 +410,10 @@ export function ContactSidebar({
         )}
 
         {/* Contact Notes */}
-        {contact && (
+        {contact != null && (
           <div className="mb-4">
             <button
+              type="button"
               onClick={() => setNotesExpanded(!notesExpanded)}
               className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-text-tertiary mb-2 hover:text-text-secondary transition-colors"
             >
@@ -413,10 +424,12 @@ export function ContactSidebar({
               )}
               {t("notes")}
             </button>
-            {notesExpanded && (
+            {notesExpanded === true && (
               <textarea
                 value={notes}
-                onChange={(e) => handleNotesChange(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                  handleNotesChange(e.target.value)
+                }
                 onBlur={handleNotesBlur}
                 placeholder={t("addNote")}
                 rows={3}
@@ -434,9 +447,9 @@ export function ContactSidebar({
               {t("sharedFiles")}
             </h4>
             <div className="space-y-1">
-              {attachments.map((att, i) => (
+              {attachments.map((att) => (
                 <div
-                  key={`${att.filename}-${att.date}-${i}`}
+                  key={`${att.filename}-${att.date}-${att.size}`}
                   className="flex items-center gap-2 px-2 py-1.5 text-xs rounded hover:bg-bg-hover transition-colors"
                 >
                   <span className="shrink-0">{getFileIcon(att.mime_type)}</span>
@@ -503,6 +516,7 @@ export function ContactSidebar({
             <div className="space-y-1">
               {recentThreads.map((thread) => (
                 <button
+                  type="button"
                   key={thread.thread_id}
                   onClick={() => handleThreadClick(thread.thread_id)}
                   className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-bg-hover transition-colors group"
@@ -510,7 +524,7 @@ export function ContactSidebar({
                   <div className="text-text-secondary group-hover:text-text-primary truncate">
                     {thread.subject ?? t("common:noSubject")}
                   </div>
-                  {thread.last_message_at && (
+                  {thread.last_message_at != null && (
                     <div className="text-text-tertiary text-[0.625rem] mt-0.5">
                       {formatRelativeDate(thread.last_message_at)}
                     </div>

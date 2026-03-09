@@ -1,7 +1,7 @@
 import { router } from "./index";
 
 /** Known system labels that map to /mail/$label */
-const SYSTEM_LABELS = new Set([
+const SYSTEM_LABELS: Set<string> = new Set([
   "inbox",
   "starred",
   "snoozed",
@@ -49,7 +49,7 @@ export function navigateToLabel(
   }
 
   if (label.startsWith("smart-folder:")) {
-    const folderId = label.replace("smart-folder:", "");
+    const folderId: string = label.replace("smart-folder:", "");
     if (opts?.threadId) {
       router.navigate({
         to: "/smart-folder/$folderId/thread/$threadId",
@@ -103,39 +103,51 @@ export function navigateToLabel(
  */
 export function navigateToThread(threadId: string): void {
   const { location } = router.state;
-  const pathname = location.pathname;
+  const pathname: string = location.pathname;
 
   // Already on a mail/$label route
-  const mailMatch = pathname.match(/^\/mail\/([^/]+)/);
+  const mailMatch: RegExpMatchArray | null = pathname.match(/^\/mail\/([^/]+)/);
   if (mailMatch) {
-    router.navigate({
-      to: "/mail/$label/thread/$threadId",
-      params: { label: mailMatch[1]!, threadId },
-      search: location.search as Record<string, string>,
-    });
-    return;
+    const label: string | undefined = mailMatch[1];
+    if (label) {
+      router.navigate({
+        to: "/mail/$label/thread/$threadId",
+        params: { label, threadId },
+        search: location.search as Record<string, string>,
+      });
+      return;
+    }
   }
 
   // On a custom label route
-  const labelMatch = pathname.match(/^\/label\/([^/]+)/);
+  const labelMatch: RegExpMatchArray | null =
+    pathname.match(/^\/label\/([^/]+)/);
   if (labelMatch) {
-    router.navigate({
-      to: "/label/$labelId/thread/$threadId",
-      params: { labelId: labelMatch[1]!, threadId },
-      search: location.search as Record<string, string>,
-    });
-    return;
+    const labelId: string | undefined = labelMatch[1];
+    if (labelId) {
+      router.navigate({
+        to: "/label/$labelId/thread/$threadId",
+        params: { labelId, threadId },
+        search: location.search as Record<string, string>,
+      });
+      return;
+    }
   }
 
   // On a smart folder route
-  const sfMatch = pathname.match(/^\/smart-folder\/([^/]+)/);
+  const sfMatch: RegExpMatchArray | null = pathname.match(
+    /^\/smart-folder\/([^/]+)/,
+  );
   if (sfMatch) {
-    router.navigate({
-      to: "/smart-folder/$folderId/thread/$threadId",
-      params: { folderId: sfMatch[1]!, threadId },
-      search: location.search as Record<string, string>,
-    });
-    return;
+    const folderId: string | undefined = sfMatch[1];
+    if (folderId) {
+      router.navigate({
+        to: "/smart-folder/$folderId/thread/$threadId",
+        params: { folderId, threadId },
+        search: location.search as Record<string, string>,
+      });
+      return;
+    }
   }
 
   // Fallback: navigate to inbox with thread
@@ -148,14 +160,14 @@ export function navigateToThread(threadId: string): void {
 /**
  * Navigate to settings with an optional tab.
  */
-export function navigateToSettings(tab = "general"): void {
+export function navigateToSettings(tab: string = "general"): void {
   router.navigate({ to: "/settings/$tab", params: { tab } });
 }
 
 /**
  * Navigate to help with an optional topic.
  */
-export function navigateToHelp(topic = "getting-started"): void {
+export function navigateToHelp(topic: string = "getting-started"): void {
   router.navigate({ to: "/help/$topic", params: { topic } });
 }
 
@@ -164,37 +176,52 @@ export function navigateToHelp(topic = "getting-started"): void {
  */
 export function navigateBack(): void {
   const { location } = router.state;
-  const pathname = location.pathname;
+  const pathname: string = location.pathname;
 
   // If on a thread sub-route, go to parent
-  const mailThreadMatch = pathname.match(/^\/mail\/([^/]+)\/thread\//);
+  const mailThreadMatch: RegExpMatchArray | null = pathname.match(
+    /^\/mail\/([^/]+)\/thread\//,
+  );
   if (mailThreadMatch) {
-    router.navigate({
-      to: "/mail/$label",
-      params: { label: mailThreadMatch[1]! },
-      search: location.search as Record<string, string>,
-    });
-    return;
+    const label: string | undefined = mailThreadMatch[1];
+    if (label) {
+      router.navigate({
+        to: "/mail/$label",
+        params: { label },
+        search: location.search as Record<string, string>,
+      });
+      return;
+    }
   }
 
-  const labelThreadMatch = pathname.match(/^\/label\/([^/]+)\/thread\//);
+  const labelThreadMatch: RegExpMatchArray | null = pathname.match(
+    /^\/label\/([^/]+)\/thread\//,
+  );
   if (labelThreadMatch) {
-    router.navigate({
-      to: "/label/$labelId",
-      params: { labelId: labelThreadMatch[1]! },
-      search: location.search as Record<string, string>,
-    });
-    return;
+    const labelId: string | undefined = labelThreadMatch[1];
+    if (labelId) {
+      router.navigate({
+        to: "/label/$labelId",
+        params: { labelId },
+        search: location.search as Record<string, string>,
+      });
+      return;
+    }
   }
 
-  const sfThreadMatch = pathname.match(/^\/smart-folder\/([^/]+)\/thread\//);
+  const sfThreadMatch: RegExpMatchArray | null = pathname.match(
+    /^\/smart-folder\/([^/]+)\/thread\//,
+  );
   if (sfThreadMatch) {
-    router.navigate({
-      to: "/smart-folder/$folderId",
-      params: { folderId: sfThreadMatch[1]! },
-      search: location.search as Record<string, string>,
-    });
-    return;
+    const folderId: string | undefined = sfThreadMatch[1];
+    if (folderId) {
+      router.navigate({
+        to: "/smart-folder/$folderId",
+        params: { folderId },
+        search: location.search as Record<string, string>,
+      });
+      return;
+    }
   }
 
   // Not on a thread route — navigate to inbox
@@ -205,7 +232,8 @@ export function navigateBack(): void {
  * Get the active label from the current router state (non-React helper).
  */
 export function getActiveLabel(): string {
-  const matches = router.state.matches;
+  const matches: Array<{ routeId: string; params: Record<string, unknown> }> =
+    router.state.matches;
   for (const match of matches) {
     if (
       match.routeId === "/mail/$label" ||
@@ -248,9 +276,10 @@ export function getActiveLabel(): string {
  * Get the selected thread ID from the current router state (non-React helper).
  */
 export function getSelectedThreadId(): string | null {
-  const matches = router.state.matches;
+  const matches: Array<{ params: Record<string, string> }> =
+    router.state.matches;
   for (const match of matches) {
-    const params = match.params as Record<string, string>;
+    const params: Record<string, string> = match.params;
     if (params["threadId"]) {
       return params["threadId"];
     }

@@ -1,4 +1,5 @@
 import { Calendar, Check, ChevronDown, Plus, UserPlus } from "lucide-react";
+import type React from "react";
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useClickOutside } from "@/hooks/useClickOutside";
@@ -12,7 +13,7 @@ interface AccountSwitcherProps {
 export function AccountSwitcher({
   collapsed,
   onAddAccount,
-}: AccountSwitcherProps) {
+}: AccountSwitcherProps): React.ReactNode {
   const { t } = useTranslation("accounts");
   const { accounts, activeAccountId, setActiveAccount } = useAccountStore();
   const [open, setOpen] = useState(false);
@@ -23,14 +24,14 @@ export function AccountSwitcher({
   const activeAccount = accounts.find((a) => a.id === activeAccountId);
 
   const handleSwitch = useCallback(
-    (id: string) => {
+    (id: string): void => {
       setActiveAccount(id);
       setOpen(false);
     },
     [setActiveAccount],
   );
 
-  const handleAdd = useCallback(() => {
+  const handleAdd = useCallback((): void => {
     onAddAccount();
     setOpen(false);
   }, [onAddAccount]);
@@ -40,6 +41,7 @@ export function AccountSwitcher({
     return (
       <div className="p-3">
         <button
+          type="button"
           onClick={onAddAccount}
           className={`flex items-center w-full rounded-lg p-2 text-sm text-sidebar-text/70 hover:bg-sidebar-hover hover:text-sidebar-text transition-colors ${
             collapsed ? "justify-center" : "gap-3"
@@ -58,7 +60,8 @@ export function AccountSwitcher({
     <div className="relative p-2" ref={dropdownRef}>
       {/* Trigger button */}
       <button
-        onClick={() => setOpen((v) => !v)}
+        type="button"
+        onClick={(): void => setOpen((v) => !v)}
         className={`flex items-center w-full rounded-lg p-1.5 hover:bg-sidebar-hover transition-colors ${
           collapsed ? "justify-center" : "gap-2.5"
         } ${open ? "bg-sidebar-hover" : ""}`}
@@ -85,7 +88,7 @@ export function AccountSwitcher({
       </button>
 
       {/* Dropdown */}
-      {open && (
+      {open === true && (
         <div
           className={`absolute z-50 mt-1 py-1 rounded-lg border border-border-primary bg-bg-primary shadow-lg glass-panel ${
             collapsed ? "left-full ml-1 top-0 w-64" : "left-2 right-2"
@@ -100,8 +103,9 @@ export function AccountSwitcher({
             const isActive = account.id === activeAccountId;
             return (
               <button
+                type="button"
                 key={account.id}
-                onClick={() => handleSwitch(account.id)}
+                onClick={(): void => handleSwitch(account.id)}
                 className={`flex items-center gap-2.5 w-full px-3 py-2 text-left transition-colors ${
                   isActive
                     ? "bg-accent/8 text-accent"
@@ -131,6 +135,7 @@ export function AccountSwitcher({
           })}
           <div className="border-t border-border-primary my-1" />
           <button
+            type="button"
             onClick={handleAdd}
             className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
           >
@@ -146,7 +151,11 @@ export function AccountSwitcher({
 }
 
 /** The main avatar shown in the trigger — slightly larger */
-function ActiveAvatar({ account }: { account: Account | undefined }) {
+function ActiveAvatar({
+  account,
+}: {
+  account: Account | undefined;
+}): React.ReactNode {
   const [imgError, setImgError] = useState(false);
 
   if (!account) return null;
@@ -163,10 +172,10 @@ function ActiveAvatar({ account }: { account: Account | undefined }) {
       {showImg ? (
         <img
           key={account.avatarUrl}
-          src={account.avatarUrl!}
+          src={account.avatarUrl ?? ""}
           alt={account.email}
           className="w-full h-full object-cover"
-          onError={() => setImgError(true)}
+          onError={(): void => setImgError(true)}
         />
       ) : (
         initial
@@ -182,7 +191,7 @@ function AccountAvatarSmall({
 }: {
   account: Account;
   isActive: boolean;
-}) {
+}): React.ReactNode {
   const [imgError, setImgError] = useState(false);
 
   const initial = (
@@ -201,10 +210,10 @@ function AccountAvatarSmall({
       {showImg ? (
         <img
           key={account.avatarUrl}
-          src={account.avatarUrl!}
+          src={account.avatarUrl ?? ""}
           alt=""
           className="w-full h-full object-cover"
-          onError={() => setImgError(true)}
+          onError={(): void => setImgError(true)}
         />
       ) : (
         initial

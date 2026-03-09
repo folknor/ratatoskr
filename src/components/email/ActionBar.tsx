@@ -21,6 +21,7 @@ import {
   Trash2,
   VolumeX,
 } from "lucide-react";
+import type React from "react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/Button";
@@ -72,7 +73,7 @@ interface ActionBarProps {
   onToggleTaskSidebar?: () => void;
 }
 
-function Separator() {
+function Separator(): React.ReactNode {
   return <div className="w-px h-5 bg-border-secondary mx-1 shrink-0" />;
 }
 
@@ -91,7 +92,7 @@ export function ActionBar({
   onPopOut,
   onToggleContactSidebar,
   onToggleTaskSidebar,
-}: ActionBarProps) {
+}: ActionBarProps): React.ReactNode {
   const { t } = useTranslation("email");
   const updateThread = useThreadStore((s) => s.updateThread);
   const removeThread = useThreadStore((s) => s.removeThread);
@@ -111,22 +112,22 @@ export function ActionBar({
       .catch(() => setHasFollowUp(false));
   }, [activeAccountId, thread.id]);
 
-  const handleToggleRead = async () => {
+  const handleToggleRead = async (): Promise<void> => {
     if (!activeAccountId) return;
     await markThreadRead(activeAccountId, thread.id, [], !thread.isRead);
   };
 
-  const handleToggleStar = async () => {
+  const handleToggleStar = async (): Promise<void> => {
     if (!activeAccountId) return;
     await starThread(activeAccountId, thread.id, [], !thread.isStarred);
   };
 
-  const handleArchive = async () => {
+  const handleArchive = async (): Promise<void> => {
     if (!activeAccountId) return;
     await archiveThread(activeAccountId, thread.id, []);
   };
 
-  const handleDelete = async () => {
+  const handleDelete = async (): Promise<void> => {
     if (!activeAccountId) return;
     const isTrashView = activeLabel === "trash";
     const isDraftsView = activeLabel === "drafts";
@@ -146,7 +147,7 @@ export function ActionBar({
     }
   };
 
-  const handleSnooze = async (until: number) => {
+  const handleSnooze = async (until: number): Promise<void> => {
     if (!activeAccountId) return;
     setShowSnooze(false);
     try {
@@ -157,7 +158,7 @@ export function ActionBar({
     }
   };
 
-  const handleSpam = async () => {
+  const handleSpam = async (): Promise<void> => {
     if (!activeAccountId) return;
     await spamThread(activeAccountId, thread.id, [], !isSpamView);
   };
@@ -169,7 +170,7 @@ export function ActionBar({
     "idle" | "loading" | "done"
   >("idle");
 
-  const handleUnsubscribe = async () => {
+  const handleUnsubscribe = async (): Promise<void> => {
     if (!(unsubscribeMessage?.list_unsubscribe && activeAccountId)) return;
     setUnsubscribeStatus("loading");
     try {
@@ -197,7 +198,7 @@ export function ActionBar({
     }
   };
 
-  const handleTogglePin = async () => {
+  const handleTogglePin = async (): Promise<void> => {
     if (!activeAccountId) return;
     const newPinned = !thread.isPinned;
     updateThread(thread.id, { isPinned: newPinned });
@@ -213,7 +214,7 @@ export function ActionBar({
     }
   };
 
-  const handleToggleMute = async () => {
+  const handleToggleMute = async (): Promise<void> => {
     if (!activeAccountId) return;
     const newMuted = !thread.isMuted;
     if (newMuted) {
@@ -239,10 +240,11 @@ export function ActionBar({
     }
   };
 
-  const handleFollowUp = async (remindAt: number) => {
+  const handleFollowUp = async (remindAt: number): Promise<void> => {
     if (!(activeAccountId && messages) || messages.length === 0) return;
     setShowFollowUp(false);
-    const lastMsg = messages[messages.length - 1]!;
+    const lastMsg = messages[messages.length - 1];
+    if (!lastMsg) return;
     try {
       await insertFollowUpReminder(
         activeAccountId,
@@ -256,7 +258,7 @@ export function ActionBar({
     }
   };
 
-  const handleCancelFollowUp = async () => {
+  const handleCancelFollowUp = async (): Promise<void> => {
     if (!activeAccountId) return;
     try {
       await cancelFollowUpForThread(activeAccountId, thread.id);

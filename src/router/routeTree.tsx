@@ -1,42 +1,48 @@
+import type { AnyRoute } from "@tanstack/react-router";
 import { createRootRoute, createRoute, redirect } from "@tanstack/react-router";
-import { lazy, Suspense } from "react";
+import React, {
+  type ComponentType,
+  type LazyExoticComponent,
+  lazy,
+  Suspense,
+} from "react";
 import App from "@/App";
 import { MailLayout } from "@/components/layout/MailLayout";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 
 // Lazy-load heavy pages — these include many sub-components and service imports
-const SettingsPage = lazy(() =>
+const SettingsPage: LazyExoticComponent<ComponentType> = lazy(() =>
   import("@/components/settings/SettingsPage").then((m) => ({
     default: m.SettingsPage,
   })),
 );
-const HelpPage = lazy(() =>
+const HelpPage: LazyExoticComponent<ComponentType> = lazy(() =>
   import("@/components/help/HelpPage").then((m) => ({ default: m.HelpPage })),
 );
-const CalendarPage = lazy(() =>
+const CalendarPage: LazyExoticComponent<ComponentType> = lazy(() =>
   import("@/components/calendar/CalendarPage").then((m) => ({
     default: m.CalendarPage,
   })),
 );
-const TasksPage = lazy(() =>
+const TasksPage: LazyExoticComponent<ComponentType> = lazy(() =>
   import("@/components/tasks/TasksPage").then((m) => ({
     default: m.TasksPage,
   })),
 );
-const AttachmentLibrary = lazy(() =>
+const AttachmentLibrary: LazyExoticComponent<ComponentType> = lazy(() =>
   import("@/components/attachments/AttachmentLibrary").then((m) => ({
     default: m.AttachmentLibrary,
   })),
 );
 
 // ---------- Search param validation ----------
-const VALID_CATEGORIES = [
+const VALID_CATEGORIES: readonly [
   "Primary",
   "Updates",
   "Promotions",
   "Social",
   "Newsletters",
-] as const;
+] = ["Primary", "Updates", "Promotions", "Social", "Newsletters"] as const;
 
 type MailSearch = {
   q?: string;
@@ -48,7 +54,7 @@ function validateMailSearch(search: Record<string, unknown>): MailSearch {
   if (typeof search["q"] === "string" && search["q"]) {
     result.q = search["q"];
   }
-  const cat = search["category"];
+  const cat: unknown = search["category"];
   if (
     typeof cat === "string" &&
     (VALID_CATEGORIES as readonly string[]).includes(cat)
@@ -59,12 +65,12 @@ function validateMailSearch(search: Record<string, unknown>): MailSearch {
 }
 
 // ---------- Root (shell: TitleBar, Sidebar, overlays) ----------
-export const rootRoute = createRootRoute({
+export const rootRoute: ReturnType<typeof createRootRoute> = createRootRoute({
   component: App,
 });
 
 // ---------- / (index) → redirect to /mail/inbox ----------
-const indexRoute = createRoute({
+const indexRoute: AnyRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   beforeLoad: () => {
@@ -73,7 +79,7 @@ const indexRoute = createRoute({
 });
 
 // ---------- Mail routes: render MailLayout for all mail views ----------
-function MailPage() {
+function MailPage(): React.JSX.Element {
   return (
     <ErrorBoundary name="MailLayout">
       <MailLayout />
@@ -81,7 +87,7 @@ function MailPage() {
   );
 }
 
-function SettingsTabPage() {
+function SettingsTabPage(): React.JSX.Element {
   return (
     <ErrorBoundary name="SettingsPage">
       <Suspense
@@ -97,7 +103,7 @@ function SettingsTabPage() {
   );
 }
 
-function CalendarPageWrapper() {
+function CalendarPageWrapper(): React.JSX.Element {
   return (
     <ErrorBoundary name="CalendarPage">
       <Suspense
@@ -113,7 +119,7 @@ function CalendarPageWrapper() {
   );
 }
 
-function HelpPageWrapper() {
+function HelpPageWrapper(): React.JSX.Element {
   return (
     <ErrorBoundary name="HelpPage">
       <Suspense
@@ -130,7 +136,7 @@ function HelpPageWrapper() {
 }
 
 // ---------- /mail/$label ----------
-export const mailRoute = createRoute({
+export const mailRoute: AnyRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "mail/$label",
   validateSearch: validateMailSearch,
@@ -138,13 +144,13 @@ export const mailRoute = createRoute({
 });
 
 // ---------- /mail/$label/thread/$threadId ----------
-export const mailThreadRoute = createRoute({
+export const mailThreadRoute: AnyRoute = createRoute({
   getParentRoute: () => mailRoute,
   path: "thread/$threadId",
 });
 
 // ---------- /label/$labelId ----------
-export const labelRoute = createRoute({
+export const labelRoute: AnyRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "label/$labelId",
   validateSearch: validateMailSearch,
@@ -152,13 +158,13 @@ export const labelRoute = createRoute({
 });
 
 // ---------- /label/$labelId/thread/$threadId ----------
-export const labelThreadRoute = createRoute({
+export const labelThreadRoute: AnyRoute = createRoute({
   getParentRoute: () => labelRoute,
   path: "thread/$threadId",
 });
 
 // ---------- /smart-folder/$folderId ----------
-export const smartFolderRoute = createRoute({
+export const smartFolderRoute: AnyRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "smart-folder/$folderId",
   validateSearch: validateMailSearch,
@@ -166,13 +172,13 @@ export const smartFolderRoute = createRoute({
 });
 
 // ---------- /smart-folder/$folderId/thread/$threadId ----------
-export const smartFolderThreadRoute = createRoute({
+export const smartFolderThreadRoute: AnyRoute = createRoute({
   getParentRoute: () => smartFolderRoute,
   path: "thread/$threadId",
 });
 
 // ---------- /settings (redirect to /settings/general) ----------
-const settingsIndexRoute = createRoute({
+const settingsIndexRoute: AnyRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "settings",
   beforeLoad: () => {
@@ -181,14 +187,14 @@ const settingsIndexRoute = createRoute({
 });
 
 // ---------- /settings/$tab ----------
-export const settingsTabRoute = createRoute({
+export const settingsTabRoute: AnyRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "settings/$tab",
   component: SettingsTabPage,
 });
 
 // ---------- /attachments ----------
-function AttachmentLibraryWrapper() {
+function AttachmentLibraryWrapper(): React.JSX.Element {
   return (
     <ErrorBoundary name="AttachmentLibrary">
       <Suspense
@@ -204,14 +210,14 @@ function AttachmentLibraryWrapper() {
   );
 }
 
-export const attachmentsRoute = createRoute({
+export const attachmentsRoute: AnyRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "attachments",
   component: AttachmentLibraryWrapper,
 });
 
 // ---------- /tasks ----------
-function TasksPageWrapper() {
+function TasksPageWrapper(): React.JSX.Element {
   return (
     <ErrorBoundary name="TasksPage">
       <Suspense
@@ -227,21 +233,21 @@ function TasksPageWrapper() {
   );
 }
 
-export const tasksRoute = createRoute({
+export const tasksRoute: AnyRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "tasks",
   component: TasksPageWrapper,
 });
 
 // ---------- /calendar ----------
-export const calendarRoute = createRoute({
+export const calendarRoute: AnyRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "calendar",
   component: CalendarPageWrapper,
 });
 
 // ---------- /help (redirect to /help/getting-started) ----------
-const helpIndexRoute = createRoute({
+const helpIndexRoute: AnyRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "help",
   beforeLoad: () => {
@@ -253,14 +259,14 @@ const helpIndexRoute = createRoute({
 });
 
 // ---------- /help/$topic ----------
-export const helpTopicRoute = createRoute({
+export const helpTopicRoute: AnyRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "help/$topic",
   component: HelpPageWrapper,
 });
 
 // ---------- Route tree ----------
-export const routeTree = rootRoute.addChildren([
+export const routeTree: AnyRoute = rootRoute.addChildren([
   indexRoute,
   mailRoute.addChildren([mailThreadRoute]),
   labelRoute.addChildren([labelThreadRoute]),

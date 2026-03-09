@@ -1,3 +1,4 @@
+import type React from "react";
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
@@ -29,15 +30,15 @@ export function DateTimePickerDialog({
   onSelect,
   submitLabel,
   zIndex,
-}: DateTimePickerDialogProps) {
+}: DateTimePickerDialogProps): React.ReactNode {
   const [customDate, setCustomDate] = useState("");
   const [customTime, setCustomTime] = useState("09:00");
 
-  const handlePresetClick = (timestamp: number) => {
+  const handlePresetClick = (timestamp: number): void => {
     onSelect(timestamp);
   };
 
-  const handleCustomSubmit = () => {
+  const handleCustomSubmit = (): void => {
     if (!customDate) return;
     const dt = new Date(`${customDate}T${customTime}`);
     onSelect(Math.floor(dt.getTime() / 1000));
@@ -48,6 +49,7 @@ export function DateTimePickerDialog({
       <div className="py-1">
         {presets.map((preset) => (
           <button
+            type="button"
             key={preset.label}
             onClick={() => handlePresetClick(preset.timestamp)}
             className="w-full text-left px-4 py-2 text-sm text-text-primary hover:bg-bg-hover transition-colors flex items-center justify-between"
@@ -72,12 +74,14 @@ export function DateTimePickerDialog({
           <input
             type="date"
             value={customDate}
+            // biome-ignore lint/nursery/useExplicitType: inline callback
             onChange={(e) => setCustomDate(e.target.value)}
             className="flex-1 bg-bg-tertiary text-text-primary text-xs px-2 py-1.5 rounded border border-border-primary"
           />
           <input
             type="time"
             value={customTime}
+            // biome-ignore lint/nursery/useExplicitType: inline callback
             onChange={(e) => setCustomTime(e.target.value)}
             className="w-20 bg-bg-tertiary text-text-primary text-xs px-2 py-1.5 rounded border border-border-primary"
           />

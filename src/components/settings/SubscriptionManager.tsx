@@ -1,4 +1,5 @@
 import { Loader2, MailMinus, Search } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -10,7 +11,7 @@ import {
 import { useAccountStore } from "@/stores/accountStore";
 import { formatRelativeDate } from "@/utils/date";
 
-export function SubscriptionManager() {
+export function SubscriptionManager(): React.ReactNode {
   const { t } = useTranslation("settings");
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
   const [subscriptions, setSubscriptions] = useState<SubscriptionEntry[]>([]);
@@ -24,14 +25,16 @@ export function SubscriptionManager() {
   useEffect(() => {
     if (!activeAccountId) return;
     setLoading(true);
-    getSubscriptions(activeAccountId)
+    void getSubscriptions(activeAccountId)
       .then((subs) => setSubscriptions(subs))
-      .catch((err) => console.error("Failed to load subscriptions:", err))
+      .catch((err: unknown) =>
+        console.error("Failed to load subscriptions:", err),
+      )
       .finally(() => setLoading(false));
   }, [activeAccountId]);
 
   const handleUnsubscribe = useCallback(
-    async (sub: SubscriptionEntry) => {
+    async (sub: SubscriptionEntry): Promise<void> => {
       if (!(activeAccountId && sub.latest_unsubscribe_header)) return;
       setUnsubscribingIds((prev) => new Set(prev).add(sub.from_address));
       try {
@@ -65,7 +68,7 @@ export function SubscriptionManager() {
     [activeAccountId],
   );
 
-  const handleBulkUnsubscribe = useCallback(async () => {
+  const handleBulkUnsubscribe = useCallback(async (): Promise<void> => {
     const toUnsubscribe = subscriptions.filter(
       (s) => selectedIds.has(s.from_address) && s.status !== "unsubscribed",
     );
@@ -75,7 +78,7 @@ export function SubscriptionManager() {
     setSelectedIds(new Set());
   }, [selectedIds, subscriptions, handleUnsubscribe]);
 
-  const toggleSelect = (addr: string) => {
+  const toggleSelect = (addr: string): void => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(addr)) next.delete(addr);
@@ -84,7 +87,7 @@ export function SubscriptionManager() {
     });
   };
 
-  const filtered = useMemo(() => {
+  const filtered = useMemo((): SubscriptionEntry[] => {
     if (!searchQuery) return subscriptions;
     const q = searchQuery.toLowerCase();
     return subscriptions.filter(
@@ -124,14 +127,17 @@ export function SubscriptionManager() {
           <input
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+              setSearchQuery(e.target.value)
+            }
             placeholder={t("subscriptionManager.searchPlaceholder")}
             className="w-full pl-8 pr-3 py-1.5 bg-bg-tertiary border border-border-primary rounded-md text-xs text-text-primary outline-none focus:border-accent"
           />
         </div>
         {selectedIds.size > 0 && (
           <button
-            onClick={handleBulkUnsubscribe}
+            type="button"
+            onClick={(): void => void handleBulkUnsubscribe()}
             className="px-3 py-1.5 text-xs bg-danger text-white rounded-md hover:bg-danger/80 transition-colors shrink-0"
           >
             {t("subscriptionManager.unsubscribeCount", {
@@ -168,7 +174,7 @@ export function SubscriptionManager() {
               <input
                 type="checkbox"
                 checked={isSelected}
-                onChange={() => toggleSelect(sub.from_address)}
+                onChange={(): void => toggleSelect(sub.from_address)}
                 disabled={isUnsubscribed}
                 className="shrink-0 accent-accent"
               />
@@ -202,7 +208,8 @@ export function SubscriptionManager() {
               </div>
               {!isUnsubscribed && (
                 <button
-                  onClick={() => handleUnsubscribe(sub)}
+                  type="button"
+                  onClick={(): void => void handleUnsubscribe(sub)}
                   disabled={isLoading}
                   className="flex items-center gap-1 px-2.5 py-1 text-xs text-danger hover:text-danger/80 bg-bg-tertiary rounded-md border border-border-primary transition-colors disabled:opacity-50 shrink-0"
                 >

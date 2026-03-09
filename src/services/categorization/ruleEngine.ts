@@ -6,7 +6,7 @@ export interface CategorizationInput {
   listUnsubscribe: string | null;
 }
 
-const SOCIAL_DOMAINS = new Set([
+const SOCIAL_DOMAINS: Set<string> = new Set([
   "facebookmail.com",
   "facebook.com",
   "twitter.com",
@@ -24,7 +24,7 @@ const SOCIAL_DOMAINS = new Set([
   "mastodon.social",
 ]);
 
-const NEWSLETTER_DOMAINS = new Set([
+const NEWSLETTER_DOMAINS: Set<string> = new Set([
   "substack.com",
   "mailchimp.com",
   "convertkit.com",
@@ -41,7 +41,7 @@ const NEWSLETTER_DOMAINS = new Set([
   "aweber.com",
 ]);
 
-const PROMO_PREFIXES = new Set([
+const PROMO_PREFIXES: Set<string> = new Set([
   "marketing",
   "promo",
   "promotions",
@@ -55,7 +55,7 @@ const PROMO_PREFIXES = new Set([
   "hello",
 ]);
 
-const UPDATE_PREFIXES = new Set([
+const UPDATE_PREFIXES: Set<string> = new Set([
   "noreply",
   "no-reply",
   "notifications",

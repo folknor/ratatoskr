@@ -1,3 +1,4 @@
+import type React from "react";
 import { useTranslation } from "react-i18next";
 import { DateTimePickerDialog } from "@/components/ui/DateTimePickerDialog";
 
@@ -7,7 +8,12 @@ interface SnoozeDialogProps {
   onClose: () => void;
 }
 
-function getSnoozeTimestamps() {
+function getSnoozeTimestamps(): {
+  laterToday: number;
+  tomorrow: number;
+  weekend: number;
+  nextWeek: number;
+} {
   const now = new Date();
   const today = new Date(now);
 
@@ -49,7 +55,7 @@ export function SnoozeDialog({
   isOpen = true,
   onSnooze,
   onClose,
-}: SnoozeDialogProps) {
+}: SnoozeDialogProps): React.ReactNode {
   const { t } = useTranslation("email");
   const ts = getSnoozeTimestamps();
   const presets = [

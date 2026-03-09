@@ -4,7 +4,7 @@ import { GmailApiProvider } from "./gmailProvider";
 import { ImapSmtpProvider } from "./imapSmtpProvider";
 import type { EmailProvider } from "./types";
 
-const providers = new Map<string, EmailProvider>();
+const providers: Map<string, EmailProvider> = new Map<string, EmailProvider>();
 
 /**
  * Get or create the appropriate EmailProvider for the given account.

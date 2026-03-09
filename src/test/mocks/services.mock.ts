@@ -29,7 +29,7 @@ export function createMockGmailClient(
 
 export function createMockEmailProvider(
   overrides: Record<string, unknown> = {},
-) {
+): Record<string, unknown> {
   return {
     archive: vi.fn(() => Promise.resolve()),
     trash: vi.fn(() => Promise.resolve()),
@@ -49,7 +49,10 @@ export function createMockEmailProvider(
   };
 }
 
-export function createMockAiProvider(response = "ai response") {
+export function createMockAiProvider(response: string = "ai response"): {
+  complete: ReturnType<typeof vi.fn>;
+  testConnection: ReturnType<typeof vi.fn>;
+} {
   return {
     complete: vi.fn(() => Promise.resolve(response)),
     testConnection: vi.fn(() => Promise.resolve(true)),

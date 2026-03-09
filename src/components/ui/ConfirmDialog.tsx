@@ -1,3 +1,4 @@
+import type React from "react";
 import { type ReactNode, useEffect, useRef } from "react";
 import { Button } from "./Button";
 import { Modal } from "./Modal";
@@ -24,7 +25,7 @@ export function ConfirmDialog({
   cancelLabel = "Cancel",
   variant = "primary",
   loading = false,
-}: ConfirmDialogProps) {
+}: ConfirmDialogProps): React.ReactNode {
   const confirmRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -35,7 +36,7 @@ export function ConfirmDialog({
     }
   }, [isOpen]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent): void => {
     if (e.key === "Enter") {
       e.preventDefault();
       onConfirm();
@@ -44,6 +45,7 @@ export function ConfirmDialog({
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={title} width="w-80">
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: keyboard handler for dialog */}
       <div className="p-4" onKeyDown={handleKeyDown}>
         <div className="text-sm text-text-secondary mb-4">{message}</div>
         <div className="flex justify-end gap-2">
@@ -56,7 +58,7 @@ export function ConfirmDialog({
             onClick={onConfirm}
             disabled={loading}
           >
-            {loading ? "..." : confirmLabel}
+            {loading === true ? "..." : String(confirmLabel)}
           </Button>
         </div>
       </div>

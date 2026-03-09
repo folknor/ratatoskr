@@ -1,3 +1,4 @@
+import type React from "react";
 import { useEffect, useState } from "react";
 import {
   type DbSignature,
@@ -6,7 +7,7 @@ import {
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 
-export function SignatureSelector() {
+export function SignatureSelector(): React.ReactNode {
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
   const isOpen = useComposerStore((s) => s.isOpen);
   const signatureId = useComposerStore((s) => s.signatureId);
@@ -27,7 +28,7 @@ export function SignatureSelector() {
 
   if (signatures.length === 0) return null;
 
-  const handleChange = (id: string) => {
+  const handleChange = (id: string): void => {
     if (id === "") {
       setSignatureId(null);
       setSignatureHtml("");
@@ -43,6 +44,7 @@ export function SignatureSelector() {
   return (
     <select
       value={signatureId ?? ""}
+      // biome-ignore lint/nursery/useExplicitType: inline callback
       onChange={(e) => handleChange(e.target.value)}
       className="text-[0.625rem] bg-bg-tertiary text-text-secondary border border-border-primary rounded px-1.5 py-0.5"
     >

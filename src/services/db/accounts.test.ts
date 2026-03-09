@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import { createMockGmailAccount, createMockImapAccount } from "@/test/mocks";
 import {
   deleteAccount,

@@ -22,12 +22,13 @@ interface BackfillRow {
  */
 export async function backfillSmartLabels(
   accountId: string,
-  batchSize = 50,
+  batchSize: number = 50,
 ): Promise<number> {
   const db = await getDb();
   let totalLabeled = 0;
   let offset = 0;
 
+  // biome-ignore lint/nursery/noUnnecessaryConditions: intentional infinite loop broken by empty batch check
   while (true) {
     // Fetch inbox threads with their latest message data
     const rows = await db.select<BackfillRow[]>(

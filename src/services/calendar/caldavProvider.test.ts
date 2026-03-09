@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import { CalDAVProvider } from "./caldavProvider";
 
 const MOCK_ICAL_DATA =

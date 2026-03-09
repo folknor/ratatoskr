@@ -77,7 +77,7 @@ describe("MessageItem", () => {
         isSpam={true}
       />,
     );
-    const wrapper = container.firstElementChild!;
+    const wrapper = container.firstElementChild as Element;
     expect(wrapper.className).toContain("bg-red-500/8");
   });
 
@@ -90,7 +90,7 @@ describe("MessageItem", () => {
         isSpam={false}
       />,
     );
-    const wrapper = container.firstElementChild!;
+    const wrapper = container.firstElementChild as Element;
     expect(wrapper.className).not.toContain("bg-red-500");
   });
 
@@ -98,7 +98,7 @@ describe("MessageItem", () => {
     const { container } = render(
       <MessageItem message={makeMessage()} isLast={true} blockImages={false} />,
     );
-    const wrapper = container.firstElementChild!;
+    const wrapper = container.firstElementChild as Element;
     expect(wrapper.className).not.toContain("bg-red-500");
   });
 
@@ -111,7 +111,7 @@ describe("MessageItem", () => {
         focused={true}
       />,
     );
-    const wrapper = container.firstElementChild!;
+    const wrapper = container.firstElementChild as Element;
     expect(wrapper.className).toContain("ring-accent/50");
   });
 
@@ -124,7 +124,7 @@ describe("MessageItem", () => {
         focused={false}
       />,
     );
-    const wrapper = container.firstElementChild!;
+    const wrapper = container.firstElementChild as Element;
     expect(wrapper.className).not.toContain("ring-accent/50");
   });
 

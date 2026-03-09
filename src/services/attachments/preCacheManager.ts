@@ -8,7 +8,7 @@ import { getSetting } from "../db/settings";
 import { getEmailProvider } from "../email/providerFactory";
 import { cacheAttachment } from "./cacheManager";
 
-const MAX_ATTACHMENT_SIZE = 5 * 1024 * 1024; // 5MB
+const MAX_ATTACHMENT_SIZE: number = 5 * 1024 * 1024; // 5MB
 const RECENT_DAYS = 7;
 const BATCH_LIMIT = 20;
 

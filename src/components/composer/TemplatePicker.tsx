@@ -1,5 +1,6 @@
 import type { Editor } from "@tiptap/react";
 import { ChevronDown, FileText } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type DbTemplate,
@@ -12,7 +13,9 @@ interface TemplatePickerProps {
   editor: Editor | null;
 }
 
-export function TemplatePicker({ editor }: TemplatePickerProps) {
+export function TemplatePicker({
+  editor,
+}: TemplatePickerProps): React.ReactNode {
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
   const { mode, subject, setSubject } = useComposerStore();
   const [templates, setTemplates] = useState<DbTemplate[]>([]);
@@ -21,13 +24,13 @@ export function TemplatePicker({ editor }: TemplatePickerProps) {
 
   useEffect(() => {
     if (!activeAccountId) return;
-    getTemplatesForAccount(activeAccountId).then(setTemplates);
+    void getTemplatesForAccount(activeAccountId).then(setTemplates);
   }, [activeAccountId]);
 
   // Close dropdown on outside click
   useEffect(() => {
     if (!isOpen) return;
-    const handleClick = (e: MouseEvent) => {
+    const handleClick = (e: MouseEvent): void => {
       if (
         dropdownRef.current &&
         !dropdownRef.current.contains(e.target as Node)
@@ -60,6 +63,7 @@ export function TemplatePicker({ editor }: TemplatePickerProps) {
   return (
     <div className="relative" ref={dropdownRef}>
       <button
+        type="button"
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-1 text-xs text-text-tertiary hover:text-text-secondary transition-colors"
       >
@@ -68,10 +72,11 @@ export function TemplatePicker({ editor }: TemplatePickerProps) {
         <ChevronDown size={10} />
       </button>
 
-      {isOpen && (
+      {isOpen === true && (
         <div className="absolute bottom-full mb-1 left-0 bg-bg-primary border border-border-primary rounded-md shadow-lg glass-modal w-56 max-h-48 overflow-y-auto z-10">
           {templates.map((tmpl) => (
             <button
+              type="button"
               key={tmpl.id}
               onClick={() => handleSelect(tmpl)}
               className="w-full text-left px-3 py-2 hover:bg-bg-hover text-sm transition-colors"
@@ -79,7 +84,7 @@ export function TemplatePicker({ editor }: TemplatePickerProps) {
               <div className="text-text-primary text-xs font-medium">
                 {tmpl.name}
               </div>
-              {tmpl.subject && (
+              {tmpl.subject != null && tmpl.subject !== "" && (
                 <div className="text-text-tertiary text-[0.625rem] truncate">
                   {tmpl.subject}
                 </div>

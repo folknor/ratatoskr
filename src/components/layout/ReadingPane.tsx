@@ -1,3 +1,4 @@
+import type React from "react";
 import { useTranslation } from "react-i18next";
 import { useSelectedThreadId } from "@/hooks/useRouteNavigation";
 import { useThreadStore } from "@/stores/threadStore";
@@ -5,7 +6,7 @@ import { ThreadView } from "../email/ThreadView";
 import { EmptyState } from "../ui/EmptyState";
 import { ReadingPaneIllustration } from "../ui/illustrations";
 
-export function ReadingPane() {
+export function ReadingPane(): React.ReactNode {
   const { t } = useTranslation("email");
   const selectedThreadId = useSelectedThreadId();
   const selectedThread = useThreadStore((s) =>

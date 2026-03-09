@@ -1,11 +1,12 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Copy, Minus, Square, X } from "lucide-react";
+import type React from "react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-const isMac = navigator.userAgent.includes("Macintosh");
+const isMac: boolean = navigator.userAgent.includes("Macintosh");
 
-export function TitleBar() {
+export function TitleBar(): React.ReactNode {
   const { t } = useTranslation("settings");
   const [maximized, setMaximized] = useState(false);
 
@@ -23,14 +24,14 @@ export function TitleBar() {
         unlisten = fn;
       });
 
-    return () => {
+    return (): void => {
       unlisten?.();
     };
   }, []);
 
-  const handleMinimize = () => getCurrentWindow().minimize();
-  const handleMaximize = () => getCurrentWindow().toggleMaximize();
-  const handleClose = () => getCurrentWindow().close();
+  const handleMinimize = (): void => void getCurrentWindow().minimize();
+  const handleMaximize = (): void => void getCurrentWindow().toggleMaximize();
+  const handleClose = (): void => void getCurrentWindow().close();
 
   return (
     <div
@@ -54,6 +55,7 @@ export function TitleBar() {
       {!isMac && (
         <div className="flex items-center h-full">
           <button
+            type="button"
             onClick={handleMinimize}
             className="h-full px-3.5 flex items-center justify-center text-sidebar-text/70 hover:bg-sidebar-hover transition-colors"
             title={t("minimize")}
@@ -61,6 +63,7 @@ export function TitleBar() {
             <Minus size={14} />
           </button>
           <button
+            type="button"
             onClick={handleMaximize}
             className="h-full px-3.5 flex items-center justify-center text-sidebar-text/70 hover:bg-sidebar-hover transition-colors"
             title={maximized ? t("restore") : t("maximize")}
@@ -68,6 +71,7 @@ export function TitleBar() {
             {maximized ? <Copy size={12} /> : <Square size={12} />}
           </button>
           <button
+            type="button"
             onClick={handleClose}
             className="h-full px-3.5 flex items-center justify-center text-sidebar-text/70 hover:bg-danger hover:text-white transition-colors"
             title={t("close")}

@@ -1,4 +1,5 @@
 import { ShieldAlert } from "lucide-react";
+import type React from "react";
 import { useTranslation } from "react-i18next";
 import type { MessageScanResult } from "@/utils/phishingDetector";
 
@@ -10,7 +11,7 @@ interface PhishingBannerProps {
 export function PhishingBanner({
   scanResult,
   onTrustSender,
-}: PhishingBannerProps) {
+}: PhishingBannerProps): React.ReactNode {
   const { t } = useTranslation("email");
   const isHigh = scanResult.maxRiskScore >= 60;
 
@@ -43,6 +44,7 @@ export function PhishingBanner({
         </p>
       </div>
       <button
+        type="button"
         onClick={onTrustSender}
         className={`shrink-0 text-xs px-2.5 py-1 rounded-md border transition-colors ${buttonClass}`}
       >

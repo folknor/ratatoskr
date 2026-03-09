@@ -1,11 +1,15 @@
 import { Search, X } from "lucide-react";
+import type React from "react";
 
 interface HelpSearchBarProps {
   query: string;
   onChange: (query: string) => void;
 }
 
-export function HelpSearchBar({ query, onChange }: HelpSearchBarProps) {
+export function HelpSearchBar({
+  query,
+  onChange,
+}: HelpSearchBarProps): React.ReactNode {
   return (
     <div className="relative mb-5">
       <Search
@@ -15,13 +19,16 @@ export function HelpSearchBar({ query, onChange }: HelpSearchBarProps) {
       <input
         type="text"
         value={query}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+          onChange(e.target.value)
+        }
         placeholder="Search help topics..."
         className="w-full pl-9 pr-9 py-2 text-sm rounded-lg bg-bg-secondary border border-border-secondary text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-accent transition-colors"
       />
-      {query && (
+      {query !== "" && (
         <button
-          onClick={() => onChange("")}
+          type="button"
+          onClick={(): void => onChange("")}
           className="absolute right-3 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-secondary transition-colors"
         >
           <X size={14} />

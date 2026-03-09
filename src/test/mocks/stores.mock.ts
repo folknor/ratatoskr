@@ -2,7 +2,7 @@ import { vi } from "vitest";
 
 export function createMockUIStoreState(
   overrides: Record<string, unknown> = {},
-) {
+): Record<string, unknown> {
   return {
     isOnline: true,
     setPendingOpsCount: vi.fn(),
@@ -12,7 +12,7 @@ export function createMockUIStoreState(
 
 export function createMockThreadStoreState(
   overrides: Record<string, unknown> = {},
-) {
+): Record<string, unknown> {
   return {
     threads: [],
     updateThread: vi.fn(),
@@ -24,7 +24,7 @@ export function createMockThreadStoreState(
 
 export function createMockAccountStoreState(
   overrides: Record<string, unknown> = {},
-) {
+): Record<string, unknown> {
   return {
     accounts: [],
     activeAccountId: null,

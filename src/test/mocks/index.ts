@@ -1,3 +1,4 @@
+// biome-ignore lint/performance/noBarrelFile: test mock barrel file is intentional
 export { createMockDb } from "./db.mock";
 export {
   createMockDbAccount,

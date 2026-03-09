@@ -24,7 +24,7 @@ async function performCheck(): Promise<void> {
   }
 }
 
-const FOUR_HOURS = 4 * 60 * 60 * 1000;
+const FOUR_HOURS: number = 4 * 60 * 60 * 1000;
 
 export function startUpdateChecker(): void {
   if (checker) return;

@@ -1,3 +1,4 @@
+import type { StoreApi, UseBoundStore } from "zustand";
 import { create } from "zustand";
 import type { DbTask, TaskPriority } from "@/services/db/tasks";
 
@@ -27,61 +28,65 @@ interface TaskState {
   setSearchQuery: (query: string) => void;
 }
 
-export const useTaskStore = create<TaskState>((set) => ({
-  tasks: [],
-  threadTasks: [],
-  selectedTaskId: null,
-  incompleteCount: 0,
-  groupBy: "none",
-  filterStatus: "incomplete",
-  filterPriority: "all",
-  searchQuery: "",
+export const useTaskStore: UseBoundStore<StoreApi<TaskState>> =
+  create<TaskState>((set) => ({
+    tasks: [],
+    threadTasks: [],
+    selectedTaskId: null,
+    incompleteCount: 0,
+    groupBy: "none",
+    filterStatus: "incomplete",
+    filterPriority: "all",
+    searchQuery: "",
 
-  setTasks: (tasks) => set({ tasks }),
-  setThreadTasks: (threadTasks) => set({ threadTasks }),
-  addTask: (task) =>
-    set((state) => ({
-      tasks: [task, ...state.tasks],
-      incompleteCount: task.is_completed
-        ? state.incompleteCount
-        : state.incompleteCount + 1,
-    })),
-  updateTaskInStore: (id, updates) =>
-    set((state) => {
-      const updateList = (list: DbTask[]) =>
-        list.map((t) => (t.id === id ? { ...t, ...updates } : t));
-      let countDelta = 0;
-      if (updates.is_completed !== undefined) {
-        const existing =
-          state.tasks.find((t) => t.id === id) ??
-          state.threadTasks.find((t) => t.id === id);
-        if (existing) {
-          if (updates.is_completed && !existing.is_completed) countDelta = -1;
-          if (!updates.is_completed && existing.is_completed) countDelta = 1;
+    setTasks: (tasks: DbTask[]) => set({ tasks }),
+    setThreadTasks: (threadTasks: DbTask[]) => set({ threadTasks }),
+    addTask: (task: DbTask) =>
+      set((state) => ({
+        tasks: [task, ...state.tasks],
+        incompleteCount: task.is_completed
+          ? state.incompleteCount
+          : state.incompleteCount + 1,
+      })),
+    updateTaskInStore: (id: string, updates: Partial<DbTask>) =>
+      set((state) => {
+        const updateList = (list: DbTask[]): DbTask[] =>
+          list.map((t) => (t.id === id ? { ...t, ...updates } : t));
+        let countDelta = 0;
+        if (updates.is_completed !== undefined) {
+          const existing =
+            state.tasks.find((t) => t.id === id) ??
+            state.threadTasks.find((t) => t.id === id);
+          if (existing) {
+            if (updates.is_completed && !existing.is_completed) countDelta = -1;
+            if (!updates.is_completed && existing.is_completed) countDelta = 1;
+          }
         }
-      }
-      return {
-        tasks: updateList(state.tasks),
-        threadTasks: updateList(state.threadTasks),
-        incompleteCount: state.incompleteCount + countDelta,
-      };
-    }),
-  removeTask: (id) =>
-    set((state) => {
-      const removed = state.tasks.find((t) => t.id === id);
-      const countDelta = removed && !removed.is_completed ? -1 : 0;
-      return {
-        tasks: state.tasks.filter((t) => t.id !== id),
-        threadTasks: state.threadTasks.filter((t) => t.id !== id),
-        selectedTaskId:
-          state.selectedTaskId === id ? null : state.selectedTaskId,
-        incompleteCount: state.incompleteCount + countDelta,
-      };
-    }),
-  setSelectedTaskId: (selectedTaskId) => set({ selectedTaskId }),
-  setIncompleteCount: (incompleteCount) => set({ incompleteCount }),
-  setGroupBy: (groupBy) => set({ groupBy }),
-  setFilterStatus: (status) => set({ filterStatus: status }),
-  setFilterPriority: (priority) => set({ filterPriority: priority }),
-  setSearchQuery: (searchQuery) => set({ searchQuery }),
-}));
+        return {
+          tasks: updateList(state.tasks),
+          threadTasks: updateList(state.threadTasks),
+          incompleteCount: state.incompleteCount + countDelta,
+        };
+      }),
+    removeTask: (id: string) =>
+      set((state) => {
+        const removed = state.tasks.find((t) => t.id === id);
+        const countDelta = removed && !removed.is_completed ? -1 : 0;
+        return {
+          tasks: state.tasks.filter((t) => t.id !== id),
+          threadTasks: state.threadTasks.filter((t) => t.id !== id),
+          selectedTaskId:
+            state.selectedTaskId === id ? null : state.selectedTaskId,
+          incompleteCount: state.incompleteCount + countDelta,
+        };
+      }),
+    setSelectedTaskId: (selectedTaskId: string | null) =>
+      set({ selectedTaskId }),
+    setIncompleteCount: (incompleteCount: number) => set({ incompleteCount }),
+    setGroupBy: (groupBy: TaskGroupBy) => set({ groupBy }),
+    setFilterStatus: (status: TaskFilterStatus) =>
+      set({ filterStatus: status }),
+    setFilterPriority: (priority: TaskPriority | "all") =>
+      set({ filterPriority: priority }),
+    setSearchQuery: (searchQuery: string) => set({ searchQuery }),
+  }));

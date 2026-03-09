@@ -3,7 +3,10 @@ import { CalDAVProvider } from "./caldavProvider";
 import { GoogleCalendarProvider } from "./googleCalendarProvider";
 import type { CalendarProvider } from "./types";
 
-const providerCache = new Map<string, CalendarProvider>();
+const providerCache: Map<string, CalendarProvider> = new Map<
+  string,
+  CalendarProvider
+>();
 
 /**
  * Get a CalendarProvider for the given account.
@@ -33,10 +36,6 @@ export async function getCalendarProvider(
     account.provider === "gmail_api" ||
     account.calendar_provider === "google_api"
   ) {
-    provider = new GoogleCalendarProvider(accountId);
-  }
-  // Default for Gmail accounts
-  else if (account.provider === "gmail_api") {
     provider = new GoogleCalendarProvider(accountId);
   } else {
     throw new Error(`No calendar provider configured for account ${accountId}`);

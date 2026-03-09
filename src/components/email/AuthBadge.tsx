@@ -4,6 +4,7 @@ import {
   ShieldQuestion,
   ShieldX,
 } from "lucide-react";
+import type React from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AuthResult } from "@/services/gmail/authParser";
@@ -12,7 +13,7 @@ interface AuthBadgeProps {
   authResults: string | null;
 }
 
-export function AuthBadge({ authResults }: AuthBadgeProps) {
+export function AuthBadge({ authResults }: AuthBadgeProps): React.ReactNode {
   const { t } = useTranslation("email");
   const [showTooltip, setShowTooltip] = useState(false);
 
@@ -71,7 +72,7 @@ export function AuthBadge({ authResults }: AuthBadgeProps) {
       role="img"
     >
       {icon}
-      {showTooltip && (
+      {showTooltip === true && (
         <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1.5 text-xs rounded-md bg-bg-tertiary text-text-primary border border-border-secondary shadow-md whitespace-pre z-50 pointer-events-none">
           {tooltipLines}
         </span>

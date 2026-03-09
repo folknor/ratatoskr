@@ -1,3 +1,4 @@
+import type React from "react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { DbCalendarEvent } from "@/services/db/calendarEvents";
@@ -8,9 +9,13 @@ interface WeekViewProps {
   onEventClick: (event: DbCalendarEvent) => void;
 }
 
-const HOURS = Array.from({ length: 24 }, (_, i) => i);
+const HOURS: number[] = Array.from({ length: 24 }, (_, i) => i);
 
-export function WeekView({ currentDate, events, onEventClick }: WeekViewProps) {
+export function WeekView({
+  currentDate,
+  events,
+  onEventClick,
+}: WeekViewProps): React.ReactNode {
   const { t } = useTranslation("calendar");
   const dayNames = [
     t("daysShort.sun"),
@@ -74,11 +79,11 @@ export function WeekView({ currentDate, events, onEventClick }: WeekViewProps) {
       {/* Day headers */}
       <div className="grid grid-cols-[60px_repeat(7,1fr)] border-b border-border-primary shrink-0">
         <div className="border-r border-border-secondary" />
-        {days.map((day, i) => {
+        {days.map((day) => {
           const isToday = day.toDateString() === todayStr;
           return (
             <div
-              key={i}
+              key={day.toISOString()}
               className="px-2 py-2 text-center border-r border-border-secondary"
             >
               <div className="text-xs text-text-tertiary">
@@ -101,17 +106,18 @@ export function WeekView({ currentDate, events, onEventClick }: WeekViewProps) {
         <div className="border-r border-border-secondary px-1 py-1 text-[0.625rem] text-text-tertiary">
           {t("allDay")}
         </div>
-        {days.map((day, i) => {
+        {days.map((day) => {
           const allDay = allDayByDay.get(day.getDate()) ?? [];
           return (
             <div
-              key={i}
+              key={day.toISOString()}
               className="border-r border-border-secondary px-1 py-1 space-y-0.5"
             >
               {allDay.map((e) => (
                 <button
+                  type="button"
                   key={e.id}
-                  onClick={() => onEventClick(e)}
+                  onClick={(): void => onEventClick(e)}
                   className="w-full text-left text-[0.625rem] px-1 py-0.5 rounded bg-accent/10 text-accent truncate hover:bg-accent/20 transition-colors"
                 >
                   {e.summary ?? t("event")}
@@ -134,18 +140,19 @@ export function WeekView({ currentDate, events, onEventClick }: WeekViewProps) {
                     : `${hour % 12 || 12}${hour < 12 ? t("am") : t("pm")}`}
                 </span>
               </div>
-              {days.map((day, di) => {
+              {days.map((day) => {
                 const hourEvents =
                   dayHourEvents.get(`${day.getDate()}-${hour}`) ?? [];
                 return (
                   <div
-                    key={di}
+                    key={day.toISOString()}
                     className="border-r border-b border-border-secondary h-12 relative px-0.5"
                   >
                     {hourEvents.map((e) => (
                       <button
+                        type="button"
                         key={e.id}
-                        onClick={() => onEventClick(e)}
+                        onClick={(): void => onEventClick(e)}
                         className="absolute inset-x-0.5 text-[0.625rem] px-1 py-0.5 rounded bg-accent/15 text-accent truncate hover:bg-accent/25 transition-colors"
                         title={e.summary ?? t("event")}
                       >

@@ -1,6 +1,7 @@
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
 import { LayoutGrid, List, Paperclip, Search } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AttachmentPreview } from "@/components/email/AttachmentList";
@@ -37,6 +38,7 @@ type SizeFilter = "all" | "small" | "medium" | "large";
 type ViewMode = "grid" | "list";
 
 function matchesType(att: AttachmentWithContext, filter: TypeFilter): boolean {
+  // biome-ignore lint/nursery/noUnnecessaryConditions: switch on string union is intentional
   switch (filter) {
     case "all":
       return true;
@@ -65,6 +67,7 @@ function matchesDate(att: AttachmentWithContext, filter: DateFilter): boolean {
   if (filter === "all" || !att.date) return true;
   const now = Date.now();
   const diff = now - att.date;
+  // biome-ignore lint/nursery/noUnnecessaryConditions: switch on string union is intentional
   switch (filter) {
     case "today":
       return diff < 86_400_000;
@@ -80,6 +83,7 @@ function matchesDate(att: AttachmentWithContext, filter: DateFilter): boolean {
 function matchesSize(att: AttachmentWithContext, filter: SizeFilter): boolean {
   if (filter === "all") return true;
   const size = att.size ?? 0;
+  // biome-ignore lint/nursery/noUnnecessaryConditions: switch on string union is intentional
   switch (filter) {
     case "small":
       return size < 1_048_576;
@@ -90,7 +94,7 @@ function matchesSize(att: AttachmentWithContext, filter: SizeFilter): boolean {
   }
 }
 
-export function AttachmentLibrary() {
+export function AttachmentLibrary(): React.ReactNode {
   const { t } = useTranslation("attachments");
   const accounts = useAccountStore((s) => s.accounts);
   const activeAccount = accounts.find((a) => a.isActive);
@@ -153,7 +157,7 @@ export function AttachmentLibrary() {
   // Load on account change
   useEffect(() => {
     if (accountId) {
-      loadData(accountId);
+      void loadData(accountId);
     } else {
       setAttachments([]);
       setSenders([]);
@@ -163,8 +167,8 @@ export function AttachmentLibrary() {
 
   // Refresh on sync
   useEffect(() => {
-    const handler = () => {
-      if (accountId) loadData(accountId);
+    const handler = (): void => {
+      if (accountId) void loadData(accountId);
     };
     window.addEventListener("velo-sync-done", handler);
     return () => window.removeEventListener("velo-sync-done", handler);
@@ -263,6 +267,7 @@ export function AttachmentLibrary() {
               type="text"
               placeholder={t("searchPlaceholder")}
               value={searchQuery}
+              // biome-ignore lint/nursery/useExplicitType: inline callback
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-8 pr-3 py-1.5 text-xs rounded-md border border-border-primary bg-bg-secondary text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent w-48"
             />
@@ -271,6 +276,7 @@ export function AttachmentLibrary() {
           {/* Filters */}
           <select
             value={typeFilter}
+            // biome-ignore lint/nursery/useExplicitType: inline callback
             onChange={(e) => setTypeFilter(e.target.value as TypeFilter)}
             className="text-xs rounded-md border border-border-primary bg-bg-secondary text-text-primary px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent"
           >
@@ -283,6 +289,7 @@ export function AttachmentLibrary() {
 
           <select
             value={senderFilter}
+            // biome-ignore lint/nursery/useExplicitType: inline callback
             onChange={(e) => setSenderFilter(e.target.value)}
             className="text-xs rounded-md border border-border-primary bg-bg-secondary text-text-primary px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent max-w-40"
           >
@@ -296,6 +303,7 @@ export function AttachmentLibrary() {
 
           <select
             value={dateFilter}
+            // biome-ignore lint/nursery/useExplicitType: inline callback
             onChange={(e) => setDateFilter(e.target.value as DateFilter)}
             className="text-xs rounded-md border border-border-primary bg-bg-secondary text-text-primary px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent"
           >
@@ -308,6 +316,7 @@ export function AttachmentLibrary() {
 
           <select
             value={sizeFilter}
+            // biome-ignore lint/nursery/useExplicitType: inline callback
             onChange={(e) => setSizeFilter(e.target.value as SizeFilter)}
             className="text-xs rounded-md border border-border-primary bg-bg-secondary text-text-primary px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent"
           >
@@ -321,6 +330,7 @@ export function AttachmentLibrary() {
           {/* View toggle */}
           <div className="flex border border-border-primary rounded-md overflow-hidden">
             <button
+              type="button"
               onClick={() => setViewMode("grid")}
               className={`p-1.5 ${viewMode === "grid" ? "bg-accent/10 text-accent" : "text-text-tertiary hover:text-text-primary"}`}
               title={t("gridView")}
@@ -328,6 +338,7 @@ export function AttachmentLibrary() {
               <LayoutGrid size={14} />
             </button>
             <button
+              type="button"
               onClick={() => setViewMode("list")}
               className={`p-1.5 ${viewMode === "list" ? "bg-accent/10 text-accent" : "text-text-tertiary hover:text-text-primary"}`}
               title={t("listView")}
@@ -384,10 +395,10 @@ export function AttachmentLibrary() {
       </div>
 
       {/* Preview modal */}
-      {previewAttachment && (
+      {previewAttachment != null && accountId != null && (
         <AttachmentPreview
           attachment={previewAttachment}
-          accountId={accountId!}
+          accountId={accountId}
           messageId={previewAttachment.message_id}
           onClose={() => setPreviewAttachment(null)}
         />

@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import { createMockGmailClient } from "@/test/mocks";
 import type { GmailClient } from "../gmail/client";
 import { GmailApiProvider } from "./gmailProvider";

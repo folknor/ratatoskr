@@ -10,7 +10,7 @@ import { startOAuthFlow } from "./auth";
 import { GmailClient } from "./client";
 
 // In-memory cache of active GmailClient instances per account
-const clients = new Map<string, GmailClient>();
+const clients: Map<string, GmailClient> = new Map<string, GmailClient>();
 
 /**
  * Get or create a GmailClient for the given account.

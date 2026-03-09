@@ -305,6 +305,7 @@ async function runSync(accountIds: string[]): Promise<void> {
     }
 
     // Drain the queue — if something was queued while we were syncing, run it now
+    // biome-ignore lint/nursery/noMisusedPromises: pendingAccountIds is string[]|null, not a Promise
     if (pendingAccountIds) {
       const queued = pendingAccountIds;
       pendingAccountIds = null;
@@ -330,18 +331,18 @@ export async function syncAccount(accountId: string): Promise<void> {
  */
 export function startBackgroundSync(
   accountIds: string[],
-  skipImmediateSync = false,
+  skipImmediateSync: boolean = false,
 ): void {
   stopBackgroundSync();
 
   if (!skipImmediateSync) {
     // Immediate sync
-    runSync(accountIds);
+    void runSync(accountIds);
   }
 
   // Periodic sync
   syncTimer = setInterval(() => {
-    runSync(accountIds);
+    void runSync(accountIds);
   }, SYNC_INTERVAL_MS);
 }
 

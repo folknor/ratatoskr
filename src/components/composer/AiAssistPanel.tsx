@@ -1,5 +1,6 @@
 import type { Editor } from "@tiptap/react";
 import { ArrowDown, Briefcase, Sparkles, Wand2 } from "lucide-react";
+import type React from "react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -21,7 +22,7 @@ export function AiAssistPanel({
   editor,
   isReplyMode,
   threadMessages,
-}: AiAssistPanelProps) {
+}: AiAssistPanelProps): React.ReactNode {
   const { t } = useTranslation("composer");
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
@@ -31,19 +32,19 @@ export function AiAssistPanel({
 
   // Check availability on mount
   useEffect(() => {
-    isAiAvailable().then(setAvailable);
+    void isAiAvailable().then(setAvailable);
   }, []);
 
   if (available === null) return null;
   if (!available) return null;
 
-  const applyToEditor = (html: string) => {
+  const applyToEditor = (html: string): void => {
     if (!editor) return;
     editor.chain().focus().setContent(html).run();
     setBodyHtml(editor.getHTML());
   };
 
-  const handleCompose = async () => {
+  const handleCompose = async (): Promise<void> => {
     if (!prompt.trim() || loading) return;
     setLoading(true);
     setError(null);
@@ -58,7 +59,7 @@ export function AiAssistPanel({
     }
   };
 
-  const handleGenerateReply = async () => {
+  const handleGenerateReply = async (): Promise<void> => {
     if (loading || !threadMessages?.length) return;
     setLoading(true);
     setError(null);
@@ -76,7 +77,7 @@ export function AiAssistPanel({
     }
   };
 
-  const handleTransform = async (type: TransformType) => {
+  const handleTransform = async (type: TransformType): Promise<void> => {
     if (!editor || loading) return;
     const html = editor.getHTML();
     if (!html || html === "<p></p>") return;
@@ -106,12 +107,14 @@ export function AiAssistPanel({
         <input
           type="text"
           value={prompt}
+          // biome-ignore lint/nursery/useExplicitType: inline callback
           onChange={(e) => setPrompt(e.target.value)}
+          // biome-ignore lint/nursery/useExplicitType: inline callback
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              if (isReplyMode) handleGenerateReply();
-              else handleCompose();
+              if (isReplyMode) void handleGenerateReply();
+              else void handleCompose();
             }
           }}
           placeholder={
@@ -124,7 +127,8 @@ export function AiAssistPanel({
         />
         {isReplyMode ? (
           <button
-            onClick={handleGenerateReply}
+            type="button"
+            onClick={() => void handleGenerateReply()}
             disabled={loading || !threadMessages?.length}
             className="px-2 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors disabled:opacity-50 flex items-center gap-1"
           >
@@ -132,7 +136,8 @@ export function AiAssistPanel({
           </button>
         ) : (
           <button
-            onClick={handleCompose}
+            type="button"
+            onClick={() => void handleCompose()}
             disabled={loading || !prompt.trim()}
             className="px-2 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors disabled:opacity-50 flex items-center gap-1"
           >
@@ -149,24 +154,24 @@ export function AiAssistPanel({
         <QuickAction
           icon={<Wand2 size={11} />}
           label={t("improve")}
-          onClick={() => handleTransform("improve")}
+          onClick={() => void handleTransform("improve")}
           disabled={loading}
         />
         <QuickAction
           icon={<ArrowDown size={11} />}
           label={t("shorter")}
-          onClick={() => handleTransform("shorten")}
+          onClick={() => void handleTransform("shorten")}
           disabled={loading}
         />
         <QuickAction
           icon={<Briefcase size={11} />}
           label={t("formal")}
-          onClick={() => handleTransform("formalize")}
+          onClick={() => void handleTransform("formalize")}
           disabled={loading}
         />
       </div>
 
-      {error && <p className="text-xs text-danger mt-1">{error}</p>}
+      {error != null && <p className="text-xs text-danger mt-1">{error}</p>}
     </div>
   );
 }
@@ -181,9 +186,10 @@ function QuickAction({
   label: string;
   onClick: () => void;
   disabled: boolean;
-}) {
+}): React.ReactNode {
   return (
     <button
+      type="button"
       onClick={onClick}
       disabled={disabled}
       className="flex items-center gap-1 px-2 py-0.5 text-xs text-text-secondary hover:text-text-primary bg-bg-tertiary hover:bg-bg-hover rounded border border-border-primary transition-colors disabled:opacity-50"

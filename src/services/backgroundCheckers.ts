@@ -14,7 +14,7 @@ export function createBackgroundChecker(
 ): BackgroundChecker {
   let interval: ReturnType<typeof setInterval> | null = null;
 
-  const run = async () => {
+  const run = async (): Promise<void> => {
     try {
       await checkFn();
     } catch (err) {
@@ -23,12 +23,12 @@ export function createBackgroundChecker(
   };
 
   return {
-    start() {
+    start(): void {
       if (interval) return;
-      run();
+      void run();
       interval = setInterval(run, intervalMs);
     },
-    stop() {
+    stop(): void {
       if (interval) {
         clearInterval(interval);
         interval = null;
