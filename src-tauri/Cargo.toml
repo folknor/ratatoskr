@@ -1,0 +1,52 @@
+[package]
+name = "ratatoskr"
+version = "0.1.0" # x-release-please-version
+description = "Email at the speed of thought"
+authors = ["folknor"]
+license = "Apache-2.0"
+repository = ""
+edition = "2024"
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.4", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.10.0", features = ["tray-icon", "devtools"] }
+tauri-plugin-log = "2"
+tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-http = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+tauri-plugin-os = "2"
+tokio = { version = "1", features = ["net", "io-util", "sync", "macros", "rt", "time"] }
+futures = "0.3"
+async-imap = { version = "0.11", default-features = false, features = ["runtime-tokio"] }
+tokio-native-tls = "0.3"
+native-tls = "0.2"
+mail-parser = "0.11"
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-native-tls", "builder"] }
+base64 = "0.22"
+utf7-imap = "0.3"
+socket2 = "0.6"
+reqwest = { version = "0.13", default-features = false, features = ["native-tls", "json", "form"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_UI_Shell"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tray-item = { version = "0.10.0", default-features = false, features = ["ksni"] }
