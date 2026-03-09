@@ -1,3 +1,4 @@
+import { indexMessage } from "@/core/rustDb";
 import { type DbAccount, getAccount } from "../db/accounts";
 import { upsertMessage } from "../db/messages";
 import {
@@ -514,6 +515,23 @@ export class ImapSmtpProvider implements EmailProvider {
       referencesHeader: references,
       inReplyToHeader: inReplyTo,
     });
+
+    // Index into tantivy search (fire-and-forget)
+    indexMessage({
+      messageId,
+      accountId: this.accountId,
+      threadId: effectiveThreadId,
+      subject,
+      fromName,
+      fromAddress,
+      toAddresses: to,
+      bodyText: snippet,
+      snippet,
+      date: now,
+      isRead: true,
+      isStarred: false,
+      hasAttachment: false,
+    }).catch(() => {});
   }
 
   async createDraft(

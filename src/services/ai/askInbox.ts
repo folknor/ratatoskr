@@ -1,4 +1,4 @@
-import { type SearchResult, searchMessages } from "@/services/db/search";
+import { type SearchResult, searchMessages } from "@/core/queries";
 import { askInbox as callAskInbox } from "./aiService";
 
 /**

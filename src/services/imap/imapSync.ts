@@ -1,3 +1,4 @@
+import { indexMessage } from "@/core/rustDb";
 import { getAccount, updateAccountSyncState } from "../db/accounts";
 import { upsertAttachment } from "../db/attachments";
 import { withTransaction } from "../db/connection";
@@ -306,6 +307,23 @@ export async function imapInitialSync(
                 imapUid: msg.uid ?? null,
                 imapFolder: msg.folder ?? null,
               });
+
+              // Index into tantivy search (fire-and-forget)
+              indexMessage({
+                messageId: parsed.id,
+                accountId,
+                threadId: parsed.id,
+                subject: parsed.subject,
+                fromName: parsed.fromName,
+                fromAddress: parsed.fromAddress,
+                toAddresses: parsed.toAddresses,
+                bodyText: parsed.bodyText,
+                snippet: parsed.snippet,
+                date: parsed.date,
+                isRead: parsed.isRead,
+                isStarred: parsed.isStarred,
+                hasAttachment: parsed.hasAttachments,
+              }).catch(() => {});
 
               // Store attachments
               for (const att of parsed.attachments) {

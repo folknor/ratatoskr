@@ -110,8 +110,16 @@ export {
   type QuickStepExecutionResult,
 } from "@/services/quickSteps/types";
 
-// ── Search (still TS — FTS5, Phase 3 will use tantivy) ──────
-export { searchMessages } from "@/services/db/search";
+// ── Search (tantivy full-text search — Phase 3) ─────────────
+export {
+  type SearchResult,
+  searchMessages,
+  indexMessage,
+  indexMessagesBatch,
+  deleteSearchDocument,
+  rebuildSearchIndex,
+  type SearchDocument,
+} from "./rustDb";
 
 // ── Thread Categories (constant) ────────────────────────────
 export { ALL_CATEGORIES } from "@/services/db/threadCategories";

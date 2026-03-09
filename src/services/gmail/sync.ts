@@ -1,3 +1,4 @@
+import { indexMessage } from "@/core/rustDb";
 import { updateAccountSyncState } from "../db/accounts";
 import { upsertAttachment } from "../db/attachments";
 import { upsertLabel } from "../db/labels";
@@ -161,6 +162,23 @@ async function processAndStoreThread(
         listUnsubscribePost: parsed.listUnsubscribePost,
         authResults: parsed.authResults,
       });
+
+      // Index into tantivy search (fire-and-forget, non-blocking)
+      indexMessage({
+        messageId: parsed.id,
+        accountId,
+        threadId: parsed.threadId,
+        subject: parsed.subject,
+        fromName: parsed.fromName,
+        fromAddress: parsed.fromAddress,
+        toAddresses: parsed.toAddresses,
+        bodyText: parsed.bodyText,
+        snippet: parsed.snippet,
+        date: parsed.date,
+        isRead: parsed.isRead,
+        isStarred: parsed.isStarred,
+        hasAttachment: parsed.attachments.length > 0,
+      }).catch(() => {}); // Silently ignore search index failures
 
       await Promise.all(
         parsed.attachments.map((att) =>

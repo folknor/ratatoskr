@@ -714,3 +714,115 @@ export async function getHeldThreadIds(
   const ids = await invoke<string[]>("db_get_held_thread_ids", { accountId });
   return new Set(ids);
 }
+
+// ═══════════════════════════════════════════════════════════════
+// TANTIVY FULL-TEXT SEARCH (Phase 3)
+// ═══════════════════════════════════════════════════════════════
+
+import {
+  hasSearchOperators,
+  parseSearchQuery,
+} from "@/services/search/searchParser";
+
+export interface SearchResult {
+  message_id: string;
+  account_id: string;
+  thread_id: string;
+  subject: string | null;
+  from_name: string | null;
+  from_address: string | null;
+  snippet: string | null;
+  date: number;
+  rank: number;
+}
+
+export interface SearchDocument {
+  messageId: string;
+  accountId: string;
+  threadId: string;
+  subject: string | null;
+  fromName: string | null;
+  fromAddress: string | null;
+  toAddresses: string | null;
+  bodyText: string | null;
+  snippet: string | null;
+  date: number;
+  isRead: boolean;
+  isStarred: boolean;
+  hasAttachment: boolean;
+}
+
+/**
+ * Search messages using tantivy full-text search.
+ * Parses the query string for operators (from:, to:, is:unread, etc.)
+ * and sends structured params to the Rust search_messages command.
+ */
+export async function searchMessages(
+  query: string,
+  accountId?: string,
+  limit: number = 50,
+): Promise<SearchResult[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  // Parse operators in TS (reuse existing parser)
+  if (hasSearchOperators(trimmed)) {
+    const parsed = parseSearchQuery(trimmed);
+    return invoke<SearchResult[]>("search_messages", {
+      params: {
+        accountId: accountId ?? "",
+        freeText: parsed.freeText || null,
+        from: parsed.from ?? null,
+        to: parsed.to ?? null,
+        subject: parsed.subject ?? null,
+        hasAttachment: parsed.hasAttachment ?? null,
+        isUnread: parsed.isUnread ?? parsed.isRead === true ? false : null,
+        isStarred: parsed.isStarred ?? null,
+        before: parsed.before ?? null,
+        after: parsed.after ?? null,
+        label: parsed.label ?? null,
+        limit,
+      },
+    });
+  }
+
+  // Plain free-text search
+  return invoke<SearchResult[]>("search_messages", {
+    params: {
+      accountId: accountId ?? "",
+      freeText: trimmed,
+      from: null,
+      to: null,
+      subject: null,
+      hasAttachment: null,
+      isUnread: null,
+      isStarred: null,
+      before: null,
+      after: null,
+      label: null,
+      limit,
+    },
+  });
+}
+
+/** Index a single message into tantivy. */
+export async function indexMessage(doc: SearchDocument): Promise<void> {
+  return invoke<void>("index_message", { doc });
+}
+
+/** Batch-index multiple messages into tantivy. */
+export async function indexMessagesBatch(
+  docs: SearchDocument[],
+): Promise<void> {
+  return invoke<void>("index_messages_batch", { docs });
+}
+
+/** Delete a document from the tantivy index by message_id. */
+export async function deleteSearchDocument(messageId: string): Promise<void> {
+  return invoke<void>("delete_search_document", { messageId });
+}
+
+/** Rebuild the entire tantivy index from SQLite messages. Returns count indexed. */
+export async function rebuildSearchIndex(): Promise<number> {
+  return invoke<number>("rebuild_search_index");
+}
