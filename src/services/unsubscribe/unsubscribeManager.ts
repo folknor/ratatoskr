@@ -29,9 +29,9 @@ export function parseUnsubscribeHeaders(
 ): ParsedUnsubscribe {
   const httpMatch = listUnsubscribe.match(/<(https?:\/\/[^>]+)>/);
   const mailtoMatch = listUnsubscribe.match(/<mailto:([^>]+)>/);
-  const hasOneClick = !!listUnsubscribePost
-    ?.toLowerCase()
-    .includes("list-unsubscribe=one-click");
+  const hasOneClick = Boolean(
+    listUnsubscribePost?.toLowerCase().includes("list-unsubscribe=one-click"),
+  );
 
   return {
     httpUrl: httpMatch?.[1] ?? null,

@@ -483,7 +483,7 @@ export class ImapSmtpProvider implements EmailProvider {
 
     // Extract sender name from "Name <email>" format
     const fromNameMatch = from.match(/^([^<]*)<[^>]+>/);
-    const fromName = fromNameMatch ? fromNameMatch[1]!.trim() : null;
+    const fromName = fromNameMatch ? fromNameMatch[1]?.trim() : null;
     const fromAddress = from.replace(/.*<([^>]+)>.*/, "$1").trim();
 
     // Parse body for HTML and text
@@ -658,7 +658,7 @@ export class ImapSmtpProvider implements EmailProvider {
     const folder = remainder.slice(0, lastDash);
     const uid = parseInt(remainder.slice(lastDash + 1), 10);
 
-    if (!folder || isNaN(uid)) {
+    if (!folder || Number.isNaN(uid)) {
       return { folder: null, uid: null };
     }
 

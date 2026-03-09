@@ -361,7 +361,7 @@ export function SettingsPage() {
       setLanguageLoaded(true);
     }
     load();
-  }, []);
+  }, [accounts.find]);
 
   const handleNotificationsToggle = useCallback(async () => {
     const newVal = !notificationsEnabled;

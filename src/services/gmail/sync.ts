@@ -86,7 +86,7 @@ async function processAndStoreThread(
     );
     const existing = await getThreadCategoryWithManual(accountId, thread.id);
     // Skip if manually categorized
-    if (!(existing && existing.isManual)) {
+    if (!existing?.isManual) {
       const { categorizeByRules } = await import(
         "@/services/categorization/ruleEngine"
       );
@@ -309,7 +309,7 @@ async function parallelLimit<T>(
   async function next(): Promise<void> {
     while (index < tasks.length) {
       const i = index++;
-      results[i] = await tasks[i]!();
+      results[i] = await tasks[i]?.();
     }
   }
 

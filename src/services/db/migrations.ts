@@ -853,7 +853,7 @@ export async function runMigrations(): Promise<void> {
         "Migration v14 marked applied but imap_folder_path column missing — re-running",
       );
       await db.execute("DELETE FROM _migrations WHERE version >= 14");
-      const maxVersion = MIGRATIONS[MIGRATIONS.length - 1]!.version;
+      const maxVersion = MIGRATIONS[MIGRATIONS.length - 1]?.version;
       for (let v = 14; v <= maxVersion; v++) {
         appliedVersions.delete(v);
       }

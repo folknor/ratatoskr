@@ -586,7 +586,7 @@ export default function App() {
     if (newest) {
       // Sync the new account immediately — before restarting the background
       // timer so it doesn't queue behind delta syncs for existing accounts.
-      syncAccount(newest.id);
+      await syncAccount(newest.id);
 
       // Fetch send-as aliases in the background (non-blocking, skip CalDAV-only accounts)
       if (newest.provider !== "caldav") {

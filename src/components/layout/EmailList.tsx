@@ -609,7 +609,7 @@ export function EmailList({
       window.removeEventListener("velo-sync-done", handler);
       if (timer) clearTimeout(timer);
     };
-  }, [loadThreads, activeAccountId, activeLabel]);
+  }, [loadThreads]);
 
   // Infinite scroll: load more when near bottom
   useEffect(() => {

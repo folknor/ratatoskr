@@ -65,7 +65,7 @@ export function ThreadView({ thread }: ThreadViewProps) {
   const toggleContactSidebar = useUIStore((s) => s.toggleContactSidebar);
   const taskSidebarVisible = useUIStore((s) => s.taskSidebarVisible);
   const [showTaskExtract, setShowTaskExtract] = useState(false);
-  const updateThread = useThreadStore((s) => s.updateThread);
+  const _updateThread = useThreadStore((s) => s.updateThread);
   const [messages, setMessages] = useState<DbMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const markedReadRef = useRef<string | null>(null);
@@ -137,13 +137,7 @@ export function ThreadView({ thread }: ThreadViewProps) {
 
     // instant
     markRead();
-  }, [
-    activeAccountId,
-    thread.id,
-    thread.isRead,
-    updateThread,
-    markAsReadBehavior,
-  ]);
+  }, [activeAccountId, thread.id, thread.isRead, markAsReadBehavior]);
 
   const openComposer = useComposerStore((s) => s.openComposer);
   const openMenu = useContextMenuStore((s) => s.openMenu);
@@ -284,12 +278,12 @@ export function ThreadView({ thread }: ThreadViewProps) {
   // Reset focused index when thread changes
   useEffect(() => {
     setFocusedMsgIdx(-1);
-  }, [thread.id]);
+  }, []);
 
   // Scroll focused message into view
   useEffect(() => {
     if (focusedMsgIdx >= 0 && messageRefs.current[focusedMsgIdx]) {
-      messageRefs.current[focusedMsgIdx]!.scrollIntoView({
+      messageRefs.current[focusedMsgIdx]?.scrollIntoView({
         behavior: "smooth",
         block: "nearest",
       });

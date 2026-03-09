@@ -101,7 +101,7 @@ export function ActionBar({
   const [showFollowUp, setShowFollowUp] = useState(false);
   const [hasFollowUp, setHasFollowUp] = useState(false);
   const isSpamView = activeLabel === "spam";
-  const hasLastMessage = !!messages?.length;
+  const hasLastMessage = Boolean(messages?.length);
 
   // Check if thread has an active follow-up reminder
   useEffect(() => {
@@ -164,7 +164,7 @@ export function ActionBar({
 
   // Find the first message with an unsubscribe header
   const unsubscribeMessage = messages?.find((m) => m.list_unsubscribe);
-  const hasUnsubscribe = !!unsubscribeMessage?.list_unsubscribe;
+  const hasUnsubscribe = Boolean(unsubscribeMessage?.list_unsubscribe);
   const [unsubscribeStatus, setUnsubscribeStatus] = useState<
     "idle" | "loading" | "done"
   >("idle");

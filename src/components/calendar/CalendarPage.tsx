@@ -189,7 +189,7 @@ export function CalendarPage() {
     loadCalendars();
     loadEvents();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeAccountId, currentDate, view]);
+  }, [loadCalendars, loadEvents]);
 
   const handlePrev = useCallback(() => {
     setCurrentDate((d) => {

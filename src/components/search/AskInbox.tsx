@@ -89,7 +89,6 @@ export function AskInbox({ isOpen, onClose }: AskInboxProps) {
         <div className="px-4 py-3 border-b border-border-secondary flex items-center gap-2">
           <input
             ref={inputRef}
-            autoFocus
             type="text"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}

@@ -47,7 +47,7 @@ export function SmartLabelEditor() {
       setLabels(l.filter((lb) => lb.type === "user")),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadRules is stable
-  }, [activeAccountId]);
+  }, [activeAccountId, loadRules]);
 
   const resetForm = useCallback(() => {
     setLabelId("");
@@ -100,11 +100,7 @@ export function SmartLabelEditor() {
     editingId,
     resetForm,
     loadRules,
-    criteriaFrom,
-    criteriaTo,
-    criteriaSubject,
-    criteriaBody,
-    criteriaHasAttachment,
+    buildCriteria,
   ]);
 
   const handleEdit = useCallback((rule: DbSmartLabelRule) => {

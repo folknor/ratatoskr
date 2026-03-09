@@ -287,7 +287,7 @@ async function syncAccountInternal(accountId: string): Promise<void> {
 }
 
 async function runSync(accountIds: string[]): Promise<void> {
-  if (syncPromise) {
+  if (await syncPromise) {
     // Queue these accounts, merging with any already-pending IDs
     const existing = new Set(pendingAccountIds ?? []);
     for (const id of accountIds) existing.add(id);

@@ -88,7 +88,7 @@ export function CalDavSettings({ account, onSaved }: CalDavSettingsProps) {
     }
   }, [account.id, account.email, onSaved]);
 
-  const isConfigured = !!account.caldav_url;
+  const isConfigured = Boolean(account.caldav_url);
 
   return (
     <div className="space-y-4">

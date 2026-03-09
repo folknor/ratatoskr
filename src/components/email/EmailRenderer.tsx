@@ -188,7 +188,7 @@ export function EmailRenderer({
       if (!doc.body) return;
       const h = doc.body.scrollHeight;
       if (h > 0) {
-        iframe.style.height = h + "px";
+        iframe.style.height = `${h}px`;
       }
     };
     applyHeight();
