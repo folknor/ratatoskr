@@ -1,17 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useAccountStore } from "@/stores/accountStore";
-import {
-  getCalendarEventsInRangeMulti,
-  upsertCalendarEvent,
-  type DbCalendarEvent,
-} from "@/services/db/calendarEvents";
-import {
-  getVisibleCalendars,
-  getCalendarsForAccount,
-  upsertCalendar,
-  type DbCalendar,
-} from "@/services/db/calendars";
 import {
   getCalendarProvider,
   hasCalendarSupport,
@@ -20,14 +8,26 @@ import type {
   CalendarEventData,
   CreateEventInput,
 } from "@/services/calendar/types";
+import {
+  type DbCalendarEvent,
+  getCalendarEventsInRangeMulti,
+  upsertCalendarEvent,
+} from "@/services/db/calendarEvents";
+import {
+  type DbCalendar,
+  getCalendarsForAccount,
+  getVisibleCalendars,
+  upsertCalendar,
+} from "@/services/db/calendars";
+import { useAccountStore } from "@/stores/accountStore";
+import { CalendarList } from "./CalendarList";
+import { CalendarReauthBanner } from "./CalendarReauthBanner";
 import { CalendarToolbar, type CalendarView } from "./CalendarToolbar";
-import { MonthView } from "./MonthView";
-import { WeekView } from "./WeekView";
 import { DayView } from "./DayView";
 import { EventCreateModal } from "./EventCreateModal";
 import { EventDetailModal } from "./EventDetailModal";
-import { CalendarList } from "./CalendarList";
-import { CalendarReauthBanner } from "./CalendarReauthBanner";
+import { MonthView } from "./MonthView";
+import { WeekView } from "./WeekView";
 
 export function CalendarPage() {
   const { t } = useTranslation("calendar");

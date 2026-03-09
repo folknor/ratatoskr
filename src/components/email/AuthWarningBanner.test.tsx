@@ -1,7 +1,7 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
-import { AuthWarningBanner } from "./AuthWarningBanner";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import type { AuthResult } from "@/services/gmail/authParser";
+import { AuthWarningBanner } from "./AuthWarningBanner";
 
 function makeAuthResults(aggregate: AuthResult["aggregate"]): string {
   const result: AuthResult = {

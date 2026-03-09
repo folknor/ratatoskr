@@ -1,11 +1,11 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { RefreshCw, Sparkles } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Sparkles, RefreshCw } from "lucide-react";
-import { isAiAvailable } from "@/services/ai/providerManager";
 import { generateSmartReplies } from "@/services/ai/aiService";
+import { isAiAvailable } from "@/services/ai/providerManager";
 import { deleteAiCache } from "@/services/db/aiCache";
-import { useComposerStore } from "@/stores/composerStore";
 import type { DbMessage } from "@/services/db/messages";
+import { useComposerStore } from "@/stores/composerStore";
 
 interface SmartReplySuggestionsProps {
   threadId: string;

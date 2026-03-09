@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/db/settings", () => {
   const fn = vi.fn();
@@ -37,19 +37,19 @@ vi.mock("./providers/copilotProvider", () => ({
 
 import { getSetting } from "@/services/db/settings";
 import {
-  createClaudeProvider,
-  clearClaudeProvider,
-} from "./providers/claudeProvider";
-import { createOpenAIProvider } from "./providers/openaiProvider";
-import { createGeminiProvider } from "./providers/geminiProvider";
-import { createOllamaProvider } from "./providers/ollamaProvider";
-import { createCopilotProvider } from "./providers/copilotProvider";
-import {
+  clearProviderClients,
   getActiveProvider,
   getActiveProviderName,
   isAiAvailable,
-  clearProviderClients,
 } from "./providerManager";
+import {
+  clearClaudeProvider,
+  createClaudeProvider,
+} from "./providers/claudeProvider";
+import { createCopilotProvider } from "./providers/copilotProvider";
+import { createGeminiProvider } from "./providers/geminiProvider";
+import { createOllamaProvider } from "./providers/ollamaProvider";
+import { createOpenAIProvider } from "./providers/openaiProvider";
 
 const mockGetSetting = vi.mocked(getSetting);
 

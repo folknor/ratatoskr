@@ -1,5 +1,5 @@
-import { getDb, selectFirstBy } from "./connection";
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
+import { getDb, selectFirstBy } from "./connection";
 
 export interface DbFollowUpReminder {
   id: string;

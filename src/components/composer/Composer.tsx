@@ -1,48 +1,48 @@
+import Image from "@tiptap/extension-image";
+import Placeholder from "@tiptap/extension-placeholder";
+import { EditorContent, useEditor } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import { Clock, ExternalLink, Maximize2, Minimize2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CSSTransition } from "react-transition-group";
-import { useEditor, EditorContent } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
-import Placeholder from "@tiptap/extension-placeholder";
-import Image from "@tiptap/extension-image";
-import { Clock, Maximize2, Minimize2, ExternalLink } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
-import { AddressInput } from "./AddressInput";
-import { EditorToolbar } from "./EditorToolbar";
-import { AiAssistPanel } from "./AiAssistPanel";
-import { AttachmentPicker } from "./AttachmentPicker";
-import { ScheduleSendDialog } from "./ScheduleSendDialog";
-import { SignatureSelector } from "./SignatureSelector";
-import { TemplatePicker } from "./TemplatePicker";
-import { FromSelector } from "./FromSelector";
-import { useComposerStore } from "@/stores/composerStore";
-import { useAccountStore } from "@/stores/accountStore";
-import { useUIStore } from "@/stores/uiStore";
-import {
-  sendEmail,
-  archiveThread,
-  deleteDraft as deleteDraftAction,
-} from "@/services/emailActions";
-import { buildRawEmail } from "@/utils/emailBuilder";
+import { startAutoSave, stopAutoSave } from "@/services/composer/draftAutoSave";
 import { upsertContact } from "@/services/db/contacts";
-import { getSetting } from "@/services/db/settings";
 import { insertScheduledEmail } from "@/services/db/scheduledEmails";
-import { getDefaultSignature } from "@/services/db/signatures";
 import {
   getAliasesForAccount,
   mapDbAlias,
   type SendAsAlias,
 } from "@/services/db/sendAsAliases";
-import { resolveFromAddress } from "@/utils/resolveFromAddress";
-import { startAutoSave, stopAutoSave } from "@/services/composer/draftAutoSave";
+import { getSetting } from "@/services/db/settings";
+import { getDefaultSignature } from "@/services/db/signatures";
 import {
-  getTemplatesForAccount,
   type DbTemplate,
+  getTemplatesForAccount,
 } from "@/services/db/templates";
+import {
+  archiveThread,
+  deleteDraft as deleteDraftAction,
+  sendEmail,
+} from "@/services/emailActions";
+import { useAccountStore } from "@/stores/accountStore";
+import { useComposerStore } from "@/stores/composerStore";
+import { useUIStore } from "@/stores/uiStore";
+import { buildRawEmail } from "@/utils/emailBuilder";
 import { readFileAsBase64 } from "@/utils/fileUtils";
-import { interpolateVariables } from "@/utils/templateVariables";
+import { resolveFromAddress } from "@/utils/resolveFromAddress";
 import { sanitizeHtml } from "@/utils/sanitize";
+import { interpolateVariables } from "@/utils/templateVariables";
+import { AddressInput } from "./AddressInput";
+import { AiAssistPanel } from "./AiAssistPanel";
+import { AttachmentPicker } from "./AttachmentPicker";
+import { EditorToolbar } from "./EditorToolbar";
+import { FromSelector } from "./FromSelector";
+import { ScheduleSendDialog } from "./ScheduleSendDialog";
+import { SignatureSelector } from "./SignatureSelector";
+import { TemplatePicker } from "./TemplatePicker";
 
 export function Composer() {
   const { t } = useTranslation("composer");
@@ -157,7 +157,7 @@ export function Composer() {
 
   // Load signature, aliases, and templates in parallel when composer opens
   useEffect(() => {
-    if (!isOpen || !activeAccountId) return;
+    if (!(isOpen && activeAccountId)) return;
     let cancelled = false;
 
     Promise.all([
@@ -209,7 +209,7 @@ export function Composer() {
 
   // Start/stop draft auto-save
   useEffect(() => {
-    if (!isOpen || !activeAccountId) return;
+    if (!(isOpen && activeAccountId)) return;
     startAutoSave(activeAccountId);
     return () => {
       stopAutoSave();
@@ -267,7 +267,7 @@ export function Composer() {
   }, [editor, signatureHtml]);
 
   const handleSend = useCallback(async () => {
-    if (!activeAccountId || !activeAccount || sendingRef.current) return;
+    if (!(activeAccountId && activeAccount) || sendingRef.current) return;
     const state = useComposerStore.getState();
     if (state.to.length === 0) return;
 
@@ -343,7 +343,7 @@ export function Composer() {
 
   const handleSchedule = useCallback(
     async (scheduledAt: number) => {
-      if (!activeAccountId || !activeAccount) return;
+      if (!(activeAccountId && activeAccount)) return;
       const state = useComposerStore.getState();
       if (state.to.length === 0) return;
 

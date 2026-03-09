@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { FileText } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DbAttachment } from "@/services/db/attachments";
 import { getEmailProvider } from "@/services/email/providerFactory";
-import { FileText } from "lucide-react";
 import { formatFileSize, isImage, isPdf } from "@/utils/fileTypeHelpers";
 
 /** Dedup attachments by filename+size (content-based) */
@@ -161,11 +161,12 @@ function ImageThumbnail({
   }, [loadThumbnail]);
 
   // Cleanup blob URL
-  useEffect(() => {
-    return () => {
+  useEffect(
+    () => () => {
       if (thumbnailUrl) URL.revokeObjectURL(thumbnailUrl);
-    };
-  }, [thumbnailUrl]);
+    },
+    [thumbnailUrl],
+  );
 
   return (
     <div ref={observerRef}>
@@ -188,7 +189,7 @@ function ImageThumbnail({
             className="max-w-[200px] max-h-[200px] object-cover"
           />
         )}
-        {!loading && !thumbnailUrl && (
+        {!(loading || thumbnailUrl) && (
           <div className="w-[200px] h-[120px] bg-bg-tertiary flex items-center justify-center">
             <span className="text-xs text-text-tertiary">
               {t("inlineAttachment.image")}

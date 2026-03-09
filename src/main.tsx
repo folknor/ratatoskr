@@ -1,9 +1,9 @@
+import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { RouterProvider } from "@tanstack/react-router";
+import ComposerWindow from "./ComposerWindow";
 import { router } from "./router";
 import ThreadWindow from "./ThreadWindow";
-import ComposerWindow from "./ComposerWindow";
 import "./i18n";
 import "./styles/globals.css";
 

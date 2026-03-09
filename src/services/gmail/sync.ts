@@ -1,20 +1,23 @@
-import { GmailClient } from "./client";
-import { parseGmailMessage, type ParsedMessage } from "./messageParser";
-import { upsertLabel } from "../db/labels";
-import { upsertThread, setThreadLabels } from "../db/threads";
-import { upsertMessage } from "../db/messages";
-import { upsertAttachment } from "../db/attachments";
 import { updateAccountSyncState } from "../db/accounts";
-import {
-  shouldNotifyForMessage,
-  queueNewEmailNotification,
-} from "../notifications/notificationManager";
-import { applyFiltersToMessages } from "../filters/filterEngine";
-import { getSetting } from "../db/settings";
-import { getMutedThreadIds } from "../db/threads";
-import { getThreadCategory } from "../db/threadCategories";
+import { upsertAttachment } from "../db/attachments";
+import { upsertLabel } from "../db/labels";
+import { upsertMessage } from "../db/messages";
 import { getVipSenders } from "../db/notificationVips";
 import { getPendingOpsForResource } from "../db/pendingOperations";
+import { getSetting } from "../db/settings";
+import { getThreadCategory } from "../db/threadCategories";
+import {
+  getMutedThreadIds,
+  setThreadLabels,
+  upsertThread,
+} from "../db/threads";
+import { applyFiltersToMessages } from "../filters/filterEngine";
+import {
+  queueNewEmailNotification,
+  shouldNotifyForMessage,
+} from "../notifications/notificationManager";
+import type { GmailClient } from "./client";
+import { type ParsedMessage, parseGmailMessage } from "./messageParser";
 
 async function loadAutoArchiveCategories(): Promise<Set<string>> {
   const raw = await getSetting("auto_archive_categories");
@@ -83,7 +86,7 @@ async function processAndStoreThread(
     );
     const existing = await getThreadCategoryWithManual(accountId, thread.id);
     // Skip if manually categorized
-    if (!existing || !existing.isManual) {
+    if (!(existing && existing.isManual)) {
       const { categorizeByRules } = await import(
         "@/services/categorization/ruleEngine"
       );

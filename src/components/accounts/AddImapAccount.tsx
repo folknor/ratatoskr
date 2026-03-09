@@ -1,32 +1,32 @@
-import { useState, useCallback } from "react";
-import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
-  XCircle,
+  KeyRound,
   Loader2,
-  Server,
   Mail,
   Send,
+  Server,
   ShieldCheck,
-  KeyRound,
+  XCircle,
 } from "lucide-react";
+import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Modal } from "@/components/ui/Modal";
 import {
   insertImapAccount,
   insertOAuthImapAccount,
 } from "@/services/db/accounts";
-import { useAccountStore } from "@/stores/accountStore";
 import {
   discoverSettings,
   getDefaultImapPort,
   getDefaultSmtpPort,
   type SecurityType,
 } from "@/services/imap/autoDiscovery";
-import { getOAuthProvider } from "@/services/oauth/providers";
 import { startProviderOAuthFlow } from "@/services/oauth/oauthFlow";
+import { getOAuthProvider } from "@/services/oauth/providers";
+import { useAccountStore } from "@/stores/accountStore";
 
 interface AddImapAccountProps {
   onClose: () => void;

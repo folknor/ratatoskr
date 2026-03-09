@@ -1,7 +1,7 @@
 import type { DbAccount } from "../db/accounts";
 import { updateAccountTokens } from "../db/accounts";
-import { getOAuthProvider } from "./providers";
 import { refreshProviderToken } from "./oauthFlow";
+import { getOAuthProvider } from "./providers";
 
 /** Buffer before expiry to trigger a refresh (5 minutes) */
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;

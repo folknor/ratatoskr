@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock Tauri plugins
 const mockCheck = vi.fn();
@@ -13,11 +13,11 @@ vi.mock("@tauri-apps/plugin-process", () => ({
 }));
 
 import {
-  checkForUpdateNow,
-  installUpdate,
-  getAvailableUpdate,
-  setUpdateCallback,
   _resetForTesting,
+  checkForUpdateNow,
+  getAvailableUpdate,
+  installUpdate,
+  setUpdateCallback,
 } from "./updateManager";
 
 beforeEach(() => {

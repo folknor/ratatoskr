@@ -1,4 +1,4 @@
-import { getDb, buildDynamicUpdate } from "./connection";
+import { buildDynamicUpdate, getDb } from "./connection";
 
 export interface DbTemplate {
   id: string;

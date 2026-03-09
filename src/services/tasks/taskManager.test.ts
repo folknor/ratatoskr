@@ -1,7 +1,7 @@
 import {
   calculateNextOccurrence,
-  parseRecurrenceRule,
   handleRecurringTaskCompletion,
+  parseRecurrenceRule,
   type RecurrenceRule,
 } from "./taskManager";
 

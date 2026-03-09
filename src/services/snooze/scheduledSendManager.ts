@@ -1,11 +1,11 @@
+import { buildRawEmail, type EmailAttachment } from "@/utils/emailBuilder";
+import { createBackgroundChecker } from "../backgroundCheckers";
+import { getAccount } from "../db/accounts";
 import {
   getPendingScheduledEmails,
   updateScheduledEmailStatus,
 } from "../db/scheduledEmails";
 import { getGmailClient } from "../gmail/tokenManager";
-import { buildRawEmail, type EmailAttachment } from "@/utils/emailBuilder";
-import { getAccount } from "../db/accounts";
-import { createBackgroundChecker } from "../backgroundCheckers";
 
 /**
  * Check for scheduled emails that are ready to be sent.

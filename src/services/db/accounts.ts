@@ -1,5 +1,5 @@
+import { decryptValue, encryptValue, isEncrypted } from "@/utils/crypto";
 import { getDb, selectFirstBy } from "./connection";
-import { encryptValue, decryptValue, isEncrypted } from "@/utils/crypto";
 
 export interface DbAccount {
   id: string;

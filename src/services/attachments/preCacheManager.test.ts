@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/stores/uiStore", () => ({
   useUIStore: {
@@ -37,9 +37,9 @@ vi.mock("../backgroundCheckers", () => ({
 }));
 
 import { useUIStore } from "@/stores/uiStore";
+import { createMockUIStoreState } from "@/test/mocks";
 import { cacheAttachment } from "./cacheManager";
 import { startPreCacheManager, stopPreCacheManager } from "./preCacheManager";
-import { createMockUIStoreState } from "@/test/mocks";
 
 async function runPreCache() {
   startPreCacheManager();

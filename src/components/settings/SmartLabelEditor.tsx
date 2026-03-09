@@ -1,18 +1,18 @@
-import { useState, useEffect, useCallback } from "react";
+import { ChevronDown, ChevronUp, Loader2, Pencil, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Trash2, Pencil, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 import { TextField } from "@/components/ui/TextField";
-import { useAccountStore } from "@/stores/accountStore";
-import { getLabelsForAccount, type DbLabel } from "@/services/db/labels";
+import type { FilterCriteria } from "@/services/db/filters";
+import { type DbLabel, getLabelsForAccount } from "@/services/db/labels";
 import {
+  type DbSmartLabelRule,
+  deleteSmartLabelRule,
   getSmartLabelRulesForAccount,
   insertSmartLabelRule,
   updateSmartLabelRule,
-  deleteSmartLabelRule,
-  type DbSmartLabelRule,
 } from "@/services/db/smartLabelRules";
-import type { FilterCriteria } from "@/services/db/filters";
 import { backfillSmartLabels } from "@/services/smartLabels/backfillService";
+import { useAccountStore } from "@/stores/accountStore";
 
 export function SmartLabelEditor() {
   const { t } = useTranslation("settings");
@@ -73,7 +73,7 @@ export function SmartLabelEditor() {
   };
 
   const handleSave = useCallback(async () => {
-    if (!activeAccountId || !labelId || !aiDescription.trim()) return;
+    if (!(activeAccountId && labelId && aiDescription.trim())) return;
     const criteria = buildCriteria();
 
     if (editingId) {
@@ -332,7 +332,7 @@ export function SmartLabelEditor() {
           <div className="flex items-center gap-2">
             <button
               onClick={handleSave}
-              disabled={!labelId || !aiDescription.trim()}
+              disabled={!(labelId && aiDescription.trim())}
               className="px-3 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-50"
             >
               {editingId

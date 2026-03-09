@@ -1,8 +1,8 @@
-import type { EmailProvider } from "./types";
-import { GmailApiProvider } from "./gmailProvider";
-import { ImapSmtpProvider } from "./imapSmtpProvider";
 import { getAccount } from "../db/accounts";
 import { getGmailClient } from "../gmail/tokenManager";
+import { GmailApiProvider } from "./gmailProvider";
+import { ImapSmtpProvider } from "./imapSmtpProvider";
+import type { EmailProvider } from "./types";
 
 const providers = new Map<string, EmailProvider>();
 

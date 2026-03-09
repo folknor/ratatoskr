@@ -1,11 +1,11 @@
 import {
   buildThreads,
-  updateThreads,
+  generateThreadId,
   normalizeSubject,
   parseReferences,
-  generateThreadId,
   type ThreadableMessage,
   type ThreadGroup,
+  updateThreads,
 } from "./threadBuilder";
 
 // ---------------------------------------------------------------------------

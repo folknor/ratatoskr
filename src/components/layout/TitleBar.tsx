@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
-import { useTranslation } from "react-i18next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Minus, Square, X, Copy } from "lucide-react";
+import { Copy, Minus, Square, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 const isMac = navigator.userAgent.includes("Macintosh");
 

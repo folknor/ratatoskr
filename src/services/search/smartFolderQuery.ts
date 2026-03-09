@@ -1,7 +1,7 @@
+import { getThreadById, getThreadLabelIds } from "@/services/db/threads";
+import type { Thread } from "@/stores/threadStore";
 import { parseSearchQuery } from "./searchParser";
 import { buildSearchQuery } from "./searchQueryBuilder";
-import { getThreadLabelIds, getThreadById } from "@/services/db/threads";
-import type { Thread } from "@/stores/threadStore";
 
 /**
  * Replace dynamic date tokens in a query string.

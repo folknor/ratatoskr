@@ -1,5 +1,5 @@
-import { HelpCard } from "./HelpCard";
 import type { HelpCard as HelpCardData } from "@/constants/helpContent";
+import { HelpCard } from "./HelpCard";
 
 interface HelpCardGridProps {
   cards: HelpCardData[];

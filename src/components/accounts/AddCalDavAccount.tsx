@@ -1,20 +1,20 @@
-import { useState, useCallback } from "react";
 import {
   ArrowLeft,
   ArrowRight,
-  CheckCircle2,
-  XCircle,
-  Loader2,
   Calendar,
+  CheckCircle2,
+  Loader2,
+  XCircle,
 } from "lucide-react";
+import { useCallback, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { TextField } from "@/components/ui/TextField";
-import { insertCalDavAccount } from "@/services/db/accounts";
-import { useAccountStore } from "@/stores/accountStore";
 import {
   discoverCalDavSettings,
   testCalDavConnection,
 } from "@/services/calendar/autoDiscovery";
+import { insertCalDavAccount } from "@/services/db/accounts";
+import { useAccountStore } from "@/stores/accountStore";
 
 interface AddCalDavAccountProps {
   onClose: () => void;
@@ -220,7 +220,7 @@ export function AddCalDavAccount({
                   setStep("test");
                   handleTest();
                 }}
-                disabled={!caldavUrl || !password}
+                disabled={!(caldavUrl && password)}
                 className="flex items-center gap-1 px-4 py-2 text-sm font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-50"
               >
                 Test & Connect

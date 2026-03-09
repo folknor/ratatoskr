@@ -1,5 +1,5 @@
-import { lazy, Suspense } from "react";
 import { createRootRoute, createRoute, redirect } from "@tanstack/react-router";
+import { lazy, Suspense } from "react";
 import App from "@/App";
 import { MailLayout } from "@/components/layout/MailLayout";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";

@@ -1,14 +1,14 @@
-import { useState, useEffect } from "react";
-import { useTranslation } from "react-i18next";
 import type { Editor } from "@tiptap/react";
-import { Wand2, Sparkles, ArrowDown, Briefcase } from "lucide-react";
-import { isAiAvailable } from "@/services/ai/providerManager";
+import { ArrowDown, Briefcase, Sparkles, Wand2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   composeFromPrompt,
   generateReply,
-  transformText,
   type TransformType,
+  transformText,
 } from "@/services/ai/aiService";
+import { isAiAvailable } from "@/services/ai/providerManager";
 import { useComposerStore } from "@/stores/composerStore";
 
 interface AiAssistPanelProps {

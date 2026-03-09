@@ -1,10 +1,10 @@
-import { useUIStore } from "@/stores/uiStore";
-import { useThreadStore } from "@/stores/threadStore";
-import { getEmailProvider } from "@/services/email/providerFactory";
-import { enqueuePendingOperation } from "@/services/db/pendingOperations";
-import { classifyError } from "@/utils/networkErrors";
+import { getSelectedThreadId, navigateToThread } from "@/router/navigate";
 import { getDb } from "@/services/db/connection";
-import { navigateToThread, getSelectedThreadId } from "@/router/navigate";
+import { enqueuePendingOperation } from "@/services/db/pendingOperations";
+import { getEmailProvider } from "@/services/email/providerFactory";
+import { useThreadStore } from "@/stores/threadStore";
+import { useUIStore } from "@/stores/uiStore";
+import { classifyError } from "@/utils/networkErrors";
 
 // ---------------------------------------------------------------------------
 // Action types

@@ -1,9 +1,9 @@
+import { getMessagesForThread } from "@/services/db/messages";
 import {
   getUncategorizedInboxThreadIds,
   setThreadCategory,
 } from "@/services/db/threadCategories";
 import { getThreadLabelIds } from "@/services/db/threads";
-import { getMessagesForThread } from "@/services/db/messages";
 import { categorizeByRules } from "./ruleEngine";
 
 /**

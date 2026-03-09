@@ -1,5 +1,5 @@
-import { getDb, selectFirstBy } from "./connection";
 import { normalizeEmail } from "@/utils/emailUtils";
+import { getDb, selectFirstBy } from "./connection";
 
 export interface DbContact {
   id: string;

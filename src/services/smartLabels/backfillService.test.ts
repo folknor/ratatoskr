@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockSelect = vi.fn();
 const { mockGetDb } = vi.hoisted(() => ({
@@ -17,9 +17,9 @@ vi.mock("@/services/emailActions", () => ({
   addThreadLabel: vi.fn(() => Promise.resolve({ success: true })),
 }));
 
-import { matchSmartLabels } from "./smartLabelService";
 import { addThreadLabel } from "@/services/emailActions";
 import { backfillSmartLabels } from "./backfillService";
+import { matchSmartLabels } from "./smartLabelService";
 
 describe("backfillSmartLabels", () => {
   beforeEach(() => {

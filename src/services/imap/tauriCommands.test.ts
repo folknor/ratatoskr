@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock @tauri-apps/api/core
 vi.mock("@tauri-apps/api/core", () => ({
@@ -9,20 +9,20 @@ vi.mock("@tauri-apps/api/core", () => ({
 const mockInvoke = vi.mocked(invoke);
 
 import {
-  imapTestConnection,
-  imapListFolders,
+  type ImapConfig,
+  imapDeleteMessages,
+  imapFetchAttachment,
+  imapFetchMessageBody,
   imapFetchMessages,
   imapFetchNewUids,
-  imapFetchMessageBody,
-  imapSetFlags,
-  imapMoveMessages,
-  imapDeleteMessages,
   imapGetFolderStatus,
-  imapFetchAttachment,
+  imapListFolders,
+  imapMoveMessages,
+  imapSetFlags,
+  imapTestConnection,
+  type SmtpConfig,
   smtpSendEmail,
   smtpTestConnection,
-  type ImapConfig,
-  type SmtpConfig,
 } from "./tauriCommands";
 
 const testImapConfig: ImapConfig = {

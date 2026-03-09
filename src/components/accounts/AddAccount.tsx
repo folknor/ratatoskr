@@ -1,15 +1,15 @@
+import { Calendar, Mail } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Mail, Calendar } from "lucide-react";
-import { startOAuthFlow } from "@/services/gmail/auth";
+import { Modal } from "@/components/ui/Modal";
 import { insertAccount } from "@/services/db/accounts";
+import { startOAuthFlow } from "@/services/gmail/auth";
 import { getClientId, getClientSecret } from "@/services/gmail/tokenManager";
 import { useAccountStore } from "@/stores/accountStore";
-import { Modal } from "@/components/ui/Modal";
-import { SetupClientId } from "./SetupClientId";
-import { AddImapAccount } from "./AddImapAccount";
-import { AddCalDavAccount } from "./AddCalDavAccount";
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
+import { AddCalDavAccount } from "./AddCalDavAccount";
+import { AddImapAccount } from "./AddImapAccount";
+import { SetupClientId } from "./SetupClientId";
 
 interface AddAccountProps {
   onClose: () => void;

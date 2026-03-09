@@ -1,20 +1,20 @@
-import { useState, useCallback, useRef, useEffect } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
+import { Download, Eye } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Modal } from "@/components/ui/Modal";
 import {
-  getAttachmentsForMessage,
   type DbAttachment,
+  getAttachmentsForMessage,
 } from "@/services/db/attachments";
 import { getEmailProvider } from "@/services/email/providerFactory";
-import { Modal } from "@/components/ui/Modal";
-import { Download, Eye } from "lucide-react";
 import {
+  canPreview,
   formatFileSize,
+  getFileIcon,
   isImage,
   isPdf,
   isText,
-  canPreview,
-  getFileIcon,
 } from "@/utils/fileTypeHelpers";
 
 /** Dedup attachments by filename+size (content-based) */
@@ -138,7 +138,7 @@ export function AttachmentPreview({
   }, [accountId, messageId, attachment.gmail_attachment_id]);
 
   const handlePreviewLoad = useCallback(async () => {
-    if (!attachment.gmail_attachment_id || !isPreviewable || blobUrl) return;
+    if (!(attachment.gmail_attachment_id && isPreviewable) || blobUrl) return;
 
     setLoading(true);
     try {
@@ -244,15 +244,14 @@ export function AttachmentPreview({
           <p className="text-sm text-text-tertiary">Loading preview...</p>
         )}
         {error && <p className="text-sm text-text-tertiary">{error}</p>}
-        {!loading && !error && blobUrl && isImage(attachment.mime_type) && (
+        {!(loading || error) && blobUrl && isImage(attachment.mime_type) && (
           <img
             src={blobUrl}
             alt={attachment.filename ?? "Attachment"}
             className="max-w-full max-h-[70vh] object-contain rounded"
           />
         )}
-        {!loading &&
-          !error &&
+        {!(loading || error) &&
           blobUrl &&
           isPdf(attachment.mime_type, attachment.filename) && (
             <iframe
@@ -261,10 +260,10 @@ export function AttachmentPreview({
               className="w-full h-[70vh] border-0 rounded"
             />
           )}
-        {!loading && !error && blobUrl && isText(attachment.mime_type) && (
+        {!(loading || error) && blobUrl && isText(attachment.mime_type) && (
           <TextPreview url={blobUrl} />
         )}
-        {!isPreviewable && !loading && (
+        {!(isPreviewable || loading) && (
           <div className="flex flex-col items-center gap-3 text-text-tertiary">
             <Eye size={40} strokeWidth={1} />
             <p className="text-sm">Preview not available for this file type</p>

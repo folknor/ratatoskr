@@ -1,5 +1,5 @@
-import { extractTask } from "./taskExtraction";
 import type { DbMessage } from "@/services/db/messages";
+import { extractTask } from "./taskExtraction";
 
 vi.mock("./aiService", () => ({
   extractTaskFromThread: vi.fn(),

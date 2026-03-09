@@ -1,10 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
+import { createMockImapFolder } from "@/test/mocks";
 import {
-  mapFolderToLabel,
   getLabelsForMessage,
   getSyncableFolders,
+  mapFolderToLabel,
 } from "./folderMapper";
-import { createMockImapFolder } from "@/test/mocks";
 
 describe("mapFolderToLabel", () => {
   it("maps special_use \\Inbox to INBOX label", () => {

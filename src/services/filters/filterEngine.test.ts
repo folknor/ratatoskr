@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { messageMatchesFilter, computeFilterActions } from "./filterEngine";
-import type { FilterCriteria, FilterActions } from "../db/filters";
+import { describe, expect, it } from "vitest";
 import { createMockParsedMessage } from "@/test/mocks";
+import type { FilterActions, FilterCriteria } from "../db/filters";
+import { computeFilterActions, messageMatchesFilter } from "./filterEngine";
 
 describe("messageMatchesFilter", () => {
   it("matches from criteria (case-insensitive)", () => {

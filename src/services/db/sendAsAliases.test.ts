@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockGetDb } = vi.hoisted(() => ({
   mockGetDb: vi.fn(),
@@ -19,16 +19,16 @@ vi.mock("@/services/db/connection", async (importOriginal) => {
 });
 
 import { getDb } from "@/services/db/connection";
-import {
-  getAliasesForAccount,
-  upsertAlias,
-  getDefaultAlias,
-  setDefaultAlias,
-  deleteAlias,
-  mapDbAlias,
-  type DbSendAsAlias,
-} from "./sendAsAliases";
 import { createMockDb } from "@/test/mocks";
+import {
+  type DbSendAsAlias,
+  deleteAlias,
+  getAliasesForAccount,
+  getDefaultAlias,
+  mapDbAlias,
+  setDefaultAlias,
+  upsertAlias,
+} from "./sendAsAliases";
 
 const mockDb = createMockDb();
 

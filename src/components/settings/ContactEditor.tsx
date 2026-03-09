@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { Check, Pencil, Search, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Search, Pencil, Trash2, Check, X } from "lucide-react";
 import {
+  type DbContact,
+  deleteContact,
   getAllContacts,
   updateContact,
-  deleteContact,
-  type DbContact,
 } from "@/services/db/contacts";
 
 export function ContactEditor() {

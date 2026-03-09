@@ -1,8 +1,8 @@
-import { getDb } from "../db/connection";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { fetch } from "@tauri-apps/plugin-http";
-import { getCurrentUnixTimestamp } from "@/utils/timestamp";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { normalizeEmail } from "@/utils/emailUtils";
+import { getCurrentUnixTimestamp } from "@/utils/timestamp";
+import { getDb } from "../db/connection";
 
 export interface ParsedUnsubscribe {
   httpUrl: string | null;

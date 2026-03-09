@@ -1,10 +1,10 @@
-import { isAiAvailable } from "./providerManager";
-import { categorizeThreads } from "./aiService";
 import { getSetting } from "@/services/db/settings";
 import {
   getRecentRuleCategorizedThreadIds,
   setThreadCategoriesBatch,
 } from "@/services/db/threadCategories";
+import { categorizeThreads } from "./aiService";
+import { isAiAvailable } from "./providerManager";
 
 export async function categorizeNewThreads(accountId: string): Promise<void> {
   try {

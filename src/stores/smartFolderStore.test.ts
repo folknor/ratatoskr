@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/db/smartFolders", () => ({
   getSmartFolders: vi.fn(() => Promise.resolve([])),
@@ -24,9 +24,9 @@ vi.mock("@/services/db/connection", () => ({
 }));
 
 import {
+  deleteSmartFolder,
   getSmartFolders,
   insertSmartFolder,
-  deleteSmartFolder,
 } from "@/services/db/smartFolders";
 import { useSmartFolderStore } from "./smartFolderStore";
 

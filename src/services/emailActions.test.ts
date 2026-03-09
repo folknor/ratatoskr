@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock dependencies
 vi.mock("@/stores/uiStore", () => ({
@@ -38,26 +38,26 @@ vi.mock("@/router/navigate", () => ({
   getSelectedThreadId: vi.fn(() => null),
 }));
 
-import { useUIStore } from "@/stores/uiStore";
-import { useThreadStore } from "@/stores/threadStore";
-import { getEmailProvider } from "@/services/email/providerFactory";
+import { getSelectedThreadId, navigateToThread } from "@/router/navigate";
 import { enqueuePendingOperation } from "@/services/db/pendingOperations";
-import {
-  archiveThread,
-  trashThread,
-  permanentDeleteThread,
-  starThread,
-  markThreadRead,
-  spamThread,
-  moveThread,
-  executeEmailAction,
-} from "./emailActions";
-import { navigateToThread, getSelectedThreadId } from "@/router/navigate";
+import { getEmailProvider } from "@/services/email/providerFactory";
+import { useThreadStore } from "@/stores/threadStore";
+import { useUIStore } from "@/stores/uiStore";
 import {
   createMockEmailProvider,
-  createMockUIStoreState,
   createMockThreadStoreState,
+  createMockUIStoreState,
 } from "@/test/mocks";
+import {
+  archiveThread,
+  executeEmailAction,
+  markThreadRead,
+  moveThread,
+  permanentDeleteThread,
+  spamThread,
+  starThread,
+  trashThread,
+} from "./emailActions";
 
 const mockProvider = createMockEmailProvider();
 

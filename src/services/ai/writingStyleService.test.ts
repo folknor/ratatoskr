@@ -1,12 +1,12 @@
+import type { DbMessage } from "@/services/db/messages";
 import {
   analyzeWritingStyle,
-  getOrCreateStyleProfile,
-  refreshWritingStyle,
   generateAutoDraft,
-  regenerateAutoDraft,
+  getOrCreateStyleProfile,
   isAutoDraftEnabled,
+  refreshWritingStyle,
+  regenerateAutoDraft,
 } from "./writingStyleService";
-import type { DbMessage } from "@/services/db/messages";
 
 vi.mock("./providerManager", () => ({
   getActiveProvider: vi.fn().mockResolvedValue({

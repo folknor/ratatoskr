@@ -1,12 +1,12 @@
+import { useUIStore } from "@/stores/uiStore";
 import {
-  createBackgroundChecker,
   type BackgroundChecker,
+  createBackgroundChecker,
 } from "../backgroundCheckers";
 import { getDb } from "../db/connection";
 import { getSetting } from "../db/settings";
 import { getEmailProvider } from "../email/providerFactory";
 import { cacheAttachment } from "./cacheManager";
-import { useUIStore } from "@/stores/uiStore";
 
 const MAX_ATTACHMENT_SIZE = 5 * 1024 * 1024; // 5MB
 const RECENT_DAYS = 7;

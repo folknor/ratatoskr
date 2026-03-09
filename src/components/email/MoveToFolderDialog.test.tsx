@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MoveToFolderDialog } from "./MoveToFolderDialog";
 
 // Mock dependencies
@@ -110,11 +110,11 @@ vi.mock("react-transition-group", () => ({
 }));
 
 import {
-  archiveThread,
-  trashThread,
-  spamThread,
   addThreadLabel,
+  archiveThread,
   removeThreadLabel,
+  spamThread,
+  trashThread,
 } from "@/services/emailActions";
 
 const defaultProps = {

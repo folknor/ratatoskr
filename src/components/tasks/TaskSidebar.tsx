@@ -1,20 +1,20 @@
-import { useState, useEffect, useCallback } from "react";
-import { X, ExternalLink } from "lucide-react";
-import { useTaskStore } from "@/stores/taskStore";
-import { useUIStore } from "@/stores/uiStore";
+import { ExternalLink, X } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { navigateToLabel } from "@/router/navigate";
+import type { DbTask } from "@/services/db/tasks";
 import {
-  getTasksForThread,
-  insertTask,
   completeTask,
-  uncompleteTask,
   deleteTask as dbDeleteTask,
   getSubtasks,
+  getTasksForThread,
+  insertTask,
+  uncompleteTask,
 } from "@/services/db/tasks";
-import type { DbTask } from "@/services/db/tasks";
 import { handleRecurringTaskCompletion } from "@/services/tasks/taskManager";
+import { useTaskStore } from "@/stores/taskStore";
+import { useUIStore } from "@/stores/uiStore";
 import { TaskItem } from "./TaskItem";
 import { TaskQuickAdd } from "./TaskQuickAdd";
-import { navigateToLabel } from "@/router/navigate";
 
 interface TaskSidebarProps {
   accountId: string;

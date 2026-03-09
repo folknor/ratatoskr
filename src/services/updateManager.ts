@@ -1,5 +1,5 @@
-import { createBackgroundChecker } from "./backgroundCheckers";
 import type { BackgroundChecker } from "./backgroundCheckers";
+import { createBackgroundChecker } from "./backgroundCheckers";
 
 interface UpdateInfo {
   version: string;

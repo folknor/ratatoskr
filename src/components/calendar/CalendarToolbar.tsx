@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Plus, CalendarDays } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 export type CalendarView = "day" | "week" | "month";

@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { SHORTCUTS, getDefaultKeyMap } from "./shortcuts";
+import { describe, expect, it } from "vitest";
+import { getDefaultKeyMap, SHORTCUTS } from "./shortcuts";
 
 describe("SHORTCUTS", () => {
   it("has at least 3 categories (Navigation, Actions, App)", () => {

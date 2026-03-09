@@ -1,8 +1,8 @@
 import {
-  getDb,
-  buildDynamicUpdate,
-  selectFirstBy,
   boolToInt,
+  buildDynamicUpdate,
+  getDb,
+  selectFirstBy,
 } from "./connection";
 
 export interface DbSignature {

@@ -1,18 +1,18 @@
-import { getActiveProvider } from "./providerManager";
-import { AiError } from "./errors";
-import { getAiCache, setAiCache, deleteAiCache } from "@/services/db/aiCache";
-import {
-  getWritingStyleProfile,
-  upsertWritingStyleProfile,
-  deleteWritingStyleProfile,
-} from "@/services/db/writingStyleProfiles";
-import { getRecentSentMessages, type DbMessage } from "@/services/db/messages";
 import { getAccount } from "@/services/db/accounts";
+import { deleteAiCache, getAiCache, setAiCache } from "@/services/db/aiCache";
+import { type DbMessage, getRecentSentMessages } from "@/services/db/messages";
 import { getSetting } from "@/services/db/settings";
 import {
-  WRITING_STYLE_ANALYSIS_PROMPT,
+  deleteWritingStyleProfile,
+  getWritingStyleProfile,
+  upsertWritingStyleProfile,
+} from "@/services/db/writingStyleProfiles";
+import { AiError } from "./errors";
+import {
   AUTO_DRAFT_REPLY_PROMPT,
+  WRITING_STYLE_ANALYSIS_PROMPT,
 } from "./prompts";
+import { getActiveProvider } from "./providerManager";
 
 async function callAi(
   systemPrompt: string,

@@ -1,37 +1,37 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useRef } from "react";
-import { useUIStore } from "@/stores/uiStore";
-import { useThreadStore } from "@/stores/threadStore";
-import { useComposerStore } from "@/stores/composerStore";
-import { useAccountStore } from "@/stores/accountStore";
-import { useShortcutStore } from "@/stores/shortcutStore";
-import { useContextMenuStore } from "@/stores/contextMenuStore";
+import { parseUnsubscribeUrl } from "@/components/email/MessageItem";
 import {
-  navigateToLabel,
-  navigateToThread,
-  navigateBack,
   getActiveLabel,
   getSelectedThreadId,
+  navigateBack,
+  navigateToLabel,
+  navigateToThread,
 } from "@/router/navigate";
-import {
-  archiveThread,
-  trashThread,
-  permanentDeleteThread,
-  starThread,
-  spamThread,
-} from "@/services/emailActions";
+import { getMessagesForThread } from "@/services/db/messages";
 import {
   deleteThread as deleteThreadFromDb,
-  pinThread as pinThreadDb,
-  unpinThread as unpinThreadDb,
   muteThread as muteThreadDb,
+  pinThread as pinThreadDb,
   unmuteThread as unmuteThreadDb,
+  unpinThread as unpinThreadDb,
 } from "@/services/db/threads";
+import {
+  archiveThread,
+  permanentDeleteThread,
+  spamThread,
+  starThread,
+  trashThread,
+} from "@/services/emailActions";
 import { deleteDraftsForThread } from "@/services/gmail/draftDeletion";
-import { getGmailClient } from "@/services/gmail/tokenManager";
-import { getMessagesForThread } from "@/services/db/messages";
-import { parseUnsubscribeUrl } from "@/components/email/MessageItem";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { triggerSync } from "@/services/gmail/syncManager";
+import { getGmailClient } from "@/services/gmail/tokenManager";
+import { useAccountStore } from "@/stores/accountStore";
+import { useComposerStore } from "@/stores/composerStore";
+import { useContextMenuStore } from "@/stores/contextMenuStore";
+import { useShortcutStore } from "@/stores/shortcutStore";
+import { useThreadStore } from "@/stores/threadStore";
+import { useUIStore } from "@/stores/uiStore";
 
 /**
  * Parse a key binding string and check if it matches a keyboard event.

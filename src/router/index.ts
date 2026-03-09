@@ -1,4 +1,4 @@
-import { createRouter, createHashHistory } from "@tanstack/react-router";
+import { createHashHistory, createRouter } from "@tanstack/react-router";
 import { routeTree } from "./routeTree";
 
 const hashHistory = createHashHistory();

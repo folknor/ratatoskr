@@ -1,12 +1,12 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { FileText, ChevronDown } from "lucide-react";
+import type { Editor } from "@tiptap/react";
+import { ChevronDown, FileText } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type DbTemplate,
+  getTemplatesForAccount,
+} from "@/services/db/templates";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
-import {
-  getTemplatesForAccount,
-  type DbTemplate,
-} from "@/services/db/templates";
-import type { Editor } from "@tiptap/react";
 
 interface TemplatePickerProps {
   editor: Editor | null;

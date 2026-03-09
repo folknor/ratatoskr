@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockGetDb } = vi.hoisted(() => ({
   mockGetDb: vi.fn(),
@@ -19,17 +19,17 @@ vi.mock("@/services/db/connection", async (importOriginal) => {
 });
 
 import { getDb } from "@/services/db/connection";
+import { createMockDb } from "@/test/mocks";
+import type { DbCalendar } from "./calendars";
 import {
-  upsertCalendar,
+  deleteCalendarsForAccount,
+  getCalendarById,
   getCalendarsForAccount,
   getVisibleCalendars,
   setCalendarVisibility,
   updateCalendarSyncToken,
-  deleteCalendarsForAccount,
-  getCalendarById,
+  upsertCalendar,
 } from "./calendars";
-import type { DbCalendar } from "./calendars";
-import { createMockDb } from "@/test/mocks";
 
 const mockDb = createMockDb();
 

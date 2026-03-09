@@ -1,7 +1,7 @@
-import { useState, useCallback, useRef, useEffect } from "react";
 import { X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useLabelStore, type Label } from "@/stores/labelStore";
+import { type Label, useLabelStore } from "@/stores/labelStore";
 
 // Gmail's predefined label colors (background, text)
 export const GMAIL_LABEL_COLORS: { bg: string; fg: string }[] = [

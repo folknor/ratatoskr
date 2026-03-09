@@ -1,28 +1,28 @@
-import { getGmailClient } from "./tokenManager";
-import { initialSync, deltaSync, type SyncProgress } from "./sync";
-import { getAccount, clearAccountHistoryId } from "../db/accounts";
-import { getSetting } from "../db/settings";
 import {
-  getThreadCountForAccount,
-  deleteAllThreadsForAccount,
-} from "../db/threads";
-import { deleteAllMessagesForAccount } from "../db/messages";
-import { imapInitialSync, imapDeltaSync } from "../imap/imapSync";
-import { clearAllFolderSyncStates } from "../db/folderSyncState";
-import { ensureFreshToken } from "../oauth/oauthTokenManager";
-import {
-  hasCalendarSupport,
   getCalendarProvider,
+  hasCalendarSupport,
 } from "../calendar/providerFactory";
+import { clearAccountHistoryId, getAccount } from "../db/accounts";
+import {
+  deleteEventByRemoteId,
+  upsertCalendarEvent,
+} from "../db/calendarEvents";
 import {
   getVisibleCalendars,
-  upsertCalendar,
   updateCalendarSyncToken,
+  upsertCalendar,
 } from "../db/calendars";
+import { clearAllFolderSyncStates } from "../db/folderSyncState";
+import { deleteAllMessagesForAccount } from "../db/messages";
+import { getSetting } from "../db/settings";
 import {
-  upsertCalendarEvent,
-  deleteEventByRemoteId,
-} from "../db/calendarEvents";
+  deleteAllThreadsForAccount,
+  getThreadCountForAccount,
+} from "../db/threads";
+import { imapDeltaSync, imapInitialSync } from "../imap/imapSync";
+import { ensureFreshToken } from "../oauth/oauthTokenManager";
+import { deltaSync, initialSync, type SyncProgress } from "./sync";
+import { getGmailClient } from "./tokenManager";
 
 const SYNC_INTERVAL_MS = 60_000; // 60 seconds — delta syncs are lightweight (single API call when idle)
 

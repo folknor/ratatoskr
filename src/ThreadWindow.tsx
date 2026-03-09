@@ -1,17 +1,17 @@
 import { useEffect, useState } from "react";
-import { ThreadView } from "./components/email/ThreadView";
 import { Composer } from "./components/composer/Composer";
 import { UndoSendToast } from "./components/composer/UndoSendToast";
-import { useAccountStore } from "./stores/accountStore";
-import { useUIStore } from "./stores/uiStore";
-import { runMigrations } from "./services/db/migrations";
-import { getAllAccounts } from "./services/db/accounts";
-import { getSetting } from "./services/db/settings";
-import { initializeClients } from "./services/gmail/tokenManager";
-import { getThreadById, getThreadLabelIds } from "./services/db/threads";
-import { getThemeById, COLOR_THEMES } from "./constants/themes";
+import { ThreadView } from "./components/email/ThreadView";
 import type { ColorThemeId } from "./constants/themes";
+import { COLOR_THEMES, getThemeById } from "./constants/themes";
+import { getAllAccounts } from "./services/db/accounts";
+import { runMigrations } from "./services/db/migrations";
+import { getSetting } from "./services/db/settings";
+import { getThreadById, getThreadLabelIds } from "./services/db/threads";
+import { initializeClients } from "./services/gmail/tokenManager";
+import { useAccountStore } from "./stores/accountStore";
 import type { Thread } from "./stores/threadStore";
+import { useUIStore } from "./stores/uiStore";
 
 export default function ThreadWindow() {
   const { setTheme, setFontScale, setColorTheme } = useUIStore();
@@ -25,7 +25,7 @@ export default function ThreadWindow() {
     const threadId = params.get("thread");
     const accountId = params.get("account");
 
-    if (!threadId || !accountId) {
+    if (!(threadId && accountId)) {
       setError("Missing thread or account parameter");
       setLoading(false);
       return;

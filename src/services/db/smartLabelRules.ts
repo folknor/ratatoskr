@@ -1,4 +1,4 @@
-import { getDb, buildDynamicUpdate, boolToInt } from "./connection";
+import { boolToInt, buildDynamicUpdate, getDb } from "./connection";
 import type { FilterCriteria } from "./filters";
 
 export interface DbSmartLabelRule {

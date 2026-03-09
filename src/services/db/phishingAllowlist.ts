@@ -1,5 +1,5 @@
-import { getDb } from "./connection";
 import { normalizeEmail } from "@/utils/emailUtils";
+import { getDb } from "./connection";
 
 export async function isPhishingAllowlisted(
   accountId: string,

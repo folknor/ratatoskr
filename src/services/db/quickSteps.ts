@@ -1,5 +1,5 @@
-import { getDb, buildDynamicUpdate, boolToInt } from "./connection";
 import type { QuickStepAction } from "../quickSteps/types";
+import { boolToInt, buildDynamicUpdate, getDb } from "./connection";
 
 export interface DbQuickStep {
   id: string;

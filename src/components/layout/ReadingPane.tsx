@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
-import { ThreadView } from "../email/ThreadView";
-import { useThreadStore } from "@/stores/threadStore";
 import { useSelectedThreadId } from "@/hooks/useRouteNavigation";
+import { useThreadStore } from "@/stores/threadStore";
+import { ThreadView } from "../email/ThreadView";
 import { EmptyState } from "../ui/EmptyState";
 import { ReadingPaneIllustration } from "../ui/illustrations";
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/db/connection", async (importOriginal) => {
   const actual =
@@ -10,20 +10,20 @@ vi.mock("@/services/db/connection", async (importOriginal) => {
 });
 
 import { getDb } from "@/services/db/connection";
-import {
-  enqueuePendingOperation,
-  getPendingOperations,
-  updateOperationStatus,
-  deleteOperation,
-  incrementRetry,
-  getPendingOpsCount,
-  getFailedOpsCount,
-  getPendingOpsForResource,
-  compactQueue,
-  clearFailedOperations,
-  retryFailedOperations,
-} from "./pendingOperations";
 import { createMockDb } from "@/test/mocks";
+import {
+  clearFailedOperations,
+  compactQueue,
+  deleteOperation,
+  enqueuePendingOperation,
+  getFailedOpsCount,
+  getPendingOperations,
+  getPendingOpsCount,
+  getPendingOpsForResource,
+  incrementRetry,
+  retryFailedOperations,
+  updateOperationStatus,
+} from "./pendingOperations";
 
 const mockDb = createMockDb();
 

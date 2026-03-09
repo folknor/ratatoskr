@@ -1,16 +1,16 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockCreate = vi.fn();
 
 vi.mock("openai", () => {
-  const MockOpenAI = vi.fn(function () {
-    return { chat: { completions: { create: mockCreate } } };
-  });
+  const MockOpenAI = vi.fn(() => ({
+    chat: { completions: { create: mockCreate } },
+  }));
   return { default: MockOpenAI };
 });
 
 import OpenAI from "openai";
-import { createCopilotProvider, clearCopilotProvider } from "./copilotProvider";
+import { clearCopilotProvider, createCopilotProvider } from "./copilotProvider";
 
 describe("copilotProvider", () => {
   beforeEach(() => {

@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { setSetting, setSecureSetting } from "@/services/db/settings";
 import { Modal } from "@/components/ui/Modal";
+import { setSecureSetting, setSetting } from "@/services/db/settings";
 
 interface SetupClientIdProps {
   onComplete: () => void;
@@ -15,7 +15,7 @@ export function SetupClientId({ onComplete, onCancel }: SetupClientIdProps) {
   const handleSave = async () => {
     const trimmedId = clientId.trim();
     const trimmedSecret = clientSecret.trim();
-    if (!trimmedId || !trimmedSecret) return;
+    if (!(trimmedId && trimmedSecret)) return;
 
     setSaving(true);
     try {
@@ -84,7 +84,7 @@ export function SetupClientId({ onComplete, onCancel }: SetupClientIdProps) {
           </button>
           <button
             onClick={handleSave}
-            disabled={!clientId.trim() || !clientSecret.trim() || saving}
+            disabled={!(clientId.trim() && clientSecret.trim()) || saving}
             className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {saving ? "Saving..." : "Save & Continue"}

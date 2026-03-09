@@ -1,5 +1,5 @@
-import { useTranslation } from "react-i18next";
 import { ShieldX, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { AuthResult } from "@/services/gmail/authParser";
 
 interface AuthWarningBannerProps {

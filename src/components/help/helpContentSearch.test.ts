@@ -1,8 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  HELP_CATEGORIES,
   getAllCards,
   getCategoryById,
+  HELP_CATEGORIES,
 } from "@/constants/helpContent";
 
 /**

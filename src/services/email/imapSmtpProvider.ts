@@ -1,36 +1,36 @@
-import type { EmailProvider, EmailFolder, SyncResult } from "./types";
-import type { ParsedMessage } from "../gmail/messageParser";
-import { buildImapConfig, buildSmtpConfig } from "../imap/imapConfigBuilder";
-import {
-  imapInitialSync,
-  imapDeltaSync,
-  imapMessageToParsedMessage,
-} from "../imap/imapSync";
-import { mapFolderToLabel, getSyncableFolders } from "../imap/folderMapper";
-import {
-  imapListFolders,
-  imapSetFlags,
-  imapMoveMessages,
-  imapDeleteMessages,
-  imapFetchMessageBody,
-  imapFetchAttachment,
-  imapFetchRawMessage,
-  imapTestConnection,
-  imapAppendMessage,
-  smtpSendEmail,
-  smtpTestConnection,
-  type ImapConfig,
-  type SmtpConfig,
-} from "../imap/tauriCommands";
-import { getAccount, type DbAccount } from "../db/accounts";
-import { findSpecialFolder } from "../imap/messageHelper";
-import { ensureFreshToken } from "../oauth/oauthTokenManager";
+import { type DbAccount, getAccount } from "../db/accounts";
 import { upsertMessage } from "../db/messages";
 import {
-  upsertThread,
-  setThreadLabels,
   getThreadLabelIds,
+  setThreadLabels,
+  upsertThread,
 } from "../db/threads";
+import type { ParsedMessage } from "../gmail/messageParser";
+import { getSyncableFolders, mapFolderToLabel } from "../imap/folderMapper";
+import { buildImapConfig, buildSmtpConfig } from "../imap/imapConfigBuilder";
+import {
+  imapDeltaSync,
+  imapInitialSync,
+  imapMessageToParsedMessage,
+} from "../imap/imapSync";
+import { findSpecialFolder } from "../imap/messageHelper";
+import {
+  type ImapConfig,
+  imapAppendMessage,
+  imapDeleteMessages,
+  imapFetchAttachment,
+  imapFetchMessageBody,
+  imapFetchRawMessage,
+  imapListFolders,
+  imapMoveMessages,
+  imapSetFlags,
+  imapTestConnection,
+  type SmtpConfig,
+  smtpSendEmail,
+  smtpTestConnection,
+} from "../imap/tauriCommands";
+import { ensureFreshToken } from "../oauth/oauthTokenManager";
+import type { EmailFolder, EmailProvider, SyncResult } from "./types";
 
 /**
  * Decode base64url (Gmail/RFC 4648 URL-safe, no padding) to a UTF-8 string.

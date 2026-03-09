@@ -1,13 +1,13 @@
+import { useDraggable } from "@dnd-kit/core";
+import { BellRing, Check, Paperclip, Pin, Star, VolumeX } from "lucide-react";
 import { memo, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { useDraggable } from "@dnd-kit/core";
+import type { DragData } from "@/components/dnd/DndProvider";
+import { useActiveLabel } from "@/hooks/useRouteNavigation";
 import type { Thread } from "@/stores/threadStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { useUIStore } from "@/stores/uiStore";
-import { useActiveLabel } from "@/hooks/useRouteNavigation";
 import { formatRelativeDate } from "@/utils/date";
-import { Paperclip, Star, Check, Pin, BellRing, VolumeX } from "lucide-react";
-import type { DragData } from "@/components/dnd/DndProvider";
 
 const CATEGORY_COLORS: Record<string, string> = {
   Updates: "bg-yellow-500/15 text-yellow-600 dark:text-yellow-400",

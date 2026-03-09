@@ -1,16 +1,16 @@
-import { useState, useMemo } from "react";
 import { useParams } from "@tanstack/react-router";
 import { ArrowLeft, Search } from "lucide-react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { navigateToLabel } from "@/router/navigate";
 import {
-  HELP_CATEGORIES,
   getAllCards,
   getCategoryById,
+  HELP_CATEGORIES,
 } from "@/constants/helpContent";
-import { HelpSidebar } from "./HelpSidebar";
-import { HelpSearchBar } from "./HelpSearchBar";
+import { navigateToLabel } from "@/router/navigate";
 import { HelpCardGrid } from "./HelpCardGrid";
+import { HelpSearchBar } from "./HelpSearchBar";
+import { HelpSidebar } from "./HelpSidebar";
 
 export function HelpPage() {
   const { t } = useTranslation("help");

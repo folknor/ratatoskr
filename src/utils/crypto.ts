@@ -5,11 +5,11 @@
  */
 
 import {
+  BaseDirectory,
   exists,
+  mkdir,
   readTextFile,
   writeTextFile,
-  mkdir,
-  BaseDirectory,
 } from "@tauri-apps/plugin-fs";
 
 const KEY_FILE_NAME = "velo.key";
@@ -114,7 +114,7 @@ export async function decryptValue(encrypted: string): Promise<string> {
     throw new Error("Invalid encrypted value format");
   }
   const [ivB64, ciphertextB64] = parts;
-  if (!ivB64 || !ciphertextB64) {
+  if (!(ivB64 && ciphertextB64)) {
     throw new Error("Invalid encrypted value format");
   }
 

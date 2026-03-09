@@ -1,19 +1,19 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { ImageOff } from "lucide-react";
 import {
-  useRef,
   useCallback,
+  useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
-  useEffect,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { ImageOff } from "lucide-react";
-import { openUrl } from "@tauri-apps/plugin-opener";
-import { stripRemoteImages, hasBlockedImages } from "@/utils/imageBlocker";
-import { addToAllowlist } from "@/services/db/imageAllowlist";
-import { escapeHtml, sanitizeHtml } from "@/utils/sanitize";
-import { useUIStore } from "@/stores/uiStore";
 import type { DbAttachment } from "@/services/db/attachments";
+import { addToAllowlist } from "@/services/db/imageAllowlist";
+import { useUIStore } from "@/stores/uiStore";
+import { hasBlockedImages, stripRemoteImages } from "@/utils/imageBlocker";
+import { escapeHtml, sanitizeHtml } from "@/utils/sanitize";
 
 interface EmailRendererProps {
   html: string | null;
@@ -53,7 +53,7 @@ export function EmailRenderer({
 
   // Resolve cid: references by fetching inline attachment data
   useEffect(() => {
-    if (!accountId || !messageId || !inlineAttachments?.length) return;
+    if (!(accountId && messageId && inlineAttachments?.length)) return;
 
     const cidAttachments = inlineAttachments.filter(
       (a) => a.content_id && a.gmail_attachment_id,
@@ -132,7 +132,7 @@ export function EmailRenderer({
   }, [sanitizedBody, text, shouldBlock, cidMap]);
 
   const blocked = useMemo(() => {
-    if (!shouldBlock || !sanitizedBody) return false;
+    if (!(shouldBlock && sanitizedBody)) return false;
     return hasBlockedImages(stripRemoteImages(sanitizedBody));
   }, [shouldBlock, sanitizedBody]);
 

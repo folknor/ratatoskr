@@ -1,5 +1,5 @@
-import { GoogleCalendarProvider } from "./googleCalendarProvider";
 import { getGmailClient } from "@/services/gmail/tokenManager";
+import { GoogleCalendarProvider } from "./googleCalendarProvider";
 
 vi.mock("@/services/gmail/tokenManager", () => ({
   getGmailClient: vi.fn(),

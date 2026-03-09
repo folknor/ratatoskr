@@ -1,10 +1,10 @@
 import { create } from "zustand";
 import {
-  getLabelsForAccount,
   deleteLabel as dbDeleteLabel,
+  getLabelsForAccount,
   updateLabelSortOrder,
+  upsertLabel,
 } from "@/services/db/labels";
-import { upsertLabel } from "@/services/db/labels";
 import { getGmailClient } from "@/services/gmail/tokenManager";
 
 export interface Label {

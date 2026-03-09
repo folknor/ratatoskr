@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./smartLabelService", () => ({
   matchSmartLabels: vi.fn(),
@@ -8,10 +8,10 @@ vi.mock("@/services/emailActions", () => ({
   addThreadLabel: vi.fn(() => Promise.resolve({ success: true })),
 }));
 
-import { matchSmartLabels } from "./smartLabelService";
 import { addThreadLabel } from "@/services/emailActions";
-import { applySmartLabelsToMessages } from "./smartLabelManager";
 import type { ParsedMessage } from "@/services/gmail/messageParser";
+import { applySmartLabelsToMessages } from "./smartLabelManager";
+import { matchSmartLabels } from "./smartLabelService";
 
 function makeMessage(threadId = "t1"): ParsedMessage {
   return {

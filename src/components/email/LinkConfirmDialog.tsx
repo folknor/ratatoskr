@@ -1,5 +1,5 @@
+import { ExternalLink, ShieldAlert } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { ShieldAlert, ExternalLink } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import type { LinkAnalysis } from "@/utils/phishingDetector";
 

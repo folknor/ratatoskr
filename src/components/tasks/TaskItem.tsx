@@ -1,16 +1,16 @@
-import { useState, useCallback } from "react";
-import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import {
-  Circle,
-  CheckCircle2,
-  ChevronRight,
-  ChevronDown,
-  Trash2,
   Calendar,
-  RepeatIcon,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Circle,
   Link2,
+  RepeatIcon,
+  Trash2,
 } from "lucide-react";
+import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { DbTask, TaskPriority } from "@/services/db/tasks";
 
 const PRIORITY_COLORS: Record<TaskPriority, string> = {

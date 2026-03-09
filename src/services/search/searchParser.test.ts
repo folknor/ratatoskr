@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { parseSearchQuery, hasSearchOperators } from "./searchParser";
+import { describe, expect, it } from "vitest";
+import { hasSearchOperators, parseSearchQuery } from "./searchParser";
 
 describe("parseSearchQuery", () => {
   it("parses plain text with no operators", () => {

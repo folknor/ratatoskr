@@ -1,24 +1,24 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { CheckCircle2, CheckSquare, Search, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CheckSquare, Search, Trash2, CheckCircle2 } from "lucide-react";
-import { useAccountStore } from "@/stores/accountStore";
 import {
-  useTaskStore,
-  type TaskGroupBy,
-  type TaskFilterStatus,
-} from "@/stores/taskStore";
-import {
+  completeTask,
+  type DbTask,
+  deleteTask as dbDeleteTask,
+  getIncompleteTaskCount,
+  getSubtasks,
   getTasksForAccount,
   insertTask,
-  completeTask,
-  uncompleteTask,
-  deleteTask as dbDeleteTask,
-  getSubtasks,
-  getIncompleteTaskCount,
-  type DbTask,
   type TaskPriority,
+  uncompleteTask,
 } from "@/services/db/tasks";
 import { handleRecurringTaskCompletion } from "@/services/tasks/taskManager";
+import { useAccountStore } from "@/stores/accountStore";
+import {
+  type TaskFilterStatus,
+  type TaskGroupBy,
+  useTaskStore,
+} from "@/stores/taskStore";
 import { TaskItem } from "./TaskItem";
 import { TaskQuickAdd } from "./TaskQuickAdd";
 

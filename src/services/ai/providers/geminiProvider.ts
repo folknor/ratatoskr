@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import type { AiProviderClient, AiCompletionRequest } from "../types";
 import { createProviderFactory } from "../providerFactory";
+import type { AiCompletionRequest, AiProviderClient } from "../types";
 
 const factory = createProviderFactory(
   (apiKey) => new GoogleGenerativeAI(apiKey),

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/stores/uiStore", () => ({
   useUIStore: {
@@ -35,21 +35,21 @@ vi.mock("../backgroundCheckers", () => ({
 }));
 
 import { useUIStore } from "@/stores/uiStore";
+import { createMockUIStoreState } from "@/test/mocks";
+import { classifyError } from "@/utils/networkErrors";
 import {
-  getPendingOperations,
-  updateOperationStatus,
-  deleteOperation,
-  incrementRetry,
   compactQueue,
+  deleteOperation,
+  getPendingOperations,
+  incrementRetry,
+  updateOperationStatus,
 } from "../db/pendingOperations";
 import { executeQueuedAction } from "../emailActions";
-import { classifyError } from "@/utils/networkErrors";
 import {
   startQueueProcessor,
   stopQueueProcessor,
   triggerQueueFlush,
 } from "./queueProcessor";
-import { createMockUIStoreState } from "@/test/mocks";
 
 const mockSetPendingOpsCount = vi.fn();
 

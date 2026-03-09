@@ -1,6 +1,6 @@
-import { extractTaskFromThread as aiExtract } from "./aiService";
 import type { DbMessage } from "@/services/db/messages";
 import type { TaskPriority } from "@/services/db/tasks";
+import { extractTaskFromThread as aiExtract } from "./aiService";
 
 export interface ExtractedTask {
   title: string;

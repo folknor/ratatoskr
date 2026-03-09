@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ImapSmtpProvider } from "./imapSmtpProvider";
 
 // Mock all external dependencies
@@ -51,25 +51,25 @@ vi.mock("../db/threads", () => ({
 }));
 
 import { getAccount } from "../db/accounts";
-import { buildImapConfig, buildSmtpConfig } from "../imap/imapConfigBuilder";
-import { mapFolderToLabel, getSyncableFolders } from "../imap/folderMapper";
+import { upsertMessage } from "../db/messages";
 import {
-  imapListFolders,
-  imapSetFlags,
-  imapMoveMessages,
-  imapDeleteMessages,
-  imapTestConnection,
+  getThreadLabelIds,
+  setThreadLabels,
+  upsertThread,
+} from "../db/threads";
+import { getSyncableFolders, mapFolderToLabel } from "../imap/folderMapper";
+import { buildImapConfig, buildSmtpConfig } from "../imap/imapConfigBuilder";
+import { findSpecialFolder } from "../imap/messageHelper";
+import {
   imapAppendMessage,
+  imapDeleteMessages,
+  imapListFolders,
+  imapMoveMessages,
+  imapSetFlags,
+  imapTestConnection,
   smtpSendEmail,
   smtpTestConnection,
 } from "../imap/tauriCommands";
-import { findSpecialFolder } from "../imap/messageHelper";
-import { upsertMessage } from "../db/messages";
-import {
-  upsertThread,
-  setThreadLabels,
-  getThreadLabelIds,
-} from "../db/threads";
 
 const mockImapConfig = {
   host: "imap.example.com",

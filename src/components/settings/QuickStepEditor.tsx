@@ -1,22 +1,22 @@
-import { useState, useEffect, useCallback } from "react";
+import { ChevronDown, GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Trash2, Pencil, Plus, GripVertical, ChevronDown } from "lucide-react";
-import { useAccountStore } from "@/stores/accountStore";
-import { getLabelsForAccount, type DbLabel } from "@/services/db/labels";
+import { type DbLabel, getLabelsForAccount } from "@/services/db/labels";
 import {
+  type DbQuickStep,
+  deleteQuickStep,
   getQuickStepsForAccount,
   insertQuickStep,
   updateQuickStep,
-  deleteQuickStep,
-  type DbQuickStep,
 } from "@/services/db/quickSteps";
+import { ALL_CATEGORIES } from "@/services/db/threadCategories";
+import { seedDefaultQuickSteps } from "@/services/quickSteps/defaults";
 import {
   ACTION_TYPE_METADATA,
   type QuickStepAction,
   type QuickStepActionType,
 } from "@/services/quickSteps/types";
-import { ALL_CATEGORIES } from "@/services/db/threadCategories";
-import { seedDefaultQuickSteps } from "@/services/quickSteps/defaults";
+import { useAccountStore } from "@/stores/accountStore";
 
 function describeActions(actionsJson: string, invalidLabel: string): string {
   try {
@@ -80,7 +80,7 @@ export function QuickStepEditor() {
   }, []);
 
   const handleSave = useCallback(async () => {
-    if (!activeAccountId || !name.trim() || actions.length === 0) return;
+    if (!(activeAccountId && name.trim()) || actions.length === 0) return;
 
     if (editingId) {
       await updateQuickStep(editingId, {

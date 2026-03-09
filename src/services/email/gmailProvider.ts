@@ -1,6 +1,6 @@
-import type { EmailProvider, EmailFolder, SyncResult } from "./types";
 import type { GmailClient } from "../gmail/client";
-import { parseGmailMessage, type ParsedMessage } from "../gmail/messageParser";
+import { type ParsedMessage, parseGmailMessage } from "../gmail/messageParser";
+import type { EmailFolder, EmailProvider, SyncResult } from "./types";
 
 /** Map Gmail system label IDs to IMAP special-use flags */
 const GMAIL_SPECIAL_USE: Record<string, string | null> = {

@@ -1,65 +1,65 @@
-import { useEffect, useCallback, useMemo, useRef, useState } from "react";
+import {
+  Archive,
+  Ban,
+  ChevronRight,
+  Filter,
+  FolderSearch,
+  Package,
+  Trash2,
+  X,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CSSTransition } from "react-transition-group";
-import { ThreadCard } from "../email/ThreadCard";
-import { CategoryTabs } from "../email/CategoryTabs";
-import { SearchBar } from "../search/SearchBar";
-import { EmailListSkeleton } from "../ui/Skeleton";
-import { useThreadStore, type Thread } from "@/stores/threadStore";
-import { useAccountStore } from "@/stores/accountStore";
-import { useUIStore } from "@/stores/uiStore";
 import {
+  useActiveCategory,
   useActiveLabel,
   useSelectedThreadId,
-  useActiveCategory,
 } from "@/hooks/useRouteNavigation";
-import { navigateToThread, navigateToLabel } from "@/router/navigate";
+import { navigateToLabel, navigateToThread } from "@/router/navigate";
 import {
-  getThreadsForAccount,
-  getThreadsForCategory,
-  getThreadLabelIds,
-  deleteThread as deleteThreadFromDb,
-} from "@/services/db/threads";
+  type DbBundleRule,
+  getBundleRules,
+  getBundleSummaries,
+  getHeldThreadIds,
+} from "@/services/db/bundleRules";
+import { getDb } from "@/services/db/connection";
+import { getActiveFollowUpThreadIds } from "@/services/db/followUpReminders";
+import { getMessagesForThread } from "@/services/db/messages";
 import {
   getCategoriesForThreads,
   getCategoryUnreadCounts,
 } from "@/services/db/threadCategories";
-import { getActiveFollowUpThreadIds } from "@/services/db/followUpReminders";
 import {
-  getBundleRules,
-  getHeldThreadIds,
-  getBundleSummaries,
-  type DbBundleRule,
-} from "@/services/db/bundleRules";
+  deleteThread as deleteThreadFromDb,
+  getThreadLabelIds,
+  getThreadsForAccount,
+  getThreadsForCategory,
+} from "@/services/db/threads";
 import { getGmailClient } from "@/services/gmail/tokenManager";
-import { useLabelStore } from "@/stores/labelStore";
-import { useSmartFolderStore } from "@/stores/smartFolderStore";
-import { useContextMenuStore } from "@/stores/contextMenuStore";
-import { useComposerStore } from "@/stores/composerStore";
-import { getMessagesForThread } from "@/services/db/messages";
 import {
   getSmartFolderSearchQuery,
   mapSmartFolderRows,
   type SmartFolderRow,
 } from "@/services/search/smartFolderQuery";
-import { getDb } from "@/services/db/connection";
-import {
-  Archive,
-  Trash2,
-  X,
-  Ban,
-  Filter,
-  ChevronRight,
-  Package,
-  FolderSearch,
-} from "lucide-react";
+import { useAccountStore } from "@/stores/accountStore";
+import { useComposerStore } from "@/stores/composerStore";
+import { useContextMenuStore } from "@/stores/contextMenuStore";
+import { useLabelStore } from "@/stores/labelStore";
+import { useSmartFolderStore } from "@/stores/smartFolderStore";
+import { type Thread, useThreadStore } from "@/stores/threadStore";
+import { useUIStore } from "@/stores/uiStore";
+import { CategoryTabs } from "../email/CategoryTabs";
+import { ThreadCard } from "../email/ThreadCard";
+import { SearchBar } from "../search/SearchBar";
 import { EmptyState } from "../ui/EmptyState";
 import {
-  InboxClearIllustration,
-  NoSearchResultsIllustration,
-  NoAccountIllustration,
   GenericEmptyIllustration,
+  InboxClearIllustration,
+  NoAccountIllustration,
+  NoSearchResultsIllustration,
 } from "../ui/illustrations";
+import { EmailListSkeleton } from "../ui/Skeleton";
 
 const PAGE_SIZE = 50;
 
@@ -329,8 +329,8 @@ export function EmailList({
   const mapDbThreads = useCallback(
     async (
       dbThreads: Awaited<ReturnType<typeof getThreadsForAccount>>,
-    ): Promise<Thread[]> => {
-      return Promise.all(
+    ): Promise<Thread[]> =>
+      Promise.all(
         dbThreads.map(async (t) => {
           const labelIds = await getThreadLabelIds(t.account_id, t.id);
           return {
@@ -350,8 +350,7 @@ export function EmailList({
             fromAddress: t.from_address,
           };
         }),
-      );
-    },
+      ),
     [],
   );
 
@@ -589,7 +588,7 @@ export function EmailList({
 
   // Auto-scroll selected thread into view (triggered by keyboard navigation)
   useEffect(() => {
-    if (!selectedThreadId || !scrollContainerRef.current) return;
+    if (!(selectedThreadId && scrollContainerRef.current)) return;
     const el = scrollContainerRef.current.querySelector(
       `[data-thread-id="${CSS.escape(selectedThreadId)}"]`,
     );

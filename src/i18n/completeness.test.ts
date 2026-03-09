@@ -1,30 +1,28 @@
-import { describe, it, expect } from "vitest";
-
-import commonEN from "./locales/en/common.json";
-import sidebarEN from "./locales/en/sidebar.json";
-import emailEN from "./locales/en/email.json";
-import composerEN from "./locales/en/composer.json";
-import settingsEN from "./locales/en/settings.json";
-import searchEN from "./locales/en/search.json";
+import { describe, expect, it } from "vitest";
 import accountsEN from "./locales/en/accounts.json";
-import tasksEN from "./locales/en/tasks.json";
-import notificationsEN from "./locales/en/notifications.json";
-import calendarEN from "./locales/en/calendar.json";
 import attachmentsEN from "./locales/en/attachments.json";
+import calendarEN from "./locales/en/calendar.json";
+import commonEN from "./locales/en/common.json";
+import composerEN from "./locales/en/composer.json";
+import emailEN from "./locales/en/email.json";
 import helpEN from "./locales/en/help.json";
-
-import commonIT from "./locales/it/common.json";
-import sidebarIT from "./locales/it/sidebar.json";
-import emailIT from "./locales/it/email.json";
-import composerIT from "./locales/it/composer.json";
-import settingsIT from "./locales/it/settings.json";
-import searchIT from "./locales/it/search.json";
+import notificationsEN from "./locales/en/notifications.json";
+import searchEN from "./locales/en/search.json";
+import settingsEN from "./locales/en/settings.json";
+import sidebarEN from "./locales/en/sidebar.json";
+import tasksEN from "./locales/en/tasks.json";
 import accountsIT from "./locales/it/accounts.json";
-import tasksIT from "./locales/it/tasks.json";
-import notificationsIT from "./locales/it/notifications.json";
-import calendarIT from "./locales/it/calendar.json";
 import attachmentsIT from "./locales/it/attachments.json";
+import calendarIT from "./locales/it/calendar.json";
+import commonIT from "./locales/it/common.json";
+import composerIT from "./locales/it/composer.json";
+import emailIT from "./locales/it/email.json";
 import helpIT from "./locales/it/help.json";
+import notificationsIT from "./locales/it/notifications.json";
+import searchIT from "./locales/it/search.json";
+import settingsIT from "./locales/it/settings.json";
+import sidebarIT from "./locales/it/sidebar.json";
+import tasksIT from "./locales/it/tasks.json";
 
 const namespaces: Record<
   string,

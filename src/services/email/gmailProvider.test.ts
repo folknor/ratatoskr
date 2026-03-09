@@ -1,6 +1,6 @@
-import { GmailApiProvider } from "./gmailProvider";
-import type { GmailClient } from "../gmail/client";
 import { createMockGmailClient } from "@/test/mocks";
+import type { GmailClient } from "../gmail/client";
+import { GmailApiProvider } from "./gmailProvider";
 
 describe("GmailApiProvider", () => {
   let provider: GmailApiProvider;

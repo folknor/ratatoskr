@@ -1,6 +1,6 @@
-import OpenAI from "openai";
 import { fetch } from "@tauri-apps/plugin-http";
-import type { AiProviderClient, AiCompletionRequest } from "../types";
+import OpenAI from "openai";
+import type { AiCompletionRequest, AiProviderClient } from "../types";
 
 let instance: OpenAI | null = null;
 let cachedKey: string | null = null;

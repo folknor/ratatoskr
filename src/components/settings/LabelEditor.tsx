@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
+import { ChevronDown, ChevronUp, Pencil, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Trash2, Pencil, ChevronUp, ChevronDown, X } from "lucide-react";
-import { useAccountStore } from "@/stores/accountStore";
-import { useLabelStore, type Label } from "@/stores/labelStore";
 import { LabelForm } from "@/components/labels/LabelForm";
+import { useAccountStore } from "@/stores/accountStore";
+import { type Label, useLabelStore } from "@/stores/labelStore";
 
 export function LabelEditor() {
   const { t } = useTranslation("settings");

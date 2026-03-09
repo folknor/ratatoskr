@@ -1,16 +1,16 @@
 import { useEffect, useState } from "react";
 import { Composer } from "./components/composer/Composer";
 import { UndoSendToast } from "./components/composer/UndoSendToast";
-import { useAccountStore } from "./stores/accountStore";
-import { useComposerStore } from "./stores/composerStore";
-import { useUIStore } from "./stores/uiStore";
-import { runMigrations } from "./services/db/migrations";
+import type { ColorThemeId } from "./constants/themes";
+import { COLOR_THEMES, getThemeById } from "./constants/themes";
 import { getAllAccounts } from "./services/db/accounts";
+import { runMigrations } from "./services/db/migrations";
 import { getSetting } from "./services/db/settings";
 import { initializeClients } from "./services/gmail/tokenManager";
-import { getThemeById, COLOR_THEMES } from "./constants/themes";
-import type { ColorThemeId } from "./constants/themes";
+import { useAccountStore } from "./stores/accountStore";
 import type { ComposerMode } from "./stores/composerStore";
+import { useComposerStore } from "./stores/composerStore";
+import { useUIStore } from "./stores/uiStore";
 
 export default function ComposerWindow() {
   const { setTheme, setFontScale, setColorTheme } = useUIStore();

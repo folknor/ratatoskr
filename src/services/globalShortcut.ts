@@ -1,11 +1,11 @@
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
+  isRegistered,
   register,
   unregister,
-  isRegistered,
 } from "@tauri-apps/plugin-global-shortcut";
-import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { getSetting, setSetting } from "./db/settings";
 import { useComposerStore } from "../stores/composerStore";
+import { getSetting, setSetting } from "./db/settings";
 
 const DEFAULT_SHORTCUT = "CmdOrCtrl+Shift+M";
 let currentShortcut: string | null = null;

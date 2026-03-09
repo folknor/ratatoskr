@@ -1,11 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
+  discoverSettings,
   extractDomain,
   findWellKnownProvider,
-  guessServerSettings,
-  discoverSettings,
-  getDefaultSmtpPort,
   getDefaultImapPort,
+  getDefaultSmtpPort,
+  guessServerSettings,
 } from "./autoDiscovery";
 
 describe("extractDomain", () => {

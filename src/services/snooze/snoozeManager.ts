@@ -1,7 +1,6 @@
-import { getDb } from "../db/connection";
-import { withTransaction } from "../db/connection";
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
 import { createBackgroundChecker } from "../backgroundCheckers";
+import { getDb, withTransaction } from "../db/connection";
 
 /**
  * Check for snoozed threads that should be un-snoozed (time has passed).

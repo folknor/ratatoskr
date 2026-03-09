@@ -1,18 +1,18 @@
-import {
-  createBackgroundChecker,
-  type BackgroundChecker,
-} from "../backgroundCheckers";
 import { useUIStore } from "@/stores/uiStore";
+import { classifyError } from "@/utils/networkErrors";
 import {
-  getPendingOperations,
-  updateOperationStatus,
-  deleteOperation,
-  incrementRetry,
-  getPendingOpsCount,
+  type BackgroundChecker,
+  createBackgroundChecker,
+} from "../backgroundCheckers";
+import {
   compactQueue,
+  deleteOperation,
+  getPendingOperations,
+  getPendingOpsCount,
+  incrementRetry,
+  updateOperationStatus,
 } from "../db/pendingOperations";
 import { executeQueuedAction } from "../emailActions";
-import { classifyError } from "@/utils/networkErrors";
 
 const BATCH_SIZE = 50;
 

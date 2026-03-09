@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import { setSetting } from "@/services/db/settings";
 import type { ColorThemeId } from "@/constants/themes";
+import { setSetting } from "@/services/db/settings";
 
 type Theme = "light" | "dark" | "system";
 type ReadingPanePosition = "right" | "bottom" | "hidden";

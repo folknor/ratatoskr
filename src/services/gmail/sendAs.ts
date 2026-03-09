@@ -1,5 +1,5 @@
-import type { GmailClient } from "./client";
 import { upsertAlias } from "../db/sendAsAliases";
+import type { GmailClient } from "./client";
 
 interface GmailSendAsEntry {
   sendAsEmail: string;

@@ -1,41 +1,41 @@
-import type {
-  ImapConfig,
-  ImapMessage,
-  DeltaCheckRequest,
-  DeltaCheckResult,
-} from "./tauriCommands";
-import {
-  imapListFolders,
-  imapGetFolderStatus,
-  imapFetchMessages,
-  imapFetchNewUids,
-  imapSearchFolder,
-  imapDeltaCheck,
-} from "./tauriCommands";
-import { buildImapConfig } from "./imapConfigBuilder";
-import {
-  mapFolderToLabel,
-  getLabelsForMessage,
-  syncFoldersToLabels,
-  getSyncableFolders,
-} from "./folderMapper";
-import type { ParsedMessage, ParsedAttachment } from "../gmail/messageParser";
-import type { SyncResult } from "../email/types";
-import { upsertMessage, updateMessageThreadIds } from "../db/messages";
-import { upsertThread, setThreadLabels, deleteThread } from "../db/threads";
-import { upsertAttachment } from "../db/attachments";
 import { getAccount, updateAccountSyncState } from "../db/accounts";
+import { upsertAttachment } from "../db/attachments";
 import { withTransaction } from "../db/connection";
 import {
-  upsertFolderSyncState,
   getAllFolderSyncStates,
+  upsertFolderSyncState,
 } from "../db/folderSyncState";
+import { updateMessageThreadIds, upsertMessage } from "../db/messages";
+import { getPendingOpsForResource } from "../db/pendingOperations";
+import { deleteThread, setThreadLabels, upsertThread } from "../db/threads";
+import type { SyncResult } from "../email/types";
+import type { ParsedAttachment, ParsedMessage } from "../gmail/messageParser";
 import {
   buildThreads,
   type ThreadableMessage,
   type ThreadGroup,
 } from "../threading/threadBuilder";
-import { getPendingOpsForResource } from "../db/pendingOperations";
+import {
+  getLabelsForMessage,
+  getSyncableFolders,
+  mapFolderToLabel,
+  syncFoldersToLabels,
+} from "./folderMapper";
+import { buildImapConfig } from "./imapConfigBuilder";
+import type {
+  DeltaCheckRequest,
+  DeltaCheckResult,
+  ImapConfig,
+  ImapMessage,
+} from "./tauriCommands";
+import {
+  imapDeltaCheck,
+  imapFetchMessages,
+  imapFetchNewUids,
+  imapGetFolderStatus,
+  imapListFolders,
+  imapSearchFolder,
+} from "./tauriCommands";
 
 // ---------------------------------------------------------------------------
 // Constants

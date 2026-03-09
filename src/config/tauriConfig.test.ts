@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { describe, expect, it } from "vitest";
 
 describe("tauri.conf.json", () => {
   const configPath = resolve(__dirname, "../../src-tauri/tauri.conf.json");

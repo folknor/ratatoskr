@@ -1,19 +1,19 @@
 import {
+  Bell,
+  Inbox,
+  type LucideIcon,
+  Newspaper,
+  Tag,
+  Users,
+} from "lucide-react";
+import {
+  useCallback,
   useEffect,
   useLayoutEffect,
-  useCallback,
   useRef,
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Inbox,
-  Bell,
-  Tag,
-  Users,
-  Newspaper,
-  type LucideIcon,
-} from "lucide-react";
 import { ALL_CATEGORIES } from "@/services/db/threadCategories";
 
 export interface CategoryTabsProps {

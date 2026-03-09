@@ -1,14 +1,14 @@
+import type { GmailClient } from "@/services/gmail/client";
+import { getGmailClient } from "@/services/gmail/tokenManager";
 import type {
+  CalendarEventData,
+  CalendarInfo,
   CalendarProvider,
   CalendarProviderType,
-  CalendarInfo,
-  CalendarEventData,
   CalendarSyncResult,
   CreateEventInput,
   UpdateEventInput,
 } from "./types";
-import { getGmailClient } from "@/services/gmail/tokenManager";
-import type { GmailClient } from "@/services/gmail/client";
 
 const CALENDAR_API_BASE = "https://www.googleapis.com/calendar/v3";
 

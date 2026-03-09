@@ -128,7 +128,7 @@ export function parseAuthenticationResults(
   );
 
   // No auth headers at all
-  if (!arcHeader && !receivedSpfHeader) return null;
+  if (!(arcHeader || receivedSpfHeader)) return null;
 
   let spf: AuthVerdict = unknownVerdict();
   let dkim: AuthVerdict = unknownVerdict();

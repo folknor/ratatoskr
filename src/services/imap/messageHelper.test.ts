@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   groupMessagesByFolder,
-  securityToConfigType,
   type ImapMessageInfo,
+  securityToConfigType,
 } from "./messageHelper";
 
 // Mock the DB module

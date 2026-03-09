@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { parseGmailMessage } from "./messageParser";
+import { describe, expect, it } from "vitest";
 import { createMockGmailMessage } from "@/test/mocks";
+import { parseGmailMessage } from "./messageParser";
 
 describe("parseGmailMessage", () => {
   it("should parse basic message metadata", () => {

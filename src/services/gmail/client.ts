@@ -1,7 +1,7 @@
-import { refreshAccessToken, type TokenResponse } from "./auth";
-import { getDb } from "../db/connection";
 import { encryptValue } from "@/utils/crypto";
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
+import { getDb } from "../db/connection";
+import { refreshAccessToken, type TokenResponse } from "./auth";
 
 const GMAIL_API_BASE = "https://www.googleapis.com/gmail/v1";
 const MAX_RETRY_ATTEMPTS = 3;
@@ -93,7 +93,7 @@ export class GmailClient {
       const retryAfter = response.headers.get("Retry-After");
       const delayMs = retryAfter
         ? parseInt(retryAfter, 10) * 1000
-        : INITIAL_BACKOFF_MS * Math.pow(2, attempt);
+        : INITIAL_BACKOFF_MS * 2 ** attempt;
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
     return lastResponse!;

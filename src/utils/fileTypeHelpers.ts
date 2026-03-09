@@ -51,8 +51,7 @@ export function isDocument(
     ext?.endsWith(".doc") ||
     ext?.endsWith(".docx") ||
     ext?.endsWith(".odt") ||
-    ext?.endsWith(".rtf") ||
-    false
+    ext?.endsWith(".rtf")
   );
 }
 
@@ -73,8 +72,7 @@ export function isSpreadsheet(
     ext?.endsWith(".xls") ||
     ext?.endsWith(".xlsx") ||
     ext?.endsWith(".ods") ||
-    ext?.endsWith(".csv") ||
-    false
+    ext?.endsWith(".csv")
   );
 }
 

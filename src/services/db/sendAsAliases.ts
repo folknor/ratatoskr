@@ -1,4 +1,4 @@
-import { getDb, selectFirstBy, boolToInt } from "./connection";
+import { boolToInt, getDb, selectFirstBy } from "./connection";
 
 export interface DbSendAsAlias {
   id: string;

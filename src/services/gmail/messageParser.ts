@@ -1,5 +1,5 @@
-import type { GmailMessage, GmailMessagePart, GmailHeader } from "./client";
 import { parseAuthenticationResults } from "./authParser";
+import type { GmailHeader, GmailMessage, GmailMessagePart } from "./client";
 
 export interface ParsedAttachment {
   filename: string;

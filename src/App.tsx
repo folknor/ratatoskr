@@ -1,81 +1,83 @@
-import { useEffect, useState, useCallback, useRef } from "react";
-import { useTranslation } from "react-i18next";
 import { Outlet } from "@tanstack/react-router";
-import { Sidebar } from "./components/layout/Sidebar";
+import { invoke } from "@tauri-apps/api/core";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { AddAccount } from "./components/accounts/AddAccount";
 import { Composer } from "./components/composer/Composer";
 import { UndoSendToast } from "./components/composer/UndoSendToast";
+import { DndProvider } from "./components/dnd/DndProvider";
+import { MoveToFolderDialog } from "./components/email/MoveToFolderDialog";
+import { Sidebar } from "./components/layout/Sidebar";
+import { TitleBar } from "./components/layout/TitleBar";
+import { AskInbox } from "./components/search/AskInbox";
 import { CommandPalette } from "./components/search/CommandPalette";
 import { ShortcutsHelp } from "./components/search/ShortcutsHelp";
-import { AskInbox } from "./components/search/AskInbox";
-import { useUIStore } from "./stores/uiStore";
-import { useAccountStore } from "./stores/accountStore";
+import { ContextMenuPortal } from "./components/ui/ContextMenuPortal";
+import { ErrorBoundary } from "./components/ui/ErrorBoundary";
+import { OfflineBanner } from "./components/ui/OfflineBanner";
+import { UpdateToast } from "./components/ui/UpdateToast";
+import type { ColorThemeId } from "./constants/themes";
+import { COLOR_THEMES, getThemeById } from "./constants/themes";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
-import { runMigrations } from "./services/db/migrations";
+import { router } from "./router";
+import { getSelectedThreadId } from "./router/navigate";
+import {
+  startPreCacheManager,
+  stopPreCacheManager,
+} from "./services/attachments/preCacheManager";
+import { updateBadgeCount } from "./services/badgeManager";
+import {
+  startBundleChecker,
+  stopBundleChecker,
+} from "./services/bundles/bundleManager";
 import { getAllAccounts } from "./services/db/accounts";
+import { runMigrations } from "./services/db/migrations";
 import { getSetting } from "./services/db/settings";
-import {
-  startBackgroundSync,
-  stopBackgroundSync,
-  syncAccount,
-  triggerSync,
-  onSyncStatus,
-} from "./services/gmail/syncManager";
-import { initializeClients } from "./services/gmail/tokenManager";
-import {
-  startSnoozeChecker,
-  stopSnoozeChecker,
-} from "./services/snooze/snoozeManager";
-import {
-  startScheduledSendChecker,
-  stopScheduledSendChecker,
-} from "./services/snooze/scheduledSendManager";
+import { getIncompleteTaskCount } from "./services/db/tasks";
+import { initDeepLinkHandler } from "./services/deepLinkHandler";
 import {
   startFollowUpChecker,
   stopFollowUpChecker,
 } from "./services/followup/followupManager";
 import {
-  startBundleChecker,
-  stopBundleChecker,
-} from "./services/bundles/bundleManager";
-import { initNotifications } from "./services/notifications/notificationManager";
-import {
   initGlobalShortcut,
   unregisterComposeShortcut,
 } from "./services/globalShortcut";
-import { initDeepLinkHandler } from "./services/deepLinkHandler";
-import { updateBadgeCount } from "./services/badgeManager";
+import { fetchSendAsAliases } from "./services/gmail/sendAs";
+import {
+  onSyncStatus,
+  startBackgroundSync,
+  stopBackgroundSync,
+  syncAccount,
+  triggerSync,
+} from "./services/gmail/syncManager";
+import {
+  getGmailClient,
+  initializeClients,
+} from "./services/gmail/tokenManager";
+import { initNotifications } from "./services/notifications/notificationManager";
 import {
   startQueueProcessor,
   stopQueueProcessor,
   triggerQueueFlush,
 } from "./services/queue/queueProcessor";
 import {
-  startPreCacheManager,
-  stopPreCacheManager,
-} from "./services/attachments/preCacheManager";
+  startScheduledSendChecker,
+  stopScheduledSendChecker,
+} from "./services/snooze/scheduledSendManager";
+import {
+  startSnoozeChecker,
+  stopSnoozeChecker,
+} from "./services/snooze/snoozeManager";
 import {
   startUpdateChecker,
   stopUpdateChecker,
 } from "./services/updateManager";
-import { fetchSendAsAliases } from "./services/gmail/sendAs";
-import { getGmailClient } from "./services/gmail/tokenManager";
-import { invoke } from "@tauri-apps/api/core";
-import { DndProvider } from "./components/dnd/DndProvider";
-import { TitleBar } from "./components/layout/TitleBar";
+import { useAccountStore } from "./stores/accountStore";
 import { useShortcutStore } from "./stores/shortcutStore";
-import { getIncompleteTaskCount } from "./services/db/tasks";
 import { useTaskStore } from "./stores/taskStore";
-import { ContextMenuPortal } from "./components/ui/ContextMenuPortal";
-import { MoveToFolderDialog } from "./components/email/MoveToFolderDialog";
-import { OfflineBanner } from "./components/ui/OfflineBanner";
-import { UpdateToast } from "./components/ui/UpdateToast";
-import { ErrorBoundary } from "./components/ui/ErrorBoundary";
+import { useUIStore } from "./stores/uiStore";
 import { formatSyncError } from "./utils/networkErrors";
-import { getThemeById, COLOR_THEMES } from "./constants/themes";
-import type { ColorThemeId } from "./constants/themes";
-import { router } from "./router";
-import { getSelectedThreadId } from "./router/navigate";
 
 /**
  * Sync bridge: subscribes to router state changes and writes the selected
@@ -83,14 +85,16 @@ import { getSelectedThreadId } from "./router/navigate";
  * logic can use it as an anchor.
  */
 function useRouterSyncBridge() {
-  useEffect(() => {
-    return router.subscribe("onResolved", () => {
-      const threadId = getSelectedThreadId();
-      if (useThreadStore.getState().selectedThreadId !== threadId) {
-        useThreadStore.getState().selectThread(threadId);
-      }
-    });
-  }, []);
+  useEffect(
+    () =>
+      router.subscribe("onResolved", () => {
+        const threadId = getSelectedThreadId();
+        if (useThreadStore.getState().selectedThreadId !== threadId) {
+          useThreadStore.getState().selectThread(threadId);
+        }
+      }),
+    [],
+  );
 }
 
 import { useThreadStore } from "./stores/threadStore";

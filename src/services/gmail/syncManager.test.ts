@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock all dependencies before importing the module under test
 vi.mock("./tokenManager", () => ({
@@ -46,17 +46,17 @@ vi.mock("../db/calendarEvents", () => ({
   deleteEventByRemoteId: vi.fn(),
 }));
 
+import { getAccount } from "../db/accounts";
+import { deltaSync, initialSync } from "./sync";
 // Import after mocks
 import {
-  syncAccount,
+  onSyncStatus,
   startBackgroundSync,
   stopBackgroundSync,
+  syncAccount,
   triggerSync,
-  onSyncStatus,
 } from "./syncManager";
-import { getAccount } from "../db/accounts";
 import { getGmailClient } from "./tokenManager";
-import { initialSync, deltaSync } from "./sync";
 
 const mockGetAccount = vi.mocked(getAccount);
 const mockGetGmailClient = vi.mocked(getGmailClient);

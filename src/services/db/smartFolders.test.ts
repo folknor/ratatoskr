@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockGetDb } = vi.hoisted(() => ({
   mockGetDb: vi.fn(),
@@ -19,16 +19,16 @@ vi.mock("@/services/db/connection", async (importOriginal) => {
   };
 });
 
-import { getDb, buildDynamicUpdate } from "@/services/db/connection";
+import { buildDynamicUpdate, getDb } from "@/services/db/connection";
+import { createMockDb } from "@/test/mocks";
 import {
-  getSmartFolders,
+  deleteSmartFolder,
   getSmartFolderById,
+  getSmartFolders,
   insertSmartFolder,
   updateSmartFolder,
-  deleteSmartFolder,
   updateSmartFolderSortOrder,
 } from "./smartFolders";
-import { createMockDb } from "@/test/mocks";
 
 const mockDb = createMockDb();
 

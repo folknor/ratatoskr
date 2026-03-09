@@ -1,13 +1,13 @@
-import {
-  getEmailProvider,
-  removeProvider,
-  clearAllProviders,
-  invalidateProviderConfig,
-} from "./providerFactory";
-import { GmailApiProvider } from "./gmailProvider";
-import { ImapSmtpProvider } from "./imapSmtpProvider";
 import { getAccount } from "../db/accounts";
 import { getGmailClient } from "../gmail/tokenManager";
+import { GmailApiProvider } from "./gmailProvider";
+import { ImapSmtpProvider } from "./imapSmtpProvider";
+import {
+  clearAllProviders,
+  getEmailProvider,
+  invalidateProviderConfig,
+  removeProvider,
+} from "./providerFactory";
 
 vi.mock("../db/accounts", () => ({
   getAccount: vi.fn(),

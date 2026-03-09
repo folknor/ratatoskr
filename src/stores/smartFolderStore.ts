@@ -1,13 +1,13 @@
 import { create } from "zustand";
+import { getDb } from "@/services/db/connection";
 import {
+  type DbSmartFolder,
+  deleteSmartFolder as deleteSmartFolderDb,
   getSmartFolders,
   insertSmartFolder,
   updateSmartFolder as updateSmartFolderDb,
-  deleteSmartFolder as deleteSmartFolderDb,
-  type DbSmartFolder,
 } from "@/services/db/smartFolders";
 import { getSmartFolderUnreadCount } from "@/services/search/smartFolderQuery";
-import { getDb } from "@/services/db/connection";
 
 export interface SmartFolder {
   id: string;

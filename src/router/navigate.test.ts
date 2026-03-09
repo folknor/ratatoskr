@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the router module before importing navigate functions
 const mockNavigate = vi.fn();
@@ -17,12 +17,12 @@ vi.mock("./index", () => ({
 }));
 
 import {
-  navigateToLabel,
-  navigateToThread,
-  navigateToSettings,
-  navigateBack,
   getActiveLabel,
   getSelectedThreadId,
+  navigateBack,
+  navigateToLabel,
+  navigateToSettings,
+  navigateToThread,
 } from "./navigate";
 
 describe("navigate", () => {

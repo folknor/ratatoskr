@@ -1,6 +1,6 @@
+import { AlertTriangle, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Loader2 } from "lucide-react";
 import { reauthorizeAccount } from "@/services/gmail/tokenManager";
 
 interface CalendarReauthBannerProps {

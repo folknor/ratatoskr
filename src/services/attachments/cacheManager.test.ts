@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockTauriFs, createMockTauriPath } from "@/test/mocks";
 
 const tauriFs = createMockTauriFs();
@@ -21,10 +21,10 @@ vi.mock("@/services/db/settings", () => ({
 
 import {
   cacheAttachment,
-  loadCachedAttachment,
-  getCacheSize,
-  evictOldestCached,
   clearAllCache,
+  evictOldestCached,
+  getCacheSize,
+  loadCachedAttachment,
 } from "./cacheManager";
 
 describe("cacheManager", () => {

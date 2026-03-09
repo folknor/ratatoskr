@@ -1,13 +1,13 @@
-import { useState, useCallback } from "react";
+import { Clock, MapPin, Pencil, Trash2, User } from "lucide-react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { MapPin, Clock, User, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { TextField } from "@/components/ui/TextField";
-import type { DbCalendarEvent } from "@/services/db/calendarEvents";
-import type { DbCalendar } from "@/services/db/calendars";
 import { getCalendarProvider } from "@/services/calendar/providerFactory";
+import type { DbCalendarEvent } from "@/services/db/calendarEvents";
 import { deleteCalendarEvent as deleteCalendarEventDb } from "@/services/db/calendarEvents";
+import type { DbCalendar } from "@/services/db/calendars";
 
 interface EventDetailModalProps {
   event: DbCalendarEvent;
@@ -103,15 +103,14 @@ export function EventDetailModal({
     }
   }, [accountId, calendar, event, onUpdated]);
 
-  const formatTime = (ts: number) => {
-    return new Date(ts * 1000).toLocaleString(undefined, {
+  const formatTime = (ts: number) =>
+    new Date(ts * 1000).toLocaleString(undefined, {
       weekday: "short",
       month: "short",
       day: "numeric",
       hour: "numeric",
       minute: "2-digit",
     });
-  };
 
   const attendees = event.attendees_json
     ? (JSON.parse(event.attendees_json) as {

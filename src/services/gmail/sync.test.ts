@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { GmailClient } from "./client";
 import { deltaSync } from "./sync";
-import { GmailClient } from "./client";
 
 // Mock all DB modules
 vi.mock("../db/threads", () => ({

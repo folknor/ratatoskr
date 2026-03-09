@@ -1,59 +1,59 @@
-import { useState, useEffect } from "react";
-import { useTranslation } from "react-i18next";
-import type { Thread } from "@/stores/threadStore";
-import { useThreadStore } from "@/stores/threadStore";
-import { useAccountStore } from "@/stores/accountStore";
-import { useActiveLabel } from "@/hooks/useRouteNavigation";
-import {
-  archiveThread,
-  trashThread,
-  permanentDeleteThread,
-  markThreadRead,
-  starThread,
-  spamThread,
-} from "@/services/emailActions";
-import {
-  deleteThread as deleteThreadFromDb,
-  pinThread as pinThreadDb,
-  unpinThread as unpinThreadDb,
-  muteThread as muteThreadDb,
-  unmuteThread as unmuteThreadDb,
-} from "@/services/db/threads";
-import { deleteDraftsForThread } from "@/services/gmail/draftDeletion";
-import { snoozeThread } from "@/services/snooze/snoozeManager";
-import { getGmailClient } from "@/services/gmail/tokenManager";
-import { SnoozeDialog } from "./SnoozeDialog";
-import { FollowUpDialog } from "./FollowUpDialog";
 import {
   Archive,
-  Trash2,
-  MailOpen,
-  Mail,
-  Star,
-  Clock,
   Ban,
-  Pin,
-  MailMinus,
   BellRing,
-  VolumeX,
-  Reply,
-  ReplyAll,
-  Forward,
-  FolderInput,
-  Printer,
+  Clock,
   Download,
   ExternalLink,
+  FolderInput,
+  Forward,
+  ListTodo,
+  Mail,
+  MailMinus,
+  MailOpen,
   PanelRightClose,
   PanelRightOpen,
-  ListTodo,
+  Pin,
+  Printer,
+  Reply,
+  ReplyAll,
+  Star,
+  Trash2,
+  VolumeX,
 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/Button";
+import { useActiveLabel } from "@/hooks/useRouteNavigation";
+import {
+  cancelFollowUpForThread,
+  getFollowUpForThread,
+  insertFollowUpReminder,
+} from "@/services/db/followUpReminders";
 import type { DbMessage } from "@/services/db/messages";
 import {
-  insertFollowUpReminder,
-  getFollowUpForThread,
-  cancelFollowUpForThread,
-} from "@/services/db/followUpReminders";
-import { Button } from "@/components/ui/Button";
+  deleteThread as deleteThreadFromDb,
+  muteThread as muteThreadDb,
+  pinThread as pinThreadDb,
+  unmuteThread as unmuteThreadDb,
+  unpinThread as unpinThreadDb,
+} from "@/services/db/threads";
+import {
+  archiveThread,
+  markThreadRead,
+  permanentDeleteThread,
+  spamThread,
+  starThread,
+  trashThread,
+} from "@/services/emailActions";
+import { deleteDraftsForThread } from "@/services/gmail/draftDeletion";
+import { getGmailClient } from "@/services/gmail/tokenManager";
+import { snoozeThread } from "@/services/snooze/snoozeManager";
+import { useAccountStore } from "@/stores/accountStore";
+import type { Thread } from "@/stores/threadStore";
+import { useThreadStore } from "@/stores/threadStore";
+import { FollowUpDialog } from "./FollowUpDialog";
+import { SnoozeDialog } from "./SnoozeDialog";
 
 interface ActionBarProps {
   thread: Thread;
@@ -170,7 +170,7 @@ export function ActionBar({
   >("idle");
 
   const handleUnsubscribe = async () => {
-    if (!unsubscribeMessage?.list_unsubscribe || !activeAccountId) return;
+    if (!(unsubscribeMessage?.list_unsubscribe && activeAccountId)) return;
     setUnsubscribeStatus("loading");
     try {
       const { executeUnsubscribe } = await import(
@@ -240,7 +240,7 @@ export function ActionBar({
   };
 
   const handleFollowUp = async (remindAt: number) => {
-    if (!activeAccountId || !messages || messages.length === 0) return;
+    if (!(activeAccountId && messages) || messages.length === 0) return;
     setShowFollowUp(false);
     const lastMsg = messages[messages.length - 1]!;
     try {

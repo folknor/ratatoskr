@@ -1,11 +1,11 @@
+import { Download, ExternalLink, Eye } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Download, Eye, ExternalLink } from "lucide-react";
+import type { AttachmentWithContext } from "@/services/db/attachments";
 import {
+  canPreview,
   formatFileSize,
   getFileIcon,
-  canPreview,
 } from "@/utils/fileTypeHelpers";
-import type { AttachmentWithContext } from "@/services/db/attachments";
 
 interface AttachmentGridItemProps {
   attachment: AttachmentWithContext;

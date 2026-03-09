@@ -28,13 +28,13 @@ const OPERATOR_REGEX =
 function parseDateToTimestamp(dateStr: string): number | undefined {
   const normalized = dateStr.replace(/-/g, "/");
   const parts = normalized.split("/");
-  if (parts.length !== 3) return undefined;
+  if (parts.length !== 3) return;
   const year = parseInt(parts[0]!, 10);
   const month = parseInt(parts[1]!, 10);
   const day = parseInt(parts[2]!, 10);
-  if (isNaN(year) || isNaN(month) || isNaN(day)) return undefined;
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return;
   const date = new Date(year, month - 1, day);
-  if (isNaN(date.getTime())) return undefined;
+  if (isNaN(date.getTime())) return;
   return Math.floor(date.getTime() / 1000);
 }
 

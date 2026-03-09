@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
-import { AttachmentLibrary } from "./AttachmentLibrary";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
-  AttachmentWithContext,
   AttachmentSender,
+  AttachmentWithContext,
 } from "@/services/db/attachments";
+import { AttachmentLibrary } from "./AttachmentLibrary";
 
 // Mock dependencies
 vi.mock("@/stores/accountStore", () => ({
@@ -43,8 +43,8 @@ vi.mock("@/router/navigate", () => ({
 }));
 
 import {
-  getAttachmentsForAccount,
   getAttachmentSenders,
+  getAttachmentsForAccount,
 } from "@/services/db/attachments";
 
 const mockAttachments: AttachmentWithContext[] = [

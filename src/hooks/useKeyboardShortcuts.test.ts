@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock dependencies needed for the hook to mount and dispatch events.
 // The hook reads store state and calls navigate/emailActions — only mock

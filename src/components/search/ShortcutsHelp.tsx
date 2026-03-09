@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
+import { Modal } from "@/components/ui/Modal";
 import { SHORTCUTS } from "@/constants/shortcuts";
 import { useShortcutStore } from "@/stores/shortcutStore";
-import { Modal } from "@/components/ui/Modal";
 
 interface ShortcutsHelpProps {
   isOpen: boolean;

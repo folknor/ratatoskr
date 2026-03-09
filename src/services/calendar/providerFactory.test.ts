@@ -1,8 +1,8 @@
+import type { DbAccount } from "@/services/db/accounts";
 import {
   createMockGmailAccount,
   createMockImapAccount,
 } from "@/test/mocks/entities.mock";
-import type { DbAccount } from "@/services/db/accounts";
 
 vi.mock("@/services/db/accounts", () => ({
   getAccount: vi.fn(),
@@ -34,10 +34,10 @@ vi.mock("./caldavProvider", () => {
 
 import { getAccount } from "@/services/db/accounts";
 import {
+  clearAllCalendarProviders,
   getCalendarProvider,
   hasCalendarSupport,
   removeCalendarProvider,
-  clearAllCalendarProviders,
 } from "./providerFactory";
 
 const mockGetAccount = vi.mocked(getAccount);

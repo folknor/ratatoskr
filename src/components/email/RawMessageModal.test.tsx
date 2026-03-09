@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { RawMessageModal } from "./RawMessageModal";
 
 vi.mock("@/services/email/providerFactory", () => ({

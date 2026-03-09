@@ -1,18 +1,18 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { Pencil, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Trash2, Pencil } from "lucide-react";
 import { TextField } from "@/components/ui/TextField";
-import { useAccountStore } from "@/stores/accountStore";
-import { getLabelsForAccount, type DbLabel } from "@/services/db/labels";
 import {
+  type DbFilterRule,
+  deleteFilter,
+  type FilterActions,
+  type FilterCriteria,
   getFiltersForAccount,
   insertFilter,
   updateFilter,
-  deleteFilter,
-  type DbFilterRule,
-  type FilterCriteria,
-  type FilterActions,
 } from "@/services/db/filters";
+import { type DbLabel, getLabelsForAccount } from "@/services/db/labels";
+import { useAccountStore } from "@/stores/accountStore";
 
 export function FilterEditor() {
   const { t } = useTranslation("settings");
@@ -87,7 +87,7 @@ export function FilterEditor() {
   };
 
   const handleSave = useCallback(async () => {
-    if (!activeAccountId || !name.trim()) return;
+    if (!(activeAccountId && name.trim())) return;
     const criteria = buildCriteria();
     const actions = buildActions();
 

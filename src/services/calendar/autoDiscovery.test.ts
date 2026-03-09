@@ -92,12 +92,13 @@ describe("testCalDavConnection", () => {
         { displayName: "Work" },
       ]);
 
-    vi.mocked(DAVClient).mockImplementation(function () {
-      return {
-        login: mockLogin,
-        fetchCalendars: mockFetchCalendars,
-      } as unknown as InstanceType<typeof DAVClient>;
-    });
+    vi.mocked(DAVClient).mockImplementation(
+      () =>
+        ({
+          login: mockLogin,
+          fetchCalendars: mockFetchCalendars,
+        }) as unknown as InstanceType<typeof DAVClient>,
+    );
 
     const result = await testCalDavConnection(
       "https://caldav.example.com",
@@ -114,11 +115,12 @@ describe("testCalDavConnection", () => {
   it("returns failure with error message on failed connection", async () => {
     const { DAVClient } = await import("tsdav");
 
-    vi.mocked(DAVClient).mockImplementation(function () {
-      return {
-        login: vi.fn().mockRejectedValue(new Error("Invalid credentials")),
-      } as unknown as InstanceType<typeof DAVClient>;
-    });
+    vi.mocked(DAVClient).mockImplementation(
+      () =>
+        ({
+          login: vi.fn().mockRejectedValue(new Error("Invalid credentials")),
+        }) as unknown as InstanceType<typeof DAVClient>,
+    );
 
     const result = await testCalDavConnection(
       "https://caldav.example.com",

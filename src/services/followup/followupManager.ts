@@ -1,10 +1,10 @@
+import { createBackgroundChecker } from "../backgroundCheckers";
 import { getDb } from "../db/connection";
 import {
   getPendingFollowUpReminders,
   updateFollowUpStatus,
 } from "../db/followUpReminders";
 import { notifyFollowUpDue } from "../notifications/notificationManager";
-import { createBackgroundChecker } from "../backgroundCheckers";
 
 /**
  * Check for follow-up reminders that have fired.

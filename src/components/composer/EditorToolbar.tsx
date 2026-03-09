@@ -1,8 +1,8 @@
+import type { Editor } from "@tiptap/react";
+import { Sparkles } from "lucide-react";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { Editor } from "@tiptap/react";
 import { InputDialog } from "@/components/ui/InputDialog";
-import { Sparkles } from "lucide-react";
 
 interface EditorToolbarProps {
   editor: Editor | null;

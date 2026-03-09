@@ -1,12 +1,12 @@
-import type { FilterCriteria, FilterActions } from "../db/filters";
+import type { FilterActions, FilterCriteria } from "../db/filters";
 import { getEnabledFiltersForAccount } from "../db/filters";
-import type { ParsedMessage } from "../gmail/messageParser";
 import {
   addThreadLabel,
-  removeThreadLabel,
   markThreadRead,
+  removeThreadLabel,
   starThread,
 } from "../emailActions";
+import type { ParsedMessage } from "../gmail/messageParser";
 
 /**
  * Check if a parsed message matches the given filter criteria.

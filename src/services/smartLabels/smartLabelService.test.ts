@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/db/smartLabelRules", () => ({
   getEnabledSmartLabelRules: vi.fn(),
@@ -12,11 +12,11 @@ vi.mock("@/services/ai/aiService", () => ({
   classifyThreadsBySmartLabels: vi.fn(),
 }));
 
+import { classifyThreadsBySmartLabels } from "@/services/ai/aiService";
 import { getEnabledSmartLabelRules } from "@/services/db/smartLabelRules";
 import { messageMatchesFilter } from "@/services/filters/filterEngine";
-import { classifyThreadsBySmartLabels } from "@/services/ai/aiService";
-import { matchSmartLabels } from "./smartLabelService";
 import type { ParsedMessage } from "@/services/gmail/messageParser";
+import { matchSmartLabels } from "./smartLabelService";
 
 function makeMessage(overrides: Partial<ParsedMessage> = {}): ParsedMessage {
   return {

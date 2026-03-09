@@ -1,6 +1,6 @@
 import OpenAI from "openai";
-import type { AiProviderClient, AiCompletionRequest } from "../types";
 import { createProviderFactory } from "../providerFactory";
+import type { AiCompletionRequest, AiProviderClient } from "../types";
 
 const factory = createProviderFactory(
   (apiKey) =>

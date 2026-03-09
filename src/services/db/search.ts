@@ -1,6 +1,6 @@
-import { getDb } from "./connection";
-import { parseSearchQuery, hasSearchOperators } from "../search/searchParser";
+import { hasSearchOperators, parseSearchQuery } from "../search/searchParser";
 import { buildSearchQuery } from "../search/searchQueryBuilder";
+import { getDb } from "./connection";
 
 export interface SearchResult {
   message_id: string;

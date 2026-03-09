@@ -1,17 +1,17 @@
-import { useState, type ReactNode } from "react";
-import { useTranslation } from "react-i18next";
 import {
   DndContext,
+  type DragEndEvent,
+  DragOverlay,
+  type DragStartEvent,
   PointerSensor,
   useSensor,
   useSensors,
-  DragOverlay,
-  type DragStartEvent,
-  type DragEndEvent,
 } from "@dnd-kit/core";
-import { useThreadStore } from "@/stores/threadStore";
-import { useAccountStore } from "@/stores/accountStore";
+import { type ReactNode, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { addThreadLabel, removeThreadLabel } from "@/services/emailActions";
+import { useAccountStore } from "@/stores/accountStore";
+import { useThreadStore } from "@/stores/threadStore";
 
 // Map sidebar IDs to Gmail label IDs (same as EmailList)
 const LABEL_MAP: Record<string, string> = {
@@ -89,7 +89,7 @@ export function DndProvider({ children }: DndProviderProps) {
     const { over } = event;
     setDragData(null);
 
-    if (!over || !dragData || !activeAccountId) return;
+    if (!(over && dragData && activeAccountId)) return;
 
     const targetLabel = over.id as string;
     const change = resolveLabelChange(targetLabel, dragData.sourceLabel);

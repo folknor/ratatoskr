@@ -1,14 +1,14 @@
+import { createMockGmailAccount, createMockImapAccount } from "@/test/mocks";
 import {
-  getAllAccounts,
+  deleteAccount,
   getAccount,
   getAccountByEmail,
-  insertImapAccount,
+  getAllAccounts,
   insertAccount,
-  deleteAccount,
-  updateAccountTokens,
+  insertImapAccount,
   updateAccountSyncState,
+  updateAccountTokens,
 } from "./accounts";
-import { createMockGmailAccount, createMockImapAccount } from "@/test/mocks";
 
 const mockExecute = vi.fn();
 const mockSelect = vi.fn();

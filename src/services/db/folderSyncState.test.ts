@@ -1,9 +1,9 @@
 import {
+  deleteFolderSyncState,
+  type FolderSyncState,
+  getAllFolderSyncStates,
   getFolderSyncState,
   upsertFolderSyncState,
-  deleteFolderSyncState,
-  getAllFolderSyncStates,
-  type FolderSyncState,
 } from "./folderSyncState";
 
 const mockExecute = vi.fn();

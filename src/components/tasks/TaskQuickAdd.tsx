@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef } from "react";
 import { Plus } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
 
 interface TaskQuickAddProps {
   onAdd: (title: string) => void;

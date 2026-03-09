@@ -1,6 +1,6 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { searchContacts, type DbContact } from "@/services/db/contacts";
+import { type DbContact, searchContacts } from "@/services/db/contacts";
 
 interface AddressInputProps {
   label: string;
@@ -25,12 +25,13 @@ export function AddressInput({
   const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    return () => {
+  useEffect(
+    () => () => {
       if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    };
-  }, []);
+    },
+    [],
+  );
 
   const handleInputChange = useCallback((value: string) => {
     setInputValue(value);

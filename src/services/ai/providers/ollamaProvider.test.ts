@@ -1,11 +1,11 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockCreate = vi.fn();
 
 vi.mock("openai", () => {
-  const MockOpenAI = vi.fn(function () {
-    return { chat: { completions: { create: mockCreate } } };
-  });
+  const MockOpenAI = vi.fn(() => ({
+    chat: { completions: { create: mockCreate } },
+  }));
   return { default: MockOpenAI };
 });
 
@@ -14,7 +14,7 @@ vi.mock("@tauri-apps/plugin-http", () => ({
 }));
 
 import OpenAI from "openai";
-import { createOllamaProvider, clearOllamaProvider } from "./ollamaProvider";
+import { clearOllamaProvider, createOllamaProvider } from "./ollamaProvider";
 
 describe("ollamaProvider", () => {
   beforeEach(() => {

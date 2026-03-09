@@ -1,5 +1,5 @@
-import type { ImapFolder } from "./tauriCommands";
 import { upsertLabel } from "../db/labels";
+import type { ImapFolder } from "./tauriCommands";
 
 /**
  * Mapping from IMAP special-use flags to Gmail-style label IDs.

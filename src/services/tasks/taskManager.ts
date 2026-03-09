@@ -1,7 +1,7 @@
 import {
   completeTask,
-  insertTask,
   getTaskById,
+  insertTask,
   updateTask,
 } from "@/services/db/tasks";
 

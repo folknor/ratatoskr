@@ -1,11 +1,11 @@
-import { useState, useRef, useCallback } from "react";
+import { FolderPlus, Search, X } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { InputDialog } from "@/components/ui/InputDialog";
 import { searchMessages } from "@/services/db/search";
 import { useAccountStore } from "@/stores/accountStore";
-import { useThreadStore } from "@/stores/threadStore";
 import { useSmartFolderStore } from "@/stores/smartFolderStore";
-import { InputDialog } from "@/components/ui/InputDialog";
-import { Search, X, FolderPlus } from "lucide-react";
+import { useThreadStore } from "@/stores/threadStore";
 
 export function SearchBar() {
   const { t } = useTranslation("search");

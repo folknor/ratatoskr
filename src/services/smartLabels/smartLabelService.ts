@@ -1,7 +1,7 @@
-import { getEnabledSmartLabelRules } from "@/services/db/smartLabelRules";
-import { messageMatchesFilter } from "@/services/filters/filterEngine";
 import { classifyThreadsBySmartLabels } from "@/services/ai/aiService";
 import type { FilterCriteria } from "@/services/db/filters";
+import { getEnabledSmartLabelRules } from "@/services/db/smartLabelRules";
+import { messageMatchesFilter } from "@/services/filters/filterEngine";
 import type { ParsedMessage } from "@/services/gmail/messageParser";
 
 export interface SmartLabelMatch {

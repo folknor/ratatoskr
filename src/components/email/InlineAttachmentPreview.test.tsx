@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
-import { InlineAttachmentPreview } from "./InlineAttachmentPreview";
 import type { DbAttachment } from "@/services/db/attachments";
+import { InlineAttachmentPreview } from "./InlineAttachmentPreview";
 
 vi.mock("@/services/email/providerFactory", () => ({
   getEmailProvider: vi.fn(),

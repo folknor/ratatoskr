@@ -1,12 +1,12 @@
+import { getCurrentUnixTimestamp } from "@/utils/timestamp";
+import { createBackgroundChecker } from "../backgroundCheckers";
+import { getAllAccounts } from "../db/accounts";
 import {
+  type DeliverySchedule,
   getBundleRules,
   releaseHeldThreads,
   updateLastDelivered,
-  type DeliverySchedule,
 } from "../db/bundleRules";
-import { getAllAccounts } from "../db/accounts";
-import { getCurrentUnixTimestamp } from "@/utils/timestamp";
-import { createBackgroundChecker } from "../backgroundCheckers";
 
 /**
  * Check if the current time matches a delivery schedule.
@@ -38,7 +38,7 @@ async function checkBundleDelivery(): Promise<void> {
     const rules = await getBundleRules(account.id);
 
     for (const rule of rules) {
-      if (!rule.delivery_enabled || !rule.delivery_schedule) continue;
+      if (!(rule.delivery_enabled && rule.delivery_schedule)) continue;
 
       let schedule: DeliverySchedule;
       try {

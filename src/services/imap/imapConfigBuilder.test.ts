@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { buildImapConfig, buildSmtpConfig } from "./imapConfigBuilder";
+import { describe, expect, it } from "vitest";
 import { createMockDbAccount } from "@/test/mocks";
+import { buildImapConfig, buildSmtpConfig } from "./imapConfigBuilder";
 
 describe("buildImapConfig", () => {
   it("builds config from account with ssl security mapped to tls", () => {

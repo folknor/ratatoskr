@@ -1,11 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { ContactSidebar } from "./ContactSidebar";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
-  DbContact,
   ContactAttachment,
+  DbContact,
   SameDomainContact,
 } from "@/services/db/contacts";
+import { ContactSidebar } from "./ContactSidebar";
 
 const mockContact: DbContact = {
   id: "c-1",
@@ -61,8 +61,8 @@ vi.mock("@/utils/fileTypeHelpers", () => ({
 
 // Import mocked modules to configure per-test
 import {
-  getContactByEmail,
   getAttachmentsFromContact,
+  getContactByEmail,
   getContactsFromSameDomain,
   getLatestAuthResult,
 } from "@/services/db/contacts";

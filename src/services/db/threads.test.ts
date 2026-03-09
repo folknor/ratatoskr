@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/db/connection", async (importOriginal) => {
   const actual =
@@ -10,13 +10,13 @@ vi.mock("@/services/db/connection", async (importOriginal) => {
 });
 
 import { getDb } from "@/services/db/connection";
+import { createMockDb } from "@/test/mocks";
 import {
+  deleteAllThreadsForAccount,
+  getMutedThreadIds,
   muteThread,
   unmuteThread,
-  getMutedThreadIds,
-  deleteAllThreadsForAccount,
 } from "./threads";
-import { createMockDb } from "@/test/mocks";
 
 const mockDb = createMockDb();
 

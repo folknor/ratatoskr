@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { Archive, Star, Trash2 } from "lucide-react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
-import { Archive, Trash2, Star } from "lucide-react";
 
 // Mock useClickOutside since it relies on document event listeners
 vi.mock("@/hooks/useClickOutside", () => ({

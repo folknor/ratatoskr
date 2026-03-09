@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CSSTransition } from "react-transition-group";
 import {
-  setUpdateCallback,
-  installUpdate,
   getAvailableUpdate,
+  installUpdate,
+  setUpdateCallback,
 } from "@/services/updateManager";
 
 export function UpdateToast() {

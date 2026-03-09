@@ -1,5 +1,5 @@
-import type { QuickStepAction } from "./types";
 import { getQuickStepsForAccount, insertQuickStep } from "../db/quickSteps";
+import type { QuickStepAction } from "./types";
 
 const DEFAULT_QUICK_STEPS: {
   name: string;

@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { resolveFromAddress } from "./resolveFromAddress";
+import { describe, expect, it } from "vitest";
 import { createMockSendAsAlias } from "@/test/mocks";
+import { resolveFromAddress } from "./resolveFromAddress";
 
 describe("resolveFromAddress", () => {
   it("returns null for empty aliases", () => {

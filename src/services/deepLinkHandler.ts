@@ -1,8 +1,8 @@
-import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { listen } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { parseMailtoUrl } from "../utils/mailtoParser";
+import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { useComposerStore } from "../stores/composerStore";
+import { parseMailtoUrl } from "../utils/mailtoParser";
 import { escapeHtml } from "../utils/sanitize";
 
 async function handleUrl(url: string): Promise<void> {

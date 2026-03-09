@@ -1,16 +1,16 @@
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   isPermissionGranted,
+  onAction,
+  registerActionTypes,
   requestPermission,
   sendNotification,
-  registerActionTypes,
-  onAction,
 } from "@tauri-apps/plugin-notification";
-import { getSetting } from "../db/settings";
-import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { useComposerStore } from "../../stores/composerStore";
-import { navigateToLabel } from "../../router/navigate";
-import { normalizeEmail } from "@/utils/emailUtils";
 import i18n from "@/i18n";
+import { normalizeEmail } from "@/utils/emailUtils";
+import { navigateToLabel } from "../../router/navigate";
+import { useComposerStore } from "../../stores/composerStore";
+import { getSetting } from "../db/settings";
 
 let initialized = false;
 let notificationsEnabled = true;

@@ -1,10 +1,10 @@
-import { useComposerStore } from "@/stores/composerStore";
 import {
   createDraft as createDraftAction,
   updateDraft as updateDraftAction,
 } from "@/services/emailActions";
-import { buildRawEmail } from "@/utils/emailBuilder";
 import { useAccountStore } from "@/stores/accountStore";
+import { useComposerStore } from "@/stores/composerStore";
+import { buildRawEmail } from "@/utils/emailBuilder";
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let unsubscribe: (() => void) | null = null;
@@ -16,14 +16,14 @@ async function saveDraft(): Promise<void> {
   const state = useComposerStore.getState();
   // Capture the accountId at save time to avoid mismatch if user switches accounts during debounce
   const accountId = currentAccountId;
-  if (!state.isOpen || !accountId) return;
+  if (!(state.isOpen && accountId)) return;
 
   const accounts = useAccountStore.getState().accounts;
   const account = accounts.find((a) => a.id === accountId);
   if (!account) return;
 
   // Don't save empty drafts
-  if (!state.bodyHtml && !state.subject && state.to.length === 0) return;
+  if (!(state.bodyHtml || state.subject) && state.to.length === 0) return;
 
   state.setIsSaving(true);
 

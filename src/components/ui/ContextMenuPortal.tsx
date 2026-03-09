@@ -1,68 +1,68 @@
-import { useState, useEffect } from "react";
-import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
-import { useContextMenuStore } from "@/stores/contextMenuStore";
-import { useThreadStore } from "@/stores/threadStore";
-import { useAccountStore } from "@/stores/accountStore";
-import { getActiveLabel } from "@/router/navigate";
-import { useComposerStore } from "@/stores/composerStore";
-import { useLabelStore } from "@/stores/labelStore";
 import {
-  archiveThread,
-  trashThread,
-  permanentDeleteThread,
-  markThreadRead,
-  starThread,
-  spamThread,
-  addThreadLabel,
-  removeThreadLabel,
-} from "@/services/emailActions";
-import {
-  deleteThread as deleteThreadFromDb,
-  pinThread as pinThreadDb,
-  unpinThread as unpinThreadDb,
-  muteThread as muteThreadDb,
-  unmuteThread as unmuteThreadDb,
-} from "@/services/db/threads";
-import { deleteDraftsForThread } from "@/services/gmail/draftDeletion";
-import { getGmailClient } from "@/services/gmail/tokenManager";
-import { getMessagesForThread } from "@/services/db/messages";
-import { snoozeThread } from "@/services/snooze/snoozeManager";
-import {
-  getEnabledQuickStepsForAccount,
-  type DbQuickStep,
-} from "@/services/db/quickSteps";
-import { executeQuickStep } from "@/services/quickSteps/executor";
-import type { QuickStep, QuickStepAction } from "@/services/quickSteps/types";
-import { SnoozeDialog } from "../email/SnoozeDialog";
-import {
-  Reply,
-  ReplyAll,
-  Forward,
   Archive,
-  Trash2,
+  Ban,
+  Clock,
+  Code,
+  Copy,
+  ExternalLink,
+  FolderInput,
+  Forward,
+  Layers,
   Mail,
   MailOpen,
-  Star,
-  Clock,
-  Pin,
-  Ban,
-  Tag,
-  FolderInput,
-  ExternalLink,
   Pencil,
-  Copy,
-  Layers,
+  Pin,
+  RefreshCw,
+  Reply,
+  ReplyAll,
+  Star,
+  Tag,
+  Trash2,
   VolumeX,
   Zap,
-  Code,
-  RefreshCw,
 } from "lucide-react";
-import { triggerSync } from "@/services/gmail/syncManager";
-import { useUIStore } from "@/stores/uiStore";
+import { useEffect, useState } from "react";
+import { getActiveLabel } from "@/router/navigate";
+import { getMessagesForThread } from "@/services/db/messages";
 import {
-  setThreadCategory,
+  type DbQuickStep,
+  getEnabledQuickStepsForAccount,
+} from "@/services/db/quickSteps";
+import {
   ALL_CATEGORIES,
+  setThreadCategory,
 } from "@/services/db/threadCategories";
+import {
+  deleteThread as deleteThreadFromDb,
+  muteThread as muteThreadDb,
+  pinThread as pinThreadDb,
+  unmuteThread as unmuteThreadDb,
+  unpinThread as unpinThreadDb,
+} from "@/services/db/threads";
+import {
+  addThreadLabel,
+  archiveThread,
+  markThreadRead,
+  permanentDeleteThread,
+  removeThreadLabel,
+  spamThread,
+  starThread,
+  trashThread,
+} from "@/services/emailActions";
+import { deleteDraftsForThread } from "@/services/gmail/draftDeletion";
+import { triggerSync } from "@/services/gmail/syncManager";
+import { getGmailClient } from "@/services/gmail/tokenManager";
+import { executeQuickStep } from "@/services/quickSteps/executor";
+import type { QuickStep, QuickStepAction } from "@/services/quickSteps/types";
+import { snoozeThread } from "@/services/snooze/snoozeManager";
+import { useAccountStore } from "@/stores/accountStore";
+import { useComposerStore } from "@/stores/composerStore";
+import { useContextMenuStore } from "@/stores/contextMenuStore";
+import { useLabelStore } from "@/stores/labelStore";
+import { useThreadStore } from "@/stores/threadStore";
+import { useUIStore } from "@/stores/uiStore";
+import { SnoozeDialog } from "../email/SnoozeDialog";
+import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 
 function buildQuote(msg: {
   from_name: string | null;
@@ -268,7 +268,7 @@ function ThreadMenu({
   const isMulti = targetIds.length > 1;
 
   const thread = threads.find((t) => t.id === threadId);
-  if (!thread || !activeAccountId) {
+  if (!(thread && activeAccountId)) {
     return <ContextMenu items={[]} position={position} onClose={onClose} />;
   }
 

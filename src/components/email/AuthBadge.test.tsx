@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { AuthBadge } from "./AuthBadge";
+import { describe, expect, it } from "vitest";
 import type { AuthResult } from "@/services/gmail/authParser";
+import { AuthBadge } from "./AuthBadge";
 
 function makeAuthResults(aggregate: AuthResult["aggregate"]): string {
   const result: AuthResult = {

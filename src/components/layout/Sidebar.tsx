@@ -1,49 +1,49 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
-import { useTranslation } from "react-i18next";
 import { useDroppable } from "@dnd-kit/core";
+import {
+  Ban,
+  Bell,
+  Calendar,
+  CheckSquare,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  Columns2,
+  FileEdit,
+  FolderSearch,
+  HelpCircle,
+  Inbox,
+  Loader2,
+  type LucideIcon,
+  Mail,
+  MailOpen,
+  Newspaper,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Paperclip,
+  Pencil,
+  Plus,
+  Search,
+  Send,
+  Settings,
+  Star,
+  Tag,
+  Trash2,
+  Users,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useActiveCategory, useActiveLabel } from "@/hooks/useRouteNavigation";
+import { navigateToLabel } from "@/router/navigate";
+import { useAccountStore } from "@/stores/accountStore";
+import { useComposerStore } from "@/stores/composerStore";
+import { useContextMenuStore } from "@/stores/contextMenuStore";
+import { type Label, useLabelStore } from "@/stores/labelStore";
+import { useSmartFolderStore } from "@/stores/smartFolderStore";
+import { useTaskStore } from "@/stores/taskStore";
+import { useUIStore } from "@/stores/uiStore";
 import { AccountSwitcher } from "../accounts/AccountSwitcher";
 import { LabelForm } from "../labels/LabelForm";
 import { InputDialog } from "../ui/InputDialog";
-import { useUIStore } from "@/stores/uiStore";
-import { useComposerStore } from "@/stores/composerStore";
-import { useAccountStore } from "@/stores/accountStore";
-import { useLabelStore, type Label } from "@/stores/labelStore";
-import { useContextMenuStore } from "@/stores/contextMenuStore";
-import { useSmartFolderStore } from "@/stores/smartFolderStore";
-import { useActiveLabel, useActiveCategory } from "@/hooks/useRouteNavigation";
-import { navigateToLabel } from "@/router/navigate";
-import {
-  Inbox,
-  Star,
-  Clock,
-  Send,
-  FileEdit,
-  Trash2,
-  Ban,
-  Mail,
-  CheckSquare,
-  Calendar,
-  Settings,
-  Plus,
-  Tag,
-  ChevronDown,
-  ChevronUp,
-  HelpCircle,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Pencil,
-  Columns2,
-  Bell,
-  Users,
-  Newspaper,
-  Search,
-  MailOpen,
-  Paperclip,
-  FolderSearch,
-  Loader2,
-  type LucideIcon,
-} from "lucide-react";
-import { useTaskStore } from "@/stores/taskStore";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -285,7 +285,7 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
     }
     // Append any new items not present in the saved config
     for (const item of ALL_NAV_ITEMS) {
-      if (!seen.has(item.id) && !SECTION_IDS.has(item.id)) result.push(item);
+      if (!(seen.has(item.id) || SECTION_IDS.has(item.id))) result.push(item);
     }
     return {
       visibleNavItems: result,

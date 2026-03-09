@@ -1,4 +1,4 @@
-import { categorizeByRules, type CategorizationInput } from "./ruleEngine";
+import { type CategorizationInput, categorizeByRules } from "./ruleEngine";
 
 function input(
   overrides: Partial<CategorizationInput> = {},

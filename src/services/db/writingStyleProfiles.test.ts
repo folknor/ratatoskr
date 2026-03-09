@@ -1,9 +1,9 @@
+import { getDb } from "./connection";
 import {
+  deleteWritingStyleProfile,
   getWritingStyleProfile,
   upsertWritingStyleProfile,
-  deleteWritingStyleProfile,
 } from "./writingStyleProfiles";
-import { getDb } from "./connection";
 
 vi.mock("./connection", () => ({
   getDb: vi.fn(),

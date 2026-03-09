@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect } from "react";
-import { Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { CheckCircle2, Loader2, XCircle } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
@@ -7,8 +7,8 @@ import {
   discoverCalDavSettings,
   testCalDavConnection,
 } from "@/services/calendar/autoDiscovery";
-import { updateAccountCalDav, type DbAccount } from "@/services/db/accounts";
 import { removeCalendarProvider } from "@/services/calendar/providerFactory";
+import { type DbAccount, updateAccountCalDav } from "@/services/db/accounts";
 
 interface CalDavSettingsProps {
   account: DbAccount;
@@ -32,7 +32,7 @@ export function CalDavSettings({ account, onSaved }: CalDavSettingsProps) {
 
   // Auto-discover on mount if not already configured
   useEffect(() => {
-    if (!account.caldav_url && !discovered) {
+    if (!(account.caldav_url || discovered)) {
       setDiscovered(true);
       discoverCalDavSettings(account.email).then((result) => {
         if (result.caldavUrl) {

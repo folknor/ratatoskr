@@ -1,14 +1,14 @@
-import { scanMessage } from "@/utils/phishingDetector";
+import {
+  cacheScanResult,
+  getCachedScanResult,
+} from "@/services/db/linkScanResults";
+import { isPhishingAllowlisted } from "@/services/db/phishingAllowlist";
+import { getSetting } from "@/services/db/settings";
 import type {
   MessageScanResult,
   PhishingSensitivity,
 } from "@/utils/phishingDetector";
-import { getSetting } from "@/services/db/settings";
-import { isPhishingAllowlisted } from "@/services/db/phishingAllowlist";
-import {
-  getCachedScanResult,
-  cacheScanResult,
-} from "@/services/db/linkScanResults";
+import { scanMessage } from "@/utils/phishingDetector";
 
 /**
  * Orchestrates phishing link scanning for a message.

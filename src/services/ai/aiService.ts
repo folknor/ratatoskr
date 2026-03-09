@@ -1,20 +1,20 @@
-import { getActiveProvider } from "./providerManager";
 import { getAiCache, setAiCache } from "@/services/db/aiCache";
-import { AiError } from "./errors";
 import type { DbMessage } from "@/services/db/messages";
+import { AiError } from "./errors";
 import {
-  SUMMARIZE_PROMPT,
-  COMPOSE_PROMPT,
-  REPLY_PROMPT,
-  IMPROVE_PROMPT,
-  SHORTEN_PROMPT,
-  FORMALIZE_PROMPT,
-  CATEGORIZE_PROMPT,
-  SMART_REPLY_PROMPT,
   ASK_INBOX_PROMPT,
-  SMART_LABEL_PROMPT,
+  CATEGORIZE_PROMPT,
+  COMPOSE_PROMPT,
   EXTRACT_TASK_PROMPT,
+  FORMALIZE_PROMPT,
+  IMPROVE_PROMPT,
+  REPLY_PROMPT,
+  SHORTEN_PROMPT,
+  SMART_LABEL_PROMPT,
+  SMART_REPLY_PROMPT,
+  SUMMARIZE_PROMPT,
 } from "./prompts";
+import { getActiveProvider } from "./providerManager";
 
 async function callAi(
   systemPrompt: string,
@@ -250,7 +250,7 @@ export async function classifyThreadsBySmartLabels(
     if (colonIdx === -1) continue;
     const threadId = trimmed.slice(0, colonIdx).trim();
     const labelsPart = trimmed.slice(colonIdx + 1).trim();
-    if (!threadId || !labelsPart || !validThreadIds.has(threadId)) continue;
+    if (!(threadId && labelsPart && validThreadIds.has(threadId))) continue;
 
     const labelIds = labelsPart
       .split(",")

@@ -1,5 +1,5 @@
-import { getDb, selectFirstBy, existsBy, boolToInt } from "./connection";
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
+import { boolToInt, existsBy, getDb, selectFirstBy } from "./connection";
 
 export interface DeliverySchedule {
   days: number[]; // 0=Sun, 1=Mon, ..., 6=Sat

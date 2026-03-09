@@ -1,8 +1,8 @@
-import { useState, useRef, useCallback } from "react";
+import { Calendar, Check, ChevronDown, Plus, UserPlus } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useAccountStore, type Account } from "@/stores/accountStore";
-import { ChevronDown, Check, Plus, UserPlus, Calendar } from "lucide-react";
 import { useClickOutside } from "@/hooks/useClickOutside";
+import { type Account, useAccountStore } from "@/stores/accountStore";
 
 interface AccountSwitcherProps {
   collapsed: boolean;

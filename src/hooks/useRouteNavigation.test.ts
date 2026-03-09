@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 // Mock useMatches from TanStack Router
 const mockMatches: Array<{
@@ -12,10 +12,10 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 
 import {
-  useActiveLabel,
-  useSelectedThreadId,
   useActiveCategory,
+  useActiveLabel,
   useSearchQuery,
+  useSelectedThreadId,
 } from "./useRouteNavigation";
 
 function setMatches(

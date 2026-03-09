@@ -1,14 +1,14 @@
-import { useState, useEffect, useCallback } from "react";
+import { Pencil, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Trash2, Pencil } from "lucide-react";
-import { useAccountStore } from "@/stores/accountStore";
 import {
+  type DbSmartFolder,
+  deleteSmartFolder,
   getSmartFolders,
   insertSmartFolder,
   updateSmartFolder,
-  deleteSmartFolder,
-  type DbSmartFolder,
 } from "@/services/db/smartFolders";
+import { useAccountStore } from "@/stores/accountStore";
 import { useSmartFolderStore } from "@/stores/smartFolderStore";
 
 export function SmartFolderEditor() {
@@ -45,7 +45,7 @@ export function SmartFolderEditor() {
   }, []);
 
   const handleSave = useCallback(async () => {
-    if (!name.trim() || !query.trim()) return;
+    if (!(name.trim() && query.trim())) return;
 
     if (editingId) {
       await updateSmartFolder(editingId, {
@@ -188,7 +188,7 @@ export function SmartFolderEditor() {
           <div className="flex items-center gap-2">
             <button
               onClick={handleSave}
-              disabled={!name.trim() || !query.trim()}
+              disabled={!(name.trim() && query.trim())}
               className="px-3 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-50"
             >
               {editingId

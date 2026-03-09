@@ -1,12 +1,12 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getThreadById, getThreadLabelIds } from "@/services/db/threads";
 import {
-  resolveQueryTokens,
   getSmartFolderSearchQuery,
   getSmartFolderUnreadCount,
   mapSmartFolderRows,
+  resolveQueryTokens,
   type SmartFolderRow,
 } from "./smartFolderQuery";
-import { getThreadLabelIds, getThreadById } from "@/services/db/threads";
 
 vi.mock("@/services/db/threads", () => ({
   getThreadLabelIds: vi.fn(),

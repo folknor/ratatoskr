@@ -1,11 +1,11 @@
-import { useRef } from "react";
 import { Paperclip, X } from "lucide-react";
+import { useRef } from "react";
 import {
-  useComposerStore,
   type ComposerAttachment,
+  useComposerStore,
 } from "@/stores/composerStore";
-import { readFileAsBase64 } from "@/utils/fileUtils";
 import { formatFileSize } from "@/utils/fileTypeHelpers";
+import { readFileAsBase64 } from "@/utils/fileUtils";
 
 const MAX_TOTAL_SIZE = 24 * 1024 * 1024; // 24MB
 

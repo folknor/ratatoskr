@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { ThreadCard } from "./ThreadCard";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Thread } from "@/stores/threadStore";
+import { ThreadCard } from "./ThreadCard";
 
 vi.mock("@dnd-kit/core", () => ({
   useDraggable: () => ({

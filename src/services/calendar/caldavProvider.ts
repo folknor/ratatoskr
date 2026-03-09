@@ -1,15 +1,15 @@
-import { DAVClient, type DAVCalendar, type DAVObject } from "tsdav";
+import { type DAVCalendar, DAVClient, type DAVObject } from "tsdav";
+import { getAccount } from "@/services/db/accounts";
+import { generateVEvent, parseVEvent } from "./icalHelper";
 import type {
+  CalendarEventData,
+  CalendarInfo,
   CalendarProvider,
   CalendarProviderType,
-  CalendarInfo,
-  CalendarEventData,
   CalendarSyncResult,
   CreateEventInput,
   UpdateEventInput,
 } from "./types";
-import { generateVEvent, parseVEvent } from "./icalHelper";
-import { getAccount } from "@/services/db/accounts";
 
 export class CalDAVProvider implements CalendarProvider {
   readonly type: CalendarProviderType = "caldav";
@@ -30,7 +30,7 @@ export class CalDAVProvider implements CalendarProvider {
     const username = account.caldav_username ?? account.email;
     const password = account.caldav_password;
 
-    if (!serverUrl || !password) {
+    if (!(serverUrl && password)) {
       throw new Error("CalDAV credentials not configured");
     }
 

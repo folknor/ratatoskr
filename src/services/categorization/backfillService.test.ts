@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { backfillUncategorizedThreads } from "./backfillService";
 
 vi.mock("@/services/db/threadCategories", () => ({
@@ -40,12 +40,12 @@ vi.mock("@/services/db/messages", () => ({
   ),
 }));
 
+import { getMessagesForThread } from "@/services/db/messages";
 import {
   getUncategorizedInboxThreadIds,
   setThreadCategory,
 } from "@/services/db/threadCategories";
 import { getThreadLabelIds } from "@/services/db/threads";
-import { getMessagesForThread } from "@/services/db/messages";
 
 describe("backfillUncategorizedThreads", () => {
   beforeEach(() => {

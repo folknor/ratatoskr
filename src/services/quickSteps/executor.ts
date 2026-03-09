@@ -1,25 +1,25 @@
+import { useThreadStore } from "@/stores/threadStore";
+import { setThreadCategory } from "../db/threadCategories";
+import {
+  pinThread as pinThreadDb,
+  unpinThread as unpinThreadDb,
+} from "../db/threads";
+import {
+  addThreadLabel,
+  archiveThread,
+  markThreadRead,
+  removeThreadLabel,
+  spamThread,
+  starThread,
+  trashThread,
+} from "../emailActions";
+import { snoozeThread } from "../snooze/snoozeManager";
 import type {
   QuickStep,
   QuickStepAction,
   QuickStepExecutionResult,
 } from "./types";
 import { ACTION_TYPE_METADATA } from "./types";
-import {
-  archiveThread,
-  trashThread,
-  markThreadRead,
-  starThread,
-  spamThread,
-  addThreadLabel,
-  removeThreadLabel,
-} from "../emailActions";
-import {
-  pinThread as pinThreadDb,
-  unpinThread as unpinThreadDb,
-} from "../db/threads";
-import { setThreadCategory } from "../db/threadCategories";
-import { snoozeThread } from "../snooze/snoozeManager";
-import { useThreadStore } from "@/stores/threadStore";
 
 /**
  * Execute a single action for a set of threads.

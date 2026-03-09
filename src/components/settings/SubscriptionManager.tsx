@@ -1,13 +1,13 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { Loader2, MailMinus, Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useAccountStore } from "@/stores/accountStore";
 import {
-  getSubscriptions,
   executeUnsubscribe,
+  getSubscriptions,
   parseUnsubscribeHeaders,
   type SubscriptionEntry,
 } from "@/services/unsubscribe/unsubscribeManager";
-import { MailMinus, Search, Loader2 } from "lucide-react";
+import { useAccountStore } from "@/stores/accountStore";
 import { formatRelativeDate } from "@/utils/date";
 
 export function SubscriptionManager() {
@@ -32,7 +32,7 @@ export function SubscriptionManager() {
 
   const handleUnsubscribe = useCallback(
     async (sub: SubscriptionEntry) => {
-      if (!activeAccountId || !sub.latest_unsubscribe_header) return;
+      if (!(activeAccountId && sub.latest_unsubscribe_header)) return;
       setUnsubscribingIds((prev) => new Set(prev).add(sub.from_address));
       try {
         const result = await executeUnsubscribe(

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock emailActions
 const mockArchiveThread = vi.fn(() => Promise.resolve({ success: true }));
@@ -60,12 +60,12 @@ vi.mock("@/stores/threadStore", () => {
   };
 });
 
-import { pinThread, unpinThread } from "@/services/db/threads";
 import { setThreadCategory } from "@/services/db/threadCategories";
+import { pinThread, unpinThread } from "@/services/db/threads";
 import { snoozeThread } from "@/services/snooze/snoozeManager";
 import { useThreadStore } from "@/stores/threadStore";
-import { executeQuickStep } from "./executor";
 import { createMockQuickStep } from "@/test/mocks";
+import { executeQuickStep } from "./executor";
 
 describe("executeQuickStep", () => {
   beforeEach(() => {

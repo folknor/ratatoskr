@@ -1,16 +1,16 @@
-import type { ParsedMessage } from "@/services/gmail/messageParser";
-import type { GmailMessage } from "@/services/gmail/client";
 import type { DbAccount } from "@/services/db/accounts";
+import type { SendAsAlias } from "@/services/db/sendAsAliases";
+import type { GmailMessage } from "@/services/gmail/client";
+import type { ParsedMessage } from "@/services/gmail/messageParser";
 import type {
-  ImapMessage,
-  ImapFolder,
   ImapConfig,
-  ImapFolderStatus,
   ImapFetchResult,
+  ImapFolder,
+  ImapFolderStatus,
   ImapFolderSyncResult,
+  ImapMessage,
 } from "@/services/imap/tauriCommands";
 import type { QuickStep } from "@/services/quickSteps/types";
-import type { SendAsAlias } from "@/services/db/sendAsAliases";
 
 export function createMockParsedMessage(
   overrides: Partial<ParsedMessage> = {},

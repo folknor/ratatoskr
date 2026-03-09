@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, useCallback } from "react";
-import { useClickOutside } from "@/hooks/useClickOutside";
-import { ChevronRight, Check } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { Check, ChevronRight } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useClickOutside } from "@/hooks/useClickOutside";
 
 export interface ContextMenuItem {
   id: string;
@@ -188,11 +188,12 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
   }, [submenuOpenId, onClose]);
 
   // Clean up timers
-  useEffect(() => {
-    return () => {
+  useEffect(
+    () => () => {
       if (submenuTimerRef.current) clearTimeout(submenuTimerRef.current);
-    };
-  }, []);
+    },
+    [],
+  );
 
   // Compute submenu anchor position from the parent item's rect
   const openItem = submenuOpenId

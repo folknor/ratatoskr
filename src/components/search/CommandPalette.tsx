@@ -1,21 +1,21 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CSSTransition } from "react-transition-group";
-import { useUIStore } from "@/stores/uiStore";
-import { useComposerStore } from "@/stores/composerStore";
-import { useThreadStore } from "@/stores/threadStore";
-import { useAccountStore } from "@/stores/accountStore";
-import { getGmailClient } from "@/services/gmail/tokenManager";
-import {
-  getTemplatesForAccount,
-  type DbTemplate,
-} from "@/services/db/templates";
 import { useActiveLabel } from "@/hooks/useRouteNavigation";
 import {
-  navigateToLabel,
-  navigateBack,
   getSelectedThreadId,
+  navigateBack,
+  navigateToLabel,
 } from "@/router/navigate";
+import {
+  type DbTemplate,
+  getTemplatesForAccount,
+} from "@/services/db/templates";
+import { getGmailClient } from "@/services/gmail/tokenManager";
+import { useAccountStore } from "@/stores/accountStore";
+import { useComposerStore } from "@/stores/composerStore";
+import { useThreadStore } from "@/stores/threadStore";
+import { useUIStore } from "@/stores/uiStore";
 
 interface Command {
   id: string;
@@ -44,7 +44,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
   const [templates, setTemplates] = useState<DbTemplate[]>([]);
 
   useEffect(() => {
-    if (!isOpen || !activeAccountId) return;
+    if (!(isOpen && activeAccountId)) return;
     getTemplatesForAccount(activeAccountId).then(setTemplates);
   }, [isOpen, activeAccountId]);
 
@@ -150,7 +150,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
           onClose();
           const selectedId = getSelectedThreadId();
           const accountId = useAccountStore.getState().activeAccountId;
-          if (!selectedId || !accountId) return;
+          if (!(selectedId && accountId)) return;
           try {
             const client = await getGmailClient(accountId);
             if (activeLabel === "spam") {

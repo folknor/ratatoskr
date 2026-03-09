@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 
 // Mirror of splitStatements from migrations.ts for testing
 function splitStatements(sql: string): string[] {

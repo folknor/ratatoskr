@@ -1,5 +1,5 @@
+import { decryptValue, encryptValue, isEncrypted } from "@/utils/crypto";
 import { getDb } from "./connection";
-import { encryptValue, decryptValue, isEncrypted } from "@/utils/crypto";
 
 export async function getSetting(key: string): Promise<string | null> {
   const db = await getDb();

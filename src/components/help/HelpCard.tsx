@@ -1,7 +1,7 @@
 import { ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { navigateToSettings } from "@/router/navigate";
 import type { HelpCard as HelpCardData } from "@/constants/helpContent";
+import { navigateToSettings } from "@/router/navigate";
 
 interface HelpCardProps {
   card: HelpCardData;

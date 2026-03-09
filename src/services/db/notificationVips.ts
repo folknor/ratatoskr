@@ -1,5 +1,5 @@
-import { getDb, existsBy } from "./connection";
 import { normalizeEmail } from "@/utils/emailUtils";
+import { existsBy, getDb } from "./connection";
 
 export interface NotificationVip {
   id: string;

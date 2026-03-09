@@ -1,6 +1,6 @@
+import { WifiOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useUIStore } from "@/stores/uiStore";
-import { WifiOff } from "lucide-react";
 
 export function OfflineBanner() {
   const { t } = useTranslation();

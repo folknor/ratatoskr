@@ -1,19 +1,19 @@
-import { useState, useEffect, useCallback } from "react";
-import { useTranslation } from "react-i18next";
-import { useEditor, EditorContent } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
-import Placeholder from "@tiptap/extension-placeholder";
 import Image from "@tiptap/extension-image";
-import { Trash2, Pencil, ChevronDown } from "lucide-react";
+import Placeholder from "@tiptap/extension-placeholder";
+import { EditorContent, useEditor } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import { ChevronDown, Pencil, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { EditorToolbar } from "@/components/composer/EditorToolbar";
-import { useAccountStore } from "@/stores/accountStore";
 import {
+  type DbTemplate,
+  deleteTemplate,
   getTemplatesForAccount,
   insertTemplate,
   updateTemplate,
-  deleteTemplate,
-  type DbTemplate,
 } from "@/services/db/templates";
+import { useAccountStore } from "@/stores/accountStore";
 import { TEMPLATE_VARIABLES } from "@/utils/templateVariables";
 
 export function TemplateEditor() {
@@ -65,7 +65,7 @@ export function TemplateEditor() {
   }, [editor]);
 
   const handleSave = useCallback(async () => {
-    if (!activeAccountId || !editor || !name.trim()) return;
+    if (!(activeAccountId && editor && name.trim())) return;
 
     const bodyHtml = editor.getHTML();
 

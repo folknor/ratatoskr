@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { Modal } from "./Modal";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "./Button";
+import { Modal } from "./Modal";
 
 interface InputField {
   key: string;

@@ -1,27 +1,27 @@
-import { getSetting, getSecureSetting } from "@/services/db/settings";
+import { getSecureSetting, getSetting } from "@/services/db/settings";
 import { AiError } from "./errors";
-import type { AiProvider, AiProviderClient } from "./types";
-import { DEFAULT_MODELS, MODEL_SETTINGS } from "./types";
 import {
-  createClaudeProvider,
   clearClaudeProvider,
+  createClaudeProvider,
 } from "./providers/claudeProvider";
 import {
-  createOpenAIProvider,
-  clearOpenAIProvider,
-} from "./providers/openaiProvider";
+  clearCopilotProvider,
+  createCopilotProvider,
+} from "./providers/copilotProvider";
 import {
-  createGeminiProvider,
   clearGeminiProvider,
+  createGeminiProvider,
 } from "./providers/geminiProvider";
 import {
-  createOllamaProvider,
   clearOllamaProvider,
+  createOllamaProvider,
 } from "./providers/ollamaProvider";
 import {
-  createCopilotProvider,
-  clearCopilotProvider,
-} from "./providers/copilotProvider";
+  clearOpenAIProvider,
+  createOpenAIProvider,
+} from "./providers/openaiProvider";
+import type { AiProvider, AiProviderClient } from "./types";
+import { DEFAULT_MODELS, MODEL_SETTINGS } from "./types";
 
 const API_KEY_SETTINGS: Record<Exclude<AiProvider, "ollama">, string> = {
   claude: "claude_api_key",

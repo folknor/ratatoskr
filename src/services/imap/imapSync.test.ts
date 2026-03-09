@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // vi.mock() calls are hoisted — must use inline factories, not external references
 vi.mock("./tauriCommands", () => ({
@@ -65,30 +65,30 @@ vi.mock("../db/pendingOperations", () => ({
 }));
 
 import {
-  imapMessageToParsedMessage,
-  imapInitialSync,
-  formatImapDate,
+  createMockImapAccount,
+  createMockImapFetchResult,
+  createMockImapFolder,
+  createMockImapFolderStatus,
+  createMockImapMessage,
+} from "@/test/mocks";
+import { getAccount } from "../db/accounts";
+import { upsertAttachment } from "../db/attachments";
+import { withTransaction } from "../db/connection";
+import { updateMessageThreadIds, upsertMessage } from "../db/messages";
+import { getPendingOpsForResource } from "../db/pendingOperations";
+import { deleteThread, upsertThread } from "../db/threads";
+import {
   computeSinceDate,
+  formatImapDate,
+  imapInitialSync,
+  imapMessageToParsedMessage,
   isConnectionError,
 } from "./imapSync";
 import {
-  createMockImapMessage,
-  createMockImapAccount,
-  createMockImapFolder,
-  createMockImapFolderStatus,
-  createMockImapFetchResult,
-} from "@/test/mocks";
-import {
+  imapFetchMessages,
   imapListFolders,
   imapSearchFolder,
-  imapFetchMessages,
 } from "./tauriCommands";
-import { getAccount } from "../db/accounts";
-import { withTransaction } from "../db/connection";
-import { upsertMessage, updateMessageThreadIds } from "../db/messages";
-import { upsertThread, deleteThread } from "../db/threads";
-import { upsertAttachment } from "../db/attachments";
-import { getPendingOpsForResource } from "../db/pendingOperations";
 
 describe("imapMessageToParsedMessage", () => {
   it("converts basic IMAP message to ParsedMessage format", () => {

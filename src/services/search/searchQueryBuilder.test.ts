@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { buildSearchQuery } from "./searchQueryBuilder";
+import { describe, expect, it } from "vitest";
 import type { ParsedSearchQuery } from "./searchParser";
+import { buildSearchQuery } from "./searchQueryBuilder";
 
 describe("buildSearchQuery", () => {
   it("builds FTS query for free text only", () => {

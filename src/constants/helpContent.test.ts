@@ -1,9 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  HELP_CATEGORIES,
   CONTEXTUAL_TIPS,
   getAllCards,
   getCategoryById,
+  HELP_CATEGORIES,
 } from "./helpContent";
 
 const VALID_SETTINGS_TABS = [

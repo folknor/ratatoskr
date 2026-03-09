@@ -1,5 +1,5 @@
-import { useTaskStore } from "./taskStore";
 import type { DbTask } from "@/services/db/tasks";
+import { useTaskStore } from "./taskStore";
 
 function makeTask(overrides: Partial<DbTask> = {}): DbTask {
   return {

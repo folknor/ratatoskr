@@ -1,45 +1,45 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useTranslation } from "react-i18next";
 import {
-  Mail,
-  Clock,
-  X,
-  Send,
-  Copy,
-  Star,
-  UserPlus,
-  Check,
-  PenLine,
-  Paperclip,
   Building2,
+  Check,
   ChevronDown,
   ChevronRight,
+  Clock,
+  Copy,
+  Mail,
+  Paperclip,
+  PenLine,
+  Send,
+  Star,
+  UserPlus,
+  X,
 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { navigateToThread } from "@/router/navigate";
+import { fetchAndCacheGravatarUrl } from "@/services/contacts/gravatar";
 import {
-  getContactByEmail,
-  getContactStats,
-  getRecentThreadsWithContact,
-  upsertContact,
-  updateContact,
-  updateContactNotes,
-  getAttachmentsFromContact,
-  getContactsFromSameDomain,
-  getLatestAuthResult,
+  type ContactAttachment,
   type ContactStats,
   type DbContact,
-  type ContactAttachment,
+  getAttachmentsFromContact,
+  getContactByEmail,
+  getContactStats,
+  getContactsFromSameDomain,
+  getLatestAuthResult,
+  getRecentThreadsWithContact,
   type SameDomainContact,
+  updateContact,
+  updateContactNotes,
+  upsertContact,
 } from "@/services/db/contacts";
 import {
-  isVipSender,
   addVipSender,
+  isVipSender,
   removeVipSender,
 } from "@/services/db/notificationVips";
-import { fetchAndCacheGravatarUrl } from "@/services/contacts/gravatar";
-import { useThreadStore } from "@/stores/threadStore";
-import { useComposerStore } from "@/stores/composerStore";
 import { getThreadById, getThreadLabelIds } from "@/services/db/threads";
-import { navigateToThread } from "@/router/navigate";
+import { useComposerStore } from "@/stores/composerStore";
+import { useThreadStore } from "@/stores/threadStore";
 import { formatRelativeDate } from "@/utils/date";
 import { formatFileSize, getFileIcon } from "@/utils/fileTypeHelpers";
 import { AuthBadge } from "./AuthBadge";
@@ -236,13 +236,14 @@ export function ContactSidebar({
   }, [contact, editNameValue]);
 
   // Cleanup all timers on unmount
-  useEffect(() => {
-    return () => {
+  useEffect(
+    () => () => {
       if (notesTimerRef.current) clearTimeout(notesTimerRef.current);
       if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
       if (addedTimerRef.current) clearTimeout(addedTimerRef.current);
-    };
-  }, []);
+    },
+    [],
+  );
 
   const displayName = contact?.display_name ?? name ?? email.split("@")[0];
   const initial = (displayName?.[0] ?? "?").toUpperCase();

@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { AiProviderClient, AiCompletionRequest } from "../types";
 import { createProviderFactory } from "../providerFactory";
+import type { AiCompletionRequest, AiProviderClient } from "../types";
 
 const factory = createProviderFactory(
   (apiKey) => new Anthropic({ apiKey, dangerouslyAllowBrowser: true }),

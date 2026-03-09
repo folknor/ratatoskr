@@ -1,18 +1,18 @@
-import { useState, useRef, useCallback, useMemo } from "react";
+import { Archive, Ban, Folder, Inbox, Search, Tag, Trash2 } from "lucide-react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CSSTransition } from "react-transition-group";
-import { useLabelStore } from "@/stores/labelStore";
-import { useAccountStore } from "@/stores/accountStore";
-import { useThreadStore } from "@/stores/threadStore";
 import {
-  archiveThread,
-  trashThread,
-  spamThread,
   addThreadLabel,
-  removeThreadLabel,
+  archiveThread,
   moveThread,
+  removeThreadLabel,
+  spamThread,
+  trashThread,
 } from "@/services/emailActions";
-import { Inbox, Archive, Trash2, Ban, Search, Tag, Folder } from "lucide-react";
+import { useAccountStore } from "@/stores/accountStore";
+import { useLabelStore } from "@/stores/labelStore";
+import { useThreadStore } from "@/stores/threadStore";
 
 interface MoveToFolderDialogProps {
   isOpen: boolean;

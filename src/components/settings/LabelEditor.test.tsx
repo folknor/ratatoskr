@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { LabelEditor } from "./LabelEditor";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAccountStore } from "@/stores/accountStore";
 import { useLabelStore } from "@/stores/labelStore";
+import { LabelEditor } from "./LabelEditor";
 
 // Mock the label store actions
 const mockCreateLabel = vi.fn();

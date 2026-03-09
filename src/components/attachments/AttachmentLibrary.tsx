@@ -1,28 +1,28 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { useTranslation } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
-import { Paperclip, Search, LayoutGrid, List } from "lucide-react";
-import { useAccountStore } from "@/stores/accountStore";
+import { LayoutGrid, List, Paperclip, Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { AttachmentPreview } from "@/components/email/AttachmentList";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { navigateToLabel } from "@/router/navigate";
 import {
-  getAttachmentsForAccount,
-  getAttachmentSenders,
-  type AttachmentWithContext,
   type AttachmentSender,
+  type AttachmentWithContext,
+  getAttachmentSenders,
+  getAttachmentsForAccount,
 } from "@/services/db/attachments";
 import { getEmailProvider } from "@/services/email/providerFactory";
-import { AttachmentPreview } from "@/components/email/AttachmentList";
-import { AttachmentGridItem } from "./AttachmentGridItem";
-import { AttachmentListItem } from "./AttachmentListItem";
-import { EmptyState } from "@/components/ui/EmptyState";
+import { useAccountStore } from "@/stores/accountStore";
 import {
+  isArchive,
+  isDocument,
   isImage,
   isPdf,
-  isDocument,
   isSpreadsheet,
-  isArchive,
 } from "@/utils/fileTypeHelpers";
-import { navigateToLabel } from "@/router/navigate";
+import { AttachmentGridItem } from "./AttachmentGridItem";
+import { AttachmentListItem } from "./AttachmentListItem";
 
 type TypeFilter =
   | "all"
@@ -51,12 +51,12 @@ function matchesType(att: AttachmentWithContext, filter: TypeFilter): boolean {
     case "archives":
       return isArchive(att.mime_type);
     case "other":
-      return (
-        !isImage(att.mime_type) &&
-        !isPdf(att.mime_type, att.filename) &&
-        !isDocument(att.mime_type, att.filename) &&
-        !isSpreadsheet(att.mime_type, att.filename) &&
-        !isArchive(att.mime_type)
+      return !(
+        isImage(att.mime_type) ||
+        isPdf(att.mime_type, att.filename) ||
+        isDocument(att.mime_type, att.filename) ||
+        isSpreadsheet(att.mime_type, att.filename) ||
+        isArchive(att.mime_type)
       );
   }
 }
@@ -179,7 +179,7 @@ export function AttachmentLibrary() {
         const matchSender =
           att.from_name?.toLowerCase().includes(q) ||
           att.from_address?.toLowerCase().includes(q);
-        if (!matchName && !matchSubject && !matchSender) return false;
+        if (!(matchName || matchSubject || matchSender)) return false;
       }
       if (!matchesType(att, typeFilter)) return false;
       if (senderFilter !== "all" && att.from_address !== senderFilter)
@@ -199,7 +199,7 @@ export function AttachmentLibrary() {
 
   const handleDownload = useCallback(
     async (att: AttachmentWithContext) => {
-      if (!att.gmail_attachment_id || !accountId) return;
+      if (!(att.gmail_attachment_id && accountId)) return;
       try {
         const filePath = await save({
           defaultPath: att.filename ?? "attachment",

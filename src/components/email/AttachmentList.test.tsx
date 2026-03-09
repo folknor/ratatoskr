@@ -1,6 +1,6 @@
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { AttachmentList } from "./AttachmentList";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { DbAttachment } from "@/services/db/attachments";
+import { AttachmentList } from "./AttachmentList";
 
 vi.mock("@/services/email/providerFactory", () => ({
   getEmailProvider: vi.fn(),
@@ -18,9 +18,9 @@ vi.mock("@tauri-apps/plugin-fs", () => ({
   writeFile: vi.fn(),
 }));
 
-import { getEmailProvider } from "@/services/email/providerFactory";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
+import { getEmailProvider } from "@/services/email/providerFactory";
 
 const makeAttachment = (
   overrides: Partial<DbAttachment> = {},

@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { GmailClient } from "./client";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockFetchResponse } from "@/test/mocks";
+import { GmailClient } from "./client";
 
 // Mock dependencies so the constructor works
 vi.mock("./auth", () => ({
@@ -121,15 +121,13 @@ describe("GmailClient.request", () => {
   });
 
   it("should throw after max 429 retries exceeded", async () => {
-    const mockFetch = vi
-      .fn()
-      .mockResolvedValue(
-        createMockFetchResponse({
-          status: 429,
-          text: "Rate Limit Exceeded",
-          headers: { "Retry-After": "0" },
-        }),
-      );
+    const mockFetch = vi.fn().mockResolvedValue(
+      createMockFetchResponse({
+        status: 429,
+        text: "Rate Limit Exceeded",
+        headers: { "Retry-After": "0" },
+      }),
+    );
     vi.stubGlobal("fetch", mockFetch);
 
     await expect(client.request("/threads/t1")).rejects.toThrow(

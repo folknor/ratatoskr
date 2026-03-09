@@ -1,5 +1,5 @@
-import { getDb } from "./connection";
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
+import { getDb } from "./connection";
 
 export interface DbScheduledEmail {
   id: string;

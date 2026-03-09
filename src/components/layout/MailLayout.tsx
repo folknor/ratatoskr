@@ -1,8 +1,8 @@
 import { useCallback, useRef } from "react";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { useUIStore } from "@/stores/uiStore";
 import { EmailList } from "./EmailList";
 import { ReadingPane } from "./ReadingPane";
-import { useUIStore } from "@/stores/uiStore";
-import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 
 function ResizableEmailLayout() {
   const emailListWidth = useUIStore((s) => s.emailListWidth);

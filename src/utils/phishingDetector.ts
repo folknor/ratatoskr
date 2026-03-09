@@ -507,11 +507,13 @@ export function scanLinksInHtml(html: string): LinkAnalysis[] {
 
     // Skip relative URLs (no protocol and doesn't look like a dangerous scheme)
     if (
-      !trimmedHref.includes("://") &&
-      !trimmedHref.startsWith("data:") &&
-      !trimmedHref.startsWith("javascript:") &&
-      !trimmedHref.startsWith("vbscript:") &&
-      !trimmedHref.startsWith("blob:")
+      !(
+        trimmedHref.includes("://") ||
+        trimmedHref.startsWith("data:") ||
+        trimmedHref.startsWith("javascript:") ||
+        trimmedHref.startsWith("vbscript:") ||
+        trimmedHref.startsWith("blob:")
+      )
     ) {
       continue;
     }

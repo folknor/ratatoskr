@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { useThreadStore, type Thread } from "./threadStore";
+import { beforeEach, describe, expect, it } from "vitest";
+import { type Thread, useThreadStore } from "./threadStore";
 
 const mockThread: Thread = {
   id: "thread-1",

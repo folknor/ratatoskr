@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { createRef } from "react";
-import { MessageItem } from "./MessageItem";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DbMessage } from "@/services/db/messages";
+import { MessageItem } from "./MessageItem";
 
 vi.mock("./EmailRenderer", () => ({
   EmailRenderer: () => <div data-testid="email-renderer" />,

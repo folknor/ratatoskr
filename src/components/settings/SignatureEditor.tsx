@@ -1,20 +1,20 @@
-import { useState, useEffect, useCallback } from "react";
-import { useTranslation } from "react-i18next";
-import { useEditor, EditorContent } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
-import Placeholder from "@tiptap/extension-placeholder";
 import Image from "@tiptap/extension-image";
-import { Trash2, Pencil, Code } from "lucide-react";
-import { TextField } from "@/components/ui/TextField";
+import Placeholder from "@tiptap/extension-placeholder";
+import { EditorContent, useEditor } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import { Code, Pencil, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { EditorToolbar } from "@/components/composer/EditorToolbar";
-import { useAccountStore } from "@/stores/accountStore";
+import { TextField } from "@/components/ui/TextField";
 import {
+  type DbSignature,
+  deleteSignature,
   getSignaturesForAccount,
   insertSignature,
   updateSignature,
-  deleteSignature,
-  type DbSignature,
 } from "@/services/db/signatures";
+import { useAccountStore } from "@/stores/accountStore";
 
 export function SignatureEditor() {
   const { t } = useTranslation("settings");
@@ -79,7 +79,7 @@ export function SignatureEditor() {
   }, [editor, isHtmlMode, rawHtml]);
 
   const handleSave = useCallback(async () => {
-    if (!activeAccountId || !editor || !name.trim()) return;
+    if (!(activeAccountId && editor && name.trim())) return;
 
     const bodyHtml = isHtmlMode ? rawHtml : editor.getHTML();
 

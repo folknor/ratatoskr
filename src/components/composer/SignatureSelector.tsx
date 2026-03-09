@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react";
-import { useComposerStore } from "@/stores/composerStore";
-import { useAccountStore } from "@/stores/accountStore";
+import { useEffect, useState } from "react";
 import {
-  getSignaturesForAccount,
   type DbSignature,
+  getSignaturesForAccount,
 } from "@/services/db/signatures";
+import { useAccountStore } from "@/stores/accountStore";
+import { useComposerStore } from "@/stores/composerStore";
 
 export function SignatureSelector() {
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
@@ -15,7 +15,7 @@ export function SignatureSelector() {
   const [signatures, setSignatures] = useState<DbSignature[]>([]);
 
   useEffect(() => {
-    if (!isOpen || !activeAccountId) return;
+    if (!(isOpen && activeAccountId)) return;
     let cancelled = false;
     getSignaturesForAccount(activeAccountId).then((sigs) => {
       if (!cancelled) setSignatures(sigs);

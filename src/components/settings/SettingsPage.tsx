@@ -1,85 +1,85 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { useTranslation } from "react-i18next";
 import { useParams } from "@tanstack/react-router";
-import { useUIStore } from "@/stores/uiStore";
-import { navigateToLabel, navigateToSettings } from "@/router/navigate";
-import { useAccountStore } from "@/stores/accountStore";
 import {
-  getSetting,
-  setSetting,
-  getSecureSetting,
-  setSecureSetting,
-} from "@/services/db/settings";
+  ArrowLeft,
+  Bell,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  ExternalLink,
+  Filter,
+  Github,
+  Globe,
+  Info,
+  Keyboard,
+  type LucideIcon,
+  Mail,
+  PenLine,
+  RefreshCw,
+  RotateCcw,
+  Scale,
+  Settings,
+  Sparkles,
+  UserCircle,
+  Users,
+} from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import appIcon from "@/assets/icon.png";
+import { ALL_NAV_ITEMS } from "@/components/layout/Sidebar";
+import { Button } from "@/components/ui/Button";
+import { TextField } from "@/components/ui/TextField";
+import { getDefaultKeyMap, SHORTCUTS } from "@/constants/shortcuts";
+import { COLOR_THEMES } from "@/constants/themes";
+import {
+  getPersistedLanguage,
+  getSystemLanguageName,
+  resetToSystemLanguage,
+  SUPPORTED_LANGUAGES,
+  setAppLanguage,
+} from "@/i18n";
+import { navigateToLabel, navigateToSettings } from "@/router/navigate";
 import { PROVIDER_MODELS } from "@/services/ai/types";
 import { deleteAccount } from "@/services/db/accounts";
 import {
-  removeClient,
-  reauthorizeAccount,
-} from "@/services/gmail/tokenManager";
-import {
-  triggerSync,
-  forceFullSync,
-  resyncAccount,
-} from "@/services/gmail/syncManager";
-import {
-  registerComposeShortcut,
-  getCurrentShortcut,
-  DEFAULT_SHORTCUT,
-} from "@/services/globalShortcut";
-import {
-  ArrowLeft,
-  RefreshCw,
-  Settings,
-  PenLine,
-  Bell,
-  Filter,
-  Users,
-  UserCircle,
-  Keyboard,
-  Sparkles,
-  Check,
-  Mail,
-  Info,
-  ExternalLink,
-  Github,
-  Scale,
-  Globe,
-  Download,
-  ChevronUp,
-  ChevronDown,
-  RotateCcw,
-  type LucideIcon,
-} from "lucide-react";
-import { SignatureEditor } from "./SignatureEditor";
-import { TemplateEditor } from "./TemplateEditor";
-import { FilterEditor } from "./FilterEditor";
-import { LabelEditor } from "./LabelEditor";
-import { ContactEditor } from "./ContactEditor";
-import { SubscriptionManager } from "./SubscriptionManager";
-import { SmartFolderEditor } from "./SmartFolderEditor";
-import { QuickStepEditor } from "./QuickStepEditor";
-import { SmartLabelEditor } from "./SmartLabelEditor";
-import { SHORTCUTS, getDefaultKeyMap } from "@/constants/shortcuts";
-import { useShortcutStore } from "@/stores/shortcutStore";
-import { COLOR_THEMES } from "@/constants/themes";
-import {
   getAliasesForAccount,
-  setDefaultAlias,
   mapDbAlias,
   type SendAsAlias,
+  setDefaultAlias,
 } from "@/services/db/sendAsAliases";
-import { ALL_NAV_ITEMS } from "@/components/layout/Sidebar";
-import type { SidebarNavItem } from "@/stores/uiStore";
-import { Button } from "@/components/ui/Button";
-import { TextField } from "@/components/ui/TextField";
-import appIcon from "@/assets/icon.png";
 import {
-  SUPPORTED_LANGUAGES,
-  setAppLanguage,
-  resetToSystemLanguage,
-  getPersistedLanguage,
-  getSystemLanguageName,
-} from "@/i18n";
+  getSecureSetting,
+  getSetting,
+  setSecureSetting,
+  setSetting,
+} from "@/services/db/settings";
+import {
+  DEFAULT_SHORTCUT,
+  getCurrentShortcut,
+  registerComposeShortcut,
+} from "@/services/globalShortcut";
+import {
+  forceFullSync,
+  resyncAccount,
+  triggerSync,
+} from "@/services/gmail/syncManager";
+import {
+  reauthorizeAccount,
+  removeClient,
+} from "@/services/gmail/tokenManager";
+import { useAccountStore } from "@/stores/accountStore";
+import { useShortcutStore } from "@/stores/shortcutStore";
+import type { SidebarNavItem } from "@/stores/uiStore";
+import { useUIStore } from "@/stores/uiStore";
+import { ContactEditor } from "./ContactEditor";
+import { FilterEditor } from "./FilterEditor";
+import { LabelEditor } from "./LabelEditor";
+import { QuickStepEditor } from "./QuickStepEditor";
+import { SignatureEditor } from "./SignatureEditor";
+import { SmartFolderEditor } from "./SmartFolderEditor";
+import { SmartLabelEditor } from "./SmartLabelEditor";
+import { SubscriptionManager } from "./SubscriptionManager";
+import { TemplateEditor } from "./TemplateEditor";
 
 type SettingsTab =
   | "general"
@@ -1429,7 +1429,7 @@ export function SettingsPage() {
                               setTimeout(() => setAiKeySaved(false), 2000);
                             }}
                             disabled={
-                              !ollamaServerUrl.trim() || !ollamaModel.trim()
+                              !(ollamaServerUrl.trim() && ollamaModel.trim())
                             }
                           >
                             {aiKeySaved ? t("saved") : t("save")}
@@ -1453,8 +1453,7 @@ export function SettingsPage() {
                               }
                             }}
                             disabled={
-                              !ollamaServerUrl.trim() ||
-                              !ollamaModel.trim() ||
+                              !(ollamaServerUrl.trim() && ollamaModel.trim()) ||
                               aiTesting
                             }
                             className="bg-bg-tertiary text-text-primary border border-border-primary"
@@ -2500,7 +2499,7 @@ function ImapCalDavSection() {
   const activeUiAccount = accounts.find((a) => a.id === activeAccountId);
   const isImap = activeUiAccount?.provider === "imap";
 
-  if (!isImap || !account) return null;
+  if (!(isImap && account)) return null;
 
   return (
     <Section title={t("calendarCaldav")}>
@@ -2564,7 +2563,7 @@ function SidebarNavEditor() {
     if (target < 0 || target >= next.length) return;
     const a = next[index];
     const b = next[target];
-    if (!a || !b) return;
+    if (!(a && b)) return;
     next[index] = b;
     next[target] = a;
     setSidebarNavConfig(next);

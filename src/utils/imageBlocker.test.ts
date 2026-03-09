@@ -1,8 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  stripRemoteImages,
-  restoreRemoteImages,
   hasBlockedImages,
+  restoreRemoteImages,
+  stripRemoteImages,
 } from "./imageBlocker";
 
 describe("stripRemoteImages", () => {

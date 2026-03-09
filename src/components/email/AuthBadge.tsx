@@ -1,11 +1,11 @@
+import {
+  ShieldAlert,
+  ShieldCheck,
+  ShieldQuestion,
+  ShieldX,
+} from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  ShieldCheck,
-  ShieldAlert,
-  ShieldX,
-  ShieldQuestion,
-} from "lucide-react";
 import type { AuthResult } from "@/services/gmail/authParser";
 
 interface AuthBadgeProps {

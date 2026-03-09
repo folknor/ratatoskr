@@ -1,7 +1,7 @@
-import type { CalendarProvider } from "./types";
-import { GoogleCalendarProvider } from "./googleCalendarProvider";
-import { CalDAVProvider } from "./caldavProvider";
 import { getAccount } from "@/services/db/accounts";
+import { CalDAVProvider } from "./caldavProvider";
+import { GoogleCalendarProvider } from "./googleCalendarProvider";
+import type { CalendarProvider } from "./types";
 
 const providerCache = new Map<string, CalendarProvider>();
 

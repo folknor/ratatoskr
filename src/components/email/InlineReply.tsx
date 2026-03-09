@@ -1,34 +1,34 @@
-import { useState, useCallback, useEffect, useRef } from "react";
-import { useTranslation } from "react-i18next";
-import { useEditor, EditorContent } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
+import { EditorContent, useEditor } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
 import {
+  Forward,
+  Loader2,
+  Maximize2,
   Reply,
   ReplyAll,
-  Forward,
-  Send,
-  Maximize2,
   RotateCcw,
+  Send,
   X,
-  Loader2,
 } from "lucide-react";
-import { useAccountStore } from "@/stores/accountStore";
-import { useComposerStore } from "@/stores/composerStore";
-import { useUIStore } from "@/stores/uiStore";
-import { sendEmail, archiveThread } from "@/services/emailActions";
-import { buildRawEmail } from "@/utils/emailBuilder";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import {
+  type AutoDraftMode,
+  generateAutoDraft,
+  isAutoDraftEnabled,
+  regenerateAutoDraft,
+} from "@/services/ai/writingStyleService";
 import { upsertContact } from "@/services/db/contacts";
+import type { DbMessage } from "@/services/db/messages";
 import { getSetting } from "@/services/db/settings";
 import { getDefaultSignature } from "@/services/db/signatures";
-import {
-  isAutoDraftEnabled,
-  generateAutoDraft,
-  regenerateAutoDraft,
-  type AutoDraftMode,
-} from "@/services/ai/writingStyleService";
-import type { DbMessage } from "@/services/db/messages";
+import { archiveThread, sendEmail } from "@/services/emailActions";
+import { useAccountStore } from "@/stores/accountStore";
+import { useComposerStore } from "@/stores/composerStore";
 import type { Thread } from "@/stores/threadStore";
+import { useUIStore } from "@/stores/uiStore";
+import { buildRawEmail } from "@/utils/emailBuilder";
 
 type ReplyMode = "reply" | "replyAll" | "forward";
 
@@ -191,7 +191,7 @@ export function InlineReply({
   }, [lastMessage, mode]);
 
   const handleSend = useCallback(async () => {
-    if (!activeAccount || !editor || sending) return;
+    if (!(activeAccount && editor) || sending) return;
     const { to, cc } = getRecipients();
     if (to.length === 0 && mode !== "forward") return;
 
@@ -270,7 +270,7 @@ export function InlineReply({
   ]);
 
   const handleExpandToComposer = useCallback(() => {
-    if (!editor || !lastMessage) return;
+    if (!(editor && lastMessage)) return;
     const { to, cc } = getRecipients();
     const bodyHtml = editor.getHTML();
 
@@ -303,7 +303,7 @@ export function InlineReply({
   ]);
 
   const handleRegenerateDraft = useCallback(async () => {
-    if (!editor || !mode || mode === "forward") return;
+    if (!(editor && mode) || mode === "forward") return;
     autoDraftAbortRef.current = false;
     setAutoDraftLoading(true);
     try {
@@ -345,12 +345,13 @@ export function InlineReply({
   }, [editor, autoDraftLoading]);
 
   // Cleanup focus timer on unmount
-  useEffect(() => {
-    return () => {
+  useEffect(
+    () => () => {
       if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
       autoDraftAbortRef.current = true;
-    };
-  }, []);
+    },
+    [],
+  );
 
   // Handle Ctrl+Enter to send, Escape to close
   useEffect(() => {

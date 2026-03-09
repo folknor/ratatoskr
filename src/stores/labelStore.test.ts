@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { useLabelStore, isSystemLabel } from "./labelStore";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { isSystemLabel, useLabelStore } from "./labelStore";
 
 vi.mock("@/services/db/labels", () => ({
   getLabelsForAccount: vi.fn(),
@@ -13,8 +13,8 @@ vi.mock("@/services/gmail/tokenManager", () => ({
 }));
 
 import {
-  getLabelsForAccount,
   deleteLabel as dbDeleteLabel,
+  getLabelsForAccount,
   updateLabelSortOrder,
   upsertLabel,
 } from "@/services/db/labels";
@@ -25,6 +25,7 @@ const mockDbDeleteLabel = vi.mocked(dbDeleteLabel);
 const mockUpdateSortOrder = vi.mocked(updateLabelSortOrder);
 const mockUpsertLabel = vi.mocked(upsertLabel);
 const mockGetGmailClient = vi.mocked(getGmailClient);
+
 import { createMockGmailClient } from "@/test/mocks";
 
 describe("labelStore", () => {
@@ -160,12 +161,10 @@ describe("labelStore", () => {
     mockUpsertLabel.mockResolvedValue(undefined);
     mockGetLabels.mockResolvedValue([]);
 
-    await useLabelStore
-      .getState()
-      .createLabel("acc1", "New Label", {
-        textColor: "#ffffff",
-        backgroundColor: "#fb4c2f",
-      });
+    await useLabelStore.getState().createLabel("acc1", "New Label", {
+      textColor: "#ffffff",
+      backgroundColor: "#fb4c2f",
+    });
 
     expect(mockClient.createLabel).toHaveBeenCalledWith("New Label", {
       textColor: "#ffffff",

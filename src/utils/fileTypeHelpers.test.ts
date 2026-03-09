@@ -1,14 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  isDocument,
-  isSpreadsheet,
-  isArchive,
-  isImage,
-  isPdf,
-  isText,
   canPreview,
   formatFileSize,
   getFileIcon,
+  isArchive,
+  isDocument,
+  isImage,
+  isPdf,
+  isSpreadsheet,
+  isText,
 } from "./fileTypeHelpers";
 
 describe("isDocument", () => {

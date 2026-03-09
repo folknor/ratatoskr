@@ -1,6 +1,6 @@
-import { matchSmartLabels } from "./smartLabelService";
 import { addThreadLabel } from "@/services/emailActions";
 import type { ParsedMessage } from "@/services/gmail/messageParser";
+import { matchSmartLabels } from "./smartLabelService";
 
 /**
  * Apply smart labels to newly synced messages.

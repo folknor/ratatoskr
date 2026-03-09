@@ -1,6 +1,6 @@
 import { render, waitFor } from "@testing-library/react";
-import { EmailRenderer } from "./EmailRenderer";
 import type { DbAttachment } from "@/services/db/attachments";
+import { EmailRenderer } from "./EmailRenderer";
 
 // Mock dependencies
 vi.mock("@tauri-apps/plugin-opener", () => ({

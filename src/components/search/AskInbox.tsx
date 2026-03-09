@@ -1,9 +1,9 @@
-import { useState, useRef, useCallback } from "react";
+import { ExternalLink, Send, Sparkles, X } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Sparkles, X, Send, ExternalLink } from "lucide-react";
-import { askMyInbox, type AskInboxResult } from "@/services/ai/askInbox";
-import { useAccountStore } from "@/stores/accountStore";
 import { navigateToLabel } from "@/router/navigate";
+import { type AskInboxResult, askMyInbox } from "@/services/ai/askInbox";
+import { useAccountStore } from "@/stores/accountStore";
 
 interface AskInboxProps {
   isOpen: boolean;
@@ -18,7 +18,7 @@ export function AskInbox({ isOpen, onClose }: AskInboxProps) {
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
 
   const handleAsk = useCallback(async () => {
-    if (!question.trim() || !activeAccountId || loading) return;
+    if (!(question.trim() && activeAccountId) || loading) return;
     setLoading(true);
     setResult(null);
     try {
@@ -166,7 +166,7 @@ export function AskInbox({ isOpen, onClose }: AskInboxProps) {
             </div>
           )}
 
-          {!loading && !result && (
+          {!(loading || result) && (
             <div className="px-4 py-8 text-center text-sm text-text-tertiary">
               Ask anything about your emails — meetings, conversations,
               attachments, and more.

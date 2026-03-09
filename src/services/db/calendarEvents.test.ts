@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/db/connection", async (importOriginal) => {
   const actual =
@@ -11,17 +11,17 @@ vi.mock("@/services/db/connection", async (importOriginal) => {
 });
 
 import { getDb, selectFirstBy } from "@/services/db/connection";
+import { createMockDb } from "@/test/mocks";
 import {
-  upsertCalendarEvent,
+  type DbCalendarEvent,
+  deleteCalendarEvent,
+  deleteEventByRemoteId,
+  deleteEventsForCalendar,
   getCalendarEventsInRange,
   getCalendarEventsInRangeMulti,
-  deleteEventsForCalendar,
   getEventByRemoteId,
-  deleteEventByRemoteId,
-  deleteCalendarEvent,
-  type DbCalendarEvent,
+  upsertCalendarEvent,
 } from "./calendarEvents";
-import { createMockDb } from "@/test/mocks";
 
 const mockDb = createMockDb();
 

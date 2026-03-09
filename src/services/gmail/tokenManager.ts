@@ -1,13 +1,13 @@
-import { GmailClient } from "./client";
-import { startOAuthFlow } from "./auth";
+import { normalizeEmail } from "@/utils/emailUtils";
+import { getCurrentUnixTimestamp } from "@/utils/timestamp";
 import {
-  getAllAccounts,
   getAccount,
+  getAllAccounts,
   updateAccountAllTokens,
 } from "../db/accounts";
-import { getSetting, getSecureSetting } from "../db/settings";
-import { getCurrentUnixTimestamp } from "@/utils/timestamp";
-import { normalizeEmail } from "@/utils/emailUtils";
+import { getSecureSetting, getSetting } from "../db/settings";
+import { startOAuthFlow } from "./auth";
+import { GmailClient } from "./client";
 
 // In-memory cache of active GmailClient instances per account
 const clients = new Map<string, GmailClient>();
@@ -25,7 +25,7 @@ export async function getGmailClient(accountId: string): Promise<GmailClient> {
   const account = accounts.find((a) => a.id === accountId);
 
   if (!account) throw new Error(`Account ${accountId} not found`);
-  if (!account.access_token || !account.refresh_token) {
+  if (!(account.access_token && account.refresh_token)) {
     throw new Error(`Account ${accountId} has no tokens`);
   }
 

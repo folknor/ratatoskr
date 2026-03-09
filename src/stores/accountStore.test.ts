@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { useAccountStore, type Account } from "./accountStore";
+import { beforeEach, describe, expect, it } from "vitest";
+import { type Account, useAccountStore } from "./accountStore";
 
 const mockAccount: Account = {
   id: "acc-1",

@@ -1,20 +1,20 @@
-import {
-  getTasksForAccount,
-  getTaskById,
-  getTasksForThread,
-  getSubtasks,
-  insertTask,
-  updateTask,
-  deleteTask,
-  completeTask,
-  uncompleteTask,
-  reorderTasks,
-  getIncompleteTaskCount,
-  getTaskTags,
-  upsertTaskTag,
-  deleteTaskTag,
-} from "./tasks";
 import { getDb } from "./connection";
+import {
+  completeTask,
+  deleteTask,
+  deleteTaskTag,
+  getIncompleteTaskCount,
+  getSubtasks,
+  getTaskById,
+  getTasksForAccount,
+  getTasksForThread,
+  getTaskTags,
+  insertTask,
+  reorderTasks,
+  uncompleteTask,
+  updateTask,
+  upsertTaskTag,
+} from "./tasks";
 
 vi.mock("./connection", () => ({
   getDb: vi.fn(),

@@ -1,14 +1,14 @@
-import { memo, useState, useRef, useEffect, useMemo, forwardRef } from "react";
-import { useTranslation } from "react-i18next";
-import { formatFullDate } from "@/utils/date";
-import { EmailRenderer } from "./EmailRenderer";
-import { InlineAttachmentPreview } from "./InlineAttachmentPreview";
-import { AttachmentList, getAttachmentsForMessage } from "./AttachmentList";
-import type { DbMessage } from "@/services/db/messages";
-import type { DbAttachment } from "@/services/db/attachments";
 import { MailMinus } from "lucide-react";
+import { forwardRef, memo, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { DbAttachment } from "@/services/db/attachments";
+import type { DbMessage } from "@/services/db/messages";
+import { formatFullDate } from "@/utils/date";
+import { AttachmentList, getAttachmentsForMessage } from "./AttachmentList";
 import { AuthBadge } from "./AuthBadge";
 import { AuthWarningBanner } from "./AuthWarningBanner";
+import { EmailRenderer } from "./EmailRenderer";
+import { InlineAttachmentPreview } from "./InlineAttachmentPreview";
 
 interface MessageItemProps {
   message: DbMessage;
