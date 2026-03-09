@@ -16,7 +16,7 @@ describe("SetupClientId", () => {
 
   it("disables Save button when only client ID is provided", () => {
     render(<SetupClientId onComplete={() => {}} onCancel={() => {}} />);
-    const inputs = screen.getAllByRole("textbox");
+    const _inputs = screen.getAllByRole("textbox");
     // Client ID is the text input; secret is password (not a textbox role)
     const clientIdInput = screen.getByPlaceholderText(
       "Paste your Client ID here...",

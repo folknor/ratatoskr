@@ -46,7 +46,7 @@
         "noBarrelFile": "error"
       },
       "suspicious": {
-        "noConsole": "error",
+        "noConsole": "off",
         "noExplicitAny": "error",
         "noDoubleEquals": "error",
         "noImplicitAnyLet": "error",

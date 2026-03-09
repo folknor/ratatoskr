@@ -46,59 +46,59 @@ describe("findWellKnownProvider", () => {
   it("returns settings for outlook.com", () => {
     const result = findWellKnownProvider("outlook.com");
     expect(result).not.toBeNull();
-    expect(result!.settings.imapHost).toBe("imap-mail.outlook.com");
-    expect(result!.settings.smtpHost).toBe("smtp-mail.outlook.com");
-    expect(result!.settings.smtpPort).toBe(587);
-    expect(result!.authMethods).toEqual(["oauth2"]);
-    expect(result!.oauthProviderId).toBe("microsoft");
+    expect(result?.settings.imapHost).toBe("imap-mail.outlook.com");
+    expect(result?.settings.smtpHost).toBe("smtp-mail.outlook.com");
+    expect(result?.settings.smtpPort).toBe(587);
+    expect(result?.authMethods).toEqual(["oauth2"]);
+    expect(result?.oauthProviderId).toBe("microsoft");
   });
 
   it("returns settings for hotmail.com (outlook alias)", () => {
     const result = findWellKnownProvider("hotmail.com");
     expect(result).not.toBeNull();
-    expect(result!.settings.imapHost).toBe("imap-mail.outlook.com");
+    expect(result?.settings.imapHost).toBe("imap-mail.outlook.com");
   });
 
   it("returns settings for yahoo.com", () => {
     const result = findWellKnownProvider("yahoo.com");
     expect(result).not.toBeNull();
-    expect(result!.settings.imapHost).toBe("imap.mail.yahoo.com");
-    expect(result!.settings.smtpHost).toBe("smtp.mail.yahoo.com");
-    expect(result!.authMethods).toEqual(["oauth2", "password"]);
-    expect(result!.oauthProviderId).toBe("yahoo");
+    expect(result?.settings.imapHost).toBe("imap.mail.yahoo.com");
+    expect(result?.settings.smtpHost).toBe("smtp.mail.yahoo.com");
+    expect(result?.authMethods).toEqual(["oauth2", "password"]);
+    expect(result?.oauthProviderId).toBe("yahoo");
   });
 
   it("returns settings for icloud.com", () => {
     const result = findWellKnownProvider("icloud.com");
     expect(result).not.toBeNull();
-    expect(result!.settings.imapHost).toBe("imap.mail.me.com");
-    expect(result!.authMethods).toEqual(["password"]);
+    expect(result?.settings.imapHost).toBe("imap.mail.me.com");
+    expect(result?.authMethods).toEqual(["password"]);
   });
 
   it("returns settings for fastmail.com", () => {
     const result = findWellKnownProvider("fastmail.com");
     expect(result).not.toBeNull();
-    expect(result!.settings.imapHost).toBe("imap.fastmail.com");
+    expect(result?.settings.imapHost).toBe("imap.fastmail.com");
   });
 
   it("returns settings for protonmail.com (local bridge)", () => {
     const result = findWellKnownProvider("protonmail.com");
     expect(result).not.toBeNull();
-    expect(result!.settings.imapHost).toBe("127.0.0.1");
-    expect(result!.settings.imapPort).toBe(1143);
-    expect(result!.acceptInvalidCerts).toBe(true);
+    expect(result?.settings.imapHost).toBe("127.0.0.1");
+    expect(result?.settings.imapPort).toBe(1143);
+    expect(result?.acceptInvalidCerts).toBe(true);
   });
 
   it("returns acceptInvalidCerts true for proton.me", () => {
     const result = findWellKnownProvider("proton.me");
     expect(result).not.toBeNull();
-    expect(result!.acceptInvalidCerts).toBe(true);
+    expect(result?.acceptInvalidCerts).toBe(true);
   });
 
   it("does not set acceptInvalidCerts for regular providers", () => {
     const result = findWellKnownProvider("outlook.com");
     expect(result).not.toBeNull();
-    expect(result!.acceptInvalidCerts).toBeUndefined();
+    expect(result?.acceptInvalidCerts).toBeUndefined();
   });
 
   it("returns null for unknown domain", () => {
@@ -108,7 +108,7 @@ describe("findWellKnownProvider", () => {
   it("is case insensitive", () => {
     const result = findWellKnownProvider("OUTLOOK.COM");
     expect(result).not.toBeNull();
-    expect(result!.settings.imapHost).toBe("imap-mail.outlook.com");
+    expect(result?.settings.imapHost).toBe("imap-mail.outlook.com");
   });
 
   it("returns a copy (not a reference)", () => {
@@ -143,15 +143,15 @@ describe("discoverSettings", () => {
   it("returns well-known settings for known providers", () => {
     const result = discoverSettings("user@outlook.com");
     expect(result).not.toBeNull();
-    expect(result!.settings.imapHost).toBe("imap-mail.outlook.com");
+    expect(result?.settings.imapHost).toBe("imap-mail.outlook.com");
   });
 
   it("falls back to guessed settings for unknown domains", () => {
     const result = discoverSettings("user@mycompany.io");
     expect(result).not.toBeNull();
-    expect(result!.settings.imapHost).toBe("imap.mycompany.io");
-    expect(result!.settings.smtpHost).toBe("smtp.mycompany.io");
-    expect(result!.authMethods).toEqual(["password"]);
+    expect(result?.settings.imapHost).toBe("imap.mycompany.io");
+    expect(result?.settings.smtpHost).toBe("smtp.mycompany.io");
+    expect(result?.authMethods).toEqual(["password"]);
   });
 
   it("returns null for invalid email", () => {
@@ -165,13 +165,13 @@ describe("discoverSettings", () => {
   it("handles yahoo alias ymail.com", () => {
     const result = discoverSettings("user@ymail.com");
     expect(result).not.toBeNull();
-    expect(result!.settings.imapHost).toBe("imap.mail.yahoo.com");
+    expect(result?.settings.imapHost).toBe("imap.mail.yahoo.com");
   });
 
   it("handles me.com (iCloud alias)", () => {
     const result = discoverSettings("user@me.com");
     expect(result).not.toBeNull();
-    expect(result!.settings.imapHost).toBe("imap.mail.me.com");
+    expect(result?.settings.imapHost).toBe("imap.mail.me.com");
   });
 });
 

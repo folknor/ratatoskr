@@ -292,7 +292,7 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
       showSmartFolders: smartFoldersVisible,
       showLabels: labelsVisible,
     };
-  }, [sidebarNavConfig]);
+  }, [sidebarNavConfig, SECTION_IDS.has]);
 
   const [labelsExpanded, setLabelsExpanded] = useState(false);
 
@@ -754,8 +754,8 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
         onClose={() => setShowSmartFolderModal(false)}
         onSubmit={(values) => {
           createSmartFolder(
-            values.name!.trim(),
-            values.query!.trim(),
+            values.name?.trim(),
+            values.query?.trim(),
             activeAccountId ?? undefined,
           );
         }}

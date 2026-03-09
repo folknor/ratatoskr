@@ -66,7 +66,7 @@ export function QuickStepEditor() {
       setLabels(l.filter((lb) => lb.type === "user")),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadQuickSteps is stable, only re-run on activeAccountId change
-  }, [activeAccountId]);
+  }, [activeAccountId, loadQuickSteps]);
 
   const resetForm = useCallback(() => {
     setName("");

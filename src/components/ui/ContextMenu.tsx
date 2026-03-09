@@ -224,7 +224,7 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
 
           const Icon = item.icon;
           const isFocused = focusedIndex === index;
-          const hasSubmenu = !!item.children;
+          const hasSubmenu = Boolean(item.children);
           const isSubmenuOpen = submenuOpenId === item.id;
 
           return (

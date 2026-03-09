@@ -103,7 +103,7 @@ export function SearchBar() {
           useSmartFolderStore
             .getState()
             .createFolder(
-              values.name!.trim(),
+              values.name?.trim(),
               useThreadStore.getState().searchQuery.trim(),
               activeAccountId ?? undefined,
             );

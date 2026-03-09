@@ -88,7 +88,7 @@ export function TaskItem({
 
   const hasSubtasks = subtasks && subtasks.length > 0;
   const completedSubtasks = subtasks?.filter((s) => s.is_completed).length ?? 0;
-  const hasRecurrence = !!task.recurrence_rule;
+  const hasRecurrence = Boolean(task.recurrence_rule);
 
   const handleToggle = useCallback(
     (e: React.MouseEvent) => {

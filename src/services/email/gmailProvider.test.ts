@@ -90,9 +90,9 @@ describe("GmailApiProvider", () => {
 
       const folders = await provider.listFolders();
 
-      expect(folders[0]!.specialUse).toBe("\\Trash");
-      expect(folders[1]!.specialUse).toBe("\\Drafts");
-      expect(folders[2]!.specialUse).toBe("\\Junk");
+      expect(folders[0]?.specialUse).toBe("\\Trash");
+      expect(folders[1]?.specialUse).toBe("\\Drafts");
+      expect(folders[2]?.specialUse).toBe("\\Junk");
     });
   });
 

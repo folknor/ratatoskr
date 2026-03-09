@@ -52,7 +52,7 @@ describe("UpdateToast", () => {
 
     // Simulate an update being found
     act(() => {
-      registeredCallback!({ version: "3.0.0" });
+      registeredCallback?.({ version: "3.0.0" });
     });
 
     await waitFor(() => {

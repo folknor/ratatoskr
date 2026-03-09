@@ -76,8 +76,8 @@ describe("CalDAVProvider", () => {
 
       const calendars = await provider.listCalendars();
 
-      expect(calendars[0]!.displayName).toBe("Calendar 1");
-      expect(calendars[1]!.displayName).toBe("Calendar 2");
+      expect(calendars[0]?.displayName).toBe("Calendar 1");
+      expect(calendars[1]?.displayName).toBe("Calendar 2");
     });
   });
 
@@ -111,12 +111,12 @@ describe("CalDAVProvider", () => {
       });
 
       expect(events).toHaveLength(2);
-      expect(events[0]!.summary).toBe("Test Event");
-      expect(events[0]!.uid).toBe("test-uid");
-      expect(events[0]!.etag).toBe('"etag-1"');
-      expect(events[0]!.remoteEventId).toBe("/cal/personal/test-uid.ics");
-      expect(events[1]!.summary).toBe("Second Event");
-      expect(events[1]!.etag).toBe('"etag-2"');
+      expect(events[0]?.summary).toBe("Test Event");
+      expect(events[0]?.uid).toBe("test-uid");
+      expect(events[0]?.etag).toBe('"etag-1"');
+      expect(events[0]?.remoteEventId).toBe("/cal/personal/test-uid.ics");
+      expect(events[1]?.summary).toBe("Second Event");
+      expect(events[1]?.etag).toBe('"etag-2"');
     });
 
     it("filters out objects with no data", async () => {
@@ -267,9 +267,9 @@ describe("CalDAVProvider", () => {
       });
 
       expect(result.created).toHaveLength(2);
-      expect(result.created[0]!.summary).toBe("Test Event");
-      expect(result.created[0]!.etag).toBe('"sync-etag"');
-      expect(result.created[1]!.summary).toBe("Second Event");
+      expect(result.created[0]?.summary).toBe("Test Event");
+      expect(result.created[0]?.etag).toBe('"sync-etag"');
+      expect(result.created[1]?.summary).toBe("Second Event");
       expect(result.updated).toEqual([]);
       expect(result.deletedRemoteIds).toEqual([]);
       expect(result.newSyncToken).toBeNull();

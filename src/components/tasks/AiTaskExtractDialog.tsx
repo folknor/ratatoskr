@@ -153,7 +153,6 @@ export function AiTaskExtractDialog({
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   className="w-full px-3 py-2 bg-bg-tertiary border border-border-primary rounded-lg text-sm text-text-primary outline-none focus:border-accent"
-                  autoFocus
                 />
               </div>
 

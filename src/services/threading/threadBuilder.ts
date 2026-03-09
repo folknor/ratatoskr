@@ -72,7 +72,7 @@ export function normalizeSubject(subject: string | null): string {
  * Handles angle-bracket-delimited IDs and bare IDs separated by whitespace.
  */
 export function parseReferences(references: string | null): string[] {
-  if (!(references && references.trim())) return [];
+  if (!references?.trim()) return [];
 
   const ids: string[] = [];
   // Match angle-bracket-delimited Message-IDs: <something@host>

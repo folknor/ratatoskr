@@ -105,7 +105,7 @@ describe("smartFolderStore", () => {
       const loadPromise = useSmartFolderStore.getState().loadFolders();
       expect(useSmartFolderStore.getState().isLoading).toBe(true);
 
-      resolveFn!();
+      resolveFn?.();
       await loadPromise;
       expect(useSmartFolderStore.getState().isLoading).toBe(false);
     });

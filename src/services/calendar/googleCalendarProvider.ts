@@ -70,7 +70,7 @@ export class GoogleCalendarProvider implements CalendarProvider {
       remoteId: cal.id,
       displayName: cal.summary,
       color: cal.backgroundColor ?? null,
-      isPrimary: !!cal.primary,
+      isPrimary: Boolean(cal.primary),
     }));
   }
 
@@ -272,13 +272,13 @@ export class GoogleCalendarProvider implements CalendarProvider {
 }
 
 function mapGoogleEvent(event: GoogleCalendarEvent): CalendarEventData {
-  const isAllDay = !!event.start.date;
+  const isAllDay = Boolean(event.start.date);
   const startTime = event.start.dateTime
     ? Math.floor(new Date(event.start.dateTime).getTime() / 1000)
-    : Math.floor(new Date(event.start.date + "T00:00:00").getTime() / 1000);
+    : Math.floor(new Date(`${event.start.date}T00:00:00`).getTime() / 1000);
   const endTime = event.end.dateTime
     ? Math.floor(new Date(event.end.dateTime).getTime() / 1000)
-    : Math.floor(new Date(event.end.date + "T23:59:59").getTime() / 1000);
+    : Math.floor(new Date(`${event.end.date}T23:59:59`).getTime() / 1000);
 
   return {
     remoteEventId: event.id,

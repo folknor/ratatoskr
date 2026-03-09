@@ -83,7 +83,7 @@ export async function findSpecialFolder(
     [accountId, specialUse],
   );
   if (rows.length > 0) {
-    return rows[0]!.imap_folder_path ?? rows[0]!.name;
+    return rows[0]?.imap_folder_path ?? rows[0]?.name;
   }
 
   // Fallback: look up by the well-known label ID (e.g. "TRASH", "SPAM")
@@ -98,7 +98,7 @@ export async function findSpecialFolder(
       [accountId, labelId],
     );
     if (fallbackRows.length > 0) {
-      return fallbackRows[0]!.imap_folder_path ?? fallbackRows[0]!.name;
+      return fallbackRows[0]?.imap_folder_path ?? fallbackRows[0]?.name;
     }
   }
 

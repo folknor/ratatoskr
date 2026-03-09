@@ -32,9 +32,9 @@ function parseDateToTimestamp(dateStr: string): number | undefined {
   const year = parseInt(parts[0]!, 10);
   const month = parseInt(parts[1]!, 10);
   const day = parseInt(parts[2]!, 10);
-  if (isNaN(year) || isNaN(month) || isNaN(day)) return;
+  if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) return;
   const date = new Date(year, month - 1, day);
-  if (isNaN(date.getTime())) return;
+  if (Number.isNaN(date.getTime())) return;
   return Math.floor(date.getTime() / 1000);
 }
 
@@ -51,7 +51,7 @@ export function parseSearchQuery(input: string): ParsedSearchQuery {
   const matches: { start: number; end: number }[] = [];
 
   while ((match = OPERATOR_REGEX.exec(input)) !== null) {
-    const operator = match[1]!.toLowerCase();
+    const operator = match[1]?.toLowerCase();
     const value = match[2] ?? match[3] ?? "";
 
     matches.push({ start: match.index, end: match.index + match[0].length });

@@ -46,7 +46,7 @@ describe("localDrafts DB service", () => {
 
     it("passes null for undefined optional fields", async () => {
       await upsertLocalDraft({ id: "draft-2", account_id: "acct-1" });
-      const args = mockDb.execute.mock.calls[0]![1] as unknown[];
+      const args = mockDb.execute.mock.calls[0]?.[1] as unknown[];
       // cc_addresses (index 3) should be null
       expect(args[3]).toBeNull();
     });

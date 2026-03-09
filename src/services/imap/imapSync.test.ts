@@ -75,7 +75,6 @@ import { getAccount } from "../db/accounts";
 import { upsertAttachment } from "../db/attachments";
 import { withTransaction } from "../db/connection";
 import { updateMessageThreadIds, upsertMessage } from "../db/messages";
-import { getPendingOpsForResource } from "../db/pendingOperations";
 import { deleteThread, upsertThread } from "../db/threads";
 import {
   computeSinceDate,
@@ -337,10 +336,10 @@ describe("imapInitialSync", () => {
     expect(mockUpsertMessage).toHaveBeenCalledTimes(2);
 
     // Each message should be stored with placeholder threadId = messageId
-    const firstCallArgs = mockUpsertMessage.mock.calls[0]![0];
+    const firstCallArgs = mockUpsertMessage.mock.calls[0]?.[0];
     expect(firstCallArgs.threadId).toBe(firstCallArgs.id);
 
-    const secondCallArgs = mockUpsertMessage.mock.calls[1]![0];
+    const secondCallArgs = mockUpsertMessage.mock.calls[1]?.[0];
     expect(secondCallArgs.threadId).toBe(secondCallArgs.id);
   });
 
@@ -376,8 +375,8 @@ describe("imapInitialSync", () => {
     }
 
     // Verify placeholder threads use the message ID as thread ID
-    const firstThreadCall = mockUpsertThread.mock.calls[0]![0];
-    const firstMsgCall = mockUpsertMessage.mock.calls[0]![0];
+    const firstThreadCall = mockUpsertThread.mock.calls[0]?.[0];
+    const firstMsgCall = mockUpsertMessage.mock.calls[0]?.[0];
     expect(firstThreadCall.id).toBe(firstMsgCall.id);
     expect(firstThreadCall.id).toBe(firstMsgCall.threadId);
   });
@@ -470,7 +469,7 @@ describe("imapInitialSync", () => {
 
     // Only recent message should be stored (old one is beyond 365 days)
     expect(mockUpsertMessage).toHaveBeenCalledTimes(1);
-    expect(mockUpsertMessage.mock.calls[0]![0].id).toContain("1"); // uid=1
+    expect(mockUpsertMessage.mock.calls[0]?.[0].id).toContain("1"); // uid=1
   });
 
   it("handles empty folders gracefully", async () => {
@@ -551,7 +550,7 @@ describe("imapInitialSync", () => {
   });
 
   it("continues to next chunk on fetch error", async () => {
-    const msg1 = createMockImapMessage({
+    const _msg1 = createMockImapMessage({
       uid: 1,
       message_id: "<m1@test>",
       date: Math.floor(Date.now() / 1000),
@@ -633,7 +632,7 @@ describe("imapInitialSync", () => {
 
     // All folders fail → error is propagated
     expect(caughtError).not.toBeNull();
-    expect(caughtError!.message).toContain("All folders failed to sync");
+    expect(caughtError?.message).toContain("All folders failed to sync");
 
     // Circuit breaker should stop after 5 failures (CIRCUIT_BREAKER_MAX_FAILURES)
     expect(mockImapSearchFolder).toHaveBeenCalledTimes(5);
@@ -698,7 +697,7 @@ describe("imapInitialSync", () => {
 
     // All folders fail → error is propagated, but all were attempted first
     expect(caughtError).not.toBeNull();
-    expect(caughtError!.message).toContain("All folders failed to sync");
+    expect(caughtError?.message).toContain("All folders failed to sync");
 
     // All folders should be attempted since these aren't connection errors
     expect(mockImapSearchFolder).toHaveBeenCalledTimes(6);
@@ -807,7 +806,7 @@ describe("imapInitialSync — all-folders-fail propagation", () => {
     await syncPromise;
 
     expect(caughtError).not.toBeNull();
-    expect(caughtError!.message).toContain("All folders failed to sync");
+    expect(caughtError?.message).toContain("All folders failed to sync");
   });
 });
 

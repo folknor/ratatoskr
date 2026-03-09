@@ -48,7 +48,7 @@ export function FilterEditor() {
       setLabels(l.filter((lb) => lb.type === "user")),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadFilters is stable, only re-run on activeAccountId change
-  }, [activeAccountId]);
+  }, [activeAccountId, loadFilters]);
 
   const resetForm = useCallback(() => {
     setName("");
@@ -110,16 +110,8 @@ export function FilterEditor() {
     editingId,
     resetForm,
     loadFilters,
-    criteriaFrom,
-    criteriaTo,
-    criteriaSubject,
-    criteriaBody,
-    criteriaHasAttachment,
-    actionLabel,
-    actionArchive,
-    actionStar,
-    actionMarkRead,
-    actionTrash,
+    buildActions,
+    buildCriteria,
   ]);
 
   const handleEdit = useCallback((filter: DbFilterRule) => {

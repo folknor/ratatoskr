@@ -192,7 +192,9 @@ export function AddImapAccount({
   }, []);
 
   const isOAuth = form.authMode === "oauth2";
-  const hasOAuthTokens = !!(form.oauthAccessToken && form.oauthRefreshToken);
+  const hasOAuthTokens = Boolean(
+    form.oauthAccessToken && form.oauthRefreshToken,
+  );
 
   const canAdvanceFromBasic =
     form.email.trim().includes("@") &&
@@ -594,7 +596,6 @@ export function AddImapAccount({
           onBlur={handleEmailBlur}
           placeholder={t("emailPlaceholder")}
           className={inputClass}
-          autoFocus
           disabled={isOAuth && hasOAuthTokens}
         />
       </div>
@@ -687,7 +688,6 @@ export function AddImapAccount({
           onChange={(e) => updateForm("imapHost", e.target.value)}
           placeholder={t("imapServerPlaceholder")}
           className={inputClass}
-          autoFocus
         />
       </div>
       <div className="grid grid-cols-2 gap-3">
@@ -760,7 +760,6 @@ export function AddImapAccount({
           onChange={(e) => updateForm("smtpHost", e.target.value)}
           placeholder={t("smtpServerPlaceholder")}
           className={inputClass}
-          autoFocus
         />
       </div>
       <div className="grid grid-cols-2 gap-3">

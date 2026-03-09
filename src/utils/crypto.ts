@@ -141,7 +141,7 @@ export function isEncrypted(value: string): boolean {
     atob(parts[0]!);
     atob(parts[1]!);
     // Encrypted values have a 12-byte IV (16 chars base64) and substantial ciphertext
-    return parts[0]!.length === 16;
+    return parts[0]?.length === 16;
   } catch {
     return false;
   }

@@ -5,31 +5,31 @@ describe("getOAuthProvider", () => {
   it("returns microsoft provider config", () => {
     const provider = getOAuthProvider("microsoft");
     expect(provider).not.toBeNull();
-    expect(provider!.id).toBe("microsoft");
-    expect(provider!.name).toBe("Microsoft");
-    expect(provider!.authUrl).toContain("login.microsoftonline.com");
-    expect(provider!.tokenUrl).toContain("login.microsoftonline.com");
-    expect(provider!.scopes).toContain(
+    expect(provider?.id).toBe("microsoft");
+    expect(provider?.name).toBe("Microsoft");
+    expect(provider?.authUrl).toContain("login.microsoftonline.com");
+    expect(provider?.tokenUrl).toContain("login.microsoftonline.com");
+    expect(provider?.scopes).toContain(
       "https://outlook.office.com/IMAP.AccessAsUser.All",
     );
-    expect(provider!.scopes).toContain("https://outlook.office.com/SMTP.Send");
-    expect(provider!.scopes).toContain("offline_access");
-    expect(provider!.scopes).toContain("openid");
-    expect(provider!.scopes).toContain("profile");
-    expect(provider!.scopes).toContain("email");
-    expect(provider!.userInfoUrl).toBeUndefined();
-    expect(provider!.usePkce).toBe(true);
+    expect(provider?.scopes).toContain("https://outlook.office.com/SMTP.Send");
+    expect(provider?.scopes).toContain("offline_access");
+    expect(provider?.scopes).toContain("openid");
+    expect(provider?.scopes).toContain("profile");
+    expect(provider?.scopes).toContain("email");
+    expect(provider?.userInfoUrl).toBeUndefined();
+    expect(provider?.usePkce).toBe(true);
   });
 
   it("returns yahoo provider config", () => {
     const provider = getOAuthProvider("yahoo");
     expect(provider).not.toBeNull();
-    expect(provider!.id).toBe("yahoo");
-    expect(provider!.name).toBe("Yahoo");
-    expect(provider!.authUrl).toContain("login.yahoo.com");
-    expect(provider!.scopes).toContain("mail-r");
-    expect(provider!.scopes).toContain("mail-w");
-    expect(provider!.usePkce).toBe(true);
+    expect(provider?.id).toBe("yahoo");
+    expect(provider?.name).toBe("Yahoo");
+    expect(provider?.authUrl).toContain("login.yahoo.com");
+    expect(provider?.scopes).toContain("mail-r");
+    expect(provider?.scopes).toContain("mail-w");
+    expect(provider?.usePkce).toBe(true);
   });
 
   it("returns null for unknown provider", () => {

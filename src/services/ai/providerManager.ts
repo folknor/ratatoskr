@@ -121,12 +121,12 @@ export async function isAiAvailable(): Promise<boolean> {
 
     if (providerName === "ollama") {
       const serverUrl = await getSetting("ollama_server_url");
-      return !!serverUrl;
+      return Boolean(serverUrl);
     }
 
     const keySetting = API_KEY_SETTINGS[providerName];
     const key = await getSecureSetting(keySetting);
-    return !!key;
+    return Boolean(key);
   } catch {
     return false;
   }

@@ -95,6 +95,7 @@ export function LabelForm({
     updateLabel,
     createLabel,
     onDone,
+    t,
   ]);
 
   const handleKeyDown = useCallback(

@@ -113,7 +113,7 @@ export function formatSyncError(rawError: string): string {
 
   // Fallback: truncate long technical errors
   if (rawError.length > 100) {
-    return rawError.slice(0, 100) + "\u2026";
+    return `${rawError.slice(0, 100)}\u2026`;
   }
   return rawError;
 }

@@ -54,7 +54,7 @@ export function SignatureEditor() {
   useEffect(() => {
     loadSignatures();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadSignatures is stable, only re-run on activeAccountId change
-  }, [activeAccountId]);
+  }, [loadSignatures]);
 
   const resetForm = useCallback(() => {
     setName("");

@@ -35,21 +35,21 @@ describe("HelpPage search filtering", () => {
   it("matches cards by title", () => {
     const results = filterCards("snooze");
     expect(results).not.toBeNull();
-    expect(results!.some((c) => c.id === "snooze")).toBe(true);
+    expect(results?.some((c) => c.id === "snooze")).toBe(true);
   });
 
   it("matches cards by description key path", () => {
     // After i18n, description is a key path like "cards.new-email.description"
     const results = filterCards("new-email");
     expect(results).not.toBeNull();
-    expect(results!.some((c) => c.id === "new-email")).toBe(true);
+    expect(results?.some((c) => c.id === "new-email")).toBe(true);
   });
 
   it("matches cards by tip text key path", () => {
     // After i18n, tip text is a key path like "cards.labels.tips.0"
     const results = filterCards("cards.labels.tips");
     expect(results).not.toBeNull();
-    expect(results!.some((c) => c.id === "labels")).toBe(true);
+    expect(results?.some((c) => c.id === "labels")).toBe(true);
   });
 
   it("empty query returns null (shows active topic)", () => {
@@ -62,13 +62,13 @@ describe("HelpPage search filtering", () => {
     const upper = filterCards("SNOOZE");
     expect(lower).not.toBeNull();
     expect(upper).not.toBeNull();
-    expect(lower!.length).toBe(upper!.length);
+    expect(lower?.length).toBe(upper?.length);
   });
 
   it("nonsense query returns empty array", () => {
     const results = filterCards("xyzzyqwerty12345");
     expect(results).not.toBeNull();
-    expect(results!.length).toBe(0);
+    expect(results?.length).toBe(0);
   });
 });
 
@@ -76,7 +76,7 @@ describe("HelpPage topic fallback", () => {
   it("valid topic resolves to correct category", () => {
     const cat = getCategoryById("composing");
     expect(cat).toBeDefined();
-    expect(cat!.label).toBe("categories.composing");
+    expect(cat?.label).toBe("categories.composing");
   });
 
   it("invalid topic falls back (getCategoryById returns undefined)", () => {

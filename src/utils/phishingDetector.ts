@@ -223,7 +223,7 @@ function checkDisplayHrefMismatch(
     if (trimmed.includes("://")) {
       displayDomain = new URL(trimmed).hostname;
     } else {
-      displayDomain = new URL("https://" + trimmed).hostname;
+      displayDomain = new URL(`https://${trimmed}`).hostname;
     }
   } catch {
     return null;

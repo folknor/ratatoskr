@@ -138,9 +138,9 @@ describe("matchSmartLabels", () => {
 
     // Should have both labels but no duplicate label-jobs
     expect(result).toHaveLength(1);
-    expect(result[0]!.labelIds).toContain("label-jobs");
-    expect(result[0]!.labelIds).toContain("label-orders");
-    expect(result[0]!.labelIds.filter((l) => l === "label-jobs")).toHaveLength(
+    expect(result[0]?.labelIds).toContain("label-jobs");
+    expect(result[0]?.labelIds).toContain("label-orders");
+    expect(result[0]?.labelIds.filter((l) => l === "label-jobs")).toHaveLength(
       1,
     );
   });
@@ -172,7 +172,7 @@ describe("matchSmartLabels", () => {
       expect.arrayContaining([expect.objectContaining({ id: "t1" })]),
       expect.anything(),
     );
-    const threads = vi.mocked(classifyThreadsBySmartLabels).mock.calls[0]![0];
+    const threads = vi.mocked(classifyThreadsBySmartLabels).mock.calls[0]?.[0];
     expect(threads).toHaveLength(1);
   });
 

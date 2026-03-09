@@ -53,10 +53,10 @@ describe("accounts", () => {
       const result = await getAccount("acc-gmail");
 
       expect(result).not.toBeNull();
-      expect(result!.id).toBe("acc-gmail");
-      expect(result!.provider).toBe("gmail_api");
-      expect(result!.access_token).toBe("access-token");
-      expect(result!.refresh_token).toBe("refresh-token");
+      expect(result?.id).toBe("acc-gmail");
+      expect(result?.provider).toBe("gmail_api");
+      expect(result?.access_token).toBe("access-token");
+      expect(result?.refresh_token).toBe("refresh-token");
     });
 
     it("returns an IMAP account with decrypted imap_password", async () => {
@@ -65,15 +65,15 @@ describe("accounts", () => {
       const result = await getAccount("acc-imap");
 
       expect(result).not.toBeNull();
-      expect(result!.provider).toBe("imap");
-      expect(result!.imap_host).toBe("imap.example.com");
-      expect(result!.imap_port).toBe(993);
-      expect(result!.imap_security).toBe("tls");
-      expect(result!.smtp_host).toBe("smtp.example.com");
-      expect(result!.smtp_port).toBe(465);
-      expect(result!.smtp_security).toBe("tls");
-      expect(result!.auth_method).toBe("password");
-      expect(result!.imap_password).toBe("secret-password");
+      expect(result?.provider).toBe("imap");
+      expect(result?.imap_host).toBe("imap.example.com");
+      expect(result?.imap_port).toBe(993);
+      expect(result?.imap_security).toBe("tls");
+      expect(result?.smtp_host).toBe("smtp.example.com");
+      expect(result?.smtp_port).toBe(465);
+      expect(result?.smtp_security).toBe("tls");
+      expect(result?.auth_method).toBe("password");
+      expect(result?.imap_password).toBe("secret-password");
     });
 
     it("handles IMAP account with null imap_password gracefully", async () => {
@@ -83,7 +83,7 @@ describe("accounts", () => {
 
       const result = await getAccount("acc-imap");
 
-      expect(result!.imap_password).toBeNull();
+      expect(result?.imap_password).toBeNull();
     });
   });
 
@@ -94,7 +94,7 @@ describe("accounts", () => {
       const result = await getAccountByEmail("user@example.com");
 
       expect(result).not.toBeNull();
-      expect(result!.email).toBe("user@example.com");
+      expect(result?.email).toBe("user@example.com");
     });
 
     it("returns null when email not found", async () => {
@@ -116,10 +116,10 @@ describe("accounts", () => {
       const result = await getAllAccounts();
 
       expect(result).toHaveLength(2);
-      expect(result[0]!.provider).toBe("gmail_api");
-      expect(result[0]!.access_token).toBe("access-token");
-      expect(result[1]!.provider).toBe("imap");
-      expect(result[1]!.imap_password).toBe("secret-password");
+      expect(result[0]?.provider).toBe("gmail_api");
+      expect(result[0]?.access_token).toBe("access-token");
+      expect(result[1]?.provider).toBe("imap");
+      expect(result[1]?.imap_password).toBe("secret-password");
     });
 
     it("returns empty array when no accounts exist", async () => {
@@ -135,7 +135,7 @@ describe("accounts", () => {
 
       const result = await getAllAccounts();
 
-      expect(result[0]!.imap_password).toBe("secret-password");
+      expect(result[0]?.imap_password).toBe("secret-password");
     });
   });
 

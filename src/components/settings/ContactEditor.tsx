@@ -23,7 +23,7 @@ export function ContactEditor() {
   useEffect(() => {
     loadContacts();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadContacts is stable (no deps), run once on mount
-  }, []);
+  }, [loadContacts]);
 
   const filtered = useMemo(() => {
     if (!search) return contacts;
@@ -92,7 +92,6 @@ export function ContactEditor() {
                       if (e.key === "Escape") setEditingId(null);
                     }}
                     className="flex-1 min-w-0 px-2 py-0.5 bg-bg-tertiary border border-border-primary rounded text-sm text-text-primary outline-none focus:border-accent"
-                    autoFocus
                     placeholder={t("contactEditor.displayName")}
                   />
                   <button

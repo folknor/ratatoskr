@@ -153,7 +153,7 @@ export function MoveToFolderDialog({
         onClose();
       }
     },
-    [filtered, selectedIdx, handleSelect, onClose],
+    [filtered, selectedIdx, handleSelect, onClose, scrollToIndex],
   );
 
   const scrollToIndex = (index: number) => {
@@ -204,7 +204,6 @@ export function MoveToFolderDialog({
               }}
               placeholder={t("moveToSearch")}
               className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-tertiary outline-none"
-              autoFocus
             />
           </div>
 

@@ -28,7 +28,7 @@ function parseVerdict(
   const match = normalized.match(regex);
   if (!match) return null;
   return {
-    result: match[1]!.toLowerCase(),
+    result: match[1]?.toLowerCase(),
     detail: match[2]?.trim() ?? null,
   };
 }
@@ -42,7 +42,7 @@ function parseReceivedSpf(headerValue: string): AuthVerdict | null {
   const match = normalized.match(/^(\w+)(?:\s*\(([^)]+)\))?/i);
   if (!match) return null;
   return {
-    result: match[1]!.toLowerCase(),
+    result: match[1]?.toLowerCase(),
     detail: match[2]?.trim() ?? null,
   };
 }
@@ -145,10 +145,10 @@ export function parseAuthenticationResults(
       ...normalized.matchAll(/dkim\s*=\s*(\w+)(?:\s*\(([^)]+)\))?/gi),
     ];
     if (dkimMatches.length > 0) {
-      const hasPass = dkimMatches.some((m) => m[1]!.toLowerCase() === "pass");
+      const hasPass = dkimMatches.some((m) => m[1]?.toLowerCase() === "pass");
       if (hasPass) {
         const passMatch = dkimMatches.find(
-          (m) => m[1]!.toLowerCase() === "pass",
+          (m) => m[1]?.toLowerCase() === "pass",
         );
         dkim = {
           result: "pass",
@@ -157,8 +157,8 @@ export function parseAuthenticationResults(
       } else {
         // Use the first result
         dkim = {
-          result: dkimMatches[0]![1]!.toLowerCase(),
-          detail: dkimMatches[0]![2]?.trim() ?? null,
+          result: dkimMatches[0]?.[1]?.toLowerCase(),
+          detail: dkimMatches[0]?.[2]?.trim() ?? null,
         };
       }
     }

@@ -105,7 +105,7 @@ describe("ContextMenu", () => {
     );
 
     fireEvent.click(screen.getByText("Archive"));
-    expect(baseItems[0]!.action).toHaveBeenCalled();
+    expect(baseItems[0]?.action).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -119,7 +119,7 @@ describe("ContextMenu", () => {
     );
 
     fireEvent.click(screen.getByText("Star"));
-    expect(baseItems[3]!.action).not.toHaveBeenCalled();
+    expect(baseItems[3]?.action).not.toHaveBeenCalled();
   });
 
   it("should apply danger styling", () => {
@@ -177,7 +177,7 @@ describe("ContextMenu", () => {
     fireEvent.keyDown(window, { key: "ArrowDown" });
     // Select
     fireEvent.keyDown(window, { key: "Enter" });
-    expect(baseItems[0]!.action).toHaveBeenCalled();
+    expect(baseItems[0]?.action).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
   });
 

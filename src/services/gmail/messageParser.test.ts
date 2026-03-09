@@ -41,7 +41,7 @@ describe("parseGmailMessage", () => {
 
   it("should detect attachments", () => {
     const withAttachment = createMockGmailMessage();
-    withAttachment.payload.parts!.push({
+    withAttachment.payload.parts?.push({
       partId: "2",
       mimeType: "application/pdf",
       filename: "report.pdf",
@@ -68,7 +68,7 @@ describe("parseGmailMessage", () => {
 
   it("should mark attachment with CID but with filename as not inline", () => {
     const msg = createMockGmailMessage();
-    msg.payload.parts!.push({
+    msg.payload.parts?.push({
       partId: "2",
       mimeType: "application/pdf",
       filename: "report.pdf",
@@ -84,13 +84,13 @@ describe("parseGmailMessage", () => {
 
     const parsed = parseGmailMessage(msg);
     expect(parsed.attachments).toHaveLength(1);
-    expect(parsed.attachments[0]!.isInline).toBe(false);
-    expect(parsed.attachments[0]!.contentId).toBe("part1.abc@example.com");
+    expect(parsed.attachments[0]?.isInline).toBe(false);
+    expect(parsed.attachments[0]?.contentId).toBe("part1.abc@example.com");
   });
 
   it("should mark CID image without filename as inline", () => {
     const msg = createMockGmailMessage();
-    msg.payload.parts!.push({
+    msg.payload.parts?.push({
       partId: "2",
       mimeType: "image/png",
       filename: "",
@@ -103,12 +103,12 @@ describe("parseGmailMessage", () => {
 
     const parsed = parseGmailMessage(msg);
     expect(parsed.attachments).toHaveLength(1);
-    expect(parsed.attachments[0]!.isInline).toBe(true);
+    expect(parsed.attachments[0]?.isInline).toBe(true);
   });
 
   it("should mark named file with inline disposition as not inline", () => {
     const msg = createMockGmailMessage();
-    msg.payload.parts!.push({
+    msg.payload.parts?.push({
       partId: "2",
       mimeType: "image/jpeg",
       filename: "photo.jpg",
@@ -120,7 +120,7 @@ describe("parseGmailMessage", () => {
 
     const parsed = parseGmailMessage(msg);
     expect(parsed.attachments).toHaveLength(1);
-    expect(parsed.attachments[0]!.isInline).toBe(false);
+    expect(parsed.attachments[0]?.isInline).toBe(false);
   });
 
   it("should preserve label IDs", () => {

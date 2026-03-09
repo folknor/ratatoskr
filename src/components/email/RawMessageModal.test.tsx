@@ -48,7 +48,7 @@ describe("RawMessageModal", () => {
     await waitFor(() => {
       const pre = document.querySelector("pre");
       expect(pre).not.toBeNull();
-      expect(pre!.textContent).toBe(rawSource);
+      expect(pre?.textContent).toBe(rawSource);
     });
   });
 

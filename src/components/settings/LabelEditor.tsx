@@ -19,7 +19,7 @@ export function LabelEditor() {
       loadLabels(activeAccountId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadLabels is a stable store function, only re-run on activeAccountId change
-  }, [activeAccountId]);
+  }, [activeAccountId, loadLabels]);
 
   const resetForm = useCallback(() => {
     setEditingId(null);

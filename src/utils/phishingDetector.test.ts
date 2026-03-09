@@ -49,14 +49,14 @@ describe("Rule: IP Address URLs", () => {
     const result = analyzeLink("http://192.168.1.1/login", "Click here");
     const rule = result.triggeredRules.find((r) => r.ruleId === "ip-address");
     expect(rule).toBeDefined();
-    expect(rule!.score).toBe(40);
+    expect(rule?.score).toBe(40);
   });
 
   it("detects IPv6 address (bracket notation)", () => {
     const result = analyzeLink("http://[::1]/path", "Click here");
     const rule = result.triggeredRules.find((r) => r.ruleId === "ip-address");
     expect(rule).toBeDefined();
-    expect(rule!.score).toBe(40);
+    expect(rule?.score).toBe(40);
   });
 
   it("does not flag normal domain", () => {
@@ -73,7 +73,7 @@ describe("Rule: Homograph/Punycode", () => {
     const result = analyzeLink("https://xn--pple-43d.com/account", "Apple");
     const rule = result.triggeredRules.find((r) => r.ruleId === "homograph");
     expect(rule).toBeDefined();
-    expect(rule!.score).toBe(50);
+    expect(rule?.score).toBe(50);
   });
 
   it("does not flag normal ASCII domain", () => {
@@ -92,7 +92,7 @@ describe("Rule: Suspicious TLDs", () => {
       (r) => r.ruleId === "suspicious-tld",
     );
     expect(rule).toBeDefined();
-    expect(rule!.score).toBe(35);
+    expect(rule?.score).toBe(35);
   });
 
   it("detects tier 2 TLD (.xyz) with 20 points", () => {
@@ -101,7 +101,7 @@ describe("Rule: Suspicious TLDs", () => {
       (r) => r.ruleId === "suspicious-tld",
     );
     expect(rule).toBeDefined();
-    expect(rule!.score).toBe(20);
+    expect(rule?.score).toBe(20);
   });
 
   it("detects tier 3 TLD (.info) with 10 points", () => {
@@ -110,7 +110,7 @@ describe("Rule: Suspicious TLDs", () => {
       (r) => r.ruleId === "suspicious-tld",
     );
     expect(rule).toBeDefined();
-    expect(rule!.score).toBe(10);
+    expect(rule?.score).toBe(10);
   });
 
   it("does not flag common TLDs like .com", () => {
@@ -134,7 +134,7 @@ describe("Rule: Display vs Href Mismatch", () => {
       (r) => r.ruleId === "display-mismatch",
     );
     expect(rule).toBeDefined();
-    expect(rule!.score).toBe(60);
+    expect(rule?.score).toBe(60);
   });
 
   it("detects mismatch when display text is a bare domain", () => {
@@ -143,7 +143,7 @@ describe("Rule: Display vs Href Mismatch", () => {
       (r) => r.ruleId === "display-mismatch",
     );
     expect(rule).toBeDefined();
-    expect(rule!.score).toBe(60);
+    expect(rule?.score).toBe(60);
   });
 
   it("does not flag when display text is not URL-like", () => {
@@ -175,7 +175,7 @@ describe("Rule: Excessive Subdomains", () => {
       (r) => r.ruleId === "excessive-subdomains",
     );
     expect(rule).toBeDefined();
-    expect(rule!.score).toBe(25);
+    expect(rule?.score).toBe(25);
   });
 
   it("does not flag hostname with 3 dots or fewer", () => {
@@ -196,7 +196,7 @@ describe("Rule: URL Shorteners", () => {
       (r) => r.ruleId === "url-shortener",
     );
     expect(rule).toBeDefined();
-    expect(rule!.score).toBe(15);
+    expect(rule?.score).toBe(15);
   });
 
   it("detects t.co", () => {
@@ -225,7 +225,7 @@ describe("Rule: Suspicious Path Keywords", () => {
       (r) => r.ruleId === "suspicious-keywords",
     );
     expect(rule).toBeDefined();
-    expect(rule!.score).toBe(15);
+    expect(rule?.score).toBe(15);
   });
 
   it("detects 'password' in query string", () => {
@@ -257,7 +257,7 @@ describe("Rule: Dangerous URI Schemes", () => {
       (r) => r.ruleId === "dangerous-protocol",
     );
     expect(rule).toBeDefined();
-    expect(rule!.score).toBe(70);
+    expect(rule?.score).toBe(70);
   });
 
   it("detects javascript: URI", () => {
@@ -266,7 +266,7 @@ describe("Rule: Dangerous URI Schemes", () => {
       (r) => r.ruleId === "dangerous-protocol",
     );
     expect(rule).toBeDefined();
-    expect(rule!.score).toBe(70);
+    expect(rule?.score).toBe(70);
   });
 
   it("detects vbscript: URI", () => {
@@ -303,7 +303,7 @@ describe("Rule: URL Obfuscation", () => {
       (r) => r.ruleId === "url-obfuscation",
     );
     expect(rule).toBeDefined();
-    expect(rule!.score).toBe(45);
+    expect(rule?.score).toBe(45);
   });
 
   it("detects percent-encoded hostname", () => {
@@ -312,7 +312,7 @@ describe("Rule: URL Obfuscation", () => {
       (r) => r.ruleId === "url-obfuscation",
     );
     expect(rule).toBeDefined();
-    expect(rule!.score).toBe(45);
+    expect(rule?.score).toBe(45);
   });
 
   it("does not flag normal URLs", () => {
@@ -336,7 +336,7 @@ describe("Rule: Brand Impersonation", () => {
       (r) => r.ruleId === "brand-impersonation",
     );
     expect(rule).toBeDefined();
-    expect(rule!.score).toBe(50);
+    expect(rule?.score).toBe(50);
   });
 
   it("detects brand in path with different domain", () => {
@@ -345,7 +345,7 @@ describe("Rule: Brand Impersonation", () => {
       (r) => r.ruleId === "brand-impersonation",
     );
     expect(rule).toBeDefined();
-    expect(rule!.score).toBe(50);
+    expect(rule?.score).toBe(50);
   });
 
   it("does not flag actual brand domain", () => {
@@ -370,7 +370,7 @@ describe("Rule: Brand Impersonation", () => {
       (r) => r.ruleId === "brand-impersonation",
     );
     expect(rule).toBeDefined();
-    expect(rule!.score).toBe(50);
+    expect(rule?.score).toBe(50);
   });
 
   it("detects brand in lookalike domain (microsoft-verify.com)", () => {
@@ -449,7 +449,7 @@ describe("scanLinksInHtml", () => {
     const mismatchLink = results[1];
     expect(mismatchLink).toBeDefined();
     expect(
-      mismatchLink!.triggeredRules.some((r) => r.ruleId === "display-mismatch"),
+      mismatchLink?.triggeredRules.some((r) => r.ruleId === "display-mismatch"),
     ).toBe(true);
   });
 
@@ -460,7 +460,7 @@ describe("scanLinksInHtml", () => {
     `;
     const results = scanLinksInHtml(html);
     expect(results).toHaveLength(1);
-    expect(results[0]!.url).toBe("https://example.com");
+    expect(results[0]?.url).toBe("https://example.com");
   });
 
   it("skips # fragment links", () => {
@@ -485,7 +485,7 @@ describe("scanLinksInHtml", () => {
     const results = scanLinksInHtml(html);
     expect(results).toHaveLength(1);
     expect(
-      results[0]!.triggeredRules.some((r) => r.ruleId === "dangerous-protocol"),
+      results[0]?.triggeredRules.some((r) => r.ruleId === "dangerous-protocol"),
     ).toBe(true);
   });
 });

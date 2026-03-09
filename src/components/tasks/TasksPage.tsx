@@ -161,7 +161,7 @@ export function TasksPage() {
           key = "";
       }
       if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(task);
+      groups.get(key)?.push(task);
     }
 
     // Sort groups by priority order if grouping by priority

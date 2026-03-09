@@ -164,12 +164,12 @@ describe("mapSmartFolderRows", () => {
     const result = await mapSmartFolderRows([makeRow()]);
 
     expect(result).toHaveLength(1);
-    expect(result[0]!.isRead).toBe(true);
-    expect(result[0]!.isStarred).toBe(true);
-    expect(result[0]!.isPinned).toBe(true);
-    expect(result[0]!.isMuted).toBe(false);
-    expect(result[0]!.hasAttachments).toBe(true);
-    expect(result[0]!.messageCount).toBe(3);
+    expect(result[0]?.isRead).toBe(true);
+    expect(result[0]?.isStarred).toBe(true);
+    expect(result[0]?.isPinned).toBe(true);
+    expect(result[0]?.isMuted).toBe(false);
+    expect(result[0]?.hasAttachments).toBe(true);
+    expect(result[0]?.messageCount).toBe(3);
   });
 
   it("maps unread thread correctly", async () => {
@@ -194,11 +194,11 @@ describe("mapSmartFolderRows", () => {
 
     const result = await mapSmartFolderRows([makeRow()]);
 
-    expect(result[0]!.isRead).toBe(false);
-    expect(result[0]!.isStarred).toBe(false);
-    expect(result[0]!.isPinned).toBe(false);
-    expect(result[0]!.isMuted).toBe(true);
-    expect(result[0]!.hasAttachments).toBe(false);
+    expect(result[0]?.isRead).toBe(false);
+    expect(result[0]?.isStarred).toBe(false);
+    expect(result[0]?.isPinned).toBe(false);
+    expect(result[0]?.isMuted).toBe(true);
+    expect(result[0]?.hasAttachments).toBe(false);
   });
 
   it("defaults to safe values when thread not found in DB", async () => {
@@ -206,12 +206,12 @@ describe("mapSmartFolderRows", () => {
 
     const result = await mapSmartFolderRows([makeRow()]);
 
-    expect(result[0]!.isRead).toBe(false);
-    expect(result[0]!.isStarred).toBe(false);
-    expect(result[0]!.isPinned).toBe(false);
-    expect(result[0]!.isMuted).toBe(false);
-    expect(result[0]!.hasAttachments).toBe(false);
-    expect(result[0]!.messageCount).toBe(1);
+    expect(result[0]?.isRead).toBe(false);
+    expect(result[0]?.isStarred).toBe(false);
+    expect(result[0]?.isPinned).toBe(false);
+    expect(result[0]?.isMuted).toBe(false);
+    expect(result[0]?.hasAttachments).toBe(false);
+    expect(result[0]?.messageCount).toBe(1);
   });
 
   it("deduplicates rows by thread_id", async () => {
@@ -224,8 +224,8 @@ describe("mapSmartFolderRows", () => {
     const result = await mapSmartFolderRows(rows);
 
     expect(result).toHaveLength(2);
-    expect(result[0]!.id).toBe("thread-1");
-    expect(result[1]!.id).toBe("thread-2");
+    expect(result[0]?.id).toBe("thread-1");
+    expect(result[1]?.id).toBe("thread-2");
   });
 
   it("includes label IDs from getThreadLabelIds", async () => {
@@ -233,7 +233,7 @@ describe("mapSmartFolderRows", () => {
 
     const result = await mapSmartFolderRows([makeRow()]);
 
-    expect(result[0]!.labelIds).toEqual(["INBOX", "Label_1"]);
+    expect(result[0]?.labelIds).toEqual(["INBOX", "Label_1"]);
   });
 
   it("preserves search result metadata (subject, snippet, date, from)", async () => {
@@ -247,10 +247,10 @@ describe("mapSmartFolderRows", () => {
 
     const result = await mapSmartFolderRows([row]);
 
-    expect(result[0]!.subject).toBe("Important meeting");
-    expect(result[0]!.snippet).toBe("Please join...");
-    expect(result[0]!.lastMessageAt).toBe(1700000000);
-    expect(result[0]!.fromName).toBe("Carol");
-    expect(result[0]!.fromAddress).toBe("carol@example.com");
+    expect(result[0]?.subject).toBe("Important meeting");
+    expect(result[0]?.snippet).toBe("Please join...");
+    expect(result[0]?.lastMessageAt).toBe(1700000000);
+    expect(result[0]?.fromName).toBe("Carol");
+    expect(result[0]?.fromAddress).toBe("carol@example.com");
   });
 });

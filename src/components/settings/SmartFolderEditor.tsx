@@ -33,7 +33,7 @@ export function SmartFolderEditor() {
   useEffect(() => {
     loadFolders();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadFolders is stable, only re-run on activeAccountId change
-  }, [activeAccountId]);
+  }, [loadFolders]);
 
   const resetForm = useCallback(() => {
     setName("");

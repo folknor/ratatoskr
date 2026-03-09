@@ -131,7 +131,7 @@ function collectAttachments(
       (h) => h.name.toLowerCase() === "content-disposition",
     );
     const hasFilename = part.filename && part.filename.length > 0;
-    const hasCid = !!contentIdHeader?.value;
+    const hasCid = Boolean(contentIdHeader?.value);
     const isInline =
       contentDisposition?.value?.toLowerCase().startsWith("inline") ?? false;
 
@@ -165,7 +165,7 @@ function decodeBase64Url(data: string): string {
     return decodeURIComponent(
       atob(base64)
         .split("")
-        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .map((c) => `%${(`00${c.charCodeAt(0).toString(16)}`).slice(-2)}`)
         .join(""),
     );
   } catch {

@@ -288,7 +288,6 @@ export function ContactSidebar({
                   if (e.key === "Enter") handleSaveEditName();
                   if (e.key === "Escape") setEditingName(false);
                 }}
-                autoFocus
                 className="w-36 text-sm text-center bg-bg-primary border border-border-primary rounded px-1.5 py-0.5 text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
               />
               <button

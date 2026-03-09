@@ -123,7 +123,7 @@ describe("classifyThreadsBySmartLabels", () => {
     await classifyThreadsBySmartLabels(threads, labelRules);
 
     expect(mockComplete).toHaveBeenCalledTimes(1);
-    const callArgs = mockComplete.mock.calls[0]![0] as { userContent: string };
+    const callArgs = mockComplete.mock.calls[0]?.[0] as { userContent: string };
     expect(callArgs.userContent).toContain("label-jobs");
     expect(callArgs.userContent).toContain("Job applications");
     expect(callArgs.userContent).toContain("t1");

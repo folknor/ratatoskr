@@ -88,7 +88,7 @@ export function parseVEvent(
     if (!nameWithParams) continue;
     const value = valueParts.join(":");
     const nameParts = nameWithParams.split(";");
-    const propName = nameParts[0]!.toUpperCase();
+    const propName = nameParts[0]?.toUpperCase();
     const params = nameParts.slice(1).join(";").toUpperCase();
 
     switch (propName) {

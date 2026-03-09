@@ -41,32 +41,29 @@ export function ScheduleSendDialog({
   const presets = [
     {
       label: t("tomorrowMorning"),
-      detail:
-        tomorrowMorning.toLocaleDateString(undefined, {
-          weekday: "short",
-          month: "short",
-          day: "numeric",
-        }) + " 9:00 AM",
+      detail: `${tomorrowMorning.toLocaleDateString(undefined, {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      })} 9:00 AM`,
       timestamp: Math.floor(tomorrowMorning.getTime() / 1000),
     },
     {
       label: t("tomorrowAfternoon"),
-      detail:
-        tomorrowAfternoon.toLocaleDateString(undefined, {
-          weekday: "short",
-          month: "short",
-          day: "numeric",
-        }) + " 1:00 PM",
+      detail: `${tomorrowAfternoon.toLocaleDateString(undefined, {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      })} 1:00 PM`,
       timestamp: Math.floor(tomorrowAfternoon.getTime() / 1000),
     },
     {
       label: t("mondayMorning"),
-      detail:
-        monday.toLocaleDateString(undefined, {
-          weekday: "short",
-          month: "short",
-          day: "numeric",
-        }) + " 9:00 AM",
+      detail: `${monday.toLocaleDateString(undefined, {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      })} 9:00 AM`,
       timestamp: Math.floor(monday.getTime() / 1000),
     },
   ];

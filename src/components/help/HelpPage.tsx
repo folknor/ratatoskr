@@ -51,7 +51,7 @@ export function HelpPage() {
       if (!groups[card.categoryId]) {
         groups[card.categoryId] = [];
       }
-      groups[card.categoryId]!.push(card);
+      groups[card.categoryId]?.push(card);
     }
     return groups;
   }, [searchResults]);

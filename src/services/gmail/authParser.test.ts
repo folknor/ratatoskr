@@ -17,10 +17,10 @@ describe("parseAuthenticationResults", () => {
 
     const result = parseAuthenticationResults(headers);
     expect(result).not.toBeNull();
-    expect(result!.spf.result).toBe("pass");
-    expect(result!.dkim.result).toBe("pass");
-    expect(result!.dmarc.result).toBe("pass");
-    expect(result!.aggregate).toBe("pass");
+    expect(result?.spf.result).toBe("pass");
+    expect(result?.dkim.result).toBe("pass");
+    expect(result?.dmarc.result).toBe("pass");
+    expect(result?.aggregate).toBe("pass");
   });
 
   it("should return aggregate fail when DMARC fails", () => {
@@ -31,8 +31,8 @@ describe("parseAuthenticationResults", () => {
 
     const result = parseAuthenticationResults(headers);
     expect(result).not.toBeNull();
-    expect(result!.dmarc.result).toBe("fail");
-    expect(result!.aggregate).toBe("fail");
+    expect(result?.dmarc.result).toBe("fail");
+    expect(result?.aggregate).toBe("fail");
   });
 
   it("should return aggregate fail when both SPF and DKIM fail", () => {
@@ -43,9 +43,9 @@ describe("parseAuthenticationResults", () => {
 
     const result = parseAuthenticationResults(headers);
     expect(result).not.toBeNull();
-    expect(result!.spf.result).toBe("fail");
-    expect(result!.dkim.result).toBe("fail");
-    expect(result!.aggregate).toBe("fail");
+    expect(result?.spf.result).toBe("fail");
+    expect(result?.dkim.result).toBe("fail");
+    expect(result?.aggregate).toBe("fail");
   });
 
   it("should return aggregate warning for SPF softfail with others pass", () => {
@@ -56,9 +56,9 @@ describe("parseAuthenticationResults", () => {
 
     const result = parseAuthenticationResults(headers);
     expect(result).not.toBeNull();
-    expect(result!.spf.result).toBe("softfail");
-    expect(result!.dkim.result).toBe("pass");
-    expect(result!.aggregate).toBe("warning");
+    expect(result?.spf.result).toBe("softfail");
+    expect(result?.dkim.result).toBe("pass");
+    expect(result?.aggregate).toBe("warning");
   });
 
   it("should return aggregate warning for mixed results", () => {
@@ -69,7 +69,7 @@ describe("parseAuthenticationResults", () => {
 
     const result = parseAuthenticationResults(headers);
     expect(result).not.toBeNull();
-    expect(result!.aggregate).toBe("warning");
+    expect(result?.aggregate).toBe("warning");
   });
 
   it("should fallback to ARC-Authentication-Results", () => {
@@ -80,10 +80,10 @@ describe("parseAuthenticationResults", () => {
 
     const result = parseAuthenticationResults(headers);
     expect(result).not.toBeNull();
-    expect(result!.spf.result).toBe("pass");
-    expect(result!.dkim.result).toBe("pass");
-    expect(result!.dmarc.result).toBe("pass");
-    expect(result!.aggregate).toBe("pass");
+    expect(result?.spf.result).toBe("pass");
+    expect(result?.dkim.result).toBe("pass");
+    expect(result?.dmarc.result).toBe("pass");
+    expect(result?.aggregate).toBe("pass");
   });
 
   it("should fallback to Received-SPF for SPF only", () => {
@@ -95,10 +95,10 @@ describe("parseAuthenticationResults", () => {
 
     const result = parseAuthenticationResults(headers);
     expect(result).not.toBeNull();
-    expect(result!.spf.result).toBe("pass");
-    expect(result!.spf.detail).toContain("google.com");
-    expect(result!.dkim.result).toBe("unknown");
-    expect(result!.dmarc.result).toBe("unknown");
+    expect(result?.spf.result).toBe("pass");
+    expect(result?.spf.detail).toContain("google.com");
+    expect(result?.dkim.result).toBe("unknown");
+    expect(result?.dmarc.result).toBe("unknown");
   });
 
   it("should return null when no auth headers exist", () => {
@@ -120,8 +120,8 @@ describe("parseAuthenticationResults", () => {
 
     const result = parseAuthenticationResults(headers);
     expect(result).not.toBeNull();
-    expect(result!.dkim.result).toBe("pass");
-    expect(result!.aggregate).toBe("pass");
+    expect(result?.dkim.result).toBe("pass");
+    expect(result?.aggregate).toBe("pass");
   });
 
   it("should handle malformed header gracefully", () => {
@@ -133,10 +133,10 @@ describe("parseAuthenticationResults", () => {
     const result = parseAuthenticationResults(headers);
     expect(result).not.toBeNull();
     // All should be unknown since nothing could be parsed
-    expect(result!.spf.result).toBe("unknown");
-    expect(result!.dkim.result).toBe("unknown");
-    expect(result!.dmarc.result).toBe("unknown");
-    expect(result!.aggregate).toBe("unknown");
+    expect(result?.spf.result).toBe("unknown");
+    expect(result?.dkim.result).toBe("unknown");
+    expect(result?.dmarc.result).toBe("unknown");
+    expect(result?.aggregate).toBe("unknown");
   });
 
   it("should return aggregate pass when DMARC passes alone", () => {
@@ -147,8 +147,8 @@ describe("parseAuthenticationResults", () => {
 
     const result = parseAuthenticationResults(headers);
     expect(result).not.toBeNull();
-    expect(result!.dmarc.result).toBe("pass");
-    expect(result!.aggregate).toBe("pass");
+    expect(result?.dmarc.result).toBe("pass");
+    expect(result?.aggregate).toBe("pass");
   });
 
   it("should handle headers with extra whitespace and newlines", () => {
@@ -160,10 +160,10 @@ describe("parseAuthenticationResults", () => {
 
     const result = parseAuthenticationResults(headers);
     expect(result).not.toBeNull();
-    expect(result!.spf.result).toBe("pass");
-    expect(result!.dkim.result).toBe("pass");
-    expect(result!.dmarc.result).toBe("pass");
-    expect(result!.aggregate).toBe("pass");
+    expect(result?.spf.result).toBe("pass");
+    expect(result?.dkim.result).toBe("pass");
+    expect(result?.dmarc.result).toBe("pass");
+    expect(result?.aggregate).toBe("pass");
   });
 
   it("should extract parenthetical detail for SPF", () => {
@@ -175,7 +175,7 @@ describe("parseAuthenticationResults", () => {
 
     const result = parseAuthenticationResults(headers);
     expect(result).not.toBeNull();
-    expect(result!.spf.detail).toContain("domain of sender@example.com");
+    expect(result?.spf.detail).toContain("domain of sender@example.com");
   });
 
   it("should prefer Authentication-Results over ARC-Authentication-Results", () => {
@@ -192,7 +192,7 @@ describe("parseAuthenticationResults", () => {
 
     const result = parseAuthenticationResults(headers);
     expect(result).not.toBeNull();
-    expect(result!.aggregate).toBe("pass");
+    expect(result?.aggregate).toBe("pass");
   });
 
   it("should return aggregate pass when SPF and DKIM both pass but DMARC is unknown", () => {
@@ -203,10 +203,10 @@ describe("parseAuthenticationResults", () => {
 
     const result = parseAuthenticationResults(headers);
     expect(result).not.toBeNull();
-    expect(result!.spf.result).toBe("pass");
-    expect(result!.dkim.result).toBe("pass");
-    expect(result!.dmarc.result).toBe("unknown");
-    expect(result!.aggregate).toBe("pass");
+    expect(result?.spf.result).toBe("pass");
+    expect(result?.dkim.result).toBe("pass");
+    expect(result?.dmarc.result).toBe("unknown");
+    expect(result?.aggregate).toBe("pass");
   });
 
   it("should handle Received-SPF with softfail result", () => {
@@ -217,7 +217,7 @@ describe("parseAuthenticationResults", () => {
 
     const result = parseAuthenticationResults(headers);
     expect(result).not.toBeNull();
-    expect(result!.spf.result).toBe("softfail");
-    expect(result!.spf.detail).toBe("transitioning domain");
+    expect(result?.spf.result).toBe("softfail");
+    expect(result?.spf.detail).toBe("transitioning domain");
   });
 });
