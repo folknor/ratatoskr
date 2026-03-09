@@ -66,11 +66,12 @@ export async function getThreadsForCategory(
 export async function getThreadById(
   accountId: string,
   threadId: string,
-): Promise<DbThread | null> {
-  return invoke<DbThread | null>("db_get_thread_by_id", {
+): Promise<DbThread | undefined> {
+  const row = await invoke<DbThread | null>("db_get_thread_by_id", {
     accountId,
     threadId,
   });
+  return row ?? undefined;
 }
 
 export async function getThreadLabelIds(

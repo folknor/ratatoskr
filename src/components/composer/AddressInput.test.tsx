@@ -2,9 +2,9 @@ import { fireEvent, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AddressInput } from "./AddressInput";
 
-// Mock the contacts search
+// Mock the Rust DB backend (searchContacts is now routed through rustDb)
 const mockSearchContacts = vi.fn().mockResolvedValue([]);
-vi.mock("@/services/db/contacts", () => ({
+vi.mock("@/core/rustDb", () => ({
   searchContacts: (...args: unknown[]) => mockSearchContacts(...args),
 }));
 

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAccountStore } from "@/stores/accountStore";
 import { SmartLabelEditor } from "./SmartLabelEditor";
 
-vi.mock("@/services/db/labels", () => ({
+vi.mock("@/core/rustDb", () => ({
   getLabelsForAccount: vi.fn(() =>
     Promise.resolve([
       { id: "label-work", name: "Work", type: "user", account_id: "acc1" },

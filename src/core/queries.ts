@@ -3,12 +3,41 @@
  *
  * UI code (components, hooks, stores) should import from here
  * instead of reaching into @/services/db/* directly.
+ *
+ * Functions backed by Rust commands are imported from ./rustDb;
+ * everything else still routes through the TS service layer.
  */
 
 import { getDb } from "@/services/db/connection";
 
-// ── Attachments ──────────────────────────────────────────────
+// ── Rust-backed queries (invoke → Rust commands) ────────────
+export {
+  getAllSettings,
+  getContactByEmail,
+  getLabelsForAccount,
+  getMessagesForThread,
+  getSetting,
+  getThreadById,
+  getThreadCount,
+  getThreadLabelIds,
+  getThreadsForAccount,
+  getThreadsForCategory,
+  getUnreadCount,
+  searchContacts,
+  setSetting,
+} from "./rustDb";
+
+// Re-export Rust-backed category helpers (return Map, same API)
+export {
+  getCategoriesForThreads,
+  getCategoryUnreadCounts,
+} from "./rustDb";
+
+// ── Types (canonical TS definitions) ────────────────────────
 export type { DbAttachment } from "@/services/db/attachments";
+export type { DbContact } from "@/services/db/contacts";
+export type { DbLabel } from "@/services/db/labels";
+export type { DbMessage } from "@/services/db/messages";
 
 // ── Bundle Rules ─────────────────────────────────────────────
 export {
@@ -18,21 +47,18 @@ export {
   getHeldThreadIds,
 } from "@/services/db/bundleRules";
 
-// ── Contacts ─────────────────────────────────────────────────
+// ── Contacts (remaining TS-only functions) ───────────────────
 export {
   type ContactAttachment,
   type ContactStats,
-  type DbContact,
   deleteContact,
   getAllContacts,
   getAttachmentsFromContact,
-  getContactByEmail,
   getContactStats,
   getContactsFromSameDomain,
   getLatestAuthResult,
   getRecentThreadsWithContact,
   type SameDomainContact,
-  searchContacts,
   updateContact,
   updateContactNotes,
   upsertContact,
@@ -63,18 +89,6 @@ export {
   getAllowlistedSenders,
 } from "@/services/db/imageAllowlist";
 
-// ── Labels ───────────────────────────────────────────────────
-export {
-  type DbLabel,
-  getLabelsForAccount,
-} from "@/services/db/labels";
-
-// ── Messages ─────────────────────────────────────────────────
-export {
-  type DbMessage,
-  getMessagesForThread,
-} from "@/services/db/messages";
-
 // ── Notification VIPs ────────────────────────────────────────
 export {
   addVipSender,
@@ -104,9 +118,6 @@ export {
 // ── Search ───────────────────────────────────────────────────
 export { searchMessages } from "@/services/db/search";
 
-// ── Settings ─────────────────────────────────────────────────
-export { getSetting } from "@/services/db/settings";
-
 // ── Smart Folders ────────────────────────────────────────────
 export {
   type DbSmartFolder,
@@ -127,21 +138,11 @@ export {
   updateSmartLabelRule,
 } from "@/services/db/smartLabelRules";
 
-// ── Thread Categories ────────────────────────────────────────
-export {
-  ALL_CATEGORIES,
-  getCategoriesForThreads,
-  getCategoryUnreadCounts,
-} from "@/services/db/threadCategories";
+// ── Thread Categories (constant) ────────────────────────────
+export { ALL_CATEGORIES } from "@/services/db/threadCategories";
 
-// ── Threads ──────────────────────────────────────────────────
-export {
-  deleteThread,
-  getThreadById,
-  getThreadLabelIds,
-  getThreadsForAccount,
-  getThreadsForCategory,
-} from "@/services/db/threads";
+// ── Threads (TS-only — deleteThread has no rustDb wrapper yet) ──
+export { deleteThread } from "@/services/db/threads";
 
 // ── Auth Results (email authentication) ─────────────────────
 export {

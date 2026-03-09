@@ -17,6 +17,14 @@ const mockContact: DbContact = {
   notes: "Important client",
 };
 
+// Rust-backed functions (routed through @/core/rustDb)
+vi.mock("@/core/rustDb", () => ({
+  getContactByEmail: vi.fn(() => Promise.resolve(null)),
+  getThreadById: vi.fn(),
+  getThreadLabelIds: vi.fn(),
+}));
+
+// TS-only contact functions (still in @/services/db/contacts)
 vi.mock("@/services/db/contacts", () => ({
   getContactByEmail: vi.fn(() => Promise.resolve(null)),
   getContactStats: vi.fn(() =>
@@ -45,11 +53,6 @@ vi.mock("@/services/contacts/gravatar", () => ({
   fetchAndCacheGravatarUrl: vi.fn(() => Promise.resolve(null)),
 }));
 
-vi.mock("@/services/db/threads", () => ({
-  getThreadById: vi.fn(),
-  getThreadLabelIds: vi.fn(),
-}));
-
 vi.mock("@/router/navigate", () => ({
   navigateToThread: vi.fn(),
 }));
@@ -60,9 +63,9 @@ vi.mock("@/utils/fileTypeHelpers", () => ({
 }));
 
 // Import mocked modules to configure per-test
+import { getContactByEmail } from "@/core/rustDb";
 import {
   getAttachmentsFromContact,
-  getContactByEmail,
   getContactsFromSameDomain,
   getLatestAuthResult,
 } from "@/services/db/contacts";
