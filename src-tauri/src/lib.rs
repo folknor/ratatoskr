@@ -11,17 +11,19 @@ mod imap;
 mod oauth;
 mod smtp;
 
+#[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
 fn close_splashscreen(app: tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("splashscreen") {
-        let _ = w.close();
+        _ = w.close();
     }
     if let Some(w) = app.get_webview_window("main") {
-        let _ = w.show();
-        let _ = w.set_focus();
+        _ = w.show();
+        _ = w.set_focus();
     }
 }
 
+#[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
 fn set_tray_tooltip(app: tauri::AppHandle, tooltip: String) -> Result<(), String> {
     #[cfg(not(target_os = "linux"))]
@@ -33,13 +35,14 @@ fn set_tray_tooltip(app: tauri::AppHandle, tooltip: String) -> Result<(), String
     }
     #[cfg(target_os = "linux")]
     {
-        let _ = tooltip;
-        let _ = app;
+        _ = tooltip;
+        _ = app;
         log::debug!("set_tray_tooltip is not supported on Linux (KSNI tray)");
         Ok(())
     }
 }
 
+#[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
 fn open_devtools(app: tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
@@ -47,6 +50,7 @@ fn open_devtools(app: tauri::AppHandle) {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Set explicit AUMID on Windows so toast notifications show "Velo"
@@ -56,7 +60,7 @@ pub fn run() {
         use windows::core::w;
         use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
         unsafe {
-            let _ = SetCurrentProcessExplicitAppUserModelID(w!("com.velomail.app"));
+            _ = SetCurrentProcessExplicitAppUserModelID(w!("com.velomail.app"));
         }
     }
 
@@ -64,12 +68,12 @@ pub fn run() {
         // Single instance MUST be first
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-                let _ = window.unminimize();
+                _ = window.show();
+                _ = window.set_focus();
+                _ = window.unminimize();
             }
             // Forward args for deep linking
-            let _ = app.emit("single-instance-args", argv);
+            _ = app.emit("single-instance-args", argv);
         }))
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
@@ -150,13 +154,13 @@ pub fn run() {
                     .on_menu_event(|app, event| match event.id.as_ref() {
                         "show" => {
                             if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
+                                _ = window.show();
+                                _ = window.set_focus();
                             }
                         }
                         "check_mail" => {
                             if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.emit("tray-check-mail", ());
+                                _ = window.emit("tray-check-mail", ());
                             }
                         }
                         "quit" => {
@@ -168,8 +172,8 @@ pub fn run() {
                         if let tauri::tray::TrayIconEvent::DoubleClick { .. } = event {
                             let app = tray.app_handle();
                             if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
+                                _ = window.show();
+                                _ = window.set_focus();
                             }
                         }
                     })
@@ -194,8 +198,8 @@ pub fn run() {
                     let app_handle_show = app_handle.clone();
                     if let Err(e) = tray.add_menu_item("Show Velo", move || {
                         if let Some(window) = app_handle_show.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
+                            _ = window.show();
+                            _ = window.set_focus();
                         }
                     }) {
                         log::warn!("Failed to add tray menu item 'Show Velo': {e}");
@@ -204,7 +208,7 @@ pub fn run() {
                     let app_handle_check = app_handle.clone();
                     if let Err(e) = tray.add_menu_item("Check for Mail", move || {
                         if let Some(window) = app_handle_check.get_webview_window("main") {
-                            let _ = window.emit("tray-check-mail", ());
+                            _ = window.emit("tray-check-mail", ());
                         }
                     }) {
                         log::warn!("Failed to add tray menu item 'Check for Mail': {e}");
@@ -229,18 +233,18 @@ pub fn run() {
             #[cfg(not(target_os = "macos"))]
             {
                 if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.set_decorations(false);
+                    _ = window.set_decorations(false);
                 }
             }
 
             // Start hidden in tray if launched with --hidden (autostart)
             if std::env::args().any(|a| a == "--hidden") {
                 if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.hide();
+                    _ = window.hide();
                 }
                 // Also close splash screen when starting hidden
                 if let Some(splash) = app.get_webview_window("splashscreen") {
-                    let _ = splash.close();
+                    _ = splash.close();
                 }
             }
 
@@ -248,11 +252,11 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             // Minimize to tray on close instead of quitting (main window only)
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
-                    let _ = window.hide();
-                    api.prevent_close();
-                }
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event
+                && window.label() == "main"
+            {
+                _ = window.hide();
+                api.prevent_close();
             }
         })
         .run(tauri::generate_context!())

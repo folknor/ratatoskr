@@ -17,7 +17,7 @@ pub async fn start_oauth_server(port: u16, state: String) -> Result<OAuthResult,
     // Try the requested port, then a few alternatives
     let mut listener = None;
     for p in [port, port + 1, port + 2, port + 3] {
-        match TcpListener::bind(format!("localhost:{}", p)).await {
+        match TcpListener::bind(format!("localhost:{p}")).await {
             Ok(l) => {
                 listener = Some(l);
                 break;
@@ -29,10 +29,10 @@ pub async fn start_oauth_server(port: u16, state: String) -> Result<OAuthResult,
     let listener = listener.ok_or("Failed to bind to any port")?;
     let actual_port = listener
         .local_addr()
-        .map_err(|e| format!("Failed to get addr: {}", e))?
+        .map_err(|e| format!("Failed to get addr: {e}"))?
         .port();
 
-    log::info!("OAuth callback server listening on port {}", actual_port);
+    log::info!("OAuth callback server listening on port {actual_port}");
 
     // Wait for exactly one connection (the redirect from Google) with 5-minute timeout
     let (mut stream, _) = tokio::time::timeout(
@@ -41,14 +41,14 @@ pub async fn start_oauth_server(port: u16, state: String) -> Result<OAuthResult,
     )
     .await
     .map_err(|_| "OAuth timed out — please try again".to_string())?
-    .map_err(|e| format!("Failed to accept: {}", e))?;
+    .map_err(|e| format!("Failed to accept: {e}"))?;
 
     // Read the HTTP request
     let mut buf = vec![0u8; 4096];
     let n = stream
         .read(&mut buf)
         .await
-        .map_err(|e| format!("Failed to read: {}", e))?;
+        .map_err(|e| format!("Failed to read: {e}"))?;
     let request = String::from_utf8_lossy(&buf[..n]);
 
     // Extract query string from GET request line
@@ -71,14 +71,13 @@ pub async fn start_oauth_server(port: u16, state: String) -> Result<OAuthResult,
 </body>
 </html>"#;
 
+    let html_len = html.len();
     let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nConnection: close\r\n\r\n{}",
-        html.len(),
-        html
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {html_len}\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nConnection: close\r\n\r\n{html}"
     );
 
-    let _ = stream.write_all(response.as_bytes()).await;
-    let _ = stream.flush().await;
+    _ = stream.write_all(response.as_bytes()).await;
+    _ = stream.flush().await;
 
     drop(listener);
 
@@ -96,7 +95,7 @@ fn parse_auth_code_and_state(request: &str) -> Result<(String, String), String> 
     if path.contains("error=") {
         let params = parse_query_string(path);
         let error = params.get("error").cloned().unwrap_or_default();
-        return Err(format!("OAuth error: {}", error));
+        return Err(format!("OAuth error: {error}"));
     }
 
     let params = parse_query_string(path);
@@ -129,15 +128,13 @@ fn urlencoding_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(byte) = u8::from_str_radix(
-                &s[i + 1..i + 3],
-                16,
-            ) {
-                result.push(byte);
-                i += 3;
-                continue;
-            }
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let Ok(byte) = u8::from_str_radix(&s[i + 1..i + 3], 16)
+        {
+            result.push(byte);
+            i += 3;
+            continue;
         }
         if bytes[i] == b'+' {
             result.push(b' ');
@@ -179,10 +176,10 @@ pub async fn oauth_exchange_token(
     if let Some(verifier) = code_verifier {
         params.push(("code_verifier", verifier));
     }
-    if let Some(secret) = client_secret {
-        if !secret.is_empty() {
-            params.push(("client_secret", secret));
-        }
+    if let Some(secret) = client_secret
+        && !secret.is_empty()
+    {
+        params.push(("client_secret", secret));
     }
     if let Some(s) = scope {
         params.push(("scope", s));
@@ -194,20 +191,20 @@ pub async fn oauth_exchange_token(
         .form(&params)
         .send()
         .await
-        .map_err(|e| format!("Token exchange request failed: {}", e))?;
+        .map_err(|e| format!("Token exchange request failed: {e}"))?;
 
     if !response.status().is_success() {
         let error = response
             .text()
             .await
             .unwrap_or_else(|_| "Unknown error".to_string());
-        return Err(format!("Token exchange failed: {}", error));
+        return Err(format!("Token exchange failed: {error}"));
     }
 
     response
         .json::<TokenExchangeResult>()
         .await
-        .map_err(|e| format!("Failed to parse token response: {}", e))
+        .map_err(|e| format!("Failed to parse token response: {e}"))
 }
 
 /// Refresh an OAuth token via Rust HTTP client (avoids CORS).
@@ -224,10 +221,10 @@ pub async fn oauth_refresh_token(
         ("client_id", client_id),
         ("grant_type", "refresh_token".to_string()),
     ];
-    if let Some(secret) = client_secret {
-        if !secret.is_empty() {
-            params.push(("client_secret", secret));
-        }
+    if let Some(secret) = client_secret
+        && !secret.is_empty()
+    {
+        params.push(("client_secret", secret));
     }
     if let Some(s) = scope {
         params.push(("scope", s));
@@ -239,18 +236,18 @@ pub async fn oauth_refresh_token(
         .form(&params)
         .send()
         .await
-        .map_err(|e| format!("Token refresh request failed: {}", e))?;
+        .map_err(|e| format!("Token refresh request failed: {e}"))?;
 
     if !response.status().is_success() {
         let error = response
             .text()
             .await
             .unwrap_or_else(|_| "Unknown error".to_string());
-        return Err(format!("Token refresh failed: {}", error));
+        return Err(format!("Token refresh failed: {error}"));
     }
 
     response
         .json::<TokenExchangeResult>()
         .await
-        .map_err(|e| format!("Failed to parse token response: {}", e))
+        .map_err(|e| format!("Failed to parse token response: {e}"))
 }

@@ -17,7 +17,7 @@ pub async fn imap_test_connection(config: ImapConfig) -> Result<String, String> 
 pub async fn imap_list_folders(config: ImapConfig) -> Result<Vec<ImapFolder>, String> {
     let mut session = imap_client::connect(&config).await?;
     let folders = imap_client::list_folders(&mut session).await?;
-    let _ = session.logout().await;
+    drop(session.logout().await);
     Ok(folders)
 }
 
@@ -34,13 +34,13 @@ pub async fn imap_fetch_messages(
     // Build a UID set string like "1,5,10,20"
     let uid_set: String = uids
         .iter()
-        .map(|u| u.to_string())
+        .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join(",");
 
     let mut session = imap_client::connect(&config).await?;
     let result = imap_client::fetch_messages(&mut session, &folder, &uid_set).await;
-    let _ = session.logout().await;
+    drop(session.logout().await);
 
     match result {
         Ok(r) => Ok(r),
@@ -61,7 +61,7 @@ pub async fn imap_fetch_new_uids(
 ) -> Result<Vec<u32>, String> {
     let mut session = imap_client::connect(&config).await?;
     let uids = imap_client::fetch_new_uids(&mut session, &folder, since_uid).await?;
-    let _ = session.logout().await;
+    drop(session.logout().await);
     Ok(uids)
 }
 
@@ -72,7 +72,7 @@ pub async fn imap_search_all_uids(
 ) -> Result<Vec<u32>, String> {
     let mut session = imap_client::connect(&config).await?;
     let uids = imap_client::search_all_uids(&mut session, &folder).await?;
-    let _ = session.logout().await;
+    drop(session.logout().await);
     Ok(uids)
 }
 
@@ -84,7 +84,7 @@ pub async fn imap_fetch_message_body(
 ) -> Result<ImapMessage, String> {
     let mut session = imap_client::connect(&config).await?;
     let message = imap_client::fetch_message_body(&mut session, &folder, uid).await?;
-    let _ = session.logout().await;
+    drop(session.logout().await);
     Ok(message)
 }
 
@@ -96,7 +96,7 @@ pub async fn imap_fetch_raw_message(
 ) -> Result<String, String> {
     let mut session = imap_client::connect(&config).await?;
     let raw = imap_client::fetch_raw_message(&mut session, &folder, uid).await?;
-    let _ = session.logout().await;
+    drop(session.logout().await);
     Ok(raw)
 }
 
@@ -116,7 +116,7 @@ pub async fn imap_set_flags(
 
     let uid_set: String = uids
         .iter()
-        .map(|u| u.to_string())
+        .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join(",");
 
@@ -140,7 +140,7 @@ pub async fn imap_set_flags(
     );
 
     imap_client::set_flags(&mut session, &folder, &uid_set, flag_op, &flags_str).await?;
-    let _ = session.logout().await;
+    drop(session.logout().await);
     Ok(())
 }
 
@@ -159,12 +159,12 @@ pub async fn imap_move_messages(
 
     let uid_set: String = uids
         .iter()
-        .map(|u| u.to_string())
+        .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join(",");
 
     imap_client::move_messages(&mut session, &folder, &uid_set, &destination).await?;
-    let _ = session.logout().await;
+    drop(session.logout().await);
     Ok(())
 }
 
@@ -182,12 +182,12 @@ pub async fn imap_delete_messages(
 
     let uid_set: String = uids
         .iter()
-        .map(|u| u.to_string())
+        .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join(",");
 
     imap_client::delete_messages(&mut session, &folder, &uid_set).await?;
-    let _ = session.logout().await;
+    drop(session.logout().await);
     Ok(())
 }
 
@@ -198,7 +198,7 @@ pub async fn imap_get_folder_status(
 ) -> Result<ImapFolderStatus, String> {
     let mut session = imap_client::connect(&config).await?;
     let status = imap_client::get_folder_status(&mut session, &folder).await?;
-    let _ = session.logout().await;
+    drop(session.logout().await);
     Ok(status)
 }
 
@@ -211,7 +211,7 @@ pub async fn imap_fetch_attachment(
 ) -> Result<String, String> {
     let mut session = imap_client::connect(&config).await?;
     let data = imap_client::fetch_attachment(&mut session, &folder, uid, &part_id).await?;
-    let _ = session.logout().await;
+    drop(session.logout().await);
     Ok(data)
 }
 
@@ -229,7 +229,7 @@ pub async fn imap_append_message(
 
     let flags_ref = flags.as_deref();
     imap_client::append_message(&mut session, &folder, flags_ref, &raw_bytes).await?;
-    let _ = session.logout().await;
+    drop(session.logout().await);
     Ok(())
 }
 
@@ -249,7 +249,7 @@ pub async fn imap_search_folder(
 ) -> Result<ImapFolderSearchResult, String> {
     let mut session = imap_client::connect(&config).await?;
     let result = imap_client::search_folder(&mut session, &folder, since_date).await;
-    let _ = session.logout().await;
+    drop(session.logout().await);
     result
 }
 
@@ -262,7 +262,7 @@ pub async fn imap_sync_folder(
 ) -> Result<ImapFolderSyncResult, String> {
     let mut session = imap_client::connect(&config).await?;
     let result = imap_client::sync_folder(&mut session, &folder, batch_size, since_date).await;
-    let _ = session.logout().await;
+    drop(session.logout().await);
     result
 }
 
@@ -282,7 +282,7 @@ pub async fn imap_delta_check(
 ) -> Result<Vec<DeltaCheckResult>, String> {
     let mut session = imap_client::connect(&config).await?;
     let results = imap_client::delta_check_folders(&mut session, &folders).await?;
-    let _ = session.logout().await;
+    drop(session.logout().await);
     Ok(results)
 }
 

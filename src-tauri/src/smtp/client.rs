@@ -13,7 +13,7 @@ use super::types::{SmtpConfig, SmtpSendResult};
 fn decode_base64url(input: &str) -> Result<Vec<u8>, String> {
     URL_SAFE_NO_PAD
         .decode(input)
-        .map_err(|e| format!("Base64 decode error: {}", e))
+        .map_err(|e| format!("Base64 decode error: {e}"))
 }
 
 /// Build an async SMTP transport from the given config.
@@ -33,7 +33,7 @@ fn build_transport(
         "tls" => {
             // Implicit TLS (typically port 465)
             let mut builder = AsyncSmtpTransport::<Tokio1Executor>::relay(&config.host)
-                .map_err(|e| format!("SMTP relay error: {}", e))?
+                .map_err(|e| format!("SMTP relay error: {e}"))?
                 .port(config.port)
                 .credentials(credentials)
                 .authentication(auth_mechanisms);
@@ -43,7 +43,7 @@ fn build_transport(
                     .dangerous_accept_invalid_certs(true)
                     .dangerous_accept_invalid_hostnames(true)
                     .build()
-                    .map_err(|e| format!("SMTP TLS params error: {}", e))?;
+                    .map_err(|e| format!("SMTP TLS params error: {e}"))?;
                 builder = builder.tls(Tls::Required(tls_params));
             }
 
@@ -52,7 +52,7 @@ fn build_transport(
         "starttls" => {
             // STARTTLS (typically port 587)
             let mut builder = AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&config.host)
-                .map_err(|e| format!("SMTP STARTTLS error: {}", e))?
+                .map_err(|e| format!("SMTP STARTTLS error: {e}"))?
                 .port(config.port)
                 .credentials(credentials)
                 .authentication(auth_mechanisms);
@@ -62,7 +62,7 @@ fn build_transport(
                     .dangerous_accept_invalid_certs(true)
                     .dangerous_accept_invalid_hostnames(true)
                     .build()
-                    .map_err(|e| format!("SMTP TLS params error: {}", e))?;
+                    .map_err(|e| format!("SMTP TLS params error: {e}"))?;
                 builder = builder.tls(Tls::Required(tls_params));
             }
 
@@ -99,37 +99,37 @@ fn extract_envelope(raw: &[u8]) -> Result<lettre::address::Envelope, String> {
 
     let from_addr: lettre::Address = from
         .parse()
-        .map_err(|e| format!("Invalid From address '{}': {}", from, e))?;
+        .map_err(|e| format!("Invalid From address '{from}': {e}"))?;
 
     // Collect all recipient addresses (To, Cc, Bcc)
     let mut recipients: Vec<lettre::Address> = Vec::new();
 
     if let Some(to_list) = message.to() {
         for addr in to_list.iter() {
-            if let Some(email) = addr.address() {
-                if let Ok(a) = email.parse::<lettre::Address>() {
-                    recipients.push(a);
-                }
+            if let Some(email) = addr.address()
+                && let Ok(a) = email.parse::<lettre::Address>()
+            {
+                recipients.push(a);
             }
         }
     }
 
     if let Some(cc_list) = message.cc() {
         for addr in cc_list.iter() {
-            if let Some(email) = addr.address() {
-                if let Ok(a) = email.parse::<lettre::Address>() {
-                    recipients.push(a);
-                }
+            if let Some(email) = addr.address()
+                && let Ok(a) = email.parse::<lettre::Address>()
+            {
+                recipients.push(a);
             }
         }
     }
 
     if let Some(bcc_list) = message.bcc() {
         for addr in bcc_list.iter() {
-            if let Some(email) = addr.address() {
-                if let Ok(a) = email.parse::<lettre::Address>() {
-                    recipients.push(a);
-                }
+            if let Some(email) = addr.address()
+                && let Ok(a) = email.parse::<lettre::Address>()
+            {
+                recipients.push(a);
             }
         }
     }
@@ -139,7 +139,7 @@ fn extract_envelope(raw: &[u8]) -> Result<lettre::address::Envelope, String> {
     }
 
     lettre::address::Envelope::new(Some(from_addr), recipients)
-        .map_err(|e| format!("Envelope error: {}", e))
+        .map_err(|e| format!("Envelope error: {e}"))
 }
 
 /// Send a pre-built RFC 2822 email via SMTP.
@@ -162,7 +162,7 @@ pub async fn send_raw_email(
             success: true,
             message: "Email sent successfully".to_string(),
         })
-        .map_err(|e| format!("SMTP send error: {}", e))
+        .map_err(|e| format!("SMTP send error: {e}"))
 }
 
 /// Test SMTP connectivity by connecting, authenticating, and disconnecting.
@@ -180,7 +180,7 @@ pub async fn test_connection(config: &SmtpConfig) -> Result<SmtpSendResult, Stri
                 "Connection failed".to_string()
             },
         })
-        .map_err(|e| format!("SMTP test error: {}", e))
+        .map_err(|e| format!("SMTP test error: {e}"))
 }
 
 #[cfg(test)]

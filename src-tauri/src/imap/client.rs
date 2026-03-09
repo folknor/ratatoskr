@@ -45,7 +45,7 @@ struct XOAuth2 {
 impl XOAuth2 {
     fn new(user: &str, access_token: &str) -> Self {
         // XOAUTH2 format: "user=" {user} "\x01auth=Bearer " {token} "\x01\x01"
-        let s = format!("user={}\x01auth=Bearer {}\x01\x01", user, access_token);
+        let s = format!("user={user}\x01auth=Bearer {access_token}\x01\x01");
         Self {
             response: s.into_bytes(),
         }
@@ -184,7 +184,7 @@ pub async fn list_folders(session: &mut ImapSession) -> Result<Vec<ImapFolder>, 
         .await
         .map_err(|_| format!("LIST stream timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
         .into_iter()
-        .filter_map(|r| r.ok())
+        .filter_map(Result::ok)
         .collect();
 
     let mut folders = Vec::new();
@@ -297,6 +297,7 @@ pub async fn fetch_messages(
             None => { log::warn!("IMAP FETCH {folder}: UID {uid} has no body"); continue; }
         };
 
+        #[allow(clippy::cast_possible_truncation)]
         let raw_size = raw.len() as u32;
 
         // Parse flags
@@ -345,7 +346,7 @@ pub async fn fetch_message_body(
     .map_err(|_| format!("UID FETCH for UID {uid} timed out after {}s — check your server settings or network connection", IMAP_FETCH_TIMEOUT.as_secs()))?
     ?
     .into_iter()
-    .filter_map(|r| r.ok())
+    .filter_map(Result::ok)
     .collect();
 
     let fetch = fetches
@@ -356,6 +357,7 @@ pub async fn fetch_message_body(
         .body()
         .ok_or_else(|| format!("No body for UID {uid}"))?;
 
+    #[allow(clippy::cast_possible_truncation)]
     let raw_size = raw.len() as u32;
     let flags: Vec<_> = fetch.flags().collect();
     let is_read = flags.iter().any(|f| matches!(f, Flag::Seen));
@@ -590,7 +592,7 @@ pub async fn fetch_attachment(
     .map_err(|_| format!("UID FETCH attachment timed out after {}s — check your server settings or network connection", IMAP_FETCH_TIMEOUT.as_secs()))?
     ?
     .into_iter()
-    .filter_map(|r| r.ok())
+    .filter_map(Result::ok)
     .collect();
 
     let fetch = fetches
@@ -663,7 +665,7 @@ pub async fn fetch_raw_message(
     .map_err(|_| format!("UID FETCH raw message timed out after {}s — check your server settings or network connection", IMAP_FETCH_TIMEOUT.as_secs()))?
     ?
     .into_iter()
-    .filter_map(|r| r.ok())
+    .filter_map(Result::ok)
     .collect();
 
     let fetch = fetches
@@ -855,7 +857,7 @@ pub async fn sync_folder(
     for chunk in uids.chunks(bs) {
         let uid_set: String = chunk
             .iter()
-            .map(|u| u.to_string())
+            .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(",");
 
@@ -881,6 +883,7 @@ pub async fn sync_folder(
                         Some(b) => b,
                         None => { log::warn!("IMAP sync_folder {folder}: UID {uid} has no body"); continue; }
                     };
+                    #[allow(clippy::cast_possible_truncation)]
                     let raw_size = raw.len() as u32;
                     let flags: Vec<_> = f.flags().collect();
                     let is_read = flags.iter().any(|fl| matches!(fl, Flag::Seen));
@@ -923,12 +926,9 @@ pub async fn test_connection(config: &ImapConfig) -> Result<String, String> {
     .map_err(|_| format!("LIST timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
     ?;
 
-    let _ = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.logout()).await;
+    _ = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.logout()).await;
 
-    Ok(format!(
-        "Connected successfully. Found {} folder(s).",
-        count
-    ))
+    Ok(format!("Connected successfully. Found {count} folder(s)."))
 }
 
 /// Raw IMAP fetch: connect via raw TCP/TLS (bypassing async-imap),
@@ -981,15 +981,11 @@ pub async fn raw_fetch_messages(
         if let Some(n) = parse_untagged_number(line, "EXISTS") {
             exists = n;
         }
-        if line.contains("[UIDVALIDITY") {
-            if let Some(v) = extract_bracket_number(line, "UIDVALIDITY") {
-                uidvalidity = v;
-            }
+        if line.contains("[UIDVALIDITY") && let Some(v) = extract_bracket_number(line, "UIDVALIDITY") {
+            uidvalidity = v;
         }
-        if line.contains("[UNSEEN") {
-            if let Some(v) = extract_bracket_number(line, "UNSEEN") {
-                unseen = v;
-            }
+        if line.contains("[UNSEEN") && let Some(v) = extract_bracket_number(line, "UNSEEN") {
+            unseen = v;
         }
     }
 
@@ -1016,12 +1012,14 @@ pub async fn raw_fetch_messages(
     let mut messages = Vec::new();
 
     for raw_msg in &raw_messages {
+        #[allow(clippy::cast_possible_truncation)]
+        let body_size = raw_msg.body.len() as u32;
         match parse_message(
             &parser,
             &raw_msg.body,
             raw_msg.uid,
             folder,
-            raw_msg.body.len() as u32,
+            body_size,
             raw_msg.is_read,
             raw_msg.is_starred,
             raw_msg.is_draft,
@@ -1033,7 +1031,7 @@ pub async fn raw_fetch_messages(
     }
 
     // LOGOUT
-    let _ = reader.get_mut().write_all(b"a4 LOGOUT\r\n").await;
+    _ = reader.get_mut().write_all(b"a4 LOGOUT\r\n").await;
 
     Ok(ImapFetchResult { messages, folder_status })
 }
@@ -1096,7 +1094,7 @@ pub async fn raw_fetch_diagnostic(
     }
     output.push_str(&format!("FETCH response:\n{fetch_response}"));
 
-    let _ = stream.write_all(b"a4 LOGOUT\r\n").await;
+    _ = stream.write_all(b"a4 LOGOUT\r\n").await;
 
     log::info!("RAW IMAP DIAGNOSTIC for {folder}:\n{output}");
 
@@ -1127,7 +1125,7 @@ async fn raw_connect_starttls(config: &ImapConfig) -> Result<ImapStream, String>
         .map_err(|e| format!("TCP: {e}"))?;
     configure_tcp_socket(&tcp);
     let mut tmp = vec![0u8; 4096];
-    let _ = tokio::time::timeout(IMAP_CMD_TIMEOUT, tcp.read(&mut tmp)).await; // consume greeting
+    _ = tokio::time::timeout(IMAP_CMD_TIMEOUT, tcp.read(&mut tmp)).await; // consume greeting
     tcp.write_all(b"a0 STARTTLS\r\n").await.map_err(|e| format!("STARTTLS: {e}"))?;
     let n = tokio::time::timeout(IMAP_CMD_TIMEOUT, tcp.read(&mut tmp))
         .await
@@ -1281,7 +1279,7 @@ async fn raw_parse_fetch_responses(
 
                     // Read the closing ")\r\n" after the literal
                     let mut closing = String::new();
-                    let _ = reader.read_line(&mut closing).await;
+                    _ = reader.read_line(&mut closing).await;
 
                     messages.push(RawFetchedMessage {
                         uid,
@@ -1575,6 +1573,7 @@ fn detect_special_use(name: &async_imap::types::Name) -> Option<String> {
 ///
 /// `internal_date`: optional INTERNALDATE timestamp from the IMAP server,
 /// used as fallback when the Date header cannot be parsed.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn parse_message(
     parser: &MessageParser,
     raw: &[u8],
@@ -1588,18 +1587,18 @@ fn parse_message(
 ) -> Result<ImapMessage, String> {
     let message = parser.parse(raw).ok_or("Failed to parse MIME message")?;
 
-    let message_id = message.message_id().map(|s| s.to_string());
-    let subject = message.subject().map(|s| s.to_string());
+    let message_id = message.message_id().map(ToString::to_string);
+    let subject = message.subject().map(ToString::to_string);
     let date = message
         .date()
-        .map(|d| d.to_timestamp())
+        .map(mail_parser::DateTime::to_timestamp)
         .or(internal_date)
         .unwrap_or(0);
 
     // In-Reply-To
     let in_reply_to = match message.in_reply_to() {
         mail_parser::HeaderValue::Text(t) => Some(t.to_string()),
-        mail_parser::HeaderValue::TextList(list) => list.first().map(|s| s.to_string()),
+        mail_parser::HeaderValue::TextList(list) => list.first().map(ToString::to_string),
         _ => None,
     };
 
@@ -1610,7 +1609,7 @@ fn parse_message(
             if list.is_empty() {
                 None
             } else {
-                Some(list.iter().map(|s| s.as_ref()).collect::<Vec<_>>().join(" "))
+                Some(list.iter().map(AsRef::as_ref).collect::<Vec<_>>().join(" "))
             }
         }
         _ => None,
@@ -1692,6 +1691,8 @@ fn parse_message(
                 })
                 .unwrap_or_else(|| "application/octet-stream".to_string());
 
+            #[allow(clippy::cast_possible_truncation)]
+            let size = att.len() as u32;
             Some(ImapAttachment {
                 part_id: section,
                 filename: att
@@ -1699,9 +1700,9 @@ fn parse_message(
                     .unwrap_or("attachment")
                     .to_string(),
                 mime_type,
-                size: att.len() as u32,
-                content_id: att.content_id().map(|s| s.to_string()),
-                is_inline: att.content_disposition().map_or(false, |cd| cd.is_inline()),
+                size,
+                content_id: att.content_id().map(ToString::to_string),
+                is_inline: att.content_disposition().is_some_and(mail_parser::ContentType::is_inline),
             })
         })
         .collect();
@@ -1786,7 +1787,7 @@ fn extract_header_text(hv: Option<&mail_parser::HeaderValue>) -> Option<String> 
     match hv {
         Some(mail_parser::HeaderValue::Text(t)) => Some(t.to_string()),
         Some(mail_parser::HeaderValue::TextList(list)) => {
-            Some(list.iter().map(|s| s.as_ref()).collect::<Vec<_>>().join(", "))
+            Some(list.iter().map(AsRef::as_ref).collect::<Vec<_>>().join(", "))
         }
         _ => None,
     }
@@ -1802,8 +1803,8 @@ fn extract_first_address(
     };
 
     if let Some(first) = addr.first() {
-        let email = first.address.as_ref().map(|s| s.to_string());
-        let name = first.name.as_ref().map(|s| s.to_string());
+        let email = first.address.as_ref().map(ToString::to_string);
+        let name = first.name.as_ref().map(ToString::to_string);
         (email, name)
     } else {
         (None, None)
@@ -1812,10 +1813,7 @@ fn extract_first_address(
 
 /// Format an address list as a comma-separated string of "Name <email>" or "email".
 fn format_address_list(addr: Option<&mail_parser::Address>) -> Option<String> {
-    let addr = match addr {
-        Some(a) => a,
-        None => return None,
-    };
+    let addr = addr?;
 
     let parts: Vec<String> = addr
         .iter()
