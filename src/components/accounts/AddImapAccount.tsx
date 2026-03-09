@@ -2,14 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   ArrowLeft,
   ArrowRight,
-  CheckCircle2,
-  KeyRound,
-  Loader2,
   Mail,
   Send,
   Server,
   ShieldCheck,
-  XCircle,
 } from "lucide-react";
 import type React from "react";
 import { useCallback, useState } from "react";
@@ -28,64 +24,23 @@ import {
 import { startProviderOAuthFlow } from "@/services/oauth/oauthFlow";
 import { getOAuthProvider } from "@/services/oauth/providers";
 import { useAccountStore } from "@/stores/accountStore";
+import { AddImapAccountBasicStep } from "./AddImapAccountBasicStep";
+import { AddImapAccountImapStep } from "./AddImapAccountImapStep";
+import { AddImapAccountSmtpStep } from "./AddImapAccountSmtpStep";
+import { AddImapAccountTestStep } from "./AddImapAccountTestStep";
+import type {
+  AuthMode,
+  FormState,
+  Step,
+  TestStatus,
+} from "./addImapAccountTypes";
+import { initialFormState } from "./addImapAccountTypes";
 
 interface AddImapAccountProps {
   onClose: () => void;
   onSuccess: () => void;
   onBack: () => void;
 }
-
-type Step = "basic" | "imap" | "smtp" | "test";
-type AuthMode = "password" | "oauth2";
-
-interface FormState {
-  email: string;
-  displayName: string;
-  imapUsername: string;
-  imapHost: string;
-  imapPort: number;
-  imapSecurity: SecurityType;
-  smtpHost: string;
-  smtpPort: number;
-  smtpSecurity: SecurityType;
-  password: string;
-  smtpPassword: string;
-  samePassword: boolean;
-  acceptInvalidCerts: boolean;
-  // OAuth2 fields
-  authMode: AuthMode;
-  oauthProvider: string | null;
-  oauthClientId: string;
-  oauthClientSecret: string;
-  oauthAccessToken: string | null;
-  oauthRefreshToken: string | null;
-  oauthExpiresAt: number | null;
-  oauthEmail: string | null;
-}
-
-const initialFormState: FormState = {
-  email: "",
-  displayName: "",
-  imapUsername: "",
-  imapHost: "",
-  imapPort: 993,
-  imapSecurity: "ssl",
-  smtpHost: "",
-  smtpPort: 465,
-  smtpSecurity: "ssl",
-  password: "",
-  smtpPassword: "",
-  samePassword: true,
-  acceptInvalidCerts: false,
-  authMode: "password",
-  oauthProvider: null,
-  oauthClientId: "",
-  oauthClientSecret: "",
-  oauthAccessToken: null,
-  oauthRefreshToken: null,
-  oauthExpiresAt: null,
-  oauthEmail: null,
-};
 
 const steps: Step[] = ["basic", "imap", "smtp", "test"];
 
@@ -102,17 +57,6 @@ const stepIcons: Record<Step, React.ReactNode> = {
   smtp: <Send className="w-4 h-4" />,
   test: <ShieldCheck className="w-4 h-4" />,
 };
-
-interface TestStatus {
-  state: "idle" | "testing" | "success" | "error";
-  message?: string;
-}
-
-const inputClass =
-  "w-full px-3 py-2 bg-bg-secondary border border-border-primary rounded-lg text-sm text-text-primary outline-none focus:border-accent transition-colors";
-const labelClass = "block text-xs font-medium text-text-secondary mb-1";
-const selectClass =
-  "w-full px-3 py-2 bg-bg-secondary border border-border-primary rounded-lg text-sm text-text-primary outline-none focus:border-accent transition-colors appearance-none";
 
 /** Map UI security value ("ssl") to Rust config value ("tls") */
 function mapSecurity(security: string): string {
@@ -448,501 +392,50 @@ export function AddImapAccount({
     </div>
   );
 
-  const renderAuthModeSelector = (): React.ReactNode => {
-    const showOAuth =
-      detectedAuthMethods.includes("oauth2") || form.authMode === "oauth2";
-    if (!showOAuth) return null;
-
-    return (
-      <div className="mb-4">
-        {/* biome-ignore lint/a11y/noLabelWithoutControl: label describes a button group, not a single input */}
-        <label className={labelClass}>{t("authMethod")}</label>
-        <div className="flex gap-2">
-          {detectedAuthMethods.includes("password") && (
-            <button
-              type="button"
-              onClick={() => updateForm("authMode", "password")}
-              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg border transition-colors ${
-                form.authMode === "password"
-                  ? "border-accent bg-accent/10 text-accent"
-                  : "border-border-primary bg-bg-secondary text-text-secondary hover:bg-bg-hover"
-              }`}
-            >
-              <KeyRound className="w-4 h-4" />
-              {t("password")}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => {
-              updateForm("authMode", "oauth2");
-              if (detectedOAuthProviderId) {
-                updateForm("oauthProvider", detectedOAuthProviderId);
-              }
-            }}
-            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg border transition-colors ${
-              form.authMode === "oauth2"
-                ? "border-accent bg-accent/10 text-accent"
-                : "border-border-primary bg-bg-secondary text-text-secondary hover:bg-bg-hover"
-            }`}
-          >
-            <ShieldCheck className="w-4 h-4" />
-            {t("oauth2")}
-          </button>
-        </div>
-      </div>
-    );
-  };
-
-  const renderOAuthSection = (): React.ReactNode => {
-    const providerId = form.oauthProvider ?? detectedOAuthProviderId;
-    const providerName =
-      providerId === "microsoft"
-        ? "Microsoft"
-        : providerId === "yahoo"
-          ? "Yahoo"
-          : "Provider";
-
-    return (
-      <div className="space-y-3">
-        <div>
-          <label htmlFor="oauth-client-id" className={labelClass}>
-            {t("clientId")}
-          </label>
-          <input
-            id="oauth-client-id"
-            type="text"
-            value={form.oauthClientId}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
-              updateForm("oauthClientId", e.target.value)
-            }
-            placeholder={`${providerName} app Client ID`}
-            className={inputClass}
-            disabled={hasOAuthTokens}
-          />
-        </div>
-        <div>
-          <label htmlFor="oauth-client-secret" className={labelClass}>
-            {t("clientSecretOptional")}
-          </label>
-          <input
-            id="oauth-client-secret"
-            type="password"
-            value={form.oauthClientSecret}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
-              updateForm("oauthClientSecret", e.target.value)
-            }
-            placeholder={t("leaveBlankPublic")}
-            className={inputClass}
-            disabled={hasOAuthTokens}
-          />
-        </div>
-
-        {hasOAuthTokens ? (
-          <div className="flex items-center gap-2 p-3 rounded-lg bg-success/10 border border-success/20">
-            <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
-            <div className="text-sm text-success">
-              {t("connectedAs", { email: form.oauthEmail })}
-            </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={(): void => {
-              if (providerId) void handleOAuthConnect(providerId);
-            }}
-            disabled={oauthConnecting || !form.oauthClientId.trim()}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {oauthConnecting ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                {t("connecting")}
-              </>
-            ) : (
-              <>
-                <ShieldCheck className="w-4 h-4" />
-                {t("signInWith", { provider: providerName })}
-              </>
-            )}
-          </button>
-        )}
-
-        {oauthError != null && (
-          <div className="bg-danger/10 border border-danger/20 rounded-lg p-3 text-sm text-danger">
-            {oauthError}
-          </div>
-        )}
-
-        <p className="text-xs text-text-tertiary">
-          {t("registerAppWith", { provider: providerName })}{" "}
-          {providerId === "microsoft" && (
-            <>
-              {t("registerAzure")}{" "}
-              <code className="text-accent">{t("oauthRedirectUri")}</code>.
-            </>
-          )}
-          {providerId === "yahoo" && (
-            <>
-              {t("registerYahoo")}{" "}
-              <code className="text-accent">{t("oauthRedirectUri")}</code>.
-            </>
-          )}
-        </p>
-      </div>
-    );
-  };
-
-  const renderBasicStep = (): React.ReactNode => (
-    <div className="space-y-4">
-      <div>
-        <label htmlFor="imap-email" className={labelClass}>
-          {t("emailAddress")}
-        </label>
-        <input
-          id="imap-email"
-          type="email"
-          value={form.email}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
-            updateForm("email", e.target.value)
-          }
-          onBlur={handleEmailBlur}
-          placeholder={t("emailPlaceholder")}
-          className={inputClass}
-          disabled={isOAuth && hasOAuthTokens}
-        />
-      </div>
-
-      {renderAuthModeSelector()}
-
-      {isOAuth ? (
-        renderOAuthSection()
-      ) : (
-        <>
-          <div>
-            <label htmlFor="imap-display-name" className={labelClass}>
-              {t("displayNameOptional")}
-            </label>
-            <input
-              id="imap-display-name"
-              type="text"
-              value={form.displayName}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
-                updateForm("displayName", e.target.value)
-              }
-              placeholder={t("yourName")}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label htmlFor="imap-username" className={labelClass}>
-              {t("usernameOptional")}
-            </label>
-            <input
-              id="imap-username"
-              type="text"
-              value={form.imapUsername}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
-                updateForm("imapUsername", e.target.value)
-              }
-              placeholder={t("usernameHelp")}
-              className={inputClass}
-            />
-            <p className="text-xs text-text-tertiary mt-1">
-              {t("usernameDiffersHelp")}
-            </p>
-          </div>
-          <div>
-            <label htmlFor="imap-password" className={labelClass}>
-              {t("password")}
-            </label>
-            <input
-              id="imap-password"
-              type="password"
-              value={form.password}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
-                updateForm("password", e.target.value)
-              }
-              placeholder={t("enterPassword")}
-              className={inputClass}
-            />
-            <p className="text-xs text-text-tertiary mt-1">
-              {t("appPasswordHelp")}
-            </p>
-          </div>
-        </>
-      )}
-
-      {isOAuth === true && hasOAuthTokens === true && (
-        <div>
-          <label htmlFor="imap-display-name" className={labelClass}>
-            {t("displayNameOptional")}
-          </label>
-          <input
-            id="imap-display-name"
-            type="text"
-            value={form.displayName}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
-              updateForm("displayName", e.target.value)
-            }
-            placeholder={t("yourName")}
-            className={inputClass}
-          />
-        </div>
-      )}
-    </div>
-  );
-
-  const renderImapStep = (): React.ReactNode => (
-    <div className="space-y-4">
-      {isOAuth && (
-        <p className="text-xs text-text-tertiary">{t("autoConfigured")}</p>
-      )}
-      <div>
-        <label htmlFor="imap-host" className={labelClass}>
-          {t("imapServer")}
-        </label>
-        <input
-          id="imap-host"
-          type="text"
-          value={form.imapHost}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
-            updateForm("imapHost", e.target.value)
-          }
-          placeholder={t("imapServerPlaceholder")}
-          className={inputClass}
-        />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label htmlFor="imap-port" className={labelClass}>
-            {t("port")}
-          </label>
-          <input
-            id="imap-port"
-            type="number"
-            value={form.imapPort}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
-              updateForm("imapPort", parseInt(e.target.value, 10) || 0)
-            }
-            className={inputClass}
-          />
-        </div>
-        <div>
-          <label htmlFor="imap-security" className={labelClass}>
-            {t("security")}
-          </label>
-          <select
-            id="imap-security"
-            value={form.imapSecurity}
-            onChange={(e: React.ChangeEvent<HTMLSelectElement>): void =>
-              handleImapSecurityChange(e.target.value as SecurityType)
-            }
-            className={selectClass}
-          >
-            <option value="ssl">{t("sslTls")}</option>
-            <option value="starttls">{t("starttls")}</option>
-            <option value="none">{t("noneOption")}</option>
-          </select>
-        </div>
-      </div>
-      <div className="flex items-center gap-2">
-        <input
-          id="accept-invalid-certs"
-          type="checkbox"
-          checked={form.acceptInvalidCerts}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
-            updateForm("acceptInvalidCerts", e.target.checked)
-          }
-          className="rounded border-border-primary text-accent focus:ring-accent"
-        />
-        <label
-          htmlFor="accept-invalid-certs"
-          className="text-sm text-text-secondary"
-        >
-          {t("selfSignedCerts")}
-        </label>
-      </div>
-      <p className="text-xs text-text-tertiary -mt-2 ml-6">
-        {t("selfSignedHelp")}
-      </p>
-    </div>
-  );
-
-  const renderSmtpStep = (): React.ReactNode => (
-    <div className="space-y-4">
-      {isOAuth && (
-        <p className="text-xs text-text-tertiary">{t("autoConfigured")}</p>
-      )}
-      <div>
-        <label htmlFor="smtp-host" className={labelClass}>
-          {t("smtpServer")}
-        </label>
-        <input
-          id="smtp-host"
-          type="text"
-          value={form.smtpHost}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
-            updateForm("smtpHost", e.target.value)
-          }
-          placeholder={t("smtpServerPlaceholder")}
-          className={inputClass}
-        />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label htmlFor="smtp-port" className={labelClass}>
-            {t("port")}
-          </label>
-          <input
-            id="smtp-port"
-            type="number"
-            value={form.smtpPort}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
-              updateForm("smtpPort", parseInt(e.target.value, 10) || 0)
-            }
-            className={inputClass}
-          />
-        </div>
-        <div>
-          <label htmlFor="smtp-security" className={labelClass}>
-            {t("security")}
-          </label>
-          <select
-            id="smtp-security"
-            value={form.smtpSecurity}
-            onChange={(e: React.ChangeEvent<HTMLSelectElement>): void =>
-              handleSmtpSecurityChange(e.target.value as SecurityType)
-            }
-            className={selectClass}
-          >
-            <option value="ssl">{t("sslTls")}</option>
-            <option value="starttls">{t("starttls")}</option>
-            <option value="none">{t("noneOption")}</option>
-          </select>
-        </div>
-      </div>
-      {!isOAuth && (
-        <>
-          <div className="flex items-center gap-2">
-            <input
-              id="smtp-same-password"
-              type="checkbox"
-              checked={form.samePassword}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
-                updateForm("samePassword", e.target.checked)
-              }
-              className="rounded border-border-primary text-accent focus:ring-accent"
-            />
-            <label
-              htmlFor="smtp-same-password"
-              className="text-sm text-text-secondary"
-            >
-              {t("samePasswordAsImap")}
-            </label>
-          </div>
-          {!form.samePassword && (
-            <div>
-              <label htmlFor="smtp-password" className={labelClass}>
-                {t("smtpPassword")}
-              </label>
-              <input
-                id="smtp-password"
-                type="password"
-                value={form.smtpPassword}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
-                  updateForm("smtpPassword", e.target.value)
-                }
-                placeholder={t("smtpPasswordPlaceholder")}
-                className={inputClass}
-              />
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-
-  const renderTestResult = (
-    label: string,
-    status: TestStatus,
-  ): React.ReactNode => {
-    const icon =
-      status.state === "testing" ? (
-        <Loader2 className="w-4 h-4 animate-spin text-accent" />
-      ) : status.state === "success" ? (
-        <CheckCircle2 className="w-4 h-4 text-success" />
-      ) : status.state === "error" ? (
-        <XCircle className="w-4 h-4 text-danger" />
-      ) : (
-        <div className="w-4 h-4 rounded-full border-2 border-border-primary" />
-      );
-
-    return (
-      <div className="flex items-start gap-3 p-3 rounded-lg bg-bg-secondary border border-border-primary">
-        <div className="mt-0.5">{icon}</div>
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-text-primary">{label}</div>
-          {status.message != null && (
-            <div
-              className={`text-xs mt-0.5 ${
-                status.state === "error"
-                  ? "text-danger"
-                  : status.state === "success"
-                    ? "text-success"
-                    : "text-text-tertiary"
-              }`}
-            >
-              {status.message}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  const renderTestStep = (): React.ReactNode => (
-    <div className="space-y-4">
-      <div className="text-sm text-text-secondary mb-2">
-        {t("testDescription")}
-      </div>
-
-      <div className="space-y-3">
-        {renderTestResult(t("imapConnection"), imapTest)}
-        {renderTestResult(t("smtpConnection"), smtpTest)}
-      </div>
-
-      <button
-        type="button"
-        onClick={testBothConnections}
-        disabled={imapTest.state === "testing" || smtpTest.state === "testing"}
-        className="w-full px-4 py-2 text-sm bg-bg-secondary border border-border-primary rounded-lg text-text-primary hover:bg-bg-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {imapTest.state === "testing" || smtpTest.state === "testing"
-          ? t("common:testing")
-          : imapTest.state === "idle" && smtpTest.state === "idle"
-            ? t("testConnection")
-            : t("reTestConnection")}
-      </button>
-
-      {saveError != null && (
-        <div className="bg-danger/10 border border-danger/20 rounded-lg p-3 text-sm text-danger">
-          {saveError}
-        </div>
-      )}
-    </div>
-  );
-
   const renderStepContent = (): React.ReactNode => {
     switch (currentStep) {
       case "basic":
-        return renderBasicStep();
+        return (
+          <AddImapAccountBasicStep
+            form={form}
+            updateForm={updateForm}
+            handleEmailBlur={handleEmailBlur}
+            isOAuth={isOAuth}
+            hasOAuthTokens={hasOAuthTokens}
+            detectedAuthMethods={detectedAuthMethods}
+            detectedOAuthProviderId={detectedOAuthProviderId}
+            oauthConnecting={oauthConnecting}
+            oauthError={oauthError}
+            onOAuthConnect={handleOAuthConnect}
+          />
+        );
       case "imap":
-        return renderImapStep();
+        return (
+          <AddImapAccountImapStep
+            form={form}
+            updateForm={updateForm}
+            isOAuth={isOAuth}
+            onImapSecurityChange={handleImapSecurityChange}
+          />
+        );
       case "smtp":
-        return renderSmtpStep();
+        return (
+          <AddImapAccountSmtpStep
+            form={form}
+            updateForm={updateForm}
+            isOAuth={isOAuth}
+            onSmtpSecurityChange={handleSmtpSecurityChange}
+          />
+        );
       case "test":
-        return renderTestStep();
+        return (
+          <AddImapAccountTestStep
+            imapTest={imapTest}
+            smtpTest={smtpTest}
+            saveError={saveError}
+            onTestBoth={testBothConnections}
+          />
+        );
     }
   };
 
