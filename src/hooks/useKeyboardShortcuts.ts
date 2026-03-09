@@ -9,19 +9,17 @@ import {
   navigateToThread,
 } from "@/router/navigate";
 import { getMessagesForThread } from "@/services/db/messages";
-import {
-  deleteThread as deleteThreadFromDb,
-  muteThread as muteThreadDb,
-  pinThread as pinThreadDb,
-  unmuteThread as unmuteThreadDb,
-  unpinThread as unpinThreadDb,
-} from "@/services/db/threads";
+import { deleteThread as deleteThreadFromDb } from "@/services/db/threads";
 import {
   archiveThread,
+  muteThread,
   permanentDeleteThread,
+  pinThread,
   spamThread,
   starThread,
   trashThread,
+  unmuteThread,
+  unpinThread,
 } from "@/services/emailActions";
 import { deleteDraftsForThread } from "@/services/gmail/draftDeletion";
 import { triggerSync } from "@/services/gmail/syncManager";
@@ -427,21 +425,10 @@ async function executeAction(actionId: string): Promise<void> {
       if (selectedId && activeAccountId) {
         const thread = threads.find((t) => t.id === selectedId);
         if (thread) {
-          const newPinned = !thread.isPinned;
-          useThreadStore
-            .getState()
-            .updateThread(selectedId, { isPinned: newPinned });
-          try {
-            if (newPinned) {
-              await pinThreadDb(activeAccountId, selectedId);
-            } else {
-              await unpinThreadDb(activeAccountId, selectedId);
-            }
-          } catch (err) {
-            console.error("Pin failed:", err);
-            useThreadStore
-              .getState()
-              .updateThread(selectedId, { isPinned: !newPinned });
+          if (thread.isPinned) {
+            await unpinThread(activeAccountId, selectedId);
+          } else {
+            await pinThread(activeAccountId, selectedId);
           }
         }
       }
@@ -480,24 +467,18 @@ async function executeAction(actionId: string): Promise<void> {
         for (const id of ids) {
           const t = threads.find((thread) => thread.id === id);
           if (t?.isMuted) {
-            await unmuteThreadDb(activeAccountId, id);
-            useThreadStore.getState().updateThread(id, { isMuted: false });
+            await unmuteThread(activeAccountId, id);
           } else {
-            await muteThreadDb(activeAccountId, id);
-            await archiveThread(activeAccountId, id, []);
+            await muteThread(activeAccountId, id, []);
           }
         }
       } else if (selectedId && activeAccountId) {
         const thread = threads.find((t) => t.id === selectedId);
         if (thread) {
           if (thread.isMuted) {
-            await unmuteThreadDb(activeAccountId, selectedId);
-            useThreadStore
-              .getState()
-              .updateThread(selectedId, { isMuted: false });
+            await unmuteThread(activeAccountId, selectedId);
           } else {
-            await muteThreadDb(activeAccountId, selectedId);
-            await archiveThread(activeAccountId, selectedId, []);
+            await muteThread(activeAccountId, selectedId, []);
           }
         }
       }

@@ -8,6 +8,9 @@ const mockStarThread = vi.fn(() => Promise.resolve({ success: true }));
 const mockSpamThread = vi.fn(() => Promise.resolve({ success: true }));
 const mockAddThreadLabel = vi.fn(() => Promise.resolve({ success: true }));
 const mockRemoveThreadLabel = vi.fn(() => Promise.resolve({ success: true }));
+const mockSnoozeThread = vi.fn(() => Promise.resolve({ success: true }));
+const mockPinThread = vi.fn(() => Promise.resolve({ success: true }));
+const mockUnpinThread = vi.fn(() => Promise.resolve({ success: true }));
 
 vi.mock("../emailActions", () => ({
   archiveThread: (...args: unknown[]) => mockArchiveThread(...args),
@@ -17,19 +20,13 @@ vi.mock("../emailActions", () => ({
   spamThread: (...args: unknown[]) => mockSpamThread(...args),
   addThreadLabel: (...args: unknown[]) => mockAddThreadLabel(...args),
   removeThreadLabel: (...args: unknown[]) => mockRemoveThreadLabel(...args),
-}));
-
-vi.mock("@/services/db/threads", () => ({
-  pinThread: vi.fn(() => Promise.resolve()),
-  unpinThread: vi.fn(() => Promise.resolve()),
+  snoozeThread: (...args: unknown[]) => mockSnoozeThread(...args),
+  pinThread: (...args: unknown[]) => mockPinThread(...args),
+  unpinThread: (...args: unknown[]) => mockUnpinThread(...args),
 }));
 
 vi.mock("@/services/db/threadCategories", () => ({
   setThreadCategory: vi.fn(() => Promise.resolve()),
-}));
-
-vi.mock("@/services/snooze/snoozeManager", () => ({
-  snoozeThread: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("@/stores/threadStore", () => {
@@ -61,8 +58,6 @@ vi.mock("@/stores/threadStore", () => {
 });
 
 import { setThreadCategory } from "@/services/db/threadCategories";
-import { pinThread, unpinThread } from "@/services/db/threads";
-import { snoozeThread } from "@/services/snooze/snoozeManager";
 import { useThreadStore } from "@/stores/threadStore";
 import { createMockQuickStep } from "@/test/mocks";
 import { executeQuickStep } from "./executor";
@@ -205,19 +200,13 @@ describe("executeQuickStep", () => {
     const result = await executeQuickStep(step, ["t1"], "acct-1");
 
     expect(result.success).toBe(true);
-    expect(pinThread).toHaveBeenCalledWith("acct-1", "t1");
-    expect(useThreadStore.getState().updateThread).toHaveBeenCalledWith("t1", {
-      isPinned: true,
-    });
+    expect(mockPinThread).toHaveBeenCalledWith("acct-1", "t1");
 
     vi.clearAllMocks();
 
     const step2 = createMockQuickStep({ actions: [{ type: "unpin" }] });
     await executeQuickStep(step2, ["t1"], "acct-1");
-    expect(unpinThread).toHaveBeenCalledWith("acct-1", "t1");
-    expect(useThreadStore.getState().updateThread).toHaveBeenCalledWith("t1", {
-      isPinned: false,
-    });
+    expect(mockUnpinThread).toHaveBeenCalledWith("acct-1", "t1");
   });
 
   it("executes snooze action", async () => {
@@ -231,9 +220,10 @@ describe("executeQuickStep", () => {
     const result = await executeQuickStep(step, ["t1"], "acct-1");
 
     expect(result.success).toBe(true);
-    expect(snoozeThread).toHaveBeenCalledWith(
+    expect(mockSnoozeThread).toHaveBeenCalledWith(
       "acct-1",
       "t1",
+      [],
       expect.any(Number),
     );
 

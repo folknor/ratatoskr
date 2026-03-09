@@ -56,7 +56,17 @@ export type EmailAction =
       rawBase64Url: string;
       threadId?: string;
     }
-  | { type: "deleteDraft"; draftId: string };
+  | { type: "deleteDraft"; draftId: string }
+  | {
+      type: "snooze";
+      threadId: string;
+      messageIds: string[];
+      snoozeUntil: number;
+    }
+  | { type: "pin"; threadId: string }
+  | { type: "unpin"; threadId: string }
+  | { type: "mute"; threadId: string; messageIds: string[] }
+  | { type: "unmute"; threadId: string };
 
 // ---------------------------------------------------------------------------
 // Result type
@@ -95,7 +105,8 @@ function applyOptimisticUpdate(action: EmailAction): void {
     case "trash":
     case "permanentDelete":
     case "spam":
-    case "moveToFolder": {
+    case "moveToFolder":
+    case "snooze": {
       const nextId = getNextThreadId(action.threadId);
       store.removeThread(action.threadId);
       if (nextId) {
@@ -108,6 +119,24 @@ function applyOptimisticUpdate(action: EmailAction): void {
       break;
     case "star":
       store.updateThread(action.threadId, { isStarred: action.starred });
+      break;
+    case "pin":
+      store.updateThread(action.threadId, { isPinned: true });
+      break;
+    case "unpin":
+      store.updateThread(action.threadId, { isPinned: false });
+      break;
+    case "mute": {
+      // Mute auto-archives: remove thread from list
+      const nextMuteId = getNextThreadId(action.threadId);
+      store.removeThread(action.threadId);
+      if (nextMuteId) {
+        navigateToThread(nextMuteId);
+      }
+      break;
+    }
+    case "unmute":
+      store.updateThread(action.threadId, { isMuted: false });
       break;
     case "addLabel":
     case "removeLabel":
@@ -129,7 +158,16 @@ function revertOptimisticUpdate(action: EmailAction): void {
     case "star":
       store.updateThread(action.threadId, { isStarred: !action.starred });
       break;
-    // For removes (archive/trash/spam/move), we can't easily restore the thread
+    case "pin":
+      store.updateThread(action.threadId, { isPinned: false });
+      break;
+    case "unpin":
+      store.updateThread(action.threadId, { isPinned: true });
+      break;
+    case "unmute":
+      store.updateThread(action.threadId, { isMuted: true });
+      break;
+    // For removes (archive/trash/spam/move/mute), we can't easily restore the thread
     // to the list from here. The next sync will fix it.
     default:
       break;
@@ -212,6 +250,20 @@ async function applyLocalDbUpdate(
         );
       }
       break;
+    case "snooze":
+      await db.execute(
+        "UPDATE threads SET is_snoozed = 1, snooze_until = $1 WHERE account_id = $2 AND id = $3",
+        [action.snoozeUntil, accountId, action.threadId],
+      );
+      await db.execute(
+        "DELETE FROM thread_labels WHERE account_id = $1 AND thread_id = $2 AND label_id = 'INBOX'",
+        [accountId, action.threadId],
+      );
+      await db.execute(
+        "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) VALUES ($1, $2, 'SNOOZED')",
+        [accountId, action.threadId],
+      );
+      break;
     case "addLabel":
       await db.execute(
         "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) VALUES ($1, $2, $3)",
@@ -222,6 +274,34 @@ async function applyLocalDbUpdate(
       await db.execute(
         "DELETE FROM thread_labels WHERE account_id = $1 AND thread_id = $2 AND label_id = $3",
         [accountId, action.threadId, action.labelId],
+      );
+      break;
+    case "pin":
+      await db.execute(
+        "UPDATE threads SET is_pinned = 1 WHERE account_id = $1 AND id = $2",
+        [accountId, action.threadId],
+      );
+      break;
+    case "unpin":
+      await db.execute(
+        "UPDATE threads SET is_pinned = 0 WHERE account_id = $1 AND id = $2",
+        [accountId, action.threadId],
+      );
+      break;
+    case "mute":
+      await db.execute(
+        "UPDATE threads SET is_muted = 1 WHERE account_id = $1 AND id = $2",
+        [accountId, action.threadId],
+      );
+      await db.execute(
+        "DELETE FROM thread_labels WHERE account_id = $1 AND thread_id = $2 AND label_id = 'INBOX'",
+        [accountId, action.threadId],
+      );
+      break;
+    case "unmute":
+      await db.execute(
+        "UPDATE threads SET is_muted = 0 WHERE account_id = $1 AND id = $2",
+        [accountId, action.threadId],
       );
       break;
     default:
@@ -285,6 +365,17 @@ async function executeViaProvider(
       );
     case "deleteDraft":
       return provider.deleteDraft(action.draftId);
+    case "snooze":
+      // Snooze is local state; on the provider side we just archive
+      return provider.archive(action.threadId, action.messageIds);
+    case "pin":
+    case "unpin":
+    case "unmute":
+      // Local-only operations — no IMAP/Gmail concept of pin or unmute
+      return;
+    case "mute":
+      // Mute auto-archives; on the provider side we archive
+      return provider.archive(action.threadId, action.messageIds);
   }
 }
 
@@ -521,4 +612,51 @@ export function deleteDraft(
   draftId: string,
 ): Promise<ActionResult> {
   return executeEmailAction(accountId, { type: "deleteDraft", draftId });
+}
+
+export function pinThread(
+  accountId: string,
+  threadId: string,
+): Promise<ActionResult> {
+  return executeEmailAction(accountId, { type: "pin", threadId });
+}
+
+export function unpinThread(
+  accountId: string,
+  threadId: string,
+): Promise<ActionResult> {
+  return executeEmailAction(accountId, { type: "unpin", threadId });
+}
+
+export function muteThread(
+  accountId: string,
+  threadId: string,
+  messageIds: string[],
+): Promise<ActionResult> {
+  return executeEmailAction(accountId, {
+    type: "mute",
+    threadId,
+    messageIds,
+  });
+}
+
+export function unmuteThread(
+  accountId: string,
+  threadId: string,
+): Promise<ActionResult> {
+  return executeEmailAction(accountId, { type: "unmute", threadId });
+}
+
+export function snoozeThread(
+  accountId: string,
+  threadId: string,
+  messageIds: string[],
+  snoozeUntil: number,
+): Promise<ActionResult> {
+  return executeEmailAction(accountId, {
+    type: "snooze",
+    threadId,
+    messageIds,
+    snoozeUntil,
+  });
 }

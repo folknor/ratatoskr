@@ -32,24 +32,22 @@ import {
   insertFollowUpReminder,
 } from "@/services/db/followUpReminders";
 import type { DbMessage } from "@/services/db/messages";
-import {
-  deleteThread as deleteThreadFromDb,
-  muteThread as muteThreadDb,
-  pinThread as pinThreadDb,
-  unmuteThread as unmuteThreadDb,
-  unpinThread as unpinThreadDb,
-} from "@/services/db/threads";
+import { deleteThread as deleteThreadFromDb } from "@/services/db/threads";
 import {
   archiveThread,
   markThreadRead,
+  muteThread,
   permanentDeleteThread,
+  pinThread,
+  snoozeThread,
   spamThread,
   starThread,
   trashThread,
+  unmuteThread,
+  unpinThread,
 } from "@/services/emailActions";
 import { deleteDraftsForThread } from "@/services/gmail/draftDeletion";
 import { getGmailClient } from "@/services/gmail/tokenManager";
-import { snoozeThread } from "@/services/snooze/snoozeManager";
 import { useAccountStore } from "@/stores/accountStore";
 import type { Thread } from "@/stores/threadStore";
 import { useThreadStore } from "@/stores/threadStore";
@@ -94,7 +92,6 @@ export function ActionBar({
   onToggleTaskSidebar,
 }: ActionBarProps): React.ReactNode {
   const { t } = useTranslation("email");
-  const updateThread = useThreadStore((s) => s.updateThread);
   const removeThread = useThreadStore((s) => s.removeThread);
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
   const activeLabel = useActiveLabel();
@@ -151,8 +148,7 @@ export function ActionBar({
     if (!activeAccountId) return;
     setShowSnooze(false);
     try {
-      await snoozeThread(activeAccountId, thread.id, until);
-      removeThread(thread.id);
+      await snoozeThread(activeAccountId, thread.id, [], until);
     } catch (err) {
       console.error("Failed to snooze:", err);
     }
@@ -200,43 +196,19 @@ export function ActionBar({
 
   const handleTogglePin = async (): Promise<void> => {
     if (!activeAccountId) return;
-    const newPinned = !thread.isPinned;
-    updateThread(thread.id, { isPinned: newPinned });
-    try {
-      if (newPinned) {
-        await pinThreadDb(activeAccountId, thread.id);
-      } else {
-        await unpinThreadDb(activeAccountId, thread.id);
-      }
-    } catch (err) {
-      console.error("Failed to toggle pin:", err);
-      updateThread(thread.id, { isPinned: !newPinned });
+    if (thread.isPinned) {
+      await unpinThread(activeAccountId, thread.id);
+    } else {
+      await pinThread(activeAccountId, thread.id);
     }
   };
 
   const handleToggleMute = async (): Promise<void> => {
     if (!activeAccountId) return;
-    const newMuted = !thread.isMuted;
-    if (newMuted) {
-      // Mute: mark as muted and archive
-      updateThread(thread.id, { isMuted: true });
-      try {
-        await muteThreadDb(activeAccountId, thread.id);
-        await archiveThread(activeAccountId, thread.id, []);
-      } catch (err) {
-        console.error("Failed to mute:", err);
-        await unmuteThreadDb(activeAccountId, thread.id);
-        updateThread(thread.id, { isMuted: false });
-      }
+    if (thread.isMuted) {
+      await unmuteThread(activeAccountId, thread.id);
     } else {
-      // Unmute
-      updateThread(thread.id, { isMuted: false });
-      try {
-        await unmuteThreadDb(activeAccountId, thread.id);
-      } catch (err) {
-        console.error("Failed to unmute:", err);
-        updateThread(thread.id, { isMuted: true });
-      }
+      await muteThread(activeAccountId, thread.id, []);
     }
   };
 

@@ -1,19 +1,17 @@
 import { useThreadStore } from "@/stores/threadStore";
 import { setThreadCategory } from "../db/threadCategories";
 import {
-  pinThread as pinThreadDb,
-  unpinThread as unpinThreadDb,
-} from "../db/threads";
-import {
   addThreadLabel,
   archiveThread,
   markThreadRead,
+  pinThread,
   removeThreadLabel,
+  snoozeThread,
   spamThread,
   starThread,
   trashThread,
+  unpinThread,
 } from "../emailActions";
-import { snoozeThread } from "../snooze/snoozeManager";
 import type {
   QuickStep,
   QuickStepAction,
@@ -66,21 +64,11 @@ async function executeSingleAction(
       break;
 
     case "pin":
-      await Promise.all(
-        threadIds.map(async (id) => {
-          await pinThreadDb(accountId, id);
-          useThreadStore.getState().updateThread(id, { isPinned: true });
-        }),
-      );
+      await Promise.all(threadIds.map((id) => pinThread(accountId, id)));
       break;
 
     case "unpin":
-      await Promise.all(
-        threadIds.map(async (id) => {
-          await unpinThreadDb(accountId, id);
-          useThreadStore.getState().updateThread(id, { isPinned: false });
-        }),
-      );
+      await Promise.all(threadIds.map((id) => unpinThread(accountId, id)));
       break;
 
     case "applyLabel":
@@ -167,7 +155,7 @@ async function executeSingleAction(
       if (action.params?.snoozeDuration) {
         const until = Date.now() + action.params.snoozeDuration;
         await Promise.all(
-          threadIds.map((id) => snoozeThread(accountId, id, until)),
+          threadIds.map((id) => snoozeThread(accountId, id, [], until)),
         );
       }
       break;

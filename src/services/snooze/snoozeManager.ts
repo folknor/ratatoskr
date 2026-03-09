@@ -4,6 +4,7 @@ import {
   createBackgroundChecker,
 } from "../backgroundCheckers";
 import { getDb, withTransaction } from "../db/connection";
+import { snoozeThread as snoozeThreadAction } from "../emailActions";
 
 /**
  * Check for snoozed threads that should be un-snoozed (time has passed).
@@ -42,30 +43,17 @@ async function checkSnoozedThreads(): Promise<void> {
 }
 
 /**
- * Snooze a thread: remove from INBOX, set snooze time.
+ * Snooze a thread: remove from INBOX, set snooze time, archive on provider.
+ * Delegates to the centralized emailActions system for optimistic UI,
+ * local DB updates, offline queueing, and provider sync.
  */
 export async function snoozeThread(
   accountId: string,
   threadId: string,
+  messageIds: string[],
   snoozeUntil: number,
 ): Promise<void> {
-  await withTransaction(async (db) => {
-    // Mark as snoozed in DB
-    await db.execute(
-      "UPDATE threads SET is_snoozed = 1, snooze_until = $1 WHERE account_id = $2 AND id = $3",
-      [snoozeUntil, accountId, threadId],
-    );
-
-    // Remove INBOX label, add SNOOZED
-    await db.execute(
-      "DELETE FROM thread_labels WHERE account_id = $1 AND thread_id = $2 AND label_id = 'INBOX'",
-      [accountId, threadId],
-    );
-    await db.execute(
-      "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) VALUES ($1, $2, 'SNOOZED')",
-      [accountId, threadId],
-    );
-  });
+  await snoozeThreadAction(accountId, threadId, messageIds, snoozeUntil);
 }
 
 const snoozeChecker: BackgroundChecker = createBackgroundChecker(

@@ -64,13 +64,13 @@ vi.mock("@/services/emailActions", () => ({
   permanentDeleteThread: vi.fn(),
   starThread: vi.fn(),
   spamThread: vi.fn(),
-}));
-vi.mock("@/services/db/threads", () => ({
-  deleteThread: vi.fn(),
   pinThread: vi.fn(),
   unpinThread: vi.fn(),
   muteThread: vi.fn(),
   unmuteThread: vi.fn(),
+}));
+vi.mock("@/services/db/threads", () => ({
+  deleteThread: vi.fn(),
 }));
 vi.mock("@/services/gmail/draftDeletion", () => ({
   deleteDraftsForThread: vi.fn(),

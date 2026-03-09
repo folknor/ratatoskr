@@ -33,29 +33,27 @@ import {
   ALL_CATEGORIES,
   setThreadCategory,
 } from "@/services/db/threadCategories";
-import {
-  deleteThread as deleteThreadFromDb,
-  muteThread as muteThreadDb,
-  pinThread as pinThreadDb,
-  unmuteThread as unmuteThreadDb,
-  unpinThread as unpinThreadDb,
-} from "@/services/db/threads";
+import { deleteThread as deleteThreadFromDb } from "@/services/db/threads";
 import {
   addThreadLabel,
   archiveThread,
   markThreadRead,
+  muteThread,
   permanentDeleteThread,
+  pinThread,
   removeThreadLabel,
   spamThread,
   starThread,
   trashThread,
+  unmuteThread,
+  snoozeThread,
+  unpinThread,
 } from "@/services/emailActions";
 import { deleteDraftsForThread } from "@/services/gmail/draftDeletion";
 import { triggerSync } from "@/services/gmail/syncManager";
 import { getGmailClient } from "@/services/gmail/tokenManager";
 import { executeQuickStep } from "@/services/quickSteps/executor";
 import type { QuickStep, QuickStepAction } from "@/services/quickSteps/types";
-import { snoozeThread } from "@/services/snooze/snoozeManager";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useContextMenuStore } from "@/stores/contextMenuStore";
@@ -108,8 +106,7 @@ export function ContextMenuPortal(): React.ReactNode {
         <SnoozeDialog
           onSnooze={async (until: number) => {
             for (const id of snoozeTarget.threadIds) {
-              await snoozeThread(snoozeTarget.accountId, id, until);
-              useThreadStore.getState().removeThread(id);
+              await snoozeThread(snoozeTarget.accountId, id, [], until);
             }
             setSnoozeTarget(null);
           }}
@@ -143,8 +140,7 @@ export function ContextMenuPortal(): React.ReactNode {
         <SnoozeDialog
           onSnooze={async (until: number) => {
             for (const id of snoozeTarget.threadIds) {
-              await snoozeThread(snoozeTarget.accountId, id, until);
-              useThreadStore.getState().removeThread(id);
+              await snoozeThread(snoozeTarget.accountId, id, [], until);
             }
             setSnoozeTarget(null);
           }}
@@ -386,12 +382,10 @@ function ThreadMenu({
     for (const id of targetIds) {
       const t = threads.find((th) => th.id === id);
       if (!t) continue;
-      const newPinned = !t.isPinned;
-      useThreadStore.getState().updateThread(id, { isPinned: newPinned });
-      if (newPinned) {
-        await pinThreadDb(activeAccountId, id);
+      if (t.isPinned) {
+        await unpinThread(activeAccountId, id);
       } else {
-        await unpinThreadDb(activeAccountId, id);
+        await pinThread(activeAccountId, id);
       }
     }
   };
@@ -410,13 +404,10 @@ function ThreadMenu({
     for (const id of targetIds) {
       const t = threads.find((th) => th.id === id);
       if (!t) continue;
-      const newMuted = !t.isMuted;
-      if (newMuted) {
-        await muteThreadDb(activeAccountId, id);
-        await archiveThread(activeAccountId, id, []);
+      if (t.isMuted) {
+        await unmuteThread(activeAccountId, id);
       } else {
-        await unmuteThreadDb(activeAccountId, id);
-        useThreadStore.getState().updateThread(id, { isMuted: false });
+        await muteThread(activeAccountId, id, []);
       }
     }
   };
