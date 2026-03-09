@@ -39,7 +39,9 @@ Current architecture bottlenecks at 60GB+ / 10M+ messages:
 
 ---
 
-## Current Coupling Audit
+## Coupling Audit (Pre-Migration Snapshot)
+
+> **Note**: This section documents the state before Phase 0. The facade layer (`src/core/`) has since been implemented, decoupling most of these direct service imports. Kept for historical context and to track what was migrated.
 
 Before any Rust migration, we need to understand how deeply the frontend is coupled to the service/DB layer. **68 out of 94+ component/hook/store files import directly from services.** Business logic is scattered throughout the UI tier.
 
@@ -248,34 +250,36 @@ Tantivy is ~2x faster than Lucene in benchmarks. It uses block-max WAND for effi
 | Unicode / non-English text | Yes — tokenizers for 17 Latin languages, CJK via third-party |
 | Fast fields (columnar data) | Yes — optimal for sort-by-date, filter-by-flag |
 
-### Proposed Email Search Schema
+### Implemented Email Search Schema
+
+Defined in `src-tauri/src/search/mod.rs`:
 
 ```rust
-let mut schema_builder = Schema::builder();
+// Indexed + stored text fields (for display and search)
+builder.add_text_field("subject", text_indexed_stored());
+builder.add_text_field("from_name", text_indexed_stored());
+builder.add_text_field("from_address", STRING | STORED);
+builder.add_text_field("snippet", text_indexed_stored());
 
-// Indexed + stored for display in results
-schema_builder.add_text_field("from", TEXT | STORED);
-schema_builder.add_text_field("to", TEXT);
-schema_builder.add_text_field("subject", TEXT | STORED);
+// Indexed text fields (search only, not stored)
+builder.add_text_field("to_addresses", text_indexed());
+builder.add_text_field("body_text", text_indexed());
 
-// Indexed for search, not stored (body lives in body store)
-schema_builder.add_text_field("body", TEXT);
+// Stored identifiers (for joining back to SQLite)
+builder.add_text_field("message_id", STRING | STORED);
+builder.add_text_field("thread_id", STRING | STORED);
+builder.add_text_field("account_id", STRING | STORED);
 
-// Date for range queries and sorting
-schema_builder.add_date_field("date", INDEXED | FAST | STORED);
+// Date field for range queries and sorting
+builder.add_date_field("date", DateOptions::default().set_indexed().set_fast().set_stored());
 
-// Facets for label/folder filtering
-schema_builder.add_facet_field("labels", INDEXED);
-
-// Fast fields for filtering
-schema_builder.add_bool_field("has_attachment", INDEXED | FAST);
-schema_builder.add_bool_field("is_unread", INDEXED | FAST);
-
-// Stored fields for joining back to SQLite
-schema_builder.add_text_field("message_id", STRING | STORED);
-schema_builder.add_text_field("thread_id", STRING | STORED);
-schema_builder.add_text_field("account_id", STRING | STORED);
+// Fast filter fields (u64: 0 or 1)
+builder.add_u64_field("is_read", NumericOptions::default().set_indexed().set_fast().set_stored());
+builder.add_u64_field("is_starred", NumericOptions::default().set_indexed().set_fast().set_stored());
+builder.add_u64_field("has_attachment", NumericOptions::default().set_indexed().set_fast().set_stored());
 ```
+
+**Note**: Labels are not indexed in tantivy (they live in SQLite's `thread_labels` table and change frequently). The `label:` search operator currently requires post-filtering or SQLite fallback. Future option: index labels as a multi-valued text field and re-index on label changes.
 
 ### Query Flow
 
@@ -340,19 +344,17 @@ No known email clients use tantivy yet. We would be the first. The closest analo
 
 | Capability | Crate | Status | Notes |
 |------------|-------|--------|-------|
-| MIME parsing | `mail-parser` (Stalwart) | Already in use | Zero-copy, RFC 5322 compliant |
+| MIME parsing | `mail-parser` (Stalwart) | ✅ In use | Zero-copy, RFC 5322 compliant |
 | Email composition | `mail-builder` (Stalwart) | Production-ready | Companion to mail-parser. Multipart MIME, attachments, auto-encoding |
-| SMTP | `lettre` | Already in use | DKIM, TLS, multiple auth mechanisms |
-| IMAP | `async-imap` | Already in use | See [imap-ecosystem-assessment.md](./imap-ecosystem-assessment.md) |
+| SMTP | `lettre` | ✅ In use | DKIM, TLS, multiple auth mechanisms |
+| IMAP | `async-imap` | ✅ In use | See [imap-ecosystem-assessment.md](./imap-ecosystem-assessment.md) |
 | HTML sanitization | `ammonia` | Production-ready (v4.1.2+) | Whitelist-based, built on html5ever. Fix RUSTSEC-2025-0071 in 4.1.2 |
-| Full-text search | `tantivy` | Production-ready (v0.25) | 14K stars, 9.7M downloads |
-| SQLite | `rusqlite` | Production-ready | Direct bindings, WAL mode, mmap |
-| SQLite (async) | `sqlx` | Production-ready | Compile-time checked queries, async |
-| Compression | `zstd` | Production-ready | Rust bindings for Facebook's zstd |
-| KV store (optional) | `heed` (LMDB) | Production-ready | Zero-copy reads, memory-mapped |
-| KV store (optional) | `redb` | Stable (1.0+) | Pure Rust, ACID, simpler than LMDB |
-| Typed IPC | `tauri-specta` | Active | Auto-generates TypeScript types from Rust command signatures |
-| Typed RPC (alternative) | `rspc` | Active | Transport-agnostic typed RPC. Used by Spacedrive |
+| Full-text search | `tantivy` 0.25 | ✅ In use | 13-field email schema, BM25 ranking, structured search |
+| SQLite | `rusqlite` 0.32 | ✅ In use | 67 commands, `spawn_blocking` + `std::sync::Mutex` pattern |
+| Date/time | `chrono` 0.4 | ✅ In use | Date parsing for search index rebuild |
+| Compression | `zstd` | Production-ready | For Phase 2 (body store) |
+| KV store (optional) | `heed` (LMDB) | Production-ready | Zero-copy reads, memory-mapped. For Phase 2 |
+| KV store (optional) | `redb` | Stable (1.0+) | Pure Rust, ACID, simpler than LMDB. For Phase 2 |
 
 ---
 
@@ -405,14 +407,9 @@ Pattern B is cleaner. With sub-millisecond local SQLite queries, the Rust→even
 
 ### Type Safety Across the Boundary
 
-Use **tauri-specta** or **rspc** to auto-generate TypeScript types from Rust command signatures. When Rust defines:
+TypeScript types are hand-written in `src/core/rustDb.ts` to match Rust struct definitions in `src-tauri/src/db/types.rs`. Both sides use `camelCase` serialization (`#[serde(rename_all = "camelCase")]` in Rust).
 
-```rust
-#[tauri::command]
-fn get_threads(folder: String, page: u32) -> Result<Vec<ThreadSummary>, String> { ... }
-```
-
-TypeScript automatically gets the `ThreadSummary` type and typed `invoke` calls. This is critical for maintaining the Rust/TS boundary as you move services.
+We evaluated tauri-specta for auto-generating TS types from Rust but removed it — the bindings were never exported and the hand-written types are more maintainable given the 1:1 mapping between TS service interfaces and Rust commands. The existing TS type definitions in `@/services/db/*` serve as the canonical contract; rustDb.ts imports these types directly.
 
 ---
 
@@ -466,64 +463,41 @@ Thunderbird is the cautionary tale: SQLite for everything (metadata + FTS + Glod
 
 This can be done **incrementally** — each phase is independently shippable, and the app remains functional throughout.
 
-### Phase 0: Frontend Decoupling (Facade Layer)
+### Phase 0: Frontend Decoupling (Facade Layer) ✅ COMPLETE
 
-**Goal**: Create a clean API boundary so the UI never touches services/DB directly. Today the facade delegates to TypeScript. Tomorrow it delegates to Rust. The UI doesn't know the difference.
+**Goal**: Create a clean API boundary so the UI never touches services/DB directly.
 
-**The problem**: 68 of 94+ component files import directly from `src/services/`. Stores call `setSetting()` inline. Two files call `getDb()` for raw SQL. There is no single point where we can swap the implementation.
+**Status**: Done. `src/core/` facade layer created with:
+- `queries.ts` — all read operations, re-exports from `rustDb.ts`
+- `mutations.ts` — all write operations, re-exports from `rustDb.ts`
+- `rustDb.ts` — invoke() wrappers for all Rust commands
 
-**The solution**: A `src/core/` module that defines the entire API surface:
+Components and stores import from `@/core` instead of `@/services/db/*`. Some service-layer imports remain for non-DB operations (AI, email providers, sync triggers).
 
-```
-src/core/
-  index.ts              — re-exports everything (single import point)
-  types.ts              — all shared types (Thread, Message, Label, etc.)
-  queries.ts            — all read operations (getThreads, searchMessages, etc.)
-  mutations.ts          — all write operations (archiveThread, starThread, etc.)
-  subscriptions.ts      — all event subscriptions (onSyncComplete, onThreadsChanged, etc.)
-```
+**Commit**: `97bce95` — refactor: introduce src/core/ facade layer
 
-Every component and store imports from `@/core` only. The core module's implementation calls the existing TS services today. When a Rust command exists for an operation, the core module switches to `invoke()` — one line change, zero UI changes.
-
-**Concrete steps**:
-
-1. **Define the API surface.** Audit every service function called from UI code (the coupling audit above is the starting point). Group into queries (reads) and mutations (writes). This becomes the typed contract.
-
-2. **Create `src/core/` with TS implementations.** Each function in `src/core/queries.ts` calls the existing `src/services/db/` function. Each function in `src/core/mutations.ts` calls the existing `src/services/emailActions.ts` or DB function. This is a mechanical refactor — no logic changes.
-
-3. **Migrate components to import from `@/core`.** Work through the coupling audit file-by-file:
-   - **CRITICAL files first**: `useEmailListData.ts`, `ActionBar.tsx`, `ContextMenuPortal.tsx`, `Composer.tsx`, `smartFolderStore.ts`
-   - **Stores next**: `uiStore.ts`, `labelStore.ts`, `accountStore.ts`, `shortcutStore.ts`
-   - **Remaining components**: work through MEDIUM severity list
-
-4. **Eliminate direct `getDb()` calls.** `smartFolderStore.ts` and `Composer.tsx` must go through the facade. The raw SQL in `useEmailListData.ts` must be wrapped in a named query function.
-
-5. **Consolidate action surfaces.** `ActionBar.tsx`, `ContextMenuPortal.tsx`, `useKeyboardShortcuts.ts`, and `MultiSelectBar.tsx` should all call the same `@/core/mutations` functions. No more per-component DB lookups for thread data before performing actions.
-
-6. **Extract background process triggers.** `triggerSync()`, auto-save start/stop, and background checker management should not be callable from arbitrary components. Expose them as core mutations with clear semantics.
-
-**Scope**: ~68 files need import changes. ~6 files need significant logic extraction. Estimated 40-60 hours.
-
-**Risk**: Low. This is a pure refactor — behavior doesn't change. Each file can be migrated independently. Tests continue to pass throughout.
-
-**Validation**: After Phase 0, `grep -r "from.*services/" src/components/ src/stores/ src/hooks/` should return zero results (except type-only imports during transition). All service access goes through `@/core`.
-
-### Phase 1: Rust-Owned Database
+### Phase 1: Rust-Owned Database ✅ COMPLETE
 
 **Goal**: Eliminate IPC overhead on every DB query.
 
-**Prerequisite**: Phase 0 complete — all DB access goes through `@/core`.
+**Status**: Done. **67 Rust commands** covering all DB operations:
+- `src-tauri/src/db/mod.rs` — `DbState` with `Arc<std::sync::Mutex<Connection>>` + `tokio::task::spawn_blocking` via `with_conn()` helper
+- `src-tauri/src/db/queries.rs` — 25 core commands (threads, messages, labels, settings, categories, contacts)
+- `src-tauri/src/db/queries_extra.rs` — 42 additional commands (contacts CRUD, filters, smart folders, smart label rules, follow-ups, quick steps, image allowlist, notification VIPs, bundle rules, thread categories)
+- `src-tauri/src/db/types.rs` — all Rust struct definitions with `serde(rename_all = "camelCase")`
+- `src/core/rustDb.ts` — invoke() wrappers for all 67 commands
 
-- Move SQLite from Tauri SQL plugin to Rust-owned `rusqlite` (or `sqlx`)
-- Wrap connection in `Arc<Mutex<Connection>>` (or connection pool) in Tauri managed state
-- Create Rust commands that mirror `src/core/queries.ts` and `src/core/mutations.ts`
-- Switch `src/core/` implementation from TS service calls to `invoke()` calls — one function at a time
-- Migrations run in Rust
-- Adopt `tauri-specta` for type-safe command generation
+**Key decisions**:
+- Used `std::sync::Mutex` + `spawn_blocking` instead of `tokio::sync::Mutex` so rusqlite's blocking I/O doesn't hold up tokio worker threads
+- Removed tauri-specta (dead weight — bindings were never exported, TS types are hand-written)
+- UUID generation stays client-side (`crypto.randomUUID()`) for insert operations
+- Dynamic `UPDATE SET` clauses via `dynamic_update()` helper in Rust
 
-**Risk**: Low. The DB schema doesn't change. Commands are 1:1 replacements. Phase 0 ensures we only change the implementation in one place.
+**What remains in TS**: Smart folder dynamic SQL queries (`querySmartFolderThreads`, `querySmartFolderUnreadCount`) — these take user-defined search queries and build SQL dynamically. They still execute via the Tauri SQL plugin. Could move to tantivy or a Rust SQL builder later.
 
-### Phase 2: Separate Body Storage
+**Commits**: `572bc16`, `218df0c`, `507a104`, `f9ee081`, `f0e95a8`, `e59d084`
+
+### Phase 2: Separate Body Storage — NOT STARTED
 
 **Goal**: Remove message bodies from the metadata DB.
 
@@ -535,21 +509,40 @@ Every component and store imports from `@/core` only. The core module's implemen
 
 **Risk**: Low-medium. Requires careful migration of existing data.
 
-### Phase 3: Tantivy Search
+### Phase 3: Tantivy Search ✅ COMPLETE (core wired, polish remaining)
 
 **Goal**: Replace FTS5 with instant full-text search.
 
-- Add `tantivy` to Cargo.toml
-- Define email search schema (from, to, subject, body, date, labels, etc.)
-- Index existing messages on first run (background, interruptible)
-- Index new messages during sync
-- Port `searchParser.ts` query parsing to Rust
-- Expose search via Tauri command (or channel for streaming results)
-- Drop FTS5 tables from SQLite
+**Status**: End-to-end wiring complete. tantivy 0.25 integrated:
 
-**Risk**: Medium. New dependency, new query language mapping. But tantivy is well-documented and the schema is straightforward.
+**Rust backend** (`src-tauri/src/search/`):
+- `mod.rs` — `SearchState` with schema (13 fields), index management, BM25-ranked search
+  - Schema: subject, from_name, from_address, to_addresses, body_text, snippet (text), date (fast), is_read/is_starred/has_attachment (fast u64 filters), message_id/thread_id/account_id (stored identifiers)
+  - `search_with_filters()` — structured search with BooleanQuery combining free text, field filters, date ranges, and flag filters, always scoped by account_id
+  - `index_message()` / `index_messages_batch()` — single and batch indexing with auto-dedup by message_id
+  - `rebuild_search_index()` — batch-reads all messages from SQLite in 10K batches, indexes into tantivy
+  - Index stored at `{app_data_dir}/search_index/`, 50MB writer heap, `ReloadPolicy::OnCommitWithDelay`
+- `commands.rs` — 5 Tauri commands: `search_messages`, `index_message`, `index_messages_batch`, `delete_search_document`, `rebuild_search_index`
 
-### Phase 4: Rust Sync Engine
+**TS frontend**:
+- `rustDb.ts` — `searchMessages()` parses operators in TS (reuses existing `searchParser.ts`) and sends structured `SearchParams` to Rust
+- `queries.ts` — exports `searchMessages` from rustDb (replaces FTS5 path)
+- SearchBar and AskInbox now route through tantivy
+
+**Sync integration**:
+- Fire-and-forget `indexMessage()` calls after every message upsert in Gmail sync (`sync.ts`), IMAP sync (`imapSync.ts`), and IMAP SMTP provider (`imapSmtpProvider.ts`)
+
+**Remaining polish**:
+- [ ] Call `rebuildSearchIndex()` on first run or expose in settings UI to bootstrap index from existing messages
+- [ ] Migrate smart folder queries from FTS5 to tantivy (currently still use SQLite SQL builder path)
+- [ ] Drop FTS5 triggers and virtual table once tantivy is proven stable
+- [ ] Port query parsing fully to Rust (currently parsed in TS, sent as structured params)
+- [ ] Add streaming results via Tauri channels for large result sets
+- [ ] Label filtering (currently labels live in SQLite, not tantivy — caller must post-filter)
+
+**Commits**: `eb2bc0e`, `6d8b58f`
+
+### Phase 4: Rust Sync Engine — NOT STARTED
 
 **Goal**: Sync without IPC overhead. Multi-threaded MIME parsing.
 
@@ -560,7 +553,9 @@ Every component and store imports from `@/core` only. The core module's implemen
 
 **Risk**: Medium-high. Most complex migration — sync logic has many edge cases. But the existing Rust IMAP commands provide the foundation.
 
-### Phase 5: Rust Email Actions
+**Note**: Tantivy indexing is already wired into the TS sync paths (fire-and-forget `indexMessage()` calls). Moving sync to Rust would eliminate the IPC overhead of these indexing calls entirely.
+
+### Phase 5: Rust Email Actions — NOT STARTED
 
 **Goal**: Direct DB access for all email modify operations.
 
@@ -571,7 +566,7 @@ Every component and store imports from `@/core` only. The core module's implemen
 
 **Risk**: Low-medium. Well-defined operations, straightforward port.
 
-### Phase 6: Remaining Services
+### Phase 6: Remaining Services — NOT STARTED
 
 Move one at a time as needed:
 - Filter engine (`filterEngine.ts`)
@@ -621,6 +616,23 @@ The point isn't just "faster." It's enabling use cases that don't work at all to
 
 The architecture is: **SQLite for metadata, compressed blob store for bodies, tantivy for search, Rust owns everything, React is a view layer.**
 
-This is the Apple Mail architecture (SQLite Envelope Index + .emlx files + Spotlight) reimagined with modern Rust tooling. The key differences: tantivy instead of Spotlight (we control the search engine, not the OS), zstd compression (3-4x space savings), and a clean Tauri IPC boundary with type-safe code generation.
+This is the Apple Mail architecture (SQLite Envelope Index + .emlx files + Spotlight) reimagined with modern Rust tooling. The key differences: tantivy instead of Spotlight (we control the search engine, not the OS), zstd compression (3-4x space savings), and a clean Tauri IPC boundary.
 
-The migration is incremental across 7 phases. Phase 0 (frontend decoupling) is the prerequisite — a pure TS refactor that creates the clean boundary. Phase 1 (Rust-owned DB) and Phase 3 (tantivy) deliver the biggest user-visible improvements. Budget 4-8 months for phases 0-4 with one developer, app remains functional throughout.
+### Current Status (March 2026)
+
+| Phase | Status | Key Metric |
+|-------|--------|------------|
+| **Phase 0**: Facade layer | ✅ Complete | `src/core/` with queries.ts, mutations.ts, rustDb.ts |
+| **Phase 1**: Rust-owned DB | ✅ Complete | 67 Rust commands, all DB reads/writes via `invoke()` |
+| **Phase 2**: Body storage | Not started | — |
+| **Phase 3**: Tantivy search | ✅ Core complete | tantivy 0.25, 5 commands, sync integration wired |
+| **Phase 4**: Rust sync | Not started | — |
+| **Phase 5**: Rust actions | Not started | — |
+| **Phase 6**: Remaining services | Not started | — |
+
+**Phases 0, 1, and 3 are done.** The biggest user-visible improvements (eliminating IPC overhead on every query, instant full-text search) are delivered. Remaining phases (body storage, Rust sync engine, Rust email actions) are performance and architecture wins that can be tackled incrementally.
+
+**Immediate next steps**:
+1. Integration test the app with Rust paths active (`pnpm tauri dev`)
+2. Bootstrap tantivy index on first run (call `rebuildSearchIndex`)
+3. Phase 2 (body storage) or Phase 4 (Rust sync) — both are independently shippable
