@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
-use specta::Type;
 
 // ── Thread ───────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbThread {
     pub id: String,
     pub account_id: String,
@@ -26,7 +25,7 @@ pub struct DbThread {
 
 // ── Message ──────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbMessage {
     pub id: String,
     pub account_id: String,
@@ -59,7 +58,7 @@ pub struct DbMessage {
 
 // ── Label ────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbLabel {
     pub id: String,
     pub account_id: String,
@@ -76,7 +75,7 @@ pub struct DbLabel {
 
 // ── Setting ──────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SettingRow {
     pub key: String,
     pub value: String,
@@ -84,13 +83,13 @@ pub struct SettingRow {
 
 // ── Thread category ──────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CategoryCount {
     pub category: Option<String>,
     pub count: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThreadCategoryRow {
     pub thread_id: String,
     pub category: String,
@@ -98,7 +97,7 @@ pub struct ThreadCategoryRow {
 
 // ── Contact ─────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbContact {
     pub id: String,
     pub email: String,
@@ -111,7 +110,7 @@ pub struct DbContact {
 
 // ── Attachment ──────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbAttachment {
     pub id: String,
     pub message_id: String,

@@ -180,6 +180,15 @@ export async function getContactByEmail(
   return invoke<DbContact | null>("db_get_contact_by_email", { email });
 }
 
+// ── Thread mutations ────────────────────────────────────────────────
+
+export async function deleteThread(
+  accountId: string,
+  threadId: string,
+): Promise<void> {
+  return invoke<void>("db_delete_thread", { accountId, threadId });
+}
+
 // ── Unread Count ────────────────────────────────────────────────────
 
 export async function getUnreadCount(accountId: string): Promise<number> {

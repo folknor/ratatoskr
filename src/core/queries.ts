@@ -12,6 +12,7 @@ import { getDb } from "@/services/db/connection";
 
 // ── Rust-backed queries (invoke → Rust commands) ────────────
 export {
+  deleteThread,
   getAllSettings,
   getContactByEmail,
   getLabelsForAccount,
@@ -141,8 +142,7 @@ export {
 // ── Thread Categories (constant) ────────────────────────────
 export { ALL_CATEGORIES } from "@/services/db/threadCategories";
 
-// ── Threads (TS-only — deleteThread has no rustDb wrapper yet) ──
-export { deleteThread } from "@/services/db/threads";
+// (deleteThread is now Rust-backed via rustDb)
 
 // ── Auth Results (email authentication) ─────────────────────
 export {

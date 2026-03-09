@@ -3,12 +3,15 @@ pub mod queries;
 pub mod types;
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
-use tokio::sync::Mutex;
 
 /// Shared database connection managed by Tauri state.
+///
+/// Uses `std::sync::Mutex` (not `tokio::sync::Mutex`) because rusqlite
+/// operations are blocking I/O. All queries run via [`with_conn`] which
+/// dispatches to `spawn_blocking` so the tokio async runtime is never blocked.
 pub struct DbState {
     conn: Arc<Mutex<Connection>>,
 }
@@ -39,8 +42,20 @@ impl DbState {
         })
     }
 
-    /// Acquire the connection lock.
-    pub async fn conn(&self) -> tokio::sync::MutexGuard<'_, Connection> {
-        self.conn.lock().await
+    /// Run a closure with the database connection on the blocking thread pool.
+    ///
+    /// This ensures rusqlite's synchronous I/O never blocks tokio worker threads.
+    pub async fn with_conn<F, T>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&Connection) -> Result<T, String> + Send + 'static,
+        T: Send + 'static,
+    {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| format!("db lock poisoned: {e}"))?;
+            f(&conn)
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
     }
 }
