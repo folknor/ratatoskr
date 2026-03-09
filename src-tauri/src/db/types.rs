@@ -108,6 +108,117 @@ pub struct DbContact {
     pub notes: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactStats {
+    pub email_count: i64,
+    pub first_email: Option<String>,
+    pub last_email: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SameDomainContact {
+    pub email: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContactAttachmentRow {
+    pub filename: String,
+    pub mime_type: Option<String>,
+    pub size: Option<i64>,
+    pub date: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecentThread {
+    pub thread_id: String,
+    pub subject: Option<String>,
+    pub last_message_at: Option<String>,
+}
+
+// ── Filter Rule ─────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbFilterRule {
+    pub id: String,
+    pub account_id: String,
+    pub name: String,
+    pub is_enabled: bool,
+    pub criteria_json: String,
+    pub actions_json: String,
+    pub sort_order: i64,
+    pub created_at: i64,
+}
+
+// ── Smart Folder ────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbSmartFolder {
+    pub id: String,
+    pub account_id: Option<String>,
+    pub name: String,
+    pub query: String,
+    pub icon: String,
+    pub color: Option<String>,
+    pub sort_order: i64,
+    pub is_default: bool,
+    pub created_at: i64,
+}
+
+// ── Smart Label Rule ────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbSmartLabelRule {
+    pub id: String,
+    pub account_id: String,
+    pub label_id: String,
+    pub ai_description: String,
+    pub criteria_json: Option<String>,
+    pub is_enabled: bool,
+    pub sort_order: i64,
+    pub created_at: i64,
+}
+
+// ── Follow-Up Reminder ──────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbFollowUpReminder {
+    pub id: String,
+    pub account_id: String,
+    pub thread_id: String,
+    pub message_id: String,
+    pub remind_at: i64,
+    pub status: String,
+    pub created_at: i64,
+}
+
+// ── Quick Step ──────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbQuickStep {
+    pub id: String,
+    pub account_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub shortcut: Option<String>,
+    pub actions_json: String,
+    pub icon: Option<String>,
+    pub is_enabled: bool,
+    pub continue_on_error: bool,
+    pub sort_order: i64,
+    pub created_at: i64,
+}
+
+// ── Sort order helper ───────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SortOrderItem {
+    pub id: String,
+    pub sort_order: i64,
+}
+
 // ── Attachment ──────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

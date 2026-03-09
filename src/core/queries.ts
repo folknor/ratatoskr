@@ -12,6 +12,7 @@ import { getDb } from "@/services/db/connection";
 
 // ── Rust-backed queries (invoke → Rust commands) ────────────
 export {
+  // Threads / Messages / Labels / Settings (Phase 1)
   deleteThread,
   getAllSettings,
   getContactByEmail,
@@ -26,32 +27,10 @@ export {
   getUnreadCount,
   searchContacts,
   setSetting,
-} from "./rustDb";
-
-// Re-export Rust-backed category helpers (return Map, same API)
-export {
+  // Categories
   getCategoriesForThreads,
   getCategoryUnreadCounts,
-} from "./rustDb";
-
-// ── Types (canonical TS definitions) ────────────────────────
-export type { DbAttachment } from "@/services/db/attachments";
-export type { DbContact } from "@/services/db/contacts";
-export type { DbLabel } from "@/services/db/labels";
-export type { DbMessage } from "@/services/db/messages";
-
-// ── Bundle Rules ─────────────────────────────────────────────
-export {
-  type DbBundleRule,
-  getBundleRules,
-  getBundleSummaries,
-  getHeldThreadIds,
-} from "@/services/db/bundleRules";
-
-// ── Contacts (remaining TS-only functions) ───────────────────
-export {
-  type ContactAttachment,
-  type ContactStats,
+  // Contacts (Phase 1.5)
   deleteContact,
   getAllContacts,
   getAttachmentsFromContact,
@@ -59,53 +38,72 @@ export {
   getContactsFromSameDomain,
   getLatestAuthResult,
   getRecentThreadsWithContact,
-  type SameDomainContact,
   updateContact,
   updateContactNotes,
   upsertContact,
-} from "@/services/db/contacts";
-
-// ── Filters ──────────────────────────────────────────────────
-export {
-  type DbFilterRule,
+  // Filters
   deleteFilter,
-  type FilterActions,
-  type FilterCriteria,
   getFiltersForAccount,
   insertFilter,
   updateFilter,
-} from "@/services/db/filters";
-
-// ── Follow-Up Reminders ──────────────────────────────────────
-export {
+  // Smart Folders
+  deleteSmartFolder,
+  getSmartFolderById,
+  getSmartFolders,
+  insertSmartFolder,
+  updateSmartFolder,
+  updateSmartFolderSortOrder,
+  // Smart Label Rules
+  deleteSmartLabelRule,
+  getSmartLabelRulesForAccount,
+  insertSmartLabelRule,
+  updateSmartLabelRule,
+  // Follow-Up Reminders
   cancelFollowUpForThread,
   getActiveFollowUpThreadIds,
   getFollowUpForThread,
   insertFollowUpReminder,
-} from "@/services/db/followUpReminders";
-
-// ── Image Allowlist ──────────────────────────────────────────
-export {
-  addToAllowlist,
-  getAllowlistedSenders,
-} from "@/services/db/imageAllowlist";
-
-// ── Notification VIPs ────────────────────────────────────────
-export {
-  addVipSender,
-  isVipSender,
-  removeVipSender,
-} from "@/services/db/notificationVips";
-
-// ── Quick Steps ──────────────────────────────────────────────
-export {
-  type DbQuickStep,
+  // Quick Steps
   deleteQuickStep,
   getEnabledQuickStepsForAccount,
   getQuickStepsForAccount,
   insertQuickStep,
   updateQuickStep,
-} from "@/services/db/quickSteps";
+  // Image Allowlist
+  addToAllowlist,
+  getAllowlistedSenders,
+  // Notification VIPs
+  addVipSender,
+  isVipSender,
+  removeVipSender,
+} from "./rustDb";
+
+// ── Types (canonical TS definitions, still from service files) ──
+export type { DbAttachment } from "@/services/db/attachments";
+export type {
+  ContactAttachment,
+  ContactStats,
+  DbContact,
+  SameDomainContact,
+} from "@/services/db/contacts";
+export type {
+  DbFilterRule,
+  FilterActions,
+  FilterCriteria,
+} from "@/services/db/filters";
+export type { DbLabel } from "@/services/db/labels";
+export type { DbMessage } from "@/services/db/messages";
+export type { DbQuickStep } from "@/services/db/quickSteps";
+export type { DbSmartFolder } from "@/services/db/smartFolders";
+export type { DbSmartLabelRule } from "@/services/db/smartLabelRules";
+
+// ── Bundle Rules (still TS — complex joins/summaries) ────────
+export {
+  type DbBundleRule,
+  getBundleRules,
+  getBundleSummaries,
+  getHeldThreadIds,
+} from "@/services/db/bundleRules";
 
 // ── Quick Step Types ────────────────────────────────────────
 export {
@@ -116,33 +114,11 @@ export {
   type QuickStepExecutionResult,
 } from "@/services/quickSteps/types";
 
-// ── Search ───────────────────────────────────────────────────
+// ── Search (still TS — FTS5, Phase 3 will use tantivy) ──────
 export { searchMessages } from "@/services/db/search";
-
-// ── Smart Folders ────────────────────────────────────────────
-export {
-  type DbSmartFolder,
-  deleteSmartFolder,
-  getSmartFolderById,
-  getSmartFolders,
-  insertSmartFolder,
-  updateSmartFolder,
-  updateSmartFolderSortOrder,
-} from "@/services/db/smartFolders";
-
-// ── Smart Label Rules ────────────────────────────────────────
-export {
-  type DbSmartLabelRule,
-  deleteSmartLabelRule,
-  getSmartLabelRulesForAccount,
-  insertSmartLabelRule,
-  updateSmartLabelRule,
-} from "@/services/db/smartLabelRules";
 
 // ── Thread Categories (constant) ────────────────────────────
 export { ALL_CATEGORIES } from "@/services/db/threadCategories";
-
-// (deleteThread is now Rust-backed via rustDb)
 
 // ── Auth Results (email authentication) ─────────────────────
 export {

@@ -1,5 +1,6 @@
 pub mod migrations;
 pub mod queries;
+pub mod queries_extra;
 pub mod types;
 
 use std::path::PathBuf;

@@ -3,6 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAccountStore } from "@/stores/accountStore";
 import { SmartLabelEditor } from "./SmartLabelEditor";
 
+const mockGetRules = vi.fn(() => Promise.resolve([]));
+const mockInsertRule = vi.fn(() => Promise.resolve("new-id"));
+const mockUpdateRule = vi.fn(() => Promise.resolve());
+const mockDeleteRule = vi.fn(() => Promise.resolve());
+
 vi.mock("@/core/rustDb", () => ({
   getLabelsForAccount: vi.fn(() =>
     Promise.resolve([
@@ -16,14 +21,6 @@ vi.mock("@/core/rustDb", () => ({
       { id: "INBOX", name: "Inbox", type: "system", account_id: "acc1" },
     ]),
   ),
-}));
-
-const mockGetRules = vi.fn(() => Promise.resolve([]));
-const mockInsertRule = vi.fn(() => Promise.resolve("new-id"));
-const mockUpdateRule = vi.fn(() => Promise.resolve());
-const mockDeleteRule = vi.fn(() => Promise.resolve());
-
-vi.mock("@/services/db/smartLabelRules", () => ({
   getSmartLabelRulesForAccount: (...args: unknown[]) => mockGetRules(...args),
   insertSmartLabelRule: (...args: unknown[]) => mockInsertRule(...args),
   updateSmartLabelRule: (...args: unknown[]) => mockUpdateRule(...args),

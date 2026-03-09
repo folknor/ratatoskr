@@ -25,37 +25,23 @@ export {
   updateDraft,
 } from "@/services/emailActions";
 
-// Thread DB writes
-export { deleteThread } from "@/services/db/threads";
-
-// Follow-up reminders (writes only)
+// DB writes — routed through Rust invoke() via rustDb
 export {
+  addToAllowlist,
   cancelFollowUpForThread,
-  insertFollowUpReminder,
-} from "@/services/db/followUpReminders";
-
-// Thread category writes
-export { setThreadCategory } from "@/services/db/threadCategories";
-
-// Image allowlist writes
-export { addToAllowlist } from "@/services/db/imageAllowlist";
-
-// Smart label rule writes
-export {
-  deleteSmartLabelRule,
-  insertSmartLabelRule,
-  updateSmartLabelRule,
-} from "@/services/db/smartLabelRules";
-
-// Quick step DB writes
-export {
   deleteQuickStep,
+  deleteSmartLabelRule,
+  deleteThread,
+  insertFollowUpReminder,
   insertQuickStep,
+  insertSmartLabelRule,
   updateQuickStep,
-} from "@/services/db/quickSteps";
+  updateSmartLabelRule,
+  upsertContact,
+} from "./rustDb";
 
-// Contact writes
-export { upsertContact } from "@/services/db/contacts";
+// Thread category writes (still TS)
+export { setThreadCategory } from "@/services/db/threadCategories";
 
 // Gmail client & sync triggers
 export { deleteDraftsForThread } from "@/services/gmail/draftDeletion";

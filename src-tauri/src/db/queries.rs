@@ -80,7 +80,7 @@ fn row_to_label(row: &Row<'_>) -> rusqlite::Result<DbLabel> {
     })
 }
 
-fn row_to_contact(row: &Row<'_>) -> rusqlite::Result<DbContact> {
+pub(crate) fn row_to_contact(row: &Row<'_>) -> rusqlite::Result<DbContact> {
     Ok(DbContact {
         id: row.get("id")?,
         email: row.get("email")?,

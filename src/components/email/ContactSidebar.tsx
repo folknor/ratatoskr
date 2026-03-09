@@ -64,7 +64,7 @@ export function ContactSidebar({
     {
       thread_id: string;
       subject: string | null;
-      last_message_at: number | null;
+      last_message_at: string | number | null;
     }[]
   >([]);
   const [contact, setContact] = useState<DbContact | null>(null);
@@ -525,7 +525,7 @@ export function ContactSidebar({
                   </div>
                   {thread.last_message_at != null && (
                     <div className="text-text-tertiary text-[0.625rem] mt-0.5">
-                      {formatRelativeDate(thread.last_message_at)}
+                      {formatRelativeDate(Number(thread.last_message_at))}
                     </div>
                   )}
                 </button>

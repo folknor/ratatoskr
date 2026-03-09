@@ -17,16 +17,11 @@ const mockContact: DbContact = {
   notes: "Important client",
 };
 
-// Rust-backed functions (routed through @/core/rustDb)
+// All DB functions now routed through @/core/rustDb
 vi.mock("@/core/rustDb", () => ({
   getContactByEmail: vi.fn(() => Promise.resolve(null)),
   getThreadById: vi.fn(),
   getThreadLabelIds: vi.fn(),
-}));
-
-// TS-only contact functions (still in @/services/db/contacts)
-vi.mock("@/services/db/contacts", () => ({
-  getContactByEmail: vi.fn(() => Promise.resolve(null)),
   getContactStats: vi.fn(() =>
     Promise.resolve({
       emailCount: 5,
@@ -41,9 +36,6 @@ vi.mock("@/services/db/contacts", () => ({
   getAttachmentsFromContact: vi.fn(() => Promise.resolve([])),
   getContactsFromSameDomain: vi.fn(() => Promise.resolve([])),
   getLatestAuthResult: vi.fn(() => Promise.resolve(null)),
-}));
-
-vi.mock("@/services/db/notificationVips", () => ({
   isVipSender: vi.fn(() => Promise.resolve(false)),
   addVipSender: vi.fn(() => Promise.resolve()),
   removeVipSender: vi.fn(() => Promise.resolve()),
@@ -63,13 +55,13 @@ vi.mock("@/utils/fileTypeHelpers", () => ({
 }));
 
 // Import mocked modules to configure per-test
-import { getContactByEmail } from "@/core/rustDb";
 import {
   getAttachmentsFromContact,
+  getContactByEmail,
   getContactsFromSameDomain,
   getLatestAuthResult,
-} from "@/services/db/contacts";
-import { isVipSender } from "@/services/db/notificationVips";
+  isVipSender,
+} from "@/core/rustDb";
 
 const defaultProps = {
   email: "alice@company.com",

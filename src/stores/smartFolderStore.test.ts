@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/services/db/smartFolders", () => ({
+vi.mock("@/core/rustDb", () => ({
   getSmartFolders: vi.fn(() => Promise.resolve([])),
   insertSmartFolder: vi.fn(() => Promise.resolve("new-id")),
   updateSmartFolder: vi.fn(() => Promise.resolve()),
@@ -27,7 +27,7 @@ import {
   deleteSmartFolder,
   getSmartFolders,
   insertSmartFolder,
-} from "@/services/db/smartFolders";
+} from "@/core/rustDb";
 import { useSmartFolderStore } from "./smartFolderStore";
 
 describe("smartFolderStore", () => {
