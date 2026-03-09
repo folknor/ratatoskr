@@ -36,7 +36,7 @@ export async function insertSmartLabelRule(rule: {
   accountId: string;
   labelId: string;
   aiDescription: string;
-  criteria?: FilterCriteria;
+  criteria?: FilterCriteria | undefined;
   isEnabled?: boolean;
 }): Promise<string> {
   const db = await getDb();

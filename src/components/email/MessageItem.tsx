@@ -2,7 +2,6 @@ import { MailMinus } from "lucide-react";
 import type React from "react";
 import {
   memo,
-  type RefObject,
   useCallback,
   useEffect,
   useMemo,
@@ -31,7 +30,7 @@ interface MessageItemProps {
   onContextMenu?: (e: React.MouseEvent) => void;
 }
 
-export const MessageItem: ReturnType<typeof memo> = memo(
+export const MessageItem = memo(
   function MessageItemInner({
     message,
     isLast,
@@ -44,7 +43,7 @@ export const MessageItem: ReturnType<typeof memo> = memo(
     onContextMenu,
     ref,
   }: MessageItemProps & {
-    ref?: RefObject<HTMLDivElement | null>;
+    ref?: React.Ref<HTMLDivElement | null>;
   }): React.ReactNode {
     const { t } = useTranslation("email");
     const [expanded, setExpanded] = useState(isLast);

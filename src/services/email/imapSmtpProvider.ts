@@ -484,7 +484,7 @@ export class ImapSmtpProvider implements EmailProvider {
 
     // Extract sender name from "Name <email>" format
     const fromNameMatch = from.match(/^([^<]*)<[^>]+>/);
-    const fromName = fromNameMatch ? fromNameMatch[1]?.trim() : null;
+    const fromName = fromNameMatch ? (fromNameMatch[1]?.trim() ?? null) : null;
     const fromAddress = from.replace(/.*<([^>]+)>.*/, "$1").trim();
 
     // Parse body for HTML and text
@@ -596,7 +596,7 @@ export class ImapSmtpProvider implements EmailProvider {
     }
   }
 
-  async getProfile(): Promise<{ email: string; name?: string }> {
+  async getProfile(): Promise<{ email: string; name?: string | undefined }> {
     const account = await this.getAccount();
     return {
       email: account.email,

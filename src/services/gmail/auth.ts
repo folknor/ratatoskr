@@ -5,7 +5,7 @@ const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const OAUTH_CALLBACK_PORT = 17248;
 
-const SCOPES: string[] = [
+const SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/gmail.modify",
   "https://www.googleapis.com/auth/gmail.send",
@@ -91,7 +91,7 @@ export async function startOAuthFlow(
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: "code",
-    scope: SCOPES.join(" "),
+    scope: SCOPES,
     code_challenge: codeChallenge,
     code_challenge_method: "S256",
     access_type: "offline",

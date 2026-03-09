@@ -22,12 +22,12 @@ interface ThreadCardProps {
   isSelected: boolean;
   onClick: (thread: Thread) => void;
   onContextMenu?: (e: React.MouseEvent, threadId: string) => void;
-  category?: string;
-  showCategoryBadge?: boolean;
-  hasFollowUp?: boolean;
+  category?: string | undefined;
+  showCategoryBadge?: boolean | undefined;
+  hasFollowUp?: boolean | undefined;
 }
 
-export const ThreadCard: ReturnType<typeof memo> = memo(
+export const ThreadCard = memo(
   function ThreadCardInner({
     thread,
     isSelected,

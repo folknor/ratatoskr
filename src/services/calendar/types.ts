@@ -26,8 +26,8 @@ export interface CalendarEventData {
 
 export interface CreateEventInput {
   summary: string;
-  description?: string;
-  location?: string;
+  description?: string | undefined;
+  location?: string | undefined;
   startTime: string; // ISO 8601
   endTime: string; // ISO 8601
   isAllDay?: boolean;
@@ -36,8 +36,8 @@ export interface CreateEventInput {
 
 export interface UpdateEventInput {
   summary?: string;
-  description?: string;
-  location?: string;
+  description?: string | undefined;
+  location?: string | undefined;
   startTime?: string;
   endTime?: string;
   isAllDay?: boolean;

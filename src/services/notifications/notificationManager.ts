@@ -16,10 +16,10 @@ let initialized = false;
 let notificationsEnabled = true;
 
 interface NotificationContext {
-  threadId?: string;
-  accountId?: string;
-  fromAddress?: string;
-  subject?: string;
+  threadId?: string | undefined;
+  accountId?: string | undefined;
+  fromAddress?: string | undefined;
+  subject?: string | undefined;
 }
 
 let lastNotificationContext: NotificationContext | null = null;

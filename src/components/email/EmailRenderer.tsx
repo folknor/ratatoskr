@@ -22,9 +22,9 @@ interface EmailRendererProps {
   blockImages?: boolean;
   senderAddress?: string | null;
   accountId?: string | null;
-  senderAllowlisted?: boolean;
-  messageId?: string | null;
-  inlineAttachments?: DbAttachment[];
+  senderAllowlisted?: boolean | undefined;
+  messageId?: string | null | undefined;
+  inlineAttachments?: DbAttachment[] | undefined;
 }
 
 export function EmailRenderer({

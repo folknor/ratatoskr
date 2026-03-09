@@ -854,8 +854,10 @@ export async function runMigrations(): Promise<void> {
       );
       await db.execute("DELETE FROM _migrations WHERE version >= 14");
       const maxVersion = MIGRATIONS[MIGRATIONS.length - 1]?.version;
-      for (let v = 14; v <= maxVersion; v++) {
-        appliedVersions.delete(v);
+      if (maxVersion != null) {
+        for (let v = 14; v <= maxVersion; v++) {
+          appliedVersions.delete(v);
+        }
       }
     }
   }

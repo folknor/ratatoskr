@@ -10,14 +10,14 @@ export interface EmailAttachment {
 export interface EmailDraft {
   from: string;
   to: string[];
-  cc?: string[];
-  bcc?: string[];
+  cc?: string[] | undefined;
+  bcc?: string[] | undefined;
   subject: string;
   htmlBody: string;
-  inReplyTo?: string;
-  references?: string;
-  threadId?: string;
-  attachments?: EmailAttachment[];
+  inReplyTo?: string | undefined;
+  references?: string | undefined;
+  threadId?: string | undefined;
+  attachments?: EmailAttachment[] | undefined;
 }
 
 function base64UrlEncode(str: string): string {

@@ -21,7 +21,7 @@ export interface TokenResponse {
 export interface ProviderUserInfo {
   email: string;
   name: string;
-  picture?: string;
+  picture?: string | undefined;
 }
 
 function generateCodeVerifier(): string {

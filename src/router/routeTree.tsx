@@ -45,8 +45,8 @@ const VALID_CATEGORIES: readonly [
 ] = ["Primary", "Updates", "Promotions", "Social", "Newsletters"] as const;
 
 type MailSearch = {
-  q?: string;
-  category?: (typeof VALID_CATEGORIES)[number];
+  q?: string | undefined;
+  category?: (typeof VALID_CATEGORIES)[number] | undefined;
 };
 
 function validateMailSearch(search: Record<string, unknown>): MailSearch {

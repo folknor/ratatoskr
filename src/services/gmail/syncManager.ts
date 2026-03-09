@@ -292,7 +292,7 @@ async function runSync(accountIds: string[]): Promise<void> {
     const existing = new Set(pendingAccountIds ?? []);
     for (const id of accountIds) existing.add(id);
     pendingAccountIds = [...existing];
-    return syncPromise;
+    return;
   }
 
   syncPromise = (async () => {

@@ -4,7 +4,7 @@ export interface OAuthProviderConfig {
   authUrl: string;
   tokenUrl: string;
   scopes: string[];
-  userInfoUrl?: string;
+  userInfoUrl?: string | undefined;
   /** Whether PKCE is required (Microsoft requires it, Yahoo supports it) */
   usePkce: boolean;
 }

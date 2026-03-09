@@ -82,5 +82,5 @@ export interface EmailProvider {
 
   // Connection
   testConnection(): Promise<{ success: boolean; message: string }>;
-  getProfile(): Promise<{ email: string; name?: string }>;
+  getProfile(): Promise<{ email: string; name?: string | undefined }>;
 }

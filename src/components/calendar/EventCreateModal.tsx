@@ -15,7 +15,7 @@ interface EventCreateModalProps {
     location: string;
     startTime: string;
     endTime: string;
-    calendarId?: string;
+    calendarId?: string | undefined;
   }) => void;
 }
 

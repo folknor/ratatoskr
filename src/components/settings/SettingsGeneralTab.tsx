@@ -8,6 +8,7 @@ import {
   resetToSystemLanguage,
   SUPPORTED_LANGUAGES,
   setAppLanguage,
+  type SupportedLanguage,
 } from "@/i18n";
 import { setSetting } from "@/services/db/settings";
 import type { SidebarNavItem } from "@/stores/uiStore";
@@ -87,7 +88,7 @@ export function SettingsGeneralTab({
                 setLanguageOverride(null);
                 await resetToSystemLanguage();
               } else {
-                const lang = val as "en" | "it";
+                const lang = val as SupportedLanguage;
                 setLanguageOverride(lang);
                 await setAppLanguage(lang);
               }

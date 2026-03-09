@@ -13,8 +13,8 @@ export interface CalendarEvent {
   organizer?: { email: string; displayName?: string };
   attendees?: {
     email: string;
-    displayName?: string;
-    responseStatus?: string;
+    displayName?: string | undefined;
+    responseStatus?: string | undefined;
   }[];
   htmlLink?: string;
   updated?: string;

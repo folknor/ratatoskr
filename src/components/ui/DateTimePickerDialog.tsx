@@ -19,7 +19,7 @@ interface DateTimePickerDialogProps {
   /** Called with a Unix timestamp in seconds */
   onSelect: (timestamp: number) => void;
   submitLabel: string;
-  zIndex?: string;
+  zIndex?: string | undefined;
 }
 
 export function DateTimePickerDialog({

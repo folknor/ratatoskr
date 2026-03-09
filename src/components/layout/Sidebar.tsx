@@ -90,7 +90,7 @@ function DroppableNavItem({
   collapsed: boolean;
   onClick: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
-  title?: string;
+  title?: string | undefined;
   children: (isOver: boolean) => React.ReactNode;
 }): React.ReactNode {
   const { setNodeRef, isOver } = useDroppable({ id });
@@ -783,8 +783,8 @@ export function Sidebar({
         onClose={() => setShowSmartFolderModal(false)}
         onSubmit={(values: Record<string, string>): void => {
           createSmartFolder(
-            values.name?.trim(),
-            values.query?.trim(),
+            values.name?.trim() ?? "",
+            values.query?.trim() ?? "",
             activeAccountId ?? undefined,
           );
         }}

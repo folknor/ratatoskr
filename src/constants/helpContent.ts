@@ -69,7 +69,7 @@ import {
 export interface HelpTip {
   /** i18n key path (e.g. "cards.add-account.tips.0") — resolve with t() */
   text: string;
-  shortcut?: string;
+  shortcut?: string | undefined;
 }
 
 export interface HelpCard {
@@ -82,7 +82,7 @@ export interface HelpCard {
   /** i18n key path for description */
   description: string;
   tips?: HelpTip[];
-  relatedSettingsTab?: string;
+  relatedSettingsTab?: string | undefined;
 }
 
 export interface HelpCategory {

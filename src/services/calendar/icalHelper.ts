@@ -79,8 +79,8 @@ export function parseVEvent(
   let isAllDay = false;
   const attendees: {
     email: string;
-    displayName?: string;
-    responseStatus?: string;
+    displayName?: string | undefined;
+    responseStatus?: string | undefined;
   }[] = [];
 
   for (const line of lines) {

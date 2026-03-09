@@ -311,7 +311,8 @@ async function parallelLimit<T>(
   async function next(): Promise<void> {
     while (index < tasks.length) {
       const i = index++;
-      results[i] = await tasks[i]?.();
+      const task = tasks[i];
+      if (task) results[i] = await task();
     }
   }
 

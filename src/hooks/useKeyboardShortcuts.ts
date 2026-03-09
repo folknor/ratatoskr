@@ -75,7 +75,7 @@ function buildReverseMap(keyMap: Record<string, string>): {
   for (const [id, keys] of Object.entries(keyMap)) {
     if (keys.includes(" then ")) {
       // Two-key sequence like "g then i"
-      const secondKey = keys.split(" then ")[1]?.trim();
+      const secondKey = keys.split(" then ")[1]?.trim() ?? "";
       twoKeySequences.set(secondKey, id);
     } else if (
       keys.includes("+") &&

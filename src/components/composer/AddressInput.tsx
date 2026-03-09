@@ -76,7 +76,7 @@ export function AddressInput({
     if (e.key === "Enter" || e.key === "Tab" || e.key === ",") {
       e.preventDefault();
       if (showSuggestions && selectedIdx >= 0) {
-        addAddress(suggestions[selectedIdx]?.email);
+        addAddress(suggestions[selectedIdx]?.email ?? "");
       } else if (inputValue.trim()) {
         addAddress(inputValue);
       }

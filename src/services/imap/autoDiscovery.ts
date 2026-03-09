@@ -168,8 +168,8 @@ export function extractDomain(email: string): string | null {
 export interface WellKnownProviderResult {
   settings: ServerSettings;
   authMethods: AuthMethod[];
-  oauthProviderId?: string;
-  acceptInvalidCerts?: boolean;
+  oauthProviderId?: string | undefined;
+  acceptInvalidCerts?: boolean | undefined;
 }
 
 /**

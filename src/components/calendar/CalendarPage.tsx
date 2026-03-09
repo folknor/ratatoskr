@@ -223,7 +223,7 @@ export function CalendarPage(): React.ReactNode {
       location: string;
       startTime: string;
       endTime: string;
-      calendarId?: string;
+      calendarId?: string | undefined;
     }) => {
       if (!activeAccountId) return;
       try {

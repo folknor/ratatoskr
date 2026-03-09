@@ -38,12 +38,12 @@ export async function getEnabledQuickStepsForAccount(
 export async function insertQuickStep(step: {
   accountId: string;
   name: string;
-  description?: string;
-  shortcut?: string;
+  description?: string | undefined;
+  shortcut?: string | undefined;
   actions: QuickStepAction[];
-  icon?: string;
-  isEnabled?: boolean;
-  continueOnError?: boolean;
+  icon?: string | undefined;
+  isEnabled?: boolean | undefined;
+  continueOnError?: boolean | undefined;
 }): Promise<string> {
   const db = await getDb();
   const id = crypto.randomUUID();
@@ -67,13 +67,13 @@ export async function insertQuickStep(step: {
 export async function updateQuickStep(
   id: string,
   updates: {
-    name?: string;
-    description?: string;
-    shortcut?: string | null;
-    actions?: QuickStepAction[];
-    icon?: string;
-    isEnabled?: boolean;
-    continueOnError?: boolean;
+    name?: string | undefined;
+    description?: string | undefined;
+    shortcut?: string | null | undefined;
+    actions?: QuickStepAction[] | undefined;
+    icon?: string | undefined;
+    isEnabled?: boolean | undefined;
+    continueOnError?: boolean | undefined;
   },
 ): Promise<void> {
   const db = await getDb();

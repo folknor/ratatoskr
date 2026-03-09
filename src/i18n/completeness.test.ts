@@ -11,35 +11,35 @@ import searchEN from "./locales/en/search.json";
 import settingsEN from "./locales/en/settings.json";
 import sidebarEN from "./locales/en/sidebar.json";
 import tasksEN from "./locales/en/tasks.json";
-import accountsIT from "./locales/it/accounts.json";
-import attachmentsIT from "./locales/it/attachments.json";
-import calendarIT from "./locales/it/calendar.json";
-import commonIT from "./locales/it/common.json";
-import composerIT from "./locales/it/composer.json";
-import emailIT from "./locales/it/email.json";
-import helpIT from "./locales/it/help.json";
-import notificationsIT from "./locales/it/notifications.json";
-import searchIT from "./locales/it/search.json";
-import settingsIT from "./locales/it/settings.json";
-import sidebarIT from "./locales/it/sidebar.json";
-import tasksIT from "./locales/it/tasks.json";
+import accountsIT from "./locales/nb/accounts.json";
+import attachmentsIT from "./locales/nb/attachments.json";
+import calendarIT from "./locales/nb/calendar.json";
+import commonIT from "./locales/nb/common.json";
+import composerIT from "./locales/nb/composer.json";
+import emailIT from "./locales/nb/email.json";
+import helpIT from "./locales/nb/help.json";
+import notificationsIT from "./locales/nb/notifications.json";
+import searchIT from "./locales/nb/search.json";
+import settingsIT from "./locales/nb/settings.json";
+import sidebarIT from "./locales/nb/sidebar.json";
+import tasksIT from "./locales/nb/tasks.json";
 
 const namespaces: Record<
   string,
-  { en: Record<string, unknown>; italiano: Record<string, unknown> }
+  { en: Record<string, unknown>; nb_NO: Record<string, unknown> }
 > = {
-  common: { en: commonEN, italiano: commonIT },
-  sidebar: { en: sidebarEN, italiano: sidebarIT },
-  email: { en: emailEN, italiano: emailIT },
-  composer: { en: composerEN, italiano: composerIT },
-  settings: { en: settingsEN, italiano: settingsIT },
-  search: { en: searchEN, italiano: searchIT },
-  accounts: { en: accountsEN, italiano: accountsIT },
-  tasks: { en: tasksEN, italiano: tasksIT },
-  notifications: { en: notificationsEN, italiano: notificationsIT },
-  calendar: { en: calendarEN, italiano: calendarIT },
-  attachments: { en: attachmentsEN, italiano: attachmentsIT },
-  help: { en: helpEN, italiano: helpIT },
+  common: { en: commonEN, nb_NO: commonIT },
+  sidebar: { en: sidebarEN, nb_NO: sidebarIT },
+  email: { en: emailEN, nb_NO: emailIT },
+  composer: { en: composerEN, nb_NO: composerIT },
+  settings: { en: settingsEN, nb_NO: settingsIT },
+  search: { en: searchEN, nb_NO: searchIT },
+  accounts: { en: accountsEN, nb_NO: accountsIT },
+  tasks: { en: tasksEN, nb_NO: tasksIT },
+  notifications: { en: notificationsEN, nb_NO: notificationsIT },
+  calendar: { en: calendarEN, nb_NO: calendarIT },
+  attachments: { en: attachmentsEN, nb_NO: attachmentsIT },
+  help: { en: helpEN, nb_NO: helpIT },
 };
 
 function getKeys(obj: Record<string, unknown>, prefix = ""): string[] {
@@ -57,20 +57,22 @@ function getKeys(obj: Record<string, unknown>, prefix = ""): string[] {
 }
 
 describe("Translation completeness", () => {
-  for (const [ns, { en, italiano }] of Object.entries(namespaces)) {
+  for (const [ns, { en, nb_NO }] of Object.entries(namespaces)) {
     describe(`namespace: ${ns}`, () => {
-      it("IT should have all keys from EN", () => {
+      it("nb_NO should have all keys from EN", () => {
         const enKeys = getKeys(en);
-        const itKeys = getKeys(italiano);
+        const itKeys = getKeys(nb_NO);
         const missing = enKeys.filter((k) => !itKeys.includes(k));
-        expect(missing, `IT missing keys: ${missing.join(", ")}`).toEqual([]);
+        expect(missing, `nb_NO missing keys: ${missing.join(", ")}`).toEqual(
+          [],
+        );
       });
 
       it("EN should have all keys from IT (no extra keys in IT)", () => {
         const enKeys = getKeys(en);
-        const itKeys = getKeys(italiano);
+        const itKeys = getKeys(nb_NO);
         const extra = itKeys.filter((k) => !enKeys.includes(k));
-        expect(extra, `IT has extra keys: ${extra.join(", ")}`).toEqual([]);
+        expect(extra, `nb_NO has extra keys: ${extra.join(", ")}`).toEqual([]);
       });
 
       it("should not have empty string values in EN", () => {
@@ -85,14 +87,16 @@ describe("Translation completeness", () => {
       });
 
       it("should not have empty string values in IT", () => {
-        const itKeys = getKeys(italiano);
+        const itKeys = getKeys(nb_NO);
         const empty = itKeys.filter((k) => {
           const parts = k.split(".");
-          let val: unknown = italiano;
+          let val: unknown = nb_NO;
           for (const p of parts) val = (val as Record<string, unknown>)[p];
           return val === "";
         });
-        expect(empty, `IT has empty values: ${empty.join(", ")}`).toEqual([]);
+        expect(empty, `nb_NO has empty values: ${empty.join(", ")}`).toEqual(
+          [],
+        );
       });
     });
   }

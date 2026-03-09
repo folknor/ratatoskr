@@ -13,7 +13,7 @@ import { markThreadRead } from "@/services/emailActions";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useContextMenuStore } from "@/stores/contextMenuStore";
-import { type Thread, useThreadStore } from "@/stores/threadStore";
+import type { Thread } from "@/stores/threadStore";
 import { useUIStore } from "@/stores/uiStore";
 import { isNoReplyAddress } from "@/utils/noReply";
 import { escapeHtml, sanitizeHtml } from "@/utils/sanitize";
@@ -66,7 +66,6 @@ export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
   const toggleContactSidebar = useUIStore((s) => s.toggleContactSidebar);
   const taskSidebarVisible = useUIStore((s) => s.taskSidebarVisible);
   const [showTaskExtract, setShowTaskExtract] = useState(false);
-  const _updateThread = useThreadStore((s) => s.updateThread);
   const [messages, setMessages] = useState<DbMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const markedReadRef = useRef<string | null>(null);
@@ -140,6 +139,7 @@ export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
 
     // instant
     markRead();
+    return undefined;
   }, [activeAccountId, thread.id, thread.isRead, markAsReadBehavior]);
 
   const openComposer = useComposerStore((s) => s.openComposer);

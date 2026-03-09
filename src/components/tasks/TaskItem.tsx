@@ -60,10 +60,10 @@ function getDueDateColor(timestamp: number): string {
 
 interface TaskItemProps {
   task: DbTask;
-  subtasks?: DbTask[];
+  subtasks?: DbTask[] | undefined;
   onToggleComplete: (id: string, completed: boolean) => void;
-  onSelect?: (id: string) => void;
-  onDelete?: (id: string) => void;
+  onSelect?: ((id: string) => void) | undefined;
+  onDelete?: ((id: string) => void) | undefined;
   isSelected?: boolean;
   compact?: boolean;
 }

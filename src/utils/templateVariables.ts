@@ -2,11 +2,11 @@ import { getContactByEmail } from "@/services/db/contacts";
 import { escapeHtml } from "@/utils/sanitize";
 
 export interface VariableContext {
-  recipientEmail?: string;
-  recipientName?: string;
-  senderEmail?: string;
-  senderName?: string;
-  subject?: string;
+  recipientEmail?: string | undefined;
+  recipientName?: string | undefined;
+  senderEmail?: string | undefined;
+  senderName?: string | undefined;
+  subject?: string | undefined;
 }
 
 export interface TemplateVariable {

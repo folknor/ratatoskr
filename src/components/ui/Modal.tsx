@@ -9,7 +9,7 @@ interface ModalProps {
   children: ReactNode;
   width?: string;
   /** Custom z-index class (default: "z-50") */
-  zIndex?: string;
+  zIndex?: string | undefined;
   /** Additional classes on the panel container */
   panelClassName?: string;
   /** Replace the default header entirely */

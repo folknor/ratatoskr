@@ -42,9 +42,9 @@ export async function getSmartFolderById(
 export async function insertSmartFolder(folder: {
   name: string;
   query: string;
-  accountId?: string;
-  icon?: string;
-  color?: string;
+  accountId?: string | undefined;
+  icon?: string | undefined;
+  color?: string | undefined;
 }): Promise<string> {
   const db = await getDb();
   const id = crypto.randomUUID();
@@ -64,7 +64,7 @@ export async function insertSmartFolder(folder: {
 
 export async function updateSmartFolder(
   id: string,
-  updates: { name?: string; query?: string; icon?: string; color?: string },
+  updates: { name?: string | undefined; query?: string | undefined; icon?: string | undefined; color?: string | undefined },
 ): Promise<void> {
   const fields: [string, unknown][] = [];
   if (updates.name !== undefined) fields.push(["name", updates.name]);

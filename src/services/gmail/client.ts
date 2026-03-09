@@ -19,7 +19,7 @@ interface TokenInfo {
 export class GmailClient {
   private accountId: string;
   private clientId: string;
-  private clientSecret?: string;
+  private clientSecret?: string | undefined;
   private tokenInfo: TokenInfo;
   private refreshPromise: Promise<void> | null = null;
 
@@ -166,15 +166,15 @@ export class GmailClient {
 
   async listThreads(
     params: {
-      labelIds?: string[];
-      maxResults?: number;
-      pageToken?: string;
-      q?: string;
+      labelIds?: string[] | undefined;
+      maxResults?: number | undefined;
+      pageToken?: string | undefined;
+      q?: string | undefined;
     } = {},
   ): Promise<{
-    threads?: GmailThreadStub[];
-    nextPageToken?: string;
-    resultSizeEstimate?: number;
+    threads?: GmailThreadStub[] | undefined;
+    nextPageToken?: string | undefined;
+    resultSizeEstimate?: number | undefined;
   }> {
     const searchParams = new URLSearchParams();
     if (params.labelIds)
@@ -220,11 +220,11 @@ export class GmailClient {
       "labelAdded",
       "labelRemoved",
     ],
-    pageToken?: string,
+    pageToken?: string | undefined,
   ): Promise<{
     history?: GmailHistoryItem[];
     historyId: string;
-    nextPageToken?: string;
+    nextPageToken?: string | undefined;
   }> {
     const params = new URLSearchParams({ startHistoryId });
     for (const ht of historyTypes) {
