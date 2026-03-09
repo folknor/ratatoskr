@@ -21,7 +21,9 @@ describe("parseGmailMessage", () => {
     );
     expect(unread.isRead).toBe(false);
 
-    const read = parseGmailMessage(createMockGmailMessage({ labelIds: ["INBOX"] }));
+    const read = parseGmailMessage(
+      createMockGmailMessage({ labelIds: ["INBOX"] }),
+    );
     expect(read.isRead).toBe(true);
   });
 
@@ -72,7 +74,10 @@ describe("parseGmailMessage", () => {
       filename: "report.pdf",
       headers: [
         { name: "Content-ID", value: "<part1.abc@example.com>" },
-        { name: "Content-Disposition", value: "attachment; filename=\"report.pdf\"" },
+        {
+          name: "Content-Disposition",
+          value: 'attachment; filename="report.pdf"',
+        },
       ],
       body: { attachmentId: "att-1", size: 5000 },
     });
@@ -108,7 +113,7 @@ describe("parseGmailMessage", () => {
       mimeType: "image/jpeg",
       filename: "photo.jpg",
       headers: [
-        { name: "Content-Disposition", value: "inline; filename=\"photo.jpg\"" },
+        { name: "Content-Disposition", value: 'inline; filename="photo.jpg"' },
       ],
       body: { attachmentId: "att-1", size: 3000 },
     });

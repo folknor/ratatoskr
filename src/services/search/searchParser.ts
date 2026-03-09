@@ -14,11 +14,12 @@ export interface ParsedSearchQuery {
   isRead?: boolean;
   isStarred?: boolean;
   before?: number; // unix timestamp (seconds)
-  after?: number;  // unix timestamp (seconds)
+  after?: number; // unix timestamp (seconds)
   label?: string;
 }
 
-const OPERATOR_REGEX = /(?:^|\s)(from|to|subject|has|is|before|after|label):\s*(?:"([^"]+)"|(\S+))/gi;
+const OPERATOR_REGEX =
+  /(?:^|\s)(from|to|subject|has|is|before|after|label):\s*(?:"([^"]+)"|(\S+))/gi;
 
 /**
  * Parse a date string like YYYY/MM/DD or YYYY-MM-DD into a unix timestamp (seconds).

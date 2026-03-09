@@ -22,9 +22,8 @@ export async function fetchSendAsAliases(
   client: GmailClient,
   accountId: string,
 ): Promise<void> {
-  const response = await client.request<GmailSendAsResponse>(
-    "/settings/sendAs",
-  );
+  const response =
+    await client.request<GmailSendAsResponse>("/settings/sendAs");
 
   if (!response.sendAs) return;
 

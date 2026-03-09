@@ -145,7 +145,9 @@ describe("parseIdToken (via module internals)", () => {
 
     const token = makeIdToken(payload);
     const parts = token.split(".");
-    const decoded = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+    const decoded = JSON.parse(
+      atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")),
+    );
 
     expect(decoded.email).toBe("user@outlook.com");
     expect(decoded.name).toBe("Test User");

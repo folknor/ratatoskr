@@ -40,7 +40,9 @@ export async function getPhishingAllowlist(
   accountId: string,
 ): Promise<{ id: string; sender_address: string; created_at: number }[]> {
   const db = await getDb();
-  return db.select<{ id: string; sender_address: string; created_at: number }[]>(
+  return db.select<
+    { id: string; sender_address: string; created_at: number }[]
+  >(
     "SELECT id, sender_address, created_at FROM phishing_allowlist WHERE account_id = $1 ORDER BY sender_address",
     [accountId],
   );

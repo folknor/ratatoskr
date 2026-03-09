@@ -140,7 +140,9 @@ describe("matchSmartLabels", () => {
     expect(result).toHaveLength(1);
     expect(result[0]!.labelIds).toContain("label-jobs");
     expect(result[0]!.labelIds).toContain("label-orders");
-    expect(result[0]!.labelIds.filter((l) => l === "label-jobs")).toHaveLength(1);
+    expect(result[0]!.labelIds.filter((l) => l === "label-jobs")).toHaveLength(
+      1,
+    );
   });
 
   it("deduplicates threads (uses first message per thread)", async () => {
@@ -198,7 +200,9 @@ describe("matchSmartLabels", () => {
       },
     ]);
     vi.mocked(messageMatchesFilter).mockReturnValue(true);
-    vi.mocked(classifyThreadsBySmartLabels).mockRejectedValue(new Error("AI error"));
+    vi.mocked(classifyThreadsBySmartLabels).mockRejectedValue(
+      new Error("AI error"),
+    );
 
     const result = await matchSmartLabels("acc-1", [makeMessage()]);
 

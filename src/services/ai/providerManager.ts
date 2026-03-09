@@ -2,11 +2,26 @@ import { getSetting, getSecureSetting } from "@/services/db/settings";
 import { AiError } from "./errors";
 import type { AiProvider, AiProviderClient } from "./types";
 import { DEFAULT_MODELS, MODEL_SETTINGS } from "./types";
-import { createClaudeProvider, clearClaudeProvider } from "./providers/claudeProvider";
-import { createOpenAIProvider, clearOpenAIProvider } from "./providers/openaiProvider";
-import { createGeminiProvider, clearGeminiProvider } from "./providers/geminiProvider";
-import { createOllamaProvider, clearOllamaProvider } from "./providers/ollamaProvider";
-import { createCopilotProvider, clearCopilotProvider } from "./providers/copilotProvider";
+import {
+  createClaudeProvider,
+  clearClaudeProvider,
+} from "./providers/claudeProvider";
+import {
+  createOpenAIProvider,
+  clearOpenAIProvider,
+} from "./providers/openaiProvider";
+import {
+  createGeminiProvider,
+  clearGeminiProvider,
+} from "./providers/geminiProvider";
+import {
+  createOllamaProvider,
+  clearOllamaProvider,
+} from "./providers/ollamaProvider";
+import {
+  createCopilotProvider,
+  clearCopilotProvider,
+} from "./providers/copilotProvider";
 
 const API_KEY_SETTINGS: Record<Exclude<AiProvider, "ollama">, string> = {
   claude: "claude_api_key",
@@ -15,11 +30,21 @@ const API_KEY_SETTINGS: Record<Exclude<AiProvider, "ollama">, string> = {
   copilot: "copilot_api_key",
 };
 
-let cachedProvider: { name: AiProvider; key: string; client: AiProviderClient } | null = null;
+let cachedProvider: {
+  name: AiProvider;
+  key: string;
+  client: AiProviderClient;
+} | null = null;
 
 export async function getActiveProviderName(): Promise<AiProvider> {
   const setting = await getSetting("ai_provider");
-  if (setting === "openai" || setting === "gemini" || setting === "ollama" || setting === "copilot") return setting;
+  if (
+    setting === "openai" ||
+    setting === "gemini" ||
+    setting === "ollama" ||
+    setting === "copilot"
+  )
+    return setting;
   return "claude";
 }
 
@@ -27,11 +52,16 @@ export async function getActiveProvider(): Promise<AiProviderClient> {
   const providerName = await getActiveProviderName();
 
   if (providerName === "ollama") {
-    const serverUrl = (await getSetting("ollama_server_url")) ?? "http://localhost:11434";
+    const serverUrl =
+      (await getSetting("ollama_server_url")) ?? "http://localhost:11434";
     const model = (await getSetting("ollama_model")) ?? "llama3.2";
     const cacheKey = `${serverUrl}|${model}`;
 
-    if (cachedProvider && cachedProvider.name === "ollama" && cachedProvider.key === cacheKey) {
+    if (
+      cachedProvider &&
+      cachedProvider.name === "ollama" &&
+      cachedProvider.key === cacheKey
+    ) {
       return cachedProvider.client;
     }
 
@@ -44,13 +74,22 @@ export async function getActiveProvider(): Promise<AiProviderClient> {
   const apiKey = await getSecureSetting(keySetting);
 
   if (!apiKey) {
-    throw new AiError("NOT_CONFIGURED", `${providerName} API key not configured`);
+    throw new AiError(
+      "NOT_CONFIGURED",
+      `${providerName} API key not configured`,
+    );
   }
 
-  const model = (await getSetting(MODEL_SETTINGS[providerName])) ?? DEFAULT_MODELS[providerName];
+  const model =
+    (await getSetting(MODEL_SETTINGS[providerName])) ??
+    DEFAULT_MODELS[providerName];
   const cacheKey = `${apiKey}|${model}`;
 
-  if (cachedProvider && cachedProvider.name === providerName && cachedProvider.key === cacheKey) {
+  if (
+    cachedProvider &&
+    cachedProvider.name === providerName &&
+    cachedProvider.key === cacheKey
+  ) {
     return cachedProvider.client;
   }
 

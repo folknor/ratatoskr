@@ -1,7 +1,12 @@
 import type { FilterCriteria, FilterActions } from "../db/filters";
 import { getEnabledFiltersForAccount } from "../db/filters";
 import type { ParsedMessage } from "../gmail/messageParser";
-import { addThreadLabel, removeThreadLabel, markThreadRead, starThread } from "../emailActions";
+import {
+  addThreadLabel,
+  removeThreadLabel,
+  markThreadRead,
+  starThread,
+} from "../emailActions";
 
 /**
  * Check if a parsed message matches the given filter criteria.
@@ -12,7 +17,8 @@ export function messageMatchesFilter(
   criteria: FilterCriteria,
 ): boolean {
   if (criteria.from) {
-    const fromStr = `${message.fromName ?? ""} ${message.fromAddress ?? ""}`.toLowerCase();
+    const fromStr =
+      `${message.fromName ?? ""} ${message.fromAddress ?? ""}`.toLowerCase();
     if (!fromStr.includes(criteria.from.toLowerCase())) return false;
   }
 
@@ -27,7 +33,8 @@ export function messageMatchesFilter(
   }
 
   if (criteria.body) {
-    const bodyStr = `${message.bodyText ?? ""} ${message.bodyHtml ?? ""}`.toLowerCase();
+    const bodyStr =
+      `${message.bodyText ?? ""} ${message.bodyHtml ?? ""}`.toLowerCase();
     if (!bodyStr.includes(criteria.body.toLowerCase())) return false;
   }
 
@@ -91,10 +98,12 @@ export async function applyFiltersToMessages(
   // Pre-parse filter JSON once (not per-message) to avoid O(M×F) parse operations
   const parsedFilters = filters.flatMap((filter) => {
     try {
-      return [{
-        criteria: JSON.parse(filter.criteria_json) as FilterCriteria,
-        actions: JSON.parse(filter.actions_json) as FilterActions,
-      }];
+      return [
+        {
+          criteria: JSON.parse(filter.criteria_json) as FilterCriteria,
+          actions: JSON.parse(filter.actions_json) as FilterActions,
+        },
+      ];
     } catch {
       return [];
     }
@@ -147,7 +156,10 @@ export async function applyFiltersToMessages(
           await starThread(accountId, threadId, [], true);
         }
       } catch (err) {
-        console.error(`Failed to apply filter actions to thread ${threadId}:`, err);
+        console.error(
+          `Failed to apply filter actions to thread ${threadId}:`,
+          err,
+        );
       }
     }),
   );

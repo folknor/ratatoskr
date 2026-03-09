@@ -8,7 +8,11 @@ interface AuthWarningBannerProps {
   onDismiss: () => void;
 }
 
-export function AuthWarningBanner({ authResults, senderAddress, onDismiss }: AuthWarningBannerProps) {
+export function AuthWarningBanner({
+  authResults,
+  senderAddress,
+  onDismiss,
+}: AuthWarningBannerProps) {
   const { t } = useTranslation("email");
 
   if (!authResults) return null;

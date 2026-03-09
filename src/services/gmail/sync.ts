@@ -5,7 +5,10 @@ import { upsertThread, setThreadLabels } from "../db/threads";
 import { upsertMessage } from "../db/messages";
 import { upsertAttachment } from "../db/attachments";
 import { updateAccountSyncState } from "../db/accounts";
-import { shouldNotifyForMessage, queueNewEmailNotification } from "../notifications/notificationManager";
+import {
+  shouldNotifyForMessage,
+  queueNewEmailNotification,
+} from "../notifications/notificationManager";
 import { applyFiltersToMessages } from "../filters/filterEngine";
 import { getSetting } from "../db/settings";
 import { getMutedThreadIds } from "../db/threads";
@@ -16,7 +19,12 @@ import { getPendingOpsForResource } from "../db/pendingOperations";
 async function loadAutoArchiveCategories(): Promise<Set<string>> {
   const raw = await getSetting("auto_archive_categories");
   if (!raw) return new Set();
-  return new Set(raw.split(",").map((s) => s.trim()).filter(Boolean));
+  return new Set(
+    raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
 }
 
 export interface SyncProgress {
@@ -70,11 +78,15 @@ async function processAndStoreThread(
 
   // Rule-based categorization for inbox threads
   if (allLabelIds.has("INBOX")) {
-    const { getThreadCategoryWithManual, setThreadCategory } = await import("@/services/db/threadCategories");
+    const { getThreadCategoryWithManual, setThreadCategory } = await import(
+      "@/services/db/threadCategories"
+    );
     const existing = await getThreadCategoryWithManual(accountId, thread.id);
     // Skip if manually categorized
     if (!existing || !existing.isManual) {
-      const { categorizeByRules } = await import("@/services/categorization/ruleEngine");
+      const { categorizeByRules } = await import(
+        "@/services/categorization/ruleEngine"
+      );
       const category = categorizeByRules({
         labelIds: [...allLabelIds],
         fromAddress: lastMessage.fromAddress,
@@ -83,7 +95,12 @@ async function processAndStoreThread(
       await setThreadCategory(accountId, thread.id, category, false);
 
       // Auto-archive if category matches
-      if (client && autoArchiveCategories && autoArchiveCategories.has(category) && category !== "Primary") {
+      if (
+        client &&
+        autoArchiveCategories &&
+        autoArchiveCategories.has(category) &&
+        category !== "Primary"
+      ) {
         try {
           await client.modifyThread(thread.id, undefined, ["INBOX"]);
           allLabelIds.delete("INBOX");
@@ -96,7 +113,8 @@ async function processAndStoreThread(
       // Hold thread if delivery schedule is active for this category
       if (category !== "Primary") {
         try {
-          const { getBundleRule, holdThread, getNextDeliveryTime } = await import("@/services/db/bundleRules");
+          const { getBundleRule, holdThread, getNextDeliveryTime } =
+            await import("@/services/db/bundleRules");
           const rule = await getBundleRule(accountId, category);
           if (rule?.delivery_enabled && rule.delivery_schedule) {
             const schedule = JSON.parse(rule.delivery_schedule);
@@ -104,51 +122,58 @@ async function processAndStoreThread(
             await holdThread(accountId, thread.id, category, heldUntil);
           }
         } catch (err) {
-          console.error(`Failed to check bundle rule for thread ${thread.id}:`, err);
+          console.error(
+            `Failed to check bundle rule for thread ${thread.id}:`,
+            err,
+          );
         }
       }
     }
   }
 
-  await Promise.all(parsedMessages.map(async (parsed) => {
-    await upsertMessage({
-      id: parsed.id,
-      accountId,
-      threadId: parsed.threadId,
-      fromAddress: parsed.fromAddress,
-      fromName: parsed.fromName,
-      toAddresses: parsed.toAddresses,
-      ccAddresses: parsed.ccAddresses,
-      bccAddresses: parsed.bccAddresses,
-      replyTo: parsed.replyTo,
-      subject: parsed.subject,
-      snippet: parsed.snippet,
-      date: parsed.date,
-      isRead: parsed.isRead,
-      isStarred: parsed.isStarred,
-      bodyHtml: parsed.bodyHtml,
-      bodyText: parsed.bodyText,
-      rawSize: parsed.rawSize,
-      internalDate: parsed.internalDate,
-      listUnsubscribe: parsed.listUnsubscribe,
-      listUnsubscribePost: parsed.listUnsubscribePost,
-      authResults: parsed.authResults,
-    });
-
-    await Promise.all(parsed.attachments.map((att) =>
-      upsertAttachment({
-        id: `${parsed.id}_${att.gmailAttachmentId}`,
-        messageId: parsed.id,
+  await Promise.all(
+    parsedMessages.map(async (parsed) => {
+      await upsertMessage({
+        id: parsed.id,
         accountId,
-        filename: att.filename,
-        mimeType: att.mimeType,
-        size: att.size,
-        gmailAttachmentId: att.gmailAttachmentId,
-        contentId: att.contentId,
-        isInline: att.isInline,
-      }),
-    ));
-  }));
+        threadId: parsed.threadId,
+        fromAddress: parsed.fromAddress,
+        fromName: parsed.fromName,
+        toAddresses: parsed.toAddresses,
+        ccAddresses: parsed.ccAddresses,
+        bccAddresses: parsed.bccAddresses,
+        replyTo: parsed.replyTo,
+        subject: parsed.subject,
+        snippet: parsed.snippet,
+        date: parsed.date,
+        isRead: parsed.isRead,
+        isStarred: parsed.isStarred,
+        bodyHtml: parsed.bodyHtml,
+        bodyText: parsed.bodyText,
+        rawSize: parsed.rawSize,
+        internalDate: parsed.internalDate,
+        listUnsubscribe: parsed.listUnsubscribe,
+        listUnsubscribePost: parsed.listUnsubscribePost,
+        authResults: parsed.authResults,
+      });
+
+      await Promise.all(
+        parsed.attachments.map((att) =>
+          upsertAttachment({
+            id: `${parsed.id}_${att.gmailAttachmentId}`,
+            messageId: parsed.id,
+            accountId,
+            filename: att.filename,
+            mimeType: att.mimeType,
+            size: att.size,
+            gmailAttachmentId: att.gmailAttachmentId,
+            contentId: att.contentId,
+            isInline: att.isInline,
+          }),
+        ),
+      );
+    }),
+  );
 }
 
 /**
@@ -159,16 +184,18 @@ export async function syncLabels(
   accountId: string,
 ): Promise<void> {
   const response = await client.listLabels();
-  await Promise.all(response.labels.map((label) =>
-    upsertLabel({
-      id: label.id,
-      accountId,
-      name: label.name,
-      type: label.type,
-      colorBg: label.color?.backgroundColor ?? null,
-      colorFg: label.color?.textColor ?? null,
-    }),
-  ));
+  await Promise.all(
+    response.labels.map((label) =>
+      upsertLabel({
+        id: label.id,
+        accountId,
+        name: label.name,
+        type: label.type,
+        colorBg: label.color?.backgroundColor ?? null,
+        colorFg: label.color?.textColor ?? null,
+      }),
+    ),
+  );
 }
 
 /**
@@ -239,7 +266,13 @@ export async function initialSync(
         if (!thread.messages || thread.messages.length === 0) return;
 
         const parsedMessages = thread.messages.map(parseGmailMessage);
-        await processAndStoreThread(thread, accountId, parsedMessages, client, autoArchiveCategories);
+        await processAndStoreThread(
+          thread,
+          accountId,
+          parsedMessages,
+          client,
+          autoArchiveCategories,
+        );
       } catch (err) {
         console.error(`Failed to sync thread ${stub.id}:`, err);
       }
@@ -277,7 +310,9 @@ async function parallelLimit<T>(
     }
   }
 
-  const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => next());
+  const workers = Array.from({ length: Math.min(limit, tasks.length) }, () =>
+    next(),
+  );
   await Promise.all(workers);
   return results;
 }
@@ -298,7 +333,11 @@ export async function deltaSync(
     let pageToken: string | undefined;
 
     do {
-      const response = await client.getHistory(lastHistoryId, undefined, pageToken);
+      const response = await client.getHistory(
+        lastHistoryId,
+        undefined,
+        pageToken,
+      );
       latestHistoryId = response.historyId;
 
       if (response.history) {
@@ -342,11 +381,17 @@ export async function deltaSync(
     // Load settings once for the whole sync cycle
     const autoArchiveCategories = await loadAutoArchiveCategories();
     const mutedThreadIds = await getMutedThreadIds(accountId);
-    const smartNotifications = (await getSetting("smart_notifications")) !== "false";
+    const smartNotifications =
+      (await getSetting("smart_notifications")) !== "false";
     const notifyCategories = new Set(
-      ((await getSetting("notify_categories")) ?? "Primary").split(",").map((s) => s.trim()).filter(Boolean),
+      ((await getSetting("notify_categories")) ?? "Primary")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
     );
-    const vipSenders = smartNotifications ? await getVipSenders(accountId) : new Set<string>();
+    const vipSenders = smartNotifications
+      ? await getVipSenders(accountId)
+      : new Set<string>();
 
     // Re-fetch affected threads in parallel (max 5 concurrent)
     const threadIds = [...affectedThreadIds];
@@ -354,9 +399,14 @@ export async function deltaSync(
       threadIds.map((threadId) => async () => {
         try {
           // Skip metadata overwrite for threads with pending local changes
-          const pendingOps = await getPendingOpsForResource(accountId, threadId);
+          const pendingOps = await getPendingOpsForResource(
+            accountId,
+            threadId,
+          );
           if (pendingOps.length > 0) {
-            console.log(`[deltaSync] Skipping thread ${threadId}: has ${pendingOps.length} pending local ops`);
+            console.log(
+              `[deltaSync] Skipping thread ${threadId}: has ${pendingOps.length} pending local ops`,
+            );
             return;
           }
 
@@ -365,19 +415,34 @@ export async function deltaSync(
           if (!thread.messages || thread.messages.length === 0) return;
 
           const parsedMessages = thread.messages.map(parseGmailMessage);
-          await processAndStoreThread(thread, accountId, parsedMessages, client, autoArchiveCategories);
+          await processAndStoreThread(
+            thread,
+            accountId,
+            parsedMessages,
+            client,
+            autoArchiveCategories,
+          );
 
           // Auto-archive muted threads that reappear in INBOX
           if (mutedThreadIds.has(threadId)) {
-            const hasInbox = parsedMessages.some((m) => m.labelIds.includes("INBOX"));
+            const hasInbox = parsedMessages.some((m) =>
+              m.labelIds.includes("INBOX"),
+            );
             if (hasInbox) {
               try {
                 await client.modifyThread(threadId, undefined, ["INBOX"]);
-                await setThreadLabels(accountId, threadId,
-                  [...new Set(parsedMessages.flatMap((m) => m.labelIds))].filter((l) => l !== "INBOX"),
+                await setThreadLabels(
+                  accountId,
+                  threadId,
+                  [
+                    ...new Set(parsedMessages.flatMap((m) => m.labelIds)),
+                  ].filter((l) => l !== "INBOX"),
                 );
               } catch (err) {
-                console.error(`Failed to auto-archive muted thread ${threadId}:`, err);
+                console.error(
+                  `Failed to auto-archive muted thread ${threadId}:`,
+                  err,
+                );
               }
             }
           }
@@ -385,10 +450,22 @@ export async function deltaSync(
           // Send desktop notifications for new unread inbox messages (smart-filtered)
           // Skip notifications for muted threads
           for (const parsed of parsedMessages) {
-            if (newInboxMessageIds.has(parsed.id) && !mutedThreadIds.has(threadId)) {
+            if (
+              newInboxMessageIds.has(parsed.id) &&
+              !mutedThreadIds.has(threadId)
+            ) {
               const fromAddr = parsed.fromAddress ?? undefined;
-              if (shouldNotifyForMessage(smartNotifications, notifyCategories, vipSenders, await getThreadCategory(accountId, threadId), fromAddr)) {
-                const sender = parsed.fromName ?? parsed.fromAddress ?? "Unknown";
+              if (
+                shouldNotifyForMessage(
+                  smartNotifications,
+                  notifyCategories,
+                  vipSenders,
+                  await getThreadCategory(accountId, threadId),
+                  fromAddr,
+                )
+              ) {
+                const sender =
+                  parsed.fromName ?? parsed.fromAddress ?? "Unknown";
                 queueNewEmailNotification(
                   sender,
                   parsed.subject ?? "",
@@ -401,17 +478,24 @@ export async function deltaSync(
           }
 
           // Apply filters to new inbox messages in this thread
-          const newMessages = parsedMessages.filter((m) => newInboxMessageIds.has(m.id));
+          const newMessages = parsedMessages.filter((m) =>
+            newInboxMessageIds.has(m.id),
+          );
           if (newMessages.length > 0) {
             try {
               await applyFiltersToMessages(accountId, newMessages);
             } catch (err) {
-              console.error(`Failed to apply filters to thread ${threadId}:`, err);
+              console.error(
+                `Failed to apply filters to thread ${threadId}:`,
+                err,
+              );
             }
 
             // Apply smart labels (fire-and-forget, non-blocking)
             import("@/services/smartLabels/smartLabelManager")
-              .then(({ applySmartLabelsToMessages }) => applySmartLabelsToMessages(accountId, newMessages))
+              .then(({ applySmartLabelsToMessages }) =>
+                applySmartLabelsToMessages(accountId, newMessages),
+              )
               .catch((err) => console.error("Smart label error:", err));
           }
         } catch (err) {

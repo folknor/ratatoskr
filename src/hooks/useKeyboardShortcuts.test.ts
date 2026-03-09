@@ -4,7 +4,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // The hook reads store state and calls navigate/emailActions — only mock
 // what's needed for the three event-dispatch tests below.
 vi.mock("@/stores/uiStore", () => ({
-  useUIStore: { getState: () => ({ inboxViewMode: "unified", toggleSidebar: vi.fn() }) },
+  useUIStore: {
+    getState: () => ({ inboxViewMode: "unified", toggleSidebar: vi.fn() }),
+  },
 }));
 vi.mock("@/stores/threadStore", () => ({
   useThreadStore: {
@@ -21,7 +23,13 @@ vi.mock("@/stores/threadStore", () => ({
   },
 }));
 vi.mock("@/stores/composerStore", () => ({
-  useComposerStore: { getState: () => ({ isOpen: false, openComposer: vi.fn(), closeComposer: vi.fn() }) },
+  useComposerStore: {
+    getState: () => ({
+      isOpen: false,
+      openComposer: vi.fn(),
+      closeComposer: vi.fn(),
+    }),
+  },
 }));
 vi.mock("@/stores/accountStore", () => ({
   useAccountStore: { getState: () => ({ activeAccountId: null }) },
@@ -39,7 +47,9 @@ vi.mock("@/stores/shortcutStore", () => ({
   },
 }));
 vi.mock("@/stores/contextMenuStore", () => ({
-  useContextMenuStore: { getState: () => ({ menuType: null, closeMenu: vi.fn() }) },
+  useContextMenuStore: {
+    getState: () => ({ menuType: null, closeMenu: vi.fn() }),
+  },
 }));
 vi.mock("@/router/navigate", () => ({
   navigateToLabel: vi.fn(),
@@ -62,10 +72,14 @@ vi.mock("@/services/db/threads", () => ({
   muteThread: vi.fn(),
   unmuteThread: vi.fn(),
 }));
-vi.mock("@/services/gmail/draftDeletion", () => ({ deleteDraftsForThread: vi.fn() }));
+vi.mock("@/services/gmail/draftDeletion", () => ({
+  deleteDraftsForThread: vi.fn(),
+}));
 vi.mock("@/services/gmail/tokenManager", () => ({ getGmailClient: vi.fn() }));
 vi.mock("@/services/db/messages", () => ({ getMessagesForThread: vi.fn() }));
-vi.mock("@/components/email/MessageItem", () => ({ parseUnsubscribeUrl: vi.fn() }));
+vi.mock("@/components/email/MessageItem", () => ({
+  parseUnsubscribeUrl: vi.fn(),
+}));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 vi.mock("@/services/gmail/syncManager", () => ({ triggerSync: vi.fn() }));
 

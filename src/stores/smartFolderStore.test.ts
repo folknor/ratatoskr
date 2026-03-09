@@ -130,9 +130,7 @@ describe("smartFolderStore", () => {
     it("uses defaults for optional params", async () => {
       vi.mocked(insertSmartFolder).mockResolvedValueOnce("new-id");
 
-      await useSmartFolderStore
-        .getState()
-        .createFolder("Minimal", "from:test");
+      await useSmartFolderStore.getState().createFolder("Minimal", "from:test");
 
       const { folders } = useSmartFolderStore.getState();
       expect(folders[0]?.icon).toBe("Search");

@@ -26,8 +26,7 @@ export async function cacheScanResult(
 
 export async function deleteScanResults(accountId: string): Promise<void> {
   const db = await getDb();
-  await db.execute(
-    "DELETE FROM link_scan_results WHERE account_id = $1",
-    [accountId],
-  );
+  await db.execute("DELETE FROM link_scan_results WHERE account_id = $1", [
+    accountId,
+  ]);
 }

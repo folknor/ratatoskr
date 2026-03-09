@@ -11,7 +11,11 @@ export interface CalendarEvent {
   end: { dateTime?: string; date?: string; timeZone?: string };
   status?: string;
   organizer?: { email: string; displayName?: string };
-  attendees?: { email: string; displayName?: string; responseStatus?: string }[];
+  attendees?: {
+    email: string;
+    displayName?: string;
+    responseStatus?: string;
+  }[];
   htmlLink?: string;
   updated?: string;
 }

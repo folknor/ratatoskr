@@ -6,7 +6,10 @@ interface CalendarListProps {
   onVisibilityChange: (calendarId: string, visible: boolean) => void;
 }
 
-export function CalendarList({ calendars, onVisibilityChange }: CalendarListProps) {
+export function CalendarList({
+  calendars,
+  onVisibilityChange,
+}: CalendarListProps) {
   const { t } = useTranslation("calendar");
   return (
     <div className="w-52 border-r border-border-primary p-3 overflow-y-auto shrink-0">
@@ -31,11 +34,21 @@ export function CalendarList({ calendars, onVisibilityChange }: CalendarListProp
                   ? "border-transparent"
                   : "border-border-primary bg-transparent"
               }`}
-              style={cal.is_visible ? { backgroundColor: cal.color ?? "var(--color-accent)" } : undefined}
+              style={
+                cal.is_visible
+                  ? { backgroundColor: cal.color ?? "var(--color-accent)" }
+                  : undefined
+              }
             >
               {!!cal.is_visible && (
                 <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
-                  <path d="M1.5 4L3 5.5L6.5 2" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  <path
+                    d="M1.5 4L3 5.5L6.5 2"
+                    stroke="white"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
                 </svg>
               )}
             </span>
@@ -43,7 +56,9 @@ export function CalendarList({ calendars, onVisibilityChange }: CalendarListProp
               {cal.display_name ?? t("calendar")}
             </span>
             {!!cal.is_primary && (
-              <span className="text-[0.6rem] text-text-tertiary ml-auto shrink-0">{t("primary")}</span>
+              <span className="text-[0.6rem] text-text-tertiary ml-auto shrink-0">
+                {t("primary")}
+              </span>
             )}
           </label>
         ))}

@@ -17,7 +17,9 @@ describe("ConfirmDialog", () => {
   it("renders title and message when open", () => {
     render(<ConfirmDialog {...baseProps} />);
     expect(screen.getByText("Delete item?")).toBeInTheDocument();
-    expect(screen.getByText("This action cannot be undone.")).toBeInTheDocument();
+    expect(
+      screen.getByText("This action cannot be undone."),
+    ).toBeInTheDocument();
   });
 
   it("does not render when closed", () => {
@@ -44,13 +46,25 @@ describe("ConfirmDialog", () => {
   });
 
   it("uses custom confirm and cancel labels", () => {
-    render(<ConfirmDialog {...baseProps} confirmLabel="Yes, delete" cancelLabel="No, keep" />);
-    expect(screen.getByRole("button", { name: "Yes, delete" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "No, keep" })).toBeInTheDocument();
+    render(
+      <ConfirmDialog
+        {...baseProps}
+        confirmLabel="Yes, delete"
+        cancelLabel="No, keep"
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Yes, delete" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "No, keep" }),
+    ).toBeInTheDocument();
   });
 
   it("applies danger variant to confirm button", () => {
-    render(<ConfirmDialog {...baseProps} variant="danger" confirmLabel="Delete" />);
+    render(
+      <ConfirmDialog {...baseProps} variant="danger" confirmLabel="Delete" />,
+    );
     const btn = screen.getByRole("button", { name: "Delete" });
     expect(btn.className).toContain("bg-danger");
   });

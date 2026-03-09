@@ -112,7 +112,9 @@ describe("emailBuilder", () => {
     const decoded = decodeBase64Url(raw);
     expect(decoded).toContain("multipart/mixed");
     expect(decoded).toContain("multipart/alternative");
-    expect(decoded).toContain('Content-Disposition: attachment; filename="test.txt"');
+    expect(decoded).toContain(
+      'Content-Disposition: attachment; filename="test.txt"',
+    );
     expect(decoded).toContain("Content-Transfer-Encoding: base64");
     expect(decoded).toContain("<p>See attached</p>");
     expect(decoded).toContain("text/plain");
@@ -127,7 +129,11 @@ describe("emailBuilder", () => {
       htmlBody: "<p>Files</p>",
       attachments: [
         { filename: "a.txt", mimeType: "text/plain", content: btoa("aaa") },
-        { filename: "b.pdf", mimeType: "application/pdf", content: btoa("bbb") },
+        {
+          filename: "b.pdf",
+          mimeType: "application/pdf",
+          content: btoa("bbb"),
+        },
       ],
     });
 

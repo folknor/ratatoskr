@@ -5,7 +5,8 @@ const { mockGetDb } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/services/db/connection", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/db/connection")>();
+  const actual =
+    await importOriginal<typeof import("@/services/db/connection")>();
   return {
     ...actual,
     getDb: mockGetDb,
@@ -63,7 +64,15 @@ describe("calendars service", () => {
       expect(mockDb.execute).toHaveBeenCalledOnce();
       expect(mockDb.execute).toHaveBeenCalledWith(
         expect.stringContaining("INSERT INTO calendars"),
-        [MOCK_UUID, "acc-1", "google", "remote-cal-1", "My Calendar", "#4285f4", 1],
+        [
+          MOCK_UUID,
+          "acc-1",
+          "google",
+          "remote-cal-1",
+          "My Calendar",
+          "#4285f4",
+          1,
+        ],
       );
     });
 
@@ -84,7 +93,15 @@ describe("calendars service", () => {
       expect(id).toBe(existingId);
       expect(mockDb.execute).toHaveBeenCalledWith(
         expect.stringContaining("ON CONFLICT(account_id, remote_id) DO UPDATE"),
-        [MOCK_UUID, "acc-1", "google", "remote-cal-1", "Updated Name", "#0b8043", 0],
+        [
+          MOCK_UUID,
+          "acc-1",
+          "google",
+          "remote-cal-1",
+          "Updated Name",
+          "#0b8043",
+          0,
+        ],
       );
     });
 
@@ -107,8 +124,18 @@ describe("calendars service", () => {
   describe("getCalendarsForAccount", () => {
     it("returns calendars for the given account", async () => {
       const calendars: DbCalendar[] = [
-        makeCal({ id: "cal-1", account_id: "acc-1", is_primary: 1, display_name: "Primary" }),
-        makeCal({ id: "cal-2", account_id: "acc-1", is_primary: 0, display_name: "Work" }),
+        makeCal({
+          id: "cal-1",
+          account_id: "acc-1",
+          is_primary: 1,
+          display_name: "Primary",
+        }),
+        makeCal({
+          id: "cal-2",
+          account_id: "acc-1",
+          is_primary: 0,
+          display_name: "Work",
+        }),
       ];
       mockDb.select.mockResolvedValueOnce(calendars);
 
@@ -170,7 +197,9 @@ describe("calendars service", () => {
       await updateCalendarSyncToken("cal-1", "sync-abc", "ctag-xyz");
 
       expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("UPDATE calendars SET sync_token = $1, ctag = $2"),
+        expect.stringContaining(
+          "UPDATE calendars SET sync_token = $1, ctag = $2",
+        ),
         ["sync-abc", "ctag-xyz", "cal-1"],
       );
     });
@@ -179,7 +208,9 @@ describe("calendars service", () => {
       await updateCalendarSyncToken("cal-1", "sync-abc");
 
       expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("UPDATE calendars SET sync_token = $1, ctag = $2"),
+        expect.stringContaining(
+          "UPDATE calendars SET sync_token = $1, ctag = $2",
+        ),
         ["sync-abc", null, "cal-1"],
       );
     });

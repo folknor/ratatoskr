@@ -14,7 +14,11 @@ import {
 describe("isDocument", () => {
   it("detects Word documents by mime type", () => {
     expect(isDocument("application/msword")).toBe(true);
-    expect(isDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document")).toBe(true);
+    expect(
+      isDocument(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      ),
+    ).toBe(true);
   });
 
   it("detects ODT by mime type", () => {
@@ -43,7 +47,11 @@ describe("isDocument", () => {
 describe("isSpreadsheet", () => {
   it("detects Excel by mime type", () => {
     expect(isSpreadsheet("application/vnd.ms-excel")).toBe(true);
-    expect(isSpreadsheet("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")).toBe(true);
+    expect(
+      isSpreadsheet(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      ),
+    ).toBe(true);
   });
 
   it("detects CSV by mime type", () => {

@@ -10,13 +10,14 @@ vi.mock("@/hooks/useClickOutside", () => ({
 
 vi.mock("@/stores/contextMenuStore", () => ({
   useContextMenuStore: Object.assign(
-    (selector: (s: Record<string, unknown>) => unknown) => selector({
-      menuType: null,
-      position: { x: 0, y: 0 },
-      data: {},
-      openMenu: vi.fn(),
-      closeMenu: vi.fn(),
-    }),
+    (selector: (s: Record<string, unknown>) => unknown) =>
+      selector({
+        menuType: null,
+        position: { x: 0, y: 0 },
+        data: {},
+        openMenu: vi.fn(),
+        closeMenu: vi.fn(),
+      }),
     { getState: () => ({ menuType: null, closeMenu: vi.fn() }) },
   ),
 }));
@@ -25,10 +26,29 @@ describe("ContextMenu", () => {
   const onClose = vi.fn();
 
   const baseItems: ContextMenuItem[] = [
-    { id: "archive", label: "Archive", icon: Archive, shortcut: "e", action: vi.fn() },
+    {
+      id: "archive",
+      label: "Archive",
+      icon: Archive,
+      shortcut: "e",
+      action: vi.fn(),
+    },
     { id: "sep-1", label: "", separator: true },
-    { id: "delete", label: "Delete", icon: Trash2, danger: true, action: vi.fn() },
-    { id: "star", label: "Star", icon: Star, shortcut: "s", disabled: true, action: vi.fn() },
+    {
+      id: "delete",
+      label: "Delete",
+      icon: Trash2,
+      danger: true,
+      action: vi.fn(),
+    },
+    {
+      id: "star",
+      label: "Star",
+      icon: Star,
+      shortcut: "s",
+      disabled: true,
+      action: vi.fn(),
+    },
   ];
 
   beforeEach(() => {
@@ -37,7 +57,11 @@ describe("ContextMenu", () => {
 
   it("should render menu items", () => {
     render(
-      <ContextMenu items={baseItems} position={{ x: 100, y: 100 }} onClose={onClose} />,
+      <ContextMenu
+        items={baseItems}
+        position={{ x: 100, y: 100 }}
+        onClose={onClose}
+      />,
     );
 
     expect(screen.getByText("Archive")).toBeInTheDocument();
@@ -47,7 +71,11 @@ describe("ContextMenu", () => {
 
   it("should render separators", () => {
     render(
-      <ContextMenu items={baseItems} position={{ x: 100, y: 100 }} onClose={onClose} />,
+      <ContextMenu
+        items={baseItems}
+        position={{ x: 100, y: 100 }}
+        onClose={onClose}
+      />,
     );
 
     const separators = screen.getAllByRole("separator");
@@ -56,7 +84,11 @@ describe("ContextMenu", () => {
 
   it("should render shortcuts", () => {
     render(
-      <ContextMenu items={baseItems} position={{ x: 100, y: 100 }} onClose={onClose} />,
+      <ContextMenu
+        items={baseItems}
+        position={{ x: 100, y: 100 }}
+        onClose={onClose}
+      />,
     );
 
     expect(screen.getByText("e")).toBeInTheDocument();
@@ -65,7 +97,11 @@ describe("ContextMenu", () => {
 
   it("should call action and close on click", () => {
     render(
-      <ContextMenu items={baseItems} position={{ x: 100, y: 100 }} onClose={onClose} />,
+      <ContextMenu
+        items={baseItems}
+        position={{ x: 100, y: 100 }}
+        onClose={onClose}
+      />,
     );
 
     fireEvent.click(screen.getByText("Archive"));
@@ -75,7 +111,11 @@ describe("ContextMenu", () => {
 
   it("should not call action on disabled item click", () => {
     render(
-      <ContextMenu items={baseItems} position={{ x: 100, y: 100 }} onClose={onClose} />,
+      <ContextMenu
+        items={baseItems}
+        position={{ x: 100, y: 100 }}
+        onClose={onClose}
+      />,
     );
 
     fireEvent.click(screen.getByText("Star"));
@@ -84,7 +124,11 @@ describe("ContextMenu", () => {
 
   it("should apply danger styling", () => {
     render(
-      <ContextMenu items={baseItems} position={{ x: 100, y: 100 }} onClose={onClose} />,
+      <ContextMenu
+        items={baseItems}
+        position={{ x: 100, y: 100 }}
+        onClose={onClose}
+      />,
     );
 
     const deleteBtn = screen.getByText("Delete").closest("button");
@@ -93,7 +137,11 @@ describe("ContextMenu", () => {
 
   it("should apply disabled styling", () => {
     render(
-      <ContextMenu items={baseItems} position={{ x: 100, y: 100 }} onClose={onClose} />,
+      <ContextMenu
+        items={baseItems}
+        position={{ x: 100, y: 100 }}
+        onClose={onClose}
+      />,
     );
 
     const starBtn = screen.getByText("Star").closest("button");
@@ -103,7 +151,11 @@ describe("ContextMenu", () => {
 
   it("should navigate with keyboard ArrowDown", () => {
     render(
-      <ContextMenu items={baseItems} position={{ x: 100, y: 100 }} onClose={onClose} />,
+      <ContextMenu
+        items={baseItems}
+        position={{ x: 100, y: 100 }}
+        onClose={onClose}
+      />,
     );
 
     // First ArrowDown should focus "Archive" (index 0)
@@ -114,7 +166,11 @@ describe("ContextMenu", () => {
 
   it("should select focused item with Enter", () => {
     render(
-      <ContextMenu items={baseItems} position={{ x: 100, y: 100 }} onClose={onClose} />,
+      <ContextMenu
+        items={baseItems}
+        position={{ x: 100, y: 100 }}
+        onClose={onClose}
+      />,
     );
 
     // Navigate to Archive
@@ -127,7 +183,11 @@ describe("ContextMenu", () => {
 
   it("should close on Escape", () => {
     render(
-      <ContextMenu items={baseItems} position={{ x: 100, y: 100 }} onClose={onClose} />,
+      <ContextMenu
+        items={baseItems}
+        position={{ x: 100, y: 100 }}
+        onClose={onClose}
+      />,
     );
 
     fireEvent.keyDown(window, { key: "Escape" });
@@ -136,7 +196,11 @@ describe("ContextMenu", () => {
 
   it("should render with role=menu", () => {
     render(
-      <ContextMenu items={baseItems} position={{ x: 100, y: 100 }} onClose={onClose} />,
+      <ContextMenu
+        items={baseItems}
+        position={{ x: 100, y: 100 }}
+        onClose={onClose}
+      />,
     );
 
     expect(screen.getByRole("menu")).toBeInTheDocument();
@@ -144,7 +208,11 @@ describe("ContextMenu", () => {
 
   it("should render items with role=menuitem", () => {
     render(
-      <ContextMenu items={baseItems} position={{ x: 100, y: 100 }} onClose={onClose} />,
+      <ContextMenu
+        items={baseItems}
+        position={{ x: 100, y: 100 }}
+        onClose={onClose}
+      />,
     );
 
     const menuItems = screen.getAllByRole("menuitem");
@@ -165,7 +233,11 @@ describe("ContextMenu", () => {
     ];
 
     render(
-      <ContextMenu items={itemsWithSubmenu} position={{ x: 100, y: 100 }} onClose={onClose} />,
+      <ContextMenu
+        items={itemsWithSubmenu}
+        position={{ x: 100, y: 100 }}
+        onClose={onClose}
+      />,
     );
 
     expect(screen.getByText("Apply Label")).toBeInTheDocument();
@@ -173,12 +245,26 @@ describe("ContextMenu", () => {
 
   it("should render checked items with checkmarks", () => {
     const checkedItems: ContextMenuItem[] = [
-      { id: "item-checked", label: "Checked Item", checked: true, action: vi.fn() },
-      { id: "item-unchecked", label: "Unchecked Item", checked: false, action: vi.fn() },
+      {
+        id: "item-checked",
+        label: "Checked Item",
+        checked: true,
+        action: vi.fn(),
+      },
+      {
+        id: "item-unchecked",
+        label: "Unchecked Item",
+        checked: false,
+        action: vi.fn(),
+      },
     ];
 
     render(
-      <ContextMenu items={checkedItems} position={{ x: 100, y: 100 }} onClose={onClose} />,
+      <ContextMenu
+        items={checkedItems}
+        position={{ x: 100, y: 100 }}
+        onClose={onClose}
+      />,
     );
 
     expect(screen.getByText("Checked Item")).toBeInTheDocument();

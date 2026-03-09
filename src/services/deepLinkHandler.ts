@@ -45,13 +45,16 @@ export async function initDeepLinkHandler(): Promise<() => void> {
 
   // Listen for forwarded args from single-instance plugin
   try {
-    const unlistenArgs = await listen<string[]>("single-instance-args", (event) => {
-      for (const arg of event.payload) {
-        if (arg.startsWith("mailto:")) {
-          handleUrl(arg);
+    const unlistenArgs = await listen<string[]>(
+      "single-instance-args",
+      (event) => {
+        for (const arg of event.payload) {
+          if (arg.startsWith("mailto:")) {
+            handleUrl(arg);
+          }
         }
-      }
-    });
+      },
+    );
     cleanups.push(unlistenArgs);
   } catch (err) {
     console.error("Failed to listen for single-instance args:", err);

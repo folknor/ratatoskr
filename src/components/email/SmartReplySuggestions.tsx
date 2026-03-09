@@ -14,7 +14,12 @@ interface SmartReplySuggestionsProps {
   noReply?: boolean;
 }
 
-export function SmartReplySuggestions({ threadId, accountId, messages, noReply }: SmartReplySuggestionsProps) {
+export function SmartReplySuggestions({
+  threadId,
+  accountId,
+  messages,
+  noReply,
+}: SmartReplySuggestionsProps) {
   const { t } = useTranslation("email");
   const [replies, setReplies] = useState<string[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -46,7 +51,13 @@ export function SmartReplySuggestions({ threadId, accountId, messages, noReply }
 
   // Auto-load when available
   useEffect(() => {
-    if (!available || messages.length === 0 || replies !== null || loadingRef.current) return;
+    if (
+      !available ||
+      messages.length === 0 ||
+      replies !== null ||
+      loadingRef.current
+    )
+      return;
     loadReplies();
   }, [available, messages.length, replies, loadReplies]);
 
@@ -64,20 +75,23 @@ export function SmartReplySuggestions({ threadId, accountId, messages, noReply }
     }
   }, [threadId, accountId, messages]);
 
-  const handleReplyClick = useCallback((replyText: string) => {
-    const lastMessage = messages[messages.length - 1];
-    if (!lastMessage) return;
+  const handleReplyClick = useCallback(
+    (replyText: string) => {
+      const lastMessage = messages[messages.length - 1];
+      if (!lastMessage) return;
 
-    const replyTo = lastMessage.reply_to ?? lastMessage.from_address;
-    openComposer({
-      mode: "reply",
-      to: replyTo ? [replyTo] : [],
-      subject: `Re: ${lastMessage.subject ?? ""}`,
-      bodyHtml: `<p>${replyText}</p>`,
-      threadId: lastMessage.thread_id,
-      inReplyToMessageId: lastMessage.id,
-    });
-  }, [messages, openComposer]);
+      const replyTo = lastMessage.reply_to ?? lastMessage.from_address;
+      openComposer({
+        mode: "reply",
+        to: replyTo ? [replyTo] : [],
+        subject: `Re: ${lastMessage.subject ?? ""}`,
+        bodyHtml: `<p>${replyText}</p>`,
+        threadId: lastMessage.thread_id,
+        inReplyToMessageId: lastMessage.id,
+      });
+    },
+    [messages, openComposer],
+  );
 
   if (!available || messages.length === 0 || noReply) return null;
 
@@ -85,7 +99,9 @@ export function SmartReplySuggestions({ threadId, accountId, messages, noReply }
     <div className="mx-4 my-2 p-3 rounded-lg bg-accent/5 border border-accent/20">
       <div className="flex items-center gap-2 mb-2">
         <Sparkles size={14} className="text-accent shrink-0" />
-        <span className="text-xs font-medium text-accent flex-1">{t("smartReplies.title")}</span>
+        <span className="text-xs font-medium text-accent flex-1">
+          {t("smartReplies.title")}
+        </span>
         <button
           onClick={handleRefresh}
           className="p-0.5 text-text-tertiary hover:text-accent transition-colors"

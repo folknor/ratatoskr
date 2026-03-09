@@ -76,10 +76,10 @@ export async function updateScheduledEmailStatus(
   status: "pending" | "sending" | "sent" | "failed" | "cancelled",
 ): Promise<void> {
   const db = await getDb();
-  await db.execute(
-    "UPDATE scheduled_emails SET status = $1 WHERE id = $2",
-    [status, id],
-  );
+  await db.execute("UPDATE scheduled_emails SET status = $1 WHERE id = $2", [
+    status,
+    id,
+  ]);
 }
 
 export async function deleteScheduledEmail(id: string): Promise<void> {

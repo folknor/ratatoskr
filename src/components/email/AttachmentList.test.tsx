@@ -22,7 +22,9 @@ import { getEmailProvider } from "@/services/email/providerFactory";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
 
-const makeAttachment = (overrides: Partial<DbAttachment> = {}): DbAttachment => ({
+const makeAttachment = (
+  overrides: Partial<DbAttachment> = {},
+): DbAttachment => ({
   id: "att-1",
   message_id: "msg-1",
   account_id: "acc-1",
@@ -48,11 +50,7 @@ describe("AttachmentList", () => {
 
   it("renders nothing when no file attachments", () => {
     const { container } = render(
-      <AttachmentList
-        accountId="acc-1"
-        messageId="msg-1"
-        attachments={[]}
-      />,
+      <AttachmentList accountId="acc-1" messageId="msg-1" attachments={[]} />,
     );
 
     expect(container.innerHTML).toBe("");
@@ -75,7 +73,13 @@ describe("AttachmentList", () => {
       <AttachmentList
         accountId="acc-1"
         messageId="msg-1"
-        attachments={[makeAttachment({ is_inline: 1, filename: "report.pdf", mime_type: "application/pdf" })]}
+        attachments={[
+          makeAttachment({
+            is_inline: 1,
+            filename: "report.pdf",
+            mime_type: "application/pdf",
+          }),
+        ]}
       />,
     );
 
@@ -84,8 +88,17 @@ describe("AttachmentList", () => {
 
   it("renders attachment count and names", () => {
     const attachments = [
-      makeAttachment({ id: "att-1", gmail_attachment_id: "gid-1", filename: "photo.png" }),
-      makeAttachment({ id: "att-2", gmail_attachment_id: "gid-2", filename: "doc.pdf", mime_type: "application/pdf" }),
+      makeAttachment({
+        id: "att-1",
+        gmail_attachment_id: "gid-1",
+        filename: "photo.png",
+      }),
+      makeAttachment({
+        id: "att-2",
+        gmail_attachment_id: "gid-2",
+        filename: "doc.pdf",
+        mime_type: "application/pdf",
+      }),
     ];
 
     render(
@@ -146,11 +159,13 @@ describe("AttachmentList", () => {
       <AttachmentList
         accountId="imap-acc"
         messageId="imap-msg-1"
-        attachments={[makeAttachment({
-          account_id: "imap-acc",
-          message_id: "imap-msg-1",
-          gmail_attachment_id: "part-1.2",
-        })]}
+        attachments={[
+          makeAttachment({
+            account_id: "imap-acc",
+            message_id: "imap-msg-1",
+            gmail_attachment_id: "part-1.2",
+          }),
+        ]}
       />,
     );
 
@@ -158,7 +173,10 @@ describe("AttachmentList", () => {
 
     await waitFor(() => {
       expect(getEmailProvider).toHaveBeenCalledWith("imap-acc");
-      expect(mockFetchAttachment).toHaveBeenCalledWith("imap-msg-1", "part-1.2");
+      expect(mockFetchAttachment).toHaveBeenCalledWith(
+        "imap-msg-1",
+        "part-1.2",
+      );
     });
   });
 
@@ -200,7 +218,13 @@ describe("AttachmentList", () => {
       <AttachmentList
         accountId="acc-1"
         messageId="msg-1"
-        attachments={[makeAttachment({ content_id: "img001@example.com", filename: "photo.png", mime_type: "image/png" })]}
+        attachments={[
+          makeAttachment({
+            content_id: "img001@example.com",
+            filename: "photo.png",
+            mime_type: "image/png",
+          }),
+        ]}
         referencedCids={referencedCids}
       />,
     );
@@ -214,7 +238,13 @@ describe("AttachmentList", () => {
       <AttachmentList
         accountId="acc-1"
         messageId="msg-1"
-        attachments={[makeAttachment({ content_id: "img001@example.com", filename: "photo.png", mime_type: "image/png" })]}
+        attachments={[
+          makeAttachment({
+            content_id: "img001@example.com",
+            filename: "photo.png",
+            mime_type: "image/png",
+          }),
+        ]}
         referencedCids={referencedCids}
       />,
     );
@@ -227,7 +257,13 @@ describe("AttachmentList", () => {
       <AttachmentList
         accountId="acc-1"
         messageId="msg-1"
-        attachments={[makeAttachment({ content_id: "part1@example.com", mime_type: "application/pdf", filename: "report.pdf" })]}
+        attachments={[
+          makeAttachment({
+            content_id: "part1@example.com",
+            mime_type: "application/pdf",
+            filename: "report.pdf",
+          }),
+        ]}
       />,
     );
 
@@ -240,8 +276,18 @@ describe("AttachmentList", () => {
         accountId="acc-1"
         messageId="msg-1"
         attachments={[
-          makeAttachment({ id: "att-1", gmail_attachment_id: "gid-1", filename: "photo.png", size: 1024 }),
-          makeAttachment({ id: "att-2", gmail_attachment_id: "gid-2", filename: "photo.png", size: 1024 }),
+          makeAttachment({
+            id: "att-1",
+            gmail_attachment_id: "gid-1",
+            filename: "photo.png",
+            size: 1024,
+          }),
+          makeAttachment({
+            id: "att-2",
+            gmail_attachment_id: "gid-2",
+            filename: "photo.png",
+            size: 1024,
+          }),
         ]}
       />,
     );
@@ -255,8 +301,18 @@ describe("AttachmentList", () => {
         accountId="acc-1"
         messageId="msg-1"
         attachments={[
-          makeAttachment({ id: "att-1", gmail_attachment_id: "gid-1", filename: "photo.png", size: 1024 }),
-          makeAttachment({ id: "att-2", gmail_attachment_id: "gid-2", filename: "photo2.png", size: 1024 }),
+          makeAttachment({
+            id: "att-1",
+            gmail_attachment_id: "gid-1",
+            filename: "photo.png",
+            size: 1024,
+          }),
+          makeAttachment({
+            id: "att-2",
+            gmail_attachment_id: "gid-2",
+            filename: "photo2.png",
+            size: 1024,
+          }),
         ]}
       />,
     );
@@ -287,7 +343,9 @@ describe("AttachmentList", () => {
     // The component should normalize - to + and _ to / before atob()
     const standardBase64 = btoa("Hello World!");
     // Convert to URL-safe base64 (replace + with - and / with _)
-    const urlSafeBase64 = standardBase64.replace(/\+/g, "-").replace(/\//g, "_");
+    const urlSafeBase64 = standardBase64
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_");
     mockFetchAttachment.mockResolvedValue({
       data: urlSafeBase64,
       size: 12,

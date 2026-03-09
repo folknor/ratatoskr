@@ -10,14 +10,16 @@ interface FromSelectorProps {
  * Dropdown for selecting a send-as alias in the composer.
  * Only visible when more than one alias is available.
  */
-export function FromSelector({ aliases, selectedEmail, onChange }: FromSelectorProps) {
+export function FromSelector({
+  aliases,
+  selectedEmail,
+  onChange,
+}: FromSelectorProps) {
   if (aliases.length <= 1) return null;
 
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs text-text-tertiary w-8 shrink-0">
-        From
-      </span>
+      <span className="text-xs text-text-tertiary w-8 shrink-0">From</span>
       <select
         value={selectedEmail}
         onChange={(e) => {

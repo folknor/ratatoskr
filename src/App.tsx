@@ -109,7 +109,10 @@ export default function App() {
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [showAskInbox, setShowAskInbox] = useState(false);
-  const [moveToFolderState, setMoveToFolderState] = useState<{ open: boolean; threadIds: string[] }>({ open: false, threadIds: [] });
+  const [moveToFolderState, setMoveToFolderState] = useState<{
+    open: boolean;
+    threadIds: string[];
+  }>({ open: false, threadIds: [] });
   const deepLinkCleanupRef = useRef<(() => void) | undefined>(undefined);
 
   // Sync bridge: router state → Zustand stores (temporary)
@@ -144,7 +147,8 @@ export default function App() {
   // Elements with data-native-context-menu opt out so the browser menu is available
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if ((e.target as HTMLElement).closest?.("[data-native-context-menu]")) return;
+      if ((e.target as HTMLElement).closest?.("[data-native-context-menu]"))
+        return;
       e.preventDefault();
     };
     document.addEventListener("contextmenu", handler);
@@ -182,9 +186,13 @@ export default function App() {
         if (activeIds.length > 0) {
           triggerSync(activeIds);
         }
-      }).then((fn) => { unlisten = fn; });
+      }).then((fn) => {
+        unlisten = fn;
+      });
     });
-    return () => { unlisten?.(); };
+    return () => {
+      unlisten?.();
+    };
   }, []);
 
   // Initialize database, load accounts, start sync
@@ -201,7 +209,11 @@ export default function App() {
 
         // Restore persisted theme
         const savedTheme = await getSetting("theme");
-        if (savedTheme === "light" || savedTheme === "dark" || savedTheme === "system") {
+        if (
+          savedTheme === "light" ||
+          savedTheme === "dark" ||
+          savedTheme === "system"
+        ) {
           ui.setTheme(savedTheme);
         }
 
@@ -219,13 +231,21 @@ export default function App() {
 
         // Restore reading pane position
         const savedPanePos = await getSetting("reading_pane_position");
-        if (savedPanePos === "right" || savedPanePos === "bottom" || savedPanePos === "hidden") {
+        if (
+          savedPanePos === "right" ||
+          savedPanePos === "bottom" ||
+          savedPanePos === "hidden"
+        ) {
           ui.setReadingPanePosition(savedPanePos);
         }
 
         // Restore read filter
         const savedReadFilter = await getSetting("read_filter");
-        if (savedReadFilter === "all" || savedReadFilter === "read" || savedReadFilter === "unread") {
+        if (
+          savedReadFilter === "all" ||
+          savedReadFilter === "read" ||
+          savedReadFilter === "unread"
+        ) {
           ui.setReadFilter(savedReadFilter);
         }
 
@@ -238,7 +258,11 @@ export default function App() {
 
         // Restore email density
         const savedDensity = await getSetting("email_density");
-        if (savedDensity === "compact" || savedDensity === "default" || savedDensity === "spacious") {
+        if (
+          savedDensity === "compact" ||
+          savedDensity === "default" ||
+          savedDensity === "spacious"
+        ) {
           ui.setEmailDensity(savedDensity);
         }
 
@@ -250,7 +274,11 @@ export default function App() {
 
         // Restore mark-as-read behavior
         const savedMarkRead = await getSetting("mark_as_read_behavior");
-        if (savedMarkRead === "instant" || savedMarkRead === "2s" || savedMarkRead === "manual") {
+        if (
+          savedMarkRead === "instant" ||
+          savedMarkRead === "2s" ||
+          savedMarkRead === "manual"
+        ) {
           ui.setMarkAsReadBehavior(savedMarkRead);
         }
 
@@ -262,13 +290,21 @@ export default function App() {
 
         // Restore font scale
         const savedFontScale = await getSetting("font_size");
-        if (savedFontScale === "small" || savedFontScale === "default" || savedFontScale === "large" || savedFontScale === "xlarge") {
+        if (
+          savedFontScale === "small" ||
+          savedFontScale === "default" ||
+          savedFontScale === "large" ||
+          savedFontScale === "xlarge"
+        ) {
           ui.setFontScale(savedFontScale);
         }
 
         // Restore color theme
         const savedColorTheme = await getSetting("color_theme");
-        if (savedColorTheme && COLOR_THEMES.some((t) => t.id === savedColorTheme)) {
+        if (
+          savedColorTheme &&
+          COLOR_THEMES.some((t) => t.id === savedColorTheme)
+        ) {
           ui.setColorTheme(savedColorTheme as ColorThemeId);
         }
 
@@ -302,7 +338,9 @@ export default function App() {
           try {
             const parsed = JSON.parse(savedNavConfig);
             if (Array.isArray(parsed)) ui.restoreSidebarNavConfig(parsed);
-          } catch { /* ignore malformed JSON */ }
+          } catch {
+            /* ignore malformed JSON */
+          }
         }
 
         // Load custom keyboard shortcuts
@@ -325,13 +363,18 @@ export default function App() {
 
         // Fetch send-as aliases for each active email account (skip CalDAV-only)
         const activeIds = mapped.filter((a) => a.isActive).map((a) => a.id);
-        const emailAccountIds = mapped.filter((a) => a.isActive && a.provider !== "caldav").map((a) => a.id);
+        const emailAccountIds = mapped
+          .filter((a) => a.isActive && a.provider !== "caldav")
+          .map((a) => a.id);
         for (const accountId of emailAccountIds) {
           try {
             const client = await getGmailClient(accountId);
             await fetchSendAsAliases(client, accountId);
           } catch (err) {
-            console.warn(`Failed to fetch send-as aliases for ${accountId}:`, err);
+            console.warn(
+              `Failed to fetch send-as aliases for ${accountId}:`,
+              err,
+            );
           }
         }
 
@@ -373,7 +416,7 @@ export default function App() {
         console.error("Failed to initialize:", err);
       }
       setInitialized(true);
-      invoke("close_splashscreen").catch(() => { });
+      invoke("close_splashscreen").catch(() => {});
     }
 
     init();
@@ -406,7 +449,9 @@ export default function App() {
           } else if (progress.phase === "labels") {
             setSyncStatus("Syncing labels...");
           } else if (progress.phase === "threads") {
-            setSyncStatus(`Building threads... (${progress.current}/${progress.total})`);
+            setSyncStatus(
+              `Building threads... (${progress.current}/${progress.total})`,
+            );
           }
         } else {
           setSyncStatus("Syncing...");
@@ -420,11 +465,15 @@ export default function App() {
         if (!backfillDoneRef.current) {
           backfillDoneRef.current = true;
           import("./services/categorization/backfillService")
-            .then(({ backfillUncategorizedThreads }) => backfillUncategorizedThreads(accountId))
+            .then(({ backfillUncategorizedThreads }) =>
+              backfillUncategorizedThreads(accountId),
+            )
             .catch((err) => console.error("Backfill error:", err));
         }
       } else if (status === "error") {
-        setSyncStatus(error ? `Sync failed: ${formatSyncError(error)}` : "Sync failed");
+        setSyncStatus(
+          error ? `Sync failed: ${formatSyncError(error)}` : "Sync failed",
+        );
         // Still dispatch sync-done so the UI refreshes with any partially stored data
         window.dispatchEvent(new Event("velo-sync-done"));
         // Auto-clear the error after 8 seconds
@@ -459,7 +508,12 @@ export default function App() {
   // Sync font-scale class to <html> element
   useEffect(() => {
     const root = document.documentElement;
-    root.classList.remove("font-scale-small", "font-scale-default", "font-scale-large", "font-scale-xlarge");
+    root.classList.remove(
+      "font-scale-small",
+      "font-scale-default",
+      "font-scale-large",
+      "font-scale-xlarge",
+    );
     root.classList.add(`font-scale-${fontScale}`);
   }, [fontScale]);
 
@@ -472,7 +526,13 @@ export default function App() {
   // Apply color theme CSS custom properties to <html>
   useEffect(() => {
     const root = document.documentElement;
-    const props = ["--color-accent", "--color-accent-hover", "--color-accent-light", "--color-bg-selected", "--color-sidebar-active"];
+    const props = [
+      "--color-accent",
+      "--color-accent-hover",
+      "--color-accent-light",
+      "--color-bg-selected",
+      "--color-sidebar-active",
+    ];
 
     const apply = () => {
       if (colorTheme === "indigo") {
@@ -483,7 +543,8 @@ export default function App() {
       const themeData = getThemeById(colorTheme);
       const isDark =
         theme === "dark" ||
-        (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        (theme === "system" &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches);
       const colors = isDark ? themeData.dark : themeData.light;
       root.style.setProperty("--color-accent", colors.accent);
       root.style.setProperty("--color-accent-hover", colors.accentHover);
@@ -527,7 +588,12 @@ export default function App() {
       if (newest.provider !== "caldav") {
         getGmailClient(newest.id)
           .then((client) => fetchSendAsAliases(client, newest.id))
-          .catch((err) => console.warn(`Failed to fetch send-as aliases for new account:`, err));
+          .catch((err) =>
+            console.warn(
+              `Failed to fetch send-as aliases for new account:`,
+              err,
+            ),
+          );
       }
     }
 
@@ -545,7 +611,9 @@ export default function App() {
             <div className="absolute inset-0 rounded-full border-2 border-accent/20" />
             <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-accent animate-spin" />
           </div>
-          <span className="text-xs text-text-tertiary animate-pulse">{t("settings:loadingInbox")}</span>
+          <span className="text-xs text-text-tertiary animate-pulse">
+            {t("settings:loadingInbox")}
+          </span>
         </div>
       </div>
     );
@@ -579,7 +647,7 @@ export default function App() {
       {showSyncStatusBar && syncStatus && (
         <div
           className={`fixed bottom-0 right-0 glass-panel text-white text-xs px-4 py-1.5 text-center z-40 transition-all duration-200 ${syncStatus.startsWith("Sync failed") ? "bg-danger/90" : "bg-accent/90"}`}
-          style={{ left: sidebarCollapsed ? '4rem' : '15rem' }}
+          style={{ left: sidebarCollapsed ? "4rem" : "15rem" }}
         >
           {syncStatus}
         </div>

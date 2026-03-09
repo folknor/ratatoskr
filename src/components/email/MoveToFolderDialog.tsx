@@ -12,15 +12,7 @@ import {
   removeThreadLabel,
   moveThread,
 } from "@/services/emailActions";
-import {
-  Inbox,
-  Archive,
-  Trash2,
-  Ban,
-  Search,
-  Tag,
-  Folder,
-} from "lucide-react";
+import { Inbox, Archive, Trash2, Ban, Search, Tag, Folder } from "lucide-react";
 
 interface MoveToFolderDialogProps {
   isOpen: boolean;
@@ -39,7 +31,9 @@ interface Destination {
 
 type SystemLabelKey = "inbox" | "archive" | "common:trash" | "common:spam";
 
-const SYSTEM_DESTINATIONS: (Omit<Destination, "label"> & { labelKey: SystemLabelKey })[] = [
+const SYSTEM_DESTINATIONS: (Omit<Destination, "label"> & {
+  labelKey: SystemLabelKey;
+})[] = [
   { id: "INBOX", labelKey: "inbox", icon: Inbox, type: "system" },
   { id: "__archive__", labelKey: "archive", icon: Archive, type: "system" },
   { id: "TRASH", labelKey: "common:trash", icon: Trash2, type: "system" },

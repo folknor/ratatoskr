@@ -42,14 +42,21 @@ export async function insertTemplate(tmpl: {
 
 export async function updateTemplate(
   id: string,
-  updates: { name?: string; subject?: string | null; bodyHtml?: string; shortcut?: string | null },
+  updates: {
+    name?: string;
+    subject?: string | null;
+    bodyHtml?: string;
+    shortcut?: string | null;
+  },
 ): Promise<void> {
   const db = await getDb();
   const fields: [string, unknown][] = [];
   if (updates.name !== undefined) fields.push(["name", updates.name]);
   if (updates.subject !== undefined) fields.push(["subject", updates.subject]);
-  if (updates.bodyHtml !== undefined) fields.push(["body_html", updates.bodyHtml]);
-  if (updates.shortcut !== undefined) fields.push(["shortcut", updates.shortcut]);
+  if (updates.bodyHtml !== undefined)
+    fields.push(["body_html", updates.bodyHtml]);
+  if (updates.shortcut !== undefined)
+    fields.push(["shortcut", updates.shortcut]);
 
   const query = buildDynamicUpdate("templates", "id", id, fields);
   if (query) {

@@ -1,8 +1,14 @@
 import { scanMessage } from "@/utils/phishingDetector";
-import type { MessageScanResult, PhishingSensitivity } from "@/utils/phishingDetector";
+import type {
+  MessageScanResult,
+  PhishingSensitivity,
+} from "@/utils/phishingDetector";
 import { getSetting } from "@/services/db/settings";
 import { isPhishingAllowlisted } from "@/services/db/phishingAllowlist";
-import { getCachedScanResult, cacheScanResult } from "@/services/db/linkScanResults";
+import {
+  getCachedScanResult,
+  cacheScanResult,
+} from "@/services/db/linkScanResults";
 
 /**
  * Orchestrates phishing link scanning for a message.
@@ -47,7 +53,9 @@ export async function scanMessageLinks(
   // 4. Read sensitivity setting and scan the message
   const sensitivityRaw = await getSetting("phishing_sensitivity");
   const sensitivity: PhishingSensitivity =
-    sensitivityRaw === "low" || sensitivityRaw === "high" ? sensitivityRaw : "default";
+    sensitivityRaw === "low" || sensitivityRaw === "high"
+      ? sensitivityRaw
+      : "default";
   const result = scanMessage(messageId, bodyHtml, sensitivity);
 
   // 5. Cache the result

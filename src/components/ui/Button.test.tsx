@@ -4,15 +4,13 @@ import { Button } from "./Button";
 describe("Button", () => {
   it("renders children text", () => {
     render(<Button>Click me</Button>);
-    expect(screen.getByRole("button", { name: "Click me" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Click me" }),
+    ).toBeInTheDocument();
   });
 
   it("renders with an icon and children", () => {
-    render(
-      <Button icon={<span data-testid="icon">I</span>}>
-        Save
-      </Button>,
-    );
+    render(<Button icon={<span data-testid="icon">I</span>}>Save</Button>);
     expect(screen.getByTestId("icon")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /save/i })).toBeInTheDocument();
   });
@@ -67,7 +65,11 @@ describe("Button", () => {
 
   it("handles disabled state", () => {
     const onClick = vi.fn();
-    render(<Button disabled onClick={onClick}>Disabled</Button>);
+    render(
+      <Button disabled onClick={onClick}>
+        Disabled
+      </Button>,
+    );
     const btn = screen.getByRole("button");
     expect(btn).toBeDisabled();
     fireEvent.click(btn);
@@ -88,7 +90,11 @@ describe("Button", () => {
   });
 
   it("passes through additional HTML attributes", () => {
-    render(<Button title="tooltip" data-testid="my-btn">Attrs</Button>);
+    render(
+      <Button title="tooltip" data-testid="my-btn">
+        Attrs
+      </Button>,
+    );
     const btn = screen.getByTestId("my-btn");
     expect(btn).toHaveAttribute("title", "tooltip");
   });

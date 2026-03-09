@@ -20,7 +20,9 @@ export function SignatureSelector() {
     getSignaturesForAccount(activeAccountId).then((sigs) => {
       if (!cancelled) setSignatures(sigs);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen, activeAccountId]);
 
   if (signatures.length === 0) return null;

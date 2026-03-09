@@ -67,10 +67,15 @@ export async function updateSmartLabelRule(
   const db = await getDb();
   const fields: [string, unknown][] = [];
   if (updates.labelId !== undefined) fields.push(["label_id", updates.labelId]);
-  if (updates.aiDescription !== undefined) fields.push(["ai_description", updates.aiDescription]);
+  if (updates.aiDescription !== undefined)
+    fields.push(["ai_description", updates.aiDescription]);
   if (updates.criteria !== undefined)
-    fields.push(["criteria_json", updates.criteria ? JSON.stringify(updates.criteria) : null]);
-  if (updates.isEnabled !== undefined) fields.push(["is_enabled", boolToInt(updates.isEnabled)]);
+    fields.push([
+      "criteria_json",
+      updates.criteria ? JSON.stringify(updates.criteria) : null,
+    ]);
+  if (updates.isEnabled !== undefined)
+    fields.push(["is_enabled", boolToInt(updates.isEnabled)]);
 
   const query = buildDynamicUpdate("smart_label_rules", "id", id, fields);
   if (query) {

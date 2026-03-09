@@ -104,7 +104,23 @@ export function FilterEditor() {
 
     resetForm();
     await loadFilters();
-  }, [activeAccountId, name, editingId, resetForm, loadFilters, criteriaFrom, criteriaTo, criteriaSubject, criteriaBody, criteriaHasAttachment, actionLabel, actionArchive, actionStar, actionMarkRead, actionTrash]);
+  }, [
+    activeAccountId,
+    name,
+    editingId,
+    resetForm,
+    loadFilters,
+    criteriaFrom,
+    criteriaTo,
+    criteriaSubject,
+    criteriaBody,
+    criteriaHasAttachment,
+    actionLabel,
+    actionArchive,
+    actionStar,
+    actionMarkRead,
+    actionTrash,
+  ]);
 
   const handleEdit = useCallback((filter: DbFilterRule) => {
     setEditingId(filter.id);
@@ -112,8 +128,16 @@ export function FilterEditor() {
 
     let criteria: FilterCriteria = {};
     let actions: FilterActions = {};
-    try { criteria = JSON.parse(filter.criteria_json); } catch { /* empty */ }
-    try { actions = JSON.parse(filter.actions_json); } catch { /* empty */ }
+    try {
+      criteria = JSON.parse(filter.criteria_json);
+    } catch {
+      /* empty */
+    }
+    try {
+      actions = JSON.parse(filter.actions_json);
+    } catch {
+      /* empty */
+    }
 
     setCriteriaFrom(criteria.from ?? "");
     setCriteriaTo(criteria.to ?? "");
@@ -128,16 +152,22 @@ export function FilterEditor() {
     setShowForm(true);
   }, []);
 
-  const handleDelete = useCallback(async (id: string) => {
-    await deleteFilter(id);
-    if (editingId === id) resetForm();
-    await loadFilters();
-  }, [editingId, resetForm, loadFilters]);
+  const handleDelete = useCallback(
+    async (id: string) => {
+      await deleteFilter(id);
+      if (editingId === id) resetForm();
+      await loadFilters();
+    },
+    [editingId, resetForm, loadFilters],
+  );
 
-  const handleToggleEnabled = useCallback(async (filter: DbFilterRule) => {
-    await updateFilter(filter.id, { isEnabled: filter.is_enabled !== 1 });
-    await loadFilters();
-  }, [loadFilters]);
+  const handleToggleEnabled = useCallback(
+    async (filter: DbFilterRule) => {
+      await updateFilter(filter.id, { isEnabled: filter.is_enabled !== 1 });
+      await loadFilters();
+    },
+    [loadFilters],
+  );
 
   const filterDescriptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -175,7 +205,8 @@ export function FilterEditor() {
               )}
             </div>
             <div className="text-xs text-text-tertiary truncate">
-              {filterDescriptions.get(filter.id) ?? t("filterEditor.noCriteria")}
+              {filterDescriptions.get(filter.id) ??
+                t("filterEditor.noCriteria")}
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -184,7 +215,11 @@ export function FilterEditor() {
               className={`w-8 h-4 rounded-full transition-colors relative ${
                 filter.is_enabled === 1 ? "bg-accent" : "bg-bg-tertiary"
               }`}
-              title={filter.is_enabled === 1 ? t("filterEditor.disable") : t("filterEditor.enable")}
+              title={
+                filter.is_enabled === 1
+                  ? t("filterEditor.disable")
+                  : t("filterEditor.enable")
+              }
             >
               <span
                 className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform shadow ${
@@ -218,7 +253,9 @@ export function FilterEditor() {
           />
 
           <div>
-            <div className="text-xs font-medium text-text-secondary mb-1.5">{t("filterEditor.matchCriteria")}</div>
+            <div className="text-xs font-medium text-text-secondary mb-1.5">
+              {t("filterEditor.matchCriteria")}
+            </div>
             <div className="space-y-1.5">
               <TextField
                 type="text"
@@ -257,11 +294,15 @@ export function FilterEditor() {
           </div>
 
           <div>
-            <div className="text-xs font-medium text-text-secondary mb-1.5">{t("filterEditor.actions")}</div>
+            <div className="text-xs font-medium text-text-secondary mb-1.5">
+              {t("filterEditor.actions")}
+            </div>
             <div className="space-y-1.5">
               {labels.length > 0 && (
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-text-secondary w-20">{t("filterEditor.applyLabel")}</span>
+                  <span className="text-xs text-text-secondary w-20">
+                    {t("filterEditor.applyLabel")}
+                  </span>
                   <select
                     value={actionLabel}
                     onChange={(e) => setActionLabel(e.target.value)}
@@ -269,26 +310,48 @@ export function FilterEditor() {
                   >
                     <option value="">{t("filterEditor.none")}</option>
                     {labels.map((l) => (
-                      <option key={l.id} value={l.id}>{l.name}</option>
+                      <option key={l.id} value={l.id}>
+                        {l.name}
+                      </option>
                     ))}
                   </select>
                 </div>
               )}
               <div className="flex flex-wrap gap-3">
                 <label className="flex items-center gap-1.5 text-xs text-text-secondary">
-                  <input type="checkbox" checked={actionArchive} onChange={(e) => setActionArchive(e.target.checked)} className="rounded" />
+                  <input
+                    type="checkbox"
+                    checked={actionArchive}
+                    onChange={(e) => setActionArchive(e.target.checked)}
+                    className="rounded"
+                  />
                   {t("filterEditor.archive")}
                 </label>
                 <label className="flex items-center gap-1.5 text-xs text-text-secondary">
-                  <input type="checkbox" checked={actionStar} onChange={(e) => setActionStar(e.target.checked)} className="rounded" />
+                  <input
+                    type="checkbox"
+                    checked={actionStar}
+                    onChange={(e) => setActionStar(e.target.checked)}
+                    className="rounded"
+                  />
                   {t("filterEditor.star")}
                 </label>
                 <label className="flex items-center gap-1.5 text-xs text-text-secondary">
-                  <input type="checkbox" checked={actionMarkRead} onChange={(e) => setActionMarkRead(e.target.checked)} className="rounded" />
+                  <input
+                    type="checkbox"
+                    checked={actionMarkRead}
+                    onChange={(e) => setActionMarkRead(e.target.checked)}
+                    className="rounded"
+                  />
                   {t("filterEditor.markAsRead")}
                 </label>
                 <label className="flex items-center gap-1.5 text-xs text-text-secondary">
-                  <input type="checkbox" checked={actionTrash} onChange={(e) => setActionTrash(e.target.checked)} className="rounded" />
+                  <input
+                    type="checkbox"
+                    checked={actionTrash}
+                    onChange={(e) => setActionTrash(e.target.checked)}
+                    className="rounded"
+                  />
                   {t("filterEditor.trash")}
                 </label>
               </div>

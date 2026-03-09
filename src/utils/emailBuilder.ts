@@ -74,7 +74,10 @@ interface InlineImage {
  * Extract base64 data URLs from HTML and replace with cid: references.
  * Returns the modified HTML and extracted inline images.
  */
-function extractInlineImages(html: string): { html: string; images: InlineImage[] } {
+function extractInlineImages(html: string): {
+  html: string;
+  images: InlineImage[];
+} {
   const images: InlineImage[] = [];
   const processed = html.replace(
     /<img([^>]*)\ssrc="data:([^;]+);base64,([^"]+)"([^>]*)>/g,
@@ -99,10 +102,7 @@ function generateMessageId(from: string): string {
 
 export function buildRawEmail(draft: EmailDraft): string {
   const messageId = generateMessageId(draft.from);
-  const lines: string[] = [
-    `From: ${draft.from}`,
-    `To: ${draft.to.join(", ")}`,
-  ];
+  const lines: string[] = [`From: ${draft.from}`, `To: ${draft.to.join(", ")}`];
 
   if (draft.cc && draft.cc.length > 0) {
     lines.push(`Cc: ${draft.cc.join(", ")}`);
@@ -123,7 +123,9 @@ export function buildRawEmail(draft: EmailDraft): string {
     lines.push(`References: ${draft.references}`);
   }
 
-  const { html: processedHtml, images: inlineImages } = extractInlineImages(draft.htmlBody);
+  const { html: processedHtml, images: inlineImages } = extractInlineImages(
+    draft.htmlBody,
+  );
   const hasAttachments = draft.attachments && draft.attachments.length > 0;
   const hasInlineImages = inlineImages.length > 0;
 
@@ -140,11 +142,15 @@ export function buildRawEmail(draft: EmailDraft): string {
     }
 
     if (hasInlineImages) {
-      lines.push(`Content-Type: multipart/related; boundary="${relatedBoundary}"`);
+      lines.push(
+        `Content-Type: multipart/related; boundary="${relatedBoundary}"`,
+      );
       lines.push("");
 
       lines.push(`--${relatedBoundary}`);
-      lines.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`);
+      lines.push(
+        `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
+      );
       lines.push("");
       lines.push(...buildAlternativePart(altBoundary, processedHtml));
       lines.push("");
@@ -165,7 +171,9 @@ export function buildRawEmail(draft: EmailDraft): string {
       lines.push(`--${relatedBoundary}--`);
     } else {
       // No inline images, just alternative
-      lines.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`);
+      lines.push(
+        `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
+      );
       lines.push("");
       lines.push(...buildAlternativePart(altBoundary, processedHtml));
     }
@@ -177,7 +185,9 @@ export function buildRawEmail(draft: EmailDraft): string {
         lines.push(`--${mixedBoundary}`);
         lines.push(`Content-Type: ${att.mimeType}; name="${att.filename}"`);
         lines.push("Content-Transfer-Encoding: base64");
-        lines.push(`Content-Disposition: attachment; filename="${att.filename}"`);
+        lines.push(
+          `Content-Disposition: attachment; filename="${att.filename}"`,
+        );
         lines.push("");
         const raw = att.content;
         for (let i = 0; i < raw.length; i += 76) {
@@ -189,7 +199,9 @@ export function buildRawEmail(draft: EmailDraft): string {
     }
   } else {
     const altBoundary = `----=_Part_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    lines.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`);
+    lines.push(
+      `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
+    );
     lines.push("");
     lines.push(...buildAlternativePart(altBoundary, processedHtml));
   }

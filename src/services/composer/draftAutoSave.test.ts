@@ -4,7 +4,9 @@ import { startAutoSave, stopAutoSave } from "./draftAutoSave";
 
 // Mock emailActions instead of getGmailClient
 vi.mock("@/services/emailActions", () => ({
-  createDraft: vi.fn().mockResolvedValue({ success: true, data: { draftId: "draft-1" } }),
+  createDraft: vi
+    .fn()
+    .mockResolvedValue({ success: true, data: { draftId: "draft-1" } }),
   updateDraft: vi.fn().mockResolvedValue({ success: true }),
 }));
 
@@ -12,9 +14,10 @@ import { createMockAccountStoreState } from "@/test/mocks";
 
 vi.mock("@/stores/accountStore", () => ({
   useAccountStore: {
-    getState: () => createMockAccountStoreState({
-      accounts: [{ id: "account-1", email: "test@example.com" }],
-    }),
+    getState: () =>
+      createMockAccountStoreState({
+        accounts: [{ id: "account-1", email: "test@example.com" }],
+      }),
   },
 }));
 

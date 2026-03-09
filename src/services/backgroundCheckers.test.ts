@@ -72,7 +72,10 @@ describe("createBackgroundChecker", () => {
 
     // Wait for the initial async run to complete
     await vi.advanceTimersByTimeAsync(0);
-    expect(consoleSpy).toHaveBeenCalledWith("[TestChecker] check failed:", error);
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[TestChecker] check failed:",
+      error,
+    );
 
     // The interval should still fire
     await vi.advanceTimersByTimeAsync(1000);

@@ -27,7 +27,8 @@ export function AskInbox({ isOpen, onClose }: AskInboxProps) {
     } catch (err) {
       console.error("Ask inbox failed:", err);
       setResult({
-        answer: "Sorry, something went wrong. Please check your AI configuration and try again.",
+        answer:
+          "Sorry, something went wrong. Please check your AI configuration and try again.",
         sourceMessages: [],
       });
     } finally {
@@ -47,10 +48,13 @@ export function AskInbox({ isOpen, onClose }: AskInboxProps) {
     [handleAsk, onClose],
   );
 
-  const handleNavigateToThread = useCallback((threadId: string) => {
-    navigateToLabel("all", { threadId });
-    onClose();
-  }, [onClose]);
+  const handleNavigateToThread = useCallback(
+    (threadId: string) => {
+      navigateToLabel("all", { threadId });
+      onClose();
+    },
+    [onClose],
+  );
 
   const handleClear = useCallback(() => {
     setQuestion("");
@@ -62,12 +66,17 @@ export function AskInbox({ isOpen, onClose }: AskInboxProps) {
 
   return createPortal(
     <div className="fixed inset-0 z-[60] flex items-start justify-center pt-[10vh]">
-      <div className="absolute inset-0 bg-black/30 glass-backdrop" onClick={onClose} />
+      <div
+        className="absolute inset-0 bg-black/30 glass-backdrop"
+        onClick={onClose}
+      />
       <div className="relative bg-bg-primary border border-border-primary rounded-lg glass-modal w-full max-w-lg overflow-hidden flex flex-col max-h-[70vh]">
         {/* Header */}
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border-primary bg-bg-secondary">
           <Sparkles size={16} className="text-accent" />
-          <span className="text-sm font-medium text-text-primary flex-1">Ask My Inbox</span>
+          <span className="text-sm font-medium text-text-primary flex-1">
+            Ask My Inbox
+          </span>
           <button
             onClick={onClose}
             className="text-text-tertiary hover:text-text-primary transition-colors"
@@ -136,7 +145,10 @@ export function AskInbox({ isOpen, onClose }: AskInboxProps) {
                         </div>
                         <div className="text-xs text-text-secondary truncate mt-0.5 flex items-center gap-1">
                           {msg.subject ?? "(no subject)"}
-                          <ExternalLink size={10} className="opacity-0 group-hover:opacity-100 shrink-0" />
+                          <ExternalLink
+                            size={10}
+                            className="opacity-0 group-hover:opacity-100 shrink-0"
+                          />
                         </div>
                       </button>
                     ))}
@@ -156,7 +168,8 @@ export function AskInbox({ isOpen, onClose }: AskInboxProps) {
 
           {!loading && !result && (
             <div className="px-4 py-8 text-center text-sm text-text-tertiary">
-              Ask anything about your emails — meetings, conversations, attachments, and more.
+              Ask anything about your emails — meetings, conversations,
+              attachments, and more.
             </div>
           )}
         </div>

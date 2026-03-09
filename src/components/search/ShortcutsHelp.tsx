@@ -13,7 +13,13 @@ export function ShortcutsHelp({ isOpen, onClose }: ShortcutsHelpProps) {
   const keyMap = useShortcutStore((s) => s.keyMap);
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={t("keyboardShortcuts")} width="w-full max-w-lg" zIndex="z-[60]">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={t("keyboardShortcuts")}
+      width="w-full max-w-lg"
+      zIndex="z-[60]"
+    >
       <div className="p-4 max-h-[60vh] overflow-y-auto space-y-4">
         {SHORTCUTS.map((section) => (
           <div key={section.category}>

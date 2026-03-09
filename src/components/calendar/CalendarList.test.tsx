@@ -29,9 +29,7 @@ describe("CalendarList", () => {
       makeCalendar({ id: "cal-3", display_name: "Holidays" }),
     ];
 
-    render(
-      <CalendarList calendars={calendars} onVisibilityChange={vi.fn()} />,
-    );
+    render(<CalendarList calendars={calendars} onVisibilityChange={vi.fn()} />);
 
     expect(screen.getByText("Work")).toBeInTheDocument();
     expect(screen.getByText("Personal")).toBeInTheDocument();
@@ -44,9 +42,7 @@ describe("CalendarList", () => {
       makeCalendar({ id: "cal-2", display_name: "Secondary", is_primary: 0 }),
     ];
 
-    render(
-      <CalendarList calendars={calendars} onVisibilityChange={vi.fn()} />,
-    );
+    render(<CalendarList calendars={calendars} onVisibilityChange={vi.fn()} />);
 
     expect(screen.getByText("Primary")).toBeInTheDocument();
     // Only one Primary badge
@@ -63,9 +59,7 @@ describe("CalendarList", () => {
       }),
     ];
 
-    render(
-      <CalendarList calendars={calendars} onVisibilityChange={vi.fn()} />,
-    );
+    render(<CalendarList calendars={calendars} onVisibilityChange={vi.fn()} />);
 
     const checkboxes = screen.getAllByRole("checkbox");
     expect(checkboxes[0]).toBeChecked();
@@ -107,9 +101,7 @@ describe("CalendarList", () => {
       }),
     ];
 
-    render(
-      <CalendarList calendars={calendars} onVisibilityChange={vi.fn()} />,
-    );
+    render(<CalendarList calendars={calendars} onVisibilityChange={vi.fn()} />);
 
     // The color indicator span is the sibling after the sr-only checkbox
     const checkbox = screen.getByRole("checkbox");
@@ -118,13 +110,9 @@ describe("CalendarList", () => {
   });
 
   it('handles null display_name by showing "Calendar" fallback', () => {
-    const calendars = [
-      makeCalendar({ id: "cal-1", display_name: null }),
-    ];
+    const calendars = [makeCalendar({ id: "cal-1", display_name: null })];
 
-    render(
-      <CalendarList calendars={calendars} onVisibilityChange={vi.fn()} />,
-    );
+    render(<CalendarList calendars={calendars} onVisibilityChange={vi.fn()} />);
 
     expect(screen.getByText("Calendar")).toBeInTheDocument();
   });

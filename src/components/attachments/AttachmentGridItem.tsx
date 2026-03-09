@@ -1,6 +1,10 @@
 import { useTranslation } from "react-i18next";
 import { Download, Eye, ExternalLink } from "lucide-react";
-import { formatFileSize, getFileIcon, canPreview } from "@/utils/fileTypeHelpers";
+import {
+  formatFileSize,
+  getFileIcon,
+  canPreview,
+} from "@/utils/fileTypeHelpers";
 import type { AttachmentWithContext } from "@/services/db/attachments";
 
 interface AttachmentGridItemProps {
@@ -24,10 +28,16 @@ function formatRelativeDate(timestamp: number | null): string {
   return `${Math.floor(months / 12)}y ago`;
 }
 
-export function AttachmentGridItem({ attachment, onPreview, onDownload, onJumpToEmail }: AttachmentGridItemProps) {
+export function AttachmentGridItem({
+  attachment,
+  onPreview,
+  onDownload,
+  onJumpToEmail,
+}: AttachmentGridItemProps) {
   const { t } = useTranslation("attachments");
   const previewable = canPreview(attachment.mime_type, attachment.filename);
-  const senderName = attachment.from_name || attachment.from_address || t("unknown");
+  const senderName =
+    attachment.from_name || attachment.from_address || t("unknown");
 
   return (
     <div className="group relative flex flex-col border border-border-primary rounded-lg hover:border-border-secondary hover:bg-bg-hover transition-colors overflow-hidden">
@@ -41,15 +51,25 @@ export function AttachmentGridItem({ attachment, onPreview, onDownload, onJumpTo
 
       {/* Info */}
       <div className="px-3 py-2 flex flex-col gap-0.5 min-w-0">
-        <span className="text-xs font-medium text-text-primary truncate" title={attachment.filename ?? undefined}>
+        <span
+          className="text-xs font-medium text-text-primary truncate"
+          title={attachment.filename ?? undefined}
+        >
           {attachment.filename ?? t("unnamed")}
         </span>
-        <span className="text-[0.6875rem] text-text-tertiary truncate" title={senderName}>
+        <span
+          className="text-[0.6875rem] text-text-tertiary truncate"
+          title={senderName}
+        >
           {senderName}
         </span>
         <div className="flex items-center gap-2 text-[0.6875rem] text-text-tertiary">
-          {attachment.size != null && <span>{formatFileSize(attachment.size)}</span>}
-          {attachment.date && <span>{formatRelativeDate(attachment.date)}</span>}
+          {attachment.size != null && (
+            <span>{formatFileSize(attachment.size)}</span>
+          )}
+          {attachment.date && (
+            <span>{formatRelativeDate(attachment.date)}</span>
+          )}
         </div>
       </div>
 

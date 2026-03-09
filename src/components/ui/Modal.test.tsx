@@ -73,7 +73,12 @@ describe("Modal", () => {
 
   it("applies custom width", () => {
     render(
-      <Modal isOpen={true} onClose={() => {}} title="Wide" width="w-full max-w-md">
+      <Modal
+        isOpen={true}
+        onClose={() => {}}
+        title="Wide"
+        width="w-full max-w-md"
+      >
         <p>Content</p>
       </Modal>,
     );
@@ -93,7 +98,12 @@ describe("Modal", () => {
 
   it("applies panelClassName", () => {
     render(
-      <Modal isOpen={true} onClose={() => {}} title="Panel" panelClassName="shadow-xl">
+      <Modal
+        isOpen={true}
+        onClose={() => {}}
+        title="Panel"
+        panelClassName="shadow-xl"
+      >
         <p>Content</p>
       </Modal>,
     );
@@ -104,7 +114,12 @@ describe("Modal", () => {
   it("renders custom header via renderHeader prop", () => {
     const customHeader = <div data-testid="custom-header">Custom Header</div>;
     render(
-      <Modal isOpen={true} onClose={() => {}} title="Ignored" renderHeader={customHeader}>
+      <Modal
+        isOpen={true}
+        onClose={() => {}}
+        title="Ignored"
+        renderHeader={customHeader}
+      >
         <p>Content</p>
       </Modal>,
     );

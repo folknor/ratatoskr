@@ -35,8 +35,20 @@ vi.mock("@/services/snooze/snoozeManager", () => ({
 vi.mock("@/stores/threadStore", () => {
   const state = {
     threads: [
-      { id: "t1", labelIds: ["INBOX", "UNREAD"], isRead: false, isStarred: false, isPinned: false },
-      { id: "t2", labelIds: ["INBOX"], isRead: true, isStarred: true, isPinned: false },
+      {
+        id: "t1",
+        labelIds: ["INBOX", "UNREAD"],
+        isRead: false,
+        isStarred: false,
+        isPinned: false,
+      },
+      {
+        id: "t2",
+        labelIds: ["INBOX"],
+        isRead: true,
+        isStarred: true,
+        isPinned: false,
+      },
     ],
     updateThread: vi.fn(),
     removeThreads: vi.fn(),
@@ -72,7 +84,9 @@ describe("executeQuickStep", () => {
     expect(result.totalActions).toBe(1);
     expect(mockArchiveThread).toHaveBeenCalledWith("acct-1", "t1", []);
     // archive removes from view — threads should be batch-removed after chain completes
-    expect(useThreadStore.getState().removeThreads).toHaveBeenCalledWith(["t1"]);
+    expect(useThreadStore.getState().removeThreads).toHaveBeenCalledWith([
+      "t1",
+    ]);
   });
 
   it("executes a multi-action chain (markRead + archive)", async () => {
@@ -93,7 +107,9 @@ describe("executeQuickStep", () => {
     expect(mockArchiveThread).toHaveBeenCalledWith("acct-1", "t1", []);
 
     // Deferred removal after chain
-    expect(useThreadStore.getState().removeThreads).toHaveBeenCalledWith(["t1"]);
+    expect(useThreadStore.getState().removeThreads).toHaveBeenCalledWith([
+      "t1",
+    ]);
   });
 
   it("fails fast by default", async () => {
@@ -155,7 +171,9 @@ describe("executeQuickStep", () => {
 
     // removeThreads should be called once, after all actions complete
     expect(useThreadStore.getState().removeThreads).toHaveBeenCalledTimes(1);
-    expect(useThreadStore.getState().removeThreads).toHaveBeenCalledWith(["t1"]);
+    expect(useThreadStore.getState().removeThreads).toHaveBeenCalledWith([
+      "t1",
+    ]);
   });
 
   it("dispatches event for reply action and does not remove from view", async () => {
@@ -188,14 +206,18 @@ describe("executeQuickStep", () => {
 
     expect(result.success).toBe(true);
     expect(pinThread).toHaveBeenCalledWith("acct-1", "t1");
-    expect(useThreadStore.getState().updateThread).toHaveBeenCalledWith("t1", { isPinned: true });
+    expect(useThreadStore.getState().updateThread).toHaveBeenCalledWith("t1", {
+      isPinned: true,
+    });
 
     vi.clearAllMocks();
 
     const step2 = createMockQuickStep({ actions: [{ type: "unpin" }] });
     await executeQuickStep(step2, ["t1"], "acct-1");
     expect(unpinThread).toHaveBeenCalledWith("acct-1", "t1");
-    expect(useThreadStore.getState().updateThread).toHaveBeenCalledWith("t1", { isPinned: false });
+    expect(useThreadStore.getState().updateThread).toHaveBeenCalledWith("t1", {
+      isPinned: false,
+    });
   });
 
   it("executes snooze action", async () => {
@@ -209,7 +231,11 @@ describe("executeQuickStep", () => {
     const result = await executeQuickStep(step, ["t1"], "acct-1");
 
     expect(result.success).toBe(true);
-    expect(snoozeThread).toHaveBeenCalledWith("acct-1", "t1", expect.any(Number));
+    expect(snoozeThread).toHaveBeenCalledWith(
+      "acct-1",
+      "t1",
+      expect.any(Number),
+    );
 
     vi.useRealTimers();
   });
@@ -224,8 +250,15 @@ describe("executeQuickStep", () => {
     const result = await executeQuickStep(step, ["t1"], "acct-1");
 
     expect(result.success).toBe(true);
-    expect(setThreadCategory).toHaveBeenCalledWith("acct-1", "t1", "Promotions", true);
-    expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({ type: "velo-sync-done" }));
+    expect(setThreadCategory).toHaveBeenCalledWith(
+      "acct-1",
+      "t1",
+      "Promotions",
+      true,
+    );
+    expect(dispatchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "velo-sync-done" }),
+    );
 
     dispatchSpy.mockRestore();
   });
@@ -239,7 +272,9 @@ describe("executeQuickStep", () => {
 
     expect(result.success).toBe(true);
     expect(mockSpamThread).toHaveBeenCalledWith("acct-1", "t1", [], true);
-    expect(useThreadStore.getState().removeThreads).toHaveBeenCalledWith(["t1"]);
+    expect(useThreadStore.getState().removeThreads).toHaveBeenCalledWith([
+      "t1",
+    ]);
   });
 
   it("handles multiple threads", async () => {

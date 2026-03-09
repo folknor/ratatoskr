@@ -50,7 +50,11 @@ describe("providerFactory", () => {
       oauth_client_id: null,
       oauth_client_secret: null,
     });
-    vi.mocked(getGmailClient).mockResolvedValue({} as ReturnType<typeof getGmailClient> extends Promise<infer T> ? T : never);
+    vi.mocked(getGmailClient).mockResolvedValue(
+      {} as ReturnType<typeof getGmailClient> extends Promise<infer T>
+        ? T
+        : never,
+    );
 
     const provider = await getEmailProvider("acc-1");
 
@@ -281,7 +285,11 @@ describe("providerFactory", () => {
       oauth_client_id: null,
       oauth_client_secret: null,
     });
-    vi.mocked(getGmailClient).mockResolvedValue({} as ReturnType<typeof getGmailClient> extends Promise<infer T> ? T : never);
+    vi.mocked(getGmailClient).mockResolvedValue(
+      {} as ReturnType<typeof getGmailClient> extends Promise<infer T>
+        ? T
+        : never,
+    );
 
     await getEmailProvider("acc-7");
 

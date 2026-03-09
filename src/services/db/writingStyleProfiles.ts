@@ -40,8 +40,7 @@ export async function deleteWritingStyleProfile(
   accountId: string,
 ): Promise<void> {
   const db = await getDb();
-  await db.execute(
-    "DELETE FROM writing_style_profiles WHERE account_id = $1",
-    [accountId],
-  );
+  await db.execute("DELETE FROM writing_style_profiles WHERE account_id = $1", [
+    accountId,
+  ]);
 }

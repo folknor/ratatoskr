@@ -2,19 +2,34 @@ import { getGmailClient } from "./tokenManager";
 import { initialSync, deltaSync, type SyncProgress } from "./sync";
 import { getAccount, clearAccountHistoryId } from "../db/accounts";
 import { getSetting } from "../db/settings";
-import { getThreadCountForAccount, deleteAllThreadsForAccount } from "../db/threads";
+import {
+  getThreadCountForAccount,
+  deleteAllThreadsForAccount,
+} from "../db/threads";
 import { deleteAllMessagesForAccount } from "../db/messages";
 import { imapInitialSync, imapDeltaSync } from "../imap/imapSync";
 import { clearAllFolderSyncStates } from "../db/folderSyncState";
 import { ensureFreshToken } from "../oauth/oauthTokenManager";
-import { hasCalendarSupport, getCalendarProvider } from "../calendar/providerFactory";
-import { getVisibleCalendars, upsertCalendar, updateCalendarSyncToken } from "../db/calendars";
-import { upsertCalendarEvent, deleteEventByRemoteId } from "../db/calendarEvents";
+import {
+  hasCalendarSupport,
+  getCalendarProvider,
+} from "../calendar/providerFactory";
+import {
+  getVisibleCalendars,
+  upsertCalendar,
+  updateCalendarSyncToken,
+} from "../db/calendars";
+import {
+  upsertCalendarEvent,
+  deleteEventByRemoteId,
+} from "../db/calendarEvents";
 
 const SYNC_INTERVAL_MS = 60_000; // 60 seconds — delta syncs are lightweight (single API call when idle)
 
 /** Map IMAP sync phases to the SyncProgress phases the UI understands. */
-function mapImapPhase(phase: string): "labels" | "threads" | "messages" | "done" {
+function mapImapPhase(
+  phase: string,
+): "labels" | "threads" | "messages" | "done" {
   if (phase === "folders") return "labels";
   if (phase === "threading" || phase === "storing_threads") return "threads";
   if (phase === "messages") return "messages";
@@ -107,7 +122,9 @@ async function syncImapAccount(accountId: string): Promise<void> {
     if (result.messages.length === 0) {
       const threadCount = await getThreadCountForAccount(accountId);
       if (threadCount === 0) {
-        console.warn(`[syncManager] IMAP delta sync returned 0 new messages and DB has 0 threads for ${accountId} — forcing full re-sync`);
+        console.warn(
+          `[syncManager] IMAP delta sync returned 0 new messages and DB has 0 threads for ${accountId} — forcing full re-sync`,
+        );
         await clearAccountHistoryId(accountId);
         await clearAllFolderSyncStates(accountId);
         await imapInitialSync(accountId, syncDays, (progress) => {
@@ -159,7 +176,10 @@ async function syncCalendarForAccount(accountId: string): Promise<void> {
     const visibleCals = await getVisibleCalendars(accountId);
     for (const cal of visibleCals) {
       try {
-        const syncResult = await provider.syncEvents(cal.remote_id, cal.sync_token ?? undefined);
+        const syncResult = await provider.syncEvents(
+          cal.remote_id,
+          cal.sync_token ?? undefined,
+        );
 
         // Upsert created/updated events
         for (const event of [...syncResult.created, ...syncResult.updated]) {
@@ -191,17 +211,27 @@ async function syncCalendarForAccount(accountId: string): Promise<void> {
 
         // Update sync token
         if (syncResult.newSyncToken || syncResult.newCtag) {
-          await updateCalendarSyncToken(cal.id, syncResult.newSyncToken, syncResult.newCtag);
+          await updateCalendarSyncToken(
+            cal.id,
+            syncResult.newSyncToken,
+            syncResult.newCtag,
+          );
         }
       } catch (err) {
-        console.warn(`[syncManager] Calendar sync failed for ${cal.display_name ?? cal.remote_id}:`, err);
+        console.warn(
+          `[syncManager] Calendar sync failed for ${cal.display_name ?? cal.remote_id}:`,
+          err,
+        );
       }
     }
 
     // Emit event for UI update
     window.dispatchEvent(new CustomEvent("velo-calendar-sync-done"));
   } catch (err) {
-    console.warn(`[syncManager] Calendar sync failed for account ${accountId}:`, err);
+    console.warn(
+      `[syncManager] Calendar sync failed for account ${accountId}:`,
+      err,
+    );
   }
 }
 
@@ -219,7 +249,9 @@ async function syncAccountInternal(accountId: string): Promise<void> {
 
     statusCallback?.(accountId, "syncing");
 
-    console.log(`[syncManager] Syncing account ${accountId} (provider=${account.provider}, history_id=${account.history_id ?? "null"})`);
+    console.log(
+      `[syncManager] Syncing account ${accountId} (provider=${account.provider}, history_id=${account.history_id ?? "null"})`,
+    );
 
     if (account.provider === "caldav") {
       // CalDAV-only accounts — skip email sync, only sync calendar
@@ -244,8 +276,12 @@ async function syncAccountInternal(accountId: string): Promise<void> {
       console.warn(`[syncManager] Calendar sync error for ${accountId}:`, err);
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err ?? "Unknown error");
-    console.error(`[syncManager] Sync failed for account ${accountId}:`, message);
+    const message =
+      err instanceof Error ? err.message : String(err ?? "Unknown error");
+    console.error(
+      `[syncManager] Sync failed for account ${accountId}:`,
+      message,
+    );
     statusCallback?.(accountId, "error", undefined, message);
   }
 }
@@ -292,7 +328,10 @@ export async function syncAccount(accountId: string): Promise<void> {
  * next interval tick — useful when the caller already triggered a sync for a
  * newly-added account and doesn't want existing accounts to block it.
  */
-export function startBackgroundSync(accountIds: string[], skipImmediateSync = false): void {
+export function startBackgroundSync(
+  accountIds: string[],
+  skipImmediateSync = false,
+): void {
   stopBackgroundSync();
 
   if (!skipImmediateSync) {

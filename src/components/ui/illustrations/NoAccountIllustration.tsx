@@ -23,13 +23,7 @@ export function NoAccountIllustration({ size = 140, className }: Props) {
         strokeWidth="1.5"
       />
       {/* Head */}
-      <circle
-        cx="65"
-        cy="52"
-        r="12"
-        fill="var(--color-accent)"
-        opacity="0.2"
-      />
+      <circle cx="65" cy="52" r="12" fill="var(--color-accent)" opacity="0.2" />
       {/* Body / shoulders */}
       <path
         d="M43 88 C43 74 55 66 65 66 C75 66 87 74 87 88"
@@ -72,7 +66,13 @@ export function NoAccountIllustration({ size = 140, className }: Props) {
       />
       {/* Sparkles */}
       <circle cx="112" cy="60" r="2" fill="var(--color-accent)" opacity="0.3" />
-      <circle cx="108" cy="72" r="1.5" fill="var(--color-accent)" opacity="0.2" />
+      <circle
+        cx="108"
+        cy="72"
+        r="1.5"
+        fill="var(--color-accent)"
+        opacity="0.2"
+      />
     </svg>
   );
 }

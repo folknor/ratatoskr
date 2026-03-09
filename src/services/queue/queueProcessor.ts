@@ -1,4 +1,7 @@
-import { createBackgroundChecker, type BackgroundChecker } from "../backgroundCheckers";
+import {
+  createBackgroundChecker,
+  type BackgroundChecker,
+} from "../backgroundCheckers";
 import { useUIStore } from "@/stores/uiStore";
 import {
   getPendingOperations,

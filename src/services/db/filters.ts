@@ -82,9 +82,12 @@ export async function updateFilter(
   const db = await getDb();
   const fields: [string, unknown][] = [];
   if (updates.name !== undefined) fields.push(["name", updates.name]);
-  if (updates.criteria !== undefined) fields.push(["criteria_json", JSON.stringify(updates.criteria)]);
-  if (updates.actions !== undefined) fields.push(["actions_json", JSON.stringify(updates.actions)]);
-  if (updates.isEnabled !== undefined) fields.push(["is_enabled", boolToInt(updates.isEnabled)]);
+  if (updates.criteria !== undefined)
+    fields.push(["criteria_json", JSON.stringify(updates.criteria)]);
+  if (updates.actions !== undefined)
+    fields.push(["actions_json", JSON.stringify(updates.actions)]);
+  if (updates.isEnabled !== undefined)
+    fields.push(["is_enabled", boolToInt(updates.isEnabled)]);
 
   const query = buildDynamicUpdate("filter_rules", "id", id, fields);
   if (query) {

@@ -17,14 +17,24 @@ interface EventDetailModalProps {
   onUpdated: () => void;
 }
 
-export function EventDetailModal({ event, calendars, accountId, onClose, onUpdated }: EventDetailModalProps) {
+export function EventDetailModal({
+  event,
+  calendars,
+  accountId,
+  onClose,
+  onUpdated,
+}: EventDetailModalProps) {
   const { t } = useTranslation("calendar");
   const [editing, setEditing] = useState(false);
   const [summary, setSummary] = useState(event.summary ?? "");
   const [description, setDescription] = useState(event.description ?? "");
   const [location, setLocation] = useState(event.location ?? "");
-  const [startTime, setStartTime] = useState(toLocalISOString(new Date(event.start_time * 1000)));
-  const [endTime, setEndTime] = useState(toLocalISOString(new Date(event.end_time * 1000)));
+  const [startTime, setStartTime] = useState(
+    toLocalISOString(new Date(event.start_time * 1000)),
+  );
+  const [endTime, setEndTime] = useState(
+    toLocalISOString(new Date(event.end_time * 1000)),
+  );
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -38,13 +48,18 @@ export function EventDetailModal({ event, calendars, accountId, onClose, onUpdat
       const calendarRemoteId = calendar?.remote_id ?? "primary";
       const remoteEventId = event.remote_event_id ?? event.google_event_id;
 
-      await provider.updateEvent(calendarRemoteId, remoteEventId, {
-        summary,
-        description: description || undefined,
-        location: location || undefined,
-        startTime: new Date(startTime).toISOString(),
-        endTime: new Date(endTime).toISOString(),
-      }, event.etag ?? undefined);
+      await provider.updateEvent(
+        calendarRemoteId,
+        remoteEventId,
+        {
+          summary,
+          description: description || undefined,
+          location: location || undefined,
+          startTime: new Date(startTime).toISOString(),
+          endTime: new Date(endTime).toISOString(),
+        },
+        event.etag ?? undefined,
+      );
 
       onUpdated();
     } catch (err) {
@@ -52,7 +67,17 @@ export function EventDetailModal({ event, calendars, accountId, onClose, onUpdat
     } finally {
       setSaving(false);
     }
-  }, [accountId, calendar, event, summary, description, location, startTime, endTime, onUpdated]);
+  }, [
+    accountId,
+    calendar,
+    event,
+    summary,
+    description,
+    location,
+    startTime,
+    endTime,
+    onUpdated,
+  ]);
 
   const handleDelete = useCallback(async () => {
     setDeleting(true);
@@ -61,7 +86,11 @@ export function EventDetailModal({ event, calendars, accountId, onClose, onUpdat
       const calendarRemoteId = calendar?.remote_id ?? "primary";
       const remoteEventId = event.remote_event_id ?? event.google_event_id;
 
-      await provider.deleteEvent(calendarRemoteId, remoteEventId, event.etag ?? undefined);
+      await provider.deleteEvent(
+        calendarRemoteId,
+        remoteEventId,
+        event.etag ?? undefined,
+      );
 
       // Remove from local DB
       await deleteCalendarEventDb(event.id);
@@ -84,11 +113,21 @@ export function EventDetailModal({ event, calendars, accountId, onClose, onUpdat
     });
   };
 
-  const attendees = event.attendees_json ? JSON.parse(event.attendees_json) as { email: string; displayName?: string }[] : [];
+  const attendees = event.attendees_json
+    ? (JSON.parse(event.attendees_json) as {
+        email: string;
+        displayName?: string;
+      }[])
+    : [];
 
   if (editing) {
     return (
-      <Modal isOpen={true} onClose={onClose} title={t("editEvent")} width="w-full max-w-md">
+      <Modal
+        isOpen={true}
+        onClose={onClose}
+        title={t("editEvent")}
+        width="w-full max-w-md"
+      >
         <div className="p-4 space-y-3">
           <TextField
             label={t("title")}
@@ -122,7 +161,9 @@ export function EventDetailModal({ event, calendars, accountId, onClose, onUpdat
           />
 
           <div>
-            <label className="text-xs text-text-secondary block mb-1">{t("description")}</label>
+            <label className="text-xs text-text-secondary block mb-1">
+              {t("description")}
+            </label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -133,10 +174,19 @@ export function EventDetailModal({ event, calendars, accountId, onClose, onUpdat
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="secondary" size="md" onClick={() => setEditing(false)}>
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={() => setEditing(false)}
+            >
               {t("cancel")}
             </Button>
-            <Button variant="primary" size="md" onClick={handleSave} disabled={saving || !summary.trim()}>
+            <Button
+              variant="primary"
+              size="md"
+              onClick={handleSave}
+              disabled={saving || !summary.trim()}
+            >
               {saving ? t("saving") : t("save")}
             </Button>
           </div>
@@ -146,13 +196,20 @@ export function EventDetailModal({ event, calendars, accountId, onClose, onUpdat
   }
 
   return (
-    <Modal isOpen={true} onClose={onClose} title={event.summary ?? t("event")} width="w-full max-w-md">
+    <Modal
+      isOpen={true}
+      onClose={onClose}
+      title={event.summary ?? t("event")}
+      width="w-full max-w-md"
+    >
       <div className="p-4 space-y-3">
         {calendar && (
           <div className="flex items-center gap-2 text-xs text-text-tertiary">
             <span
               className="w-2.5 h-2.5 rounded-full"
-              style={{ backgroundColor: calendar.color ?? "var(--color-accent)" }}
+              style={{
+                backgroundColor: calendar.color ?? "var(--color-accent)",
+              }}
             />
             {calendar.display_name}
           </div>
@@ -181,10 +238,15 @@ export function EventDetailModal({ event, calendars, accountId, onClose, onUpdat
 
         {attendees.length > 0 && (
           <div className="border-t border-border-primary pt-3">
-            <div className="text-xs text-text-tertiary mb-1.5">{t("attendees")}</div>
+            <div className="text-xs text-text-tertiary mb-1.5">
+              {t("attendees")}
+            </div>
             <div className="space-y-1">
               {attendees.map((a, i) => (
-                <div key={i} className="flex items-center gap-2 text-sm text-text-secondary">
+                <div
+                  key={i}
+                  className="flex items-center gap-2 text-sm text-text-secondary"
+                >
                   <User size={12} className="text-text-tertiary" />
                   <span>{a.displayName ?? a.email}</span>
                 </div>
@@ -197,10 +259,19 @@ export function EventDetailModal({ event, calendars, accountId, onClose, onUpdat
           {confirmDelete ? (
             <div className="flex items-center gap-2">
               <span className="text-xs text-danger">{t("deleteEvent")}</span>
-              <Button variant="danger" size="xs" onClick={handleDelete} disabled={deleting}>
+              <Button
+                variant="danger"
+                size="xs"
+                onClick={handleDelete}
+                disabled={deleting}
+              >
                 {deleting ? t("deleting") : t("yesDelete")}
               </Button>
-              <Button variant="secondary" size="xs" onClick={() => setConfirmDelete(false)}>
+              <Button
+                variant="secondary"
+                size="xs"
+                onClick={() => setConfirmDelete(false)}
+              >
                 {t("cancel")}
               </Button>
             </div>

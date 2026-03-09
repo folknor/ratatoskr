@@ -212,7 +212,9 @@ export function guessServerSettings(domain: string): ServerSettings {
  * First checks well-known providers, then falls back to common patterns.
  * Returns null if the email address is invalid.
  */
-export function discoverSettings(email: string): WellKnownProviderResult | null {
+export function discoverSettings(
+  email: string,
+): WellKnownProviderResult | null {
   const domain = extractDomain(email);
   if (!domain) return null;
 

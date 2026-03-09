@@ -65,7 +65,11 @@ import {
 } from "../imap/tauriCommands";
 import { findSpecialFolder } from "../imap/messageHelper";
 import { upsertMessage } from "../db/messages";
-import { upsertThread, setThreadLabels, getThreadLabelIds } from "../db/threads";
+import {
+  upsertThread,
+  setThreadLabels,
+  getThreadLabelIds,
+} from "../db/threads";
 
 const mockImapConfig = {
   host: "imap.example.com",
@@ -196,12 +200,20 @@ describe("ImapSmtpProvider", () => {
   describe("fetchRawMessage", () => {
     it("parses IMAP message ID and calls imapFetchRawMessage", async () => {
       const { imapFetchRawMessage } = await import("../imap/tauriCommands");
-      vi.mocked(imapFetchRawMessage).mockResolvedValue("From: test@example.com\r\nSubject: Hello\r\n\r\nBody");
+      vi.mocked(imapFetchRawMessage).mockResolvedValue(
+        "From: test@example.com\r\nSubject: Hello\r\n\r\nBody",
+      );
 
       const result = await provider.fetchRawMessage("imap-acc-1-INBOX-42");
 
-      expect(imapFetchRawMessage).toHaveBeenCalledWith(mockImapConfig, "INBOX", 42);
-      expect(result).toBe("From: test@example.com\r\nSubject: Hello\r\n\r\nBody");
+      expect(imapFetchRawMessage).toHaveBeenCalledWith(
+        mockImapConfig,
+        "INBOX",
+        42,
+      );
+      expect(result).toBe(
+        "From: test@example.com\r\nSubject: Hello\r\n\r\nBody",
+      );
     });
 
     it("throws for invalid message ID format", async () => {
@@ -389,11 +401,7 @@ describe("ImapSmtpProvider", () => {
     it("skips messages already in target folder", async () => {
       vi.mocked(imapMoveMessages).mockResolvedValue(undefined);
 
-      await provider.moveToFolder(
-        "thread-1",
-        ["imap-acc-1-Work-100"],
-        "Work",
-      );
+      await provider.moveToFolder("thread-1", ["imap-acc-1-Work-100"], "Work");
 
       expect(imapMoveMessages).not.toHaveBeenCalled();
     });
@@ -419,8 +427,12 @@ describe("ImapSmtpProvider", () => {
 
   describe("sendMessage", () => {
     // A valid base64url-encoded RFC 2822 email for testing
-    const rawEmail = "From: user@example.com\r\nTo: bob@example.com\r\nSubject: Test\r\nDate: Thu, 20 Feb 2025 12:00:00 GMT\r\nMessage-ID: <test123@example.com>\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nHello World";
-    const rawBase64Url = btoa(rawEmail).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const rawEmail =
+      "From: user@example.com\r\nTo: bob@example.com\r\nSubject: Test\r\nDate: Thu, 20 Feb 2025 12:00:00 GMT\r\nMessage-ID: <test123@example.com>\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nHello World";
+    const rawBase64Url = btoa(rawEmail)
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
 
     it("sends via SMTP, saves locally, and copies to Sent folder", async () => {
       vi.mocked(smtpSendEmail).mockResolvedValue({
@@ -468,7 +480,10 @@ describe("ImapSmtpProvider", () => {
       vi.mocked(imapAppendMessage).mockResolvedValue(undefined);
       vi.mocked(getThreadLabelIds).mockResolvedValue(["INBOX"]);
 
-      const result = await provider.sendMessage(rawBase64Url, "existing-thread-1");
+      const result = await provider.sendMessage(
+        rawBase64Url,
+        "existing-thread-1",
+      );
 
       // Should add SENT to existing labels
       expect(setThreadLabels).toHaveBeenCalledWith(

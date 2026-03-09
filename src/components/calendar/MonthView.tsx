@@ -9,9 +9,21 @@ interface MonthViewProps {
   onEventClick: (event: DbCalendarEvent) => void;
 }
 
-export function MonthView({ currentDate, events, onEventClick }: MonthViewProps) {
+export function MonthView({
+  currentDate,
+  events,
+  onEventClick,
+}: MonthViewProps) {
   const { t } = useTranslation("calendar");
-  const dayNames = [t("daysShort.sun"), t("daysShort.mon"), t("daysShort.tue"), t("daysShort.wed"), t("daysShort.thu"), t("daysShort.fri"), t("daysShort.sat")];
+  const dayNames = [
+    t("daysShort.sun"),
+    t("daysShort.mon"),
+    t("daysShort.tue"),
+    t("daysShort.wed"),
+    t("daysShort.thu"),
+    t("daysShort.fri"),
+    t("daysShort.sat"),
+  ];
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
   const firstDay = new Date(year, month, 1);
@@ -33,7 +45,9 @@ export function MonthView({ currentDate, events, onEventClick }: MonthViewProps)
     for (let d = 1; d <= totalDays; d++) {
       const dayStart = new Date(year, month, d).getTime() / 1000;
       const dayEnd = new Date(year, month, d + 1).getTime() / 1000;
-      const dayEvents = events.filter((e) => e.start_time < dayEnd && e.end_time > dayStart);
+      const dayEvents = events.filter(
+        (e) => e.start_time < dayEnd && e.end_time > dayStart,
+      );
       if (dayEvents.length > 0) map.set(d, dayEvents);
     }
     return map;
@@ -44,7 +58,10 @@ export function MonthView({ currentDate, events, onEventClick }: MonthViewProps)
       {/* Day headers */}
       <div className="grid grid-cols-7 border-b border-border-primary">
         {dayNames.map((name) => (
-          <div key={name} className="px-2 py-2 text-xs font-medium text-text-tertiary text-center">
+          <div
+            key={name}
+            className="px-2 py-2 text-xs font-medium text-text-tertiary text-center"
+          >
             {name}
           </div>
         ))}
@@ -54,7 +71,12 @@ export function MonthView({ currentDate, events, onEventClick }: MonthViewProps)
       <div className="grid grid-cols-7 flex-1 auto-rows-fr overflow-y-auto">
         {cells.map((day, idx) => {
           if (day === null) {
-            return <div key={`empty-${idx}`} className="border-b border-r border-border-secondary bg-bg-tertiary/30" />;
+            return (
+              <div
+                key={`empty-${idx}`}
+                className="border-b border-r border-border-secondary bg-bg-tertiary/30"
+              />
+            );
           }
           const isToday = `${year}-${month}-${day}` === todayStr;
           const dayEvents = eventsByDay.get(day) ?? [];
@@ -64,9 +86,11 @@ export function MonthView({ currentDate, events, onEventClick }: MonthViewProps)
               key={day}
               className="border-b border-r border-border-secondary p-1 min-h-[80px]"
             >
-              <div className={`text-xs font-medium mb-0.5 w-6 h-6 flex items-center justify-center rounded-full ${
-                isToday ? "bg-accent text-white" : "text-text-secondary"
-              }`}>
+              <div
+                className={`text-xs font-medium mb-0.5 w-6 h-6 flex items-center justify-center rounded-full ${
+                  isToday ? "bg-accent text-white" : "text-text-secondary"
+                }`}
+              >
                 {day}
               </div>
               <div className="space-y-0.5">

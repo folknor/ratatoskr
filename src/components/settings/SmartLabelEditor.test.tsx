@@ -7,7 +7,12 @@ vi.mock("@/services/db/labels", () => ({
   getLabelsForAccount: vi.fn(() =>
     Promise.resolve([
       { id: "label-work", name: "Work", type: "user", account_id: "acc1" },
-      { id: "label-personal", name: "Personal", type: "user", account_id: "acc1" },
+      {
+        id: "label-personal",
+        name: "Personal",
+        type: "user",
+        account_id: "acc1",
+      },
       { id: "INBOX", name: "Inbox", type: "system", account_id: "acc1" },
     ]),
   ),
@@ -35,7 +40,15 @@ describe("SmartLabelEditor", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useAccountStore.setState({
-      accounts: [{ id: "acc1", email: "test@test.com", displayName: "Test", avatarUrl: null, isActive: true }],
+      accounts: [
+        {
+          id: "acc1",
+          email: "test@test.com",
+          displayName: "Test",
+          avatarUrl: null,
+          isActive: true,
+        },
+      ],
       activeAccountId: "acc1",
     });
     mockGetRules.mockResolvedValue([]);
@@ -125,7 +138,9 @@ describe("SmartLabelEditor", () => {
     fireEvent.change(select, { target: { value: "label-work" } });
 
     // Enter description
-    const textarea = screen.getByPlaceholderText("e.g., Job applications and career opportunities");
+    const textarea = screen.getByPlaceholderText(
+      "e.g., Job applications and career opportunities",
+    );
     fireEvent.change(textarea, { target: { value: "Work-related emails" } });
 
     fireEvent.click(screen.getByText("Save"));
@@ -183,7 +198,9 @@ describe("SmartLabelEditor", () => {
 
     await waitFor(() => {
       expect(mockBackfill).toHaveBeenCalledWith("acc1");
-      expect(screen.getByText("Applied 5 labels to existing emails.")).toBeInTheDocument();
+      expect(
+        screen.getByText("Applied 5 labels to existing emails."),
+      ).toBeInTheDocument();
     });
   });
 
@@ -208,7 +225,9 @@ describe("SmartLabelEditor", () => {
     fireEvent.click(screen.getByText("Optional filter criteria"));
 
     expect(screen.getByPlaceholderText("From contains...")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Subject contains...")).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText("Subject contains..."),
+    ).toBeInTheDocument();
   });
 
   it("deletes a rule", async () => {
@@ -230,7 +249,9 @@ describe("SmartLabelEditor", () => {
     await waitFor(() => screen.getByText("Work"));
 
     // Click the delete button (last button in the row, with hover:text-danger class)
-    const dangerButtons = document.querySelectorAll("button.p-1.text-text-tertiary");
+    const dangerButtons = document.querySelectorAll(
+      "button.p-1.text-text-tertiary",
+    );
     const deleteBtn = dangerButtons[dangerButtons.length - 1];
     if (deleteBtn) fireEvent.click(deleteBtn);
 

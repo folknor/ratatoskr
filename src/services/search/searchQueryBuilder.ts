@@ -26,7 +26,8 @@ export function buildSearchQuery(
   // Free text search via FTS5
   if (parsed.freeText) {
     needsFts = true;
-    fromClause = "FROM messages_fts JOIN messages m ON m.rowid = messages_fts.rowid";
+    fromClause =
+      "FROM messages_fts JOIN messages m ON m.rowid = messages_fts.rowid";
     whereClauses.push(`messages_fts MATCH $${paramIdx}`);
     params.push(parsed.freeText);
     paramIdx++;
@@ -41,7 +42,9 @@ export function buildSearchQuery(
 
   // from: operator
   if (parsed.from) {
-    whereClauses.push(`(m.from_address LIKE '%' || $${paramIdx} || '%' OR m.from_name LIKE '%' || $${paramIdx} || '%')`);
+    whereClauses.push(
+      `(m.from_address LIKE '%' || $${paramIdx} || '%' OR m.from_name LIKE '%' || $${paramIdx} || '%')`,
+    );
     params.push(parsed.from);
     paramIdx++;
   }
@@ -105,7 +108,8 @@ export function buildSearchQuery(
     paramIdx++;
   }
 
-  const whereStr = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+  const whereStr =
+    whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
   const orderBy = needsFts ? "ORDER BY rank" : "ORDER BY m.date DESC";
 
   params.push(limit);

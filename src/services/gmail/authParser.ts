@@ -14,7 +14,10 @@ export interface AuthResult {
  * Parse a single auth mechanism result from the Authentication-Results header value.
  * Matches patterns like: spf=pass (detail text)
  */
-function parseVerdict(headerValue: string, mechanism: string): AuthVerdict | null {
+function parseVerdict(
+  headerValue: string,
+  mechanism: string,
+): AuthVerdict | null {
   // Match mechanism=result, optionally followed by parenthetical details
   // Use case-insensitive matching and allow whitespace/newlines
   const normalized = headerValue.replace(/\r?\n\s*/g, " ");
@@ -117,9 +120,7 @@ export function parseAuthenticationResults(
   // Fallback to ARC-Authentication-Results
   const arcHeader =
     authResultsHeader ??
-    headers.find(
-      (h) => h.name.toLowerCase() === "arc-authentication-results",
-    );
+    headers.find((h) => h.name.toLowerCase() === "arc-authentication-results");
 
   // Fallback to Received-SPF for SPF only
   const receivedSpfHeader = headers.find(
@@ -140,11 +141,15 @@ export function parseAuthenticationResults(
 
     // For DKIM, there might be multiple results. If any passes, consider it a pass.
     const normalized = headerValue.replace(/\r?\n\s*/g, " ");
-    const dkimMatches = [...normalized.matchAll(/dkim\s*=\s*(\w+)(?:\s*\(([^)]+)\))?/gi)];
+    const dkimMatches = [
+      ...normalized.matchAll(/dkim\s*=\s*(\w+)(?:\s*\(([^)]+)\))?/gi),
+    ];
     if (dkimMatches.length > 0) {
       const hasPass = dkimMatches.some((m) => m[1]!.toLowerCase() === "pass");
       if (hasPass) {
-        const passMatch = dkimMatches.find((m) => m[1]!.toLowerCase() === "pass");
+        const passMatch = dkimMatches.find(
+          (m) => m[1]!.toLowerCase() === "pass",
+        );
         dkim = {
           result: "pass",
           detail: passMatch?.[2]?.trim() ?? null,

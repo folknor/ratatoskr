@@ -55,7 +55,10 @@ describe("buildImapConfig", () => {
   });
 
   it("uses accessToken override for oauth2 accounts", () => {
-    const account = createMockDbAccount({ auth_method: "oauth2", imap_password: "old" });
+    const account = createMockDbAccount({
+      auth_method: "oauth2",
+      imap_password: "old",
+    });
     const config = buildImapConfig(account, "fresh-token");
     expect(config.password).toBe("fresh-token");
     expect(config.auth_method).toBe("oauth2");

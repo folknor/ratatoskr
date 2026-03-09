@@ -17,7 +17,11 @@ interface AiAssistPanelProps {
   threadMessages?: string[];
 }
 
-export function AiAssistPanel({ editor, isReplyMode, threadMessages }: AiAssistPanelProps) {
+export function AiAssistPanel({
+  editor,
+  isReplyMode,
+  threadMessages,
+}: AiAssistPanelProps) {
   const { t } = useTranslation("composer");
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
@@ -59,7 +63,10 @@ export function AiAssistPanel({ editor, isReplyMode, threadMessages }: AiAssistP
     setLoading(true);
     setError(null);
     try {
-      const result = await generateReply(threadMessages, prompt.trim() || undefined);
+      const result = await generateReply(
+        threadMessages,
+        prompt.trim() || undefined,
+      );
       applyToEditor(result);
       setPrompt("");
     } catch (err) {
@@ -89,7 +96,9 @@ export function AiAssistPanel({ editor, isReplyMode, threadMessages }: AiAssistP
     <div className="px-3 py-2 border-b border-border-secondary bg-accent/5">
       <div className="flex items-center gap-2 mb-2">
         <Sparkles size={12} className="text-accent" />
-        <span className="text-xs font-medium text-accent">{t("aiAssistTitle")}</span>
+        <span className="text-xs font-medium text-accent">
+          {t("aiAssistTitle")}
+        </span>
       </div>
 
       {/* Prompt input */}
@@ -105,7 +114,11 @@ export function AiAssistPanel({ editor, isReplyMode, threadMessages }: AiAssistP
               else handleCompose();
             }
           }}
-          placeholder={isReplyMode ? t("aiInstructionsPlaceholder") : t("aiComposePlaceholder")}
+          placeholder={
+            isReplyMode
+              ? t("aiInstructionsPlaceholder")
+              : t("aiComposePlaceholder")
+          }
           className="flex-1 px-2 py-1 text-xs bg-bg-tertiary border border-border-primary rounded outline-none focus:border-accent text-text-primary placeholder:text-text-tertiary"
           disabled={loading}
         />
@@ -130,7 +143,9 @@ export function AiAssistPanel({ editor, isReplyMode, threadMessages }: AiAssistP
 
       {/* Quick actions */}
       <div className="flex items-center gap-1.5">
-        <span className="text-xs text-text-tertiary mr-1">{t("transform")}</span>
+        <span className="text-xs text-text-tertiary mr-1">
+          {t("transform")}
+        </span>
         <QuickAction
           icon={<Wand2 size={11} />}
           label={t("improve")}
@@ -151,9 +166,7 @@ export function AiAssistPanel({ editor, isReplyMode, threadMessages }: AiAssistP
         />
       </div>
 
-      {error && (
-        <p className="text-xs text-danger mt-1">{error}</p>
-      )}
+      {error && <p className="text-xs text-danger mt-1">{error}</p>}
     </div>
   );
 }

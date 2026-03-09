@@ -53,8 +53,18 @@ describe("CalDAVProvider", () => {
       const calendars = await provider.listCalendars();
 
       expect(calendars).toEqual([
-        { remoteId: "/cal/personal/", displayName: "Personal", color: null, isPrimary: true },
-        { remoteId: "/cal/work/", displayName: "Work", color: "#ff0000", isPrimary: false },
+        {
+          remoteId: "/cal/personal/",
+          displayName: "Personal",
+          color: null,
+          isPrimary: true,
+        },
+        {
+          remoteId: "/cal/work/",
+          displayName: "Work",
+          color: "#ff0000",
+          isPrimary: false,
+        },
       ]);
     });
 
@@ -74,15 +84,30 @@ describe("CalDAVProvider", () => {
   describe("fetchEvents", () => {
     it("passes time range and parses iCalendar data from objects", async () => {
       mockFetchCalendarObjects.mockResolvedValue([
-        { data: MOCK_ICAL_DATA, url: "/cal/personal/test-uid.ics", etag: '"etag-1"' },
-        { data: MOCK_ICAL_DATA_2, url: "/cal/personal/test-uid-2.ics", etag: '"etag-2"' },
+        {
+          data: MOCK_ICAL_DATA,
+          url: "/cal/personal/test-uid.ics",
+          etag: '"etag-1"',
+        },
+        {
+          data: MOCK_ICAL_DATA_2,
+          url: "/cal/personal/test-uid-2.ics",
+          etag: '"etag-2"',
+        },
       ]);
 
-      const events = await provider.fetchEvents("/cal/personal/", "2024-01-01T00:00:00Z", "2024-01-31T23:59:59Z");
+      const events = await provider.fetchEvents(
+        "/cal/personal/",
+        "2024-01-01T00:00:00Z",
+        "2024-01-31T23:59:59Z",
+      );
 
       expect(mockFetchCalendarObjects).toHaveBeenCalledWith({
         calendar: { url: "/cal/personal/" },
-        timeRange: { start: "2024-01-01T00:00:00Z", end: "2024-01-31T23:59:59Z" },
+        timeRange: {
+          start: "2024-01-01T00:00:00Z",
+          end: "2024-01-31T23:59:59Z",
+        },
       });
 
       expect(events).toHaveLength(2);
@@ -96,11 +121,19 @@ describe("CalDAVProvider", () => {
 
     it("filters out objects with no data", async () => {
       mockFetchCalendarObjects.mockResolvedValue([
-        { data: MOCK_ICAL_DATA, url: "/cal/personal/test-uid.ics", etag: '"etag-1"' },
+        {
+          data: MOCK_ICAL_DATA,
+          url: "/cal/personal/test-uid.ics",
+          etag: '"etag-1"',
+        },
         { data: null, url: "/cal/personal/empty.ics", etag: null },
       ]);
 
-      const events = await provider.fetchEvents("/cal/personal/", "2024-01-01T00:00:00Z", "2024-01-31T23:59:59Z");
+      const events = await provider.fetchEvents(
+        "/cal/personal/",
+        "2024-01-01T00:00:00Z",
+        "2024-01-31T23:59:59Z",
+      );
 
       expect(events).toHaveLength(1);
     });
@@ -108,7 +141,9 @@ describe("CalDAVProvider", () => {
 
   describe("createEvent", () => {
     it("generates iCalendar and calls createCalendarObject", async () => {
-      vi.spyOn(crypto, "randomUUID").mockReturnValue("generated-uuid" as `${string}-${string}-${string}-${string}-${string}`);
+      vi.spyOn(crypto, "randomUUID").mockReturnValue(
+        "generated-uuid" as `${string}-${string}-${string}-${string}-${string}`,
+      );
 
       const event = await provider.createEvent("/cal/personal/", {
         summary: "New Meeting",
@@ -130,7 +165,11 @@ describe("CalDAVProvider", () => {
   describe("updateEvent", () => {
     it("fetches existing, merges updates, and calls updateCalendarObject", async () => {
       mockFetchCalendarObjects.mockResolvedValue([
-        { data: MOCK_ICAL_DATA, url: "/cal/personal/test-uid.ics", etag: '"old-etag"' },
+        {
+          data: MOCK_ICAL_DATA,
+          url: "/cal/personal/test-uid.ics",
+          etag: '"old-etag"',
+        },
       ]);
 
       const event = await provider.updateEvent(
@@ -162,14 +201,20 @@ describe("CalDAVProvider", () => {
       mockFetchCalendarObjects.mockResolvedValue([]);
 
       await expect(
-        provider.updateEvent("/cal/personal/", "/cal/personal/missing.ics", { summary: "Nope" }),
+        provider.updateEvent("/cal/personal/", "/cal/personal/missing.ics", {
+          summary: "Nope",
+        }),
       ).rejects.toThrow("Event not found on server");
     });
   });
 
   describe("deleteEvent", () => {
     it("calls deleteCalendarObject with etag", async () => {
-      await provider.deleteEvent("/cal/personal/", "/cal/personal/test-uid.ics", '"delete-etag"');
+      await provider.deleteEvent(
+        "/cal/personal/",
+        "/cal/personal/test-uid.ics",
+        '"delete-etag"',
+      );
 
       expect(mockDeleteCalendarObject).toHaveBeenCalledWith({
         calendarObject: {
@@ -181,7 +226,10 @@ describe("CalDAVProvider", () => {
     });
 
     it("calls deleteCalendarObject without etag when not provided", async () => {
-      await provider.deleteEvent("/cal/personal/", "/cal/personal/test-uid.ics");
+      await provider.deleteEvent(
+        "/cal/personal/",
+        "/cal/personal/test-uid.ics",
+      );
 
       expect(mockDeleteCalendarObject).toHaveBeenCalledWith({
         calendarObject: {
@@ -196,8 +244,16 @@ describe("CalDAVProvider", () => {
   describe("syncEvents", () => {
     it("fetches all objects in time range and returns them as created events", async () => {
       mockFetchCalendarObjects.mockResolvedValue([
-        { data: MOCK_ICAL_DATA, url: "/cal/personal/test-uid.ics", etag: '"sync-etag"' },
-        { data: MOCK_ICAL_DATA_2, url: "/cal/personal/test-uid-2.ics", etag: '"sync-etag-2"' },
+        {
+          data: MOCK_ICAL_DATA,
+          url: "/cal/personal/test-uid.ics",
+          etag: '"sync-etag"',
+        },
+        {
+          data: MOCK_ICAL_DATA_2,
+          url: "/cal/personal/test-uid-2.ics",
+          etag: '"sync-etag-2"',
+        },
       ]);
 
       const result = await provider.syncEvents("/cal/personal/");

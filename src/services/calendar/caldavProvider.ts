@@ -51,13 +51,20 @@ export class CalDAVProvider implements CalendarProvider {
 
     return calendars.map((cal, index) => ({
       remoteId: cal.url,
-      displayName: typeof cal.displayName === "string" ? cal.displayName : `Calendar ${index + 1}`,
+      displayName:
+        typeof cal.displayName === "string"
+          ? cal.displayName
+          : `Calendar ${index + 1}`,
       color: extractCalendarColor(cal) ?? null,
       isPrimary: index === 0,
     }));
   }
 
-  async fetchEvents(calendarRemoteId: string, timeMin: string, timeMax: string): Promise<CalendarEventData[]> {
+  async fetchEvents(
+    calendarRemoteId: string,
+    timeMin: string,
+    timeMax: string,
+  ): Promise<CalendarEventData[]> {
     const client = await this.getClient();
 
     const objects = await client.fetchCalendarObjects({
@@ -77,7 +84,10 @@ export class CalDAVProvider implements CalendarProvider {
       });
   }
 
-  async createEvent(calendarRemoteId: string, event: CreateEventInput): Promise<CalendarEventData> {
+  async createEvent(
+    calendarRemoteId: string,
+    event: CreateEventInput,
+  ): Promise<CalendarEventData> {
     const client = await this.getClient();
     const uid = crypto.randomUUID();
     const icalData = generateVEvent(event, uid);
@@ -116,7 +126,8 @@ export class CalDAVProvider implements CalendarProvider {
       summary: event.summary ?? parsed.summary ?? "",
       description: event.description ?? parsed.description ?? undefined,
       location: event.location ?? parsed.location ?? undefined,
-      startTime: event.startTime ?? new Date(parsed.startTime * 1000).toISOString(),
+      startTime:
+        event.startTime ?? new Date(parsed.startTime * 1000).toISOString(),
       endTime: event.endTime ?? new Date(parsed.endTime * 1000).toISOString(),
       isAllDay: event.isAllDay ?? parsed.isAllDay,
     };
@@ -139,7 +150,11 @@ export class CalDAVProvider implements CalendarProvider {
     return result;
   }
 
-  async deleteEvent(_calendarRemoteId: string, remoteEventId: string, etag?: string): Promise<void> {
+  async deleteEvent(
+    _calendarRemoteId: string,
+    remoteEventId: string,
+    etag?: string,
+  ): Promise<void> {
     const client = await this.getClient();
 
     const headers: Record<string, string> = {};
@@ -154,7 +169,10 @@ export class CalDAVProvider implements CalendarProvider {
     });
   }
 
-  async syncEvents(calendarRemoteId: string, _syncToken?: string): Promise<CalendarSyncResult> {
+  async syncEvents(
+    calendarRemoteId: string,
+    _syncToken?: string,
+  ): Promise<CalendarSyncResult> {
     const client = await this.getClient();
     const created: CalendarEventData[] = [];
 
@@ -182,7 +200,13 @@ export class CalDAVProvider implements CalendarProvider {
       }
     }
 
-    return { created, updated: [], deletedRemoteIds: [], newSyncToken: null, newCtag: null };
+    return {
+      created,
+      updated: [],
+      deletedRemoteIds: [],
+      newSyncToken: null,
+      newCtag: null,
+    };
   }
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
@@ -196,7 +220,10 @@ export class CalDAVProvider implements CalendarProvider {
     } catch (err) {
       // Reset client on failure so next attempt can retry
       this.client = null;
-      return { success: false, message: err instanceof Error ? err.message : "Connection failed" };
+      return {
+        success: false,
+        message: err instanceof Error ? err.message : "Connection failed",
+      };
     }
   }
 }

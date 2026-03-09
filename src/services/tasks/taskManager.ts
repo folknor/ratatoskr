@@ -1,4 +1,9 @@
-import { completeTask, insertTask, getTaskById, updateTask } from "@/services/db/tasks";
+import {
+  completeTask,
+  insertTask,
+  getTaskById,
+  updateTask,
+} from "@/services/db/tasks";
 
 export interface RecurrenceRule {
   type: "daily" | "weekly" | "monthly" | "yearly";
@@ -9,7 +14,9 @@ export interface RecurrenceRule {
 /**
  * Parse a recurrence rule from its JSON string.
  */
-export function parseRecurrenceRule(json: string | null): RecurrenceRule | null {
+export function parseRecurrenceRule(
+  json: string | null,
+): RecurrenceRule | null {
   if (!json) return null;
   try {
     return JSON.parse(json) as RecurrenceRule;

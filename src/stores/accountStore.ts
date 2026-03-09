@@ -24,9 +24,10 @@ export const useAccountStore = create<AccountState>((set) => ({
   activeAccountId: null,
 
   setAccounts: (accounts, restoredId) => {
-    const activeId = (restoredId && accounts.some((a) => a.id === restoredId))
-      ? restoredId
-      : accounts[0]?.id ?? null;
+    const activeId =
+      restoredId && accounts.some((a) => a.id === restoredId)
+        ? restoredId
+        : (accounts[0]?.id ?? null);
     set({ accounts, activeAccountId: activeId });
   },
 

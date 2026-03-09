@@ -9,7 +9,9 @@ const providerCache = new Map<string, CalendarProvider>();
  * Get a CalendarProvider for the given account.
  * Routes based on `account.calendar_provider` or `account.provider` for standalone CalDAV accounts.
  */
-export async function getCalendarProvider(accountId: string): Promise<CalendarProvider> {
+export async function getCalendarProvider(
+  accountId: string,
+): Promise<CalendarProvider> {
   const cached = providerCache.get(accountId);
   if (cached) return cached;
 
@@ -27,7 +29,10 @@ export async function getCalendarProvider(accountId: string): Promise<CalendarPr
     provider = new CalDAVProvider(accountId);
   }
   // Gmail API account
-  else if (account.provider === "gmail_api" || account.calendar_provider === "google_api") {
+  else if (
+    account.provider === "gmail_api" ||
+    account.calendar_provider === "google_api"
+  ) {
     provider = new GoogleCalendarProvider(accountId);
   }
   // Default for Gmail accounts

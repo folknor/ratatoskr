@@ -102,7 +102,9 @@ export async function startProviderOAuthFlow(
   const result = await serverPromise;
 
   if (result.state !== oauthState) {
-    throw new Error("OAuth state mismatch — possible CSRF attack. Please try again.");
+    throw new Error(
+      "OAuth state mismatch — possible CSRF attack. Please try again.",
+    );
   }
 
   const tokens = await exchangeCode(
@@ -174,7 +176,10 @@ async function fetchUserInfo(
     if (tokens.id_token) {
       const claims = parseIdToken(tokens.id_token);
       return {
-        email: (claims.email as string) || (claims.preferred_username as string) || "",
+        email:
+          (claims.email as string) ||
+          (claims.preferred_username as string) ||
+          "",
         name: (claims.name as string) || "",
         picture: undefined,
       };

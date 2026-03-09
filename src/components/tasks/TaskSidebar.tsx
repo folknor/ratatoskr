@@ -31,52 +31,63 @@ export function TaskSidebar({ accountId, threadId }: TaskSidebarProps) {
     getTasksForThread(accountId, threadId).then((tasks) => {
       if (!cancelled) setThreadTasks(tasks);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [accountId, threadId, setThreadTasks]);
 
-  const handleAddTask = useCallback(async (title: string) => {
-    const id = await insertTask({
-      accountId,
-      title,
-      threadId,
-      threadAccountId: accountId,
-    });
-    // Refresh
-    const tasks = await getTasksForThread(accountId, threadId);
-    setThreadTasks(tasks);
-    useTaskStore.getState().setIncompleteCount(
-      useTaskStore.getState().incompleteCount + 1,
-    );
-    return id;
-  }, [accountId, threadId, setThreadTasks]);
+  const handleAddTask = useCallback(
+    async (title: string) => {
+      const id = await insertTask({
+        accountId,
+        title,
+        threadId,
+        threadAccountId: accountId,
+      });
+      // Refresh
+      const tasks = await getTasksForThread(accountId, threadId);
+      setThreadTasks(tasks);
+      useTaskStore
+        .getState()
+        .setIncompleteCount(useTaskStore.getState().incompleteCount + 1);
+      return id;
+    },
+    [accountId, threadId, setThreadTasks],
+  );
 
-  const handleToggleComplete = useCallback(async (id: string, completed: boolean) => {
-    if (completed) {
-      const task = threadTasks.find((t) => t.id === id);
-      if (task?.recurrence_rule) {
-        await handleRecurringTaskCompletion(id);
+  const handleToggleComplete = useCallback(
+    async (id: string, completed: boolean) => {
+      if (completed) {
+        const task = threadTasks.find((t) => t.id === id);
+        if (task?.recurrence_rule) {
+          await handleRecurringTaskCompletion(id);
+        } else {
+          await completeTask(id);
+        }
       } else {
-        await completeTask(id);
+        await uncompleteTask(id);
       }
-    } else {
-      await uncompleteTask(id);
-    }
-    const tasks = await getTasksForThread(accountId, threadId);
-    setThreadTasks(tasks);
-    // Update count
-    const { getIncompleteTaskCount } = await import("@/services/db/tasks");
-    const count = await getIncompleteTaskCount(accountId);
-    useTaskStore.getState().setIncompleteCount(count);
-  }, [accountId, threadId, setThreadTasks, threadTasks]);
+      const tasks = await getTasksForThread(accountId, threadId);
+      setThreadTasks(tasks);
+      // Update count
+      const { getIncompleteTaskCount } = await import("@/services/db/tasks");
+      const count = await getIncompleteTaskCount(accountId);
+      useTaskStore.getState().setIncompleteCount(count);
+    },
+    [accountId, threadId, setThreadTasks, threadTasks],
+  );
 
-  const handleDelete = useCallback(async (id: string) => {
-    await dbDeleteTask(id);
-    const tasks = await getTasksForThread(accountId, threadId);
-    setThreadTasks(tasks);
-    const { getIncompleteTaskCount } = await import("@/services/db/tasks");
-    const count = await getIncompleteTaskCount(accountId);
-    useTaskStore.getState().setIncompleteCount(count);
-  }, [accountId, threadId, setThreadTasks]);
+  const handleDelete = useCallback(
+    async (id: string) => {
+      await dbDeleteTask(id);
+      const tasks = await getTasksForThread(accountId, threadId);
+      setThreadTasks(tasks);
+      const { getIncompleteTaskCount } = await import("@/services/db/tasks");
+      const count = await getIncompleteTaskCount(accountId);
+      useTaskStore.getState().setIncompleteCount(count);
+    },
+    [accountId, threadId, setThreadTasks],
+  );
 
   // Load subtasks for each task
   const [subtaskMap, setSubtaskMap] = useState<Record<string, DbTask[]>>({});
@@ -92,7 +103,9 @@ export function TaskSidebar({ accountId, threadId }: TaskSidebarProps) {
       if (!cancelled) setSubtaskMap(map);
     }
     loadSubtasks();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [threadTasks]);
 
   return (
@@ -140,7 +153,10 @@ export function TaskSidebar({ accountId, threadId }: TaskSidebarProps) {
 
       {/* Quick add */}
       <div className="border-t border-border-secondary">
-        <TaskQuickAdd onAdd={handleAddTask} placeholder="Add task to this thread..." />
+        <TaskQuickAdd
+          onAdd={handleAddTask}
+          placeholder="Add task to this thread..."
+        />
       </div>
     </div>
   );

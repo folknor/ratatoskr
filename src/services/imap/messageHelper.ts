@@ -76,7 +76,9 @@ export async function findSpecialFolder(
   const db = await getDb();
 
   // Primary: look up by imap_special_use attribute
-  const rows = await db.select<{ imap_folder_path: string | null; name: string }[]>(
+  const rows = await db.select<
+    { imap_folder_path: string | null; name: string }[]
+  >(
     "SELECT imap_folder_path, name FROM labels WHERE account_id = $1 AND imap_special_use = $2 LIMIT 1",
     [accountId, specialUse],
   );
@@ -89,7 +91,9 @@ export async function findSpecialFolder(
   // but didn't set imap_special_use (or the attribute wasn't reported by the server).
   const labelId = SPECIAL_USE_TO_LABEL_ID[specialUse];
   if (labelId) {
-    const fallbackRows = await db.select<{ imap_folder_path: string | null; name: string }[]>(
+    const fallbackRows = await db.select<
+      { imap_folder_path: string | null; name: string }[]
+    >(
       "SELECT imap_folder_path, name FROM labels WHERE account_id = $1 AND id = $2 AND imap_folder_path IS NOT NULL LIMIT 1",
       [accountId, labelId],
     );

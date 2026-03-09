@@ -4,23 +4,66 @@ import { MoveToFolderDialog } from "./MoveToFolderDialog";
 
 // Mock dependencies
 vi.mock("@/stores/labelStore", () => ({
-  useLabelStore: vi.fn((selector: (s: { labels: { id: string; name: string; accountId: string; type: string; colorBg: string | null; colorFg: string | null; sortOrder: number }[] }) => unknown) =>
-    selector({
-      labels: [
-        { id: "label-1", name: "Work", accountId: "acc-1", type: "user", colorBg: null, colorFg: null, sortOrder: 0 },
-        { id: "label-2", name: "Personal", accountId: "acc-1", type: "user", colorBg: null, colorFg: null, sortOrder: 1 },
-        { id: "label-3", name: "Finance", accountId: "acc-1", type: "user", colorBg: null, colorFg: null, sortOrder: 2 },
-      ],
-    }),
+  useLabelStore: vi.fn(
+    (
+      selector: (s: {
+        labels: {
+          id: string;
+          name: string;
+          accountId: string;
+          type: string;
+          colorBg: string | null;
+          colorFg: string | null;
+          sortOrder: number;
+        }[];
+      }) => unknown,
+    ) =>
+      selector({
+        labels: [
+          {
+            id: "label-1",
+            name: "Work",
+            accountId: "acc-1",
+            type: "user",
+            colorBg: null,
+            colorFg: null,
+            sortOrder: 0,
+          },
+          {
+            id: "label-2",
+            name: "Personal",
+            accountId: "acc-1",
+            type: "user",
+            colorBg: null,
+            colorFg: null,
+            sortOrder: 1,
+          },
+          {
+            id: "label-3",
+            name: "Finance",
+            accountId: "acc-1",
+            type: "user",
+            colorBg: null,
+            colorFg: null,
+            sortOrder: 2,
+          },
+        ],
+      }),
   ),
 }));
 
 vi.mock("@/stores/accountStore", () => ({
-  useAccountStore: vi.fn((selector: (s: { activeAccountId: string; accounts: { id: string; provider?: string }[] }) => unknown) =>
-    selector({
-      activeAccountId: "acc-1",
-      accounts: [{ id: "acc-1", provider: "gmail_api" }],
-    }),
+  useAccountStore: vi.fn(
+    (
+      selector: (s: {
+        activeAccountId: string;
+        accounts: { id: string; provider?: string }[];
+      }) => unknown,
+    ) =>
+      selector({
+        activeAccountId: "acc-1",
+        accounts: [{ id: "acc-1", provider: "gmail_api" }],
+      }),
   ),
 }));
 
@@ -46,7 +89,17 @@ vi.mock("@/services/emailActions", () => ({
 
 // CSSTransition mock: render children immediately when `in` is true
 vi.mock("react-transition-group", () => ({
-  CSSTransition: ({ in: inProp, children, unmountOnExit, onEntered }: { in: boolean; children: React.ReactNode; unmountOnExit?: boolean; onEntered?: () => void }) => {
+  CSSTransition: ({
+    in: inProp,
+    children,
+    unmountOnExit,
+    onEntered,
+  }: {
+    in: boolean;
+    children: React.ReactNode;
+    unmountOnExit?: boolean;
+    onEntered?: () => void;
+  }) => {
     if (!inProp && unmountOnExit) return null;
     // Trigger onEntered immediately for testing
     if (inProp && onEntered) {
@@ -56,7 +109,13 @@ vi.mock("react-transition-group", () => ({
   },
 }));
 
-import { archiveThread, trashThread, spamThread, addThreadLabel, removeThreadLabel } from "@/services/emailActions";
+import {
+  archiveThread,
+  trashThread,
+  spamThread,
+  addThreadLabel,
+  removeThreadLabel,
+} from "@/services/emailActions";
 
 const defaultProps = {
   isOpen: true,
@@ -104,7 +163,9 @@ describe("MoveToFolderDialog", () => {
     const input = screen.getByPlaceholderText("Move to...");
     fireEvent.change(input, { target: { value: "nonexistent" } });
 
-    expect(screen.getByText("No matching folders or labels")).toBeInTheDocument();
+    expect(
+      screen.getByText("No matching folders or labels"),
+    ).toBeInTheDocument();
   });
 
   it("calls archiveThread when Archive is selected", async () => {
@@ -143,7 +204,11 @@ describe("MoveToFolderDialog", () => {
     expect(addThreadLabel).toHaveBeenCalledWith("acc-1", "thread-1", "label-1");
     // removeThreadLabel is called after addThreadLabel resolves — wait for microtasks
     await vi.waitFor(() => {
-      expect(removeThreadLabel).toHaveBeenCalledWith("acc-1", "thread-1", "INBOX");
+      expect(removeThreadLabel).toHaveBeenCalledWith(
+        "acc-1",
+        "thread-1",
+        "INBOX",
+      );
     });
   });
 
@@ -179,7 +244,12 @@ describe("MoveToFolderDialog", () => {
   });
 
   it("handles multiple threadIds", async () => {
-    render(<MoveToFolderDialog {...defaultProps} threadIds={["thread-1", "thread-2"]} />);
+    render(
+      <MoveToFolderDialog
+        {...defaultProps}
+        threadIds={["thread-1", "thread-2"]}
+      />,
+    );
 
     fireEvent.click(screen.getByText("Archive"));
 

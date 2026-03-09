@@ -1,9 +1,16 @@
-import type { CalendarEventData, CreateEventInput, UpdateEventInput } from "./types";
+import type {
+  CalendarEventData,
+  CreateEventInput,
+  UpdateEventInput,
+} from "./types";
 
 /**
  * Generate a VEVENT iCalendar string from event input.
  */
-export function generateVEvent(event: CreateEventInput | UpdateEventInput, uid?: string): string {
+export function generateVEvent(
+  event: CreateEventInput | UpdateEventInput,
+  uid?: string,
+): string {
   const eventUid = uid ?? crypto.randomUUID();
   const now = formatDateTimeUTC(new Date());
 
@@ -22,7 +29,9 @@ export function generateVEvent(event: CreateEventInput | UpdateEventInput, uid?:
 
   if (event.startTime && event.endTime) {
     if (event.isAllDay) {
-      lines.push(`DTSTART;VALUE=DATE:${formatDateOnly(new Date(event.startTime))}`);
+      lines.push(
+        `DTSTART;VALUE=DATE:${formatDateOnly(new Date(event.startTime))}`,
+      );
       lines.push(`DTEND;VALUE=DATE:${formatDateOnly(new Date(event.endTime))}`);
     } else {
       lines.push(`DTSTART:${formatDateTimeUTC(new Date(event.startTime))}`);
@@ -53,7 +62,10 @@ export function generateVEvent(event: CreateEventInput | UpdateEventInput, uid?:
 /**
  * Parse a VEVENT from iCalendar data into CalendarEventData.
  */
-export function parseVEvent(icalData: string, href?: string): CalendarEventData {
+export function parseVEvent(
+  icalData: string,
+  href?: string,
+): CalendarEventData {
   const lines = unfoldLines(icalData);
 
   let uid: string | null = null;
@@ -65,7 +77,11 @@ export function parseVEvent(icalData: string, href?: string): CalendarEventData 
   let status = "confirmed";
   let organizerEmail: string | null = null;
   let isAllDay = false;
-  const attendees: { email: string; displayName?: string; responseStatus?: string }[] = [];
+  const attendees: {
+    email: string;
+    displayName?: string;
+    responseStatus?: string;
+  }[] = [];
 
   for (const line of lines) {
     const [nameWithParams, ...valueParts] = line.split(":");
@@ -90,7 +106,10 @@ export function parseVEvent(icalData: string, href?: string): CalendarEventData 
         break;
       case "DTSTART":
         dtstart = value;
-        if (params.includes("VALUE=DATE") && !params.includes("VALUE=DATE-TIME")) {
+        if (
+          params.includes("VALUE=DATE") &&
+          !params.includes("VALUE=DATE-TIME")
+        ) {
           isAllDay = true;
         }
         break;
@@ -144,12 +163,18 @@ export function parseVEvent(icalData: string, href?: string): CalendarEventData 
 
 /** Unfold continuation lines (RFC 5545 §3.1) */
 function unfoldLines(icalData: string): string[] {
-  const raw = icalData.replace(/\r\n[ \t]/g, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const raw = icalData
+    .replace(/\r\n[ \t]/g, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n");
   return raw.split("\n").filter((l) => l.length > 0);
 }
 
 function formatDateTimeUTC(date: Date): string {
-  return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+  return date
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}/, "");
 }
 
 function formatDateOnly(date: Date): string {

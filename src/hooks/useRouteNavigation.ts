@@ -19,13 +19,22 @@ function useMatchesSafe() {
 export function useActiveLabel(): string {
   const matches = useMatchesSafe();
   for (const match of matches) {
-    if (match.routeId === "/mail/$label" || match.routeId === "/mail/$label/thread/$threadId") {
+    if (
+      match.routeId === "/mail/$label" ||
+      match.routeId === "/mail/$label/thread/$threadId"
+    ) {
       return (match.params as { label: string }).label;
     }
-    if (match.routeId === "/label/$labelId" || match.routeId === "/label/$labelId/thread/$threadId") {
+    if (
+      match.routeId === "/label/$labelId" ||
+      match.routeId === "/label/$labelId/thread/$threadId"
+    ) {
       return (match.params as { labelId: string }).labelId;
     }
-    if (match.routeId === "/smart-folder/$folderId" || match.routeId === "/smart-folder/$folderId/thread/$threadId") {
+    if (
+      match.routeId === "/smart-folder/$folderId" ||
+      match.routeId === "/smart-folder/$folderId/thread/$threadId"
+    ) {
       return `smart-folder:${(match.params as { folderId: string }).folderId}`;
     }
     if (match.routeId === "/settings/$tab" || match.routeId === "/settings") {

@@ -1,6 +1,8 @@
 import { vi } from "vitest";
 
-export function createMockUIStoreState(overrides: Record<string, unknown> = {}) {
+export function createMockUIStoreState(
+  overrides: Record<string, unknown> = {},
+) {
   return {
     isOnline: true,
     setPendingOpsCount: vi.fn(),

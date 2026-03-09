@@ -46,7 +46,8 @@ export function resolveLabelChange(
 
   // Dragging to trash: add TRASH, remove source (if specific)
   if (targetGmailId === "TRASH") {
-    const removeLabelIds = sourceGmailId && sourceGmailId !== "" ? [sourceGmailId] : [];
+    const removeLabelIds =
+      sourceGmailId && sourceGmailId !== "" ? [sourceGmailId] : [];
     return { addLabelIds: ["TRASH"], removeLabelIds };
   }
 

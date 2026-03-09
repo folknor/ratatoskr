@@ -27,7 +27,9 @@ beforeAll(() => {
   window.IntersectionObserver = MockIntersectionObserver as never;
 });
 
-const makeAttachment = (overrides: Partial<DbAttachment> = {}): DbAttachment => ({
+const makeAttachment = (
+  overrides: Partial<DbAttachment> = {},
+): DbAttachment => ({
   id: "att-1",
   message_id: "msg-1",
   account_id: "acc-1",
@@ -60,7 +62,12 @@ describe("InlineAttachmentPreview", () => {
       <InlineAttachmentPreview
         accountId="acc-1"
         messageId="msg-1"
-        attachments={[makeAttachment({ mime_type: "application/zip", filename: "archive.zip" })]}
+        attachments={[
+          makeAttachment({
+            mime_type: "application/zip",
+            filename: "archive.zip",
+          }),
+        ]}
         onAttachmentClick={onAttachmentClick}
       />,
     );
@@ -87,7 +94,13 @@ describe("InlineAttachmentPreview", () => {
       <InlineAttachmentPreview
         accountId="acc-1"
         messageId="msg-1"
-        attachments={[makeAttachment({ content_id: "img001@example.com", filename: "photo.png", mime_type: "image/png" })]}
+        attachments={[
+          makeAttachment({
+            content_id: "img001@example.com",
+            filename: "photo.png",
+            mime_type: "image/png",
+          }),
+        ]}
         referencedCids={referencedCids}
         onAttachmentClick={onAttachmentClick}
       />,
@@ -115,10 +128,12 @@ describe("InlineAttachmentPreview", () => {
       <InlineAttachmentPreview
         accountId="acc-1"
         messageId="msg-1"
-        attachments={[makeAttachment({
-          mime_type: "application/pdf",
-          filename: "report.pdf",
-        })]}
+        attachments={[
+          makeAttachment({
+            mime_type: "application/pdf",
+            filename: "report.pdf",
+          }),
+        ]}
         onAttachmentClick={onAttachmentClick}
       />,
     );
@@ -157,11 +172,13 @@ describe("InlineAttachmentPreview", () => {
       <InlineAttachmentPreview
         accountId="imap-acc"
         messageId="imap-inbox-42"
-        attachments={[makeAttachment({
-          account_id: "imap-acc",
-          message_id: "imap-inbox-42",
-          gmail_attachment_id: "1.2",
-        })]}
+        attachments={[
+          makeAttachment({
+            account_id: "imap-acc",
+            message_id: "imap-inbox-42",
+            gmail_attachment_id: "1.2",
+          }),
+        ]}
         onAttachmentClick={onAttachmentClick}
       />,
     );

@@ -38,7 +38,11 @@ function getFollowUpTimestamps() {
   };
 }
 
-export function FollowUpDialog({ isOpen = true, onSetReminder, onClose }: FollowUpDialogProps) {
+export function FollowUpDialog({
+  isOpen = true,
+  onSetReminder,
+  onClose,
+}: FollowUpDialogProps) {
   const { t } = useTranslation("email");
   const ts = getFollowUpTimestamps();
   const presets = [

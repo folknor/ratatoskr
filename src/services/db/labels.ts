@@ -54,9 +54,7 @@ export async function upsertLabel(label: {
   );
 }
 
-export async function deleteLabelsForAccount(
-  accountId: string,
-): Promise<void> {
+export async function deleteLabelsForAccount(accountId: string): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE FROM labels WHERE account_id = $1", [accountId]);
 }
@@ -66,10 +64,10 @@ export async function deleteLabel(
   labelId: string,
 ): Promise<void> {
   const db = await getDb();
-  await db.execute(
-    "DELETE FROM labels WHERE account_id = $1 AND id = $2",
-    [accountId, labelId],
-  );
+  await db.execute("DELETE FROM labels WHERE account_id = $1 AND id = $2", [
+    accountId,
+    labelId,
+  ]);
 }
 
 export async function updateLabelSortOrder(

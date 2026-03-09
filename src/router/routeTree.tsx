@@ -1,22 +1,42 @@
 import { lazy, Suspense } from "react";
-import {
-  createRootRoute,
-  createRoute,
-  redirect,
-} from "@tanstack/react-router";
+import { createRootRoute, createRoute, redirect } from "@tanstack/react-router";
 import App from "@/App";
 import { MailLayout } from "@/components/layout/MailLayout";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 
 // Lazy-load heavy pages — these include many sub-components and service imports
-const SettingsPage = lazy(() => import("@/components/settings/SettingsPage").then((m) => ({ default: m.SettingsPage })));
-const HelpPage = lazy(() => import("@/components/help/HelpPage").then((m) => ({ default: m.HelpPage })));
-const CalendarPage = lazy(() => import("@/components/calendar/CalendarPage").then((m) => ({ default: m.CalendarPage })));
-const TasksPage = lazy(() => import("@/components/tasks/TasksPage").then((m) => ({ default: m.TasksPage })));
-const AttachmentLibrary = lazy(() => import("@/components/attachments/AttachmentLibrary").then((m) => ({ default: m.AttachmentLibrary })));
+const SettingsPage = lazy(() =>
+  import("@/components/settings/SettingsPage").then((m) => ({
+    default: m.SettingsPage,
+  })),
+);
+const HelpPage = lazy(() =>
+  import("@/components/help/HelpPage").then((m) => ({ default: m.HelpPage })),
+);
+const CalendarPage = lazy(() =>
+  import("@/components/calendar/CalendarPage").then((m) => ({
+    default: m.CalendarPage,
+  })),
+);
+const TasksPage = lazy(() =>
+  import("@/components/tasks/TasksPage").then((m) => ({
+    default: m.TasksPage,
+  })),
+);
+const AttachmentLibrary = lazy(() =>
+  import("@/components/attachments/AttachmentLibrary").then((m) => ({
+    default: m.AttachmentLibrary,
+  })),
+);
 
 // ---------- Search param validation ----------
-const VALID_CATEGORIES = ["Primary", "Updates", "Promotions", "Social", "Newsletters"] as const;
+const VALID_CATEGORIES = [
+  "Primary",
+  "Updates",
+  "Promotions",
+  "Social",
+  "Newsletters",
+] as const;
 
 type MailSearch = {
   q?: string;
@@ -29,7 +49,10 @@ function validateMailSearch(search: Record<string, unknown>): MailSearch {
     result.q = search["q"];
   }
   const cat = search["category"];
-  if (typeof cat === "string" && (VALID_CATEGORIES as readonly string[]).includes(cat)) {
+  if (
+    typeof cat === "string" &&
+    (VALID_CATEGORIES as readonly string[]).includes(cat)
+  ) {
     result.category = cat as MailSearch["category"];
   }
   return result;
@@ -61,7 +84,13 @@ function MailPage() {
 function SettingsTabPage() {
   return (
     <ErrorBoundary name="SettingsPage">
-      <Suspense fallback={<div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">Loading settings...</div>}>
+      <Suspense
+        fallback={
+          <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">
+            Loading settings...
+          </div>
+        }
+      >
         <SettingsPage />
       </Suspense>
     </ErrorBoundary>
@@ -71,7 +100,13 @@ function SettingsTabPage() {
 function CalendarPageWrapper() {
   return (
     <ErrorBoundary name="CalendarPage">
-      <Suspense fallback={<div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">Loading calendar...</div>}>
+      <Suspense
+        fallback={
+          <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">
+            Loading calendar...
+          </div>
+        }
+      >
         <CalendarPage />
       </Suspense>
     </ErrorBoundary>
@@ -81,7 +116,13 @@ function CalendarPageWrapper() {
 function HelpPageWrapper() {
   return (
     <ErrorBoundary name="HelpPage">
-      <Suspense fallback={<div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">Loading help...</div>}>
+      <Suspense
+        fallback={
+          <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">
+            Loading help...
+          </div>
+        }
+      >
         <HelpPage />
       </Suspense>
     </ErrorBoundary>
@@ -150,7 +191,13 @@ export const settingsTabRoute = createRoute({
 function AttachmentLibraryWrapper() {
   return (
     <ErrorBoundary name="AttachmentLibrary">
-      <Suspense fallback={<div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">Loading attachments...</div>}>
+      <Suspense
+        fallback={
+          <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">
+            Loading attachments...
+          </div>
+        }
+      >
         <AttachmentLibrary />
       </Suspense>
     </ErrorBoundary>
@@ -167,7 +214,13 @@ export const attachmentsRoute = createRoute({
 function TasksPageWrapper() {
   return (
     <ErrorBoundary name="TasksPage">
-      <Suspense fallback={<div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">Loading tasks...</div>}>
+      <Suspense
+        fallback={
+          <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">
+            Loading tasks...
+          </div>
+        }
+      >
         <TasksPage />
       </Suspense>
     </ErrorBoundary>
@@ -192,7 +245,10 @@ const helpIndexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "help",
   beforeLoad: () => {
-    throw redirect({ to: "/help/$topic", params: { topic: "getting-started" } });
+    throw redirect({
+      to: "/help/$topic",
+      params: { topic: "getting-started" },
+    });
   },
 });
 

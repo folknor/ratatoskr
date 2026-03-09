@@ -17,7 +17,10 @@ export async function applySmartLabelsToMessages(
       matches.flatMap(({ threadId, labelIds }) =>
         labelIds.map((labelId) =>
           addThreadLabel(accountId, threadId, labelId).catch((err) => {
-            console.error(`Failed to apply smart label ${labelId} to thread ${threadId}:`, err);
+            console.error(
+              `Failed to apply smart label ${labelId} to thread ${threadId}:`,
+              err,
+            );
           }),
         ),
       ),

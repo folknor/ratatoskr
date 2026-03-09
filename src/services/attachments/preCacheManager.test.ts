@@ -29,7 +29,9 @@ vi.mock("./cacheManager", () => ({
 let lastRunPromise: Promise<void> = Promise.resolve();
 vi.mock("../backgroundCheckers", () => ({
   createBackgroundChecker: vi.fn((_name: string, fn: () => Promise<void>) => ({
-    start: () => { lastRunPromise = fn(); },
+    start: () => {
+      lastRunPromise = fn();
+    },
     stop: vi.fn(),
   })),
 }));
@@ -48,13 +50,17 @@ describe("preCacheManager", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     stopPreCacheManager();
-    (useUIStore.getState as ReturnType<typeof vi.fn>).mockReturnValue(createMockUIStoreState());
+    (useUIStore.getState as ReturnType<typeof vi.fn>).mockReturnValue(
+      createMockUIStoreState(),
+    );
     mockSelect.mockReset();
     mockFetchAttachment.mockReset();
   });
 
   it("skips when offline", async () => {
-    (useUIStore.getState as ReturnType<typeof vi.fn>).mockReturnValue(createMockUIStoreState({ isOnline: false }));
+    (useUIStore.getState as ReturnType<typeof vi.fn>).mockReturnValue(
+      createMockUIStoreState({ isOnline: false }),
+    );
 
     await runPreCache();
 
@@ -62,8 +68,7 @@ describe("preCacheManager", () => {
   });
 
   it("skips when cache is full", async () => {
-    mockSelect
-      .mockResolvedValueOnce([{ total: 600 * 1024 * 1024 }]);
+    mockSelect.mockResolvedValueOnce([{ total: 600 * 1024 * 1024 }]);
 
     await runPreCache();
 
@@ -71,40 +76,39 @@ describe("preCacheManager", () => {
   });
 
   it("fetches and caches uncached attachments", async () => {
-    mockSelect
-      .mockResolvedValueOnce([{ total: 0 }])
-      .mockResolvedValueOnce([
-        {
-          id: "att-1",
-          message_id: "msg-1",
-          account_id: "acc-1",
-          size: 1024,
-          gmail_attachment_id: "gmail-att-1",
-          imap_part_id: null,
-        },
-      ]);
+    mockSelect.mockResolvedValueOnce([{ total: 0 }]).mockResolvedValueOnce([
+      {
+        id: "att-1",
+        message_id: "msg-1",
+        account_id: "acc-1",
+        size: 1024,
+        gmail_attachment_id: "gmail-att-1",
+        imap_part_id: null,
+      },
+    ]);
 
     mockFetchAttachment.mockResolvedValueOnce({ data: btoa("hello") });
 
     await runPreCache();
 
     expect(mockFetchAttachment).toHaveBeenCalledWith("msg-1", "gmail-att-1");
-    expect(cacheAttachment).toHaveBeenCalledWith("att-1", expect.any(Uint8Array));
+    expect(cacheAttachment).toHaveBeenCalledWith(
+      "att-1",
+      expect.any(Uint8Array),
+    );
   });
 
   it("uses imap_part_id when gmail_attachment_id is null", async () => {
-    mockSelect
-      .mockResolvedValueOnce([{ total: 0 }])
-      .mockResolvedValueOnce([
-        {
-          id: "att-2",
-          message_id: "msg-2",
-          account_id: "acc-2",
-          size: 2048,
-          gmail_attachment_id: null,
-          imap_part_id: "1.2",
-        },
-      ]);
+    mockSelect.mockResolvedValueOnce([{ total: 0 }]).mockResolvedValueOnce([
+      {
+        id: "att-2",
+        message_id: "msg-2",
+        account_id: "acc-2",
+        size: 2048,
+        gmail_attachment_id: null,
+        imap_part_id: "1.2",
+      },
+    ]);
 
     mockFetchAttachment.mockResolvedValueOnce({ data: btoa("data") });
 
@@ -114,18 +118,16 @@ describe("preCacheManager", () => {
   });
 
   it("skips attachments without any attachment id", async () => {
-    mockSelect
-      .mockResolvedValueOnce([{ total: 0 }])
-      .mockResolvedValueOnce([
-        {
-          id: "att-3",
-          message_id: "msg-3",
-          account_id: "acc-3",
-          size: 512,
-          gmail_attachment_id: null,
-          imap_part_id: null,
-        },
-      ]);
+    mockSelect.mockResolvedValueOnce([{ total: 0 }]).mockResolvedValueOnce([
+      {
+        id: "att-3",
+        message_id: "msg-3",
+        account_id: "acc-3",
+        size: 512,
+        gmail_attachment_id: null,
+        imap_part_id: null,
+      },
+    ]);
 
     await runPreCache();
 
@@ -133,18 +135,16 @@ describe("preCacheManager", () => {
   });
 
   it("silently skips on fetch error", async () => {
-    mockSelect
-      .mockResolvedValueOnce([{ total: 0 }])
-      .mockResolvedValueOnce([
-        {
-          id: "att-4",
-          message_id: "msg-4",
-          account_id: "acc-4",
-          size: 1024,
-          gmail_attachment_id: "gmail-att-4",
-          imap_part_id: null,
-        },
-      ]);
+    mockSelect.mockResolvedValueOnce([{ total: 0 }]).mockResolvedValueOnce([
+      {
+        id: "att-4",
+        message_id: "msg-4",
+        account_id: "acc-4",
+        size: 1024,
+        gmail_attachment_id: "gmail-att-4",
+        imap_part_id: null,
+      },
+    ]);
 
     mockFetchAttachment.mockRejectedValueOnce(new Error("network error"));
 

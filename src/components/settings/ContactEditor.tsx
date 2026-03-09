@@ -70,7 +70,9 @@ export function ContactEditor() {
 
       {filtered.length === 0 ? (
         <p className="text-sm text-text-tertiary py-2">
-          {search ? t("contactEditor.noMatching") : t("contactEditor.noContacts")}
+          {search
+            ? t("contactEditor.noMatching")
+            : t("contactEditor.noContacts")}
         </p>
       ) : (
         <div className="space-y-1 max-h-[300px] overflow-y-auto">
@@ -145,7 +147,8 @@ export function ContactEditor() {
       )}
 
       <p className="text-xs text-text-tertiary">
-        {t("contactEditor.contact", { count: contacts.length })} {t("contactEditor.total")}
+        {t("contactEditor.contact", { count: contacts.length })}{" "}
+        {t("contactEditor.total")}
       </p>
     </div>
   );

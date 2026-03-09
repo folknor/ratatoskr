@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { interpolateVariablesSync, TEMPLATE_VARIABLES } from "./templateVariables";
+import {
+  interpolateVariablesSync,
+  TEMPLATE_VARIABLES,
+} from "./templateVariables";
 
 describe("templateVariables", () => {
   describe("TEMPLATE_VARIABLES", () => {

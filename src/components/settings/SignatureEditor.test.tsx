@@ -47,13 +47,16 @@ vi.mock("@/components/ui/TextField", () => ({
   )),
 }));
 
-const mockGetSignatures = vi.fn<() => Promise<import("@/services/db/signatures").DbSignature[]>>().mockResolvedValue([]);
+const mockGetSignatures = vi
+  .fn<() => Promise<import("@/services/db/signatures").DbSignature[]>>()
+  .mockResolvedValue([]);
 const mockInsertSignature = vi.fn().mockResolvedValue(undefined);
 const mockUpdateSignature = vi.fn().mockResolvedValue(undefined);
 const mockDeleteSignature = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@/services/db/signatures", () => ({
-  getSignaturesForAccount: (...args: unknown[]) => mockGetSignatures(...(args as [])),
+  getSignaturesForAccount: (...args: unknown[]) =>
+    mockGetSignatures(...(args as [])),
   insertSignature: (...args: unknown[]) => mockInsertSignature(...(args as [])),
   updateSignature: (...args: unknown[]) => mockUpdateSignature(...(args as [])),
   deleteSignature: (...args: unknown[]) => mockDeleteSignature(...(args as [])),
@@ -133,7 +136,9 @@ describe("SignatureEditor", () => {
 
     // Edit the raw HTML
     const textarea = document.querySelector("textarea")!;
-    fireEvent.change(textarea, { target: { value: "<table><tr><td>Sig</td></tr></table>" } });
+    fireEvent.change(textarea, {
+      target: { value: "<table><tr><td>Sig</td></tr></table>" },
+    });
 
     // Save
     fireEvent.click(screen.getByText("Save"));

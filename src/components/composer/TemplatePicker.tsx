@@ -2,7 +2,10 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { FileText, ChevronDown } from "lucide-react";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
-import { getTemplatesForAccount, type DbTemplate } from "@/services/db/templates";
+import {
+  getTemplatesForAccount,
+  type DbTemplate,
+} from "@/services/db/templates";
 import type { Editor } from "@tiptap/react";
 
 interface TemplatePickerProps {
@@ -25,7 +28,10 @@ export function TemplatePicker({ editor }: TemplatePickerProps) {
   useEffect(() => {
     if (!isOpen) return;
     const handleClick = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node)
+      ) {
         setIsOpen(false);
       }
     };
@@ -33,18 +39,21 @@ export function TemplatePicker({ editor }: TemplatePickerProps) {
     return () => document.removeEventListener("mousedown", handleClick);
   }, [isOpen]);
 
-  const handleSelect = useCallback((tmpl: DbTemplate) => {
-    if (!editor) return;
+  const handleSelect = useCallback(
+    (tmpl: DbTemplate) => {
+      if (!editor) return;
 
-    // If new message and subject is empty, use template subject
-    if (mode === "new" && !subject && tmpl.subject) {
-      setSubject(tmpl.subject);
-    }
+      // If new message and subject is empty, use template subject
+      if (mode === "new" && !subject && tmpl.subject) {
+        setSubject(tmpl.subject);
+      }
 
-    // Insert template body at cursor
-    editor.commands.insertContent(tmpl.body_html);
-    setIsOpen(false);
-  }, [editor, mode, subject, setSubject]);
+      // Insert template body at cursor
+      editor.commands.insertContent(tmpl.body_html);
+      setIsOpen(false);
+    },
+    [editor, mode, subject, setSubject],
+  );
 
   if (templates.length === 0) return null;
 
@@ -67,9 +76,13 @@ export function TemplatePicker({ editor }: TemplatePickerProps) {
               onClick={() => handleSelect(tmpl)}
               className="w-full text-left px-3 py-2 hover:bg-bg-hover text-sm transition-colors"
             >
-              <div className="text-text-primary text-xs font-medium">{tmpl.name}</div>
+              <div className="text-text-primary text-xs font-medium">
+                {tmpl.name}
+              </div>
               {tmpl.subject && (
-                <div className="text-text-tertiary text-[0.625rem] truncate">{tmpl.subject}</div>
+                <div className="text-text-tertiary text-[0.625rem] truncate">
+                  {tmpl.subject}
+                </div>
               )}
             </button>
           ))}

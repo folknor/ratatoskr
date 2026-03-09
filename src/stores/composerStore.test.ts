@@ -120,7 +120,9 @@ describe("composerStore", () => {
 
     useComposerStore.getState().addAttachment(attachment);
     expect(useComposerStore.getState().attachments).toHaveLength(1);
-    expect(useComposerStore.getState().attachments[0]?.filename).toBe("test.txt");
+    expect(useComposerStore.getState().attachments[0]?.filename).toBe(
+      "test.txt",
+    );
 
     useComposerStore.getState().removeAttachment("att-1");
     expect(useComposerStore.getState().attachments).toHaveLength(0);
@@ -209,7 +211,9 @@ describe("composerStore", () => {
 
   it("manages signature state", () => {
     useComposerStore.getState().setSignatureHtml("<p>My Signature</p>");
-    expect(useComposerStore.getState().signatureHtml).toBe("<p>My Signature</p>");
+    expect(useComposerStore.getState().signatureHtml).toBe(
+      "<p>My Signature</p>",
+    );
 
     useComposerStore.getState().setSignatureId("sig-1");
     expect(useComposerStore.getState().signatureId).toBe("sig-1");

@@ -34,36 +34,95 @@ export interface MessageScanResult {
 // ── Constants ──────────────────────────────────────────────────────
 
 const SUSPICIOUS_TLDS_TIER1 = new Set([
-  ".zip", ".mov", ".top", ".click", ".buzz", ".tk", ".ml", ".ga", ".cf", ".gq",
+  ".zip",
+  ".mov",
+  ".top",
+  ".click",
+  ".buzz",
+  ".tk",
+  ".ml",
+  ".ga",
+  ".cf",
+  ".gq",
 ]);
 const SUSPICIOUS_TLDS_TIER2 = new Set([
-  ".xyz", ".work", ".rest", ".surf", ".icu", ".cam", ".quest", ".sbs", ".cfd",
+  ".xyz",
+  ".work",
+  ".rest",
+  ".surf",
+  ".icu",
+  ".cam",
+  ".quest",
+  ".sbs",
+  ".cfd",
 ]);
 const SUSPICIOUS_TLDS_TIER3 = new Set([
-  ".info", ".online", ".site", ".club", ".space", ".fun", ".store", ".live",
+  ".info",
+  ".online",
+  ".site",
+  ".club",
+  ".space",
+  ".fun",
+  ".store",
+  ".live",
 ]);
 
 const URL_SHORTENERS = new Set([
-  "bit.ly", "t.co", "tinyurl.com", "goo.gl", "ow.ly", "is.gd", "buff.ly", "rebrand.ly",
+  "bit.ly",
+  "t.co",
+  "tinyurl.com",
+  "goo.gl",
+  "ow.ly",
+  "is.gd",
+  "buff.ly",
+  "rebrand.ly",
 ]);
 
 const SUSPICIOUS_PATH_KEYWORDS = [
-  "login", "signin", "verify", "confirm", "suspend", "secure",
-  "password", "credential", "wallet", "banking", "oauth", "token", "authenticate",
+  "login",
+  "signin",
+  "verify",
+  "confirm",
+  "suspend",
+  "secure",
+  "password",
+  "credential",
+  "wallet",
+  "banking",
+  "oauth",
+  "token",
+  "authenticate",
 ];
 
-const DANGEROUS_PROTOCOLS = new Set(["data:", "javascript:", "vbscript:", "blob:"]);
+const DANGEROUS_PROTOCOLS = new Set([
+  "data:",
+  "javascript:",
+  "vbscript:",
+  "blob:",
+]);
 
 const IMPERSONATED_BRANDS = [
-  "paypal", "amazon", "apple", "microsoft", "google", "chase",
-  "wellsfargo", "bankofamerica", "netflix", "facebook", "instagram", "dropbox",
+  "paypal",
+  "amazon",
+  "apple",
+  "microsoft",
+  "google",
+  "chase",
+  "wellsfargo",
+  "bankofamerica",
+  "netflix",
+  "facebook",
+  "instagram",
+  "dropbox",
 ];
 
 const MAX_LINKS = 200;
 
 // ── Risk Level ─────────────────────────────────────────────────────
 
-export function getRiskLevel(score: number): "safe" | "low" | "medium" | "high" {
+export function getRiskLevel(
+  score: number,
+): "safe" | "low" | "medium" | "high" {
   if (score >= 60) return "high";
   if (score >= 40) return "medium";
   if (score >= 20) return "low";
@@ -144,12 +203,17 @@ function getRegistrableDomain(hostname: string): string {
   return hostname.toLowerCase();
 }
 
-function checkDisplayHrefMismatch(url: string, displayText: string): TriggeredRule | null {
+function checkDisplayHrefMismatch(
+  url: string,
+  displayText: string,
+): TriggeredRule | null {
   const trimmed = displayText.trim();
   if (!trimmed) return null;
 
   // Check if display text looks like a URL (contains :// or matches domain pattern)
-  const looksLikeUrl = trimmed.includes("://") || /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(\/|$)/.test(trimmed);
+  const looksLikeUrl =
+    trimmed.includes("://") ||
+    /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(\/|$)/.test(trimmed);
   if (!looksLikeUrl) return null;
 
   // Extract domain from display text
@@ -213,7 +277,10 @@ function checkUrlShortener(hostname: string): TriggeredRule | null {
   return null;
 }
 
-function checkSuspiciousPathKeywords(pathname: string, search: string): TriggeredRule | null {
+function checkSuspiciousPathKeywords(
+  pathname: string,
+  search: string,
+): TriggeredRule | null {
   const combined = (pathname + search).toLowerCase();
   const found = SUSPICIOUS_PATH_KEYWORDS.filter((kw) => combined.includes(kw));
   if (found.length > 0) {
@@ -242,7 +309,10 @@ function checkDangerousProtocol(url: string): TriggeredRule | null {
   return null;
 }
 
-function checkUrlObfuscation(url: string, _hostname: string): TriggeredRule | null {
+function checkUrlObfuscation(
+  url: string,
+  _hostname: string,
+): TriggeredRule | null {
   // Check for @ before hostname (userinfo in URL) — use the raw URL string
   // The @ sign before hostname tricks users into thinking they're visiting
   // a different domain
@@ -292,7 +362,10 @@ function checkUrlObfuscation(url: string, _hostname: string): TriggeredRule | nu
   return null;
 }
 
-function checkBrandImpersonation(hostname: string, pathname: string): TriggeredRule | null {
+function checkBrandImpersonation(
+  hostname: string,
+  pathname: string,
+): TriggeredRule | null {
   const lowerHost = hostname.toLowerCase();
   const lowerPath = pathname.toLowerCase();
   const registrable = getRegistrableDomain(lowerHost);
@@ -433,7 +506,13 @@ export function scanLinksInHtml(html: string): LinkAnalysis[] {
     }
 
     // Skip relative URLs (no protocol and doesn't look like a dangerous scheme)
-    if (!trimmedHref.includes("://") && !trimmedHref.startsWith("data:") && !trimmedHref.startsWith("javascript:") && !trimmedHref.startsWith("vbscript:") && !trimmedHref.startsWith("blob:")) {
+    if (
+      !trimmedHref.includes("://") &&
+      !trimmedHref.startsWith("data:") &&
+      !trimmedHref.startsWith("javascript:") &&
+      !trimmedHref.startsWith("vbscript:") &&
+      !trimmedHref.startsWith("blob:")
+    ) {
       continue;
     }
 
@@ -451,13 +530,20 @@ export function scanLinksInHtml(html: string): LinkAnalysis[] {
 export type PhishingSensitivity = "low" | "default" | "high";
 
 /** Banner thresholds per sensitivity level */
-const SENSITIVITY_THRESHOLDS: Record<PhishingSensitivity, { scoreThreshold: number; countThreshold: number }> = {
+const SENSITIVITY_THRESHOLDS: Record<
+  PhishingSensitivity,
+  { scoreThreshold: number; countThreshold: number }
+> = {
   low: { scoreThreshold: 60, countThreshold: 5 },
   default: { scoreThreshold: 40, countThreshold: 3 },
   high: { scoreThreshold: 20, countThreshold: 1 },
 };
 
-export function scanMessage(messageId: string, html: string | null, sensitivity: PhishingSensitivity = "default"): MessageScanResult {
+export function scanMessage(
+  messageId: string,
+  html: string | null,
+  sensitivity: PhishingSensitivity = "default",
+): MessageScanResult {
   if (!html) {
     return {
       messageId,
@@ -472,8 +558,10 @@ export function scanMessage(messageId: string, html: string | null, sensitivity:
   const links = scanLinksInHtml(html);
   const maxRiskScore = links.reduce((max, l) => Math.max(max, l.riskScore), 0);
   const suspiciousLinkCount = links.filter((l) => l.riskScore >= 20).length;
-  const { scoreThreshold, countThreshold } = SENSITIVITY_THRESHOLDS[sensitivity];
-  const showBanner = maxRiskScore >= scoreThreshold || suspiciousLinkCount >= countThreshold;
+  const { scoreThreshold, countThreshold } =
+    SENSITIVITY_THRESHOLDS[sensitivity];
+  const showBanner =
+    maxRiskScore >= scoreThreshold || suspiciousLinkCount >= countThreshold;
 
   return {
     messageId,

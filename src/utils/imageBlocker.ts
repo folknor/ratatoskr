@@ -11,13 +11,13 @@ export function stripRemoteImages(html: string): string {
   // Replace <img src="http..."> with data-blocked-src
   let result = html.replace(
     /(<img\b[^>]*?)(\ssrc\s*=\s*)(["'])(https?:\/\/[^"']*)\3/gi,
-    '$1 data-blocked-src=$3$4$3 src=$3$3',
+    "$1 data-blocked-src=$3$4$3 src=$3$3",
   );
 
   // Replace background-image: url(http...) in inline styles
   result = result.replace(
     /url\(\s*(["']?)(https?:\/\/[^)"']*)\1\s*\)/gi,
-    'url($1$1)',
+    "url($1$1)",
   );
 
   return result;
@@ -29,7 +29,7 @@ export function stripRemoteImages(html: string): string {
 export function restoreRemoteImages(html: string): string {
   return html.replace(
     /(<img\b[^>]*?)\sdata-blocked-src\s*=\s*(["'])(https?:\/\/[^"']*)\2([^>]*?)\ssrc\s*=\s*(["'])\5/gi,
-    '$1 src=$2$3$2$4',
+    "$1 src=$2$3$2$4",
   );
 }
 

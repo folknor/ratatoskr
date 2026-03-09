@@ -60,10 +60,10 @@ describe("folderSyncState", () => {
 
       await getFolderSyncState("acc-2", "Sent");
 
-      expect(mockSelectFirstBy).toHaveBeenCalledWith(
-        expect.any(String),
-        ["acc-2", "Sent"],
-      );
+      expect(mockSelectFirstBy).toHaveBeenCalledWith(expect.any(String), [
+        "acc-2",
+        "Sent",
+      ]);
     });
   });
 
@@ -86,14 +86,7 @@ describe("folderSyncState", () => {
       const [sql, params] = mockExecute.mock.calls[0] as [string, unknown[]];
       expect(sql).toContain("INSERT INTO folder_sync_state");
       expect(sql).toContain("ON CONFLICT");
-      expect(params).toEqual([
-        "acc-1",
-        "INBOX",
-        12345,
-        100,
-        999,
-        1700000000,
-      ]);
+      expect(params).toEqual(["acc-1", "INBOX", 12345, 100, 999, 1700000000]);
     });
 
     it("handles null values for optional fields", async () => {
@@ -141,14 +134,7 @@ describe("folderSyncState", () => {
 
       expect(mockExecute).toHaveBeenCalledTimes(2);
       const [, params2] = mockExecute.mock.calls[1] as [string, unknown[]];
-      expect(params2).toEqual([
-        "acc-1",
-        "INBOX",
-        12345,
-        200,
-        1500,
-        1700001000,
-      ]);
+      expect(params2).toEqual(["acc-1", "INBOX", 12345, 200, 1500, 1700001000]);
     });
   });
 

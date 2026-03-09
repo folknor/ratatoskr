@@ -18,11 +18,9 @@ describe("contextMenuStore", () => {
   });
 
   it("should open a menu with type, position, and data", () => {
-    useContextMenuStore.getState().openMenu(
-      "thread",
-      { x: 100, y: 200 },
-      { threadId: "abc123" },
-    );
+    useContextMenuStore
+      .getState()
+      .openMenu("thread", { x: 100, y: 200 }, { threadId: "abc123" });
 
     const state = useContextMenuStore.getState();
     expect(state.menuType).toBe("thread");
@@ -31,10 +29,7 @@ describe("contextMenuStore", () => {
   });
 
   it("should open a menu with default empty data", () => {
-    useContextMenuStore.getState().openMenu(
-      "sidebarLabel",
-      { x: 50, y: 75 },
-    );
+    useContextMenuStore.getState().openMenu("sidebarLabel", { x: 50, y: 75 });
 
     const state = useContextMenuStore.getState();
     expect(state.menuType).toBe("sidebarLabel");
@@ -43,11 +38,9 @@ describe("contextMenuStore", () => {
   });
 
   it("should close the menu", () => {
-    useContextMenuStore.getState().openMenu(
-      "thread",
-      { x: 100, y: 200 },
-      { threadId: "abc123" },
-    );
+    useContextMenuStore
+      .getState()
+      .openMenu("thread", { x: 100, y: 200 }, { threadId: "abc123" });
 
     useContextMenuStore.getState().closeMenu();
 
@@ -57,17 +50,13 @@ describe("contextMenuStore", () => {
   });
 
   it("should only have one menu open at a time", () => {
-    useContextMenuStore.getState().openMenu(
-      "thread",
-      { x: 100, y: 200 },
-      { threadId: "thread1" },
-    );
+    useContextMenuStore
+      .getState()
+      .openMenu("thread", { x: 100, y: 200 }, { threadId: "thread1" });
 
-    useContextMenuStore.getState().openMenu(
-      "sidebarLabel",
-      { x: 300, y: 400 },
-      { labelId: "label1" },
-    );
+    useContextMenuStore
+      .getState()
+      .openMenu("sidebarLabel", { x: 300, y: 400 }, { labelId: "label1" });
 
     const state = useContextMenuStore.getState();
     expect(state.menuType).toBe("sidebarLabel");
@@ -76,11 +65,13 @@ describe("contextMenuStore", () => {
   });
 
   it("should handle message menu type", () => {
-    useContextMenuStore.getState().openMenu(
-      "message",
-      { x: 150, y: 250 },
-      { messageId: "msg1", bodyText: "Hello" },
-    );
+    useContextMenuStore
+      .getState()
+      .openMenu(
+        "message",
+        { x: 150, y: 250 },
+        { messageId: "msg1", bodyText: "Hello" },
+      );
 
     const state = useContextMenuStore.getState();
     expect(state.menuType).toBe("message");

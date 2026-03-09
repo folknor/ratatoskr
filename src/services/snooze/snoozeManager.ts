@@ -12,9 +12,7 @@ async function checkSnoozedThreads(): Promise<void> {
   const now = getCurrentUnixTimestamp();
 
   // Find threads where snooze time has passed
-  const snoozed = await db.select<
-    { id: string; account_id: string }[]
-  >(
+  const snoozed = await db.select<{ id: string; account_id: string }[]>(
     "SELECT id, account_id FROM threads WHERE is_snoozed = 1 AND snooze_until <= $1",
     [now],
   );

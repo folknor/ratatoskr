@@ -28,16 +28,12 @@ describe("resolveQueryTokens", () => {
   });
 
   it("replaces __LAST_7_DAYS__ with date 7 days ago", () => {
-    const result = resolveQueryTokens(
-      "is:starred after:__LAST_7_DAYS__",
-    );
+    const result = resolveQueryTokens("is:starred after:__LAST_7_DAYS__");
     expect(result).toBe("is:starred after:2025/03/08");
   });
 
   it("replaces __LAST_30_DAYS__ with date 30 days ago", () => {
-    const result = resolveQueryTokens(
-      "from:boss after:__LAST_30_DAYS__",
-    );
+    const result = resolveQueryTokens("from:boss after:__LAST_30_DAYS__");
     expect(result).toBe("from:boss after:2025/02/13");
   });
 
@@ -47,9 +43,7 @@ describe("resolveQueryTokens", () => {
   });
 
   it("replaces multiple tokens in one query", () => {
-    const result = resolveQueryTokens(
-      "after:__LAST_7_DAYS__ before:__TODAY__",
-    );
+    const result = resolveQueryTokens("after:__LAST_7_DAYS__ before:__TODAY__");
     expect(result).toBe("after:2025/03/08 before:2025/03/15");
   });
 
@@ -127,7 +121,9 @@ describe("getSmartFolderUnreadCount", () => {
 });
 
 describe("mapSmartFolderRows", () => {
-  const makeRow = (overrides: Partial<SmartFolderRow> = {}): SmartFolderRow => ({
+  const makeRow = (
+    overrides: Partial<SmartFolderRow> = {},
+  ): SmartFolderRow => ({
     message_id: "msg-1",
     account_id: "acc-1",
     thread_id: "thread-1",

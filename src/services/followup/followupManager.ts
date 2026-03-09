@@ -50,6 +50,9 @@ async function checkFollowUpReminders(): Promise<void> {
   window.dispatchEvent(new Event("velo-sync-done"));
 }
 
-const followUpChecker = createBackgroundChecker("FollowUp", checkFollowUpReminders);
+const followUpChecker = createBackgroundChecker(
+  "FollowUp",
+  checkFollowUpReminders,
+);
 export const startFollowUpChecker = followUpChecker.start;
 export const stopFollowUpChecker = followUpChecker.stop;

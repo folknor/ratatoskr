@@ -87,7 +87,10 @@ describe("testCalDavConnection", () => {
     const mockLogin = vi.fn().mockResolvedValue(undefined);
     const mockFetchCalendars = vi
       .fn()
-      .mockResolvedValue([{ displayName: "Personal" }, { displayName: "Work" }]);
+      .mockResolvedValue([
+        { displayName: "Personal" },
+        { displayName: "Work" },
+      ]);
 
     vi.mocked(DAVClient).mockImplementation(function () {
       return {

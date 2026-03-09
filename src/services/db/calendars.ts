@@ -30,7 +30,15 @@ export async function upsertCalendar(calendar: {
      VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT(account_id, remote_id) DO UPDATE SET
        display_name = $5, color = $6, is_primary = $7, updated_at = unixepoch()`,
-    [id, calendar.accountId, calendar.provider, calendar.remoteId, calendar.displayName, calendar.color, calendar.isPrimary ? 1 : 0],
+    [
+      id,
+      calendar.accountId,
+      calendar.provider,
+      calendar.remoteId,
+      calendar.displayName,
+      calendar.color,
+      calendar.isPrimary ? 1 : 0,
+    ],
   );
   // Return the actual ID (could be existing row on conflict)
   const existing = await selectFirstBy<{ id: string }>(
@@ -40,7 +48,9 @@ export async function upsertCalendar(calendar: {
   return existing?.id ?? id;
 }
 
-export async function getCalendarsForAccount(accountId: string): Promise<DbCalendar[]> {
+export async function getCalendarsForAccount(
+  accountId: string,
+): Promise<DbCalendar[]> {
   const db = await getDb();
   return db.select<DbCalendar[]>(
     "SELECT * FROM calendars WHERE account_id = $1 ORDER BY is_primary DESC, display_name ASC",
@@ -48,7 +58,9 @@ export async function getCalendarsForAccount(accountId: string): Promise<DbCalen
   );
 }
 
-export async function getVisibleCalendars(accountId: string): Promise<DbCalendar[]> {
+export async function getVisibleCalendars(
+  accountId: string,
+): Promise<DbCalendar[]> {
   const db = await getDb();
   return db.select<DbCalendar[]>(
     "SELECT * FROM calendars WHERE account_id = $1 AND is_visible = 1 ORDER BY is_primary DESC, display_name ASC",
@@ -56,7 +68,10 @@ export async function getVisibleCalendars(accountId: string): Promise<DbCalendar
   );
 }
 
-export async function setCalendarVisibility(calendarId: string, visible: boolean): Promise<void> {
+export async function setCalendarVisibility(
+  calendarId: string,
+  visible: boolean,
+): Promise<void> {
   const db = await getDb();
   await db.execute(
     "UPDATE calendars SET is_visible = $1, updated_at = unixepoch() WHERE id = $2",
@@ -76,14 +91,17 @@ export async function updateCalendarSyncToken(
   );
 }
 
-export async function deleteCalendarsForAccount(accountId: string): Promise<void> {
+export async function deleteCalendarsForAccount(
+  accountId: string,
+): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE FROM calendars WHERE account_id = $1", [accountId]);
 }
 
-export async function getCalendarById(calendarId: string): Promise<DbCalendar | null> {
-  return selectFirstBy<DbCalendar>(
-    "SELECT * FROM calendars WHERE id = $1",
-    [calendarId],
-  );
+export async function getCalendarById(
+  calendarId: string,
+): Promise<DbCalendar | null> {
+  return selectFirstBy<DbCalendar>("SELECT * FROM calendars WHERE id = $1", [
+    calendarId,
+  ]);
 }

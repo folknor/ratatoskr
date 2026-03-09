@@ -10,7 +10,9 @@ vi.mock("@tauri-apps/api/path", () => tauriPath);
 const mockExecute = vi.fn();
 const mockSelect = vi.fn();
 vi.mock("@/services/db/connection", () => ({
-  getDb: vi.fn(() => Promise.resolve({ execute: mockExecute, select: mockSelect })),
+  getDb: vi.fn(() =>
+    Promise.resolve({ execute: mockExecute, select: mockSelect }),
+  ),
 }));
 
 vi.mock("@/services/db/settings", () => ({
@@ -77,7 +79,10 @@ describe("cacheManager", () => {
     it("reads file with baseDir option", async () => {
       const result = await loadCachedAttachment("attachment_cache/abc");
 
-      expect(tauriFs.mock.readFile).toHaveBeenCalledWith("attachment_cache/abc", { baseDir: 26 });
+      expect(tauriFs.mock.readFile).toHaveBeenCalledWith(
+        "attachment_cache/abc",
+        { baseDir: 26 },
+      );
       expect(result).toEqual(new Uint8Array([1, 2, 3]));
     });
 
@@ -108,12 +113,18 @@ describe("cacheManager", () => {
       mockSelect
         .mockResolvedValueOnce([{ total: maxBytes + 1000 }])
         .mockResolvedValueOnce([
-          { id: "att-old", local_path: "attachment_cache/old", cache_size: 2000 },
+          {
+            id: "att-old",
+            local_path: "attachment_cache/old",
+            cache_size: 2000,
+          },
         ]);
 
       await evictOldestCached();
 
-      expect(tauriFs.mock.remove).toHaveBeenCalledWith("attachment_cache/old", { baseDir: 26 });
+      expect(tauriFs.mock.remove).toHaveBeenCalledWith("attachment_cache/old", {
+        baseDir: 26,
+      });
       expect(mockExecute).toHaveBeenCalledWith(
         expect.stringContaining("UPDATE attachments SET local_path = NULL"),
         ["att-old"],

@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 vi.mock("@/services/db/connection", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/db/connection")>();
+  const actual =
+    await importOriginal<typeof import("@/services/db/connection")>();
   return {
     ...actual,
     getDb: vi.fn(),
@@ -9,7 +10,12 @@ vi.mock("@/services/db/connection", async (importOriginal) => {
 });
 
 import { getDb } from "@/services/db/connection";
-import { getAttachmentsForAccount, getAttachmentSenders, upsertAttachment, getAttachmentsForMessage } from "./attachments";
+import {
+  getAttachmentsForAccount,
+  getAttachmentSenders,
+  upsertAttachment,
+  getAttachmentsForMessage,
+} from "./attachments";
 import { createMockDb } from "@/test/mocks";
 
 const mockDb = createMockDb();
@@ -17,13 +23,20 @@ const mockDb = createMockDb();
 describe("attachments DB service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getDb).mockResolvedValue(mockDb as unknown as Awaited<ReturnType<typeof getDb>>);
+    vi.mocked(getDb).mockResolvedValue(
+      mockDb as unknown as Awaited<ReturnType<typeof getDb>>,
+    );
   });
 
   describe("getAttachmentsForAccount", () => {
     it("queries with correct SQL joining messages", async () => {
       const mockData = [
-        { id: "att-1", filename: "test.pdf", from_address: "alice@example.com", date: 1000 },
+        {
+          id: "att-1",
+          filename: "test.pdf",
+          from_address: "alice@example.com",
+          date: 1000,
+        },
       ];
       mockDb.select.mockResolvedValueOnce(mockData);
 
@@ -85,7 +98,17 @@ describe("attachments DB service", () => {
       const [sql, params] = mockDb.execute.mock.calls[0]!;
       expect(sql).toContain("INSERT INTO attachments");
       expect(sql).toContain("ON CONFLICT");
-      expect(params).toEqual(["att-1", "msg-1", "acc-1", "test.pdf", "application/pdf", 1024, "gid-1", null, 0]);
+      expect(params).toEqual([
+        "att-1",
+        "msg-1",
+        "acc-1",
+        "test.pdf",
+        "application/pdf",
+        1024,
+        "gid-1",
+        null,
+        0,
+      ]);
     });
   });
 

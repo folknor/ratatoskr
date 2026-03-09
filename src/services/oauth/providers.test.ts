@@ -9,7 +9,9 @@ describe("getOAuthProvider", () => {
     expect(provider!.name).toBe("Microsoft");
     expect(provider!.authUrl).toContain("login.microsoftonline.com");
     expect(provider!.tokenUrl).toContain("login.microsoftonline.com");
-    expect(provider!.scopes).toContain("https://outlook.office.com/IMAP.AccessAsUser.All");
+    expect(provider!.scopes).toContain(
+      "https://outlook.office.com/IMAP.AccessAsUser.All",
+    );
     expect(provider!.scopes).toContain("https://outlook.office.com/SMTP.Send");
     expect(provider!.scopes).toContain("offline_access");
     expect(provider!.scopes).toContain("openid");

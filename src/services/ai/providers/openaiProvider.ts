@@ -6,7 +6,10 @@ const factory = createProviderFactory(
   (apiKey) => new OpenAI({ apiKey, dangerouslyAllowBrowser: true }),
 );
 
-export function createOpenAIProvider(apiKey: string, model: string): AiProviderClient {
+export function createOpenAIProvider(
+  apiKey: string,
+  model: string,
+): AiProviderClient {
   const client = factory.getClient(apiKey);
 
   return {

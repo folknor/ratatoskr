@@ -1,6 +1,9 @@
 import { useRef } from "react";
 import { Paperclip, X } from "lucide-react";
-import { useComposerStore, type ComposerAttachment } from "@/stores/composerStore";
+import {
+  useComposerStore,
+  type ComposerAttachment,
+} from "@/stores/composerStore";
 import { readFileAsBase64 } from "@/utils/fileUtils";
 import { formatFileSize } from "@/utils/fileTypeHelpers";
 

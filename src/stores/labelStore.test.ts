@@ -12,7 +12,12 @@ vi.mock("@/services/gmail/tokenManager", () => ({
   getGmailClient: vi.fn(),
 }));
 
-import { getLabelsForAccount, deleteLabel as dbDeleteLabel, updateLabelSortOrder, upsertLabel } from "@/services/db/labels";
+import {
+  getLabelsForAccount,
+  deleteLabel as dbDeleteLabel,
+  updateLabelSortOrder,
+  upsertLabel,
+} from "@/services/db/labels";
 import { getGmailClient } from "@/services/gmail/tokenManager";
 
 const mockGetLabels = vi.mocked(getLabelsForAccount);
@@ -37,7 +42,15 @@ describe("labelStore", () => {
   it("should clear labels", () => {
     useLabelStore.setState({
       labels: [
-        { id: "Label_1", accountId: "acc1", name: "Work", type: "user", colorBg: null, colorFg: null, sortOrder: 0 },
+        {
+          id: "Label_1",
+          accountId: "acc1",
+          name: "Work",
+          type: "user",
+          colorBg: null,
+          colorFg: null,
+          sortOrder: 0,
+        },
       ],
       isLoading: true,
     });
@@ -49,11 +62,56 @@ describe("labelStore", () => {
 
   it("should load labels and filter out system labels", async () => {
     mockGetLabels.mockResolvedValue([
-      { id: "INBOX", account_id: "acc1", name: "INBOX", type: "system", color_bg: null, color_fg: null, visible: 1, sort_order: 0 },
-      { id: "SENT", account_id: "acc1", name: "SENT", type: "system", color_bg: null, color_fg: null, visible: 1, sort_order: 1 },
-      { id: "CATEGORY_SOCIAL", account_id: "acc1", name: "Social", type: "system", color_bg: null, color_fg: null, visible: 1, sort_order: 2 },
-      { id: "Label_1", account_id: "acc1", name: "Work", type: "user", color_bg: "#4285f4", color_fg: "#ffffff", visible: 1, sort_order: 3 },
-      { id: "Label_2", account_id: "acc1", name: "Personal", type: "user", color_bg: null, color_fg: null, visible: 1, sort_order: 4 },
+      {
+        id: "INBOX",
+        account_id: "acc1",
+        name: "INBOX",
+        type: "system",
+        color_bg: null,
+        color_fg: null,
+        visible: 1,
+        sort_order: 0,
+      },
+      {
+        id: "SENT",
+        account_id: "acc1",
+        name: "SENT",
+        type: "system",
+        color_bg: null,
+        color_fg: null,
+        visible: 1,
+        sort_order: 1,
+      },
+      {
+        id: "CATEGORY_SOCIAL",
+        account_id: "acc1",
+        name: "Social",
+        type: "system",
+        color_bg: null,
+        color_fg: null,
+        visible: 1,
+        sort_order: 2,
+      },
+      {
+        id: "Label_1",
+        account_id: "acc1",
+        name: "Work",
+        type: "user",
+        color_bg: "#4285f4",
+        color_fg: "#ffffff",
+        visible: 1,
+        sort_order: 3,
+      },
+      {
+        id: "Label_2",
+        account_id: "acc1",
+        name: "Personal",
+        type: "user",
+        color_bg: null,
+        color_fg: null,
+        visible: 1,
+        sort_order: 4,
+      },
     ]);
 
     await useLabelStore.getState().loadLabels("acc1");
@@ -102,9 +160,17 @@ describe("labelStore", () => {
     mockUpsertLabel.mockResolvedValue(undefined);
     mockGetLabels.mockResolvedValue([]);
 
-    await useLabelStore.getState().createLabel("acc1", "New Label", { textColor: "#ffffff", backgroundColor: "#fb4c2f" });
+    await useLabelStore
+      .getState()
+      .createLabel("acc1", "New Label", {
+        textColor: "#ffffff",
+        backgroundColor: "#fb4c2f",
+      });
 
-    expect(mockClient.createLabel).toHaveBeenCalledWith("New Label", { textColor: "#ffffff", backgroundColor: "#fb4c2f" });
+    expect(mockClient.createLabel).toHaveBeenCalledWith("New Label", {
+      textColor: "#ffffff",
+      backgroundColor: "#fb4c2f",
+    });
     expect(mockUpsertLabel).toHaveBeenCalledWith({
       id: "Label_new",
       accountId: "acc1",
@@ -160,7 +226,9 @@ describe("labelStore", () => {
     mockUpdateSortOrder.mockResolvedValue(undefined);
     mockGetLabels.mockResolvedValue([]);
 
-    await useLabelStore.getState().reorderLabels("acc1", ["Label_2", "Label_1", "Label_3"]);
+    await useLabelStore
+      .getState()
+      .reorderLabels("acc1", ["Label_2", "Label_1", "Label_3"]);
 
     expect(mockUpdateSortOrder).toHaveBeenCalledWith("acc1", [
       { id: "Label_2", sortOrder: 0 },

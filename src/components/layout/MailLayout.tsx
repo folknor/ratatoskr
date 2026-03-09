@@ -10,32 +10,35 @@ function ResizableEmailLayout() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
 
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = listRef.current?.offsetWidth ?? emailListWidth;
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = listRef.current?.offsetWidth ?? emailListWidth;
 
-    const handleMouseMove = (ev: MouseEvent) => {
-      const delta = ev.clientX - startX;
-      const newWidth = Math.min(800, Math.max(240, startWidth + delta));
-      if (listRef.current) listRef.current.style.width = `${newWidth}px`;
-    };
+      const handleMouseMove = (ev: MouseEvent) => {
+        const delta = ev.clientX - startX;
+        const newWidth = Math.min(800, Math.max(240, startWidth + delta));
+        if (listRef.current) listRef.current.style.width = `${newWidth}px`;
+      };
 
-    const handleMouseUp = (ev: MouseEvent) => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-      const delta = ev.clientX - startX;
-      const finalWidth = Math.min(800, Math.max(240, startWidth + delta));
-      setEmailListWidth(finalWidth);
-    };
+      const handleMouseUp = (ev: MouseEvent) => {
+        document.removeEventListener("mousemove", handleMouseMove);
+        document.removeEventListener("mouseup", handleMouseUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        const delta = ev.clientX - startX;
+        const finalWidth = Math.min(800, Math.max(240, startWidth + delta));
+        setEmailListWidth(finalWidth);
+      };
 
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-  }, [emailListWidth, setEmailListWidth]);
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    },
+    [emailListWidth, setEmailListWidth],
+  );
 
   return (
     <div ref={containerRef} className="flex flex-1 min-w-0 flex-row">
@@ -61,7 +64,9 @@ export function MailLayout() {
   }
 
   return (
-    <div className={`flex flex-1 min-w-0 ${readingPanePosition === "bottom" ? "flex-col" : "flex-row"}`}>
+    <div
+      className={`flex flex-1 min-w-0 ${readingPanePosition === "bottom" ? "flex-col" : "flex-row"}`}
+    >
       <ErrorBoundary name="EmailList">
         <EmailList />
       </ErrorBoundary>

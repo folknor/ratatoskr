@@ -7,8 +7,16 @@ const mockPresets = [
 ];
 
 const mockPresetsWithDetail = [
-  { label: "Tomorrow morning", detail: "Thu, Jan 16 9:00 AM", timestamp: 1737100800 },
-  { label: "Monday morning", detail: "Mon, Jan 20 9:00 AM", timestamp: 1737532800 },
+  {
+    label: "Tomorrow morning",
+    detail: "Thu, Jan 16 9:00 AM",
+    timestamp: 1737100800,
+  },
+  {
+    label: "Monday morning",
+    detail: "Mon, Jan 20 9:00 AM",
+    timestamp: 1737532800,
+  },
 ];
 
 describe("DateTimePickerDialog", () => {
@@ -116,7 +124,9 @@ describe("DateTimePickerDialog", () => {
         submitLabel="Snooze"
       />,
     );
-    const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement;
+    const dateInput = document.querySelector(
+      'input[type="date"]',
+    ) as HTMLInputElement;
     fireEvent.change(dateInput, { target: { value: "2025-02-01" } });
     const submitButton = screen.getByText("Snooze");
     expect(submitButton).not.toBeDisabled();
@@ -138,8 +148,12 @@ describe("DateTimePickerDialog", () => {
       />,
     );
 
-    const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement;
-    const timeInput = document.querySelector('input[type="time"]') as HTMLInputElement;
+    const dateInput = document.querySelector(
+      'input[type="date"]',
+    ) as HTMLInputElement;
+    const timeInput = document.querySelector(
+      'input[type="time"]',
+    ) as HTMLInputElement;
 
     fireEvent.change(dateInput, { target: { value: "2025-02-01" } });
     fireEvent.change(timeInput, { target: { value: "14:30" } });

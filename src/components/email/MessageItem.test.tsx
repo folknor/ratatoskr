@@ -62,13 +62,20 @@ describe("MessageItem", () => {
   });
 
   it("renders sender name", () => {
-    render(<MessageItem message={makeMessage()} isLast={true} blockImages={false} />);
+    render(
+      <MessageItem message={makeMessage()} isLast={true} blockImages={false} />,
+    );
     expect(screen.getByText("Bob")).toBeInTheDocument();
   });
 
   it("applies red background when isSpam is true", () => {
     const { container } = render(
-      <MessageItem message={makeMessage()} isLast={true} blockImages={false} isSpam={true} />,
+      <MessageItem
+        message={makeMessage()}
+        isLast={true}
+        blockImages={false}
+        isSpam={true}
+      />,
     );
     const wrapper = container.firstElementChild!;
     expect(wrapper.className).toContain("bg-red-500/8");
@@ -76,7 +83,12 @@ describe("MessageItem", () => {
 
   it("does not apply red background when isSpam is false", () => {
     const { container } = render(
-      <MessageItem message={makeMessage()} isLast={true} blockImages={false} isSpam={false} />,
+      <MessageItem
+        message={makeMessage()}
+        isLast={true}
+        blockImages={false}
+        isSpam={false}
+      />,
     );
     const wrapper = container.firstElementChild!;
     expect(wrapper.className).not.toContain("bg-red-500");
@@ -92,7 +104,12 @@ describe("MessageItem", () => {
 
   it("applies focus ring when focused prop is true", () => {
     const { container } = render(
-      <MessageItem message={makeMessage()} isLast={false} blockImages={false} focused={true} />,
+      <MessageItem
+        message={makeMessage()}
+        isLast={false}
+        blockImages={false}
+        focused={true}
+      />,
     );
     const wrapper = container.firstElementChild!;
     expect(wrapper.className).toContain("ring-accent/50");
@@ -100,7 +117,12 @@ describe("MessageItem", () => {
 
   it("does not apply focus ring when focused is false", () => {
     const { container } = render(
-      <MessageItem message={makeMessage()} isLast={false} blockImages={false} focused={false} />,
+      <MessageItem
+        message={makeMessage()}
+        isLast={false}
+        blockImages={false}
+        focused={false}
+      />,
     );
     const wrapper = container.firstElementChild!;
     expect(wrapper.className).not.toContain("ring-accent/50");
@@ -109,23 +131,42 @@ describe("MessageItem", () => {
   it("auto-expands when focused becomes true", () => {
     // Render collapsed (isLast=false, not focused)
     const { container, rerender } = render(
-      <MessageItem message={makeMessage()} isLast={false} blockImages={false} focused={false} />,
+      <MessageItem
+        message={makeMessage()}
+        isLast={false}
+        blockImages={false}
+        focused={false}
+      />,
     );
     // Should be collapsed — no email renderer visible
-    expect(container.querySelector("[data-testid='email-renderer']")).toBeNull();
+    expect(
+      container.querySelector("[data-testid='email-renderer']"),
+    ).toBeNull();
 
     // Now set focused=true
     rerender(
-      <MessageItem message={makeMessage()} isLast={false} blockImages={false} focused={true} />,
+      <MessageItem
+        message={makeMessage()}
+        isLast={false}
+        blockImages={false}
+        focused={true}
+      />,
     );
     // Should now be expanded — email renderer visible
-    expect(container.querySelector("[data-testid='email-renderer']")).toBeInTheDocument();
+    expect(
+      container.querySelector("[data-testid='email-renderer']"),
+    ).toBeInTheDocument();
   });
 
   it("forwards ref to outer div", () => {
     const ref = createRef<HTMLDivElement>();
     render(
-      <MessageItem ref={ref} message={makeMessage()} isLast={true} blockImages={false} />,
+      <MessageItem
+        ref={ref}
+        message={makeMessage()}
+        isLast={true}
+        blockImages={false}
+      />,
     );
     expect(ref.current).toBeInstanceOf(HTMLDivElement);
   });

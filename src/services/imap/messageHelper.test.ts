@@ -92,9 +92,12 @@ describe("messageHelper", () => {
     it("falls back to label ID lookup when imap_special_use not found", async () => {
       const { getDb } = await import("../db/connection");
       const mockDb = {
-        select: vi.fn()
+        select: vi
+          .fn()
           .mockResolvedValueOnce([]) // first query: imap_special_use lookup → empty
-          .mockResolvedValueOnce([{ imap_folder_path: "unsolbox", name: "Trash" }]), // fallback: label ID lookup
+          .mockResolvedValueOnce([
+            { imap_folder_path: "unsolbox", name: "Trash" },
+          ]), // fallback: label ID lookup
       };
       vi.mocked(getDb).mockResolvedValue(mockDb as never);
 
@@ -107,9 +110,11 @@ describe("messageHelper", () => {
     it("returns imap_folder_path when available", async () => {
       const { getDb } = await import("../db/connection");
       const mockDb = {
-        select: vi.fn().mockResolvedValue([
-          { imap_folder_path: "INBOX.Trash", name: "Trash" },
-        ]),
+        select: vi
+          .fn()
+          .mockResolvedValue([
+            { imap_folder_path: "INBOX.Trash", name: "Trash" },
+          ]),
       };
       vi.mocked(getDb).mockResolvedValue(mockDb as never);
 
@@ -121,9 +126,9 @@ describe("messageHelper", () => {
     it("falls back to name when imap_folder_path is null", async () => {
       const { getDb } = await import("../db/connection");
       const mockDb = {
-        select: vi.fn().mockResolvedValue([
-          { imap_folder_path: null, name: "Trash" },
-        ]),
+        select: vi
+          .fn()
+          .mockResolvedValue([{ imap_folder_path: null, name: "Trash" }]),
       };
       vi.mocked(getDb).mockResolvedValue(mockDb as never);
 

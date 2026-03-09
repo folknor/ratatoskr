@@ -48,7 +48,10 @@ export async function getSecureSetting(key: string): Promise<string | null> {
 /**
  * Set a setting with encryption. The value is encrypted before storing.
  */
-export async function setSecureSetting(key: string, value: string): Promise<void> {
+export async function setSecureSetting(
+  key: string,
+  value: string,
+): Promise<void> {
   const encrypted = await encryptValue(value);
   await setSetting(key, encrypted);
 }

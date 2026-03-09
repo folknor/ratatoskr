@@ -52,7 +52,10 @@ describe("applySmartLabelsToMessages", () => {
       { threadId: "t2", labelIds: ["label-c"] },
     ]);
 
-    await applySmartLabelsToMessages("acc-1", [makeMessage("t1"), makeMessage("t2")]);
+    await applySmartLabelsToMessages("acc-1", [
+      makeMessage("t1"),
+      makeMessage("t2"),
+    ]);
 
     expect(addThreadLabel).toHaveBeenCalledTimes(3);
     expect(addThreadLabel).toHaveBeenCalledWith("acc-1", "t1", "label-a");

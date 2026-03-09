@@ -48,7 +48,9 @@ export function buildDynamicUpdate(
  */
 let txQueue: Promise<void> = Promise.resolve();
 
-export async function withTransaction(fn: (db: Database) => Promise<void>): Promise<void> {
+export async function withTransaction(
+  fn: (db: Database) => Promise<void>,
+): Promise<void> {
   // Queue this transaction behind any currently-running one.
   // This serialises all transactions without blocking non-transactional reads.
   const prev = txQueue;
@@ -65,8 +67,8 @@ export async function withTransaction(fn: (db: Database) => Promise<void>): Prom
 
   const database = await getDb();
   try {
-    // Note: Do NOT use explicit BEGIN/COMMIT here. tauri-plugin-sql maintains a 
-    // connection pool in Rust. Executing raw transaction statements can cause pool 
+    // Note: Do NOT use explicit BEGIN/COMMIT here. tauri-plugin-sql maintains a
+    // connection pool in Rust. Executing raw transaction statements can cause pool
     // deadlocks if subsequent queries check out a different connection.
     // The JS `txQueue` guarantees sequential execution of this block.
     await fn(database);

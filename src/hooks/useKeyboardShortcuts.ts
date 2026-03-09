@@ -5,9 +5,27 @@ import { useComposerStore } from "@/stores/composerStore";
 import { useAccountStore } from "@/stores/accountStore";
 import { useShortcutStore } from "@/stores/shortcutStore";
 import { useContextMenuStore } from "@/stores/contextMenuStore";
-import { navigateToLabel, navigateToThread, navigateBack, getActiveLabel, getSelectedThreadId } from "@/router/navigate";
-import { archiveThread, trashThread, permanentDeleteThread, starThread, spamThread } from "@/services/emailActions";
-import { deleteThread as deleteThreadFromDb, pinThread as pinThreadDb, unpinThread as unpinThreadDb, muteThread as muteThreadDb, unmuteThread as unmuteThreadDb } from "@/services/db/threads";
+import {
+  navigateToLabel,
+  navigateToThread,
+  navigateBack,
+  getActiveLabel,
+  getSelectedThreadId,
+} from "@/router/navigate";
+import {
+  archiveThread,
+  trashThread,
+  permanentDeleteThread,
+  starThread,
+  spamThread,
+} from "@/services/emailActions";
+import {
+  deleteThread as deleteThreadFromDb,
+  pinThread as pinThreadDb,
+  unpinThread as unpinThreadDb,
+  muteThread as muteThreadDb,
+  unmuteThread as unmuteThreadDb,
+} from "@/services/db/threads";
 import { deleteDraftsForThread } from "@/services/gmail/draftDeletion";
 import { getGmailClient } from "@/services/gmail/tokenManager";
 import { getMessagesForThread } from "@/services/db/messages";
@@ -26,14 +44,19 @@ function matchesKey(binding: string, e: KeyboardEvent): boolean {
   const needsShift = parts.some((p) => p === "Shift");
   const needsAlt = parts.some((p) => p === "Alt");
 
-  const ctrlMatch = needsCtrl ? (e.ctrlKey || e.metaKey) : !(e.ctrlKey || e.metaKey);
+  const ctrlMatch = needsCtrl
+    ? e.ctrlKey || e.metaKey
+    : !(e.ctrlKey || e.metaKey);
   const shiftMatch = needsShift ? e.shiftKey : !e.shiftKey;
   const altMatch = needsAlt ? e.altKey : !e.altKey;
 
   // For single character keys, compare case-insensitively
-  const keyMatch = key.length === 1
-    ? e.key === key || e.key === key.toLowerCase() || e.key === key.toUpperCase()
-    : e.key === key;
+  const keyMatch =
+    key.length === 1
+      ? e.key === key ||
+        e.key === key.toLowerCase() ||
+        e.key === key.toUpperCase()
+      : e.key === key;
 
   return ctrlMatch && shiftMatch && altMatch && keyMatch;
 }
@@ -56,7 +79,10 @@ function buildReverseMap(keyMap: Record<string, string>): {
       // Two-key sequence like "g then i"
       const secondKey = keys.split(" then ")[1]!.trim();
       twoKeySequences.set(secondKey, id);
-    } else if (keys.includes("+") && (keys.includes("Ctrl") || keys.includes("Cmd"))) {
+    } else if (
+      keys.includes("+") &&
+      (keys.includes("Ctrl") || keys.includes("Cmd"))
+    ) {
       ctrlCombos.set(id, keys);
     } else {
       singleKey.set(keys, id);
@@ -70,7 +96,9 @@ function buildReverseMap(keyMap: Record<string, string>): {
 let cachedKeyMap: Record<string, string> | null = null;
 let cachedReverseMap: ReturnType<typeof buildReverseMap> | null = null;
 
-function getCachedReverseMap(keyMap: Record<string, string>): ReturnType<typeof buildReverseMap> {
+function getCachedReverseMap(
+  keyMap: Record<string, string>,
+): ReturnType<typeof buildReverseMap> {
   if (cachedKeyMap === keyMap && cachedReverseMap) return cachedReverseMap;
   cachedKeyMap = keyMap;
   cachedReverseMap = buildReverseMap(keyMap);
@@ -101,12 +129,17 @@ export function useKeyboardShortcuts() {
         target.isContentEditable;
 
       const keyMap = useShortcutStore.getState().keyMap;
-      const { singleKey, twoKeySequences, ctrlCombos } = getCachedReverseMap(keyMap);
+      const { singleKey, twoKeySequences, ctrlCombos } =
+        getCachedReverseMap(keyMap);
 
       // Ctrl/Cmd shortcuts
       if (e.ctrlKey || e.metaKey) {
         // Let native text-editing shortcuts work in inputs (select all, copy, cut, paste, undo, redo)
-        if (isInputFocused && ["a", "c", "x", "v", "z"].includes(e.key.toLowerCase())) return;
+        if (
+          isInputFocused &&
+          ["a", "c", "x", "v", "z"].includes(e.key.toLowerCase())
+        )
+          return;
 
         for (const [actionId, binding] of ctrlCombos) {
           if (matchesKey(binding, e)) {
@@ -118,7 +151,11 @@ export function useKeyboardShortcuts() {
         // Ctrl+K for command palette (also check binding)
         if (e.key === "k" && !e.shiftKey) {
           const paletteBinding = keyMap["app.commandPalette"];
-          if (paletteBinding === "Ctrl+K" || paletteBinding === "/" || !paletteBinding) {
+          if (
+            paletteBinding === "Ctrl+K" ||
+            paletteBinding === "/" ||
+            !paletteBinding
+          ) {
             e.preventDefault();
             window.dispatchEvent(new Event("velo-toggle-command-palette"));
             return;
@@ -287,18 +324,26 @@ async function executeAction(actionId: string): Promise<void> {
     case "action.reply": {
       if (selectedId) {
         const replyMode = useUIStore.getState().defaultReplyMode;
-        window.dispatchEvent(new CustomEvent("velo-inline-reply", { detail: { mode: replyMode } }));
+        window.dispatchEvent(
+          new CustomEvent("velo-inline-reply", { detail: { mode: replyMode } }),
+        );
       }
       break;
     }
     case "action.replyAll":
       if (selectedId) {
-        window.dispatchEvent(new CustomEvent("velo-inline-reply", { detail: { mode: "replyAll" } }));
+        window.dispatchEvent(
+          new CustomEvent("velo-inline-reply", {
+            detail: { mode: "replyAll" },
+          }),
+        );
       }
       break;
     case "action.forward":
       if (selectedId) {
-        window.dispatchEvent(new CustomEvent("velo-inline-reply", { detail: { mode: "forward" } }));
+        window.dispatchEvent(
+          new CustomEvent("velo-inline-reply", { detail: { mode: "forward" } }),
+        );
       }
       break;
     case "action.archive": {
@@ -381,7 +426,9 @@ async function executeAction(actionId: string): Promise<void> {
         const thread = threads.find((t) => t.id === selectedId);
         if (thread) {
           const newPinned = !thread.isPinned;
-          useThreadStore.getState().updateThread(selectedId, { isPinned: newPinned });
+          useThreadStore
+            .getState()
+            .updateThread(selectedId, { isPinned: newPinned });
           try {
             if (newPinned) {
               await pinThreadDb(activeAccountId, selectedId);
@@ -390,7 +437,9 @@ async function executeAction(actionId: string): Promise<void> {
             }
           } catch (err) {
             console.error("Pin failed:", err);
-            useThreadStore.getState().updateThread(selectedId, { isPinned: !newPinned });
+            useThreadStore
+              .getState()
+              .updateThread(selectedId, { isPinned: !newPinned });
           }
         }
       }
@@ -441,7 +490,9 @@ async function executeAction(actionId: string): Promise<void> {
         if (thread) {
           if (thread.isMuted) {
             await unmuteThreadDb(activeAccountId, selectedId);
-            useThreadStore.getState().updateThread(selectedId, { isMuted: false });
+            useThreadStore
+              .getState()
+              .updateThread(selectedId, { isMuted: false });
           } else {
             await muteThreadDb(activeAccountId, selectedId);
             await archiveThread(activeAccountId, selectedId, []);
@@ -452,15 +503,28 @@ async function executeAction(actionId: string): Promise<void> {
     }
     case "action.createTaskFromEmail": {
       if (selectedId) {
-        window.dispatchEvent(new CustomEvent("velo-extract-task", { detail: { threadId: selectedId } }));
+        window.dispatchEvent(
+          new CustomEvent("velo-extract-task", {
+            detail: { threadId: selectedId },
+          }),
+        );
       }
       break;
     }
     case "action.moveToFolder": {
       const multiMoveIds = useThreadStore.getState().selectedThreadIds;
-      const moveThreadIds = multiMoveIds.size > 0 ? [...multiMoveIds] : selectedId ? [selectedId] : [];
+      const moveThreadIds =
+        multiMoveIds.size > 0
+          ? [...multiMoveIds]
+          : selectedId
+            ? [selectedId]
+            : [];
       if (moveThreadIds.length > 0) {
-        window.dispatchEvent(new CustomEvent("velo-move-to-folder", { detail: { threadIds: moveThreadIds } }));
+        window.dispatchEvent(
+          new CustomEvent("velo-move-to-folder", {
+            detail: { threadIds: moveThreadIds },
+          }),
+        );
       }
       break;
     }

@@ -22,14 +22,35 @@ describe("classifyThreadsBySmartLabels", () => {
   });
 
   const threads = [
-    { id: "t1", subject: "Software Engineer Position", snippet: "We're hiring...", fromAddress: "recruiter@company.com" },
-    { id: "t2", subject: "Your order shipped", snippet: "Package tracking...", fromAddress: "orders@shop.com" },
-    { id: "t3", subject: "Team standup notes", snippet: "Meeting recap...", fromAddress: "pm@work.com" },
+    {
+      id: "t1",
+      subject: "Software Engineer Position",
+      snippet: "We're hiring...",
+      fromAddress: "recruiter@company.com",
+    },
+    {
+      id: "t2",
+      subject: "Your order shipped",
+      snippet: "Package tracking...",
+      fromAddress: "orders@shop.com",
+    },
+    {
+      id: "t3",
+      subject: "Team standup notes",
+      snippet: "Meeting recap...",
+      fromAddress: "pm@work.com",
+    },
   ];
 
   const labelRules = [
-    { labelId: "label-jobs", description: "Job applications and career opportunities" },
-    { labelId: "label-orders", description: "Shopping orders and delivery updates" },
+    {
+      labelId: "label-jobs",
+      description: "Job applications and career opportunities",
+    },
+    {
+      labelId: "label-orders",
+      description: "Shopping orders and delivery updates",
+    },
   ];
 
   it("parses valid AI response into assignments map", async () => {
@@ -85,7 +106,9 @@ describe("classifyThreadsBySmartLabels", () => {
   });
 
   it("handles blank lines and whitespace in response", async () => {
-    mockComplete.mockResolvedValueOnce("\n  t1:label-jobs  \n\n  t2:label-orders\n");
+    mockComplete.mockResolvedValueOnce(
+      "\n  t1:label-jobs  \n\n  t2:label-orders\n",
+    );
 
     const result = await classifyThreadsBySmartLabels(threads, labelRules);
 

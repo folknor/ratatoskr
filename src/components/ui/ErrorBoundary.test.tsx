@@ -38,7 +38,9 @@ describe("ErrorBoundary", () => {
     );
     expect(screen.getByText("Something went wrong")).toBeInTheDocument();
     expect(screen.getByText("Test error")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Try again" }),
+    ).toBeInTheDocument();
   });
 
   it("renders custom fallback when provided", () => {

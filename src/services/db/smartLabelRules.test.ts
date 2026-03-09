@@ -5,7 +5,8 @@ const { mockGetDb } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/services/db/connection", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/db/connection")>();
+  const actual =
+    await importOriginal<typeof import("@/services/db/connection")>();
   return {
     ...actual,
     getDb: mockGetDb,
@@ -36,7 +37,16 @@ describe("smartLabelRules service", () => {
   describe("getSmartLabelRulesForAccount", () => {
     it("returns rules for the account ordered by sort_order", async () => {
       const mockRules = [
-        { id: "r1", account_id: "acc-1", label_id: "l1", ai_description: "Test", criteria_json: null, is_enabled: 1, sort_order: 0, created_at: 100 },
+        {
+          id: "r1",
+          account_id: "acc-1",
+          label_id: "l1",
+          ai_description: "Test",
+          criteria_json: null,
+          is_enabled: 1,
+          sort_order: 0,
+          created_at: 100,
+        },
       ];
       mockDb.select.mockResolvedValueOnce(mockRules);
 
@@ -76,7 +86,13 @@ describe("smartLabelRules service", () => {
       expect(id).toBeTruthy();
       expect(mockDb.execute).toHaveBeenCalledWith(
         expect.stringContaining("INSERT INTO smart_label_rules"),
-        expect.arrayContaining(["acc-1", "label-1", "Job applications", null, 1]),
+        expect.arrayContaining([
+          "acc-1",
+          "label-1",
+          "Job applications",
+          null,
+          1,
+        ]),
       );
     });
 
@@ -118,7 +134,9 @@ describe("smartLabelRules service", () => {
         params: ["Updated description", "r1"],
       });
 
-      await updateSmartLabelRule("r1", { aiDescription: "Updated description" });
+      await updateSmartLabelRule("r1", {
+        aiDescription: "Updated description",
+      });
 
       expect(buildDynamicUpdate).toHaveBeenCalledWith(
         "smart_label_rules",

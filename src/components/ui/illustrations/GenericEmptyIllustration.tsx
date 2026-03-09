@@ -66,11 +66,29 @@ export function GenericEmptyIllustration({ size = 140, className }: Props) {
       />
       {/* Floating particles */}
       <circle cx="55" cy="32" r="3" fill="var(--color-accent)" opacity="0.25" />
-      <circle cx="85" cy="28" r="2.5" fill="var(--color-accent)" opacity="0.2" />
+      <circle
+        cx="85"
+        cy="28"
+        r="2.5"
+        fill="var(--color-accent)"
+        opacity="0.2"
+      />
       <circle cx="70" cy="22" r="2" fill="var(--color-accent)" opacity="0.35" />
-      <circle cx="45" cy="42" r="1.5" fill="var(--color-accent)" opacity="0.15" />
+      <circle
+        cx="45"
+        cy="42"
+        r="1.5"
+        fill="var(--color-accent)"
+        opacity="0.15"
+      />
       <circle cx="98" cy="38" r="2" fill="var(--color-accent)" opacity="0.18" />
-      <circle cx="62" cy="26" r="1.5" fill="var(--color-accent)" opacity="0.12" />
+      <circle
+        cx="62"
+        cy="26"
+        r="1.5"
+        fill="var(--color-accent)"
+        opacity="0.12"
+      />
     </svg>
   );
 }

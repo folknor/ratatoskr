@@ -1,5 +1,9 @@
 import { create } from "zustand";
-import { getLabelsForAccount, deleteLabel as dbDeleteLabel, updateLabelSortOrder } from "@/services/db/labels";
+import {
+  getLabelsForAccount,
+  deleteLabel as dbDeleteLabel,
+  updateLabelSortOrder,
+} from "@/services/db/labels";
 import { upsertLabel } from "@/services/db/labels";
 import { getGmailClient } from "@/services/gmail/tokenManager";
 
@@ -38,8 +42,19 @@ interface LabelState {
   isLoading: boolean;
   loadLabels: (accountId: string) => Promise<void>;
   clearLabels: () => void;
-  createLabel: (accountId: string, name: string, color?: { textColor: string; backgroundColor: string }) => Promise<void>;
-  updateLabel: (accountId: string, labelId: string, updates: { name?: string; color?: { textColor: string; backgroundColor: string } | null }) => Promise<void>;
+  createLabel: (
+    accountId: string,
+    name: string,
+    color?: { textColor: string; backgroundColor: string },
+  ) => Promise<void>;
+  updateLabel: (
+    accountId: string,
+    labelId: string,
+    updates: {
+      name?: string;
+      color?: { textColor: string; backgroundColor: string } | null;
+    },
+  ) => Promise<void>;
   deleteLabel: (accountId: string, labelId: string) => Promise<void>;
   reorderLabels: (accountId: string, labelIds: string[]) => Promise<void>;
 }
@@ -72,7 +87,11 @@ export const useLabelStore = create<LabelState>((set, get) => ({
 
   clearLabels: () => set({ labels: [], isLoading: false }),
 
-  createLabel: async (accountId: string, name: string, color?: { textColor: string; backgroundColor: string }) => {
+  createLabel: async (
+    accountId: string,
+    name: string,
+    color?: { textColor: string; backgroundColor: string },
+  ) => {
     const client = await getGmailClient(accountId);
     const gmailLabel = await client.createLabel(name, color);
     await upsertLabel({
@@ -86,7 +105,14 @@ export const useLabelStore = create<LabelState>((set, get) => ({
     await get().loadLabels(accountId);
   },
 
-  updateLabel: async (accountId: string, labelId: string, updates: { name?: string; color?: { textColor: string; backgroundColor: string } | null }) => {
+  updateLabel: async (
+    accountId: string,
+    labelId: string,
+    updates: {
+      name?: string;
+      color?: { textColor: string; backgroundColor: string } | null;
+    },
+  ) => {
     const client = await getGmailClient(accountId);
     const gmailLabel = await client.updateLabel(labelId, updates);
     await upsertLabel({

@@ -1,0 +1,96 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.6/schema.json",
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "nursery": {
+        "useExplicitType": "error",
+        "useAwaitThenable": "off",
+        "useArraySortCompare": "error",
+        "noUnnecessaryConditions": "error",
+        "noShadow": "error",
+        "noParametersOnlyUsedInRecursion": "error",
+        "noMisusedPromises": "error",
+        "noLeakedRender": "error",
+        "noFloatingPromises": "error"
+      },
+      "complexity": {
+        "useLiteralKeys": "off",
+        "useSimplifiedLogicExpression": "error",
+        "noUselessStringConcat": "error",
+        "noImplicitCoercions": "error",
+        "noForEach": "error",
+        "useMaxParams": "error",
+        "noUselessUndefined": "error",
+        "noUselessCatchBinding": "error"
+      },
+      "correctness": {
+        "noUndeclaredVariables": "error",
+        "noReactPropAssignments": "error",
+        "noProcessGlobal": "error",
+        "noNestedComponentDefinitions": "error",
+        "noUnresolvedImports": "off"
+      },
+      "style": {
+        "noNonNullAssertion": "error",
+        "useConsistentArrowReturn": "error"
+      },
+      "performance": {
+        "noNamespaceImport": "error",
+        "noReExportAll": "error",
+        "noBarrelFile": "error"
+      },
+      "suspicious": {
+        "noConsole": "error",
+        "noExplicitAny": "error",
+        "noDoubleEquals": "error",
+        "noImplicitAnyLet": "error",
+        "noConfusingVoidType": "error",
+        "noDebugger": "error",
+        "noTsIgnore": "error",
+        "useErrorMessage": "error",
+        "noVar": "error",
+        "noUnassignedVariables": "error",
+        "noMisplacedAssertion": "error",
+        "noEvolvingTypes": "error",
+        "noUnusedExpressions": "error",
+        "noReactForwardRef": "error",
+        "noImportCycles": "error"
+      }
+    }
+  },
+  "assist": {
+    "enabled": true
+  },
+  "files": {
+    "includes": [
+      "**/*.ts",
+      "**/*.tsx",
+      "**/*.js",
+      "**/*.jsx",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/target"
+    ]
+  },
+  "overrides": [
+    {
+      "includes": ["**/*.test.ts", "**/*.test.tsx"],
+      "linter": {
+        "rules": {
+          "nursery": {
+            "useExplicitType": "off"
+          },
+          "performance": {
+            "noNamespaceImport": "off"
+          }
+        }
+      }
+    }
+  ]
+}

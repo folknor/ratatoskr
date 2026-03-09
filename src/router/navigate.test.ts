@@ -250,7 +250,10 @@ describe("navigate", () => {
 
     it("should return label from mail thread route", () => {
       mockState.matches = [
-        { routeId: "/mail/$label/thread/$threadId", params: { label: "sent", threadId: "t-1" } },
+        {
+          routeId: "/mail/$label/thread/$threadId",
+          params: { label: "sent", threadId: "t-1" },
+        },
       ];
       expect(getActiveLabel()).toBe("sent");
     });
@@ -290,7 +293,10 @@ describe("navigate", () => {
   describe("getSelectedThreadId", () => {
     it("should return threadId from route params", () => {
       mockState.matches = [
-        { routeId: "/mail/$label/thread/$threadId", params: { label: "inbox", threadId: "t-42" } },
+        {
+          routeId: "/mail/$label/thread/$threadId",
+          params: { label: "inbox", threadId: "t-42" },
+        },
       ];
       expect(getSelectedThreadId()).toBe("t-42");
     });

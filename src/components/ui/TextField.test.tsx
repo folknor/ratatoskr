@@ -78,7 +78,9 @@ describe("TextField", () => {
   });
 
   it("merges custom className on the wrapper div", () => {
-    const { container } = render(<TextField className="mt-4" placeholder="wrap" />);
+    const { container } = render(
+      <TextField className="mt-4" placeholder="wrap" />,
+    );
     const wrapper = container.firstChild as HTMLElement;
     expect(wrapper.className).toContain("mt-4");
   });

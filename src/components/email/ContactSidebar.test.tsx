@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ContactSidebar } from "./ContactSidebar";
-import type { DbContact, ContactAttachment, SameDomainContact } from "@/services/db/contacts";
+import type {
+  DbContact,
+  ContactAttachment,
+  SameDomainContact,
+} from "@/services/db/contacts";
 
 const mockContact: DbContact = {
   id: "c-1",
@@ -16,7 +20,11 @@ const mockContact: DbContact = {
 vi.mock("@/services/db/contacts", () => ({
   getContactByEmail: vi.fn(() => Promise.resolve(null)),
   getContactStats: vi.fn(() =>
-    Promise.resolve({ emailCount: 5, firstEmail: 1700000000000, lastEmail: 1700100000000 }),
+    Promise.resolve({
+      emailCount: 5,
+      firstEmail: 1700000000000,
+      lastEmail: 1700100000000,
+    }),
   ),
   getRecentThreadsWithContact: vi.fn(() => Promise.resolve([])),
   upsertContact: vi.fn(() => Promise.resolve()),
@@ -112,7 +120,9 @@ describe("ContactSidebar", () => {
     });
 
     // Notes textarea should not be visible initially
-    expect(screen.queryByPlaceholderText("Add a note...")).not.toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText("Add a note..."),
+    ).not.toBeInTheDocument();
 
     // Click to expand
     fireEvent.click(screen.getByText("Notes"));
@@ -122,7 +132,12 @@ describe("ContactSidebar", () => {
 
   it("renders attachments section when data present", async () => {
     const mockAttachments: ContactAttachment[] = [
-      { filename: "report.pdf", mime_type: "application/pdf", size: 1024, date: 1700000000000 },
+      {
+        filename: "report.pdf",
+        mime_type: "application/pdf",
+        size: 1024,
+        date: 1700000000000,
+      },
     ];
     vi.mocked(getAttachmentsFromContact).mockResolvedValueOnce(mockAttachments);
 
@@ -138,7 +153,9 @@ describe("ContactSidebar", () => {
     const mockDomainContacts: SameDomainContact[] = [
       { email: "bob@company.com", display_name: "Bob Jones", avatar_url: null },
     ];
-    vi.mocked(getContactsFromSameDomain).mockResolvedValueOnce(mockDomainContacts);
+    vi.mocked(getContactsFromSameDomain).mockResolvedValueOnce(
+      mockDomainContacts,
+    );
 
     render(<ContactSidebar {...defaultProps} />);
 
@@ -160,7 +177,9 @@ describe("ContactSidebar", () => {
     const { container } = render(<ContactSidebar {...defaultProps} />);
 
     await waitFor(() => {
-      const badge = container.querySelector("[aria-label='Authentication passed']");
+      const badge = container.querySelector(
+        "[aria-label='Authentication passed']",
+      );
       expect(badge).toBeInTheDocument();
     });
   });

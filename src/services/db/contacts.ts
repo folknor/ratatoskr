@@ -116,11 +116,11 @@ export interface ContactStats {
   lastEmail: number | null;
 }
 
-export async function getContactStats(
-  email: string,
-): Promise<ContactStats> {
+export async function getContactStats(email: string): Promise<ContactStats> {
   const db = await getDb();
-  const rows = await db.select<{ cnt: number; first_date: number | null; last_date: number | null }[]>(
+  const rows = await db.select<
+    { cnt: number; first_date: number | null; last_date: number | null }[]
+  >(
     `SELECT COUNT(*) as cnt, MIN(date) as first_date, MAX(date) as last_date
      FROM messages WHERE from_address = $1`,
     [normalizeEmail(email)],
@@ -136,7 +136,13 @@ export async function getContactStats(
 export async function getRecentThreadsWithContact(
   email: string,
   limit = 5,
-): Promise<{ thread_id: string; subject: string | null; last_message_at: number | null }[]> {
+): Promise<
+  {
+    thread_id: string;
+    subject: string | null;
+    last_message_at: number | null;
+  }[]
+> {
   const db = await getDb();
   return db.select(
     `SELECT DISTINCT t.id as thread_id, t.subject, t.last_message_at
@@ -194,10 +200,24 @@ export async function getAttachmentsFromContact(
 }
 
 const PUBLIC_DOMAINS = new Set([
-  "gmail.com", "googlemail.com", "outlook.com", "hotmail.com",
-  "live.com", "yahoo.com", "yahoo.co.uk", "aol.com", "icloud.com",
-  "me.com", "mac.com", "protonmail.com", "proton.me", "mail.com",
-  "zoho.com", "yandex.com", "gmx.com", "gmx.net",
+  "gmail.com",
+  "googlemail.com",
+  "outlook.com",
+  "hotmail.com",
+  "live.com",
+  "yahoo.com",
+  "yahoo.co.uk",
+  "aol.com",
+  "icloud.com",
+  "me.com",
+  "mac.com",
+  "protonmail.com",
+  "proton.me",
+  "mail.com",
+  "zoho.com",
+  "yandex.com",
+  "gmx.com",
+  "gmx.net",
 ]);
 
 /**

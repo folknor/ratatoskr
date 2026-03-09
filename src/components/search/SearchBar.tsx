@@ -35,7 +35,11 @@ export function SearchBar() {
 
       debounceRef.current = setTimeout(async () => {
         try {
-          const hits = await searchMessages(value, activeAccountId ?? undefined, 100);
+          const hits = await searchMessages(
+            value,
+            activeAccountId ?? undefined,
+            100,
+          );
           const threadIds = new Set(hits.map((h) => h.thread_id));
           useThreadStore.getState().setSearch(value, threadIds);
         } catch {
@@ -96,11 +100,21 @@ export function SearchBar() {
         isOpen={showSaveModal}
         onClose={() => setShowSaveModal(false)}
         onSubmit={(values) => {
-          useSmartFolderStore.getState().createFolder(values.name!.trim(), useThreadStore.getState().searchQuery.trim(), activeAccountId ?? undefined);
+          useSmartFolderStore
+            .getState()
+            .createFolder(
+              values.name!.trim(),
+              useThreadStore.getState().searchQuery.trim(),
+              activeAccountId ?? undefined,
+            );
         }}
         title={t("saveAsSmartFolder")}
         fields={[
-          { key: "name", label: t("common:name"), defaultValue: searchQuery.trim() },
+          {
+            key: "name",
+            label: t("common:name"),
+            defaultValue: searchQuery.trim(),
+          },
         ]}
         submitLabel={t("common:save")}
       />

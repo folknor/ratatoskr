@@ -11,7 +11,17 @@ const mockDeleteLabel = vi.fn();
 const mockReorderLabels = vi.fn();
 const mockLoadLabels = vi.fn();
 
-function setStoreWithLabels(labels: { id: string; accountId: string; name: string; type: string; colorBg: string | null; colorFg: string | null; sortOrder: number }[]) {
+function setStoreWithLabels(
+  labels: {
+    id: string;
+    accountId: string;
+    name: string;
+    type: string;
+    colorBg: string | null;
+    colorFg: string | null;
+    sortOrder: number;
+  }[],
+) {
   useLabelStore.setState({
     labels,
     isLoading: false,
@@ -27,7 +37,15 @@ describe("LabelEditor", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useAccountStore.setState({
-      accounts: [{ id: "acc1", email: "test@test.com", displayName: "Test", avatarUrl: null, isActive: true }],
+      accounts: [
+        {
+          id: "acc1",
+          email: "test@test.com",
+          displayName: "Test",
+          avatarUrl: null,
+          isActive: true,
+        },
+      ],
       activeAccountId: "acc1",
     });
     setStoreWithLabels([]);
@@ -41,8 +59,24 @@ describe("LabelEditor", () => {
 
   it("renders labels list", () => {
     setStoreWithLabels([
-      { id: "L1", accountId: "acc1", name: "Work", type: "user", colorBg: "#fb4c2f", colorFg: "#ffffff", sortOrder: 0 },
-      { id: "L2", accountId: "acc1", name: "Personal", type: "user", colorBg: null, colorFg: null, sortOrder: 1 },
+      {
+        id: "L1",
+        accountId: "acc1",
+        name: "Work",
+        type: "user",
+        colorBg: "#fb4c2f",
+        colorFg: "#ffffff",
+        sortOrder: 0,
+      },
+      {
+        id: "L2",
+        accountId: "acc1",
+        name: "Personal",
+        type: "user",
+        colorBg: null,
+        colorFg: null,
+        sortOrder: 1,
+      },
     ]);
     render(<LabelEditor />);
     expect(screen.getByText("Work")).toBeInTheDocument();
@@ -69,17 +103,31 @@ describe("LabelEditor", () => {
     mockCreateLabel.mockResolvedValue(undefined);
     render(<LabelEditor />);
     fireEvent.click(screen.getByText("+ Add label"));
-    fireEvent.change(screen.getByPlaceholderText("Label name"), { target: { value: "New Label" } });
+    fireEvent.change(screen.getByPlaceholderText("Label name"), {
+      target: { value: "New Label" },
+    });
     fireEvent.click(screen.getByText("Save"));
 
     await waitFor(() => {
-      expect(mockCreateLabel).toHaveBeenCalledWith("acc1", "New Label", undefined);
+      expect(mockCreateLabel).toHaveBeenCalledWith(
+        "acc1",
+        "New Label",
+        undefined,
+      );
     });
   });
 
   it("populates form when edit button is clicked", () => {
     setStoreWithLabels([
-      { id: "L1", accountId: "acc1", name: "Work", type: "user", colorBg: "#fb4c2f", colorFg: "#ffffff", sortOrder: 0 },
+      {
+        id: "L1",
+        accountId: "acc1",
+        name: "Work",
+        type: "user",
+        colorBg: "#fb4c2f",
+        colorFg: "#ffffff",
+        sortOrder: 0,
+      },
     ]);
     render(<LabelEditor />);
 
@@ -95,12 +143,22 @@ describe("LabelEditor", () => {
   it("calls updateLabel on save when editing", async () => {
     mockUpdateLabel.mockResolvedValue(undefined);
     setStoreWithLabels([
-      { id: "L1", accountId: "acc1", name: "Work", type: "user", colorBg: null, colorFg: null, sortOrder: 0 },
+      {
+        id: "L1",
+        accountId: "acc1",
+        name: "Work",
+        type: "user",
+        colorBg: null,
+        colorFg: null,
+        sortOrder: 0,
+      },
     ]);
     render(<LabelEditor />);
 
     fireEvent.click(screen.getAllByTitle("Edit")[0]!);
-    fireEvent.change(screen.getByPlaceholderText("Label name"), { target: { value: "Updated" } });
+    fireEvent.change(screen.getByPlaceholderText("Label name"), {
+      target: { value: "Updated" },
+    });
     fireEvent.click(screen.getByText("Update"));
 
     await waitFor(() => {
@@ -114,7 +172,15 @@ describe("LabelEditor", () => {
   it("calls deleteLabel when delete button is clicked", async () => {
     mockDeleteLabel.mockResolvedValue(undefined);
     setStoreWithLabels([
-      { id: "L1", accountId: "acc1", name: "Work", type: "user", colorBg: null, colorFg: null, sortOrder: 0 },
+      {
+        id: "L1",
+        accountId: "acc1",
+        name: "Work",
+        type: "user",
+        colorBg: null,
+        colorFg: null,
+        sortOrder: 0,
+      },
     ]);
     render(<LabelEditor />);
 
@@ -127,8 +193,24 @@ describe("LabelEditor", () => {
 
   it("disables move up for first label and move down for last", () => {
     setStoreWithLabels([
-      { id: "L1", accountId: "acc1", name: "First", type: "user", colorBg: null, colorFg: null, sortOrder: 0 },
-      { id: "L2", accountId: "acc1", name: "Last", type: "user", colorBg: null, colorFg: null, sortOrder: 1 },
+      {
+        id: "L1",
+        accountId: "acc1",
+        name: "First",
+        type: "user",
+        colorBg: null,
+        colorFg: null,
+        sortOrder: 0,
+      },
+      {
+        id: "L2",
+        accountId: "acc1",
+        name: "Last",
+        type: "user",
+        colorBg: null,
+        colorFg: null,
+        sortOrder: 1,
+      },
     ]);
     render(<LabelEditor />);
 
@@ -144,8 +226,24 @@ describe("LabelEditor", () => {
   it("calls reorderLabels when move down is clicked", async () => {
     mockReorderLabels.mockResolvedValue(undefined);
     setStoreWithLabels([
-      { id: "L1", accountId: "acc1", name: "First", type: "user", colorBg: null, colorFg: null, sortOrder: 0 },
-      { id: "L2", accountId: "acc1", name: "Second", type: "user", colorBg: null, colorFg: null, sortOrder: 1 },
+      {
+        id: "L1",
+        accountId: "acc1",
+        name: "First",
+        type: "user",
+        colorBg: null,
+        colorFg: null,
+        sortOrder: 0,
+      },
+      {
+        id: "L2",
+        accountId: "acc1",
+        name: "Second",
+        type: "user",
+        colorBg: null,
+        colorFg: null,
+        sortOrder: 1,
+      },
     ]);
     render(<LabelEditor />);
 
@@ -160,7 +258,15 @@ describe("LabelEditor", () => {
   it("shows error on delete failure", async () => {
     mockDeleteLabel.mockRejectedValue(new Error("API error"));
     setStoreWithLabels([
-      { id: "L1", accountId: "acc1", name: "Work", type: "user", colorBg: null, colorFg: null, sortOrder: 0 },
+      {
+        id: "L1",
+        accountId: "acc1",
+        name: "Work",
+        type: "user",
+        colorBg: null,
+        colorFg: null,
+        sortOrder: 0,
+      },
     ]);
     render(<LabelEditor />);
     fireEvent.click(screen.getAllByTitle("Delete")[0]!);
@@ -190,8 +296,24 @@ describe("LabelEditor", () => {
 
   it("shows edit form under the label being edited, not at bottom", () => {
     setStoreWithLabels([
-      { id: "L1", accountId: "acc1", name: "First", type: "user", colorBg: null, colorFg: null, sortOrder: 0 },
-      { id: "L2", accountId: "acc1", name: "Second", type: "user", colorBg: null, colorFg: null, sortOrder: 1 },
+      {
+        id: "L1",
+        accountId: "acc1",
+        name: "First",
+        type: "user",
+        colorBg: null,
+        colorFg: null,
+        sortOrder: 0,
+      },
+      {
+        id: "L2",
+        accountId: "acc1",
+        name: "Second",
+        type: "user",
+        colorBg: null,
+        colorFg: null,
+        sortOrder: 1,
+      },
     ]);
     render(<LabelEditor />);
 

@@ -44,7 +44,11 @@ import {
 } from "../db/pendingOperations";
 import { executeQueuedAction } from "../emailActions";
 import { classifyError } from "@/utils/networkErrors";
-import { startQueueProcessor, stopQueueProcessor, triggerQueueFlush } from "./queueProcessor";
+import {
+  startQueueProcessor,
+  stopQueueProcessor,
+  triggerQueueFlush,
+} from "./queueProcessor";
 import { createMockUIStoreState } from "@/test/mocks";
 
 const mockSetPendingOpsCount = vi.fn();
@@ -52,17 +56,21 @@ const mockSetPendingOpsCount = vi.fn();
 describe("queueProcessor", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(useUIStore.getState).mockReturnValue(createMockUIStoreState({
-      setPendingOpsCount: mockSetPendingOpsCount,
-    }) as never);
+    vi.mocked(useUIStore.getState).mockReturnValue(
+      createMockUIStoreState({
+        setPendingOpsCount: mockSetPendingOpsCount,
+      }) as never,
+    );
     vi.mocked(getPendingOperations).mockResolvedValue([]);
   });
 
   it("skips processing when offline", async () => {
-    vi.mocked(useUIStore.getState).mockReturnValue(createMockUIStoreState({
-      isOnline: false,
-      setPendingOpsCount: mockSetPendingOpsCount,
-    }) as never);
+    vi.mocked(useUIStore.getState).mockReturnValue(
+      createMockUIStoreState({
+        isOnline: false,
+        setPendingOpsCount: mockSetPendingOpsCount,
+      }) as never,
+    );
     await triggerQueueFlush();
     expect(getPendingOperations).not.toHaveBeenCalled();
   });
@@ -115,7 +123,9 @@ describe("queueProcessor", () => {
         error_message: null,
       },
     ]);
-    vi.mocked(executeQueuedAction).mockRejectedValueOnce(new Error("Failed to fetch"));
+    vi.mocked(executeQueuedAction).mockRejectedValueOnce(
+      new Error("Failed to fetch"),
+    );
     vi.mocked(classifyError).mockReturnValueOnce({
       type: "network",
       isRetryable: true,
@@ -124,7 +134,11 @@ describe("queueProcessor", () => {
 
     await triggerQueueFlush();
 
-    expect(updateOperationStatus).toHaveBeenCalledWith("op-1", "pending", "Failed to fetch");
+    expect(updateOperationStatus).toHaveBeenCalledWith(
+      "op-1",
+      "pending",
+      "Failed to fetch",
+    );
     expect(incrementRetry).toHaveBeenCalledWith("op-1");
     expect(deleteOperation).not.toHaveBeenCalled();
   });
@@ -145,7 +159,9 @@ describe("queueProcessor", () => {
         error_message: null,
       },
     ]);
-    vi.mocked(executeQueuedAction).mockRejectedValueOnce(new Error("Bad request"));
+    vi.mocked(executeQueuedAction).mockRejectedValueOnce(
+      new Error("Bad request"),
+    );
     vi.mocked(classifyError).mockReturnValueOnce({
       type: "permanent",
       isRetryable: false,
@@ -154,7 +170,11 @@ describe("queueProcessor", () => {
 
     await triggerQueueFlush();
 
-    expect(updateOperationStatus).toHaveBeenCalledWith("op-1", "failed", "Bad request");
+    expect(updateOperationStatus).toHaveBeenCalledWith(
+      "op-1",
+      "failed",
+      "Bad request",
+    );
   });
 
   it("updates pending count after processing", async () => {

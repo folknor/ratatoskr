@@ -49,12 +49,7 @@ describe("TaskItem", () => {
 
   it("calls onToggleComplete when checkbox clicked", () => {
     const onToggle = vi.fn();
-    render(
-      <TaskItem
-        task={makeTask()}
-        onToggleComplete={onToggle}
-      />,
-    );
+    render(<TaskItem task={makeTask()} onToggleComplete={onToggle} />);
     // Click the circle button (first button in the component)
     const buttons = screen.getAllByRole("button");
     fireEvent.click(buttons[0]!);

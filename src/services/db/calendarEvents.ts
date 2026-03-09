@@ -53,11 +53,24 @@ export async function upsertCalendarEvent(event: {
        html_link = $13, calendar_id = $14, remote_event_id = $15, etag = $16,
        ical_data = $17, uid = $18, updated_at = unixepoch()`,
     [
-      id, event.accountId, event.googleEventId, event.summary, event.description,
-      event.location, event.startTime, event.endTime, event.isAllDay ? 1 : 0,
-      event.status, event.organizerEmail, event.attendeesJson, event.htmlLink,
-      event.calendarId ?? null, event.remoteEventId ?? null, event.etag ?? null,
-      event.icalData ?? null, event.uid ?? null,
+      id,
+      event.accountId,
+      event.googleEventId,
+      event.summary,
+      event.description,
+      event.location,
+      event.startTime,
+      event.endTime,
+      event.isAllDay ? 1 : 0,
+      event.status,
+      event.organizerEmail,
+      event.attendeesJson,
+      event.htmlLink,
+      event.calendarId ?? null,
+      event.remoteEventId ?? null,
+      event.etag ?? null,
+      event.icalData ?? null,
+      event.uid ?? null,
     ],
   );
 }
@@ -96,9 +109,13 @@ export async function getCalendarEventsInRangeMulti(
   );
 }
 
-export async function deleteEventsForCalendar(calendarId: string): Promise<void> {
+export async function deleteEventsForCalendar(
+  calendarId: string,
+): Promise<void> {
   const db = await getDb();
-  await db.execute("DELETE FROM calendar_events WHERE calendar_id = $1", [calendarId]);
+  await db.execute("DELETE FROM calendar_events WHERE calendar_id = $1", [
+    calendarId,
+  ]);
 }
 
 export async function getEventByRemoteId(

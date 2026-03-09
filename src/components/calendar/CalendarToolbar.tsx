@@ -28,7 +28,20 @@ export function CalendarToolbar({
 }: CalendarToolbarProps) {
   const { t } = useTranslation("calendar");
 
-  const monthKeys = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+  const monthKeys = [
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+  ];
 
   const formatTitle = (date: Date, v: CalendarView): string => {
     if (v === "month") {
@@ -44,7 +57,12 @@ export function CalendarToolbar({
       }
       return `${t(`months.${monthKeys[start.getMonth()]}`)?.slice(0, 3)} ${start.getDate()} - ${t(`months.${monthKeys[end.getMonth()]}`)?.slice(0, 3)} ${end.getDate()}, ${end.getFullYear()}`;
     }
-    return date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+    return date.toLocaleDateString(undefined, {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
   };
 
   const title = formatTitle(currentDate, view);
@@ -111,4 +129,3 @@ export function CalendarToolbar({
     </div>
   );
 }
-

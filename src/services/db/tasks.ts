@@ -51,10 +51,9 @@ export async function getTasksForAccount(
 
 export async function getTaskById(id: string): Promise<DbTask | null> {
   const db = await getDb();
-  const rows = await db.select<DbTask[]>(
-    "SELECT * FROM tasks WHERE id = $1",
-    [id],
-  );
+  const rows = await db.select<DbTask[]>("SELECT * FROM tasks WHERE id = $1", [
+    id,
+  ]);
   return rows[0] ?? null;
 }
 
@@ -194,9 +193,7 @@ export async function uncompleteTask(id: string): Promise<void> {
   );
 }
 
-export async function reorderTasks(
-  taskIds: string[],
-): Promise<void> {
+export async function reorderTasks(taskIds: string[]): Promise<void> {
   const db = await getDb();
   for (let i = 0; i < taskIds.length; i++) {
     await db.execute(
@@ -246,8 +243,8 @@ export async function deleteTaskTag(
   accountId: string | null,
 ): Promise<void> {
   const db = await getDb();
-  await db.execute(
-    "DELETE FROM task_tags WHERE tag = $1 AND account_id = $2",
-    [tag, accountId],
-  );
+  await db.execute("DELETE FROM task_tags WHERE tag = $1 AND account_id = $2", [
+    tag,
+    accountId,
+  ]);
 }

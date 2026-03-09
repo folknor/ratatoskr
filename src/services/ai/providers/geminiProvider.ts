@@ -6,7 +6,10 @@ const factory = createProviderFactory(
   (apiKey) => new GoogleGenerativeAI(apiKey),
 );
 
-export function createGeminiProvider(apiKey: string, modelId: string): AiProviderClient {
+export function createGeminiProvider(
+  apiKey: string,
+  modelId: string,
+): AiProviderClient {
   const client = factory.getClient(apiKey);
 
   return {

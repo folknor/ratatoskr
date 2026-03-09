@@ -21,7 +21,9 @@ function isDeliveryTime(schedule: DeliverySchedule): boolean {
   if (!schedule.days.includes(currentDay)) return false;
   if (currentHour !== schedule.hour) return false;
   // Allow within 2-minute window
-  return currentMinute >= schedule.minute && currentMinute < schedule.minute + 2;
+  return (
+    currentMinute >= schedule.minute && currentMinute < schedule.minute + 2
+  );
 }
 
 /**
@@ -48,7 +50,8 @@ async function checkBundleDelivery(): Promise<void> {
       if (isDeliveryTime(schedule)) {
         // Avoid double-delivery: check last_delivered_at
         const now = getCurrentUnixTimestamp();
-        if (rule.last_delivered_at && now - rule.last_delivered_at < 120) continue;
+        if (rule.last_delivered_at && now - rule.last_delivered_at < 120)
+          continue;
 
         const released = await releaseHeldThreads(account.id, rule.category);
         if (released > 0) {

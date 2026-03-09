@@ -14,7 +14,9 @@ describe("classifyError", () => {
   });
 
   it("classifies ECONNREFUSED as network (retryable)", () => {
-    const result = classifyError(new Error("connect ECONNREFUSED 127.0.0.1:443"));
+    const result = classifyError(
+      new Error("connect ECONNREFUSED 127.0.0.1:443"),
+    );
     expect(result.type).toBe("network");
     expect(result.isRetryable).toBe(true);
   });
@@ -80,7 +82,9 @@ describe("classifyError", () => {
   });
 
   it("classifies DNS errors as network", () => {
-    const result = classifyError(new Error("getaddrinfo ENOTFOUND gmail.googleapis.com"));
+    const result = classifyError(
+      new Error("getaddrinfo ENOTFOUND gmail.googleapis.com"),
+    );
     expect(result.type).toBe("network");
     expect(result.isRetryable).toBe(true);
   });
@@ -98,7 +102,9 @@ describe("classifyError", () => {
   });
 
   it("classifies 'tls handshake' as network (IMAP pattern)", () => {
-    const result = classifyError("tls handshake error: certificate verify failed");
+    const result = classifyError(
+      "tls handshake error: certificate verify failed",
+    );
     expect(result.type).toBe("network");
     expect(result.isRetryable).toBe(true);
   });
@@ -136,9 +142,9 @@ describe("formatSyncError", () => {
   });
 
   it("translates TLS errors", () => {
-    expect(formatSyncError("TLS handshake failed: certificate verify error")).toBe(
-      "Secure connection failed \u2014 check security settings",
-    );
+    expect(
+      formatSyncError("TLS handshake failed: certificate verify error"),
+    ).toBe("Secure connection failed \u2014 check security settings");
   });
 
   it("translates connection refused", () => {
@@ -161,6 +167,8 @@ describe("formatSyncError", () => {
   });
 
   it("passes through short unknown errors unchanged", () => {
-    expect(formatSyncError("Something unexpected")).toBe("Something unexpected");
+    expect(formatSyncError("Something unexpected")).toBe(
+      "Something unexpected",
+    );
   });
 });

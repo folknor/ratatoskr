@@ -60,9 +60,14 @@ async function decryptAccountTokens(account: DbAccount): Promise<DbAccount> {
   }
   if (account.oauth_client_secret && isEncrypted(account.oauth_client_secret)) {
     try {
-      account.oauth_client_secret = await decryptValue(account.oauth_client_secret);
+      account.oauth_client_secret = await decryptValue(
+        account.oauth_client_secret,
+      );
     } catch (err) {
-      console.warn("Failed to decrypt OAuth client secret, using raw value:", err);
+      console.warn(
+        "Failed to decrypt OAuth client secret, using raw value:",
+        err,
+      );
     }
   }
   if (account.caldav_password && isEncrypted(account.caldav_password)) {

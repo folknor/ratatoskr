@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 vi.mock("@/services/db/connection", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/db/connection")>();
+  const actual =
+    await importOriginal<typeof import("@/services/db/connection")>();
   return {
     ...actual,
     getDb: vi.fn(),
@@ -9,7 +10,12 @@ vi.mock("@/services/db/connection", async (importOriginal) => {
 });
 
 import { getDb } from "@/services/db/connection";
-import { muteThread, unmuteThread, getMutedThreadIds, deleteAllThreadsForAccount } from "./threads";
+import {
+  muteThread,
+  unmuteThread,
+  getMutedThreadIds,
+  deleteAllThreadsForAccount,
+} from "./threads";
 import { createMockDb } from "@/test/mocks";
 
 const mockDb = createMockDb();
@@ -17,7 +23,9 @@ const mockDb = createMockDb();
 describe("threads service - deleteAllThreadsForAccount", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getDb).mockResolvedValue(mockDb as unknown as Awaited<ReturnType<typeof getDb>>);
+    vi.mocked(getDb).mockResolvedValue(
+      mockDb as unknown as Awaited<ReturnType<typeof getDb>>,
+    );
   });
 
   it("deletes all threads for the given account", async () => {
@@ -33,7 +41,9 @@ describe("threads service - deleteAllThreadsForAccount", () => {
 describe("threads service - mute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getDb).mockResolvedValue(mockDb as unknown as Awaited<ReturnType<typeof getDb>>);
+    vi.mocked(getDb).mockResolvedValue(
+      mockDb as unknown as Awaited<ReturnType<typeof getDb>>,
+    );
   });
 
   describe("muteThread", () => {

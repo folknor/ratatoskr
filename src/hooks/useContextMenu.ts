@@ -1,5 +1,8 @@
 import { useCallback } from "react";
-import { useContextMenuStore, type ContextMenuType } from "@/stores/contextMenuStore";
+import {
+  useContextMenuStore,
+  type ContextMenuType,
+} from "@/stores/contextMenuStore";
 
 /**
  * Hook to wire up a context menu trigger on an element.

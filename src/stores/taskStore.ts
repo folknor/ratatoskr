@@ -42,7 +42,9 @@ export const useTaskStore = create<TaskState>((set) => ({
   addTask: (task) =>
     set((state) => ({
       tasks: [task, ...state.tasks],
-      incompleteCount: task.is_completed ? state.incompleteCount : state.incompleteCount + 1,
+      incompleteCount: task.is_completed
+        ? state.incompleteCount
+        : state.incompleteCount + 1,
     })),
   updateTaskInStore: (id, updates) =>
     set((state) => {
@@ -50,7 +52,9 @@ export const useTaskStore = create<TaskState>((set) => ({
         list.map((t) => (t.id === id ? { ...t, ...updates } : t));
       let countDelta = 0;
       if (updates.is_completed !== undefined) {
-        const existing = state.tasks.find((t) => t.id === id) ?? state.threadTasks.find((t) => t.id === id);
+        const existing =
+          state.tasks.find((t) => t.id === id) ??
+          state.threadTasks.find((t) => t.id === id);
         if (existing) {
           if (updates.is_completed && !existing.is_completed) countDelta = -1;
           if (!updates.is_completed && existing.is_completed) countDelta = 1;
@@ -69,7 +73,8 @@ export const useTaskStore = create<TaskState>((set) => ({
       return {
         tasks: state.tasks.filter((t) => t.id !== id),
         threadTasks: state.threadTasks.filter((t) => t.id !== id),
-        selectedTaskId: state.selectedTaskId === id ? null : state.selectedTaskId,
+        selectedTaskId:
+          state.selectedTaskId === id ? null : state.selectedTaskId,
         incompleteCount: state.incompleteCount + countDelta,
       };
     }),

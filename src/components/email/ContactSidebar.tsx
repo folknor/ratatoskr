@@ -1,16 +1,40 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Mail, Clock, X, Send, Copy, Star, UserPlus, Check, PenLine,
-  Paperclip, Building2, ChevronDown, ChevronRight,
+  Mail,
+  Clock,
+  X,
+  Send,
+  Copy,
+  Star,
+  UserPlus,
+  Check,
+  PenLine,
+  Paperclip,
+  Building2,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import {
-  getContactByEmail, getContactStats, getRecentThreadsWithContact,
-  upsertContact, updateContact, updateContactNotes,
-  getAttachmentsFromContact, getContactsFromSameDomain, getLatestAuthResult,
-  type ContactStats, type DbContact, type ContactAttachment, type SameDomainContact,
+  getContactByEmail,
+  getContactStats,
+  getRecentThreadsWithContact,
+  upsertContact,
+  updateContact,
+  updateContactNotes,
+  getAttachmentsFromContact,
+  getContactsFromSameDomain,
+  getLatestAuthResult,
+  type ContactStats,
+  type DbContact,
+  type ContactAttachment,
+  type SameDomainContact,
 } from "@/services/db/contacts";
-import { isVipSender, addVipSender, removeVipSender } from "@/services/db/notificationVips";
+import {
+  isVipSender,
+  addVipSender,
+  removeVipSender,
+} from "@/services/db/notificationVips";
 import { fetchAndCacheGravatarUrl } from "@/services/contacts/gravatar";
 import { useThreadStore } from "@/stores/threadStore";
 import { useComposerStore } from "@/stores/composerStore";
@@ -27,17 +51,30 @@ interface ContactSidebarProps {
   onClose: () => void;
 }
 
-export function ContactSidebar({ email, name, accountId, onClose }: ContactSidebarProps) {
+export function ContactSidebar({
+  email,
+  name,
+  accountId,
+  onClose,
+}: ContactSidebarProps) {
   const { t } = useTranslation("email");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [stats, setStats] = useState<ContactStats | null>(null);
-  const [recentThreads, setRecentThreads] = useState<{ thread_id: string; subject: string | null; last_message_at: number | null }[]>([]);
+  const [recentThreads, setRecentThreads] = useState<
+    {
+      thread_id: string;
+      subject: string | null;
+      last_message_at: number | null;
+    }[]
+  >([]);
   const [contact, setContact] = useState<DbContact | null>(null);
   const [isVip, setIsVip] = useState(false);
   const [notes, setNotes] = useState("");
   const [notesExpanded, setNotesExpanded] = useState(false);
   const [attachments, setAttachments] = useState<ContactAttachment[]>([]);
-  const [sameDomainContacts, setSameDomainContacts] = useState<SameDomainContact[]>([]);
+  const [sameDomainContacts, setSameDomainContacts] = useState<
+    SameDomainContact[]
+  >([]);
   const [authResults, setAuthResults] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [addedFeedback, setAddedFeedback] = useState(false);
@@ -48,34 +85,37 @@ export function ContactSidebar({ email, name, accountId, onClose }: ContactSideb
   const notesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const addedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const handleThreadClick = useCallback(async (threadId: string) => {
-    const { threads, threadMap, setThreads } = useThreadStore.getState();
-    if (threadMap.has(threadId)) {
+  const handleThreadClick = useCallback(
+    async (threadId: string) => {
+      const { threads, threadMap, setThreads } = useThreadStore.getState();
+      if (threadMap.has(threadId)) {
+        navigateToThread(threadId);
+        return;
+      }
+      const dbThread = await getThreadById(accountId, threadId);
+      if (!dbThread) return;
+      const labelIds = await getThreadLabelIds(accountId, threadId);
+      const mapped = {
+        id: dbThread.id,
+        accountId: dbThread.account_id,
+        subject: dbThread.subject,
+        snippet: dbThread.snippet,
+        lastMessageAt: dbThread.last_message_at ?? 0,
+        messageCount: dbThread.message_count,
+        isRead: dbThread.is_read === 1,
+        isStarred: dbThread.is_starred === 1,
+        isPinned: dbThread.is_pinned === 1,
+        isMuted: dbThread.is_muted === 1,
+        hasAttachments: dbThread.has_attachments === 1,
+        labelIds,
+        fromName: dbThread.from_name,
+        fromAddress: dbThread.from_address,
+      };
+      setThreads([...threads, mapped]);
       navigateToThread(threadId);
-      return;
-    }
-    const dbThread = await getThreadById(accountId, threadId);
-    if (!dbThread) return;
-    const labelIds = await getThreadLabelIds(accountId, threadId);
-    const mapped = {
-      id: dbThread.id,
-      accountId: dbThread.account_id,
-      subject: dbThread.subject,
-      snippet: dbThread.snippet,
-      lastMessageAt: dbThread.last_message_at ?? 0,
-      messageCount: dbThread.message_count,
-      isRead: dbThread.is_read === 1,
-      isStarred: dbThread.is_starred === 1,
-      isPinned: dbThread.is_pinned === 1,
-      isMuted: dbThread.is_muted === 1,
-      hasAttachments: dbThread.has_attachments === 1,
-      labelIds,
-      fromName: dbThread.from_name,
-      fromAddress: dbThread.from_address,
-    };
-    setThreads([...threads, mapped]);
-    navigateToThread(threadId);
-  }, [accountId]);
+    },
+    [accountId],
+  );
 
   useEffect(() => {
     if (!email) return;
@@ -97,24 +137,38 @@ export function ContactSidebar({ email, name, accountId, onClose }: ContactSideb
     });
 
     // Load stats
-    getContactStats(email).then((s) => { if (!cancelled) setStats(s); });
+    getContactStats(email).then((s) => {
+      if (!cancelled) setStats(s);
+    });
 
     // Load recent threads
-    getRecentThreadsWithContact(email).then((t) => { if (!cancelled) setRecentThreads(t); });
+    getRecentThreadsWithContact(email).then((t) => {
+      if (!cancelled) setRecentThreads(t);
+    });
 
     // Load VIP status
-    isVipSender(accountId, email).then((v) => { if (!cancelled) setIsVip(v); });
+    isVipSender(accountId, email).then((v) => {
+      if (!cancelled) setIsVip(v);
+    });
 
     // Load attachments from contact
-    getAttachmentsFromContact(email).then((a) => { if (!cancelled) setAttachments(a); });
+    getAttachmentsFromContact(email).then((a) => {
+      if (!cancelled) setAttachments(a);
+    });
 
     // Load same-domain contacts
-    getContactsFromSameDomain(email).then((c) => { if (!cancelled) setSameDomainContacts(c); });
+    getContactsFromSameDomain(email).then((c) => {
+      if (!cancelled) setSameDomainContacts(c);
+    });
 
     // Load auth results
-    getLatestAuthResult(email).then((r) => { if (!cancelled) setAuthResults(r); });
+    getLatestAuthResult(email).then((r) => {
+      if (!cancelled) setAuthResults(r);
+    });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [email, accountId]);
 
   // -- Event handlers --
@@ -140,13 +194,16 @@ export function ContactSidebar({ email, name, accountId, onClose }: ContactSideb
     }
   }, [accountId, email, name, isVip]);
 
-  const handleNotesChange = useCallback((value: string) => {
-    setNotes(value);
-    if (notesTimerRef.current) clearTimeout(notesTimerRef.current);
-    notesTimerRef.current = setTimeout(() => {
-      updateContactNotes(email, value);
-    }, 1000);
-  }, [email]);
+  const handleNotesChange = useCallback(
+    (value: string) => {
+      setNotes(value);
+      if (notesTimerRef.current) clearTimeout(notesTimerRef.current);
+      notesTimerRef.current = setTimeout(() => {
+        updateContactNotes(email, value);
+      }, 1000);
+    },
+    [email],
+  );
 
   const handleNotesBlur = useCallback(() => {
     if (notesTimerRef.current) {
@@ -248,9 +305,7 @@ export function ContactSidebar({ email, name, accountId, onClose }: ContactSideb
             </div>
           )}
 
-          <div className="text-xs text-text-tertiary mt-0.5">
-            {email}
-          </div>
+          <div className="text-xs text-text-tertiary mt-0.5">{email}</div>
         </div>
 
         {/* Quick Actions Row */}
@@ -267,7 +322,11 @@ export function ContactSidebar({ email, name, accountId, onClose }: ContactSideb
             title={copyFeedback ? t("copied") : t("copyEmail")}
             className="p-2 text-text-secondary hover:text-accent hover:bg-bg-hover rounded-lg transition-colors"
           >
-            {copyFeedback ? <Check size={16} className="text-success" /> : <Copy size={16} />}
+            {copyFeedback ? (
+              <Check size={16} className="text-success" />
+            ) : (
+              <Copy size={16} />
+            )}
           </button>
           <button
             onClick={handleToggleVip}
@@ -315,18 +374,26 @@ export function ContactSidebar({ email, name, accountId, onClose }: ContactSideb
           <div className="space-y-2 mb-4">
             <div className="flex items-center gap-2 text-xs text-text-secondary">
               <Mail size={12} className="text-text-tertiary shrink-0" />
-              <span>{stats.emailCount} {t("emails")}</span>
+              <span>
+                {stats.emailCount} {t("emails")}
+              </span>
             </div>
             {stats.firstEmail && (
               <div className="flex items-center gap-2 text-xs text-text-secondary">
                 <Clock size={12} className="text-text-tertiary shrink-0" />
-                <span>{t("firstEmail")}{formatRelativeDate(stats.firstEmail)}</span>
+                <span>
+                  {t("firstEmail")}
+                  {formatRelativeDate(stats.firstEmail)}
+                </span>
               </div>
             )}
             {stats.lastEmail && (
               <div className="flex items-center gap-2 text-xs text-text-secondary">
                 <Clock size={12} className="text-text-tertiary shrink-0" />
-                <span>{t("lastEmail")}{formatRelativeDate(stats.lastEmail)}</span>
+                <span>
+                  {t("lastEmail")}
+                  {formatRelativeDate(stats.lastEmail)}
+                </span>
               </div>
             )}
           </div>
@@ -339,7 +406,11 @@ export function ContactSidebar({ email, name, accountId, onClose }: ContactSideb
               onClick={() => setNotesExpanded(!notesExpanded)}
               className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-text-tertiary mb-2 hover:text-text-secondary transition-colors"
             >
-              {notesExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+              {notesExpanded ? (
+                <ChevronDown size={12} />
+              ) : (
+                <ChevronRight size={12} />
+              )}
               {t("notes")}
             </button>
             {notesExpanded && (
@@ -370,7 +441,9 @@ export function ContactSidebar({ email, name, accountId, onClose }: ContactSideb
                 >
                   <span className="shrink-0">{getFileIcon(att.mime_type)}</span>
                   <div className="min-w-0 flex-1">
-                    <div className="text-text-secondary truncate">{att.filename}</div>
+                    <div className="text-text-secondary truncate">
+                      {att.filename}
+                    </div>
                     <div className="text-text-tertiary text-[0.625rem]">
                       {att.size != null && formatFileSize(att.size)}
                       {att.size != null && " \u00B7 "}
@@ -397,7 +470,11 @@ export function ContactSidebar({ email, name, accountId, onClose }: ContactSideb
                   className="flex items-center gap-2 px-2 py-1.5 text-xs rounded hover:bg-bg-hover transition-colors"
                 >
                   {c.avatar_url ? (
-                    <img src={c.avatar_url} alt="" className="w-5 h-5 rounded-full shrink-0" />
+                    <img
+                      src={c.avatar_url}
+                      alt=""
+                      className="w-5 h-5 rounded-full shrink-0"
+                    />
                   ) : (
                     <div className="w-5 h-5 rounded-full bg-accent/20 text-accent flex items-center justify-center text-[0.5rem] font-semibold shrink-0">
                       {(c.display_name?.[0] ?? c.email[0] ?? "?").toUpperCase()}
@@ -407,7 +484,9 @@ export function ContactSidebar({ email, name, accountId, onClose }: ContactSideb
                     <div className="text-text-secondary truncate">
                       {c.display_name ?? c.email.split("@")[0]}
                     </div>
-                    <div className="text-text-tertiary text-[0.625rem] truncate">{c.email}</div>
+                    <div className="text-text-tertiary text-[0.625rem] truncate">
+                      {c.email}
+                    </div>
                   </div>
                 </div>
               ))}

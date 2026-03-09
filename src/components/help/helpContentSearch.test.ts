@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { HELP_CATEGORIES, getAllCards, getCategoryById } from "@/constants/helpContent";
+import {
+  HELP_CATEGORIES,
+  getAllCards,
+  getCategoryById,
+} from "@/constants/helpContent";
 
 /**
  * Tests for Help page search/filter logic and data integrity.
@@ -21,7 +25,8 @@ function filterCards(query: string) {
     if (card.title.toLowerCase().includes(q)) return true;
     if (card.summary.toLowerCase().includes(q)) return true;
     if (card.description.toLowerCase().includes(q)) return true;
-    if (card.tips?.some((tip) => tip.text.toLowerCase().includes(q))) return true;
+    if (card.tips?.some((tip) => tip.text.toLowerCase().includes(q)))
+      return true;
     return false;
   });
 }

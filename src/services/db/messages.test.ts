@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 vi.mock("@/services/db/connection", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/db/connection")>();
+  const actual =
+    await importOriginal<typeof import("@/services/db/connection")>();
   return {
     ...actual,
     getDb: vi.fn(),
@@ -9,7 +10,10 @@ vi.mock("@/services/db/connection", async (importOriginal) => {
 });
 
 import { getDb } from "@/services/db/connection";
-import { deleteAllMessagesForAccount, updateMessageThreadIds } from "./messages";
+import {
+  deleteAllMessagesForAccount,
+  updateMessageThreadIds,
+} from "./messages";
 import { createMockDb } from "@/test/mocks";
 
 const mockDb = createMockDb();
@@ -17,7 +21,9 @@ const mockDb = createMockDb();
 describe("messages service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getDb).mockResolvedValue(mockDb as unknown as Awaited<ReturnType<typeof getDb>>);
+    vi.mocked(getDb).mockResolvedValue(
+      mockDb as unknown as Awaited<ReturnType<typeof getDb>>,
+    );
   });
 
   describe("deleteAllMessagesForAccount", () => {
@@ -33,7 +39,11 @@ describe("messages service", () => {
 
   describe("updateMessageThreadIds", () => {
     it("updates thread_id for a small batch of messages", async () => {
-      await updateMessageThreadIds("acc-1", ["msg-1", "msg-2", "msg-3"], "thread-abc");
+      await updateMessageThreadIds(
+        "acc-1",
+        ["msg-1", "msg-2", "msg-3"],
+        "thread-abc",
+      );
 
       expect(mockDb.execute).toHaveBeenCalledTimes(1);
       expect(mockDb.execute).toHaveBeenCalledWith(

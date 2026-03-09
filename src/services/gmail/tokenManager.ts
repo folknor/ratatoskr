@@ -1,6 +1,10 @@
 import { GmailClient } from "./client";
 import { startOAuthFlow } from "./auth";
-import { getAllAccounts, getAccount, updateAccountAllTokens } from "../db/accounts";
+import {
+  getAllAccounts,
+  getAccount,
+  updateAccountAllTokens,
+} from "../db/accounts";
 import { getSetting, getSecureSetting } from "../db/settings";
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
 import { normalizeEmail } from "@/utils/emailUtils";
@@ -11,9 +15,7 @@ const clients = new Map<string, GmailClient>();
 /**
  * Get or create a GmailClient for the given account.
  */
-export async function getGmailClient(
-  accountId: string,
-): Promise<GmailClient> {
+export async function getGmailClient(accountId: string): Promise<GmailClient> {
   const existing = clients.get(accountId);
   if (existing) return existing;
 
@@ -27,11 +29,16 @@ export async function getGmailClient(
     throw new Error(`Account ${accountId} has no tokens`);
   }
 
-  const client = new GmailClient(accountId, clientId, {
-    accessToken: account.access_token,
-    refreshToken: account.refresh_token,
-    expiresAt: account.token_expires_at ?? 0,
-  }, clientSecret);
+  const client = new GmailClient(
+    accountId,
+    clientId,
+    {
+      accessToken: account.access_token,
+      refreshToken: account.refresh_token,
+      expiresAt: account.token_expires_at ?? 0,
+    },
+    clientSecret,
+  );
 
   clients.set(accountId, client);
   return client;
@@ -50,7 +57,9 @@ export function removeClient(accountId: string): void {
 export async function getClientId(): Promise<string> {
   const clientId = await getSetting("google_client_id");
   if (!clientId) {
-    throw new Error("Google Client ID not configured. Go to Settings to set it up.");
+    throw new Error(
+      "Google Client ID not configured. Go to Settings to set it up.",
+    );
   }
   return clientId;
 }
@@ -70,15 +79,21 @@ export async function initializeClients(): Promise<void> {
   const accounts = await getAllAccounts();
   const clientId = await getSetting("google_client_id");
   if (!clientId) return;
-  const clientSecret = (await getSecureSetting("google_client_secret")) ?? undefined;
+  const clientSecret =
+    (await getSecureSetting("google_client_secret")) ?? undefined;
 
   for (const account of accounts) {
     if (account.is_active && account.access_token && account.refresh_token) {
-      const client = new GmailClient(account.id, clientId, {
-        accessToken: account.access_token,
-        refreshToken: account.refresh_token,
-        expiresAt: account.token_expires_at ?? 0,
-      }, clientSecret);
+      const client = new GmailClient(
+        account.id,
+        clientId,
+        {
+          accessToken: account.access_token,
+          refreshToken: account.refresh_token,
+          expiresAt: account.token_expires_at ?? 0,
+        },
+        clientSecret,
+      );
       clients.set(account.id, client);
     }
   }
@@ -113,14 +128,24 @@ export async function reauthorizeAccount(
   }
 
   const expiresAt = getCurrentUnixTimestamp() + tokens.expires_in;
-  await updateAccountAllTokens(accountId, tokens.access_token, tokens.refresh_token, expiresAt);
+  await updateAccountAllTokens(
+    accountId,
+    tokens.access_token,
+    tokens.refresh_token,
+    expiresAt,
+  );
 
   // Evict stale client and create a fresh one
   clients.delete(accountId);
-  const client = new GmailClient(accountId, clientId, {
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-    expiresAt,
-  }, clientSecret);
+  const client = new GmailClient(
+    accountId,
+    clientId,
+    {
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      expiresAt,
+    },
+    clientSecret,
+  );
   clients.set(accountId, client);
 }

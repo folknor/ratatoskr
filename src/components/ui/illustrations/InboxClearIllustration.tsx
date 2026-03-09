@@ -66,13 +66,37 @@ export function InboxClearIllustration({ size = 140, className }: Props) {
         fill="none"
       />
       {/* Sparkle top-right */}
-      <circle cx="102" cy="40" r="2.5" fill="var(--color-accent)" opacity="0.5" />
-      <circle cx="110" cy="48" r="1.5" fill="var(--color-accent)" opacity="0.35" />
+      <circle
+        cx="102"
+        cy="40"
+        r="2.5"
+        fill="var(--color-accent)"
+        opacity="0.5"
+      />
+      <circle
+        cx="110"
+        cy="48"
+        r="1.5"
+        fill="var(--color-accent)"
+        opacity="0.35"
+      />
       {/* Sparkle top-left */}
       <circle cx="38" cy="35" r="2" fill="var(--color-accent)" opacity="0.4" />
-      <circle cx="30" cy="44" r="1.5" fill="var(--color-accent)" opacity="0.3" />
+      <circle
+        cx="30"
+        cy="44"
+        r="1.5"
+        fill="var(--color-accent)"
+        opacity="0.3"
+      />
       {/* Sparkle bottom */}
-      <circle cx="95" cy="95" r="1.5" fill="var(--color-accent)" opacity="0.3" />
+      <circle
+        cx="95"
+        cy="95"
+        r="1.5"
+        fill="var(--color-accent)"
+        opacity="0.3"
+      />
     </svg>
   );
 }

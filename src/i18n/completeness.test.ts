@@ -26,7 +26,10 @@ import calendarIT from "./locales/it/calendar.json";
 import attachmentsIT from "./locales/it/attachments.json";
 import helpIT from "./locales/it/help.json";
 
-const namespaces: Record<string, { en: Record<string, unknown>; italiano: Record<string, unknown> }> = {
+const namespaces: Record<
+  string,
+  { en: Record<string, unknown>; italiano: Record<string, unknown> }
+> = {
   common: { en: commonEN, italiano: commonIT },
   sidebar: { en: sidebarEN, italiano: sidebarIT },
   email: { en: emailEN, italiano: emailIT },

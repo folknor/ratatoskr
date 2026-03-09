@@ -31,19 +31,31 @@ export default function ComposerWindow() {
 
         // Restore theme
         const savedTheme = await getSetting("theme");
-        if (savedTheme === "light" || savedTheme === "dark" || savedTheme === "system") {
+        if (
+          savedTheme === "light" ||
+          savedTheme === "dark" ||
+          savedTheme === "system"
+        ) {
           setTheme(savedTheme);
         }
 
         // Restore font scale
         const savedFontScale = await getSetting("font_size");
-        if (savedFontScale === "small" || savedFontScale === "default" || savedFontScale === "large" || savedFontScale === "xlarge") {
+        if (
+          savedFontScale === "small" ||
+          savedFontScale === "default" ||
+          savedFontScale === "large" ||
+          savedFontScale === "xlarge"
+        ) {
           setFontScale(savedFontScale);
         }
 
         // Restore color theme
         const savedColorTheme = await getSetting("color_theme");
-        if (savedColorTheme && COLOR_THEMES.some((t) => t.id === savedColorTheme)) {
+        if (
+          savedColorTheme &&
+          COLOR_THEMES.some((t) => t.id === savedColorTheme)
+        ) {
           setColorTheme(savedColorTheme as ColorThemeId);
         }
 
@@ -137,7 +149,12 @@ export default function ComposerWindow() {
   const fontScale = useUIStore((s) => s.fontScale);
   useEffect(() => {
     const root = document.documentElement;
-    root.classList.remove("font-scale-small", "font-scale-default", "font-scale-large", "font-scale-xlarge");
+    root.classList.remove(
+      "font-scale-small",
+      "font-scale-default",
+      "font-scale-large",
+      "font-scale-xlarge",
+    );
     root.classList.add(`font-scale-${fontScale}`);
   }, [fontScale]);
 
@@ -145,7 +162,13 @@ export default function ComposerWindow() {
   const colorTheme = useUIStore((s) => s.colorTheme);
   useEffect(() => {
     const root = document.documentElement;
-    const props = ["--color-accent", "--color-accent-hover", "--color-accent-light", "--color-bg-selected", "--color-sidebar-active"];
+    const props = [
+      "--color-accent",
+      "--color-accent-hover",
+      "--color-accent-light",
+      "--color-bg-selected",
+      "--color-sidebar-active",
+    ];
 
     const apply = () => {
       if (colorTheme === "indigo") {
@@ -155,7 +178,8 @@ export default function ComposerWindow() {
       const themeData = getThemeById(colorTheme);
       const isDark =
         theme === "dark" ||
-        (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        (theme === "system" &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches);
       const colors = isDark ? themeData.dark : themeData.light;
       root.style.setProperty("--color-accent", colors.accent);
       root.style.setProperty("--color-accent-hover", colors.accentHover);

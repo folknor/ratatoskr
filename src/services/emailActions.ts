@@ -258,23 +258,11 @@ async function executeViaProvider(
     case "permanentDelete":
       return provider.permanentDelete(action.threadId, action.messageIds);
     case "markRead":
-      return provider.markRead(
-        action.threadId,
-        action.messageIds,
-        action.read,
-      );
+      return provider.markRead(action.threadId, action.messageIds, action.read);
     case "star":
-      return provider.star(
-        action.threadId,
-        action.messageIds,
-        action.starred,
-      );
+      return provider.star(action.threadId, action.messageIds, action.starred);
     case "spam":
-      return provider.spam(
-        action.threadId,
-        action.messageIds,
-        action.isSpam,
-      );
+      return provider.spam(action.threadId, action.messageIds, action.isSpam);
     case "moveToFolder":
       return provider.moveToFolder(
         action.threadId,

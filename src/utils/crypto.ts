@@ -4,7 +4,13 @@
  * via Tauri's filesystem in the app data directory.
  */
 
-import { exists, readTextFile, writeTextFile, mkdir, BaseDirectory } from "@tauri-apps/plugin-fs";
+import {
+  exists,
+  readTextFile,
+  writeTextFile,
+  mkdir,
+  BaseDirectory,
+} from "@tauri-apps/plugin-fs";
 
 const KEY_FILE_NAME = "velo.key";
 const ALGORITHM = "AES-GCM";

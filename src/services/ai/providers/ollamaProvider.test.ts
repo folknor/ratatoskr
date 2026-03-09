@@ -52,7 +52,10 @@ describe("ollamaProvider", () => {
         choices: [{ message: { content: "Hello!" } }],
       });
 
-      const provider = createOllamaProvider("http://localhost:11434", "llama3.2");
+      const provider = createOllamaProvider(
+        "http://localhost:11434",
+        "llama3.2",
+      );
       const result = await provider.complete({
         systemPrompt: "You are helpful",
         userContent: "Hi",
@@ -70,9 +73,14 @@ describe("ollamaProvider", () => {
     });
 
     it("returns empty string when no content in response", async () => {
-      mockCreate.mockResolvedValue({ choices: [{ message: { content: null } }] });
+      mockCreate.mockResolvedValue({
+        choices: [{ message: { content: null } }],
+      });
 
-      const provider = createOllamaProvider("http://localhost:11434", "llama3.2");
+      const provider = createOllamaProvider(
+        "http://localhost:11434",
+        "llama3.2",
+      );
       const result = await provider.complete({
         systemPrompt: "sys",
         userContent: "user",
@@ -88,14 +96,20 @@ describe("ollamaProvider", () => {
         choices: [{ message: { content: "hi" } }],
       });
 
-      const provider = createOllamaProvider("http://localhost:11434", "llama3.2");
+      const provider = createOllamaProvider(
+        "http://localhost:11434",
+        "llama3.2",
+      );
       expect(await provider.testConnection()).toBe(true);
     });
 
     it("returns false when completion throws", async () => {
       mockCreate.mockRejectedValue(new Error("Connection refused"));
 
-      const provider = createOllamaProvider("http://localhost:11434", "llama3.2");
+      const provider = createOllamaProvider(
+        "http://localhost:11434",
+        "llama3.2",
+      );
       expect(await provider.testConnection()).toBe(false);
     });
   });

@@ -1,21 +1,21 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from "@tauri-apps/api/core";
 
 // ---------- IMAP types ----------
 
 export interface ImapConfig {
   host: string;
   port: number;
-  security: 'tls' | 'starttls' | 'none';
+  security: "tls" | "starttls" | "none";
   username: string;
   password: string; // plaintext password or OAuth2 access token
-  auth_method: 'password' | 'oauth2';
+  auth_method: "password" | "oauth2";
   accept_invalid_certs?: boolean;
 }
 
 export interface ImapFolder {
-  path: string;       // decoded UTF-8 display name
-  raw_path: string;   // original modified UTF-7 path for IMAP commands
-  name: string;       // decoded display name (last segment)
+  path: string; // decoded UTF-8 display name
+  raw_path: string; // original modified UTF-7 path for IMAP commands
+  name: string; // decoded display name (last segment)
   delimiter: string;
   special_use: string | null;
   exists: number;
@@ -106,10 +106,10 @@ export interface DeltaCheckResult {
 export interface SmtpConfig {
   host: string;
   port: number;
-  security: 'tls' | 'starttls' | 'none';
+  security: "tls" | "starttls" | "none";
   username: string;
   password: string;
-  auth_method: 'password' | 'oauth2';
+  auth_method: "password" | "oauth2";
   accept_invalid_certs?: boolean;
 }
 
@@ -125,14 +125,16 @@ export interface SmtpSendResult {
  * Returns a success message string.
  */
 export async function imapTestConnection(config: ImapConfig): Promise<string> {
-  return invoke<string>('imap_test_connection', { config });
+  return invoke<string>("imap_test_connection", { config });
 }
 
 /**
  * List all IMAP folders/mailboxes on the server.
  */
-export async function imapListFolders(config: ImapConfig): Promise<ImapFolder[]> {
-  return invoke<ImapFolder[]>('imap_list_folders', { config });
+export async function imapListFolders(
+  config: ImapConfig,
+): Promise<ImapFolder[]> {
+  return invoke<ImapFolder[]>("imap_list_folders", { config });
 }
 
 /**
@@ -142,9 +144,13 @@ export async function imapListFolders(config: ImapConfig): Promise<ImapFolder[]>
 export async function imapFetchMessages(
   config: ImapConfig,
   folder: string,
-  uids: number[]
+  uids: number[],
 ): Promise<ImapFetchResult> {
-  return invoke<ImapFetchResult>('imap_fetch_messages', { config, folder, uids });
+  return invoke<ImapFetchResult>("imap_fetch_messages", {
+    config,
+    folder,
+    uids,
+  });
 }
 
 /**
@@ -153,9 +159,9 @@ export async function imapFetchMessages(
 export async function imapFetchNewUids(
   config: ImapConfig,
   folder: string,
-  sinceUid: number
+  sinceUid: number,
 ): Promise<number[]> {
-  return invoke<number[]>('imap_fetch_new_uids', { config, folder, sinceUid });
+  return invoke<number[]>("imap_fetch_new_uids", { config, folder, sinceUid });
 }
 
 /**
@@ -164,9 +170,9 @@ export async function imapFetchNewUids(
  */
 export async function imapSearchAllUids(
   config: ImapConfig,
-  folder: string
+  folder: string,
 ): Promise<number[]> {
-  return invoke<number[]>('imap_search_all_uids', { config, folder });
+  return invoke<number[]>("imap_search_all_uids", { config, folder });
 }
 
 /**
@@ -175,9 +181,13 @@ export async function imapSearchAllUids(
 export async function imapFetchMessageBody(
   config: ImapConfig,
   folder: string,
-  uid: number
+  uid: number,
 ): Promise<ImapMessage> {
-  return invoke<ImapMessage>('imap_fetch_message_body', { config, folder, uid });
+  return invoke<ImapMessage>("imap_fetch_message_body", {
+    config,
+    folder,
+    uid,
+  });
 }
 
 /**
@@ -190,9 +200,9 @@ export async function imapSetFlags(
   folder: string,
   uids: number[],
   flags: string[],
-  add: boolean
+  add: boolean,
 ): Promise<void> {
-  return invoke<void>('imap_set_flags', { config, folder, uids, flags, add });
+  return invoke<void>("imap_set_flags", { config, folder, uids, flags, add });
 }
 
 /**
@@ -203,9 +213,14 @@ export async function imapMoveMessages(
   config: ImapConfig,
   folder: string,
   uids: number[],
-  destination: string
+  destination: string,
 ): Promise<void> {
-  return invoke<void>('imap_move_messages', { config, folder, uids, destination });
+  return invoke<void>("imap_move_messages", {
+    config,
+    folder,
+    uids,
+    destination,
+  });
 }
 
 /**
@@ -214,9 +229,9 @@ export async function imapMoveMessages(
 export async function imapDeleteMessages(
   config: ImapConfig,
   folder: string,
-  uids: number[]
+  uids: number[],
 ): Promise<void> {
-  return invoke<void>('imap_delete_messages', { config, folder, uids });
+  return invoke<void>("imap_delete_messages", { config, folder, uids });
 }
 
 /**
@@ -228,9 +243,14 @@ export async function imapAppendMessage(
   config: ImapConfig,
   folder: string,
   rawMessage: string,
-  flags?: string
+  flags?: string,
 ): Promise<void> {
-  return invoke<void>('imap_append_message', { config, folder, flags: flags ?? null, rawMessage });
+  return invoke<void>("imap_append_message", {
+    config,
+    folder,
+    flags: flags ?? null,
+    rawMessage,
+  });
 }
 
 /**
@@ -238,9 +258,9 @@ export async function imapAppendMessage(
  */
 export async function imapGetFolderStatus(
   config: ImapConfig,
-  folder: string
+  folder: string,
 ): Promise<ImapFolderStatus> {
-  return invoke<ImapFolderStatus>('imap_get_folder_status', { config, folder });
+  return invoke<ImapFolderStatus>("imap_get_folder_status", { config, folder });
 }
 
 /**
@@ -251,9 +271,14 @@ export async function imapFetchAttachment(
   config: ImapConfig,
   folder: string,
   uid: number,
-  partId: string
+  partId: string,
 ): Promise<string> {
-  return invoke<string>('imap_fetch_attachment', { config, folder, uid, partId });
+  return invoke<string>("imap_fetch_attachment", {
+    config,
+    folder,
+    uid,
+    partId,
+  });
 }
 
 /**
@@ -263,9 +288,9 @@ export async function imapFetchAttachment(
 export async function imapFetchRawMessage(
   config: ImapConfig,
   folder: string,
-  uid: number
+  uid: number,
 ): Promise<string> {
-  return invoke<string>('imap_fetch_raw_message', { config, folder, uid });
+  return invoke<string>("imap_fetch_raw_message", { config, folder, uid });
 }
 
 /**
@@ -274,9 +299,9 @@ export async function imapFetchRawMessage(
  */
 export async function imapDeltaCheck(
   config: ImapConfig,
-  folders: DeltaCheckRequest[]
+  folders: DeltaCheckRequest[],
 ): Promise<DeltaCheckResult[]> {
-  return invoke<DeltaCheckResult[]>('imap_delta_check', { config, folders });
+  return invoke<DeltaCheckResult[]>("imap_delta_check", { config, folders });
 }
 
 /**
@@ -290,7 +315,12 @@ export async function imapSyncFolder(
   batchSize: number,
   sinceDate?: string | null,
 ): Promise<ImapFolderSyncResult> {
-  return invoke<ImapFolderSyncResult>('imap_sync_folder', { config, folder, batchSize, sinceDate: sinceDate ?? null });
+  return invoke<ImapFolderSyncResult>("imap_sync_folder", {
+    config,
+    folder,
+    batchSize,
+    sinceDate: sinceDate ?? null,
+  });
 }
 
 /**
@@ -303,7 +333,11 @@ export async function imapSearchFolder(
   folder: string,
   sinceDate?: string | null,
 ): Promise<ImapFolderSearchResult> {
-  return invoke<ImapFolderSearchResult>('imap_search_folder', { config, folder, sinceDate: sinceDate ?? null });
+  return invoke<ImapFolderSearchResult>("imap_search_folder", {
+    config,
+    folder,
+    sinceDate: sinceDate ?? null,
+  });
 }
 
 /**
@@ -314,7 +348,11 @@ export async function imapRawFetchDiagnostic(
   folder: string,
   uidRange: string,
 ): Promise<string> {
-  return invoke<string>('imap_raw_fetch_diagnostic', { config, folder, uidRange });
+  return invoke<string>("imap_raw_fetch_diagnostic", {
+    config,
+    folder,
+    uidRange,
+  });
 }
 
 // ---------- SMTP commands ----------
@@ -325,14 +363,16 @@ export async function imapRawFetchDiagnostic(
  */
 export async function smtpSendEmail(
   config: SmtpConfig,
-  rawEmail: string
+  rawEmail: string,
 ): Promise<SmtpSendResult> {
-  return invoke<SmtpSendResult>('smtp_send_email', { config, rawEmail });
+  return invoke<SmtpSendResult>("smtp_send_email", { config, rawEmail });
 }
 
 /**
  * Test SMTP connectivity by connecting and authenticating.
  */
-export async function smtpTestConnection(config: SmtpConfig): Promise<SmtpSendResult> {
-  return invoke<SmtpSendResult>('smtp_test_connection', { config });
+export async function smtpTestConnection(
+  config: SmtpConfig,
+): Promise<SmtpSendResult> {
+  return invoke<SmtpSendResult>("smtp_test_connection", { config });
 }

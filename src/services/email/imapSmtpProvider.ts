@@ -1,7 +1,11 @@
 import type { EmailProvider, EmailFolder, SyncResult } from "./types";
 import type { ParsedMessage } from "../gmail/messageParser";
 import { buildImapConfig, buildSmtpConfig } from "../imap/imapConfigBuilder";
-import { imapInitialSync, imapDeltaSync, imapMessageToParsedMessage } from "../imap/imapSync";
+import {
+  imapInitialSync,
+  imapDeltaSync,
+  imapMessageToParsedMessage,
+} from "../imap/imapSync";
 import { mapFolderToLabel, getSyncableFolders } from "../imap/folderMapper";
 import {
   imapListFolders,
@@ -22,7 +26,11 @@ import { getAccount, type DbAccount } from "../db/accounts";
 import { findSpecialFolder } from "../imap/messageHelper";
 import { ensureFreshToken } from "../oauth/oauthTokenManager";
 import { upsertMessage } from "../db/messages";
-import { upsertThread, setThreadLabels, getThreadLabelIds } from "../db/threads";
+import {
+  upsertThread,
+  setThreadLabels,
+  getThreadLabelIds,
+} from "../db/threads";
 
 /**
  * Decode base64url (Gmail/RFC 4648 URL-safe, no padding) to a UTF-8 string.
@@ -206,9 +214,15 @@ export class ImapSmtpProvider implements EmailProvider {
     daysBack: number,
     onProgress?: (phase: string, current: number, total: number) => void,
   ): Promise<SyncResult> {
-    return imapInitialSync(this.accountId, daysBack, onProgress ? (p) => {
-      onProgress(p.phase, p.current, p.total);
-    } : undefined);
+    return imapInitialSync(
+      this.accountId,
+      daysBack,
+      onProgress
+        ? (p) => {
+            onProgress(p.phase, p.current, p.total);
+          }
+        : undefined,
+    );
   }
 
   async deltaSync(_syncToken: string): Promise<SyncResult> {
@@ -265,10 +279,7 @@ export class ImapSmtpProvider implements EmailProvider {
 
   // ---- Actions ----
 
-  async archive(
-    _threadId: string,
-    _messageIds: string[],
-  ): Promise<void> {
+  async archive(_threadId: string, _messageIds: string[]): Promise<void> {
     const config = await this.getImapConfig();
     const grouped = this.groupByFolder(_messageIds);
     const archiveFolder =
@@ -280,10 +291,7 @@ export class ImapSmtpProvider implements EmailProvider {
     }
   }
 
-  async trash(
-    _threadId: string,
-    _messageIds: string[],
-  ): Promise<void> {
+  async trash(_threadId: string, _messageIds: string[]): Promise<void> {
     const config = await this.getImapConfig();
     const grouped = this.groupByFolder(_messageIds);
     const trashFolder =
@@ -364,10 +372,7 @@ export class ImapSmtpProvider implements EmailProvider {
     }
   }
 
-  async addLabel(
-    _threadId: string,
-    _labelId: string,
-  ): Promise<void> {
+  async addLabel(_threadId: string, _labelId: string): Promise<void> {
     // IMAP doesn't have native labels — this would require COPY to another folder
     // or using IMAP keywords (if server supports them).
     // For now, this is a no-op with a warning.
@@ -377,10 +382,7 @@ export class ImapSmtpProvider implements EmailProvider {
     );
   }
 
-  async removeLabel(
-    _threadId: string,
-    _labelId: string,
-  ): Promise<void> {
+  async removeLabel(_threadId: string, _labelId: string): Promise<void> {
     // IMAP doesn't have native labels.
     console.warn(
       "IMAP does not natively support labels. " +
@@ -457,7 +459,10 @@ export class ImapSmtpProvider implements EmailProvider {
       // Reply: add SENT label to existing thread
       const existingLabels = await getThreadLabelIds(this.accountId, threadId);
       if (!existingLabels.includes("SENT")) {
-        await setThreadLabels(this.accountId, threadId, [...existingLabels, "SENT"]);
+        await setThreadLabels(this.accountId, threadId, [
+          ...existingLabels,
+          "SENT",
+        ]);
       }
     } else {
       // New thread: create thread record

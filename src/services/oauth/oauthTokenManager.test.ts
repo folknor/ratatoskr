@@ -63,7 +63,9 @@ describe("ensureFreshToken", () => {
     });
 
     const mockProvider = { id: "microsoft", name: "Microsoft" };
-    vi.mocked(getOAuthProvider).mockReturnValue(mockProvider as ReturnType<typeof getOAuthProvider>);
+    vi.mocked(getOAuthProvider).mockReturnValue(
+      mockProvider as ReturnType<typeof getOAuthProvider>,
+    );
     vi.mocked(refreshProviderToken).mockResolvedValue({
       access_token: "new-token",
       expires_in: 3600,
@@ -93,7 +95,9 @@ describe("ensureFreshToken", () => {
     });
 
     const mockProvider = { id: "microsoft", name: "Microsoft" };
-    vi.mocked(getOAuthProvider).mockReturnValue(mockProvider as ReturnType<typeof getOAuthProvider>);
+    vi.mocked(getOAuthProvider).mockReturnValue(
+      mockProvider as ReturnType<typeof getOAuthProvider>,
+    );
     vi.mocked(refreshProviderToken).mockResolvedValue({
       access_token: "refreshed-token",
       expires_in: 3600,
@@ -105,7 +109,10 @@ describe("ensureFreshToken", () => {
   });
 
   it("throws when no access token", async () => {
-    const account = createMockDbAccount({ ...oauthOverrides, access_token: null });
+    const account = createMockDbAccount({
+      ...oauthOverrides,
+      access_token: null,
+    });
     await expect(ensureFreshToken(account)).rejects.toThrow("no access token");
   });
 
@@ -125,6 +132,8 @@ describe("ensureFreshToken", () => {
       token_expires_at: Math.floor(Date.now() / 1000) - 60,
     });
     vi.mocked(getOAuthProvider).mockReturnValue(null);
-    await expect(ensureFreshToken(account)).rejects.toThrow("Unknown OAuth provider");
+    await expect(ensureFreshToken(account)).rejects.toThrow(
+      "Unknown OAuth provider",
+    );
   });
 });

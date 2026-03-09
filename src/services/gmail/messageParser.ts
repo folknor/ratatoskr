@@ -98,10 +98,7 @@ function parseEmailAddress(raw: string | null): {
   return { name: null, address: raw.trim() };
 }
 
-function extractBody(
-  part: GmailMessagePart,
-  mimeType: string,
-): string | null {
+function extractBody(part: GmailMessagePart, mimeType: string): string | null {
   if (part.mimeType === mimeType && part.body.data) {
     return part.body.data;
   }
@@ -122,7 +119,10 @@ function extractAttachments(part: GmailMessagePart): ParsedAttachment[] {
   return results;
 }
 
-function collectAttachments(part: GmailMessagePart, results: ParsedAttachment[]): void {
+function collectAttachments(
+  part: GmailMessagePart,
+  results: ParsedAttachment[],
+): void {
   if (part.body.attachmentId) {
     const contentIdHeader = part.headers?.find(
       (h) => h.name.toLowerCase() === "content-id",
@@ -132,12 +132,16 @@ function collectAttachments(part: GmailMessagePart, results: ParsedAttachment[])
     );
     const hasFilename = part.filename && part.filename.length > 0;
     const hasCid = !!contentIdHeader?.value;
-    const isInline = contentDisposition?.value?.toLowerCase().startsWith("inline") ?? false;
+    const isInline =
+      contentDisposition?.value?.toLowerCase().startsWith("inline") ?? false;
 
     // Collect parts with a filename (regular attachments) or a Content-ID (CID inline images)
     if (hasFilename || hasCid) {
       results.push({
-        filename: part.filename || contentIdHeader?.value?.replace(/[<>]/g, "") || "inline",
+        filename:
+          part.filename ||
+          contentIdHeader?.value?.replace(/[<>]/g, "") ||
+          "inline",
         mimeType: part.mimeType,
         size: part.body.size,
         gmailAttachmentId: part.body.attachmentId,

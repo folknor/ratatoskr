@@ -63,8 +63,7 @@ export function AddAccount({ onClose, onSuccess }: AddAccountProps) {
       onSuccess();
     } catch (err) {
       console.error("Add account error:", err);
-      const message =
-        err instanceof Error ? err.message : String(err);
+      const message = err instanceof Error ? err.message : String(err);
       if (message.includes("Client ID not configured")) {
         setNeedsSetup(true);
       } else {
@@ -108,7 +107,12 @@ export function AddAccount({ onClose, onSuccess }: AddAccountProps) {
 
   if (view === "gmail") {
     return (
-      <Modal isOpen={true} onClose={onClose} title={t("addGmailAccount")} width="w-full max-w-md">
+      <Modal
+        isOpen={true}
+        onClose={onClose}
+        title={t("addGmailAccount")}
+        width="w-full max-w-md"
+      >
         <div className="p-4">
           <p className="text-text-secondary text-sm mb-6">
             {t("gmailSignInDescription")}
@@ -167,7 +171,12 @@ export function AddAccount({ onClose, onSuccess }: AddAccountProps) {
 
   // Provider selection view
   return (
-    <Modal isOpen={true} onClose={onClose} title={t("addAccount")} width="w-full max-w-md">
+    <Modal
+      isOpen={true}
+      onClose={onClose}
+      title={t("addAccount")}
+      width="w-full max-w-md"
+    >
       <div className="p-4">
         <p className="text-text-secondary text-sm mb-4">
           {t("chooseConnectionMethod")}

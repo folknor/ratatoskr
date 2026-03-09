@@ -99,7 +99,11 @@ describe("tasks DB service", () => {
     });
 
     it("uses provided id if given", async () => {
-      const id = await insertTask({ id: "custom-id", accountId: "acc1", title: "Test" });
+      const id = await insertTask({
+        id: "custom-id",
+        accountId: "acc1",
+        title: "Test",
+      });
       expect(id).toBe("custom-id");
     });
   });

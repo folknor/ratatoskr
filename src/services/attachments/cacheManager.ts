@@ -22,7 +22,11 @@ export async function cacheAttachment(
   data: Uint8Array,
 ): Promise<string> {
   try {
-    const { mkdir, writeFile: fsWriteFile, BaseDirectory } = await import("@tauri-apps/plugin-fs");
+    const {
+      mkdir,
+      writeFile: fsWriteFile,
+      BaseDirectory,
+    } = await import("@tauri-apps/plugin-fs");
     const baseDir = BaseDirectory.AppData;
 
     // Ensure cache directory exists
@@ -81,7 +85,9 @@ export async function evictOldestCached(): Promise<void> {
   let freed = 0;
 
   // Get oldest cached attachments
-  const rows = await db.select<{ id: string; local_path: string; cache_size: number }[]>(
+  const rows = await db.select<
+    { id: string; local_path: string; cache_size: number }[]
+  >(
     "SELECT id, local_path, cache_size FROM attachments WHERE cached_at IS NOT NULL ORDER BY cached_at ASC LIMIT 100",
   );
 
@@ -108,7 +114,10 @@ export async function clearAllCache(): Promise<void> {
   try {
     const { remove, BaseDirectory } = await import("@tauri-apps/plugin-fs");
     try {
-      await remove(CACHE_DIR, { baseDir: BaseDirectory.AppData, recursive: true });
+      await remove(CACHE_DIR, {
+        baseDir: BaseDirectory.AppData,
+        recursive: true,
+      });
     } catch {
       // directory may not exist
     }

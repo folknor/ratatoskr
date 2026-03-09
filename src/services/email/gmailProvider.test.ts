@@ -430,11 +430,15 @@ describe("GmailApiProvider", () => {
   describe("fetchRawMessage", () => {
     it("fetches raw format and decodes base64url to string", async () => {
       // "Hello World" in base64url
-      const base64url = btoa("From: test@example.com\r\nSubject: Hi\r\n\r\nHello")
+      const base64url = btoa(
+        "From: test@example.com\r\nSubject: Hi\r\n\r\nHello",
+      )
         .replace(/\+/g, "-")
         .replace(/\//g, "_")
         .replace(/=+$/, "");
-      vi.mocked(mockClient.getMessage).mockResolvedValue({ raw: base64url } as never);
+      vi.mocked(mockClient.getMessage).mockResolvedValue({
+        raw: base64url,
+      } as never);
 
       const result = await provider.fetchRawMessage("msg-1");
 

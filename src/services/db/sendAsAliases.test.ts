@@ -5,7 +5,8 @@ const { mockGetDb } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/services/db/connection", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/db/connection")>();
+  const actual =
+    await importOriginal<typeof import("@/services/db/connection")>();
   return {
     ...actual,
     getDb: mockGetDb,
@@ -44,7 +45,9 @@ describe("sendAsAliases service", () => {
       await getAliasesForAccount("acc-1");
 
       expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringContaining("SELECT * FROM send_as_aliases WHERE account_id = $1"),
+        expect.stringContaining(
+          "SELECT * FROM send_as_aliases WHERE account_id = $1",
+        ),
         ["acc-1"],
       );
     });

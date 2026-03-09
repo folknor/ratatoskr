@@ -15,11 +15,17 @@ export function TitleBar() {
 
     // Listen for resize events to track maximize state
     let unlisten: (() => void) | undefined;
-    appWindow.onResized(() => {
-      appWindow.isMaximized().then(setMaximized);
-    }).then((fn) => { unlisten = fn; });
+    appWindow
+      .onResized(() => {
+        appWindow.isMaximized().then(setMaximized);
+      })
+      .then((fn) => {
+        unlisten = fn;
+      });
 
-    return () => { unlisten?.(); };
+    return () => {
+      unlisten?.();
+    };
   }, []);
 
   const handleMinimize = () => getCurrentWindow().minimize();
@@ -32,8 +38,14 @@ export function TitleBar() {
       className="flex items-center justify-between h-9 bg-sidebar-bg border-b border-border-primary select-none shrink-0"
     >
       {/* App title — left side (extra padding on macOS for traffic light buttons) */}
-      <div data-tauri-drag-region className={`flex items-center gap-2 ${isMac ? "pl-20" : "pl-4"}`}>
-        <span data-tauri-drag-region className="text-xs font-semibold text-sidebar-text tracking-wide">
+      <div
+        data-tauri-drag-region
+        className={`flex items-center gap-2 ${isMac ? "pl-20" : "pl-4"}`}
+      >
+        <span
+          data-tauri-drag-region
+          className="text-xs font-semibold text-sidebar-text tracking-wide"
+        >
           {t("common:velo")}
         </span>
       </div>

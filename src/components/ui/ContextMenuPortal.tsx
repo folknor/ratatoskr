@@ -6,13 +6,31 @@ import { useAccountStore } from "@/stores/accountStore";
 import { getActiveLabel } from "@/router/navigate";
 import { useComposerStore } from "@/stores/composerStore";
 import { useLabelStore } from "@/stores/labelStore";
-import { archiveThread, trashThread, permanentDeleteThread, markThreadRead, starThread, spamThread, addThreadLabel, removeThreadLabel } from "@/services/emailActions";
-import { deleteThread as deleteThreadFromDb, pinThread as pinThreadDb, unpinThread as unpinThreadDb, muteThread as muteThreadDb, unmuteThread as unmuteThreadDb } from "@/services/db/threads";
+import {
+  archiveThread,
+  trashThread,
+  permanentDeleteThread,
+  markThreadRead,
+  starThread,
+  spamThread,
+  addThreadLabel,
+  removeThreadLabel,
+} from "@/services/emailActions";
+import {
+  deleteThread as deleteThreadFromDb,
+  pinThread as pinThreadDb,
+  unpinThread as unpinThreadDb,
+  muteThread as muteThreadDb,
+  unmuteThread as unmuteThreadDb,
+} from "@/services/db/threads";
 import { deleteDraftsForThread } from "@/services/gmail/draftDeletion";
 import { getGmailClient } from "@/services/gmail/tokenManager";
 import { getMessagesForThread } from "@/services/db/messages";
 import { snoozeThread } from "@/services/snooze/snoozeManager";
-import { getEnabledQuickStepsForAccount, type DbQuickStep } from "@/services/db/quickSteps";
+import {
+  getEnabledQuickStepsForAccount,
+  type DbQuickStep,
+} from "@/services/db/quickSteps";
 import { executeQuickStep } from "@/services/quickSteps/executor";
 import type { QuickStep, QuickStepAction } from "@/services/quickSteps/types";
 import { SnoozeDialog } from "../email/SnoozeDialog";
@@ -41,9 +59,18 @@ import {
 } from "lucide-react";
 import { triggerSync } from "@/services/gmail/syncManager";
 import { useUIStore } from "@/stores/uiStore";
-import { setThreadCategory, ALL_CATEGORIES } from "@/services/db/threadCategories";
+import {
+  setThreadCategory,
+  ALL_CATEGORIES,
+} from "@/services/db/threadCategories";
 
-function buildQuote(msg: { from_name: string | null; from_address: string | null; date: string | number; body_html: string | null; body_text: string | null }): string {
+function buildQuote(msg: {
+  from_name: string | null;
+  from_address: string | null;
+  date: string | number;
+  body_html: string | null;
+  body_text: string | null;
+}): string {
   const date = new Date(msg.date).toLocaleString();
   const from = msg.from_name
     ? `${msg.from_name} &lt;${msg.from_address}&gt;`
@@ -51,7 +78,15 @@ function buildQuote(msg: { from_name: string | null; from_address: string | null
   return `<br><br><div style="border-left:2px solid #ccc;padding-left:12px;margin-left:0;color:#666">On ${date}, ${from} wrote:<br>${msg.body_html ?? msg.body_text ?? ""}</div>`;
 }
 
-function buildForwardQuote(msg: { from_name: string | null; from_address: string | null; date: string | number; subject: string | null; to_addresses: string | null; body_html: string | null; body_text: string | null }): string {
+function buildForwardQuote(msg: {
+  from_name: string | null;
+  from_address: string | null;
+  date: string | number;
+  subject: string | null;
+  to_addresses: string | null;
+  body_html: string | null;
+  body_text: string | null;
+}): string {
   const date = new Date(msg.date).toLocaleString();
   return `<br><br>---------- Forwarded message ---------<br>From: ${msg.from_name ?? ""} &lt;${msg.from_address ?? ""}&gt;<br>Date: ${date}<br>Subject: ${msg.subject ?? ""}<br>To: ${msg.to_addresses ?? ""}<br><br>${msg.body_html ?? msg.body_text ?? ""}`;
 }
@@ -61,7 +96,10 @@ export function ContextMenuPortal() {
   const position = useContextMenuStore((s) => s.position);
   const data = useContextMenuStore((s) => s.data);
   const closeMenu = useContextMenuStore((s) => s.closeMenu);
-  const [snoozeTarget, setSnoozeTarget] = useState<{ threadIds: string[]; accountId: string } | null>(null);
+  const [snoozeTarget, setSnoozeTarget] = useState<{
+    threadIds: string[];
+    accountId: string;
+  } | null>(null);
 
   if (!menuType) {
     if (snoozeTarget) {
@@ -214,16 +252,19 @@ function ThreadMenu({
 
   useEffect(() => {
     if (!activeAccountId) return;
-    getEnabledQuickStepsForAccount(activeAccountId).then(setQuickSteps).catch(() => {
-      // quick_steps table may not exist yet before migration
-    });
+    getEnabledQuickStepsForAccount(activeAccountId)
+      .then(setQuickSteps)
+      .catch(() => {
+        // quick_steps table may not exist yet before migration
+      });
   }, [activeAccountId]);
 
   // Determine target threads: if right-clicked thread is in multi-select, use all selected; otherwise just this one
   const isInMultiSelect = selectedThreadIds.has(threadId);
-  const targetIds = isInMultiSelect && selectedThreadIds.size > 1
-    ? [...selectedThreadIds]
-    : [threadId];
+  const targetIds =
+    isInMultiSelect && selectedThreadIds.size > 1
+      ? [...selectedThreadIds]
+      : [threadId];
   const isMulti = targetIds.length > 1;
 
   const thread = threads.find((t) => t.id === threadId);
@@ -264,7 +305,9 @@ function ThreadMenu({
     const allRecipients = new Set<string>();
     if (replyTo) allRecipients.add(replyTo);
     if (lastMessage.to_addresses) {
-      lastMessage.to_addresses.split(",").forEach((a) => allRecipients.add(a.trim()));
+      lastMessage.to_addresses
+        .split(",")
+        .forEach((a) => allRecipients.add(a.trim()));
     }
     const ccList: string[] = [];
     if (lastMessage.cc_addresses) {
@@ -517,12 +560,14 @@ function ThreadMenu({
     },
     { id: "sep-3", label: "", separator: true },
     ...(labelItems.length > 0
-      ? [{
-          id: "apply-label",
-          label: "Apply Label",
-          icon: Tag,
-          children: labelItems,
-        }]
+      ? [
+          {
+            id: "apply-label",
+            label: "Apply Label",
+            icon: Tag,
+            children: labelItems,
+          },
+        ]
       : []),
     {
       id: "move-to-folder",
@@ -530,7 +575,11 @@ function ThreadMenu({
       icon: FolderInput,
       shortcut: "v",
       action: () => {
-        window.dispatchEvent(new CustomEvent("velo-move-to-folder", { detail: { threadIds: [...targetIds] } }));
+        window.dispatchEvent(
+          new CustomEvent("velo-move-to-folder", {
+            detail: { threadIds: [...targetIds] },
+          }),
+        );
       },
     },
     {
@@ -558,8 +607,12 @@ function ThreadMenu({
             children: quickSteps.map((qs) => {
               let parsedActions: QuickStepAction[] = [];
               try {
-                parsedActions = JSON.parse(qs.actions_json) as QuickStepAction[];
-              } catch { /* ignore */ }
+                parsedActions = JSON.parse(
+                  qs.actions_json,
+                ) as QuickStepAction[];
+              } catch {
+                /* ignore */
+              }
               return {
                 id: `qs-${qs.id}`,
                 label: qs.name,
@@ -620,7 +673,15 @@ function MessageMenu({
   const bodyHtml = data["bodyHtml"] as string | null;
   const bodyText = data["bodyText"] as string | null;
 
-  const msg = { from_name: fromName, from_address: fromAddress, date, body_html: bodyHtml, body_text: bodyText, subject, to_addresses: toAddresses };
+  const msg = {
+    from_name: fromName,
+    from_address: fromAddress,
+    date,
+    body_html: bodyHtml,
+    body_text: bodyText,
+    subject,
+    to_addresses: toAddresses,
+  };
 
   const handleReply = () => {
     const replyAddr = replyTo ?? fromAddress;

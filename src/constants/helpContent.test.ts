@@ -7,8 +7,15 @@ import {
 } from "./helpContent";
 
 const VALID_SETTINGS_TABS = [
-  "general", "notifications", "composing", "mail-rules", "people",
-  "accounts", "shortcuts", "ai", "about",
+  "general",
+  "notifications",
+  "composing",
+  "mail-rules",
+  "people",
+  "accounts",
+  "shortcuts",
+  "ai",
+  "about",
 ];
 
 describe("helpContent", () => {

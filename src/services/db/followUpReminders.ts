@@ -28,7 +28,9 @@ export async function insertFollowUpReminder(
   );
 }
 
-export async function getPendingFollowUpReminders(): Promise<DbFollowUpReminder[]> {
+export async function getPendingFollowUpReminders(): Promise<
+  DbFollowUpReminder[]
+> {
   const db = await getDb();
   const now = getCurrentUnixTimestamp();
   return db.select<DbFollowUpReminder[]>(
@@ -52,10 +54,10 @@ export async function updateFollowUpStatus(
   status: "triggered" | "cancelled",
 ): Promise<void> {
   const db = await getDb();
-  await db.execute(
-    "UPDATE follow_up_reminders SET status = $1 WHERE id = $2",
-    [status, id],
-  );
+  await db.execute("UPDATE follow_up_reminders SET status = $1 WHERE id = $2", [
+    status,
+    id,
+  ]);
 }
 
 export async function cancelFollowUpForThread(

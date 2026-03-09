@@ -116,7 +116,9 @@ export async function startOAuthFlow(
 
   // Validate state parameter (CSRF protection)
   if (result.state !== oauthState) {
-    throw new Error("OAuth state mismatch — possible CSRF attack. Please try again.");
+    throw new Error(
+      "OAuth state mismatch — possible CSRF attack. Please try again.",
+    );
   }
 
   // Exchange auth code for tokens

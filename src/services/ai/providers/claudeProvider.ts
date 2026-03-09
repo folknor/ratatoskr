@@ -6,7 +6,10 @@ const factory = createProviderFactory(
   (apiKey) => new Anthropic({ apiKey, dangerouslyAllowBrowser: true }),
 );
 
-export function createClaudeProvider(apiKey: string, model: string): AiProviderClient {
+export function createClaudeProvider(
+  apiKey: string,
+  model: string,
+): AiProviderClient {
   const client = factory.getClient(apiKey);
 
   return {

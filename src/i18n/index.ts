@@ -34,48 +34,46 @@ export const SUPPORTED_LANGUAGES = [
 
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number]["code"];
 
-i18n
-  .use(initReactI18next)
-  .init({
-    resources: {
-      en: {
-        common: commonEN,
-        sidebar: sidebarEN,
-        email: emailEN,
-        composer: composerEN,
-        settings: settingsEN,
-        search: searchEN,
-        accounts: accountsEN,
-        tasks: tasksEN,
-        notifications: notificationsEN,
-        calendar: calendarEN,
-        attachments: attachmentsEN,
-        help: helpEN,
-      },
-      it: {
-        common: commonIT,
-        sidebar: sidebarIT,
-        email: emailIT,
-        composer: composerIT,
-        settings: settingsIT,
-        search: searchIT,
-        accounts: accountsIT,
-        tasks: tasksIT,
-        notifications: notificationsIT,
-        calendar: calendarIT,
-        attachments: attachmentsIT,
-        help: helpIT,
-      },
+i18n.use(initReactI18next).init({
+  resources: {
+    en: {
+      common: commonEN,
+      sidebar: sidebarEN,
+      email: emailEN,
+      composer: composerEN,
+      settings: settingsEN,
+      search: searchEN,
+      accounts: accountsEN,
+      tasks: tasksEN,
+      notifications: notificationsEN,
+      calendar: calendarEN,
+      attachments: attachmentsEN,
+      help: helpEN,
     },
-    supportedLngs: ["en", "it"],
-    load: "languageOnly",
-    fallbackLng: "en",
-    defaultNS: "common",
-    interpolation: {
-      escapeValue: false,
+    it: {
+      common: commonIT,
+      sidebar: sidebarIT,
+      email: emailIT,
+      composer: composerIT,
+      settings: settingsIT,
+      search: searchIT,
+      accounts: accountsIT,
+      tasks: tasksIT,
+      notifications: notificationsIT,
+      calendar: calendarIT,
+      attachments: attachmentsIT,
+      help: helpIT,
     },
-    lng: "en",
-  });
+  },
+  supportedLngs: ["en", "it"],
+  load: "languageOnly",
+  fallbackLng: "en",
+  defaultNS: "common",
+  interpolation: {
+    escapeValue: false,
+  },
+  lng: "en",
+});
 
 /**
  * Detect the OS system locale via Tauri plugin-os.
@@ -121,7 +119,11 @@ export async function resetToSystemLanguage(): Promise<void> {
 export async function loadPersistedLanguage(): Promise<void> {
   const { getSetting } = await import("@/services/db/settings");
   const saved = await getSetting("language");
-  if (saved && saved !== "system" && SUPPORTED_LANGUAGES.some((l) => l.code === saved)) {
+  if (
+    saved &&
+    saved !== "system" &&
+    SUPPORTED_LANGUAGES.some((l) => l.code === saved)
+  ) {
     await i18n.changeLanguage(saved);
   } else {
     // No explicit preference — detect from OS
@@ -137,7 +139,11 @@ export async function loadPersistedLanguage(): Promise<void> {
 export async function getPersistedLanguage(): Promise<string | null> {
   const { getSetting } = await import("@/services/db/settings");
   const saved = await getSetting("language");
-  if (saved && saved !== "system" && SUPPORTED_LANGUAGES.some((l) => l.code === saved)) {
+  if (
+    saved &&
+    saved !== "system" &&
+    SUPPORTED_LANGUAGES.some((l) => l.code === saved)
+  ) {
     return saved;
   }
   return null;

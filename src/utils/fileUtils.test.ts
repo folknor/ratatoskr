@@ -38,8 +38,12 @@ describe("readFileAsBase64", () => {
     const mockError = new DOMException("Read failed");
 
     class FailingFileReader {
-      onerror: ((this: FileReader, ev: ProgressEvent<FileReader>) => void) | null = null;
-      onload: ((this: FileReader, ev: ProgressEvent<FileReader>) => void) | null = null;
+      onerror:
+        | ((this: FileReader, ev: ProgressEvent<FileReader>) => void)
+        | null = null;
+      onload:
+        | ((this: FileReader, ev: ProgressEvent<FileReader>) => void)
+        | null = null;
       error: DOMException | null = mockError;
       result: string | ArrayBuffer | null = null;
 
@@ -47,7 +51,10 @@ describe("readFileAsBase64", () => {
         // Simulate async error
         setTimeout(() => {
           if (this.onerror) {
-            this.onerror.call(this as unknown as FileReader, {} as ProgressEvent<FileReader>);
+            this.onerror.call(
+              this as unknown as FileReader,
+              {} as ProgressEvent<FileReader>,
+            );
           }
         }, 0);
       }

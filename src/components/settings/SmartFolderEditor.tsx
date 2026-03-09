@@ -67,7 +67,17 @@ export function SmartFolderEditor() {
     resetForm();
     await loadFolders();
     await reloadStore(activeAccountId ?? undefined);
-  }, [activeAccountId, name, query, icon, color, editingId, resetForm, loadFolders, reloadStore]);
+  }, [
+    activeAccountId,
+    name,
+    query,
+    icon,
+    color,
+    editingId,
+    resetForm,
+    loadFolders,
+    reloadStore,
+  ]);
 
   const handleEdit = useCallback((folder: DbSmartFolder) => {
     setEditingId(folder.id);
@@ -78,12 +88,15 @@ export function SmartFolderEditor() {
     setShowForm(true);
   }, []);
 
-  const handleDelete = useCallback(async (id: string) => {
-    await deleteSmartFolder(id);
-    if (editingId === id) resetForm();
-    await loadFolders();
-    await reloadStore(activeAccountId ?? undefined);
-  }, [editingId, resetForm, loadFolders, reloadStore, activeAccountId]);
+  const handleDelete = useCallback(
+    async (id: string) => {
+      await deleteSmartFolder(id);
+      if (editingId === id) resetForm();
+      await loadFolders();
+      await reloadStore(activeAccountId ?? undefined);
+    },
+    [editingId, resetForm, loadFolders, reloadStore, activeAccountId],
+  );
 
   return (
     <div className="space-y-3">
@@ -178,7 +191,9 @@ export function SmartFolderEditor() {
               disabled={!name.trim() || !query.trim()}
               className="px-3 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-50"
             >
-              {editingId ? t("smartFolderEditor.update") : t("smartFolderEditor.save")}
+              {editingId
+                ? t("smartFolderEditor.update")
+                : t("smartFolderEditor.save")}
             </button>
             <button
               onClick={resetForm}

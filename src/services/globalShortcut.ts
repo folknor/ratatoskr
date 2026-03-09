@@ -1,4 +1,8 @@
-import { register, unregister, isRegistered } from "@tauri-apps/plugin-global-shortcut";
+import {
+  register,
+  unregister,
+  isRegistered,
+} from "@tauri-apps/plugin-global-shortcut";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getSetting, setSetting } from "./db/settings";
 import { useComposerStore } from "../stores/composerStore";

@@ -28,10 +28,7 @@ export function InputDialog({
   submitLabel = "Save",
 }: InputDialogProps) {
   const buildInitial = useCallback(
-    () =>
-      Object.fromEntries(
-        fields.map((f) => [f.key, f.defaultValue ?? ""]),
-      ),
+    () => Object.fromEntries(fields.map((f) => [f.key, f.defaultValue ?? ""])),
     [fields],
   );
 

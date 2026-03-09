@@ -41,7 +41,7 @@ interface Container {
  * Also strips [list-prefix] tags.
  */
 export function normalizeSubject(subject: string | null): string {
-  if (!subject) return '';
+  if (!subject) return "";
 
   let s = subject.trim();
   let changed = true;
@@ -92,7 +92,7 @@ export function parseReferences(references: string | null): string[] {
   if (ids.length === 0) {
     const tokens = references.trim().split(/\s+/);
     for (const token of tokens) {
-      const cleaned = token.replace(/^<|>$/g, '').trim();
+      const cleaned = token.replace(/^<|>$/g, "").trim();
       if (cleaned) {
         ids.push(cleaned);
       }

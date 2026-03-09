@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  COLOR_THEMES,
-  DEFAULT_COLOR_THEME,
-  getThemeById,
-} from "./themes";
+import { COLOR_THEMES, DEFAULT_COLOR_THEME, getThemeById } from "./themes";
 
 describe("themes", () => {
   it("all themes have unique IDs", () => {
@@ -12,7 +8,13 @@ describe("themes", () => {
   });
 
   it("all themes have complete light and dark color sets", () => {
-    const requiredKeys = ["accent", "accentHover", "accentLight", "bgSelected", "sidebarActive"];
+    const requiredKeys = [
+      "accent",
+      "accentHover",
+      "accentLight",
+      "bgSelected",
+      "sidebarActive",
+    ];
     for (const theme of COLOR_THEMES) {
       for (const key of requiredKeys) {
         expect(theme.light).toHaveProperty(key);

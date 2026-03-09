@@ -3,7 +3,11 @@ import { useParams } from "@tanstack/react-router";
 import { ArrowLeft, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { navigateToLabel } from "@/router/navigate";
-import { HELP_CATEGORIES, getAllCards, getCategoryById } from "@/constants/helpContent";
+import {
+  HELP_CATEGORIES,
+  getAllCards,
+  getCategoryById,
+} from "@/constants/helpContent";
 import { HelpSidebar } from "./HelpSidebar";
 import { HelpSearchBar } from "./HelpSearchBar";
 import { HelpCardGrid } from "./HelpCardGrid";
@@ -12,7 +16,9 @@ export function HelpPage() {
   const { t } = useTranslation("help");
   const { topic } = useParams({ strict: false }) as { topic?: string };
   const activeTopic =
-    topic && HELP_CATEGORIES.some((c) => c.id === topic) ? topic : "getting-started";
+    topic && HELP_CATEGORIES.some((c) => c.id === topic)
+      ? topic
+      : "getting-started";
 
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedCardId, setExpandedCardId] = useState<string | null>(null);
@@ -31,7 +37,8 @@ export function HelpPage() {
       if (t(card.title).toLowerCase().includes(q)) return true;
       if (t(card.summary).toLowerCase().includes(q)) return true;
       if (t(card.description).toLowerCase().includes(q)) return true;
-      if (card.tips?.some((tip) => t(tip.text).toLowerCase().includes(q))) return true;
+      if (card.tips?.some((tip) => t(tip.text).toLowerCase().includes(q)))
+        return true;
       return false;
     });
   }, [searchQuery, t]);
@@ -62,7 +69,9 @@ export function HelpPage() {
         >
           <ArrowLeft size={18} />
         </button>
-        <h1 className="text-base font-semibold text-text-primary">{t("help")}</h1>
+        <h1 className="text-base font-semibold text-text-primary">
+          {t("help")}
+        </h1>
       </div>
 
       {/* Body: sidebar nav + content */}
@@ -98,7 +107,9 @@ export function HelpPage() {
                 // Empty search state
                 <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
                   <Search size={32} className="mb-3 opacity-40" />
-                  <p className="text-sm">{t("noResults", { query: searchQuery })}</p>
+                  <p className="text-sm">
+                    {t("noResults", { query: searchQuery })}
+                  </p>
                 </div>
               )
             ) : (

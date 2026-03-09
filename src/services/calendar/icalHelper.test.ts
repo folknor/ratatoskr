@@ -2,7 +2,9 @@ import { generateVEvent, parseVEvent } from "./icalHelper";
 import type { CreateEventInput } from "./types";
 
 beforeEach(() => {
-  crypto.randomUUID = vi.fn(() => "test-uuid-1234") as () => `${string}-${string}-${string}-${string}-${string}`;
+  crypto.randomUUID = vi.fn(
+    () => "test-uuid-1234",
+  ) as () => `${string}-${string}-${string}-${string}-${string}`;
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2025-06-15T10:00:00Z"));
 });
@@ -93,10 +95,7 @@ describe("generateVEvent", () => {
       summary: "Standup",
       startTime: "2025-06-20T09:00:00Z",
       endTime: "2025-06-20T09:15:00Z",
-      attendees: [
-        { email: "alice@example.com" },
-        { email: "bob@example.com" },
-      ],
+      attendees: [{ email: "alice@example.com" }, { email: "bob@example.com" }],
     };
 
     const result = generateVEvent(event);
@@ -180,8 +179,12 @@ describe("parseVEvent", () => {
     expect(result.uid).toBe("abc-123");
     expect(result.summary).toBe("Team Sync");
     expect(result.isAllDay).toBe(false);
-    expect(result.startTime).toBe(Math.floor(new Date("2025-06-20T14:00:00Z").getTime() / 1000));
-    expect(result.endTime).toBe(Math.floor(new Date("2025-06-20T15:00:00Z").getTime() / 1000));
+    expect(result.startTime).toBe(
+      Math.floor(new Date("2025-06-20T14:00:00Z").getTime() / 1000),
+    );
+    expect(result.endTime).toBe(
+      Math.floor(new Date("2025-06-20T15:00:00Z").getTime() / 1000),
+    );
     expect(result.remoteEventId).toBe("abc-123");
     expect(result.status).toBe("confirmed");
     expect(result.etag).toBeNull();
@@ -288,11 +291,7 @@ describe("parseVEvent", () => {
   });
 
   it("handles missing fields gracefully", () => {
-    const ical = [
-      "BEGIN:VEVENT",
-      "UID:minimal-1",
-      "END:VEVENT",
-    ].join("\r\n");
+    const ical = ["BEGIN:VEVENT", "UID:minimal-1", "END:VEVENT"].join("\r\n");
 
     const result = parseVEvent(ical);
 
@@ -414,8 +413,12 @@ describe("parseVEvent", () => {
     const result = parseVEvent(ical);
 
     // Local time -- new Date(2025, 5, 20, 14, 0, 0)
-    const expectedStart = Math.floor(new Date(2025, 5, 20, 14, 0, 0).getTime() / 1000);
-    const expectedEnd = Math.floor(new Date(2025, 5, 20, 15, 0, 0).getTime() / 1000);
+    const expectedStart = Math.floor(
+      new Date(2025, 5, 20, 14, 0, 0).getTime() / 1000,
+    );
+    const expectedEnd = Math.floor(
+      new Date(2025, 5, 20, 15, 0, 0).getTime() / 1000,
+    );
     expect(result.startTime).toBe(expectedStart);
     expect(result.endTime).toBe(expectedEnd);
   });
@@ -473,8 +476,12 @@ describe("round-trip: generateVEvent -> parseVEvent", () => {
     expect(parsed.description).toBe("Testing full cycle");
     expect(parsed.location).toBe("Office");
     expect(parsed.isAllDay).toBe(false);
-    expect(parsed.startTime).toBe(Math.floor(new Date("2025-07-01T09:00:00Z").getTime() / 1000));
-    expect(parsed.endTime).toBe(Math.floor(new Date("2025-07-01T10:30:00Z").getTime() / 1000));
+    expect(parsed.startTime).toBe(
+      Math.floor(new Date("2025-07-01T09:00:00Z").getTime() / 1000),
+    );
+    expect(parsed.endTime).toBe(
+      Math.floor(new Date("2025-07-01T10:30:00Z").getTime() / 1000),
+    );
   });
 
   it("preserves all-day event data through round-trip", () => {
@@ -498,10 +505,7 @@ describe("round-trip: generateVEvent -> parseVEvent", () => {
       summary: "Group Call",
       startTime: "2025-07-01T15:00:00Z",
       endTime: "2025-07-01T16:00:00Z",
-      attendees: [
-        { email: "dev@example.com" },
-        { email: "pm@example.com" },
-      ],
+      attendees: [{ email: "dev@example.com" }, { email: "pm@example.com" }],
     };
 
     const ical = generateVEvent(input, "att-rt");

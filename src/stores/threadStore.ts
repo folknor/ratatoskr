@@ -49,8 +49,10 @@ export const useThreadStore = create<ThreadState>((set, get) => ({
   searchQuery: "",
   searchThreadIds: null,
 
-  setThreads: (threads) => set({ threads, threadMap: new Map(threads.map((t) => [t.id, t])) }),
-  selectThread: (selectedThreadId) => set({ selectedThreadId, selectedThreadIds: new Set() }),
+  setThreads: (threads) =>
+    set({ threads, threadMap: new Map(threads.map((t) => [t.id, t])) }),
+  selectThread: (selectedThreadId) =>
+    set({ selectedThreadId, selectedThreadIds: new Set() }),
   toggleThreadSelection: (id) =>
     set((state) => {
       const next = new Set(state.selectedThreadIds);
@@ -114,7 +116,8 @@ export const useThreadStore = create<ThreadState>((set, get) => ({
       return {
         threads: state.threads.filter((t) => t.id !== id),
         threadMap,
-        selectedThreadId: state.selectedThreadId === id ? null : state.selectedThreadId,
+        selectedThreadId:
+          state.selectedThreadId === id ? null : state.selectedThreadId,
         selectedThreadIds: next,
       };
     }),
@@ -128,10 +131,14 @@ export const useThreadStore = create<ThreadState>((set, get) => ({
       return {
         threads: state.threads.filter((t) => !idsSet.has(t.id)),
         threadMap,
-        selectedThreadId: state.selectedThreadId && idsSet.has(state.selectedThreadId) ? null : state.selectedThreadId,
+        selectedThreadId:
+          state.selectedThreadId && idsSet.has(state.selectedThreadId)
+            ? null
+            : state.selectedThreadId,
         selectedThreadIds: next,
       };
     }),
-  setSearch: (query, threadIds) => set({ searchQuery: query, searchThreadIds: threadIds }),
+  setSearch: (query, threadIds) =>
+    set({ searchQuery: query, searchThreadIds: threadIds }),
   clearSearch: () => set({ searchQuery: "", searchThreadIds: null }),
 }));

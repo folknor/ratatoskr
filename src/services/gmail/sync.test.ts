@@ -55,7 +55,11 @@ vi.mock("../notifications/notificationManager", () => ({
 
 // Mock parseGmailMessage
 vi.mock("./messageParser", () => ({
-  parseGmailMessage: (msg: { id: string; threadId: string; labelIds: string[] }) => ({
+  parseGmailMessage: (msg: {
+    id: string;
+    threadId: string;
+    labelIds: string[];
+  }) => ({
     id: msg.id,
     threadId: msg.threadId,
     labelIds: msg.labelIds ?? [],
@@ -97,7 +101,13 @@ function createMockClient(historyItems: unknown[]): GmailClient {
             snippet: "test",
             historyId: "200",
             internalDate: "1704067200000",
-            payload: { partId: "", mimeType: "text/plain", filename: "", headers: [], body: { size: 0 } },
+            payload: {
+              partId: "",
+              mimeType: "text/plain",
+              filename: "",
+              headers: [],
+              body: { size: 0 },
+            },
             sizeEstimate: 100,
           },
         ],

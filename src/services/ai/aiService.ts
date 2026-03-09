@@ -16,7 +16,10 @@ import {
   EXTRACT_TASK_PROMPT,
 } from "./prompts";
 
-async function callAi(systemPrompt: string, userContent: string): Promise<string> {
+async function callAi(
+  systemPrompt: string,
+  userContent: string,
+): Promise<string> {
   try {
     const provider = await getActiveProvider();
     return await provider.complete({ systemPrompt, userContent });
@@ -27,7 +30,10 @@ async function callAi(systemPrompt: string, userContent: string): Promise<string
       throw new AiError("AUTH_ERROR", "Invalid API key");
     }
     if (message.includes("429") || message.includes("rate")) {
-      throw new AiError("RATE_LIMITED", "Rate limited — please try again shortly");
+      throw new AiError(
+        "RATE_LIMITED",
+        "Rate limited — please try again shortly",
+      );
     }
     throw new AiError("NETWORK_ERROR", message);
   }
@@ -111,7 +117,10 @@ export async function generateSmartReplies(
 
   const formatted = messages.map(formatMessageForSummary).join("\n---\n");
   const combined = formatted.slice(0, 4000);
-  const result = await callAi(SMART_REPLY_PROMPT, `<email_content>${combined}</email_content>`);
+  const result = await callAi(
+    SMART_REPLY_PROMPT,
+    `<email_content>${combined}</email_content>`,
+  );
 
   // Parse JSON array from response
   let replies: string[];
@@ -119,7 +128,7 @@ export async function generateSmartReplies(
     // Extract JSON array from the response (handle potential markdown wrapping)
     // Use non-greedy match to avoid capturing extra content
     const jsonMatch = result.match(/\[[\s\S]*?\]/);
-    replies = jsonMatch ? JSON.parse(jsonMatch[0]) as string[] : [result];
+    replies = jsonMatch ? (JSON.parse(jsonMatch[0]) as string[]) : [result];
   } catch {
     // If parsing fails, split by newlines as fallback
     replies = result
@@ -139,7 +148,12 @@ export async function generateSmartReplies(
   replies = replies.slice(0, 3);
 
   // Cache the result
-  await setAiCache(accountId, threadId, "smart_replies", JSON.stringify(replies));
+  await setAiCache(
+    accountId,
+    threadId,
+    "smart_replies",
+    JSON.stringify(replies),
+  );
   return replies;
 }
 
@@ -152,13 +166,27 @@ export async function askInbox(
   return callAi(ASK_INBOX_PROMPT, userContent);
 }
 
-const VALID_CATEGORIES = new Set(["Primary", "Updates", "Promotions", "Social", "Newsletters"]);
+const VALID_CATEGORIES = new Set([
+  "Primary",
+  "Updates",
+  "Promotions",
+  "Social",
+  "Newsletters",
+]);
 
 export async function categorizeThreads(
-  threads: { id: string; subject: string; snippet: string; fromAddress: string }[],
+  threads: {
+    id: string;
+    subject: string;
+    snippet: string;
+    fromAddress: string;
+  }[],
 ): Promise<Map<string, string>> {
   const input = threads
-    .map((t) => `<email_content>ID:${t.id} | From:${t.fromAddress} | Subject:${t.subject} | ${t.snippet}</email_content>`)
+    .map(
+      (t) =>
+        `<email_content>ID:${t.id} | From:${t.fromAddress} | Subject:${t.subject} | ${t.snippet}</email_content>`,
+    )
     .join("\n");
 
   const validThreadIds = new Set(threads.map((t) => t.id));
@@ -174,7 +202,12 @@ export async function categorizeThreads(
     const threadId = trimmed.slice(0, colonIdx).trim();
     const category = trimmed.slice(colonIdx + 1).trim();
     // Validate: only accept known thread IDs and valid categories
-    if (threadId && category && validThreadIds.has(threadId) && VALID_CATEGORIES.has(category)) {
+    if (
+      threadId &&
+      category &&
+      validThreadIds.has(threadId) &&
+      VALID_CATEGORIES.has(category)
+    ) {
       categories.set(threadId, category);
     }
   }
@@ -183,7 +216,12 @@ export async function categorizeThreads(
 }
 
 export async function classifyThreadsBySmartLabels(
-  threads: { id: string; subject: string; snippet: string; fromAddress: string }[],
+  threads: {
+    id: string;
+    subject: string;
+    snippet: string;
+    fromAddress: string;
+  }[],
   labelRules: { labelId: string; description: string }[],
 ): Promise<Map<string, string[]>> {
   const labelDefs = labelRules
@@ -191,7 +229,10 @@ export async function classifyThreadsBySmartLabels(
     .join("\n");
 
   const threadData = threads
-    .map((t) => `<email_content>ID:${t.id} | From:${t.fromAddress} | Subject:${t.subject} | ${t.snippet}</email_content>`)
+    .map(
+      (t) =>
+        `<email_content>ID:${t.id} | From:${t.fromAddress} | Subject:${t.subject} | ${t.snippet}</email_content>`,
+    )
     .join("\n");
 
   const userContent = `Label definitions:\n${labelDefs}\n\nThreads:\n${threadData}`;
@@ -231,7 +272,11 @@ export async function extractTaskFromThread(
 ): Promise<string> {
   const subject = messages[0]?.subject ?? "No subject";
   const formatted = messages.map(formatMessageForSummary).join("\n---\n");
-  const combined = `<email_content>Subject: ${subject}\n\n${formatted}</email_content>`.slice(0, 6000);
+  const combined =
+    `<email_content>Subject: ${subject}\n\n${formatted}</email_content>`.slice(
+      0,
+      6000,
+    );
   return callAi(EXTRACT_TASK_PROMPT, combined);
 }
 

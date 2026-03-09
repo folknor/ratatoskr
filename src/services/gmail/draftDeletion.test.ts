@@ -7,7 +7,9 @@ vi.mock("../db/threads", () => ({
   deleteThread: (...args: unknown[]) => mockDeleteThread(...args),
 }));
 
-function createMockClient(drafts: { id: string; message: { id: string; threadId: string } }[]) {
+function createMockClient(
+  drafts: { id: string; message: { id: string; threadId: string } }[],
+) {
   return {
     listDrafts: vi.fn().mockResolvedValue(drafts),
     deleteDraft: vi.fn().mockResolvedValue(undefined),

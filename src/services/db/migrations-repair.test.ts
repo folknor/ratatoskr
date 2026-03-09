@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 vi.mock("@/services/db/connection", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/db/connection")>();
+  const actual =
+    await importOriginal<typeof import("@/services/db/connection")>();
   return {
     ...actual,
     getDb: vi.fn(),
@@ -12,11 +13,20 @@ import { getDb } from "@/services/db/connection";
 import { runMigrations } from "./migrations";
 
 const LABELS_BASE_COLUMNS = [
-  "id", "account_id", "name", "type", "color_bg", "color_fg", "visible", "sort_order",
+  "id",
+  "account_id",
+  "name",
+  "type",
+  "color_bg",
+  "color_fg",
+  "visible",
+  "sort_order",
 ];
 
 const LABELS_IMAP_COLUMNS = [
-  ...LABELS_BASE_COLUMNS, "imap_folder_path", "imap_special_use",
+  ...LABELS_BASE_COLUMNS,
+  "imap_folder_path",
+  "imap_special_use",
 ];
 
 function createStatefulMockDb(opts: {
@@ -46,7 +56,9 @@ function createStatefulMockDb(opts: {
     }),
     select: vi.fn(async (sql: string) => {
       if (sql.includes("SELECT version FROM _migrations")) {
-        return [...migrations].sort((a, b) => a - b).map((v) => ({ version: v }));
+        return [...migrations]
+          .sort((a, b) => a - b)
+          .map((v) => ({ version: v }));
       }
       if (sql.includes("PRAGMA table_info(labels)")) {
         return opts.labelColumns.map((name) => ({ name }));
@@ -73,7 +85,9 @@ describe("runMigrations v14 repair", () => {
       labelColumns: LABELS_BASE_COLUMNS,
     });
 
-    vi.mocked(getDb).mockResolvedValue(mockDb as unknown as Awaited<ReturnType<typeof getDb>>);
+    vi.mocked(getDb).mockResolvedValue(
+      mockDb as unknown as Awaited<ReturnType<typeof getDb>>,
+    );
 
     await runMigrations();
 
@@ -81,8 +95,8 @@ describe("runMigrations v14 repair", () => {
       "DELETE FROM _migrations WHERE version >= 14",
     );
 
-    const reRanV14 = mockDb.executedSql.some(
-      (sql) => sql.includes("ALTER TABLE labels ADD COLUMN imap_folder_path"),
+    const reRanV14 = mockDb.executedSql.some((sql) =>
+      sql.includes("ALTER TABLE labels ADD COLUMN imap_folder_path"),
     );
     expect(reRanV14).toBe(true);
   });
@@ -93,17 +107,19 @@ describe("runMigrations v14 repair", () => {
       labelColumns: LABELS_IMAP_COLUMNS,
     });
 
-    vi.mocked(getDb).mockResolvedValue(mockDb as unknown as Awaited<ReturnType<typeof getDb>>);
+    vi.mocked(getDb).mockResolvedValue(
+      mockDb as unknown as Awaited<ReturnType<typeof getDb>>,
+    );
 
     await runMigrations();
 
-    const deletedV14 = mockDb.executedSql.some(
-      (sql) => sql.includes("DELETE FROM _migrations WHERE version >= 14"),
+    const deletedV14 = mockDb.executedSql.some((sql) =>
+      sql.includes("DELETE FROM _migrations WHERE version >= 14"),
     );
     expect(deletedV14).toBe(false);
 
-    const ranV14Sql = mockDb.executedSql.some(
-      (sql) => sql.includes("ALTER TABLE labels ADD COLUMN imap_folder_path"),
+    const ranV14Sql = mockDb.executedSql.some((sql) =>
+      sql.includes("ALTER TABLE labels ADD COLUMN imap_folder_path"),
     );
     expect(ranV14Sql).toBe(false);
   });
@@ -114,17 +130,19 @@ describe("runMigrations v14 repair", () => {
       labelColumns: LABELS_BASE_COLUMNS,
     });
 
-    vi.mocked(getDb).mockResolvedValue(mockDb as unknown as Awaited<ReturnType<typeof getDb>>);
+    vi.mocked(getDb).mockResolvedValue(
+      mockDb as unknown as Awaited<ReturnType<typeof getDb>>,
+    );
 
     await runMigrations();
 
-    const deletedV14 = mockDb.executedSql.some(
-      (sql) => sql.includes("DELETE FROM _migrations WHERE version >= 14"),
+    const deletedV14 = mockDb.executedSql.some((sql) =>
+      sql.includes("DELETE FROM _migrations WHERE version >= 14"),
     );
     expect(deletedV14).toBe(false);
 
-    const ranV14Sql = mockDb.executedSql.some(
-      (sql) => sql.includes("ALTER TABLE labels ADD COLUMN imap_folder_path"),
+    const ranV14Sql = mockDb.executedSql.some((sql) =>
+      sql.includes("ALTER TABLE labels ADD COLUMN imap_folder_path"),
     );
     expect(ranV14Sql).toBe(true);
   });

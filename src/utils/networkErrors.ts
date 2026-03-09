@@ -93,13 +93,21 @@ export function formatSyncError(rawError: string): string {
   if (lower.includes("timed out") || lower.includes("timeout")) {
     return "Connection timed out \u2014 check your internet or server settings";
   }
-  if (lower.includes("tls") || lower.includes("ssl") || lower.includes("certificate")) {
+  if (
+    lower.includes("tls") ||
+    lower.includes("ssl") ||
+    lower.includes("certificate")
+  ) {
     return "Secure connection failed \u2014 check security settings";
   }
   if (lower.includes("econnrefused") || lower.includes("connection refused")) {
     return "Could not reach mail server \u2014 check address and port";
   }
-  if (lower.includes("dns") || lower.includes("enotfound") || lower.includes("server not found")) {
+  if (
+    lower.includes("dns") ||
+    lower.includes("enotfound") ||
+    lower.includes("server not found")
+  ) {
     return "Server not found \u2014 check hostname";
   }
 

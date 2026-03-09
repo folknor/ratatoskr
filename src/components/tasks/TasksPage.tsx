@@ -1,13 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  CheckSquare,
-  Search,
-  Trash2,
-  CheckCircle2,
-} from "lucide-react";
+import { CheckSquare, Search, Trash2, CheckCircle2 } from "lucide-react";
 import { useAccountStore } from "@/stores/accountStore";
-import { useTaskStore, type TaskGroupBy, type TaskFilterStatus } from "@/stores/taskStore";
+import {
+  useTaskStore,
+  type TaskGroupBy,
+  type TaskFilterStatus,
+} from "@/stores/taskStore";
 import {
   getTasksForAccount,
   insertTask,
@@ -79,7 +78,9 @@ export function TasksPage() {
       if (!cancelled) setSubtaskMap(map);
     }
     load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [tasks]);
 
   // Filter + search
@@ -99,7 +100,9 @@ export function TasksPage() {
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(
-        (t) => t.title.toLowerCase().includes(q) || t.description?.toLowerCase().includes(q),
+        (t) =>
+          t.title.toLowerCase().includes(q) ||
+          t.description?.toLowerCase().includes(q),
       );
     }
 
@@ -123,9 +126,19 @@ export function TasksPage() {
           else {
             const d = new Date(task.due_date * 1000);
             const now = new Date();
-            const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            const dueStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-            const diff = Math.floor((dueStart.getTime() - todayStart.getTime()) / 86400000);
+            const todayStart = new Date(
+              now.getFullYear(),
+              now.getMonth(),
+              now.getDate(),
+            );
+            const dueStart = new Date(
+              d.getFullYear(),
+              d.getMonth(),
+              d.getDate(),
+            );
+            const diff = Math.floor(
+              (dueStart.getTime() - todayStart.getTime()) / 86400000,
+            );
             if (diff < 0) key = t("overdue");
             else if (diff === 0) key = t("today");
             else if (diff === 1) key = t("tomorrow");
@@ -134,7 +147,13 @@ export function TasksPage() {
           }
           break;
         case "tag": {
-          const tags: string[] = (() => { try { return JSON.parse(task.tags_json); } catch { return []; } })();
+          const tags: string[] = (() => {
+            try {
+              return JSON.parse(task.tags_json);
+            } catch {
+              return [];
+            }
+          })();
           key = tags[0] ?? "Untagged";
           break;
         }
@@ -158,30 +177,39 @@ export function TasksPage() {
     return entries.map(([label, tasks]) => ({ label, tasks }));
   }, [filteredTasks, groupBy, t]);
 
-  const handleAddTask = useCallback(async (title: string) => {
-    if (!accountId) return;
-    await insertTask({ accountId, title });
-    await loadTasks();
-  }, [accountId, loadTasks]);
+  const handleAddTask = useCallback(
+    async (title: string) => {
+      if (!accountId) return;
+      await insertTask({ accountId, title });
+      await loadTasks();
+    },
+    [accountId, loadTasks],
+  );
 
-  const handleToggleComplete = useCallback(async (id: string, completed: boolean) => {
-    if (completed) {
-      const task = tasks.find((t) => t.id === id);
-      if (task?.recurrence_rule) {
-        await handleRecurringTaskCompletion(id);
+  const handleToggleComplete = useCallback(
+    async (id: string, completed: boolean) => {
+      if (completed) {
+        const task = tasks.find((t) => t.id === id);
+        if (task?.recurrence_rule) {
+          await handleRecurringTaskCompletion(id);
+        } else {
+          await completeTask(id);
+        }
       } else {
-        await completeTask(id);
+        await uncompleteTask(id);
       }
-    } else {
-      await uncompleteTask(id);
-    }
-    await loadTasks();
-  }, [tasks, loadTasks]);
+      await loadTasks();
+    },
+    [tasks, loadTasks],
+  );
 
-  const handleDelete = useCallback(async (id: string) => {
-    await dbDeleteTask(id);
-    await loadTasks();
-  }, [loadTasks]);
+  const handleDelete = useCallback(
+    async (id: string) => {
+      await dbDeleteTask(id);
+      await loadTasks();
+    },
+    [loadTasks],
+  );
 
   const handleBulkComplete = useCallback(async () => {
     for (const id of selectedIds) {
@@ -205,7 +233,9 @@ export function TasksPage() {
       <div className="flex items-center justify-between px-5 py-3 border-b border-border-primary shrink-0 bg-bg-primary/60 backdrop-blur-sm">
         <div className="flex items-center gap-2">
           <CheckSquare size={18} className="text-accent" />
-          <h1 className="text-base font-semibold text-text-primary">{t("tasks")}</h1>
+          <h1 className="text-base font-semibold text-text-primary">
+            {t("tasks")}
+          </h1>
           {filteredTasks.length > 0 && (
             <span className="text-xs text-text-tertiary bg-bg-tertiary px-2 py-0.5 rounded-full">
               {filteredTasks.length}
@@ -216,7 +246,10 @@ export function TasksPage() {
         <div className="flex items-center gap-2">
           {/* Search */}
           <div className="relative">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary" />
+            <Search
+              size={13}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary"
+            />
             <input
               type="text"
               value={searchQuery}
@@ -229,7 +262,9 @@ export function TasksPage() {
           {/* Filters */}
           <select
             value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value as TaskFilterStatus)}
+            onChange={(e) =>
+              setFilterStatus(e.target.value as TaskFilterStatus)
+            }
             className="bg-bg-tertiary text-text-primary text-xs px-2.5 py-1.5 rounded-lg border border-border-primary"
           >
             <option value="incomplete">{t("active")}</option>
@@ -239,7 +274,9 @@ export function TasksPage() {
 
           <select
             value={filterPriority}
-            onChange={(e) => setFilterPriority(e.target.value as TaskPriority | "all")}
+            onChange={(e) =>
+              setFilterPriority(e.target.value as TaskPriority | "all")
+            }
             className="bg-bg-tertiary text-text-primary text-xs px-2.5 py-1.5 rounded-lg border border-border-primary"
           >
             <option value="all">{t("allPriorities")}</option>
@@ -267,7 +304,9 @@ export function TasksPage() {
       {/* Bulk actions bar */}
       {selectedIds.size > 0 && (
         <div className="flex items-center gap-3 px-5 py-2 bg-accent/5 border-b border-accent/20">
-          <span className="text-xs text-text-secondary">{selectedIds.size} {t("common:selected")}</span>
+          <span className="text-xs text-text-secondary">
+            {selectedIds.size} {t("common:selected")}
+          </span>
           <button
             onClick={handleBulkComplete}
             className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover"

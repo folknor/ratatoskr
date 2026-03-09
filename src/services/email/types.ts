@@ -57,16 +57,8 @@ export interface EmailProvider {
     messageIds: string[],
     read: boolean,
   ): Promise<void>;
-  star(
-    threadId: string,
-    messageIds: string[],
-    starred: boolean,
-  ): Promise<void>;
-  spam(
-    threadId: string,
-    messageIds: string[],
-    isSpam: boolean,
-  ): Promise<void>;
+  star(threadId: string, messageIds: string[], starred: boolean): Promise<void>;
+  spam(threadId: string, messageIds: string[], isSpam: boolean): Promise<void>;
   moveToFolder(
     threadId: string,
     messageIds: string[],
@@ -76,10 +68,7 @@ export interface EmailProvider {
   removeLabel(threadId: string, labelId: string): Promise<void>;
 
   // Send/Draft operations
-  sendMessage(
-    rawBase64Url: string,
-    threadId?: string,
-  ): Promise<{ id: string }>;
+  sendMessage(rawBase64Url: string, threadId?: string): Promise<{ id: string }>;
   createDraft(
     rawBase64Url: string,
     threadId?: string,

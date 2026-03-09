@@ -93,7 +93,19 @@ export function SmartLabelEditor() {
 
     resetForm();
     await loadRules();
-  }, [activeAccountId, labelId, aiDescription, editingId, resetForm, loadRules, criteriaFrom, criteriaTo, criteriaSubject, criteriaBody, criteriaHasAttachment]);
+  }, [
+    activeAccountId,
+    labelId,
+    aiDescription,
+    editingId,
+    resetForm,
+    loadRules,
+    criteriaFrom,
+    criteriaTo,
+    criteriaSubject,
+    criteriaBody,
+    criteriaHasAttachment,
+  ]);
 
   const handleEdit = useCallback((rule: DbSmartLabelRule) => {
     setEditingId(rule.id);
@@ -102,7 +114,11 @@ export function SmartLabelEditor() {
 
     let criteria: FilterCriteria = {};
     if (rule.criteria_json) {
-      try { criteria = JSON.parse(rule.criteria_json); } catch { /* empty */ }
+      try {
+        criteria = JSON.parse(rule.criteria_json);
+      } catch {
+        /* empty */
+      }
     }
 
     setCriteriaFrom(criteria.from ?? "");
@@ -114,16 +130,22 @@ export function SmartLabelEditor() {
     setShowForm(true);
   }, []);
 
-  const handleDelete = useCallback(async (id: string) => {
-    await deleteSmartLabelRule(id);
-    if (editingId === id) resetForm();
-    await loadRules();
-  }, [editingId, resetForm, loadRules]);
+  const handleDelete = useCallback(
+    async (id: string) => {
+      await deleteSmartLabelRule(id);
+      if (editingId === id) resetForm();
+      await loadRules();
+    },
+    [editingId, resetForm, loadRules],
+  );
 
-  const handleToggleEnabled = useCallback(async (rule: DbSmartLabelRule) => {
-    await updateSmartLabelRule(rule.id, { isEnabled: rule.is_enabled !== 1 });
-    await loadRules();
-  }, [loadRules]);
+  const handleToggleEnabled = useCallback(
+    async (rule: DbSmartLabelRule) => {
+      await updateSmartLabelRule(rule.id, { isEnabled: rule.is_enabled !== 1 });
+      await loadRules();
+    },
+    [loadRules],
+  );
 
   const handleBackfill = useCallback(async () => {
     if (!activeAccountId || backfilling) return;
@@ -154,7 +176,9 @@ export function SmartLabelEditor() {
           className="text-xs text-accent hover:text-accent-hover disabled:opacity-50 flex items-center gap-1.5"
         >
           {backfilling && <Loader2 size={12} className="animate-spin" />}
-          {backfilling ? t("smartLabelEditor.applying") : t("smartLabelEditor.applyToExisting")}
+          {backfilling
+            ? t("smartLabelEditor.applying")
+            : t("smartLabelEditor.applyToExisting")}
         </button>
       )}
 
@@ -186,7 +210,11 @@ export function SmartLabelEditor() {
               className={`w-8 h-4 rounded-full transition-colors relative ${
                 rule.is_enabled === 1 ? "bg-accent" : "bg-bg-tertiary"
               }`}
-              title={rule.is_enabled === 1 ? t("smartLabelEditor.disable") : t("smartLabelEditor.enable")}
+              title={
+                rule.is_enabled === 1
+                  ? t("smartLabelEditor.disable")
+                  : t("smartLabelEditor.enable")
+              }
             >
               <span
                 className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform shadow ${
@@ -214,7 +242,9 @@ export function SmartLabelEditor() {
         <div className="border border-border-primary rounded-md p-3 space-y-3">
           {labels.length > 0 ? (
             <div>
-              <div className="text-xs font-medium text-text-secondary mb-1.5">{t("smartLabelEditor.label")}</div>
+              <div className="text-xs font-medium text-text-secondary mb-1.5">
+                {t("smartLabelEditor.label")}
+              </div>
               <select
                 value={labelId}
                 onChange={(e) => setLabelId(e.target.value)}
@@ -222,7 +252,9 @@ export function SmartLabelEditor() {
               >
                 <option value="">{t("smartLabelEditor.selectLabel")}</option>
                 {labels.map((l) => (
-                  <option key={l.id} value={l.id}>{l.name}</option>
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
                 ))}
               </select>
             </div>
@@ -233,7 +265,9 @@ export function SmartLabelEditor() {
           )}
 
           <div>
-            <div className="text-xs font-medium text-text-secondary mb-1.5">{t("smartLabelEditor.aiDescription")}</div>
+            <div className="text-xs font-medium text-text-secondary mb-1.5">
+              {t("smartLabelEditor.aiDescription")}
+            </div>
             <textarea
               value={aiDescription}
               onChange={(e) => setAiDescription(e.target.value)}
@@ -248,7 +282,11 @@ export function SmartLabelEditor() {
               onClick={() => setShowCriteria(!showCriteria)}
               className="flex items-center gap-1 text-xs text-text-secondary hover:text-text-primary"
             >
-              {showCriteria ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              {showCriteria ? (
+                <ChevronUp size={12} />
+              ) : (
+                <ChevronDown size={12} />
+              )}
               {t("smartLabelEditor.optionalCriteria")}
             </button>
 
@@ -297,7 +335,9 @@ export function SmartLabelEditor() {
               disabled={!labelId || !aiDescription.trim()}
               className="px-3 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-50"
             >
-              {editingId ? t("smartLabelEditor.update") : t("smartLabelEditor.save")}
+              {editingId
+                ? t("smartLabelEditor.update")
+                : t("smartLabelEditor.save")}
             </button>
             <button
               onClick={resetForm}

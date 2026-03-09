@@ -16,7 +16,9 @@ export function SubscriptionManager() {
   const [subscriptions, setSubscriptions] = useState<SubscriptionEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [unsubscribingIds, setUnsubscribingIds] = useState<Set<string>>(() => new Set());
+  const [unsubscribingIds, setUnsubscribingIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
@@ -28,37 +30,40 @@ export function SubscriptionManager() {
       .finally(() => setLoading(false));
   }, [activeAccountId]);
 
-  const handleUnsubscribe = useCallback(async (sub: SubscriptionEntry) => {
-    if (!activeAccountId || !sub.latest_unsubscribe_header) return;
-    setUnsubscribingIds((prev) => new Set(prev).add(sub.from_address));
-    try {
-      const result = await executeUnsubscribe(
-        activeAccountId,
-        "", // threadId not critical for tracking
-        sub.from_address,
-        sub.from_name,
-        sub.latest_unsubscribe_header,
-        sub.latest_unsubscribe_post,
-      );
-      if (result.success) {
-        setSubscriptions((prev) =>
-          prev.map((s) =>
-            s.from_address === sub.from_address
-              ? { ...s, status: "unsubscribed" }
-              : s,
-          ),
+  const handleUnsubscribe = useCallback(
+    async (sub: SubscriptionEntry) => {
+      if (!activeAccountId || !sub.latest_unsubscribe_header) return;
+      setUnsubscribingIds((prev) => new Set(prev).add(sub.from_address));
+      try {
+        const result = await executeUnsubscribe(
+          activeAccountId,
+          "", // threadId not critical for tracking
+          sub.from_address,
+          sub.from_name,
+          sub.latest_unsubscribe_header,
+          sub.latest_unsubscribe_post,
         );
+        if (result.success) {
+          setSubscriptions((prev) =>
+            prev.map((s) =>
+              s.from_address === sub.from_address
+                ? { ...s, status: "unsubscribed" }
+                : s,
+            ),
+          );
+        }
+      } catch (err) {
+        console.error("Failed to unsubscribe:", err);
+      } finally {
+        setUnsubscribingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(sub.from_address);
+          return next;
+        });
       }
-    } catch (err) {
-      console.error("Failed to unsubscribe:", err);
-    } finally {
-      setUnsubscribingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(sub.from_address);
-        return next;
-      });
-    }
-  }, [activeAccountId]);
+    },
+    [activeAccountId],
+  );
 
   const handleBulkUnsubscribe = useCallback(async () => {
     const toUnsubscribe = subscriptions.filter(
@@ -82,21 +87,28 @@ export function SubscriptionManager() {
   const filtered = useMemo(() => {
     if (!searchQuery) return subscriptions;
     const q = searchQuery.toLowerCase();
-    return subscriptions.filter((s) =>
-      s.from_address.toLowerCase().includes(q) ||
-      (s.from_name?.toLowerCase().includes(q) ?? false),
+    return subscriptions.filter(
+      (s) =>
+        s.from_address.toLowerCase().includes(q) ||
+        (s.from_name?.toLowerCase().includes(q) ?? false),
     );
   }, [subscriptions, searchQuery]);
 
   if (!activeAccountId) {
-    return <p className="text-sm text-text-tertiary">{t("subscriptionManager.noActiveAccount")}</p>;
+    return (
+      <p className="text-sm text-text-tertiary">
+        {t("subscriptionManager.noActiveAccount")}
+      </p>
+    );
   }
 
   if (loading) {
     return (
       <div className="flex items-center gap-2 py-8 justify-center text-text-tertiary">
         <Loader2 size={16} className="animate-spin" />
-        <span className="text-sm">{t("subscriptionManager.loadingSubscriptions")}</span>
+        <span className="text-sm">
+          {t("subscriptionManager.loadingSubscriptions")}
+        </span>
       </div>
     );
   }
@@ -105,7 +117,10 @@ export function SubscriptionManager() {
     <div className="space-y-4">
       <div className="flex items-center gap-2">
         <div className="relative flex-1">
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary" />
+          <Search
+            size={14}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary"
+          />
           <input
             type="text"
             value={searchQuery}
@@ -119,13 +134,16 @@ export function SubscriptionManager() {
             onClick={handleBulkUnsubscribe}
             className="px-3 py-1.5 text-xs bg-danger text-white rounded-md hover:bg-danger/80 transition-colors shrink-0"
           >
-            {t("subscriptionManager.unsubscribeCount", { count: selectedIds.size })}
+            {t("subscriptionManager.unsubscribeCount", {
+              count: selectedIds.size,
+            })}
           </button>
         )}
       </div>
 
       <p className="text-xs text-text-tertiary">
-        {t("subscriptionManager.sender", { count: subscriptions.length })} {t("subscriptionManager.detectedWithHeaders")}
+        {t("subscriptionManager.sender", { count: subscriptions.length })}{" "}
+        {t("subscriptionManager.detectedWithHeaders")}
       </p>
 
       <div className="space-y-1 max-h-[500px] overflow-y-auto">
@@ -142,7 +160,9 @@ export function SubscriptionManager() {
             <div
               key={sub.from_address}
               className={`flex items-center gap-3 py-2.5 px-3 rounded-lg transition-colors ${
-                isSelected ? "bg-accent/10" : "bg-bg-secondary hover:bg-bg-hover"
+                isSelected
+                  ? "bg-accent/10"
+                  : "bg-bg-secondary hover:bg-bg-hover"
               }`}
             >
               <input
@@ -170,8 +190,14 @@ export function SubscriptionManager() {
                 </div>
                 <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5">
                   <span className="truncate">{sub.from_address}</span>
-                  <span className="shrink-0">{t("subscriptionManager.emailCount", { count: sub.message_count })}</span>
-                  <span className="shrink-0">{formatRelativeDate(sub.latest_date)}</span>
+                  <span className="shrink-0">
+                    {t("subscriptionManager.emailCount", {
+                      count: sub.message_count,
+                    })}
+                  </span>
+                  <span className="shrink-0">
+                    {formatRelativeDate(sub.latest_date)}
+                  </span>
                 </div>
               </div>
               {!isUnsubscribed && (
@@ -185,7 +211,9 @@ export function SubscriptionManager() {
                   ) : (
                     <MailMinus size={12} />
                   )}
-                  {isLoading ? t("subscriptionManager.unsubscribing") : t("subscriptionManager.unsubscribe")}
+                  {isLoading
+                    ? t("subscriptionManager.unsubscribing")
+                    : t("subscriptionManager.unsubscribe")}
                 </button>
               )}
             </div>
@@ -193,7 +221,9 @@ export function SubscriptionManager() {
         })}
         {filtered.length === 0 && (
           <p className="text-sm text-text-tertiary py-4 text-center">
-            {searchQuery ? t("subscriptionManager.noMatchingSenders") : t("subscriptionManager.noSubscriptions")}
+            {searchQuery
+              ? t("subscriptionManager.noMatchingSenders")
+              : t("subscriptionManager.noSubscriptions")}
           </p>
         )}
       </div>

@@ -32,17 +32,21 @@ export function InlineAttachmentPreview({
   onAttachmentClick,
 }: InlineAttachmentPreviewProps) {
   // Filter to previewable non-inline attachments, dedup, exclude CID-referenced
-  const previewableAttachments = dedup(attachments.filter((a) => {
-    // Skip attachments whose CID is referenced in the email body
-    if (a.content_id && referencedCids?.has(a.content_id)) return false;
-    if (a.is_inline && !a.filename) return false;
-    return isImage(a.mime_type) || isPdf(a.mime_type, a.filename);
-  }));
+  const previewableAttachments = dedup(
+    attachments.filter((a) => {
+      // Skip attachments whose CID is referenced in the email body
+      if (a.content_id && referencedCids?.has(a.content_id)) return false;
+      if (a.is_inline && !a.filename) return false;
+      return isImage(a.mime_type) || isPdf(a.mime_type, a.filename);
+    }),
+  );
 
   if (previewableAttachments.length === 0) return null;
 
   const images = previewableAttachments.filter((a) => isImage(a.mime_type));
-  const pdfs = previewableAttachments.filter((a) => isPdf(a.mime_type, a.filename));
+  const pdfs = previewableAttachments.filter((a) =>
+    isPdf(a.mime_type, a.filename),
+  );
 
   return (
     <div className="mt-3">
@@ -113,7 +117,10 @@ function ImageThumbnail({
 
     try {
       const provider = await getEmailProvider(accountId);
-      const response = await provider.fetchAttachment(messageId, attachment.gmail_attachment_id);
+      const response = await provider.fetchAttachment(
+        messageId,
+        attachment.gmail_attachment_id,
+      );
 
       // Normalize URL-safe base64 (Gmail API) to standard base64
       const base64 = response.data.replace(/-/g, "+").replace(/_/g, "/");
@@ -169,7 +176,9 @@ function ImageThumbnail({
       >
         {loading && (
           <div className="w-[200px] h-[120px] bg-bg-tertiary animate-pulse flex items-center justify-center">
-            <span className="text-xs text-text-tertiary">{t("inlineAttachment.loading")}</span>
+            <span className="text-xs text-text-tertiary">
+              {t("inlineAttachment.loading")}
+            </span>
           </div>
         )}
         {thumbnailUrl && (
@@ -181,11 +190,12 @@ function ImageThumbnail({
         )}
         {!loading && !thumbnailUrl && (
           <div className="w-[200px] h-[120px] bg-bg-tertiary flex items-center justify-center">
-            <span className="text-xs text-text-tertiary">{t("inlineAttachment.image")}</span>
+            <span className="text-xs text-text-tertiary">
+              {t("inlineAttachment.image")}
+            </span>
           </div>
         )}
       </button>
     </div>
   );
 }
-

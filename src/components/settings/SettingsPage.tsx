@@ -4,11 +4,23 @@ import { useParams } from "@tanstack/react-router";
 import { useUIStore } from "@/stores/uiStore";
 import { navigateToLabel, navigateToSettings } from "@/router/navigate";
 import { useAccountStore } from "@/stores/accountStore";
-import { getSetting, setSetting, getSecureSetting, setSecureSetting } from "@/services/db/settings";
+import {
+  getSetting,
+  setSetting,
+  getSecureSetting,
+  setSecureSetting,
+} from "@/services/db/settings";
 import { PROVIDER_MODELS } from "@/services/ai/types";
 import { deleteAccount } from "@/services/db/accounts";
-import { removeClient, reauthorizeAccount } from "@/services/gmail/tokenManager";
-import { triggerSync, forceFullSync, resyncAccount } from "@/services/gmail/syncManager";
+import {
+  removeClient,
+  reauthorizeAccount,
+} from "@/services/gmail/tokenManager";
+import {
+  triggerSync,
+  forceFullSync,
+  resyncAccount,
+} from "@/services/gmail/syncManager";
 import {
   registerComposeShortcut,
   getCurrentShortcut,
@@ -61,9 +73,24 @@ import type { SidebarNavItem } from "@/stores/uiStore";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
 import appIcon from "@/assets/icon.png";
-import { SUPPORTED_LANGUAGES, setAppLanguage, resetToSystemLanguage, getPersistedLanguage, getSystemLanguageName } from "@/i18n";
+import {
+  SUPPORTED_LANGUAGES,
+  setAppLanguage,
+  resetToSystemLanguage,
+  getPersistedLanguage,
+  getSystemLanguageName,
+} from "@/i18n";
 
-type SettingsTab = "general" | "notifications" | "composing" | "mail-rules" | "people" | "accounts" | "shortcuts" | "ai" | "about";
+type SettingsTab =
+  | "general"
+  | "notifications"
+  | "composing"
+  | "mail-rules"
+  | "people"
+  | "accounts"
+  | "shortcuts"
+  | "ai"
+  | "about";
 
 const TAB_ICONS: Record<SettingsTab, LucideIcon> = {
   general: Settings,
@@ -77,7 +104,17 @@ const TAB_ICONS: Record<SettingsTab, LucideIcon> = {
   about: Info,
 };
 
-const TAB_IDS: SettingsTab[] = ["general", "notifications", "composing", "mail-rules", "people", "accounts", "shortcuts", "ai", "about"];
+const TAB_IDS: SettingsTab[] = [
+  "general",
+  "notifications",
+  "composing",
+  "mail-rules",
+  "people",
+  "accounts",
+  "shortcuts",
+  "ai",
+  "about",
+];
 
 const TAB_LABEL_KEYS = {
   general: "tabGeneral",
@@ -118,7 +155,9 @@ export function SettingsPage() {
   const accounts = useAccountStore((s) => s.accounts);
   const removeAccountFromStore = useAccountStore((s) => s.removeAccount);
   const { tab } = useParams({ strict: false }) as { tab?: string };
-  const activeTab = (tab && TAB_IDS.includes(tab as SettingsTab) ? tab : "general") as SettingsTab;
+  const activeTab = (
+    tab && TAB_IDS.includes(tab as SettingsTab) ? tab : "general"
+  ) as SettingsTab;
   const setActiveTab = (tabId: SettingsTab) => navigateToSettings(tabId);
   const [languageOverride, setLanguageOverride] = useState<string | null>(null);
   const [languageLoaded, setLanguageLoaded] = useState(false);
@@ -131,26 +170,37 @@ export function SettingsPage() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncPeriodDays, setSyncPeriodDays] = useState("365");
   const [blockRemoteImages, setBlockRemoteImages] = useState(true);
-  const [phishingDetectionEnabled, setPhishingDetectionEnabled] = useState(true);
-  const [phishingSensitivity, setPhishingSensitivity] = useState<"low" | "default" | "high">("default");
+  const [phishingDetectionEnabled, setPhishingDetectionEnabled] =
+    useState(true);
+  const [phishingSensitivity, setPhishingSensitivity] = useState<
+    "low" | "default" | "high"
+  >("default");
   const [autostartEnabled, setAutostartEnabled] = useState(false);
-  const [aiProvider, setAiProvider] = useState<"claude" | "openai" | "gemini" | "ollama" | "copilot">("claude");
+  const [aiProvider, setAiProvider] = useState<
+    "claude" | "openai" | "gemini" | "ollama" | "copilot"
+  >("claude");
   const [claudeApiKey, setClaudeApiKey] = useState("");
   const [openaiApiKey, setOpenaiApiKey] = useState("");
   const [geminiApiKey, setGeminiApiKey] = useState("");
   const [copilotApiKey, setCopilotApiKey] = useState("");
-  const [ollamaServerUrl, setOllamaServerUrl] = useState("http://localhost:11434");
+  const [ollamaServerUrl, setOllamaServerUrl] = useState(
+    "http://localhost:11434",
+  );
   const [ollamaModel, setOllamaModel] = useState("llama3.2");
   const [claudeModel, setClaudeModel] = useState("claude-haiku-4-5-20251001");
   const [openaiModel, setOpenaiModel] = useState("gpt-4o-mini");
-  const [geminiModel, setGeminiModel] = useState("gemini-2.5-flash-preview-05-20");
+  const [geminiModel, setGeminiModel] = useState(
+    "gemini-2.5-flash-preview-05-20",
+  );
   const [copilotModel, setCopilotModel] = useState("openai/gpt-4o-mini");
   const [aiEnabled, setAiEnabled] = useState(true);
   const [aiAutoCategorize, setAiAutoCategorize] = useState(true);
   const [aiAutoSummarize, setAiAutoSummarize] = useState(true);
   const [aiKeySaved, setAiKeySaved] = useState(false);
   const [aiTesting, setAiTesting] = useState(false);
-  const [aiTestResult, setAiTestResult] = useState<"success" | "fail" | null>(null);
+  const [aiTestResult, setAiTestResult] = useState<"success" | "fail" | null>(
+    null,
+  );
   const [aiAutoDraftEnabled, setAiAutoDraftEnabled] = useState(true);
   const [aiWritingStyleEnabled, setAiWritingStyleEnabled] = useState(true);
   const [styleAnalyzing, setStyleAnalyzing] = useState(false);
@@ -158,12 +208,22 @@ export function SettingsPage() {
   const [cacheMaxMb, setCacheMaxMb] = useState("500");
   const [cacheSizeMb, setCacheSizeMb] = useState<number | null>(null);
   const [clearingCache, setClearingCache] = useState(false);
-  const [reauthStatus, setReauthStatus] = useState<Record<string, "idle" | "authorizing" | "done" | "error">>({});
-  const [resyncStatus, setResyncStatus] = useState<Record<string, "idle" | "syncing" | "done" | "error">>({});
-  const [autoArchiveCategories, setAutoArchiveCategories] = useState<Set<string>>(() => new Set());
+  const [reauthStatus, setReauthStatus] = useState<
+    Record<string, "idle" | "authorizing" | "done" | "error">
+  >({});
+  const [resyncStatus, setResyncStatus] = useState<
+    Record<string, "idle" | "syncing" | "done" | "error">
+  >({});
+  const [autoArchiveCategories, setAutoArchiveCategories] = useState<
+    Set<string>
+  >(() => new Set());
   const [smartNotifications, setSmartNotifications] = useState(true);
-  const [notifyCategories, setNotifyCategories] = useState<Set<string>>(() => new Set(["Primary"]));
-  const [vipSenders, setVipSenders] = useState<{ email_address: string; display_name: string | null }[]>([]);
+  const [notifyCategories, setNotifyCategories] = useState<Set<string>>(
+    () => new Set(["Primary"]),
+  );
+  const [vipSenders, setVipSenders] = useState<
+    { email_address: string; display_name: string | null }[]
+  >([]);
   const [newVipEmail, setNewVipEmail] = useState("");
 
   // Load settings from DB
@@ -182,7 +242,8 @@ export function SettingsPage() {
       const phishingEnabled = await getSetting("phishing_detection_enabled");
       setPhishingDetectionEnabled(phishingEnabled !== "false");
       const phishingSens = await getSetting("phishing_sensitivity");
-      if (phishingSens === "low" || phishingSens === "high") setPhishingSensitivity(phishingSens);
+      if (phishingSens === "low" || phishingSens === "high")
+        setPhishingSensitivity(phishingSens);
       const syncDays = await getSetting("sync_period_days");
       setSyncPeriodDays(syncDays ?? "365");
 
@@ -196,7 +257,13 @@ export function SettingsPage() {
 
       // Load AI settings
       const provider = await getSetting("ai_provider");
-      if (provider === "openai" || provider === "gemini" || provider === "ollama" || provider === "copilot") setAiProvider(provider);
+      if (
+        provider === "openai" ||
+        provider === "gemini" ||
+        provider === "ollama" ||
+        provider === "copilot"
+      )
+        setAiProvider(provider);
       const ollamaUrl = await getSetting("ollama_server_url");
       if (ollamaUrl) setOllamaServerUrl(ollamaUrl);
       const ollamaModelVal = await getSetting("ollama_model");
@@ -231,7 +298,14 @@ export function SettingsPage() {
       // Load auto-archive categories
       const autoArchive = await getSetting("auto_archive_categories");
       if (autoArchive) {
-        setAutoArchiveCategories(new Set(autoArchive.split(",").map((s) => s.trim()).filter(Boolean)));
+        setAutoArchiveCategories(
+          new Set(
+            autoArchive
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+          ),
+        );
       }
 
       // Load smart notification settings
@@ -239,14 +313,28 @@ export function SettingsPage() {
       setSmartNotifications(smartNotif !== "false");
       const notifCats = await getSetting("notify_categories");
       if (notifCats) {
-        setNotifyCategories(new Set(notifCats.split(",").map((s) => s.trim()).filter(Boolean)));
+        setNotifyCategories(
+          new Set(
+            notifCats
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+          ),
+        );
       }
       try {
-        const { getAllVipSenders } = await import("@/services/db/notificationVips");
+        const { getAllVipSenders } = await import(
+          "@/services/db/notificationVips"
+        );
         const activeId = accounts.find((a) => a.isActive)?.id;
         if (activeId) {
           const vips = await getAllVipSenders(activeId);
-          setVipSenders(vips.map((v) => ({ email_address: v.email_address, display_name: v.display_name })));
+          setVipSenders(
+            vips.map((v) => ({
+              email_address: v.email_address,
+              display_name: v.display_name,
+            })),
+          );
         }
       } catch {
         // VIP table may not exist yet
@@ -256,9 +344,11 @@ export function SettingsPage() {
       const cacheMax = await getSetting("attachment_cache_max_mb");
       setCacheMaxMb(cacheMax ?? "500");
       try {
-        const { getCacheSize } = await import("@/services/attachments/cacheManager");
+        const { getCacheSize } = await import(
+          "@/services/attachments/cacheManager"
+        );
         const size = await getCacheSize();
-        setCacheSizeMb(Math.round(size / (1024 * 1024) * 10) / 10);
+        setCacheSizeMb(Math.round((size / (1024 * 1024)) * 10) / 10);
       } catch {
         // cache manager may not be available
       }
@@ -362,25 +452,22 @@ export function SettingsPage() {
     [],
   );
 
-  const handleResyncAccount = useCallback(
-    async (accountId: string) => {
-      setResyncStatus((prev) => ({ ...prev, [accountId]: "syncing" }));
-      try {
-        await resyncAccount(accountId);
-        setResyncStatus((prev) => ({ ...prev, [accountId]: "done" }));
-        setTimeout(() => {
-          setResyncStatus((prev) => ({ ...prev, [accountId]: "idle" }));
-        }, 3000);
-      } catch (err) {
-        console.error("Resync failed:", err);
-        setResyncStatus((prev) => ({ ...prev, [accountId]: "error" }));
-        setTimeout(() => {
-          setResyncStatus((prev) => ({ ...prev, [accountId]: "idle" }));
-        }, 3000);
-      }
-    },
-    [],
-  );
+  const handleResyncAccount = useCallback(async (accountId: string) => {
+    setResyncStatus((prev) => ({ ...prev, [accountId]: "syncing" }));
+    try {
+      await resyncAccount(accountId);
+      setResyncStatus((prev) => ({ ...prev, [accountId]: "done" }));
+      setTimeout(() => {
+        setResyncStatus((prev) => ({ ...prev, [accountId]: "idle" }));
+      }, 3000);
+    } catch (err) {
+      console.error("Resync failed:", err);
+      setResyncStatus((prev) => ({ ...prev, [accountId]: "error" }));
+      setTimeout(() => {
+        setResyncStatus((prev) => ({ ...prev, [accountId]: "idle" }));
+      }, 3000);
+    }
+  }, []);
 
   return (
     <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-bg-primary/50">
@@ -393,7 +480,9 @@ export function SettingsPage() {
         >
           <ArrowLeft size={18} />
         </button>
-        <h1 className="text-base font-semibold text-text-primary">{t("settings")}</h1>
+        <h1 className="text-base font-semibold text-text-primary">
+          {t("settings")}
+        </h1>
       </div>
 
       {/* Body: sidebar nav + content */}
@@ -411,7 +500,7 @@ export function SettingsPage() {
                   isActive
                     ? "bg-bg-selected text-accent font-medium"
                     : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
-                  }`}
+                }`}
               >
                 <Icon size={15} className="shrink-0" />
                 {t(TAB_LABEL_KEYS[tabId])}
@@ -436,7 +525,11 @@ export function SettingsPage() {
                   <Section title={t("language")}>
                     <SettingRow label={t("language")}>
                       <select
-                        value={languageLoaded ? (languageOverride ?? "system") : "system"}
+                        value={
+                          languageLoaded
+                            ? (languageOverride ?? "system")
+                            : "system"
+                        }
                         onChange={async (e) => {
                           const val = e.target.value;
                           if (val === "system") {
@@ -450,9 +543,15 @@ export function SettingsPage() {
                         }}
                         className="w-48 bg-bg-tertiary text-text-primary text-sm px-3 py-1.5 rounded-md border border-border-primary focus:border-accent outline-none"
                       >
-                        <option value="system">{t("languageDefaultWithName", { language: systemLanguageName })}</option>
+                        <option value="system">
+                          {t("languageDefaultWithName", {
+                            language: systemLanguageName,
+                          })}
+                        </option>
                         {SUPPORTED_LANGUAGES.map((lang) => (
-                          <option key={lang.code} value={lang.code}>{lang.name}</option>
+                          <option key={lang.code} value={lang.code}>
+                            {lang.name}
+                          </option>
                         ))}
                       </select>
                     </SettingRow>
@@ -462,7 +561,10 @@ export function SettingsPage() {
                       <select
                         value={theme}
                         onChange={(e) => {
-                          const val = e.target.value as "light" | "dark" | "system";
+                          const val = e.target.value as
+                            | "light"
+                            | "dark"
+                            | "system";
                           setTheme(val);
                           setSetting("theme", val);
                         }}
@@ -477,7 +579,9 @@ export function SettingsPage() {
                       <select
                         value={readingPanePosition}
                         onChange={(e) => {
-                          setReadingPanePosition(e.target.value as "right" | "bottom" | "hidden");
+                          setReadingPanePosition(
+                            e.target.value as "right" | "bottom" | "hidden",
+                          );
                         }}
                         className="w-48 bg-bg-tertiary text-text-primary text-sm px-3 py-1.5 rounded-md border border-border-primary focus:border-accent outline-none"
                       >
@@ -490,7 +594,12 @@ export function SettingsPage() {
                       <select
                         value={emailDensity}
                         onChange={(e) => {
-                          setEmailDensity(e.target.value as "compact" | "default" | "spacious");
+                          setEmailDensity(
+                            e.target.value as
+                              | "compact"
+                              | "default"
+                              | "spacious",
+                          );
                         }}
                         className="w-48 bg-bg-tertiary text-text-primary text-sm px-3 py-1.5 rounded-md border border-border-primary focus:border-accent outline-none"
                       >
@@ -503,7 +612,13 @@ export function SettingsPage() {
                       <select
                         value={fontScale}
                         onChange={(e) => {
-                          setFontScale(e.target.value as "small" | "default" | "large" | "xlarge");
+                          setFontScale(
+                            e.target.value as
+                              | "small"
+                              | "default"
+                              | "large"
+                              | "xlarge",
+                          );
                         }}
                         className="w-48 bg-bg-tertiary text-text-primary text-sm px-3 py-1.5 rounded-md border border-border-primary focus:border-accent outline-none"
                       >
@@ -526,7 +641,7 @@ export function SettingsPage() {
                                 isSelected
                                   ? "ring-2 ring-offset-2 ring-offset-bg-primary scale-110"
                                   : "hover:scale-105"
-                                }`}
+                              }`}
                               style={{
                                 backgroundColor: ct.swatch,
                                 boxShadow: isSelected
@@ -535,7 +650,10 @@ export function SettingsPage() {
                               }}
                             >
                               {isSelected && (
-                                <Check size={14} className="absolute inset-0 m-auto text-white drop-shadow-sm" />
+                                <Check
+                                  size={14}
+                                  className="absolute inset-0 m-auto text-white drop-shadow-sm"
+                                />
                               )}
                             </button>
                           );
@@ -546,7 +664,9 @@ export function SettingsPage() {
                       <select
                         value={inboxViewMode}
                         onChange={(e) => {
-                          setInboxViewMode(e.target.value as "unified" | "split");
+                          setInboxViewMode(
+                            e.target.value as "unified" | "split",
+                          );
                         }}
                         className="w-48 bg-bg-tertiary text-text-primary text-sm px-3 py-1.5 rounded-md border border-border-primary focus:border-accent outline-none"
                       >
@@ -587,7 +707,10 @@ export function SettingsPage() {
                       onToggle={async () => {
                         const newVal = !blockRemoteImages;
                         setBlockRemoteImages(newVal);
-                        await setSetting("block_remote_images", newVal ? "true" : "false");
+                        await setSetting(
+                          "block_remote_images",
+                          newVal ? "true" : "false",
+                        );
                       }}
                     />
                     <ToggleRow
@@ -597,7 +720,10 @@ export function SettingsPage() {
                       onToggle={async () => {
                         const newVal = !phishingDetectionEnabled;
                         setPhishingDetectionEnabled(newVal);
-                        await setSetting("phishing_detection_enabled", newVal ? "true" : "false");
+                        await setSetting(
+                          "phishing_detection_enabled",
+                          newVal ? "true" : "false",
+                        );
                       }}
                     />
                     {phishingDetectionEnabled && (
@@ -605,14 +731,19 @@ export function SettingsPage() {
                         <select
                           value={phishingSensitivity}
                           onChange={async (e) => {
-                            const val = e.target.value as "low" | "default" | "high";
+                            const val = e.target.value as
+                              | "low"
+                              | "default"
+                              | "high";
                             setPhishingSensitivity(val);
                             await setSetting("phishing_sensitivity", val);
                           }}
                           className="w-48 bg-bg-tertiary text-text-primary text-sm px-3 py-1.5 rounded-md border border-border-primary focus:border-accent outline-none"
                         >
                           <option value="low">{t("sensitivityLow")}</option>
-                          <option value="default">{t("sensitivityDefault")}</option>
+                          <option value="default">
+                            {t("sensitivityDefault")}
+                          </option>
                           <option value="high">{t("sensitivityHigh")}</option>
                         </select>
                       </SettingRow>
@@ -622,9 +753,13 @@ export function SettingsPage() {
                   <Section title={t("storage")}>
                     <div className="flex items-center justify-between">
                       <div>
-                        <span className="text-sm text-text-secondary">{t("attachmentCache")}</span>
+                        <span className="text-sm text-text-secondary">
+                          {t("attachmentCache")}
+                        </span>
                         <p className="text-xs text-text-tertiary mt-0.5">
-                          {cacheSizeMb !== null ? t("mbUsed", { size: cacheSizeMb }) : t("calculating")}
+                          {cacheSizeMb !== null
+                            ? t("mbUsed", { size: cacheSizeMb })
+                            : t("calculating")}
                         </p>
                       </div>
                       <Button
@@ -632,7 +767,9 @@ export function SettingsPage() {
                         onClick={async () => {
                           setClearingCache(true);
                           try {
-                            const { clearAllCache } = await import("@/services/attachments/cacheManager");
+                            const { clearAllCache } = await import(
+                              "@/services/attachments/cacheManager"
+                            );
                             await clearAllCache();
                             setCacheSizeMb(0);
                           } catch (err) {
@@ -683,7 +820,10 @@ export function SettingsPage() {
                       onToggle={async () => {
                         const newVal = !smartNotifications;
                         setSmartNotifications(newVal);
-                        await setSetting("smart_notifications", newVal ? "true" : "false");
+                        await setSetting(
+                          "smart_notifications",
+                          newVal ? "true" : "false",
+                        );
                       }}
                     />
                   </Section>
@@ -692,9 +832,19 @@ export function SettingsPage() {
                     <>
                       <Section title={t("notifyForCategories")}>
                         <div>
-                          <span className="text-sm text-text-secondary">{t("notifyForCategories")}</span>
+                          <span className="text-sm text-text-secondary">
+                            {t("notifyForCategories")}
+                          </span>
                           <div className="flex flex-wrap gap-2 mt-2">
-                            {(["Primary", "Updates", "Promotions", "Social", "Newsletters"] as const).map((cat) => (
+                            {(
+                              [
+                                "Primary",
+                                "Updates",
+                                "Promotions",
+                                "Social",
+                                "Newsletters",
+                              ] as const
+                            ).map((cat) => (
                               <button
                                 key={cat}
                                 onClick={async () => {
@@ -702,13 +852,16 @@ export function SettingsPage() {
                                   if (next.has(cat)) next.delete(cat);
                                   else next.add(cat);
                                   setNotifyCategories(next);
-                                  await setSetting("notify_categories", [...next].join(","));
+                                  await setSetting(
+                                    "notify_categories",
+                                    [...next].join(","),
+                                  );
                                 }}
                                 className={`px-2.5 py-1 text-xs rounded-full transition-colors border ${
                                   notifyCategories.has(cat)
                                     ? "bg-accent/15 text-accent border-accent/30"
                                     : "bg-bg-tertiary text-text-tertiary border-border-primary hover:text-text-primary"
-                                  }`}
+                                }`}
                               >
                                 {t(`sidebar:${cat.toLowerCase()}`)}
                               </button>
@@ -723,17 +876,34 @@ export function SettingsPage() {
                         </p>
                         <div className="space-y-1.5">
                           {vipSenders.map((vip) => (
-                            <div key={vip.email_address} className="flex items-center justify-between py-1.5 px-3 bg-bg-secondary rounded-md">
+                            <div
+                              key={vip.email_address}
+                              className="flex items-center justify-between py-1.5 px-3 bg-bg-secondary rounded-md"
+                            >
                               <span className="text-xs text-text-primary truncate">
-                                {vip.display_name ? `${vip.display_name} (${vip.email_address})` : vip.email_address}
+                                {vip.display_name
+                                  ? `${vip.display_name} (${vip.email_address})`
+                                  : vip.email_address}
                               </span>
                               <button
                                 onClick={async () => {
-                                  const activeId = accounts.find((a) => a.isActive)?.id;
+                                  const activeId = accounts.find(
+                                    (a) => a.isActive,
+                                  )?.id;
                                   if (!activeId) return;
-                                  const { removeVipSender } = await import("@/services/db/notificationVips");
-                                  await removeVipSender(activeId, vip.email_address);
-                                  setVipSenders((prev) => prev.filter((v) => v.email_address !== vip.email_address));
+                                  const { removeVipSender } = await import(
+                                    "@/services/db/notificationVips"
+                                  );
+                                  await removeVipSender(
+                                    activeId,
+                                    vip.email_address,
+                                  );
+                                  setVipSenders((prev) =>
+                                    prev.filter(
+                                      (v) =>
+                                        v.email_address !== vip.email_address,
+                                    ),
+                                  );
                                 }}
                                 className="text-xs text-danger hover:text-danger/80 ml-2 shrink-0"
                               >
@@ -750,12 +920,25 @@ export function SettingsPage() {
                             placeholder={t("vipPlaceholder")}
                             className="flex-1 px-3 py-1.5 bg-bg-tertiary border border-border-primary rounded-md text-xs text-text-primary outline-none focus:border-accent"
                             onKeyDown={async (e) => {
-                              if (e.key !== "Enter" || !newVipEmail.trim()) return;
-                              const activeId = accounts.find((a) => a.isActive)?.id;
+                              if (e.key !== "Enter" || !newVipEmail.trim())
+                                return;
+                              const activeId = accounts.find(
+                                (a) => a.isActive,
+                              )?.id;
                               if (!activeId) return;
-                              const { addVipSender } = await import("@/services/db/notificationVips");
+                              const { addVipSender } = await import(
+                                "@/services/db/notificationVips"
+                              );
                               await addVipSender(activeId, newVipEmail.trim());
-                              setVipSenders((prev) => [...prev, { email_address: newVipEmail.trim().toLowerCase(), display_name: null }]);
+                              setVipSenders((prev) => [
+                                ...prev,
+                                {
+                                  email_address: newVipEmail
+                                    .trim()
+                                    .toLowerCase(),
+                                  display_name: null,
+                                },
+                              ]);
                               setNewVipEmail("");
                             }}
                           />
@@ -763,11 +946,23 @@ export function SettingsPage() {
                             variant="primary"
                             onClick={async () => {
                               if (!newVipEmail.trim()) return;
-                              const activeId = accounts.find((a) => a.isActive)?.id;
+                              const activeId = accounts.find(
+                                (a) => a.isActive,
+                              )?.id;
                               if (!activeId) return;
-                              const { addVipSender } = await import("@/services/db/notificationVips");
+                              const { addVipSender } = await import(
+                                "@/services/db/notificationVips"
+                              );
                               await addVipSender(activeId, newVipEmail.trim());
-                              setVipSenders((prev) => [...prev, { email_address: newVipEmail.trim().toLowerCase(), display_name: null }]);
+                              setVipSenders((prev) => [
+                                ...prev,
+                                {
+                                  email_address: newVipEmail
+                                    .trim()
+                                    .toLowerCase(),
+                                  display_name: null,
+                                },
+                              ]);
                               setNewVipEmail("");
                             }}
                             disabled={!newVipEmail.trim()}
@@ -808,7 +1003,9 @@ export function SettingsPage() {
                       <select
                         value={defaultReplyMode}
                         onChange={(e) => {
-                          setDefaultReplyMode(e.target.value as "reply" | "replyAll");
+                          setDefaultReplyMode(
+                            e.target.value as "reply" | "replyAll",
+                          );
                         }}
                         className="w-48 bg-bg-tertiary text-text-primary text-sm px-3 py-1.5 rounded-md border border-border-primary focus:border-accent outline-none"
                       >
@@ -820,11 +1017,15 @@ export function SettingsPage() {
                       <select
                         value={markAsReadBehavior}
                         onChange={(e) => {
-                          setMarkAsReadBehavior(e.target.value as "instant" | "2s" | "manual");
+                          setMarkAsReadBehavior(
+                            e.target.value as "instant" | "2s" | "manual",
+                          );
                         }}
                         className="w-48 bg-bg-tertiary text-text-primary text-sm px-3 py-1.5 rounded-md border border-border-primary focus:border-accent outline-none"
                       >
-                        <option value="instant">{t("markReadInstantly")}</option>
+                        <option value="instant">
+                          {t("markReadInstantly")}
+                        </option>
                         <option value="2s">{t("markReadAfter2s")}</option>
                         <option value="manual">{t("markReadManually")}</option>
                       </select>
@@ -866,7 +1067,21 @@ export function SettingsPage() {
 
                   <Section title={t("smartFolders")}>
                     <p className="text-xs text-text-tertiary mb-3">
-                      {t("smartFoldersDescription")} <code className="bg-bg-tertiary px-1 rounded">is:unread</code>, <code className="bg-bg-tertiary px-1 rounded">from:</code>, <code className="bg-bg-tertiary px-1 rounded">has:attachment</code>, <code className="bg-bg-tertiary px-1 rounded">after:</code>.
+                      {t("smartFoldersDescription")}{" "}
+                      <code className="bg-bg-tertiary px-1 rounded">
+                        is:unread
+                      </code>
+                      ,{" "}
+                      <code className="bg-bg-tertiary px-1 rounded">from:</code>
+                      ,{" "}
+                      <code className="bg-bg-tertiary px-1 rounded">
+                        has:attachment
+                      </code>
+                      ,{" "}
+                      <code className="bg-bg-tertiary px-1 rounded">
+                        after:
+                      </code>
+                      .
                     </p>
                     <SmartFolderEditor />
                   </Section>
@@ -901,61 +1116,90 @@ export function SettingsPage() {
               {activeTab === "accounts" && (
                 <>
                   <Section title={t("mailAccounts")}>
-                    {accounts.filter((a) => a.provider !== "caldav").length === 0 ? (
+                    {accounts.filter((a) => a.provider !== "caldav").length ===
+                    0 ? (
                       <p className="text-sm text-text-tertiary">
                         {t("noMailAccounts")}
                       </p>
                     ) : (
                       <div className="space-y-2">
-                        {accounts.filter((a) => a.provider !== "caldav").map((account) => {
-                          const providerLabel = account.provider === "imap" ? t("imap") : t("gmail");
-                          return (
-                            <div
-                              key={account.id}
-                              className="flex items-center justify-between py-2.5 px-4 bg-bg-secondary rounded-lg"
-                            >
-                              <div>
-                                <div className="text-sm font-medium text-text-primary flex items-center gap-2">
-                                  {account.displayName ?? account.email}
-                                  <span className="text-[0.6rem] font-medium px-1.5 py-0.5 rounded-full bg-bg-tertiary text-text-tertiary">
-                                    {providerLabel}
-                                  </span>
+                        {accounts
+                          .filter((a) => a.provider !== "caldav")
+                          .map((account) => {
+                            const providerLabel =
+                              account.provider === "imap"
+                                ? t("imap")
+                                : t("gmail");
+                            return (
+                              <div
+                                key={account.id}
+                                className="flex items-center justify-between py-2.5 px-4 bg-bg-secondary rounded-lg"
+                              >
+                                <div>
+                                  <div className="text-sm font-medium text-text-primary flex items-center gap-2">
+                                    {account.displayName ?? account.email}
+                                    <span className="text-[0.6rem] font-medium px-1.5 py-0.5 rounded-full bg-bg-tertiary text-text-tertiary">
+                                      {providerLabel}
+                                    </span>
+                                  </div>
+                                  <div className="text-xs text-text-tertiary">
+                                    {account.email}
+                                  </div>
                                 </div>
-                                <div className="text-xs text-text-tertiary">
-                                  {account.email}
+                                <div className="flex items-center gap-3">
+                                  <button
+                                    onClick={() =>
+                                      handleReauthorizeAccount(
+                                        account.id,
+                                        account.email,
+                                      )
+                                    }
+                                    disabled={
+                                      reauthStatus[account.id] === "authorizing"
+                                    }
+                                    className="text-xs text-accent hover:text-accent-hover transition-colors disabled:opacity-50"
+                                  >
+                                    {reauthStatus[account.id] ===
+                                      "authorizing" && t("waiting")}
+                                    {reauthStatus[account.id] === "done" &&
+                                      t("done")}
+                                    {reauthStatus[account.id] === "error" &&
+                                      t("failed")}
+                                    {(!reauthStatus[account.id] ||
+                                      reauthStatus[account.id] === "idle") &&
+                                      t("reauthorize")}
+                                  </button>
+                                  <button
+                                    onClick={() =>
+                                      handleResyncAccount(account.id)
+                                    }
+                                    disabled={
+                                      resyncStatus[account.id] === "syncing"
+                                    }
+                                    className="text-xs text-accent hover:text-accent-hover transition-colors disabled:opacity-50"
+                                  >
+                                    {resyncStatus[account.id] === "syncing" &&
+                                      t("resyncing")}
+                                    {resyncStatus[account.id] === "done" &&
+                                      t("done")}
+                                    {resyncStatus[account.id] === "error" &&
+                                      t("failed")}
+                                    {(!resyncStatus[account.id] ||
+                                      resyncStatus[account.id] === "idle") &&
+                                      t("resync")}
+                                  </button>
+                                  <button
+                                    onClick={() =>
+                                      handleRemoveAccount(account.id)
+                                    }
+                                    className="text-xs text-danger hover:text-danger/80 transition-colors"
+                                  >
+                                    {t("remove")}
+                                  </button>
                                 </div>
                               </div>
-                              <div className="flex items-center gap-3">
-                                <button
-                                  onClick={() => handleReauthorizeAccount(account.id, account.email)}
-                                  disabled={reauthStatus[account.id] === "authorizing"}
-                                  className="text-xs text-accent hover:text-accent-hover transition-colors disabled:opacity-50"
-                                >
-                                  {reauthStatus[account.id] === "authorizing" && t("waiting")}
-                                  {reauthStatus[account.id] === "done" && t("done")}
-                                  {reauthStatus[account.id] === "error" && t("failed")}
-                                  {(!reauthStatus[account.id] || reauthStatus[account.id] === "idle") && t("reauthorize")}
-                                </button>
-                                <button
-                                  onClick={() => handleResyncAccount(account.id)}
-                                  disabled={resyncStatus[account.id] === "syncing"}
-                                  className="text-xs text-accent hover:text-accent-hover transition-colors disabled:opacity-50"
-                                >
-                                  {resyncStatus[account.id] === "syncing" && t("resyncing")}
-                                  {resyncStatus[account.id] === "done" && t("done")}
-                                  {resyncStatus[account.id] === "error" && t("failed")}
-                                  {(!resyncStatus[account.id] || resyncStatus[account.id] === "idle") && t("resync")}
-                                </button>
-                                <button
-                                  onClick={() => handleRemoveAccount(account.id)}
-                                  className="text-xs text-danger hover:text-danger/80 transition-colors"
-                                >
-                                  {t("remove")}
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
                       </div>
                     )}
                   </Section>
@@ -963,30 +1207,32 @@ export function SettingsPage() {
                   {accounts.some((a) => a.provider === "caldav") && (
                     <Section title={t("calendarAccounts")}>
                       <div className="space-y-2">
-                        {accounts.filter((a) => a.provider === "caldav").map((account) => (
-                          <div
-                            key={account.id}
-                            className="flex items-center justify-between py-2.5 px-4 bg-bg-secondary rounded-lg"
-                          >
-                            <div>
-                              <div className="text-sm font-medium text-text-primary flex items-center gap-2">
-                                {account.displayName ?? account.email}
-                                <span className="text-[0.6rem] font-medium px-1.5 py-0.5 rounded-full bg-accent/10 text-accent">
-                                  {t("caldav")}
-                                </span>
-                              </div>
-                              <div className="text-xs text-text-tertiary">
-                                {account.email}
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => handleRemoveAccount(account.id)}
-                              className="text-xs text-danger hover:text-danger/80 transition-colors"
+                        {accounts
+                          .filter((a) => a.provider === "caldav")
+                          .map((account) => (
+                            <div
+                              key={account.id}
+                              className="flex items-center justify-between py-2.5 px-4 bg-bg-secondary rounded-lg"
                             >
-                              {t("remove")}
-                            </button>
-                          </div>
-                        ))}
+                              <div>
+                                <div className="text-sm font-medium text-text-primary flex items-center gap-2">
+                                  {account.displayName ?? account.email}
+                                  <span className="text-[0.6rem] font-medium px-1.5 py-0.5 rounded-full bg-accent/10 text-accent">
+                                    {t("caldav")}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-text-tertiary">
+                                  {account.email}
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => handleRemoveAccount(account.id)}
+                                className="text-xs text-danger hover:text-danger/80 transition-colors"
+                              >
+                                {t("remove")}
+                              </button>
+                            </div>
+                          ))}
                       </div>
                     </Section>
                   )}
@@ -1032,7 +1278,12 @@ export function SettingsPage() {
                       <Button
                         variant="primary"
                         size="md"
-                        icon={<RefreshCw size={14} className={isSyncing ? "animate-spin" : ""} />}
+                        icon={
+                          <RefreshCw
+                            size={14}
+                            className={isSyncing ? "animate-spin" : ""}
+                          />
+                        }
                         onClick={handleManualSync}
                         disabled={isSyncing || accounts.length === 0}
                       >
@@ -1051,7 +1302,12 @@ export function SettingsPage() {
                       <Button
                         variant="secondary"
                         size="md"
-                        icon={<RefreshCw size={14} className={isSyncing ? "animate-spin" : ""} />}
+                        icon={
+                          <RefreshCw
+                            size={14}
+                            className={isSyncing ? "animate-spin" : ""}
+                          />
+                        }
                         onClick={handleForceFullSync}
                         disabled={isSyncing || accounts.length === 0}
                         className="bg-bg-tertiary text-text-primary border border-border-primary"
@@ -1087,9 +1343,7 @@ export function SettingsPage() {
                 </>
               )}
 
-              {activeTab === "shortcuts" && (
-                <ShortcutsTab />
-              )}
+              {activeTab === "shortcuts" && <ShortcutsTab />}
 
               {activeTab === "ai" && (
                 <>
@@ -1101,11 +1355,18 @@ export function SettingsPage() {
                       <select
                         value={aiProvider}
                         onChange={async (e) => {
-                          const val = e.target.value as "claude" | "openai" | "gemini" | "ollama" | "copilot";
+                          const val = e.target.value as
+                            | "claude"
+                            | "openai"
+                            | "gemini"
+                            | "ollama"
+                            | "copilot";
                           setAiProvider(val);
                           setAiTestResult(null);
                           await setSetting("ai_provider", val);
-                          const { clearProviderClients } = await import("@/services/ai/providerManager");
+                          const { clearProviderClients } = await import(
+                            "@/services/ai/providerManager"
+                          );
                           clearProviderClients();
                         }}
                         className="w-48 bg-bg-tertiary text-text-primary text-sm px-3 py-1.5 rounded-md border border-border-primary focus:border-accent outline-none"
@@ -1118,11 +1379,15 @@ export function SettingsPage() {
                       </select>
                     </SettingRow>
                     <p className="text-xs text-text-tertiary">
-                      {aiProvider === "claude" && `${t("uses")} ${PROVIDER_MODELS.claude.find((m) => m.id === claudeModel)?.label ?? claudeModel}.`}
-                      {aiProvider === "openai" && `${t("uses")} ${PROVIDER_MODELS.openai.find((m) => m.id === openaiModel)?.label ?? openaiModel}.`}
-                      {aiProvider === "gemini" && `${t("uses")} ${PROVIDER_MODELS.gemini.find((m) => m.id === geminiModel)?.label ?? geminiModel}.`}
+                      {aiProvider === "claude" &&
+                        `${t("uses")} ${PROVIDER_MODELS.claude.find((m) => m.id === claudeModel)?.label ?? claudeModel}.`}
+                      {aiProvider === "openai" &&
+                        `${t("uses")} ${PROVIDER_MODELS.openai.find((m) => m.id === openaiModel)?.label ?? openaiModel}.`}
+                      {aiProvider === "gemini" &&
+                        `${t("uses")} ${PROVIDER_MODELS.gemini.find((m) => m.id === geminiModel)?.label ?? geminiModel}.`}
                       {aiProvider === "ollama" && t("localAiDescription")}
-                      {aiProvider === "copilot" && `${t("uses")} ${PROVIDER_MODELS.copilot.find((m) => m.id === copilotModel)?.label ?? copilotModel}. ${t("copilotDescription")}`}
+                      {aiProvider === "copilot" &&
+                        `${t("uses")} ${PROVIDER_MODELS.copilot.find((m) => m.id === copilotModel)?.label ?? copilotModel}. ${t("copilotDescription")}`}
                     </p>
                   </Section>
 
@@ -1148,14 +1413,24 @@ export function SettingsPage() {
                             variant="primary"
                             size="md"
                             onClick={async () => {
-                              await setSetting("ollama_server_url", ollamaServerUrl.trim());
-                              await setSetting("ollama_model", ollamaModel.trim());
-                              const { clearProviderClients } = await import("@/services/ai/providerManager");
+                              await setSetting(
+                                "ollama_server_url",
+                                ollamaServerUrl.trim(),
+                              );
+                              await setSetting(
+                                "ollama_model",
+                                ollamaModel.trim(),
+                              );
+                              const { clearProviderClients } = await import(
+                                "@/services/ai/providerManager"
+                              );
                               clearProviderClients();
                               setAiKeySaved(true);
                               setTimeout(() => setAiKeySaved(false), 2000);
                             }}
-                            disabled={!ollamaServerUrl.trim() || !ollamaModel.trim()}
+                            disabled={
+                              !ollamaServerUrl.trim() || !ollamaModel.trim()
+                            }
                           >
                             {aiKeySaved ? t("saved") : t("save")}
                           </Button>
@@ -1166,7 +1441,9 @@ export function SettingsPage() {
                               setAiTesting(true);
                               setAiTestResult(null);
                               try {
-                                const { testConnection } = await import("@/services/ai/aiService");
+                                const { testConnection } = await import(
+                                  "@/services/ai/aiService"
+                                );
                                 const ok = await testConnection();
                                 setAiTestResult(ok ? "success" : "fail");
                               } catch {
@@ -1175,16 +1452,24 @@ export function SettingsPage() {
                                 setAiTesting(false);
                               }
                             }}
-                            disabled={!ollamaServerUrl.trim() || !ollamaModel.trim() || aiTesting}
+                            disabled={
+                              !ollamaServerUrl.trim() ||
+                              !ollamaModel.trim() ||
+                              aiTesting
+                            }
                             className="bg-bg-tertiary text-text-primary border border-border-primary"
                           >
                             {aiTesting ? t("testing") : t("testConnection")}
                           </Button>
                           {aiTestResult === "success" && (
-                            <span className="text-xs text-success">{t("connected")}</span>
+                            <span className="text-xs text-success">
+                              {t("connected")}
+                            </span>
                           )}
                           {aiTestResult === "fail" && (
-                            <span className="text-xs text-danger">{t("connectionFailed")}</span>
+                            <span className="text-xs text-danger">
+                              {t("connectionFailed")}
+                            </span>
                           )}
                         </div>
                       </div>
@@ -1194,38 +1479,53 @@ export function SettingsPage() {
                       <div className="space-y-3">
                         <TextField
                           label={
-                            aiProvider === "claude" ? t("anthropicApiKey")
-                            : aiProvider === "openai" ? t("openaiApiKey")
-                            : aiProvider === "copilot" ? t("githubPat")
-                            : t("googleAiApiKey")
+                            aiProvider === "claude"
+                              ? t("anthropicApiKey")
+                              : aiProvider === "openai"
+                                ? t("openaiApiKey")
+                                : aiProvider === "copilot"
+                                  ? t("githubPat")
+                                  : t("googleAiApiKey")
                           }
                           size="md"
                           type="password"
                           value={
-                            aiProvider === "claude" ? claudeApiKey
-                              : aiProvider === "openai" ? openaiApiKey
-                                : aiProvider === "copilot" ? copilotApiKey
+                            aiProvider === "claude"
+                              ? claudeApiKey
+                              : aiProvider === "openai"
+                                ? openaiApiKey
+                                : aiProvider === "copilot"
+                                  ? copilotApiKey
                                   : geminiApiKey
                           }
                           onChange={(e) => {
-                            if (aiProvider === "claude") setClaudeApiKey(e.target.value);
-                            else if (aiProvider === "openai") setOpenaiApiKey(e.target.value);
-                            else if (aiProvider === "copilot") setCopilotApiKey(e.target.value);
+                            if (aiProvider === "claude")
+                              setClaudeApiKey(e.target.value);
+                            else if (aiProvider === "openai")
+                              setOpenaiApiKey(e.target.value);
+                            else if (aiProvider === "copilot")
+                              setCopilotApiKey(e.target.value);
                             else setGeminiApiKey(e.target.value);
                           }}
                           placeholder={
-                            aiProvider === "claude" ? "sk-ant-..."
-                              : aiProvider === "openai" ? "sk-..."
-                                : aiProvider === "copilot" ? "ghp_..."
+                            aiProvider === "claude"
+                              ? "sk-ant-..."
+                              : aiProvider === "openai"
+                                ? "sk-..."
+                                : aiProvider === "copilot"
+                                  ? "ghp_..."
                                   : "AI..."
                           }
                         />
                         <SettingRow label={t("model")}>
                           <select
                             value={
-                              aiProvider === "claude" ? claudeModel
-                                : aiProvider === "openai" ? openaiModel
-                                  : aiProvider === "copilot" ? copilotModel
+                              aiProvider === "claude"
+                                ? claudeModel
+                                : aiProvider === "openai"
+                                  ? openaiModel
+                                  : aiProvider === "copilot"
+                                    ? copilotModel
                                     : geminiModel
                             }
                             onChange={async (e) => {
@@ -1237,17 +1537,26 @@ export function SettingsPage() {
                                 copilot: "copilot_model",
                               } as const;
                               if (aiProvider === "claude") setClaudeModel(val);
-                              else if (aiProvider === "openai") setOpenaiModel(val);
-                              else if (aiProvider === "copilot") setCopilotModel(val);
+                              else if (aiProvider === "openai")
+                                setOpenaiModel(val);
+                              else if (aiProvider === "copilot")
+                                setCopilotModel(val);
                               else setGeminiModel(val);
-                              await setSetting(modelSettingMap[aiProvider], val);
-                              const { clearProviderClients } = await import("@/services/ai/providerManager");
+                              await setSetting(
+                                modelSettingMap[aiProvider],
+                                val,
+                              );
+                              const { clearProviderClients } = await import(
+                                "@/services/ai/providerManager"
+                              );
                               clearProviderClients();
                             }}
                             className="w-48 bg-bg-tertiary text-text-primary text-sm px-3 py-1.5 rounded-md border border-border-primary focus:border-accent outline-none"
                           >
                             {PROVIDER_MODELS[aiProvider].map((m) => (
-                              <option key={m.id} value={m.id}>{m.label}</option>
+                              <option key={m.id} value={m.id}>
+                                {m.label}
+                              </option>
                             ))}
                           </select>
                         </SettingRow>
@@ -1263,22 +1572,33 @@ export function SettingsPage() {
                                 copilot: "copilot_api_key",
                               } as const;
                               const keyValue =
-                                aiProvider === "claude" ? claudeApiKey.trim()
-                                  : aiProvider === "openai" ? openaiApiKey.trim()
-                                    : aiProvider === "copilot" ? copilotApiKey.trim()
+                                aiProvider === "claude"
+                                  ? claudeApiKey.trim()
+                                  : aiProvider === "openai"
+                                    ? openaiApiKey.trim()
+                                    : aiProvider === "copilot"
+                                      ? copilotApiKey.trim()
                                       : geminiApiKey.trim();
                               if (keyValue) {
-                                await setSecureSetting(keySettingMap[aiProvider], keyValue);
-                                const { clearProviderClients } = await import("@/services/ai/providerManager");
+                                await setSecureSetting(
+                                  keySettingMap[aiProvider],
+                                  keyValue,
+                                );
+                                const { clearProviderClients } = await import(
+                                  "@/services/ai/providerManager"
+                                );
                                 clearProviderClients();
                               }
                               setAiKeySaved(true);
                               setTimeout(() => setAiKeySaved(false), 2000);
                             }}
                             disabled={
-                              !(aiProvider === "claude" ? claudeApiKey.trim()
-                                : aiProvider === "openai" ? openaiApiKey.trim()
-                                  : aiProvider === "copilot" ? copilotApiKey.trim()
+                              !(aiProvider === "claude"
+                                ? claudeApiKey.trim()
+                                : aiProvider === "openai"
+                                  ? openaiApiKey.trim()
+                                  : aiProvider === "copilot"
+                                    ? copilotApiKey.trim()
                                     : geminiApiKey.trim())
                             }
                           >
@@ -1291,7 +1611,9 @@ export function SettingsPage() {
                               setAiTesting(true);
                               setAiTestResult(null);
                               try {
-                                const { testConnection } = await import("@/services/ai/aiService");
+                                const { testConnection } = await import(
+                                  "@/services/ai/aiService"
+                                );
                                 const ok = await testConnection();
                                 setAiTestResult(ok ? "success" : "fail");
                               } catch {
@@ -1301,9 +1623,12 @@ export function SettingsPage() {
                               }
                             }}
                             disabled={
-                              !(aiProvider === "claude" ? claudeApiKey.trim()
-                                : aiProvider === "openai" ? openaiApiKey.trim()
-                                  : aiProvider === "copilot" ? copilotApiKey.trim()
+                              !(aiProvider === "claude"
+                                ? claudeApiKey.trim()
+                                : aiProvider === "openai"
+                                  ? openaiApiKey.trim()
+                                  : aiProvider === "copilot"
+                                    ? copilotApiKey.trim()
                                     : geminiApiKey.trim()) || aiTesting
                             }
                             className="bg-bg-tertiary text-text-primary border border-border-primary"
@@ -1311,10 +1636,14 @@ export function SettingsPage() {
                             {aiTesting ? t("testing") : t("testConnection")}
                           </Button>
                           {aiTestResult === "success" && (
-                            <span className="text-xs text-success">{t("connected")}</span>
+                            <span className="text-xs text-success">
+                              {t("connected")}
+                            </span>
                           )}
                           {aiTestResult === "fail" && (
-                            <span className="text-xs text-danger">{t("connectionFailed")}</span>
+                            <span className="text-xs text-danger">
+                              {t("connectionFailed")}
+                            </span>
                           )}
                         </div>
                       </div>
@@ -1329,7 +1658,10 @@ export function SettingsPage() {
                       onToggle={async () => {
                         const newVal = !aiEnabled;
                         setAiEnabled(newVal);
-                        await setSetting("ai_enabled", newVal ? "true" : "false");
+                        await setSetting(
+                          "ai_enabled",
+                          newVal ? "true" : "false",
+                        );
                       }}
                     />
                     <ToggleRow
@@ -1339,7 +1671,10 @@ export function SettingsPage() {
                       onToggle={async () => {
                         const newVal = !aiAutoCategorize;
                         setAiAutoCategorize(newVal);
-                        await setSetting("ai_auto_categorize", newVal ? "true" : "false");
+                        await setSetting(
+                          "ai_auto_categorize",
+                          newVal ? "true" : "false",
+                        );
                       }}
                     />
                     <ToggleRow
@@ -1349,7 +1684,10 @@ export function SettingsPage() {
                       onToggle={async () => {
                         const newVal = !aiAutoSummarize;
                         setAiAutoSummarize(newVal);
-                        await setSetting("ai_auto_summarize", newVal ? "true" : "false");
+                        await setSetting(
+                          "ai_auto_summarize",
+                          newVal ? "true" : "false",
+                        );
                       }}
                     />
                   </Section>
@@ -1362,7 +1700,10 @@ export function SettingsPage() {
                       onToggle={async () => {
                         const newVal = !aiAutoDraftEnabled;
                         setAiAutoDraftEnabled(newVal);
-                        await setSetting("ai_auto_draft_enabled", newVal ? "true" : "false");
+                        await setSetting(
+                          "ai_auto_draft_enabled",
+                          newVal ? "true" : "false",
+                        );
                       }}
                     />
                     <ToggleRow
@@ -1372,13 +1713,18 @@ export function SettingsPage() {
                       onToggle={async () => {
                         const newVal = !aiWritingStyleEnabled;
                         setAiWritingStyleEnabled(newVal);
-                        await setSetting("ai_writing_style_enabled", newVal ? "true" : "false");
+                        await setSetting(
+                          "ai_writing_style_enabled",
+                          newVal ? "true" : "false",
+                        );
                       }}
                     />
                     {aiWritingStyleEnabled && (
                       <div className="flex items-center justify-between">
                         <div>
-                          <span className="text-sm text-text-secondary">{t("writingStyleProfile")}</span>
+                          <span className="text-sm text-text-secondary">
+                            {t("writingStyleProfile")}
+                          </span>
                           <p className="text-xs text-text-tertiary mt-0.5">
                             {t("writingStyleReanalyze")}
                           </p>
@@ -1390,12 +1736,19 @@ export function SettingsPage() {
                             setStyleAnalyzing(true);
                             setStyleAnalyzeDone(false);
                             try {
-                              const activeId = accounts.find((a) => a.isActive)?.id;
+                              const activeId = accounts.find(
+                                (a) => a.isActive,
+                              )?.id;
                               if (activeId) {
-                                const { refreshWritingStyle } = await import("@/services/ai/writingStyleService");
+                                const { refreshWritingStyle } = await import(
+                                  "@/services/ai/writingStyleService"
+                                );
                                 await refreshWritingStyle(activeId);
                                 setStyleAnalyzeDone(true);
-                                setTimeout(() => setStyleAnalyzeDone(false), 3000);
+                                setTimeout(
+                                  () => setStyleAnalyzeDone(false),
+                                  3000,
+                                );
                               }
                             } catch (err) {
                               console.error("Style analysis failed:", err);
@@ -1406,7 +1759,11 @@ export function SettingsPage() {
                           disabled={styleAnalyzing}
                           className="bg-bg-tertiary text-text-primary border border-border-primary"
                         >
-                          {styleAnalyzing ? t("analyzing") : styleAnalyzeDone ? t("done") : t("reanalyze")}
+                          {styleAnalyzing
+                            ? t("analyzing")
+                            : styleAnalyzeDone
+                              ? t("done")
+                              : t("reanalyze")}
                         </Button>
                       </div>
                     )}
@@ -1419,23 +1776,33 @@ export function SettingsPage() {
                     <p className="text-xs text-text-tertiary mb-3">
                       {t("categoriesArchiveNote")}
                     </p>
-                    {(["Updates", "Promotions", "Social", "Newsletters"] as const).map((cat) => {
+                    {(
+                      [
+                        "Updates",
+                        "Promotions",
+                        "Social",
+                        "Newsletters",
+                      ] as const
+                    ).map((cat) => {
                       const labelKey = `autoArchive${cat}` as const;
                       const descKey = `autoArchive${cat}Desc` as const;
                       return (
-                      <ToggleRow
-                        key={cat}
-                        label={t(labelKey)}
-                        description={t(descKey)}
-                        checked={autoArchiveCategories.has(cat)}
-                        onToggle={async () => {
-                          const next = new Set(autoArchiveCategories);
-                          if (next.has(cat)) next.delete(cat);
-                          else next.add(cat);
-                          setAutoArchiveCategories(next);
-                          await setSetting("auto_archive_categories", [...next].join(","));
-                        }}
-                      />
+                        <ToggleRow
+                          key={cat}
+                          label={t(labelKey)}
+                          description={t(descKey)}
+                          checked={autoArchiveCategories.has(cat)}
+                          onToggle={async () => {
+                            const next = new Set(autoArchiveCategories);
+                            if (next.has(cat)) next.delete(cat);
+                            else next.add(cat);
+                            setAutoArchiveCategories(next);
+                            await setSetting(
+                              "auto_archive_categories",
+                              [...next].join(","),
+                            );
+                          }}
+                        />
                       );
                     })}
                   </Section>
@@ -1476,7 +1843,9 @@ function SendAsAliasesSection() {
       if (cancelled) return;
       setAliases(dbAliases.map(mapDbAlias));
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [accounts]);
 
   const activeAccount = accounts.find((a) => a.isActive);
@@ -1498,9 +1867,7 @@ function SendAsAliasesSection() {
         {t("sendAsDescription")}
       </p>
       {aliases.length === 0 ? (
-        <p className="text-sm text-text-tertiary">
-          {t("noAliases")}
-        </p>
+        <p className="text-sm text-text-tertiary">{t("noAliases")}</p>
       ) : (
         <div className="space-y-2">
           {aliases.map((alias) => (
@@ -1512,7 +1879,9 @@ function SendAsAliasesSection() {
                 <Mail size={15} className="text-text-tertiary shrink-0" />
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-text-primary truncate">
-                    {alias.displayName ? `${alias.displayName} <${alias.email}>` : alias.email}
+                    {alias.displayName
+                      ? `${alias.displayName} <${alias.email}>`
+                      : alias.email}
                   </div>
                   <div className="flex items-center gap-2 mt-0.5">
                     {alias.isPrimary && (
@@ -1556,7 +1925,9 @@ function SyncOfflineSection() {
   const [loading, setLoading] = useState(false);
 
   const loadCounts = useCallback(async () => {
-    const { getPendingOpsCount, getFailedOpsCount } = await import("@/services/db/pendingOperations");
+    const { getPendingOpsCount, getFailedOpsCount } = await import(
+      "@/services/db/pendingOperations"
+    );
     setPendingCount(await getPendingOpsCount());
     setFailedCount(await getFailedOpsCount());
   }, []);
@@ -1568,7 +1939,9 @@ function SyncOfflineSection() {
   const handleRetryFailed = async () => {
     setLoading(true);
     try {
-      const { retryFailedOperations } = await import("@/services/db/pendingOperations");
+      const { retryFailedOperations } = await import(
+        "@/services/db/pendingOperations"
+      );
       await retryFailedOperations();
       await loadCounts();
     } finally {
@@ -1579,7 +1952,9 @@ function SyncOfflineSection() {
   const handleClearFailed = async () => {
     setLoading(true);
     try {
-      const { clearFailedOperations } = await import("@/services/db/pendingOperations");
+      const { clearFailedOperations } = await import(
+        "@/services/db/pendingOperations"
+      );
       await clearFailedOperations();
       await loadCounts();
     } finally {
@@ -1592,23 +1967,31 @@ function SyncOfflineSection() {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div>
-            <span className="text-sm text-text-secondary">{t("pendingOperations")}</span>
+            <span className="text-sm text-text-secondary">
+              {t("pendingOperations")}
+            </span>
             <p className="text-xs text-text-tertiary mt-0.5">
               {t("pendingOpsDescription")}
             </p>
           </div>
-          <span className="text-sm font-mono text-text-primary">{pendingCount}</span>
+          <span className="text-sm font-mono text-text-primary">
+            {pendingCount}
+          </span>
         </div>
 
         <div className="flex items-center justify-between">
           <div>
-            <span className="text-sm text-text-secondary">{t("failedOperations")}</span>
+            <span className="text-sm text-text-secondary">
+              {t("failedOperations")}
+            </span>
             <p className="text-xs text-text-tertiary mt-0.5">
               {t("failedOpsDescription")}
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-sm font-mono text-text-primary">{failedCount}</span>
+            <span className="text-sm font-mono text-text-primary">
+              {failedCount}
+            </span>
             {failedCount > 0 && (
               <>
                 <button
@@ -1647,7 +2030,9 @@ function DeveloperTab() {
 
   useEffect(() => {
     async function load() {
-      const { getVersion, getTauriVersion } = await import("@tauri-apps/api/app");
+      const { getVersion, getTauriVersion } = await import(
+        "@tauri-apps/api/app"
+      );
       setAppVersion(await getVersion());
       setTauriVersion(await getTauriVersion());
 
@@ -1656,15 +2041,20 @@ function DeveloperTab() {
       const edgMatch = /Edg\/(\S+)/.exec(ua);
       const chromeMatch = /Chrome\/(\S+)/.exec(ua);
       const webkitMatch = /AppleWebKit\/(\S+)/.exec(ua);
-      setWebviewVersion(edgMatch?.[1] ?? chromeMatch?.[1] ?? webkitMatch?.[1] ?? "Unknown");
+      setWebviewVersion(
+        edgMatch?.[1] ?? chromeMatch?.[1] ?? webkitMatch?.[1] ?? "Unknown",
+      );
 
       // Detect platform via Tauri OS plugin (reliable native arch detection)
       const { platform, arch } = await import("@tauri-apps/plugin-os");
       const p = platform();
       const a = arch();
-      const archLabel = a === "aarch64" || a === "arm" ? "ARM" : a === "x86_64" ? "x64" : a;
+      const archLabel =
+        a === "aarch64" || a === "arm" ? "ARM" : a === "x86_64" ? "x64" : a;
       if (p === "macos") {
-        setPlatformLabel(a === "aarch64" ? "macOS (Apple Silicon)" : `macOS (${archLabel})`);
+        setPlatformLabel(
+          a === "aarch64" ? "macOS (Apple Silicon)" : `macOS (${archLabel})`,
+        );
       } else if (p === "windows") {
         setPlatformLabel(`Windows (${archLabel})`);
       } else if (p === "linux") {
@@ -1724,7 +2114,9 @@ function DeveloperTab() {
       <Section title={t("updatesSection")}>
         <div className="flex items-center justify-between">
           <div>
-            <span className="text-sm text-text-secondary">{t("softwareUpdates")}</span>
+            <span className="text-sm text-text-secondary">
+              {t("softwareUpdates")}
+            </span>
             {updateVersion && (
               <p className="text-xs text-accent mt-0.5">
                 v{updateVersion} {t("available")}
@@ -1749,7 +2141,12 @@ function DeveloperTab() {
               <Button
                 variant="secondary"
                 size="md"
-                icon={<RefreshCw size={14} className={checkingForUpdate ? "animate-spin" : ""} />}
+                icon={
+                  <RefreshCw
+                    size={14}
+                    className={checkingForUpdate ? "animate-spin" : ""}
+                  />
+                }
                 onClick={handleCheckForUpdate}
                 disabled={checkingForUpdate}
                 className="bg-bg-tertiary text-text-primary border border-border-primary"
@@ -1764,7 +2161,9 @@ function DeveloperTab() {
       <Section title={t("developerTools")}>
         <div className="flex items-center justify-between">
           <div>
-            <span className="text-sm text-text-secondary">{t("openDevTools")}</span>
+            <span className="text-sm text-text-secondary">
+              {t("openDevTools")}
+            </span>
             <p className="text-xs text-text-tertiary mt-0.5">
               {t("openDevToolsDescription")}
             </p>
@@ -1833,12 +2232,16 @@ function AboutTab() {
           </button>
 
           <button
-            onClick={() => openExternal("https://github.com/avihaymenahem/velo")}
+            onClick={() =>
+              openExternal("https://github.com/avihaymenahem/velo")
+            }
             className="flex items-center gap-3 w-full px-4 py-2.5 rounded-lg bg-bg-secondary hover:bg-bg-hover transition-colors text-left"
           >
             <Github size={16} className="text-text-tertiary shrink-0" />
             <div className="min-w-0 flex-1">
-              <span className="text-sm text-text-primary">{t("githubRepository")}</span>
+              <span className="text-sm text-text-primary">
+                {t("githubRepository")}
+              </span>
               <p className="text-xs text-text-tertiary">avihaymenahem/velo</p>
             </div>
             <ExternalLink size={14} className="text-text-tertiary shrink-0" />
@@ -1862,12 +2265,16 @@ function AboutTab() {
         <div className="px-4 py-3 bg-bg-secondary rounded-lg">
           <div className="flex items-center gap-2 mb-2">
             <Scale size={15} className="text-text-tertiary" />
-            <span className="text-sm font-medium text-text-primary">{t("apacheLicense")}</span>
+            <span className="text-sm font-medium text-text-primary">
+              {t("apacheLicense")}
+            </span>
           </div>
           <p className="text-xs text-text-secondary leading-relaxed mb-3">
             {t("licenseDescription")}{" "}
             <button
-              onClick={() => openExternal("https://www.apache.org/licenses/LICENSE-2.0")}
+              onClick={() =>
+                openExternal("https://www.apache.org/licenses/LICENSE-2.0")
+              }
               className="text-accent hover:text-accent-hover transition-colors"
             >
               apache.org/licenses/LICENSE-2.0
@@ -1881,7 +2288,6 @@ function AboutTab() {
     </>
   );
 }
-
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
@@ -1909,58 +2315,79 @@ function ShortcutsTab() {
     if (current) setComposeShortcut(current);
   }, []);
 
-  const handleGlobalRecord = useCallback((e: React.KeyboardEvent) => {
-    if (!recordingGlobal) return;
-    e.preventDefault();
-    e.stopPropagation();
+  const handleGlobalRecord = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (!recordingGlobal) return;
+      e.preventDefault();
+      e.stopPropagation();
 
-    const parts: string[] = [];
-    if (e.ctrlKey || e.metaKey) parts.push("CmdOrCtrl");
-    if (e.altKey) parts.push("Alt");
-    if (e.shiftKey) parts.push("Shift");
+      const parts: string[] = [];
+      if (e.ctrlKey || e.metaKey) parts.push("CmdOrCtrl");
+      if (e.altKey) parts.push("Alt");
+      if (e.shiftKey) parts.push("Shift");
 
-    const key = e.key;
-    if (key !== "Control" && key !== "Meta" && key !== "Shift" && key !== "Alt") {
-      parts.push(key.length === 1 ? key.toUpperCase() : key);
-      const shortcut = parts.join("+");
-      setComposeShortcut(shortcut);
-      setRecordingGlobal(false);
-      registerComposeShortcut(shortcut).catch((err) => {
-        console.error("Failed to register shortcut:", err);
-      });
-    }
-  }, [recordingGlobal]);
+      const key = e.key;
+      if (
+        key !== "Control" &&
+        key !== "Meta" &&
+        key !== "Shift" &&
+        key !== "Alt"
+      ) {
+        parts.push(key.length === 1 ? key.toUpperCase() : key);
+        const shortcut = parts.join("+");
+        setComposeShortcut(shortcut);
+        setRecordingGlobal(false);
+        registerComposeShortcut(shortcut).catch((err) => {
+          console.error("Failed to register shortcut:", err);
+        });
+      }
+    },
+    [recordingGlobal],
+  );
 
-  const handleKeyRecord = useCallback((e: React.KeyboardEvent, id: string) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const handleKeyRecord = useCallback(
+    (e: React.KeyboardEvent, id: string) => {
+      e.preventDefault();
+      e.stopPropagation();
 
-    const parts: string[] = [];
-    if (e.ctrlKey || e.metaKey) parts.push("Ctrl");
-    if (e.altKey) parts.push("Alt");
-    if (e.shiftKey) parts.push("Shift");
+      const parts: string[] = [];
+      if (e.ctrlKey || e.metaKey) parts.push("Ctrl");
+      if (e.altKey) parts.push("Alt");
+      if (e.shiftKey) parts.push("Shift");
 
-    const key = e.key;
-    if (key === "Control" || key === "Meta" || key === "Shift" || key === "Alt") return;
+      const key = e.key;
+      if (
+        key === "Control" ||
+        key === "Meta" ||
+        key === "Shift" ||
+        key === "Alt"
+      )
+        return;
 
-    if (parts.length > 0) {
-      parts.push(key.length === 1 ? key.toUpperCase() : key);
-    } else {
-      parts.push(key);
-    }
+      if (parts.length > 0) {
+        parts.push(key.length === 1 ? key.toUpperCase() : key);
+      } else {
+        parts.push(key);
+      }
 
-    setKey(id, parts.join("+"));
-    setRecordingId(null);
-  }, [setKey]);
+      setKey(id, parts.join("+"));
+      setRecordingId(null);
+    },
+    [setKey],
+  );
 
-  const hasCustom = Object.entries(keyMap).some(([id, keys]) => defaults[id] !== keys);
+  const hasCustom = Object.entries(keyMap).some(
+    ([id, keys]) => defaults[id] !== keys,
+  );
 
   return (
     <>
       <Section title={t("globalShortcut")}>
         <div className="flex items-center justify-between">
           <div>
-            <span className="text-sm text-text-secondary">{t("quickCompose")}</span>
+            <span className="text-sm text-text-secondary">
+              {t("quickCompose")}
+            </span>
             <p className="text-xs text-text-tertiary mt-0.5">
               {t("quickComposeDescription")}
             </p>
@@ -1978,7 +2405,7 @@ function ShortcutsTab() {
                 recordingGlobal
                   ? "bg-accent text-white"
                   : "bg-bg-tertiary text-text-secondary hover:text-text-primary border border-border-primary"
-                }`}
+              }`}
             >
               {recordingGlobal ? t("pressKeys") : t("change")}
             </button>
@@ -1987,9 +2414,7 @@ function ShortcutsTab() {
       </Section>
 
       <div className="flex items-center justify-between mb-4">
-        <p className="text-sm text-text-tertiary">
-          {t("clickToRebind")}
-        </p>
+        <p className="text-sm text-text-tertiary">{t("clickToRebind")}</p>
         {hasCustom && (
           <button
             onClick={resetAll}
@@ -2000,7 +2425,10 @@ function ShortcutsTab() {
         )}
       </div>
       {SHORTCUTS.map((section) => (
-        <Section key={section.category} title={t(`shortcutCategories.${section.category.toLowerCase()}`)}>
+        <Section
+          key={section.category}
+          title={t(`shortcutCategories.${section.category.toLowerCase()}`)}
+        >
           <div className="space-y-1">
             {section.items.map((item) => {
               const currentKey = keyMap[item.id] ?? item.keys;
@@ -2017,16 +2445,20 @@ function ShortcutsTab() {
                   </span>
                   <div className="flex items-center gap-2 ml-4 shrink-0">
                     <button
-                      onClick={() => setRecordingId(isRecording ? null : item.id)}
+                      onClick={() =>
+                        setRecordingId(isRecording ? null : item.id)
+                      }
                       onKeyDown={(e) => {
                         if (isRecording) handleKeyRecord(e, item.id);
                       }}
-                      onBlur={() => { if (isRecording) setRecordingId(null); }}
+                      onBlur={() => {
+                        if (isRecording) setRecordingId(null);
+                      }}
                       className={`text-xs px-2.5 py-1 rounded-md font-mono transition-colors ${
                         isRecording
                           ? "bg-accent text-white"
                           : "bg-bg-tertiary text-text-tertiary hover:text-text-primary border border-border-primary"
-                        }`}
+                      }`}
                     >
                       {isRecording ? t("pressKey") : currentKey}
                     </button>
@@ -2054,7 +2486,9 @@ function ImapCalDavSection() {
   const { t } = useTranslation("settings");
   const accounts = useAccountStore((s) => s.accounts);
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
-  const [account, setAccount] = useState<import("@/services/db/accounts").DbAccount | null>(null);
+  const [account, setAccount] = useState<
+    import("@/services/db/accounts").DbAccount | null
+  >(null);
 
   useEffect(() => {
     if (!activeAccountId) return;
@@ -2070,25 +2504,39 @@ function ImapCalDavSection() {
 
   return (
     <Section title={t("calendarCaldav")}>
-      <CalDavSettingsInline account={account} onSaved={() => {
-        // Reload account
-        import("@/services/db/accounts").then(({ getAccount }) => {
-          getAccount(account.id).then(setAccount);
-        });
-      }} />
+      <CalDavSettingsInline
+        account={account}
+        onSaved={() => {
+          // Reload account
+          import("@/services/db/accounts").then(({ getAccount }) => {
+            getAccount(account.id).then(setAccount);
+          });
+        }}
+      />
     </Section>
   );
 }
 
-function CalDavSettingsInline({ account, onSaved }: { account: import("@/services/db/accounts").DbAccount; onSaved: () => void }) {
+function CalDavSettingsInline({
+  account,
+  onSaved,
+}: {
+  account: import("@/services/db/accounts").DbAccount;
+  onSaved: () => void;
+}) {
   const { t } = useTranslation("settings");
-  const [CalDav, setCalDav] = useState<typeof import("@/components/settings/CalDavSettings").CalDavSettings | null>(null);
+  const [CalDav, setCalDav] = useState<
+    typeof import("@/components/settings/CalDavSettings").CalDavSettings | null
+  >(null);
 
   useEffect(() => {
-    import("@/components/settings/CalDavSettings").then((m) => setCalDav(() => m.CalDavSettings));
+    import("@/components/settings/CalDavSettings").then((m) =>
+      setCalDav(() => m.CalDavSettings),
+    );
   }, []);
 
-  if (!CalDav) return <div className="text-xs text-text-tertiary">{t("loading")}</div>;
+  if (!CalDav)
+    return <div className="text-xs text-text-tertiary">{t("loading")}</div>;
 
   return <CalDav account={account} onSaved={onSaved} />;
 }
@@ -2099,10 +2547,13 @@ function SidebarNavEditor() {
   const setSidebarNavConfig = useUIStore((s) => s.setSidebarNavConfig);
 
   const items: SidebarNavItem[] = (() => {
-    if (!sidebarNavConfig) return ALL_NAV_ITEMS.map((i) => ({ id: i.id, visible: true }));
+    if (!sidebarNavConfig)
+      return ALL_NAV_ITEMS.map((i) => ({ id: i.id, visible: true }));
     // Append any ALL_NAV_ITEMS entries missing from saved config (e.g. newly added sections)
     const savedIds = new Set(sidebarNavConfig.map((i) => i.id));
-    const missing = ALL_NAV_ITEMS.filter((i) => !savedIds.has(i.id)).map((i) => ({ id: i.id, visible: true }));
+    const missing = ALL_NAV_ITEMS.filter((i) => !savedIds.has(i.id)).map(
+      (i) => ({ id: i.id, visible: true }),
+    );
     return [...sidebarNavConfig, ...missing];
   })();
   const navLookup = new Map(ALL_NAV_ITEMS.map((n) => [n.id, n]));
@@ -2129,13 +2580,17 @@ function SidebarNavEditor() {
   };
 
   const resetToDefaults = () => {
-    setSidebarNavConfig(ALL_NAV_ITEMS.map((i) => ({ id: i.id, visible: true })));
+    setSidebarNavConfig(
+      ALL_NAV_ITEMS.map((i) => ({ id: i.id, visible: true })),
+    );
   };
 
   const isDefault =
     !sidebarNavConfig ||
     (items.length === ALL_NAV_ITEMS.length &&
-      items.every((item, i) => item.id === ALL_NAV_ITEMS[i]?.id && item.visible));
+      items.every(
+        (item, i) => item.id === ALL_NAV_ITEMS[i]?.id && item.visible,
+      ));
 
   return (
     <Section title={t("sidebar")}>
@@ -2150,7 +2605,7 @@ function SidebarNavEditor() {
               key={item.id}
               className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
                 item.visible ? "text-text-primary" : "text-text-tertiary"
-                }`}
+              }`}
             >
               <button
                 onClick={() => moveItem(index, -1)}
@@ -2169,7 +2624,11 @@ function SidebarNavEditor() {
                 <ChevronDown size={14} />
               </button>
               <Icon size={16} className="shrink-0 ml-1" />
-              <span className="flex-1 truncate">{t(`sidebar:${item.id === "all" ? "allMail" : item.id === "smart-folders" ? "smartFolders" : item.id}`)}</span>
+              <span className="flex-1 truncate">
+                {t(
+                  `sidebar:${item.id === "all" ? "allMail" : item.id === "smart-folders" ? "smartFolders" : item.id}`,
+                )}
+              </span>
               <button
                 onClick={() => toggleItem(index)}
                 disabled={isInbox}
@@ -2180,12 +2639,18 @@ function SidebarNavEditor() {
                       ? "bg-accent cursor-pointer"
                       : "bg-bg-tertiary cursor-pointer"
                 }`}
-                title={isInbox ? t("inboxAlwaysVisible") : item.visible ? t("hide") : t("show")}
+                title={
+                  isInbox
+                    ? t("inboxAlwaysVisible")
+                    : item.visible
+                      ? t("hide")
+                      : t("show")
+                }
               >
                 <span
                   className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
                     item.visible ? "translate-x-5" : ""
-                    }`}
+                  }`}
                 />
               </button>
             </div>
@@ -2239,10 +2704,29 @@ function SettingRow({
 
 function BundleSettings() {
   const { t } = useTranslation("settings");
-  const DAY_NAMES = [t("sun"), t("mon"), t("tue"), t("wed"), t("thu"), t("fri"), t("sat")];
+  const DAY_NAMES = [
+    t("sun"),
+    t("mon"),
+    t("tue"),
+    t("wed"),
+    t("thu"),
+    t("fri"),
+    t("sat"),
+  ];
   const accounts = useAccountStore((s) => s.accounts);
   const activeAccountId = accounts.find((a) => a.isActive)?.id;
-  const [rules, setRules] = useState<Record<string, { bundled: boolean; delivery: boolean; days: number[]; hour: number; minute: number }>>({});
+  const [rules, setRules] = useState<
+    Record<
+      string,
+      {
+        bundled: boolean;
+        delivery: boolean;
+        days: number[];
+        hour: number;
+        minute: number;
+      }
+    >
+  >({});
 
   useEffect(() => {
     if (!activeAccountId) return;
@@ -2253,7 +2737,9 @@ function BundleSettings() {
         let schedule = { days: [6], hour: 9, minute: 0 };
         try {
           if (r.delivery_schedule) schedule = JSON.parse(r.delivery_schedule);
-        } catch { /* use defaults */ }
+        } catch {
+          /* use defaults */
+        }
         map[r.category] = {
           bundled: r.is_bundled === 1,
           delivery: r.delivery_enabled === 1,
@@ -2266,9 +2752,18 @@ function BundleSettings() {
     });
   }, [activeAccountId]);
 
-  const saveRule = async (category: string, update: Partial<typeof rules[string]>) => {
+  const saveRule = async (
+    category: string,
+    update: Partial<(typeof rules)[string]>,
+  ) => {
     if (!activeAccountId) return;
-    const current = rules[category] ?? { bundled: false, delivery: false, days: [6], hour: 9, minute: 0 };
+    const current = rules[category] ?? {
+      bundled: false,
+      delivery: false,
+      days: [6],
+      hour: 9,
+      minute: 0,
+    };
     const merged = { ...current, ...update };
     setRules((prev) => ({ ...prev, [category]: merged }));
     const { setBundleRule } = await import("@/services/db/bundleRules");
@@ -2277,78 +2772,93 @@ function BundleSettings() {
       category,
       merged.bundled,
       merged.delivery,
-      merged.delivery ? { days: merged.days, hour: merged.hour, minute: merged.minute } : null,
+      merged.delivery
+        ? { days: merged.days, hour: merged.hour, minute: merged.minute }
+        : null,
     );
   };
 
   return (
     <div className="space-y-4">
-      {(["Newsletters", "Promotions", "Social", "Updates"] as const).map((cat) => {
-        const rule = rules[cat];
-        return (
-          <div key={cat} className="py-3 px-4 bg-bg-secondary rounded-lg space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-text-primary">{t(`sidebar:${cat.toLowerCase()}`)}</span>
-              <div className="flex items-center gap-3">
-                <label className="flex items-center gap-1.5 text-xs text-text-secondary">
-                  <input
-                    type="checkbox"
-                    checked={rule?.bundled ?? false}
-                    onChange={() => saveRule(cat, { bundled: !(rule?.bundled ?? false) })}
-                    className="accent-accent"
-                  />
-                  {t("bundle")}
-                </label>
-                <label className="flex items-center gap-1.5 text-xs text-text-secondary">
-                  <input
-                    type="checkbox"
-                    checked={rule?.delivery ?? false}
-                    onChange={() => saveRule(cat, { delivery: !(rule?.delivery ?? false) })}
-                    className="accent-accent"
-                  />
-                  {t("scheduleLabel")}
-                </label>
+      {(["Newsletters", "Promotions", "Social", "Updates"] as const).map(
+        (cat) => {
+          const rule = rules[cat];
+          return (
+            <div
+              key={cat}
+              className="py-3 px-4 bg-bg-secondary rounded-lg space-y-2"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-text-primary">
+                  {t(`sidebar:${cat.toLowerCase()}`)}
+                </span>
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-1.5 text-xs text-text-secondary">
+                    <input
+                      type="checkbox"
+                      checked={rule?.bundled ?? false}
+                      onChange={() =>
+                        saveRule(cat, { bundled: !(rule?.bundled ?? false) })
+                      }
+                      className="accent-accent"
+                    />
+                    {t("bundle")}
+                  </label>
+                  <label className="flex items-center gap-1.5 text-xs text-text-secondary">
+                    <input
+                      type="checkbox"
+                      checked={rule?.delivery ?? false}
+                      onChange={() =>
+                        saveRule(cat, { delivery: !(rule?.delivery ?? false) })
+                      }
+                      className="accent-accent"
+                    />
+                    {t("scheduleLabel")}
+                  </label>
+                </div>
               </div>
-            </div>
-            {rule?.delivery && (
-              <div className="space-y-2 pt-1">
-                <div className="flex gap-1">
-                  {DAY_NAMES.map((name, idx) => (
-                    <button
-                      key={name}
-                      onClick={() => {
-                        const days = rule.days.includes(idx)
-                          ? rule.days.filter((d) => d !== idx)
-                          : [...rule.days, idx].sort();
-                        saveRule(cat, { days });
-                      }}
-                      className={`w-8 h-7 text-[0.625rem] rounded transition-colors ${
-                        rule.days.includes(idx)
-                          ? "bg-accent text-white"
-                          : "bg-bg-tertiary text-text-tertiary border border-border-primary"
+              {rule?.delivery && (
+                <div className="space-y-2 pt-1">
+                  <div className="flex gap-1">
+                    {DAY_NAMES.map((name, idx) => (
+                      <button
+                        key={name}
+                        onClick={() => {
+                          const days = rule.days.includes(idx)
+                            ? rule.days.filter((d) => d !== idx)
+                            : [...rule.days, idx].sort();
+                          saveRule(cat, { days });
+                        }}
+                        className={`w-8 h-7 text-[0.625rem] rounded transition-colors ${
+                          rule.days.includes(idx)
+                            ? "bg-accent text-white"
+                            : "bg-bg-tertiary text-text-tertiary border border-border-primary"
                         }`}
-                    >
-                      {name}
-                    </button>
-                  ))}
+                      >
+                        {name}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-text-tertiary">
+                      {t("at")}
+                    </span>
+                    <input
+                      type="time"
+                      value={`${String(rule.hour).padStart(2, "0")}:${String(rule.minute).padStart(2, "0")}`}
+                      onChange={(e) => {
+                        const [h, m] = e.target.value.split(":").map(Number);
+                        saveRule(cat, { hour: h ?? 9, minute: m ?? 0 });
+                      }}
+                      className="bg-bg-tertiary text-text-primary text-xs px-2 py-1 rounded border border-border-primary"
+                    />
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-text-tertiary">{t("at")}</span>
-                  <input
-                    type="time"
-                    value={`${String(rule.hour).padStart(2, "0")}:${String(rule.minute).padStart(2, "0")}`}
-                    onChange={(e) => {
-                      const [h, m] = e.target.value.split(":").map(Number);
-                      saveRule(cat, { hour: h ?? 9, minute: m ?? 0 });
-                    }}
-                    className="bg-bg-tertiary text-text-primary text-xs px-2 py-1 rounded border border-border-primary"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      })}
+              )}
+            </div>
+          );
+        },
+      )}
     </div>
   );
 }
@@ -2376,12 +2886,12 @@ function ToggleRow({
         onClick={onToggle}
         className={`w-10 h-5 rounded-full transition-colors relative shrink-0 ml-4 ${
           checked ? "bg-accent" : "bg-bg-tertiary"
-          }`}
+        }`}
       >
         <span
           className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow ${
             checked ? "translate-x-5" : ""
-            }`}
+          }`}
         />
       </button>
     </div>

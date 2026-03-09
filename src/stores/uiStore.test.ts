@@ -169,7 +169,10 @@ describe("uiStore", () => {
       { id: "sent", visible: true },
     ];
     useUIStore.getState().setSidebarNavConfig(config);
-    expect(setSetting).toHaveBeenCalledWith("sidebar_nav_config", JSON.stringify(config));
+    expect(setSetting).toHaveBeenCalledWith(
+      "sidebar_nav_config",
+      JSON.stringify(config),
+    );
     expect(useUIStore.getState().sidebarNavConfig).toEqual(config);
   });
 
@@ -211,5 +214,4 @@ describe("uiStore", () => {
     expect(setSetting).toHaveBeenCalledWith("reduce_motion", "false");
     expect(useUIStore.getState().reduceMotion).toBe(false);
   });
-
 });

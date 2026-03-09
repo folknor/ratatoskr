@@ -61,7 +61,9 @@ describe("ThreadCard", () => {
   });
 
   it("renders sender name and subject", () => {
-    render(<ThreadCard thread={makeThread()} isSelected={false} onClick={onClick} />);
+    render(
+      <ThreadCard thread={makeThread()} isSelected={false} onClick={onClick} />,
+    );
     expect(screen.getByText("Alice")).toBeInTheDocument();
     expect(screen.getByText("Test subject")).toBeInTheDocument();
   });

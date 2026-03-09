@@ -28,14 +28,18 @@ export function TemplateEditor() {
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ heading: { levels: [1, 2, 3] }, link: { openOnClick: false } }),
+      StarterKit.configure({
+        heading: { levels: [1, 2, 3] },
+        link: { openOnClick: false },
+      }),
       Image.configure({ inline: true, allowBase64: true }),
       Placeholder.configure({ placeholder: "Write your template..." }),
     ],
     content: "",
     editorProps: {
       attributes: {
-        class: "prose prose-sm max-w-none px-3 py-2 min-h-[80px] focus:outline-none text-text-primary text-xs",
+        class:
+          "prose prose-sm max-w-none px-3 py-2 min-h-[80px] focus:outline-none text-text-primary text-xs",
       },
     },
   });
@@ -84,22 +88,37 @@ export function TemplateEditor() {
 
     resetForm();
     await loadTemplates();
-  }, [activeAccountId, editor, name, subject, shortcut, editingId, resetForm, loadTemplates]);
+  }, [
+    activeAccountId,
+    editor,
+    name,
+    subject,
+    shortcut,
+    editingId,
+    resetForm,
+    loadTemplates,
+  ]);
 
-  const handleEdit = useCallback((tmpl: DbTemplate) => {
-    setEditingId(tmpl.id);
-    setName(tmpl.name);
-    setSubject(tmpl.subject ?? "");
-    setShortcut(tmpl.shortcut ?? "");
-    setShowForm(true);
-    editor?.commands.setContent(tmpl.body_html);
-  }, [editor]);
+  const handleEdit = useCallback(
+    (tmpl: DbTemplate) => {
+      setEditingId(tmpl.id);
+      setName(tmpl.name);
+      setSubject(tmpl.subject ?? "");
+      setShortcut(tmpl.shortcut ?? "");
+      setShowForm(true);
+      editor?.commands.setContent(tmpl.body_html);
+    },
+    [editor],
+  );
 
-  const handleDelete = useCallback(async (id: string) => {
-    await deleteTemplate(id);
-    if (editingId === id) resetForm();
-    await loadTemplates();
-  }, [editingId, resetForm, loadTemplates]);
+  const handleDelete = useCallback(
+    async (id: string) => {
+      await deleteTemplate(id);
+      if (editingId === id) resetForm();
+      await loadTemplates();
+    },
+    [editingId, resetForm, loadTemplates],
+  );
 
   return (
     <div className="space-y-3">
@@ -118,7 +137,9 @@ export function TemplateEditor() {
               )}
             </div>
             {tmpl.subject && (
-              <div className="text-xs text-text-tertiary truncate">{tmpl.subject}</div>
+              <div className="text-xs text-text-tertiary truncate">
+                {tmpl.subject}
+              </div>
             )}
           </div>
           <div className="flex items-center gap-1">
@@ -176,7 +197,9 @@ export function TemplateEditor() {
               disabled={!name.trim()}
               className="px-3 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-50"
             >
-              {editingId ? t("templateEditor.update") : t("templateEditor.save")}
+              {editingId
+                ? t("templateEditor.update")
+                : t("templateEditor.save")}
             </button>
             <button
               onClick={resetForm}
@@ -198,7 +221,11 @@ export function TemplateEditor() {
   );
 }
 
-function InsertVariableDropdown({ onInsert }: { onInsert: (variable: string) => void }) {
+function InsertVariableDropdown({
+  onInsert,
+}: {
+  onInsert: (variable: string) => void;
+}) {
   const { t } = useTranslation("settings");
   const [open, setOpen] = useState(false);
 
@@ -210,7 +237,12 @@ function InsertVariableDropdown({ onInsert }: { onInsert: (variable: string) => 
         className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover transition-colors"
       >
         {t("templateEditor.insertVariable")}
-        <ChevronDown size={12} className={open ? "rotate-180 transition-transform" : "transition-transform"} />
+        <ChevronDown
+          size={12}
+          className={
+            open ? "rotate-180 transition-transform" : "transition-transform"
+          }
+        />
       </button>
       {open && (
         <div className="absolute left-0 top-full mt-1 z-10 bg-bg-primary border border-border-primary rounded-md shadow-lg py-1 min-w-[220px]">

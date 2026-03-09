@@ -70,14 +70,18 @@ describe("parseSearchQuery", () => {
   });
 
   it("combines operators with free text", () => {
-    const result = parseSearchQuery("budget report from:john@example.com is:unread");
+    const result = parseSearchQuery(
+      "budget report from:john@example.com is:unread",
+    );
     expect(result.freeText).toBe("budget report");
     expect(result.from).toBe("john@example.com");
     expect(result.isUnread).toBe(true);
   });
 
   it("handles multiple operators together", () => {
-    const result = parseSearchQuery("from:alice to:bob has:attachment is:starred");
+    const result = parseSearchQuery(
+      "from:alice to:bob has:attachment is:starred",
+    );
     expect(result.from).toBe("alice");
     expect(result.to).toBe("bob");
     expect(result.hasAttachment).toBe(true);

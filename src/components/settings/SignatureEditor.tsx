@@ -29,14 +29,18 @@ export function SignatureEditor() {
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ heading: { levels: [1, 2, 3] }, link: { openOnClick: false } }),
+      StarterKit.configure({
+        heading: { levels: [1, 2, 3] },
+        link: { openOnClick: false },
+      }),
       Image.configure({ inline: true, allowBase64: true }),
       Placeholder.configure({ placeholder: "Write your signature..." }),
     ],
     content: "",
     editorProps: {
       attributes: {
-        class: "prose prose-sm max-w-none px-3 py-2 min-h-[80px] focus:outline-none text-text-primary text-xs",
+        class:
+          "prose prose-sm max-w-none px-3 py-2 min-h-[80px] focus:outline-none text-text-primary text-xs",
       },
     },
   });
@@ -80,7 +84,11 @@ export function SignatureEditor() {
     const bodyHtml = isHtmlMode ? rawHtml : editor.getHTML();
 
     if (editingId) {
-      await updateSignature(editingId, { name: name.trim(), bodyHtml, isDefault });
+      await updateSignature(editingId, {
+        name: name.trim(),
+        bodyHtml,
+        isDefault,
+      });
     } else {
       await insertSignature({
         accountId: activeAccountId,
@@ -92,21 +100,37 @@ export function SignatureEditor() {
 
     resetForm();
     await loadSignatures();
-  }, [activeAccountId, editor, name, isDefault, editingId, isHtmlMode, rawHtml, resetForm, loadSignatures]);
+  }, [
+    activeAccountId,
+    editor,
+    name,
+    isDefault,
+    editingId,
+    isHtmlMode,
+    rawHtml,
+    resetForm,
+    loadSignatures,
+  ]);
 
-  const handleEdit = useCallback((sig: DbSignature) => {
-    setEditingId(sig.id);
-    setName(sig.name);
-    setIsDefault(sig.is_default === 1);
-    setShowForm(true);
-    editor?.commands.setContent(sig.body_html);
-  }, [editor]);
+  const handleEdit = useCallback(
+    (sig: DbSignature) => {
+      setEditingId(sig.id);
+      setName(sig.name);
+      setIsDefault(sig.is_default === 1);
+      setShowForm(true);
+      editor?.commands.setContent(sig.body_html);
+    },
+    [editor],
+  );
 
-  const handleDelete = useCallback(async (id: string) => {
-    await deleteSignature(id);
-    if (editingId === id) resetForm();
-    await loadSignatures();
-  }, [editingId, resetForm, loadSignatures]);
+  const handleDelete = useCallback(
+    async (id: string) => {
+      await deleteSignature(id);
+      if (editingId === id) resetForm();
+      await loadSignatures();
+    },
+    [editingId, resetForm, loadSignatures],
+  );
 
   return (
     <div className="space-y-3">
@@ -153,7 +177,9 @@ export function SignatureEditor() {
           <div className="border border-border-primary rounded overflow-hidden bg-bg-tertiary">
             <div className="flex items-center justify-between">
               {isHtmlMode ? (
-                <span className="px-2 py-1 text-xs text-text-secondary">{t("signatureEditor.htmlSource")}</span>
+                <span className="px-2 py-1 text-xs text-text-secondary">
+                  {t("signatureEditor.htmlSource")}
+                </span>
               ) : (
                 <EditorToolbar editor={editor} />
               )}
@@ -161,7 +187,11 @@ export function SignatureEditor() {
                 type="button"
                 onClick={toggleHtmlMode}
                 className={`p-1.5 mr-1 rounded transition-colors ${isHtmlMode ? "text-accent bg-accent/10" : "text-text-tertiary hover:text-text-primary"}`}
-                title={isHtmlMode ? t("signatureEditor.switchToVisual") : t("signatureEditor.editHtml")}
+                title={
+                  isHtmlMode
+                    ? t("signatureEditor.switchToVisual")
+                    : t("signatureEditor.editHtml")
+                }
               >
                 <Code size={14} />
               </button>
@@ -194,7 +224,9 @@ export function SignatureEditor() {
               disabled={!name.trim()}
               className="px-3 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-50"
             >
-              {editingId ? t("signatureEditor.update") : t("signatureEditor.save")}
+              {editingId
+                ? t("signatureEditor.update")
+                : t("signatureEditor.save")}
             </button>
             <button
               onClick={resetForm}

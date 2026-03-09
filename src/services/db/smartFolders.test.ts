@@ -5,7 +5,8 @@ const { mockGetDb } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/services/db/connection", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/db/connection")>();
+  const actual =
+    await importOriginal<typeof import("@/services/db/connection")>();
   return {
     ...actual,
     getDb: mockGetDb,
@@ -113,7 +114,13 @@ describe("smartFolders service", () => {
       expect(id).toBeTruthy();
       expect(mockDb.execute).toHaveBeenCalledWith(
         expect.stringContaining("INSERT INTO smart_folders"),
-        expect.arrayContaining(["Test Folder", "is:unread", "acc-1", "Star", "#ff0000"]),
+        expect.arrayContaining([
+          "Test Folder",
+          "is:unread",
+          "acc-1",
+          "Star",
+          "#ff0000",
+        ]),
       );
     });
 

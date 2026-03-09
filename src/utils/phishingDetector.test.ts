@@ -88,28 +88,36 @@ describe("Rule: Homograph/Punycode", () => {
 describe("Rule: Suspicious TLDs", () => {
   it("detects tier 1 TLD (.zip) with 35 points", () => {
     const result = analyzeLink("https://update.zip", "Update");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "suspicious-tld");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "suspicious-tld",
+    );
     expect(rule).toBeDefined();
     expect(rule!.score).toBe(35);
   });
 
   it("detects tier 2 TLD (.xyz) with 20 points", () => {
     const result = analyzeLink("https://example.xyz", "Example");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "suspicious-tld");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "suspicious-tld",
+    );
     expect(rule).toBeDefined();
     expect(rule!.score).toBe(20);
   });
 
   it("detects tier 3 TLD (.info) with 10 points", () => {
     const result = analyzeLink("https://example.info", "Example");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "suspicious-tld");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "suspicious-tld",
+    );
     expect(rule).toBeDefined();
     expect(rule!.score).toBe(10);
   });
 
   it("does not flag common TLDs like .com", () => {
     const result = analyzeLink("https://example.com", "Example");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "suspicious-tld");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "suspicious-tld",
+    );
     expect(rule).toBeUndefined();
   });
 });
@@ -118,28 +126,42 @@ describe("Rule: Suspicious TLDs", () => {
 
 describe("Rule: Display vs Href Mismatch", () => {
   it("detects mismatched URL-like display text", () => {
-    const result = analyzeLink("https://evil.com/login", "https://paypal.com/secure");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "display-mismatch");
+    const result = analyzeLink(
+      "https://evil.com/login",
+      "https://paypal.com/secure",
+    );
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "display-mismatch",
+    );
     expect(rule).toBeDefined();
     expect(rule!.score).toBe(60);
   });
 
   it("detects mismatch when display text is a bare domain", () => {
     const result = analyzeLink("https://evil.com/login", "paypal.com");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "display-mismatch");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "display-mismatch",
+    );
     expect(rule).toBeDefined();
     expect(rule!.score).toBe(60);
   });
 
   it("does not flag when display text is not URL-like", () => {
     const result = analyzeLink("https://evil.com/login", "Click here to login");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "display-mismatch");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "display-mismatch",
+    );
     expect(rule).toBeUndefined();
   });
 
   it("does not flag when display and href match", () => {
-    const result = analyzeLink("https://paypal.com/login", "https://paypal.com/secure");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "display-mismatch");
+    const result = analyzeLink(
+      "https://paypal.com/login",
+      "https://paypal.com/secure",
+    );
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "display-mismatch",
+    );
     expect(rule).toBeUndefined();
   });
 });
@@ -149,14 +171,18 @@ describe("Rule: Display vs Href Mismatch", () => {
 describe("Rule: Excessive Subdomains", () => {
   it("detects 4+ dots in hostname", () => {
     const result = analyzeLink("https://a.b.c.d.evil.com/path", "Click");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "excessive-subdomains");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "excessive-subdomains",
+    );
     expect(rule).toBeDefined();
     expect(rule!.score).toBe(25);
   });
 
   it("does not flag hostname with 3 dots or fewer", () => {
     const result = analyzeLink("https://www.mail.example.com", "Click");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "excessive-subdomains");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "excessive-subdomains",
+    );
     expect(rule).toBeUndefined();
   });
 });
@@ -166,20 +192,26 @@ describe("Rule: Excessive Subdomains", () => {
 describe("Rule: URL Shorteners", () => {
   it("detects bit.ly", () => {
     const result = analyzeLink("https://bit.ly/abc123", "Click");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "url-shortener");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "url-shortener",
+    );
     expect(rule).toBeDefined();
     expect(rule!.score).toBe(15);
   });
 
   it("detects t.co", () => {
     const result = analyzeLink("https://t.co/xyz", "Link");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "url-shortener");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "url-shortener",
+    );
     expect(rule).toBeDefined();
   });
 
   it("does not flag non-shortener domains", () => {
     const result = analyzeLink("https://example.com/short", "Short link");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "url-shortener");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "url-shortener",
+    );
     expect(rule).toBeUndefined();
   });
 });
@@ -189,20 +221,26 @@ describe("Rule: URL Shorteners", () => {
 describe("Rule: Suspicious Path Keywords", () => {
   it("detects 'login' in path", () => {
     const result = analyzeLink("https://example.com/login", "Login");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "suspicious-keywords");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "suspicious-keywords",
+    );
     expect(rule).toBeDefined();
     expect(rule!.score).toBe(15);
   });
 
   it("detects 'password' in query string", () => {
     const result = analyzeLink("https://example.com/?action=password", "Reset");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "suspicious-keywords");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "suspicious-keywords",
+    );
     expect(rule).toBeDefined();
   });
 
   it("does not flag clean paths", () => {
     const result = analyzeLink("https://example.com/about", "About");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "suspicious-keywords");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "suspicious-keywords",
+    );
     expect(rule).toBeUndefined();
   });
 });
@@ -211,34 +249,47 @@ describe("Rule: Suspicious Path Keywords", () => {
 
 describe("Rule: Dangerous URI Schemes", () => {
   it("detects data: URI", () => {
-    const result = analyzeLink("data:text/html,<script>alert(1)</script>", "Click");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "dangerous-protocol");
+    const result = analyzeLink(
+      "data:text/html,<script>alert(1)</script>",
+      "Click",
+    );
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "dangerous-protocol",
+    );
     expect(rule).toBeDefined();
     expect(rule!.score).toBe(70);
   });
 
   it("detects javascript: URI", () => {
     const result = analyzeLink("javascript:alert(1)", "Run");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "dangerous-protocol");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "dangerous-protocol",
+    );
     expect(rule).toBeDefined();
     expect(rule!.score).toBe(70);
   });
 
   it("detects vbscript: URI", () => {
     const result = analyzeLink("vbscript:msgbox", "Run");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "dangerous-protocol");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "dangerous-protocol",
+    );
     expect(rule).toBeDefined();
   });
 
   it("detects blob: URI", () => {
     const result = analyzeLink("blob:http://evil.com/uuid", "Open");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "dangerous-protocol");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "dangerous-protocol",
+    );
     expect(rule).toBeDefined();
   });
 
   it("does not flag https: URI", () => {
     const result = analyzeLink("https://example.com", "Example");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "dangerous-protocol");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "dangerous-protocol",
+    );
     expect(rule).toBeUndefined();
   });
 });
@@ -248,21 +299,30 @@ describe("Rule: Dangerous URI Schemes", () => {
 describe("Rule: URL Obfuscation", () => {
   it("detects @ in URL (credential spoofing)", () => {
     const result = analyzeLink("https://google.com@evil.com/path", "Google");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "url-obfuscation");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "url-obfuscation",
+    );
     expect(rule).toBeDefined();
     expect(rule!.score).toBe(45);
   });
 
   it("detects percent-encoded hostname", () => {
     const result = analyzeLink("https://exam%70le.com/path", "Example");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "url-obfuscation");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "url-obfuscation",
+    );
     expect(rule).toBeDefined();
     expect(rule!.score).toBe(45);
   });
 
   it("does not flag normal URLs", () => {
-    const result = analyzeLink("https://example.com/path%20with%20spaces", "Example");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "url-obfuscation");
+    const result = analyzeLink(
+      "https://example.com/path%20with%20spaces",
+      "Example",
+    );
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "url-obfuscation",
+    );
     expect(rule).toBeUndefined();
   });
 });
@@ -272,40 +332,55 @@ describe("Rule: URL Obfuscation", () => {
 describe("Rule: Brand Impersonation", () => {
   it("detects brand in subdomain with different registrable domain", () => {
     const result = analyzeLink("https://paypal.evil.com/account", "PayPal");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "brand-impersonation");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "brand-impersonation",
+    );
     expect(rule).toBeDefined();
     expect(rule!.score).toBe(50);
   });
 
   it("detects brand in path with different domain", () => {
     const result = analyzeLink("https://evil.com/paypal/login", "PayPal");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "brand-impersonation");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "brand-impersonation",
+    );
     expect(rule).toBeDefined();
     expect(rule!.score).toBe(50);
   });
 
   it("does not flag actual brand domain", () => {
     const result = analyzeLink("https://www.paypal.com/login", "PayPal");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "brand-impersonation");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "brand-impersonation",
+    );
     expect(rule).toBeUndefined();
   });
 
   it("does not flag paypal.com (exact domain)", () => {
     const result = analyzeLink("https://paypal.com/login", "PayPal");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "brand-impersonation");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "brand-impersonation",
+    );
     expect(rule).toBeUndefined();
   });
 
   it("detects brand in lookalike domain (paypal-security.com)", () => {
     const result = analyzeLink("https://paypal-security.com/login", "PayPal");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "brand-impersonation");
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "brand-impersonation",
+    );
     expect(rule).toBeDefined();
     expect(rule!.score).toBe(50);
   });
 
   it("detects brand in lookalike domain (microsoft-verify.com)", () => {
-    const result = analyzeLink("https://microsoft-verify.com/account", "Microsoft");
-    const rule = result.triggeredRules.find((r) => r.ruleId === "brand-impersonation");
+    const result = analyzeLink(
+      "https://microsoft-verify.com/account",
+      "Microsoft",
+    );
+    const rule = result.triggeredRules.find(
+      (r) => r.ruleId === "brand-impersonation",
+    );
     expect(rule).toBeDefined();
   });
 });
@@ -321,7 +396,10 @@ describe("Clean URL", () => {
   });
 
   it("returns safe score 0 for normal email link", () => {
-    const result = analyzeLink("https://docs.github.com/en/repositories", "GitHub Docs");
+    const result = analyzeLink(
+      "https://docs.github.com/en/repositories",
+      "GitHub Docs",
+    );
     expect(result.riskScore).toBe(0);
     expect(result.riskLevel).toBe("safe");
   });
@@ -370,7 +448,9 @@ describe("scanLinksInHtml", () => {
     // Second link should be flagged for mismatch
     const mismatchLink = results[1];
     expect(mismatchLink).toBeDefined();
-    expect(mismatchLink!.triggeredRules.some((r) => r.ruleId === "display-mismatch")).toBe(true);
+    expect(
+      mismatchLink!.triggeredRules.some((r) => r.ruleId === "display-mismatch"),
+    ).toBe(true);
   });
 
   it("skips mailto: links", () => {
@@ -404,7 +484,9 @@ describe("scanLinksInHtml", () => {
     const html = `<a href="javascript:alert(1)">Click</a>`;
     const results = scanLinksInHtml(html);
     expect(results).toHaveLength(1);
-    expect(results[0]!.triggeredRules.some((r) => r.ruleId === "dangerous-protocol")).toBe(true);
+    expect(
+      results[0]!.triggeredRules.some((r) => r.ruleId === "dangerous-protocol"),
+    ).toBe(true);
   });
 });
 
@@ -449,7 +531,10 @@ describe("scanMessage", () => {
 
   it("includes scannedAt timestamp", () => {
     const before = Date.now();
-    const result = scanMessage("msg-5", "<a href='https://example.com'>Link</a>");
+    const result = scanMessage(
+      "msg-5",
+      "<a href='https://example.com'>Link</a>",
+    );
     expect(result.scannedAt).toBeGreaterThanOrEqual(before);
     expect(result.scannedAt).toBeLessThanOrEqual(Date.now());
   });

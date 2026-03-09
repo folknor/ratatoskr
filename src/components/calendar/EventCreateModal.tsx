@@ -18,7 +18,11 @@ interface EventCreateModalProps {
   }) => void;
 }
 
-export function EventCreateModal({ calendars, onClose, onCreate }: EventCreateModalProps) {
+export function EventCreateModal({
+  calendars,
+  onClose,
+  onCreate,
+}: EventCreateModalProps) {
   const { t } = useTranslation("calendar");
   const [summary, setSummary] = useState("");
   const [description, setDescription] = useState("");
@@ -29,21 +33,29 @@ export function EventCreateModal({ calendars, onClose, onCreate }: EventCreateMo
     calendars?.find((c) => c.is_primary)?.id ?? calendars?.[0]?.id ?? "",
   );
 
-  const handleSubmit = useCallback((e: React.FormEvent) => {
-    e.preventDefault();
-    if (!summary.trim()) return;
-    onCreate({
-      summary: summary.trim(),
-      description,
-      location,
-      startTime,
-      endTime,
-      calendarId: calendarId || undefined,
-    });
-  }, [summary, description, location, startTime, endTime, calendarId, onCreate]);
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!summary.trim()) return;
+      onCreate({
+        summary: summary.trim(),
+        description,
+        location,
+        startTime,
+        endTime,
+        calendarId: calendarId || undefined,
+      });
+    },
+    [summary, description, location, startTime, endTime, calendarId, onCreate],
+  );
 
   return (
-    <Modal isOpen={true} onClose={onClose} title={t("createEvent")} width="w-full max-w-md">
+    <Modal
+      isOpen={true}
+      onClose={onClose}
+      title={t("createEvent")}
+      width="w-full max-w-md"
+    >
       <form onSubmit={handleSubmit} className="p-4 space-y-3">
         <TextField
           label={t("title")}
@@ -56,7 +68,9 @@ export function EventCreateModal({ calendars, onClose, onCreate }: EventCreateMo
 
         {calendars && calendars.length > 1 && (
           <div>
-            <label className="text-xs text-text-secondary block mb-1">{t("calendar")}</label>
+            <label className="text-xs text-text-secondary block mb-1">
+              {t("calendar")}
+            </label>
             <select
               value={calendarId}
               onChange={(e) => setCalendarId(e.target.value)}
@@ -96,7 +110,9 @@ export function EventCreateModal({ calendars, onClose, onCreate }: EventCreateMo
         />
 
         <div>
-          <label className="text-xs text-text-secondary block mb-1">{t("description")}</label>
+          <label className="text-xs text-text-secondary block mb-1">
+            {t("description")}
+          </label>
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -107,12 +123,7 @@ export function EventCreateModal({ calendars, onClose, onCreate }: EventCreateMo
         </div>
 
         <div className="flex justify-end gap-2 pt-2">
-          <Button
-            type="button"
-            variant="secondary"
-            size="md"
-            onClick={onClose}
-          >
+          <Button type="button" variant="secondary" size="md" onClick={onClose}>
             {t("cancel")}
           </Button>
           <Button

@@ -25,7 +25,9 @@ export interface DbBundledThread {
   held_until: number | null;
 }
 
-export async function getBundleRules(accountId: string): Promise<DbBundleRule[]> {
+export async function getBundleRules(
+  accountId: string,
+): Promise<DbBundleRule[]> {
   const db = await getDb();
   return db.select<DbBundleRule[]>(
     "SELECT * FROM bundle_rules WHERE account_id = $1",
@@ -57,7 +59,14 @@ export async function setBundleRule(
      VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT(account_id, category) DO UPDATE SET
        is_bundled = $4, delivery_enabled = $5, delivery_schedule = $6`,
-    [id, accountId, category, boolToInt(isBundled), boolToInt(deliveryEnabled), schedule ? JSON.stringify(schedule) : null],
+    [
+      id,
+      accountId,
+      category,
+      boolToInt(isBundled),
+      boolToInt(deliveryEnabled),
+      schedule ? JSON.stringify(schedule) : null,
+    ],
   );
 }
 
@@ -127,7 +136,11 @@ export async function updateLastDelivered(
 export async function getBundleSummary(
   accountId: string,
   category: string,
-): Promise<{ count: number; latestSubject: string | null; latestSender: string | null }> {
+): Promise<{
+  count: number;
+  latestSubject: string | null;
+  latestSender: string | null;
+}> {
   const db = await getDb();
   // Count threads in this category that are in inbox
   const countRows = await db.select<{ count: number }[]>(
@@ -138,7 +151,9 @@ export async function getBundleSummary(
      WHERE t.account_id = $1`,
     [accountId, category],
   );
-  const latestRows = await db.select<{ subject: string | null; from_name: string | null }[]>(
+  const latestRows = await db.select<
+    { subject: string | null; from_name: string | null }[]
+  >(
     `SELECT t.subject, m.from_name
      FROM threads t
      JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id AND tl.label_id = 'INBOX'
@@ -162,7 +177,12 @@ export async function getBundleSummary(
 export async function getBundleSummaries(
   accountId: string,
   categories: string[],
-): Promise<Map<string, { count: number; latestSubject: string | null; latestSender: string | null }>> {
+): Promise<
+  Map<
+    string,
+    { count: number; latestSubject: string | null; latestSender: string | null }
+  >
+> {
   if (categories.length === 0) return new Map();
   const db = await getDb();
   const placeholders = categories.map((_, i) => `$${i + 2}`).join(", ");
@@ -177,7 +197,9 @@ export async function getBundleSummaries(
     [accountId, ...categories],
   );
 
-  const latestRows = await db.select<{ category: string; subject: string | null; from_name: string | null }[]>(
+  const latestRows = await db.select<
+    { category: string; subject: string | null; from_name: string | null }[]
+  >(
     `SELECT tc.category, t.subject, m.from_name
      FROM threads t
      JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id AND tl.label_id = 'INBOX'
@@ -190,7 +212,10 @@ export async function getBundleSummaries(
   );
 
   const latestMap = new Map(latestRows.map((r) => [r.category, r]));
-  const result = new Map<string, { count: number; latestSubject: string | null; latestSender: string | null }>();
+  const result = new Map<
+    string,
+    { count: number; latestSubject: string | null; latestSender: string | null }
+  >();
   for (const cat of categories) {
     const countRow = countRows.find((r) => r.category === cat);
     const latest = latestMap.get(cat);

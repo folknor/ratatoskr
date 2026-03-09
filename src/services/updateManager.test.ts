@@ -43,7 +43,10 @@ describe("updateManager", () => {
 
     const result = await checkForUpdateNow();
     expect(result).toEqual({ version: "1.2.3", body: "Bug fixes" });
-    expect(getAvailableUpdate()).toEqual({ version: "1.2.3", body: "Bug fixes" });
+    expect(getAvailableUpdate()).toEqual({
+      version: "1.2.3",
+      body: "Bug fixes",
+    });
   });
 
   it("invokes callback when update is found", async () => {

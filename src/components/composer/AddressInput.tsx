@@ -32,24 +32,21 @@ export function AddressInput({
     };
   }, []);
 
-  const handleInputChange = useCallback(
-    (value: string) => {
-      setInputValue(value);
-      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-      if (value.length >= 2) {
-        searchTimerRef.current = setTimeout(async () => {
-          const results = await searchContacts(value, 5);
-          setSuggestions(results);
-          setShowSuggestions(results.length > 0);
-          setSelectedIdx(-1);
-        }, 200);
-      } else {
-        setSuggestions([]);
-        setShowSuggestions(false);
-      }
-    },
-    [],
-  );
+  const handleInputChange = useCallback((value: string) => {
+    setInputValue(value);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    if (value.length >= 2) {
+      searchTimerRef.current = setTimeout(async () => {
+        const results = await searchContacts(value, 5);
+        setSuggestions(results);
+        setShowSuggestions(results.length > 0);
+        setSelectedIdx(-1);
+      }, 200);
+    } else {
+      setSuggestions([]);
+      setShowSuggestions(false);
+    }
+  }, []);
 
   const addAddress = useCallback(
     (address: string) => {
@@ -122,7 +119,10 @@ export function AddressInput({
           onBlur={() => {
             // Delay to allow click on suggestion
             if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
-            blurTimerRef.current = setTimeout(() => setShowSuggestions(false), 150);
+            blurTimerRef.current = setTimeout(
+              () => setShowSuggestions(false),
+              150,
+            );
             if (inputValue.trim()) addAddress(inputValue);
           }}
           placeholder={addresses.length === 0 ? resolvedPlaceholder : ""}

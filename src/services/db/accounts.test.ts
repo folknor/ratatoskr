@@ -23,7 +23,9 @@ vi.mock("./connection", () => ({
 
 vi.mock("@/utils/crypto", () => ({
   encryptValue: vi.fn((val: string) => Promise.resolve(`enc:${val}`)),
-  decryptValue: vi.fn((val: string) => Promise.resolve(val.replace("enc:", ""))),
+  decryptValue: vi.fn((val: string) =>
+    Promise.resolve(val.replace("enc:", "")),
+  ),
   isEncrypted: vi.fn((val: string) => val.startsWith("enc:")),
 }));
 
@@ -106,7 +108,10 @@ describe("accounts", () => {
 
   describe("getAllAccounts", () => {
     it("returns all accounts with decrypted tokens", async () => {
-      mockSelect.mockResolvedValue([createMockGmailAccount(), createMockImapAccount()]);
+      mockSelect.mockResolvedValue([
+        createMockGmailAccount(),
+        createMockImapAccount(),
+      ]);
 
       const result = await getAllAccounts();
 

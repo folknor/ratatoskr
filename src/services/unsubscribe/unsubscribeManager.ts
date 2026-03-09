@@ -29,7 +29,9 @@ export function parseUnsubscribeHeaders(
 ): ParsedUnsubscribe {
   const httpMatch = listUnsubscribe.match(/<(https?:\/\/[^>]+)>/);
   const mailtoMatch = listUnsubscribe.match(/<mailto:([^>]+)>/);
-  const hasOneClick = !!listUnsubscribePost?.toLowerCase().includes("list-unsubscribe=one-click");
+  const hasOneClick = !!listUnsubscribePost
+    ?.toLowerCase()
+    .includes("list-unsubscribe=one-click");
 
   return {
     httpUrl: httpMatch?.[1] ?? null,
@@ -65,7 +67,8 @@ export async function executeUnsubscribe(
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new TextEncoder().encode("List-Unsubscribe=One-Click"),
       });
-      success = response.ok || response.status === 200 || response.status === 202;
+      success =
+        response.ok || response.status === 200 || response.status === 202;
       method = "http_post";
     } catch (err) {
       console.error("One-click unsubscribe failed, trying fallback:", err);
@@ -81,7 +84,9 @@ export async function executeUnsubscribe(
         const to = parsed.mailtoAddress.split("?")[0] ?? parsed.mailtoAddress;
         // Extract subject from mailto params if present
         const subjectMatch = parsed.mailtoAddress.match(/subject=([^&]+)/i);
-        const subject = subjectMatch ? decodeURIComponent(subjectMatch[1]!) : "unsubscribe";
+        const subject = subjectMatch
+          ? decodeURIComponent(subjectMatch[1]!)
+          : "unsubscribe";
 
         const { getAccount } = await import("../db/accounts");
         const account = await getAccount(accountId);
@@ -143,14 +148,26 @@ async function recordUnsubscribeAction(
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      ON CONFLICT(account_id, from_address) DO UPDATE SET
        status = $8, unsubscribed_at = $9, method = $6, thread_id = $3`,
-    [id, accountId, threadId, normalizeEmail(fromAddress), fromName, method, url, status, now],
+    [
+      id,
+      accountId,
+      threadId,
+      normalizeEmail(fromAddress),
+      fromName,
+      method,
+      url,
+      status,
+      now,
+    ],
   );
 }
 
 /**
  * Get all detectable newsletter/promo subscriptions for an account.
  */
-export async function getSubscriptions(accountId: string): Promise<SubscriptionEntry[]> {
+export async function getSubscriptions(
+  accountId: string,
+): Promise<SubscriptionEntry[]> {
   const db = await getDb();
   return db.select<SubscriptionEntry[]>(
     `SELECT

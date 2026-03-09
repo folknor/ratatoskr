@@ -113,7 +113,10 @@ export function AccountSwitcher({
                   <div className="text-sm font-medium truncate leading-tight flex items-center gap-1.5">
                     {account.displayName || account.email.split("@")[0]}
                     {account.provider === "caldav" && (
-                      <Calendar size={12} className="shrink-0 text-text-tertiary" />
+                      <Calendar
+                        size={12}
+                        className="shrink-0 text-text-tertiary"
+                      />
                     )}
                   </div>
                   <div className="text-xs text-text-secondary truncate leading-tight">
@@ -149,7 +152,9 @@ function ActiveAvatar({ account }: { account: Account | undefined }) {
   if (!account) return null;
 
   const initial = (
-    account.displayName?.[0] ?? account.email[0] ?? "?"
+    account.displayName?.[0] ??
+    account.email[0] ??
+    "?"
   ).toUpperCase();
   const showImg = account.avatarUrl && !imgError;
 
@@ -181,16 +186,16 @@ function AccountAvatarSmall({
   const [imgError, setImgError] = useState(false);
 
   const initial = (
-    account.displayName?.[0] ?? account.email[0] ?? "?"
+    account.displayName?.[0] ??
+    account.email[0] ??
+    "?"
   ).toUpperCase();
   const showImg = account.avatarUrl && !imgError;
 
   return (
     <div
       className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs font-semibold overflow-hidden ${
-        isActive
-          ? "bg-accent text-white"
-          : "bg-accent/12 text-accent"
+        isActive ? "bg-accent text-white" : "bg-accent/12 text-accent"
       }`}
     >
       {showImg ? (

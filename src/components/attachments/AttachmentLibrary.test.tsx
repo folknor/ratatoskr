@@ -1,12 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { AttachmentLibrary } from "./AttachmentLibrary";
-import type { AttachmentWithContext, AttachmentSender } from "@/services/db/attachments";
+import type {
+  AttachmentWithContext,
+  AttachmentSender,
+} from "@/services/db/attachments";
 
 // Mock dependencies
 vi.mock("@/stores/accountStore", () => ({
-  useAccountStore: vi.fn((selector: (s: { accounts: { id: string; isActive: boolean }[] }) => unknown) =>
-    selector({ accounts: [{ id: "acc-1", isActive: true }] }),
+  useAccountStore: vi.fn(
+    (
+      selector: (s: {
+        accounts: { id: string; isActive: boolean }[];
+      }) => unknown,
+    ) => selector({ accounts: [{ id: "acc-1", isActive: true }] }),
   ),
 }));
 
@@ -35,7 +42,10 @@ vi.mock("@/router/navigate", () => ({
   navigateToLabel: vi.fn(),
 }));
 
-import { getAttachmentsForAccount, getAttachmentSenders } from "@/services/db/attachments";
+import {
+  getAttachmentsForAccount,
+  getAttachmentSenders,
+} from "@/services/db/attachments";
 
 const mockAttachments: AttachmentWithContext[] = [
   {

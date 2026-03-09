@@ -38,25 +38,35 @@ describe("useRouteNavigation hooks", () => {
 
     it("should return label from /mail/$label/thread/$threadId route", () => {
       setMatches([
-        { routeId: "/mail/$label/thread/$threadId", params: { label: "sent", threadId: "t-1" } },
+        {
+          routeId: "/mail/$label/thread/$threadId",
+          params: { label: "sent", threadId: "t-1" },
+        },
       ]);
       expect(useActiveLabel()).toBe("sent");
     });
 
     it("should return labelId from /label/$labelId route", () => {
-      setMatches([{ routeId: "/label/$labelId", params: { labelId: "Label_42" } }]);
+      setMatches([
+        { routeId: "/label/$labelId", params: { labelId: "Label_42" } },
+      ]);
       expect(useActiveLabel()).toBe("Label_42");
     });
 
     it("should return labelId from /label/$labelId/thread/$threadId route", () => {
       setMatches([
-        { routeId: "/label/$labelId/thread/$threadId", params: { labelId: "Label_42", threadId: "t-1" } },
+        {
+          routeId: "/label/$labelId/thread/$threadId",
+          params: { labelId: "Label_42", threadId: "t-1" },
+        },
       ]);
       expect(useActiveLabel()).toBe("Label_42");
     });
 
     it("should return smart-folder: prefix from smart folder route", () => {
-      setMatches([{ routeId: "/smart-folder/$folderId", params: { folderId: "sf-1" } }]);
+      setMatches([
+        { routeId: "/smart-folder/$folderId", params: { folderId: "sf-1" } },
+      ]);
       expect(useActiveLabel()).toBe("smart-folder:sf-1");
     });
 
@@ -84,14 +94,20 @@ describe("useRouteNavigation hooks", () => {
   describe("useSelectedThreadId", () => {
     it("should return threadId from mail thread route", () => {
       setMatches([
-        { routeId: "/mail/$label/thread/$threadId", params: { label: "inbox", threadId: "t-42" } },
+        {
+          routeId: "/mail/$label/thread/$threadId",
+          params: { label: "inbox", threadId: "t-42" },
+        },
       ]);
       expect(useSelectedThreadId()).toBe("t-42");
     });
 
     it("should return threadId from label thread route", () => {
       setMatches([
-        { routeId: "/label/$labelId/thread/$threadId", params: { labelId: "L1", threadId: "t-99" } },
+        {
+          routeId: "/label/$labelId/thread/$threadId",
+          params: { labelId: "L1", threadId: "t-99" },
+        },
       ]);
       expect(useSelectedThreadId()).toBe("t-99");
     });
@@ -110,7 +126,11 @@ describe("useRouteNavigation hooks", () => {
   describe("useActiveCategory", () => {
     it("should return category from search params", () => {
       setMatches([
-        { routeId: "/mail/$label", params: { label: "inbox" }, search: { category: "Updates" } },
+        {
+          routeId: "/mail/$label",
+          params: { label: "inbox" },
+          search: { category: "Updates" },
+        },
       ]);
       expect(useActiveCategory()).toBe("Updates");
     });
@@ -136,7 +156,11 @@ describe("useRouteNavigation hooks", () => {
   describe("useSearchQuery", () => {
     it("should return query from search params", () => {
       setMatches([
-        { routeId: "/mail/$label", params: { label: "inbox" }, search: { q: "hello world" } },
+        {
+          routeId: "/mail/$label",
+          params: { label: "inbox" },
+          search: { q: "hello world" },
+        },
       ]);
       expect(useSearchQuery()).toBe("hello world");
     });

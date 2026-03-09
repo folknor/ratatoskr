@@ -266,7 +266,9 @@ describe("syncManager", () => {
       const account = makeGmailAccount("a1", "100");
       mockGetAccount.mockResolvedValue(account);
       // Tauri IPC rejects with a plain string, not an Error instance
-      mockDeltaSync.mockRejectedValue("authentication failed for user@test.com");
+      mockDeltaSync.mockRejectedValue(
+        "authentication failed for user@test.com",
+      );
 
       const errors: string[] = [];
       const unsub = onSyncStatus((_id, status, _progress, error) => {

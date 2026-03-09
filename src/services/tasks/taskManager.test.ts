@@ -12,7 +12,9 @@ vi.mock("@/services/db/tasks", () => ({
   updateTask: vi.fn(),
 }));
 
-const { getTaskById, completeTask, insertTask } = await import("@/services/db/tasks");
+const { getTaskById, completeTask, insertTask } = await import(
+  "@/services/db/tasks"
+);
 
 beforeEach(() => {
   vi.clearAllMocks();

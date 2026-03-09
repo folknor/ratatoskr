@@ -114,7 +114,16 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
       }
 
       // Prevent other handlers from seeing these keys
-      if (["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "Enter", "Escape"].includes(e.key)) {
+      if (
+        [
+          "ArrowDown",
+          "ArrowUp",
+          "ArrowRight",
+          "ArrowLeft",
+          "Enter",
+          "Escape",
+        ].includes(e.key)
+      ) {
         e.stopPropagation();
       }
     };
@@ -130,31 +139,37 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
     }
   }, []);
 
-  const handleMouseEnter = useCallback((index: number, item: ContextMenuItem) => {
-    setFocusedIndex(index);
-    cancelSubmenuTimer();
+  const handleMouseEnter = useCallback(
+    (index: number, item: ContextMenuItem) => {
+      setFocusedIndex(index);
+      cancelSubmenuTimer();
 
-    if (item.children && !item.disabled) {
-      submenuTimerRef.current = setTimeout(() => {
-        setSubmenuOpenId(item.id);
-      }, 100);
-    } else {
-      // Longer delay before closing to allow mouse to travel to submenu
-      submenuTimerRef.current = setTimeout(() => {
-        setSubmenuOpenId(null);
-      }, 300);
-    }
-  }, [cancelSubmenuTimer]);
+      if (item.children && !item.disabled) {
+        submenuTimerRef.current = setTimeout(() => {
+          setSubmenuOpenId(item.id);
+        }, 100);
+      } else {
+        // Longer delay before closing to allow mouse to travel to submenu
+        submenuTimerRef.current = setTimeout(() => {
+          setSubmenuOpenId(null);
+        }, 300);
+      }
+    },
+    [cancelSubmenuTimer],
+  );
 
-  const handleItemClick = useCallback((item: ContextMenuItem) => {
-    if (item.disabled || item.separator) return;
-    if (item.children) {
-      setSubmenuOpenId((prev) => prev === item.id ? null : item.id);
-      return;
-    }
-    item.action?.();
-    onClose();
-  }, [onClose]);
+  const handleItemClick = useCallback(
+    (item: ContextMenuItem) => {
+      if (item.disabled || item.separator) return;
+      if (item.children) {
+        setSubmenuOpenId((prev) => (prev === item.id ? null : item.id));
+        return;
+      }
+      item.action?.();
+      onClose();
+    },
+    [onClose],
+  );
 
   // Close submenu when clicking outside both menu and submenu
   useEffect(() => {
@@ -180,8 +195,12 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
   }, []);
 
   // Compute submenu anchor position from the parent item's rect
-  const openItem = submenuOpenId ? items.find((i) => i.id === submenuOpenId) : null;
-  const submenuAnchor = submenuOpenId ? itemRectsRef.current.get(submenuOpenId) : undefined;
+  const openItem = submenuOpenId
+    ? items.find((i) => i.id === submenuOpenId)
+    : null;
+  const submenuAnchor = submenuOpenId
+    ? itemRectsRef.current.get(submenuOpenId)
+    : undefined;
 
   return (
     <>
@@ -213,7 +232,10 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
                 role="menuitem"
                 ref={(el) => {
                   if (el && hasSubmenu) {
-                    itemRectsRef.current.set(item.id, el.getBoundingClientRect());
+                    itemRectsRef.current.set(
+                      item.id,
+                      el.getBoundingClientRect(),
+                    );
                   }
                 }}
                 disabled={item.disabled}
@@ -230,7 +252,9 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
                 {/* Checkmark or icon column */}
                 <span className="w-4 h-4 flex items-center justify-center shrink-0">
                   {item.checked != null ? (
-                    item.checked ? <Check size={12} /> : null
+                    item.checked ? (
+                      <Check size={12} />
+                    ) : null
                   ) : Icon ? (
                     <Icon size={12} />
                   ) : null}
@@ -239,7 +263,10 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
                 <span className="flex-1">{item.label}</span>
 
                 {hasSubmenu && (
-                  <ChevronRight size={12} className="text-text-tertiary shrink-0" />
+                  <ChevronRight
+                    size={12}
+                    className="text-text-tertiary shrink-0"
+                  />
                 )}
 
                 {item.shortcut && !hasSubmenu && (
@@ -340,7 +367,9 @@ function Submenu({
           >
             <span className="w-4 h-4 flex items-center justify-center shrink-0">
               {item.checked != null ? (
-                item.checked ? <Check size={12} className="text-accent" /> : null
+                item.checked ? (
+                  <Check size={12} className="text-accent" />
+                ) : null
               ) : Icon ? (
                 <Icon size={12} />
               ) : null}

@@ -28,7 +28,12 @@ export function SetupClientId({ onComplete, onCancel }: SetupClientIdProps) {
   };
 
   return (
-    <Modal isOpen={true} onClose={onCancel} title="Google API Setup" width="w-full max-w-lg">
+    <Modal
+      isOpen={true}
+      onClose={onCancel}
+      title="Google API Setup"
+      width="w-full max-w-lg"
+    >
       <div className="p-4">
         <p className="text-text-secondary text-sm mb-4">
           To connect Gmail accounts, you need a Google Cloud OAuth Client ID.
@@ -36,16 +41,16 @@ export function SetupClientId({ onComplete, onCancel }: SetupClientIdProps) {
 
         <ol className="text-text-secondary text-sm mb-4 space-y-1 list-decimal list-inside">
           <li>
-            Go to the{" "}
-            <span className="text-accent">Google Cloud Console</span>
+            Go to the <span className="text-accent">Google Cloud Console</span>
           </li>
           <li>Create a project (or use an existing one)</li>
           <li>Enable the Gmail API</li>
+          <li>Create OAuth 2.0 credentials (Web application type)</li>
           <li>
-            Create OAuth 2.0 credentials (Web application type)
-          </li>
-          <li>
-            Add <code className="bg-bg-tertiary px-1 rounded text-xs">http://127.0.0.1:17248</code>{" "}
+            Add{" "}
+            <code className="bg-bg-tertiary px-1 rounded text-xs">
+              http://127.0.0.1:17248
+            </code>{" "}
             as an authorized redirect URI
           </li>
           <li>Copy the Client ID and Client Secret below</li>

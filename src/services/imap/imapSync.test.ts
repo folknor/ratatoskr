@@ -64,7 +64,13 @@ vi.mock("../db/pendingOperations", () => ({
   getPendingOpsForResource: vi.fn(() => []),
 }));
 
-import { imapMessageToParsedMessage, imapInitialSync, formatImapDate, computeSinceDate, isConnectionError } from "./imapSync";
+import {
+  imapMessageToParsedMessage,
+  imapInitialSync,
+  formatImapDate,
+  computeSinceDate,
+  isConnectionError,
+} from "./imapSync";
 import {
   createMockImapMessage,
   createMockImapAccount,
@@ -72,7 +78,11 @@ import {
   createMockImapFolderStatus,
   createMockImapFetchResult,
 } from "@/test/mocks";
-import { imapListFolders, imapSearchFolder, imapFetchMessages } from "./tauriCommands";
+import {
+  imapListFolders,
+  imapSearchFolder,
+  imapFetchMessages,
+} from "./tauriCommands";
 import { getAccount } from "../db/accounts";
 import { withTransaction } from "../db/connection";
 import { upsertMessage, updateMessageThreadIds } from "../db/messages";
@@ -83,7 +93,11 @@ import { getPendingOpsForResource } from "../db/pendingOperations";
 describe("imapMessageToParsedMessage", () => {
   it("converts basic IMAP message to ParsedMessage format", () => {
     const msg = createMockImapMessage();
-    const { parsed, threadable } = imapMessageToParsedMessage(msg, "acc-1", "INBOX");
+    const { parsed, threadable } = imapMessageToParsedMessage(
+      msg,
+      "acc-1",
+      "INBOX",
+    );
 
     expect(parsed.id).toBe("imap-acc-1-INBOX-42");
     expect(parsed.fromAddress).toBe("sender@example.com");
@@ -138,7 +152,9 @@ describe("imapMessageToParsedMessage", () => {
     expect(threadable.id).toBe("imap-acc-1-INBOX-42");
     expect(threadable.messageId).toBe("<msg-abc@host.com>");
     expect(threadable.inReplyTo).toBe("<msg-parent@host.com>");
-    expect(threadable.references).toBe("<msg-root@host.com> <msg-parent@host.com>");
+    expect(threadable.references).toBe(
+      "<msg-root@host.com> <msg-parent@host.com>",
+    );
     expect(threadable.subject).toBe("Test Subject");
     expect(threadable.date).toBe(1700000000000);
   });
@@ -196,10 +212,13 @@ describe("imapMessageToParsedMessage", () => {
   it("generates snippet from body_text when snippet is null", () => {
     const msg = createMockImapMessage({
       snippet: null,
-      body_text: "This is a long email body that should be truncated to create a snippet for display purposes.",
+      body_text:
+        "This is a long email body that should be truncated to create a snippet for display purposes.",
     });
     const { parsed } = imapMessageToParsedMessage(msg, "acc-1", "INBOX");
-    expect(parsed.snippet).toBe("This is a long email body that should be truncated to create a snippet for display purposes.");
+    expect(parsed.snippet).toBe(
+      "This is a long email body that should be truncated to create a snippet for display purposes.",
+    );
   });
 
   it("handles null body fields gracefully", () => {
@@ -234,7 +253,11 @@ describe("imapMessageToParsedMessage", () => {
 
   it("handles date=0 (unparseable Date header) without crashing", () => {
     const msg = createMockImapMessage({ date: 0 });
-    const { parsed, threadable } = imapMessageToParsedMessage(msg, "acc-1", "INBOX");
+    const { parsed, threadable } = imapMessageToParsedMessage(
+      msg,
+      "acc-1",
+      "INBOX",
+    );
 
     // date=0 * 1000 = 0, passed through — the caller (imapInitialSync) applies the fallback
     expect(parsed.date).toBe(0);
@@ -271,7 +294,10 @@ describe("imapInitialSync", () => {
   });
 
   /** Configure mocks to return a single folder with the given messages. */
-  function setupFolderWithMessages(folder: string, messages: ReturnType<typeof createMockImapMessage>[]) {
+  function setupFolderWithMessages(
+    folder: string,
+    messages: ReturnType<typeof createMockImapMessage>[],
+  ) {
     const mockFolder = createMockImapFolder({
       path: folder,
       raw_path: folder,
@@ -291,8 +317,18 @@ describe("imapInitialSync", () => {
   }
 
   it("stores messages to DB immediately per-chunk (streaming)", async () => {
-    const msg1 = createMockImapMessage({ uid: 1, message_id: "<m1@test>", subject: "First", date: Math.floor(Date.now() / 1000) });
-    const msg2 = createMockImapMessage({ uid: 2, message_id: "<m2@test>", subject: "Second", date: Math.floor(Date.now() / 1000) });
+    const msg1 = createMockImapMessage({
+      uid: 1,
+      message_id: "<m1@test>",
+      subject: "First",
+      date: Math.floor(Date.now() / 1000),
+    });
+    const msg2 = createMockImapMessage({
+      uid: 2,
+      message_id: "<m2@test>",
+      subject: "Second",
+      date: Math.floor(Date.now() / 1000),
+    });
     setupFolderWithMessages("INBOX", [msg1, msg2]);
 
     await imapInitialSync("acc-1");
@@ -309,8 +345,18 @@ describe("imapInitialSync", () => {
   });
 
   it("creates placeholder thread before each message to satisfy FK constraint", async () => {
-    const msg1 = createMockImapMessage({ uid: 1, message_id: "<m1@test>", subject: "Hello", date: Math.floor(Date.now() / 1000) });
-    const msg2 = createMockImapMessage({ uid: 2, message_id: "<m2@test>", subject: "World", date: Math.floor(Date.now() / 1000) });
+    const msg1 = createMockImapMessage({
+      uid: 1,
+      message_id: "<m1@test>",
+      subject: "Hello",
+      date: Math.floor(Date.now() / 1000),
+    });
+    const msg2 = createMockImapMessage({
+      uid: 2,
+      message_id: "<m2@test>",
+      subject: "World",
+      date: Math.floor(Date.now() / 1000),
+    });
     setupFolderWithMessages("INBOX", [msg1, msg2]);
 
     await imapInitialSync("acc-1");
@@ -337,7 +383,12 @@ describe("imapInitialSync", () => {
   });
 
   it("updates thread IDs after threading phase", async () => {
-    const msg1 = createMockImapMessage({ uid: 1, message_id: "<m1@test>", subject: "Hello", date: Math.floor(Date.now() / 1000) });
+    const msg1 = createMockImapMessage({
+      uid: 1,
+      message_id: "<m1@test>",
+      subject: "Hello",
+      date: Math.floor(Date.now() / 1000),
+    });
     setupFolderWithMessages("INBOX", [msg1]);
 
     await imapInitialSync("acc-1");
@@ -347,14 +398,19 @@ describe("imapInitialSync", () => {
 
     // Thread IDs should be batch-updated via updateMessageThreadIds
     expect(mockUpdateMessageThreadIds).toHaveBeenCalledTimes(1);
-    const [accountId, messageIds, threadId] = mockUpdateMessageThreadIds.mock.calls[0]!;
+    const [accountId, messageIds, threadId] =
+      mockUpdateMessageThreadIds.mock.calls[0]!;
     expect(accountId).toBe("acc-1");
     expect(messageIds).toHaveLength(1);
     expect(threadId).toBeTruthy();
   });
 
   it("returns empty messages array (bodies not accumulated)", async () => {
-    const msg = createMockImapMessage({ uid: 1, message_id: "<m1@test>", date: Math.floor(Date.now() / 1000) });
+    const msg = createMockImapMessage({
+      uid: 1,
+      message_id: "<m1@test>",
+      date: Math.floor(Date.now() / 1000),
+    });
     setupFolderWithMessages("INBOX", [msg]);
 
     const result = await imapInitialSync("acc-1");
@@ -397,8 +453,16 @@ describe("imapInitialSync", () => {
     const recentDate = Math.floor(Date.now() / 1000) - 10; // 10 seconds ago
     const oldDate = Math.floor(Date.now() / 1000) - 400 * 86400; // 400 days ago
 
-    const recentMsg = createMockImapMessage({ uid: 1, message_id: "<recent@test>", date: recentDate });
-    const oldMsg = createMockImapMessage({ uid: 2, message_id: "<old@test>", date: oldDate });
+    const recentMsg = createMockImapMessage({
+      uid: 1,
+      message_id: "<recent@test>",
+      date: recentDate,
+    });
+    const oldMsg = createMockImapMessage({
+      uid: 2,
+      message_id: "<old@test>",
+      date: oldDate,
+    });
 
     setupFolderWithMessages("INBOX", [recentMsg, oldMsg]);
 
@@ -410,7 +474,11 @@ describe("imapInitialSync", () => {
   });
 
   it("handles empty folders gracefully", async () => {
-    const mockFolder = createMockImapFolder({ path: "INBOX", raw_path: "INBOX", exists: 0 });
+    const mockFolder = createMockImapFolder({
+      path: "INBOX",
+      raw_path: "INBOX",
+      exists: 0,
+    });
     mockImapListFolders.mockResolvedValue([mockFolder]);
 
     const result = await imapInitialSync("acc-1");
@@ -421,7 +489,11 @@ describe("imapInitialSync", () => {
   });
 
   it("reports progress through all phases", async () => {
-    const msg = createMockImapMessage({ uid: 1, message_id: "<m1@test>", date: Math.floor(Date.now() / 1000) });
+    const msg = createMockImapMessage({
+      uid: 1,
+      message_id: "<m1@test>",
+      date: Math.floor(Date.now() / 1000),
+    });
     setupFolderWithMessages("INBOX", [msg]);
 
     const progressCalls: Array<{ phase: string }> = [];
@@ -438,7 +510,11 @@ describe("imapInitialSync", () => {
   });
 
   it("uses imapSearchFolder + imapFetchMessages for chunked sync per folder", async () => {
-    const msg = createMockImapMessage({ uid: 1, message_id: "<m1@test>", date: Math.floor(Date.now() / 1000) });
+    const msg = createMockImapMessage({
+      uid: 1,
+      message_id: "<m1@test>",
+      date: Math.floor(Date.now() / 1000),
+    });
     setupFolderWithMessages("INBOX", [msg]);
 
     await imapInitialSync("acc-1");
@@ -461,7 +537,11 @@ describe("imapInitialSync", () => {
   });
 
   it("wraps chunk DB writes in a transaction", async () => {
-    const msg = createMockImapMessage({ uid: 1, message_id: "<m1@test>", date: Math.floor(Date.now() / 1000) });
+    const msg = createMockImapMessage({
+      uid: 1,
+      message_id: "<m1@test>",
+      date: Math.floor(Date.now() / 1000),
+    });
     setupFolderWithMessages("INBOX", [msg]);
 
     await imapInitialSync("acc-1");
@@ -471,10 +551,22 @@ describe("imapInitialSync", () => {
   });
 
   it("continues to next chunk on fetch error", async () => {
-    const msg1 = createMockImapMessage({ uid: 1, message_id: "<m1@test>", date: Math.floor(Date.now() / 1000) });
-    const msg2 = createMockImapMessage({ uid: 201, message_id: "<m2@test>", date: Math.floor(Date.now() / 1000) });
+    const msg1 = createMockImapMessage({
+      uid: 1,
+      message_id: "<m1@test>",
+      date: Math.floor(Date.now() / 1000),
+    });
+    const msg2 = createMockImapMessage({
+      uid: 201,
+      message_id: "<m2@test>",
+      date: Math.floor(Date.now() / 1000),
+    });
 
-    const mockFolder = createMockImapFolder({ path: "INBOX", raw_path: "INBOX", exists: 2 });
+    const mockFolder = createMockImapFolder({
+      path: "INBOX",
+      raw_path: "INBOX",
+      exists: 2,
+    });
     mockImapListFolders.mockResolvedValue([mockFolder]);
 
     // Return UIDs in two "chunks" (we'll set CHUNK_SIZE to 200 but have UIDs 1 and 201)
@@ -496,12 +588,18 @@ describe("imapInitialSync", () => {
     mockGetAccount.mockResolvedValue(createMockImapAccount({ id: "acc-1" }));
 
     const msgs = Array.from({ length: 2 }, (_, i) =>
-      createMockImapMessage({ uid: i + 1, message_id: `<m${i}@test>`, date: Math.floor(Date.now() / 1000) }),
+      createMockImapMessage({
+        uid: i + 1,
+        message_id: `<m${i}@test>`,
+        date: Math.floor(Date.now() / 1000),
+      }),
     );
     setupFolderWithMessages("INBOX", msgs);
 
     // Even if imapFetchMessages fails for one chunk, the folder-level error is caught
-    mockImapFetchMessages.mockRejectedValueOnce(new Error("chunk fetch failed"));
+    mockImapFetchMessages.mockRejectedValueOnce(
+      new Error("chunk fetch failed"),
+    );
 
     const syncPromise = imapInitialSync("acc-1");
     await vi.runAllTimersAsync();
@@ -513,10 +611,16 @@ describe("imapInitialSync", () => {
 
   it("circuit breaker skips remaining folders after 5 consecutive connection failures", async () => {
     const folders = Array.from({ length: 8 }, (_, i) =>
-      createMockImapFolder({ path: `folder-${i}`, raw_path: `folder-${i}`, exists: 10 }),
+      createMockImapFolder({
+        path: `folder-${i}`,
+        raw_path: `folder-${i}`,
+        exists: 10,
+      }),
     );
     mockImapListFolders.mockResolvedValue(folders);
-    mockImapSearchFolder.mockRejectedValue(new Error("TCP connect timed out (os error 60)"));
+    mockImapSearchFolder.mockRejectedValue(
+      new Error("TCP connect timed out (os error 60)"),
+    );
 
     // Advance timers and catch the expected error in one go to avoid
     // Vitest's unhandled-rejection tracker from flagging it.
@@ -544,7 +648,11 @@ describe("imapInitialSync", () => {
     ];
     mockImapListFolders.mockResolvedValue(folders);
 
-    const msg = createMockImapMessage({ uid: 1, message_id: "<m1@test>", date: Math.floor(Date.now() / 1000) });
+    const msg = createMockImapMessage({
+      uid: 1,
+      message_id: "<m1@test>",
+      date: Math.floor(Date.now() / 1000),
+    });
 
     // First 2 fail with connection error, 3rd succeeds, 4th fails
     mockImapSearchFolder
@@ -568,12 +676,18 @@ describe("imapInitialSync", () => {
 
   it("continues on non-connection errors without triggering circuit breaker", async () => {
     const folders = Array.from({ length: 6 }, (_, i) =>
-      createMockImapFolder({ path: `folder-${i}`, raw_path: `folder-${i}`, exists: 10 }),
+      createMockImapFolder({
+        path: `folder-${i}`,
+        raw_path: `folder-${i}`,
+        exists: 10,
+      }),
     );
     mockImapListFolders.mockResolvedValue(folders);
 
     // Non-connection errors should NOT trigger circuit breaker
-    mockImapSearchFolder.mockRejectedValue(new Error("PARSE failed: invalid response"));
+    mockImapSearchFolder.mockRejectedValue(
+      new Error("PARSE failed: invalid response"),
+    );
 
     let caughtError: Error | null = null;
     const syncPromise = imapInitialSync("acc-1").catch((err: Error) => {
@@ -731,13 +845,19 @@ describe("imapInitialSync — placeholder cleanup", () => {
       date: Math.floor(Date.now() / 1000) + 60,
     });
 
-    const mockFolder = createMockImapFolder({ path: "INBOX", raw_path: "INBOX", exists: 2 });
+    const mockFolder = createMockImapFolder({
+      path: "INBOX",
+      raw_path: "INBOX",
+      exists: 2,
+    });
     mockImapListFolders.mockResolvedValue([mockFolder]);
     mockImapSearchFolder.mockResolvedValue({
       uids: [1, 2],
       folder_status: createMockImapFolderStatus({ exists: 2 }),
     });
-    mockImapFetchMessages.mockResolvedValue(createMockImapFetchResult([msg1, msg2]));
+    mockImapFetchMessages.mockResolvedValue(
+      createMockImapFetchResult([msg1, msg2]),
+    );
 
     await imapInitialSync("acc-1");
 

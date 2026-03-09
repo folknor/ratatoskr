@@ -32,7 +32,9 @@ async function checkScheduledEmails(): Promise<void> {
         try {
           attachments = JSON.parse(email.attachment_paths) as EmailAttachment[];
         } catch {
-          console.warn(`Failed to parse attachment_paths for scheduled email ${email.id}`);
+          console.warn(
+            `Failed to parse attachment_paths for scheduled email ${email.id}`,
+          );
         }
       }
 
@@ -57,16 +59,23 @@ async function checkScheduledEmails(): Promise<void> {
       console.error(`Failed to send scheduled email ${email.id}:`, err);
       // Distinguish transient vs permanent errors
       const message = err instanceof Error ? err.message : String(err);
-      const isTransient = message.includes("5") && /\b5\d{2}\b/.test(message)
-        || message.toLowerCase().includes("network")
-        || message.toLowerCase().includes("timeout")
-        || message.toLowerCase().includes("econnrefused");
+      const isTransient =
+        (message.includes("5") && /\b5\d{2}\b/.test(message)) ||
+        message.toLowerCase().includes("network") ||
+        message.toLowerCase().includes("timeout") ||
+        message.toLowerCase().includes("econnrefused");
       // Revert to pending for transient errors (allows retry), mark failed for permanent
-      await updateScheduledEmailStatus(email.id, isTransient ? "pending" : "failed");
+      await updateScheduledEmailStatus(
+        email.id,
+        isTransient ? "pending" : "failed",
+      );
     }
   }
 }
 
-const scheduledSendChecker = createBackgroundChecker("ScheduledSend", checkScheduledEmails);
+const scheduledSendChecker = createBackgroundChecker(
+  "ScheduledSend",
+  checkScheduledEmails,
+);
 export const startScheduledSendChecker = scheduledSendChecker.start;
 export const stopScheduledSendChecker = scheduledSendChecker.stop;

@@ -33,7 +33,11 @@ interface GoogleCalendarEvent {
   end: { dateTime?: string; date?: string; timeZone?: string };
   status?: string;
   organizer?: { email: string; displayName?: string };
-  attendees?: { email: string; displayName?: string; responseStatus?: string }[];
+  attendees?: {
+    email: string;
+    displayName?: string;
+    responseStatus?: string;
+  }[];
   htmlLink?: string;
   iCalUID?: string;
   etag?: string;
@@ -70,7 +74,11 @@ export class GoogleCalendarProvider implements CalendarProvider {
     }));
   }
 
-  async fetchEvents(calendarRemoteId: string, timeMin: string, timeMax: string): Promise<CalendarEventData[]> {
+  async fetchEvents(
+    calendarRemoteId: string,
+    timeMin: string,
+    timeMax: string,
+  ): Promise<CalendarEventData[]> {
     const client = await this.getClient();
     const params = new URLSearchParams({
       timeMin,
@@ -86,7 +94,10 @@ export class GoogleCalendarProvider implements CalendarProvider {
     return (response.items ?? []).map(mapGoogleEvent);
   }
 
-  async createEvent(calendarRemoteId: string, event: CreateEventInput): Promise<CalendarEventData> {
+  async createEvent(
+    calendarRemoteId: string,
+    event: CreateEventInput,
+  ): Promise<CalendarEventData> {
     const client = await this.getClient();
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const encodedId = encodeURIComponent(calendarRemoteId);
@@ -102,8 +113,14 @@ export class GoogleCalendarProvider implements CalendarProvider {
       body.start = { date: event.startTime.split("T")[0] };
       body.end = { date: event.endTime.split("T")[0] };
     } else {
-      body.start = { dateTime: new Date(event.startTime).toISOString(), timeZone: tz };
-      body.end = { dateTime: new Date(event.endTime).toISOString(), timeZone: tz };
+      body.start = {
+        dateTime: new Date(event.startTime).toISOString(),
+        timeZone: tz,
+      };
+      body.end = {
+        dateTime: new Date(event.endTime).toISOString(),
+        timeZone: tz,
+      };
     }
 
     if (event.attendees) {
@@ -117,7 +134,11 @@ export class GoogleCalendarProvider implements CalendarProvider {
     return mapGoogleEvent(created);
   }
 
-  async updateEvent(calendarRemoteId: string, remoteEventId: string, event: UpdateEventInput): Promise<CalendarEventData> {
+  async updateEvent(
+    calendarRemoteId: string,
+    remoteEventId: string,
+    event: UpdateEventInput,
+  ): Promise<CalendarEventData> {
     const client = await this.getClient();
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const encodedCalId = encodeURIComponent(calendarRemoteId);
@@ -134,8 +155,14 @@ export class GoogleCalendarProvider implements CalendarProvider {
         body.start = { date: event.startTime.split("T")[0] };
         body.end = { date: event.endTime.split("T")[0] };
       } else {
-        body.start = { dateTime: new Date(event.startTime).toISOString(), timeZone: tz };
-        body.end = { dateTime: new Date(event.endTime).toISOString(), timeZone: tz };
+        body.start = {
+          dateTime: new Date(event.startTime).toISOString(),
+          timeZone: tz,
+        };
+        body.end = {
+          dateTime: new Date(event.endTime).toISOString(),
+          timeZone: tz,
+        };
       }
     }
 
@@ -146,7 +173,10 @@ export class GoogleCalendarProvider implements CalendarProvider {
     return mapGoogleEvent(updated);
   }
 
-  async deleteEvent(calendarRemoteId: string, remoteEventId: string): Promise<void> {
+  async deleteEvent(
+    calendarRemoteId: string,
+    remoteEventId: string,
+  ): Promise<void> {
     const client = await this.getClient();
     const encodedCalId = encodeURIComponent(calendarRemoteId);
     const encodedEventId = encodeURIComponent(remoteEventId);
@@ -154,7 +184,10 @@ export class GoogleCalendarProvider implements CalendarProvider {
     await client.request(url, { method: "DELETE" });
   }
 
-  async syncEvents(calendarRemoteId: string, syncToken?: string): Promise<CalendarSyncResult> {
+  async syncEvents(
+    calendarRemoteId: string,
+    syncToken?: string,
+  ): Promise<CalendarSyncResult> {
     const client = await this.getClient();
     const encodedId = encodeURIComponent(calendarRemoteId);
     const created: CalendarEventData[] = [];
@@ -189,7 +222,13 @@ export class GoogleCalendarProvider implements CalendarProvider {
         const message = err instanceof Error ? err.message : "";
         if (message.includes("410") || message.includes("sync token")) {
           // Sync token expired — caller should do full sync
-          return { created: [], updated: [], deletedRemoteIds: [], newSyncToken: null, newCtag: null };
+          return {
+            created: [],
+            updated: [],
+            deletedRemoteIds: [],
+            newSyncToken: null,
+            newCtag: null,
+          };
         }
         throw err;
       }
@@ -210,7 +249,13 @@ export class GoogleCalendarProvider implements CalendarProvider {
       }
     } while (pageToken);
 
-    return { created, updated, deletedRemoteIds, newSyncToken: nextSyncToken, newCtag: null };
+    return {
+      created,
+      updated,
+      deletedRemoteIds,
+      newSyncToken: nextSyncToken,
+      newCtag: null,
+    };
   }
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
@@ -218,7 +263,10 @@ export class GoogleCalendarProvider implements CalendarProvider {
       await this.listCalendars();
       return { success: true, message: "Connected to Google Calendar" };
     } catch (err) {
-      return { success: false, message: err instanceof Error ? err.message : "Connection failed" };
+      return {
+        success: false,
+        message: err instanceof Error ? err.message : "Connection failed",
+      };
     }
   }
 }

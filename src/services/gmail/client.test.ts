@@ -36,36 +36,56 @@ describe("GmailClient.request", () => {
   });
 
   it("should handle 204 No Content responses without JSON parse error", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
-      createMockFetchResponse({ status: 204 }),
-    ));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(createMockFetchResponse({ status: 204 })),
+    );
 
-    const result = await client.request("/drafts/draft-1", { method: "DELETE" });
+    const result = await client.request("/drafts/draft-1", {
+      method: "DELETE",
+    });
     expect(result).toBeUndefined();
   });
 
   it("should parse JSON for normal 200 responses", async () => {
     const mockData = { id: "draft-1", message: { id: "msg-1" } };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
-      createMockFetchResponse({ status: 200, data: mockData }),
-    ));
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          createMockFetchResponse({ status: 200, data: mockData }),
+        ),
+    );
 
     const result = await client.request("/drafts");
     expect(result).toEqual(mockData);
   });
 
   it("should throw on non-ok responses", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
-      createMockFetchResponse({ status: 404, text: "Not Found" }),
-    ));
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          createMockFetchResponse({ status: 404, text: "Not Found" }),
+        ),
+    );
 
-    await expect(client.request("/drafts/bad-id")).rejects.toThrow("Gmail API error: 404 Not Found");
+    await expect(client.request("/drafts/bad-id")).rejects.toThrow(
+      "Gmail API error: 404 Not Found",
+    );
   });
 
   it("should retry on 429 and succeed", async () => {
-    const mockFetch = vi.fn()
+    const mockFetch = vi
+      .fn()
       .mockResolvedValueOnce(
-        createMockFetchResponse({ status: 429, text: "Rate Limit Exceeded", headers: { "Retry-After": "0" } }),
+        createMockFetchResponse({
+          status: 429,
+          text: "Rate Limit Exceeded",
+          headers: { "Retry-After": "0" },
+        }),
       )
       .mockResolvedValueOnce(
         createMockFetchResponse({ status: 200, data: { id: "success" } }),
@@ -78,9 +98,14 @@ describe("GmailClient.request", () => {
   });
 
   it("should respect Retry-After header on 429", async () => {
-    const mockFetch = vi.fn()
+    const mockFetch = vi
+      .fn()
       .mockResolvedValueOnce(
-        createMockFetchResponse({ status: 429, text: "Rate Limit Exceeded", headers: { "Retry-After": "1" } }),
+        createMockFetchResponse({
+          status: 429,
+          text: "Rate Limit Exceeded",
+          headers: { "Retry-After": "1" },
+        }),
       )
       .mockResolvedValueOnce(
         createMockFetchResponse({ status: 200, data: { id: "ok" } }),
@@ -96,17 +121,26 @@ describe("GmailClient.request", () => {
   });
 
   it("should throw after max 429 retries exceeded", async () => {
-    const mockFetch = vi.fn().mockResolvedValue(
-      createMockFetchResponse({ status: 429, text: "Rate Limit Exceeded", headers: { "Retry-After": "0" } }),
-    );
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValue(
+        createMockFetchResponse({
+          status: 429,
+          text: "Rate Limit Exceeded",
+          headers: { "Retry-After": "0" },
+        }),
+      );
     vi.stubGlobal("fetch", mockFetch);
 
-    await expect(client.request("/threads/t1")).rejects.toThrow("Gmail API error: 429 Rate Limit Exceeded");
+    await expect(client.request("/threads/t1")).rejects.toThrow(
+      "Gmail API error: 429 Rate Limit Exceeded",
+    );
     expect(mockFetch).toHaveBeenCalledTimes(3); // 3 attempts total
   });
 
   it("should use exponential backoff when no Retry-After header", async () => {
-    const mockFetch = vi.fn()
+    const mockFetch = vi
+      .fn()
       .mockResolvedValueOnce(
         createMockFetchResponse({ status: 429, text: "Rate Limit Exceeded" }),
       )
@@ -133,14 +167,19 @@ describe("GmailClient.request", () => {
       scope: "https://mail.google.com/",
     });
 
-    const mockFetch = vi.fn()
+    const mockFetch = vi
+      .fn()
       // Initial request returns 401
       .mockResolvedValueOnce(
         createMockFetchResponse({ status: 401, text: "Unauthorized" }),
       )
       // Post-refresh retry returns 429, then succeeds
       .mockResolvedValueOnce(
-        createMockFetchResponse({ status: 429, text: "Rate Limit Exceeded", headers: { "Retry-After": "0" } }),
+        createMockFetchResponse({
+          status: 429,
+          text: "Rate Limit Exceeded",
+          headers: { "Retry-After": "0" },
+        }),
       )
       .mockResolvedValueOnce(
         createMockFetchResponse({ status: 200, data: { id: "after-429" } }),

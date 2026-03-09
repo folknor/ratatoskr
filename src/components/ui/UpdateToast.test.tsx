@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from "@testing-library/react";
 
 const mockGetAvailableUpdate = vi.fn();
 const mockSetUpdateCallback = vi.fn();
@@ -81,7 +87,10 @@ describe("UpdateToast", () => {
     unmount();
 
     // Last call should be setUpdateCallback(null)
-    const lastCall = mockSetUpdateCallback.mock.calls[mockSetUpdateCallback.mock.calls.length - 1];
+    const lastCall =
+      mockSetUpdateCallback.mock.calls[
+        mockSetUpdateCallback.mock.calls.length - 1
+      ];
     expect(lastCall?.[0]).toBeNull();
   });
 });

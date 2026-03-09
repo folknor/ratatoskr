@@ -9,7 +9,13 @@ export interface ExtractedTask {
   priority: TaskPriority;
 }
 
-const VALID_PRIORITIES = new Set<TaskPriority>(["none", "low", "medium", "high", "urgent"]);
+const VALID_PRIORITIES = new Set<TaskPriority>([
+  "none",
+  "low",
+  "medium",
+  "high",
+  "urgent",
+]);
 
 /**
  * Extract a task from a thread using AI, with robust parsing of the result.
@@ -36,10 +42,12 @@ export async function extractTask(
     const subject = messages[0]?.subject ?? "Email task";
 
     return {
-      title: (typeof parsed.title === "string" && parsed.title.trim())
-        ? parsed.title.trim()
-        : `Follow up on: ${subject}`,
-      description: typeof parsed.description === "string" ? parsed.description : null,
+      title:
+        typeof parsed.title === "string" && parsed.title.trim()
+          ? parsed.title.trim()
+          : `Follow up on: ${subject}`,
+      description:
+        typeof parsed.description === "string" ? parsed.description : null,
       dueDate: typeof parsed.dueDate === "number" ? parsed.dueDate : null,
       priority: VALID_PRIORITIES.has(parsed.priority as TaskPriority)
         ? (parsed.priority as TaskPriority)

@@ -45,9 +45,11 @@ export function DayView({ currentDate, events, onEventClick }: DayViewProps) {
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Header */}
       <div className="px-6 py-3 border-b border-border-primary flex items-center gap-3 shrink-0">
-        <div className={`text-2xl font-bold w-10 h-10 flex items-center justify-center rounded-full ${
-          isToday ? "bg-accent text-white" : "text-text-primary"
-        }`}>
+        <div
+          className={`text-2xl font-bold w-10 h-10 flex items-center justify-center rounded-full ${
+            isToday ? "bg-accent text-white" : "text-text-primary"
+          }`}
+        >
           {currentDate.getDate()}
         </div>
         <div className="text-sm text-text-secondary">
@@ -75,10 +77,15 @@ export function DayView({ currentDate, events, onEventClick }: DayViewProps) {
         {HOURS.map((hour) => {
           const hourEvents = hourEventMap.get(hour) ?? [];
           return (
-            <div key={hour} className="flex border-b border-border-secondary h-14">
+            <div
+              key={hour}
+              className="flex border-b border-border-secondary h-14"
+            >
               <div className="w-16 shrink-0 px-2 flex items-start justify-end -mt-1.5">
                 <span className="text-[0.625rem] text-text-tertiary">
-                  {hour === 0 ? "" : `${hour % 12 || 12}${hour < 12 ? t("am") : t("pm")}`}
+                  {hour === 0
+                    ? ""
+                    : `${hour % 12 || 12}${hour < 12 ? t("am") : t("pm")}`}
                 </span>
               </div>
               <div className="flex-1 relative px-1">
@@ -89,7 +96,12 @@ export function DayView({ currentDate, events, onEventClick }: DayViewProps) {
                     className="w-full text-left text-xs px-2 py-1 rounded bg-accent/15 text-accent truncate hover:bg-accent/25 transition-colors mb-0.5"
                   >
                     {e.summary ?? t("event")}
-                    {e.location && <span className="text-text-tertiary"> · {e.location}</span>}
+                    {e.location && (
+                      <span className="text-text-tertiary">
+                        {" "}
+                        · {e.location}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>

@@ -99,7 +99,8 @@ export const useUIStore = create<UIState>((set) => ({
       setSetting("contact_sidebar_visible", String(visible)).catch(() => {});
       return { contactSidebarVisible: visible };
     }),
-  setContactSidebarVisible: (contactSidebarVisible) => set({ contactSidebarVisible }),
+  setContactSidebarVisible: (contactSidebarVisible) =>
+    set({ contactSidebarVisible }),
   setReadingPanePosition: (readingPanePosition) => {
     setSetting("reading_pane_position", readingPanePosition).catch(() => {});
     set({ readingPanePosition });
@@ -148,7 +149,9 @@ export const useUIStore = create<UIState>((set) => ({
     }),
   setTaskSidebarVisible: (taskSidebarVisible) => set({ taskSidebarVisible }),
   setSidebarNavConfig: (sidebarNavConfig) => {
-    setSetting("sidebar_nav_config", JSON.stringify(sidebarNavConfig)).catch(() => {});
+    setSetting("sidebar_nav_config", JSON.stringify(sidebarNavConfig)).catch(
+      () => {},
+    );
     set({ sidebarNavConfig });
   },
   restoreSidebarNavConfig: (sidebarNavConfig) => set({ sidebarNavConfig }),
@@ -157,7 +160,7 @@ export const useUIStore = create<UIState>((set) => ({
     set({ reduceMotion });
   },
   setShowSyncStatusBar: (showSyncStatusBar) => {
-    setSetting("show_sync_status", String(showSyncStatusBar)).catch(() => { });
+    setSetting("show_sync_status", String(showSyncStatusBar)).catch(() => {});
     set({ showSyncStatusBar });
   },
   setOnline: (isOnline) => set({ isOnline }),

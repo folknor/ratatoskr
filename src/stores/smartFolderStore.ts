@@ -95,9 +95,7 @@ export const useSmartFolderStore = create<SmartFolderState>((set, get) => ({
     await updateSmartFolderDb(id, updates);
     const { folders } = get();
     set({
-      folders: folders.map((f) =>
-        f.id === id ? { ...f, ...updates } : f,
-      ),
+      folders: folders.map((f) => (f.id === id ? { ...f, ...updates } : f)),
     });
   },
 

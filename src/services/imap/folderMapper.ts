@@ -4,7 +4,10 @@ import { upsertLabel } from "../db/labels";
 /**
  * Mapping from IMAP special-use flags to Gmail-style label IDs.
  */
-const SPECIAL_USE_MAP: Record<string, { labelId: string; labelName: string; type: string }> = {
+const SPECIAL_USE_MAP: Record<
+  string,
+  { labelId: string; labelName: string; type: string }
+> = {
   "\\Inbox": { labelId: "INBOX", labelName: "Inbox", type: "system" },
   "\\Sent": { labelId: "SENT", labelName: "Sent", type: "system" },
   "\\Drafts": { labelId: "DRAFT", labelName: "Drafts", type: "system" },
@@ -13,7 +16,11 @@ const SPECIAL_USE_MAP: Record<string, { labelId: string; labelName: string; type
   "\\Archive": { labelId: "archive", labelName: "Archive", type: "system" },
   "\\Flagged": { labelId: "STARRED", labelName: "Starred", type: "system" },
   "\\All": { labelId: "all-mail", labelName: "All Mail", type: "system" },
-  "\\Important": { labelId: "IMPORTANT", labelName: "Important", type: "system" },
+  "\\Important": {
+    labelId: "IMPORTANT",
+    labelName: "Important",
+    type: "system",
+  },
 };
 
 /**

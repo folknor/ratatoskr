@@ -24,8 +24,12 @@ export function HelpCard({ card, isExpanded, onToggle }: HelpCardProps) {
           <Icon size={16} />
         </div>
         <div className="flex-1 min-w-0">
-          <h3 className="text-sm font-medium text-text-primary">{t(card.title)}</h3>
-          <p className="text-xs text-text-tertiary mt-0.5 truncate">{t(card.summary)}</p>
+          <h3 className="text-sm font-medium text-text-primary">
+            {t(card.title)}
+          </h3>
+          <p className="text-xs text-text-tertiary mt-0.5 truncate">
+            {t(card.summary)}
+          </p>
         </div>
         <ChevronRight
           size={14}
@@ -50,8 +54,13 @@ export function HelpCard({ card, isExpanded, onToggle }: HelpCardProps) {
             {card.tips && card.tips.length > 0 && (
               <ul className="space-y-1.5">
                 {card.tips.map((tip, i) => (
-                  <li key={i} className="flex items-start gap-2 text-xs text-text-secondary">
-                    <span className="text-text-tertiary mt-0.5 shrink-0">•</span>
+                  <li
+                    key={i}
+                    className="flex items-start gap-2 text-xs text-text-secondary"
+                  >
+                    <span className="text-text-tertiary mt-0.5 shrink-0">
+                      •
+                    </span>
                     <span className="flex-1">{t(tip.text)}</span>
                     {tip.shortcut && (
                       <kbd className="shrink-0 px-1.5 py-0.5 text-[0.625rem] bg-bg-secondary border border-border-secondary rounded text-text-tertiary font-mono">

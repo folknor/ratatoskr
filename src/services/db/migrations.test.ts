@@ -42,7 +42,9 @@ function splitStatements(sql: string): string[] {
 
 describe("splitStatements", () => {
   it("splits simple statements", () => {
-    const result = splitStatements("CREATE TABLE foo (id INT); CREATE TABLE bar (id INT);");
+    const result = splitStatements(
+      "CREATE TABLE foo (id INT); CREATE TABLE bar (id INT);",
+    );
     expect(result).toHaveLength(2);
     expect(result[0]).toBe("CREATE TABLE foo (id INT)");
     expect(result[1]).toBe("CREATE TABLE bar (id INT)");

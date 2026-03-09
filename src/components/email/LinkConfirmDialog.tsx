@@ -9,7 +9,11 @@ interface LinkConfirmDialogProps {
   onConfirm: () => void;
 }
 
-export function LinkConfirmDialog({ linkAnalysis, onCancel, onConfirm }: LinkConfirmDialogProps) {
+export function LinkConfirmDialog({
+  linkAnalysis,
+  onCancel,
+  onConfirm,
+}: LinkConfirmDialogProps) {
   const { t } = useTranslation("email");
   const isHigh = linkAnalysis.riskLevel === "high";
   const borderColor = isHigh ? "border-danger/40" : "border-warning/40";
@@ -17,10 +21,14 @@ export function LinkConfirmDialog({ linkAnalysis, onCancel, onConfirm }: LinkCon
   const headerText = isHigh ? "text-danger" : "text-warning";
 
   const customHeader = (
-    <div className={`px-4 py-3 ${headerBg} flex items-center gap-2.5 rounded-t-lg`}>
+    <div
+      className={`px-4 py-3 ${headerBg} flex items-center gap-2.5 rounded-t-lg`}
+    >
       <ShieldAlert size={18} className={headerText} />
       <h2 className={`text-sm font-semibold ${headerText}`}>
-        {isHigh ? t("linkConfirm.highRiskLink") : t("linkConfirm.suspiciousLink")}
+        {isHigh
+          ? t("linkConfirm.highRiskLink")
+          : t("linkConfirm.suspiciousLink")}
       </h2>
     </div>
   );
@@ -39,9 +47,14 @@ export function LinkConfirmDialog({ linkAnalysis, onCancel, onConfirm }: LinkCon
       <div className="px-4 py-3 space-y-3">
         {/* URL display */}
         <div>
-          <label className="text-xs text-text-tertiary block mb-1">{t("linkConfirm.fullUrl")}</label>
+          <label className="text-xs text-text-tertiary block mb-1">
+            {t("linkConfirm.fullUrl")}
+          </label>
           <div className="flex items-start gap-2 p-2 bg-bg-tertiary rounded-md">
-            <ExternalLink size={14} className="text-text-tertiary shrink-0 mt-0.5" />
+            <ExternalLink
+              size={14}
+              className="text-text-tertiary shrink-0 mt-0.5"
+            />
             <span className="text-xs text-text-primary break-all font-mono leading-relaxed">
               {linkAnalysis.url}
             </span>
@@ -51,7 +64,9 @@ export function LinkConfirmDialog({ linkAnalysis, onCancel, onConfirm }: LinkCon
         {/* Display text if different */}
         {linkAnalysis.displayText && (
           <div>
-            <label className="text-xs text-text-tertiary block mb-1">{t("linkConfirm.linkText")}</label>
+            <label className="text-xs text-text-tertiary block mb-1">
+              {t("linkConfirm.linkText")}
+            </label>
             <p className="text-xs text-text-secondary px-2">
               {linkAnalysis.displayText}
             </p>
@@ -62,7 +77,9 @@ export function LinkConfirmDialog({ linkAnalysis, onCancel, onConfirm }: LinkCon
         {linkAnalysis.triggeredRules.length > 0 && (
           <div>
             <label className="text-xs text-text-tertiary block mb-1.5">
-              {t("linkConfirm.issuesDetected", { count: linkAnalysis.triggeredRules.length })}
+              {t("linkConfirm.issuesDetected", {
+                count: linkAnalysis.triggeredRules.length,
+              })}
             </label>
             <ul className="space-y-1.5">
               {linkAnalysis.triggeredRules.map((rule) => (

@@ -79,7 +79,10 @@ export async function backfillSmartLabels(
       matches.flatMap(({ threadId, labelIds }) =>
         labelIds.map((labelId) =>
           addThreadLabel(accountId, threadId, labelId).catch((err) => {
-            console.error(`Backfill: failed to apply label ${labelId} to ${threadId}:`, err);
+            console.error(
+              `Backfill: failed to apply label ${labelId} to ${threadId}:`,
+              err,
+            );
           }),
         ),
       ),

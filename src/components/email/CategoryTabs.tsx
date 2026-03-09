@@ -1,6 +1,19 @@
-import { useEffect, useLayoutEffect, useCallback, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
-import { Inbox, Bell, Tag, Users, Newspaper, type LucideIcon } from "lucide-react";
+import {
+  Inbox,
+  Bell,
+  Tag,
+  Users,
+  Newspaper,
+  type LucideIcon,
+} from "lucide-react";
 import { ALL_CATEGORIES } from "@/services/db/threadCategories";
 
 export interface CategoryTabsProps {
@@ -17,7 +30,12 @@ const CATEGORY_ICONS: Record<string, LucideIcon> = {
   Newsletters: Newspaper,
 };
 
-type SidebarKey = "primary" | "updates" | "promotions" | "social" | "newsletters";
+type SidebarKey =
+  | "primary"
+  | "updates"
+  | "promotions"
+  | "social"
+  | "newsletters";
 
 const CATEGORY_I18N_KEYS: Record<string, SidebarKey> = {
   Primary: "primary",
@@ -27,11 +45,18 @@ const CATEGORY_I18N_KEYS: Record<string, SidebarKey> = {
   Newsletters: "newsletters",
 };
 
-export function CategoryTabs({ activeCategory, onCategoryChange, unreadCounts }: CategoryTabsProps) {
+export function CategoryTabs({
+  activeCategory,
+  onCategoryChange,
+  unreadCounts,
+}: CategoryTabsProps) {
   const { t } = useTranslation("sidebar");
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const tabRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
-  const [indicatorStyle, setIndicatorStyle] = useState<{ left: number; width: number } | null>(null);
+  const [indicatorStyle, setIndicatorStyle] = useState<{
+    left: number;
+    width: number;
+  } | null>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
@@ -83,10 +108,17 @@ export function CategoryTabs({ activeCategory, onCategoryChange, unreadCounts }:
           return (
             <button
               key={cat}
-              ref={(el) => { if (el) tabRefs.current.set(cat, el); else tabRefs.current.delete(cat); }}
+              ref={(el) => {
+                if (el) tabRefs.current.set(cat, el);
+                else tabRefs.current.delete(cat);
+              }}
               onClick={(e) => {
                 onCategoryChange(cat);
-                e.currentTarget.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+                e.currentTarget.scrollIntoView({
+                  behavior: "smooth",
+                  inline: "center",
+                  block: "nearest",
+                });
               }}
               className={`px-2.5 py-1.5 text-xs font-medium transition-colors relative whitespace-nowrap flex items-center gap-1.5 ${
                 activeCategory === cat

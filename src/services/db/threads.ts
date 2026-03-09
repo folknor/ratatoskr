@@ -167,7 +167,9 @@ export async function getThreadById(
   return rows[0];
 }
 
-export async function getThreadCountForAccount(accountId: string): Promise<number> {
+export async function getThreadCountForAccount(
+  accountId: string,
+): Promise<number> {
   const db = await getDb();
   const rows = await db.select<{ count: number }[]>(
     "SELECT COUNT(*) as count FROM threads WHERE account_id = $1",
@@ -191,20 +193,17 @@ export async function deleteThread(
   threadId: string,
 ): Promise<void> {
   const db = await getDb();
-  await db.execute(
-    "DELETE FROM threads WHERE account_id = $1 AND id = $2",
-    [accountId, threadId],
-  );
+  await db.execute("DELETE FROM threads WHERE account_id = $1 AND id = $2", [
+    accountId,
+    threadId,
+  ]);
 }
 
 export async function deleteAllThreadsForAccount(
   accountId: string,
 ): Promise<void> {
   const db = await getDb();
-  await db.execute(
-    "DELETE FROM threads WHERE account_id = $1",
-    [accountId],
-  );
+  await db.execute("DELETE FROM threads WHERE account_id = $1", [accountId]);
 }
 
 export async function pinThread(

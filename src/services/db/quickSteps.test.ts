@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 vi.mock("@/services/db/connection", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/db/connection")>();
+  const actual =
+    await importOriginal<typeof import("@/services/db/connection")>();
   return {
     ...actual,
     getDb: vi.fn(),
@@ -36,7 +37,9 @@ describe("quickSteps DB service", () => {
       await getQuickStepsForAccount("acct-1");
 
       expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringContaining("SELECT * FROM quick_steps WHERE account_id = $1"),
+        expect.stringContaining(
+          "SELECT * FROM quick_steps WHERE account_id = $1",
+        ),
         ["acct-1"],
       );
       expect(mockDb.select).toHaveBeenCalledWith(
@@ -59,7 +62,10 @@ describe("quickSteps DB service", () => {
 
   describe("insertQuickStep", () => {
     it("inserts a quick step with serialized actions JSON", async () => {
-      const actions = [{ type: "archive" as const }, { type: "markRead" as const }];
+      const actions = [
+        { type: "archive" as const },
+        { type: "markRead" as const },
+      ];
 
       const id = await insertQuickStep({
         accountId: "acct-1",

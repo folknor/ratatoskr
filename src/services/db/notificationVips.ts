@@ -18,7 +18,9 @@ export async function getVipSenders(accountId: string): Promise<Set<string>> {
   return new Set(rows.map((r) => normalizeEmail(r.email_address)));
 }
 
-export async function getAllVipSenders(accountId: string): Promise<NotificationVip[]> {
+export async function getAllVipSenders(
+  accountId: string,
+): Promise<NotificationVip[]> {
   const db = await getDb();
   return db.select<NotificationVip[]>(
     "SELECT * FROM notification_vips WHERE account_id = $1 ORDER BY display_name, email_address",

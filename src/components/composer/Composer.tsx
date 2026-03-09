@@ -19,16 +19,27 @@ import { FromSelector } from "./FromSelector";
 import { useComposerStore } from "@/stores/composerStore";
 import { useAccountStore } from "@/stores/accountStore";
 import { useUIStore } from "@/stores/uiStore";
-import { sendEmail, archiveThread, deleteDraft as deleteDraftAction } from "@/services/emailActions";
+import {
+  sendEmail,
+  archiveThread,
+  deleteDraft as deleteDraftAction,
+} from "@/services/emailActions";
 import { buildRawEmail } from "@/utils/emailBuilder";
 import { upsertContact } from "@/services/db/contacts";
 import { getSetting } from "@/services/db/settings";
 import { insertScheduledEmail } from "@/services/db/scheduledEmails";
 import { getDefaultSignature } from "@/services/db/signatures";
-import { getAliasesForAccount, mapDbAlias, type SendAsAlias } from "@/services/db/sendAsAliases";
+import {
+  getAliasesForAccount,
+  mapDbAlias,
+  type SendAsAlias,
+} from "@/services/db/sendAsAliases";
 import { resolveFromAddress } from "@/utils/resolveFromAddress";
 import { startAutoSave, stopAutoSave } from "@/services/composer/draftAutoSave";
-import { getTemplatesForAccount, type DbTemplate } from "@/services/db/templates";
+import {
+  getTemplatesForAccount,
+  type DbTemplate,
+} from "@/services/db/templates";
 import { readFileAsBase64 } from "@/utils/fileUtils";
 import { interpolateVariables } from "@/utils/templateVariables";
 import { sanitizeHtml } from "@/utils/sanitize";
@@ -103,9 +114,11 @@ export function Composer() {
           const deleteFrom = from - tmpl.shortcut.length;
           if (deleteFrom >= 0) {
             const state = useComposerStore.getState();
-            const account = useAccountStore.getState().accounts.find(
-              (a) => a.id === useAccountStore.getState().activeAccountId,
-            );
+            const account = useAccountStore
+              .getState()
+              .accounts.find(
+                (a) => a.id === useAccountStore.getState().activeAccountId,
+              );
             interpolateVariables(tmpl.body_html, {
               recipientEmail: state.to[0],
               senderEmail: account?.email,
@@ -165,11 +178,22 @@ export function Composer() {
       const mapped = dbAliases.map(mapDbAlias);
       setAliases(mapped);
       if (!store.fromEmail && mapped.length > 0) {
-        if (store.mode === "reply" || store.mode === "replyAll" || store.mode === "forward") {
-          const resolved = resolveFromAddress(mapped, store.to.join(", "), store.cc.join(", "));
+        if (
+          store.mode === "reply" ||
+          store.mode === "replyAll" ||
+          store.mode === "forward"
+        ) {
+          const resolved = resolveFromAddress(
+            mapped,
+            store.to.join(", "),
+            store.cc.join(", "),
+          );
           if (resolved) store.setFromEmail(resolved.email);
         } else {
-          const defaultAlias = mapped.find((a) => a.isDefault) ?? mapped.find((a) => a.isPrimary) ?? mapped[0];
+          const defaultAlias =
+            mapped.find((a) => a.isDefault) ??
+            mapped.find((a) => a.isPrimary) ??
+            mapped[0];
           if (defaultAlias) store.setFromEmail(defaultAlias.email);
         }
       }
@@ -178,14 +202,18 @@ export function Composer() {
       templateShortcutsRef.current = templates.filter((t) => t.shortcut);
     });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen, activeAccountId]);
 
   // Start/stop draft auto-save
   useEffect(() => {
     if (!isOpen || !activeAccountId) return;
     startAutoSave(activeAccountId);
-    return () => { stopAutoSave(); };
+    return () => {
+      stopAutoSave();
+    };
   }, [isOpen, activeAccountId]);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
@@ -208,26 +236,29 @@ export function Composer() {
     e.preventDefault();
   }, []);
 
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault();
-    dragCounterRef.current = 0;
-    setIsDragging(false);
+  const handleDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault();
+      dragCounterRef.current = 0;
+      setIsDragging(false);
 
-    const files = e.dataTransfer.files;
-    if (!files || files.length === 0) return;
+      const files = e.dataTransfer.files;
+      if (!files || files.length === 0) return;
 
-    for (const file of Array.from(files)) {
-      const content = await readFileAsBase64(file);
-      addAttachment({
-        id: crypto.randomUUID(),
-        file,
-        filename: file.name,
-        mimeType: file.type || "application/octet-stream",
-        size: file.size,
-        content,
-      });
-    }
-  }, [addAttachment]);
+      for (const file of Array.from(files)) {
+        const content = await readFileAsBase64(file);
+        addAttachment({
+          id: crypto.randomUUID(),
+          file,
+          filename: file.name,
+          mimeType: file.type || "application/octet-stream",
+          size: file.size,
+          content,
+        });
+      }
+    },
+    [addAttachment],
+  );
 
   const getFullHtml = useCallback(() => {
     const editorHtml = editor?.getHTML() ?? "";
@@ -254,13 +285,14 @@ export function Composer() {
       htmlBody: html,
       inReplyTo: state.inReplyToMessageId ?? undefined,
       threadId: state.threadId ?? undefined,
-      attachments: state.attachments.length > 0
-        ? state.attachments.map((a) => ({
-            filename: a.filename,
-            mimeType: a.mimeType,
-            content: a.content,
-          }))
-        : undefined,
+      attachments:
+        state.attachments.length > 0
+          ? state.attachments.map((a) => ({
+              filename: a.filename,
+              mimeType: a.mimeType,
+              content: a.content,
+            }))
+          : undefined,
     });
 
     // Get undo send delay
@@ -277,12 +309,20 @@ export function Composer() {
 
         // Delete draft if it was saved
         if (currentDraftId) {
-          try { await deleteDraftAction(activeAccountId, currentDraftId); } catch { /* ignore */ }
+          try {
+            await deleteDraftAction(activeAccountId, currentDraftId);
+          } catch {
+            /* ignore */
+          }
         }
 
         // Send & archive: remove from inbox if replying to a thread
         if (useUIStore.getState().sendAndArchive && state.threadId) {
-          try { await archiveThread(activeAccountId, state.threadId, []); } catch { /* ignore */ }
+          try {
+            await archiveThread(activeAccountId, state.threadId, []);
+          } catch {
+            /* ignore */
+          }
         }
 
         // Update contacts frequency
@@ -301,64 +341,72 @@ export function Composer() {
     closeComposer();
   }, [activeAccountId, activeAccount, closeComposer, getFullHtml]);
 
-  const handleSchedule = useCallback(async (scheduledAt: number) => {
-    if (!activeAccountId || !activeAccount) return;
-    const state = useComposerStore.getState();
-    if (state.to.length === 0) return;
+  const handleSchedule = useCallback(
+    async (scheduledAt: number) => {
+      if (!activeAccountId || !activeAccount) return;
+      const state = useComposerStore.getState();
+      if (state.to.length === 0) return;
 
-    const html = getFullHtml();
+      const html = getFullHtml();
 
-    const attachmentData = state.attachments.length > 0
-      ? JSON.stringify(state.attachments.map((a) => ({
-          filename: a.filename,
-          mimeType: a.mimeType,
-          content: a.content,
-        })))
-      : null;
+      const attachmentData =
+        state.attachments.length > 0
+          ? JSON.stringify(
+              state.attachments.map((a) => ({
+                filename: a.filename,
+                mimeType: a.mimeType,
+                content: a.content,
+              })),
+            )
+          : null;
 
-    await insertScheduledEmail({
-      accountId: activeAccountId,
-      toAddresses: state.to.join(", "),
-      ccAddresses: state.cc.length > 0 ? state.cc.join(", ") : null,
-      bccAddresses: state.bcc.length > 0 ? state.bcc.join(", ") : null,
-      subject: state.subject,
-      bodyHtml: html,
-      replyToMessageId: state.inReplyToMessageId,
-      threadId: state.threadId,
-      scheduledAt,
-      signatureId: null,
-    });
+      await insertScheduledEmail({
+        accountId: activeAccountId,
+        toAddresses: state.to.join(", "),
+        ccAddresses: state.cc.length > 0 ? state.cc.join(", ") : null,
+        bccAddresses: state.bcc.length > 0 ? state.bcc.join(", ") : null,
+        subject: state.subject,
+        bodyHtml: html,
+        replyToMessageId: state.inReplyToMessageId,
+        threadId: state.threadId,
+        scheduledAt,
+        signatureId: null,
+      });
 
-    // Store attachment data if present
-    if (attachmentData) {
-      // The insertScheduledEmail doesn't have an attachmentPaths param,
-      // so we update it separately via the existing column
-      const { getDb } = await import("@/services/db/connection");
-      const db = await getDb();
-      // Get the most recently inserted scheduled email for this account
-      const rows = await db.select<{ id: string }[]>(
-        "SELECT id FROM scheduled_emails WHERE account_id = $1 ORDER BY created_at DESC LIMIT 1",
-        [activeAccountId],
-      );
-      if (rows[0]) {
-        await db.execute(
-          "UPDATE scheduled_emails SET attachment_paths = $1 WHERE id = $2",
-          [attachmentData, rows[0].id],
+      // Store attachment data if present
+      if (attachmentData) {
+        // The insertScheduledEmail doesn't have an attachmentPaths param,
+        // so we update it separately via the existing column
+        const { getDb } = await import("@/services/db/connection");
+        const db = await getDb();
+        // Get the most recently inserted scheduled email for this account
+        const rows = await db.select<{ id: string }[]>(
+          "SELECT id FROM scheduled_emails WHERE account_id = $1 ORDER BY created_at DESC LIMIT 1",
+          [activeAccountId],
         );
+        if (rows[0]) {
+          await db.execute(
+            "UPDATE scheduled_emails SET attachment_paths = $1 WHERE id = $2",
+            [attachmentData, rows[0].id],
+          );
+        }
       }
-    }
 
-    stopAutoSave();
-    // Delete the draft if exists
-    if (state.draftId) {
-      try {
-        await deleteDraftAction(activeAccountId, state.draftId);
-      } catch { /* ignore */ }
-    }
+      stopAutoSave();
+      // Delete the draft if exists
+      if (state.draftId) {
+        try {
+          await deleteDraftAction(activeAccountId, state.draftId);
+        } catch {
+          /* ignore */
+        }
+      }
 
-    setShowSchedule(false);
-    closeComposer();
-  }, [activeAccountId, activeAccount, closeComposer, getFullHtml]);
+      setShowSchedule(false);
+      closeComposer();
+    },
+    [activeAccountId, activeAccount, closeComposer, getFullHtml],
+  );
 
   const handleDiscard = useCallback(async () => {
     stopAutoSave();
@@ -367,7 +415,9 @@ export function Composer() {
     if (currentDraftId && activeAccountId) {
       try {
         await deleteDraftAction(activeAccountId, currentDraftId);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     closeComposer();
   }, [activeAccountId, closeComposer]);
@@ -384,12 +434,14 @@ export function Composer() {
       if (state.bcc.length > 0) params.set("bcc", state.bcc.join(","));
       if (state.subject) params.set("subject", state.subject);
       if (state.threadId) params.set("threadId", state.threadId);
-      if (state.inReplyToMessageId) params.set("inReplyToMessageId", state.inReplyToMessageId);
+      if (state.inReplyToMessageId)
+        params.set("inReplyToMessageId", state.inReplyToMessageId);
       if (state.draftId) params.set("draftId", state.draftId);
       if (state.fromEmail) params.set("fromEmail", state.fromEmail);
       // Encode body as base64 to safely pass HTML
       const bodyHtml = editor?.getHTML() ?? "";
-      if (bodyHtml) params.set("body", btoa(unescape(encodeURIComponent(bodyHtml))));
+      if (bodyHtml)
+        params.set("body", btoa(unescape(encodeURIComponent(bodyHtml))));
 
       const windowLabel = `compose-${Date.now()}`;
       const existing = await WebviewWindow.getByLabel(windowLabel);
@@ -431,178 +483,192 @@ export function Composer() {
       : null;
 
   return (
-    <CSSTransition nodeRef={overlayRef} in={isOpen} timeout={200} classNames="slide-up" unmountOnExit>
-    <div ref={overlayRef} className={`fixed inset-0 z-50 flex ${isFullpage ? "items-stretch justify-center p-4" : "items-end justify-center pb-4"} pointer-events-none`}>
-      {/* Backdrop */}
+    <CSSTransition
+      nodeRef={overlayRef}
+      in={isOpen}
+      timeout={200}
+      classNames="slide-up"
+      unmountOnExit
+    >
       <div
-        className="absolute inset-0 pointer-events-auto backdrop-animate"
-        onClick={closeComposer}
-      />
-
-      {/* Composer window */}
-      <div
-        className={`relative bg-bg-primary border rounded-lg glass-modal pointer-events-auto flex flex-col slide-up-panel ${
-          isFullpage ? "w-full h-full max-w-5xl" : "w-full max-w-2xl max-h-[80vh]"
-        } ${isDragging ? "border-accent border-2" : "border-border-primary"}`}
-        onDragEnter={handleDragEnter}
-        onDragLeave={handleDragLeave}
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
+        ref={overlayRef}
+        className={`fixed inset-0 z-50 flex ${isFullpage ? "items-stretch justify-center p-4" : "items-end justify-center pb-4"} pointer-events-none`}
       >
-        {isDragging && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-accent/10 rounded-lg pointer-events-none">
-            <span className="text-sm font-medium text-accent">{t("dropToAttach")}</span>
-          </div>
-        )}
-
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-primary bg-bg-secondary rounded-t-lg">
-          <span className="text-sm font-medium text-text-primary">
-            {modeLabel}
-          </span>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setViewMode(isFullpage ? "modal" : "fullpage")}
-              className="text-text-tertiary hover:text-text-primary p-1 rounded transition-colors"
-              title={isFullpage ? t("collapse") : t("expand")}
-            >
-              {isFullpage ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-            </button>
-            <button
-              onClick={handlePopOutComposer}
-              className="text-text-tertiary hover:text-text-primary p-1 rounded transition-colors"
-              title={t("openInNewWindow")}
-            >
-              <ExternalLink size={14} />
-            </button>
-            <button
-              onClick={closeComposer}
-              className="text-text-tertiary hover:text-text-primary text-lg leading-none p-1"
-            >
-              ×
-            </button>
-          </div>
-        </div>
-
-        {/* Address fields */}
-        <div className="px-3 py-2 space-y-1.5 border-b border-border-secondary">
-          <FromSelector
-            aliases={aliases}
-            selectedEmail={fromEmail ?? activeAccount?.email ?? ""}
-            onChange={(alias) => setFromEmail(alias.email)}
-          />
-          <AddressInput label="To" addresses={to} onChange={setTo} />
-          {showCcBcc ? (
-            <>
-              <AddressInput label="Cc" addresses={cc} onChange={setCc} />
-              <AddressInput label="Bcc" addresses={bcc} onChange={setBcc} />
-            </>
-          ) : (
-            <button
-              onClick={() => setShowCcBcc(true)}
-              className="text-xs text-accent hover:text-accent-hover ml-10"
-            >
-              {t("ccBcc")}
-            </button>
-          )}
-        </div>
-
-        {/* Subject */}
-        <div className="px-3 py-1.5 border-b border-border-secondary">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-text-tertiary w-8 shrink-0">
-              {t("sub")}
-            </span>
-            <input
-              type="text"
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              placeholder={t("subject")}
-              className="flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-tertiary"
-            />
-          </div>
-        </div>
-
-        {/* Editor toolbar */}
-        <EditorToolbar
-          editor={editor}
-          onToggleAiAssist={() => setShowAiAssist(!showAiAssist)}
-          aiAssistOpen={showAiAssist}
+        {/* Backdrop */}
+        <div
+          className="absolute inset-0 pointer-events-auto backdrop-animate"
+          onClick={closeComposer}
         />
 
-        {/* AI Assist Panel */}
-        {showAiAssist && (
-          <AiAssistPanel
-            editor={editor}
-            isReplyMode={mode === "reply" || mode === "replyAll"}
-          />
-        )}
-
-        {/* Editor */}
-        <div className="flex-1 overflow-y-auto">
-          <EditorContent editor={editor} />
-          {signatureHtml && (
-            <div
-              className="px-4 py-2 border-t border-border-secondary text-xs text-text-tertiary"
-              dangerouslySetInnerHTML={{ __html: sanitizeHtml(signatureHtml) }}
-            />
-          )}
-        </div>
-
-        {/* Attachments */}
-        <div className="border-t border-border-secondary">
-          <AttachmentPicker />
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between px-4 py-2.5 border-t border-border-primary bg-bg-secondary rounded-b-lg">
-          <div className="flex items-center gap-3">
-            <div className="text-xs text-text-tertiary">
-              {fromEmail ?? activeAccount?.email ?? t("noAccount")}
-            </div>
-            {savedLabel && (
-              <span className={`text-xs text-text-tertiary italic transition-opacity duration-200 ${isSaving ? "animate-pulse" : ""}`}>
-                {savedLabel}
+        {/* Composer window */}
+        <div
+          className={`relative bg-bg-primary border rounded-lg glass-modal pointer-events-auto flex flex-col slide-up-panel ${
+            isFullpage
+              ? "w-full h-full max-w-5xl"
+              : "w-full max-w-2xl max-h-[80vh]"
+          } ${isDragging ? "border-accent border-2" : "border-border-primary"}`}
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+        >
+          {isDragging && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-accent/10 rounded-lg pointer-events-none">
+              <span className="text-sm font-medium text-accent">
+                {t("dropToAttach")}
               </span>
-            )}
-            <SignatureSelector />
-            <TemplatePicker editor={editor} />
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="secondary"
-              onClick={handleDiscard}
-            >
-              {t("common:discard")}
-            </Button>
-            <div className="flex items-center">
+            </div>
+          )}
+
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-primary bg-bg-secondary rounded-t-lg">
+            <span className="text-sm font-medium text-text-primary">
+              {modeLabel}
+            </span>
+            <div className="flex items-center gap-1">
               <button
-                onClick={handleSend}
-                disabled={to.length === 0}
-                className="px-4 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-l-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => setViewMode(isFullpage ? "modal" : "fullpage")}
+                className="text-text-tertiary hover:text-text-primary p-1 rounded transition-colors"
+                title={isFullpage ? t("collapse") : t("expand")}
               >
-                {t("common:send")}
+                {isFullpage ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
               </button>
               <button
-                onClick={() => setShowSchedule(true)}
-                disabled={to.length === 0}
-                className="px-2 py-1.5 text-white bg-accent hover:bg-accent-hover border-l border-white/20 rounded-r-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                title={t("scheduleSend")}
+                onClick={handlePopOutComposer}
+                className="text-text-tertiary hover:text-text-primary p-1 rounded transition-colors"
+                title={t("openInNewWindow")}
               >
-                <Clock size={12} />
+                <ExternalLink size={14} />
+              </button>
+              <button
+                onClick={closeComposer}
+                className="text-text-tertiary hover:text-text-primary text-lg leading-none p-1"
+              >
+                ×
               </button>
             </div>
           </div>
-        </div>
-      </div>
 
-      {showSchedule && (
-        <ScheduleSendDialog
-          onSchedule={handleSchedule}
-          onClose={() => setShowSchedule(false)}
-        />
-      )}
-    </div>
+          {/* Address fields */}
+          <div className="px-3 py-2 space-y-1.5 border-b border-border-secondary">
+            <FromSelector
+              aliases={aliases}
+              selectedEmail={fromEmail ?? activeAccount?.email ?? ""}
+              onChange={(alias) => setFromEmail(alias.email)}
+            />
+            <AddressInput label="To" addresses={to} onChange={setTo} />
+            {showCcBcc ? (
+              <>
+                <AddressInput label="Cc" addresses={cc} onChange={setCc} />
+                <AddressInput label="Bcc" addresses={bcc} onChange={setBcc} />
+              </>
+            ) : (
+              <button
+                onClick={() => setShowCcBcc(true)}
+                className="text-xs text-accent hover:text-accent-hover ml-10"
+              >
+                {t("ccBcc")}
+              </button>
+            )}
+          </div>
+
+          {/* Subject */}
+          <div className="px-3 py-1.5 border-b border-border-secondary">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-text-tertiary w-8 shrink-0">
+                {t("sub")}
+              </span>
+              <input
+                type="text"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                placeholder={t("subject")}
+                className="flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-tertiary"
+              />
+            </div>
+          </div>
+
+          {/* Editor toolbar */}
+          <EditorToolbar
+            editor={editor}
+            onToggleAiAssist={() => setShowAiAssist(!showAiAssist)}
+            aiAssistOpen={showAiAssist}
+          />
+
+          {/* AI Assist Panel */}
+          {showAiAssist && (
+            <AiAssistPanel
+              editor={editor}
+              isReplyMode={mode === "reply" || mode === "replyAll"}
+            />
+          )}
+
+          {/* Editor */}
+          <div className="flex-1 overflow-y-auto">
+            <EditorContent editor={editor} />
+            {signatureHtml && (
+              <div
+                className="px-4 py-2 border-t border-border-secondary text-xs text-text-tertiary"
+                dangerouslySetInnerHTML={{
+                  __html: sanitizeHtml(signatureHtml),
+                }}
+              />
+            )}
+          </div>
+
+          {/* Attachments */}
+          <div className="border-t border-border-secondary">
+            <AttachmentPicker />
+          </div>
+
+          {/* Footer */}
+          <div className="flex items-center justify-between px-4 py-2.5 border-t border-border-primary bg-bg-secondary rounded-b-lg">
+            <div className="flex items-center gap-3">
+              <div className="text-xs text-text-tertiary">
+                {fromEmail ?? activeAccount?.email ?? t("noAccount")}
+              </div>
+              {savedLabel && (
+                <span
+                  className={`text-xs text-text-tertiary italic transition-opacity duration-200 ${isSaving ? "animate-pulse" : ""}`}
+                >
+                  {savedLabel}
+                </span>
+              )}
+              <SignatureSelector />
+              <TemplatePicker editor={editor} />
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" onClick={handleDiscard}>
+                {t("common:discard")}
+              </Button>
+              <div className="flex items-center">
+                <button
+                  onClick={handleSend}
+                  disabled={to.length === 0}
+                  className="px-4 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-l-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {t("common:send")}
+                </button>
+                <button
+                  onClick={() => setShowSchedule(true)}
+                  disabled={to.length === 0}
+                  className="px-2 py-1.5 text-white bg-accent hover:bg-accent-hover border-l border-white/20 rounded-r-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={t("scheduleSend")}
+                >
+                  <Clock size={12} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {showSchedule && (
+          <ScheduleSendDialog
+            onSchedule={handleSchedule}
+            onClose={() => setShowSchedule(false)}
+          />
+        )}
+      </div>
     </CSSTransition>
   );
 }

@@ -12,7 +12,11 @@ interface ThreadSummaryProps {
   messages: DbMessage[];
 }
 
-export function ThreadSummary({ threadId, accountId, messages }: ThreadSummaryProps) {
+export function ThreadSummary({
+  threadId,
+  accountId,
+  messages,
+}: ThreadSummaryProps) {
   const { t } = useTranslation("email");
   const [summary, setSummary] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -46,7 +50,13 @@ export function ThreadSummary({ threadId, accountId, messages }: ThreadSummaryPr
 
   // Auto-load summary when available
   useEffect(() => {
-    if (!available || messages.length < 2 || summary !== null || loadingRef.current) return;
+    if (
+      !available ||
+      messages.length < 2 ||
+      summary !== null ||
+      loadingRef.current
+    )
+      return;
     loadSummary();
   }, [available, messages.length, summary, loadSummary]);
 
@@ -73,20 +83,35 @@ export function ThreadSummary({ threadId, accountId, messages }: ThreadSummaryPr
         className="flex items-center gap-2 w-full text-left"
       >
         <Sparkles size={14} className="text-accent shrink-0" />
-        <span className="text-xs font-medium text-accent flex-1">{t("threadSummary.title")}</span>
+        <span className="text-xs font-medium text-accent flex-1">
+          {t("threadSummary.title")}
+        </span>
         {summary && (
           <span
             role="button"
             tabIndex={0}
-            onClick={(e) => { e.stopPropagation(); handleRefresh(); }}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); e.preventDefault(); handleRefresh(); } }}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleRefresh();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.stopPropagation();
+                e.preventDefault();
+                handleRefresh();
+              }
+            }}
             className="p-0.5 text-text-tertiary hover:text-accent transition-colors cursor-pointer"
             title={t("threadSummary.refresh")}
           >
             <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
           </span>
         )}
-        {collapsed ? <ChevronDown size={14} className="text-text-tertiary" /> : <ChevronUp size={14} className="text-text-tertiary" />}
+        {collapsed ? (
+          <ChevronDown size={14} className="text-text-tertiary" />
+        ) : (
+          <ChevronUp size={14} className="text-text-tertiary" />
+        )}
       </button>
       {!collapsed && (
         <div className="mt-2 text-sm text-text-secondary">

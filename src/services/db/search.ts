@@ -32,10 +32,19 @@ export async function searchMessages(
   if (hasSearchOperators(ftsQuery)) {
     const parsed = parseSearchQuery(ftsQuery);
     // If we have no free text and no operators matched usefully, fall through
-    if (parsed.freeText || parsed.from || parsed.to || parsed.subject ||
-        parsed.hasAttachment || parsed.isUnread || parsed.isRead ||
-        parsed.isStarred || parsed.before !== undefined || parsed.after !== undefined ||
-        parsed.label) {
+    if (
+      parsed.freeText ||
+      parsed.from ||
+      parsed.to ||
+      parsed.subject ||
+      parsed.hasAttachment ||
+      parsed.isUnread ||
+      parsed.isRead ||
+      parsed.isStarred ||
+      parsed.before !== undefined ||
+      parsed.after !== undefined ||
+      parsed.label
+    ) {
       const { sql, params } = buildSearchQuery(parsed, accountId, limit);
       return db.select<SearchResult[]>(sql, params);
     }

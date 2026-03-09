@@ -26,9 +26,7 @@ const DEFAULT_QUICK_STEPS: {
 /**
  * Seed default quick steps for an account if none exist yet.
  */
-export async function seedDefaultQuickSteps(
-  accountId: string,
-): Promise<void> {
+export async function seedDefaultQuickSteps(accountId: string): Promise<void> {
   const existing = await getQuickStepsForAccount(accountId);
   if (existing.length > 0) return;
 

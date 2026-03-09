@@ -89,9 +89,9 @@ export async function updateSmartFolderSortOrder(
 ): Promise<void> {
   const db = await getDb();
   for (const { id, sortOrder } of orders) {
-    await db.execute(
-      "UPDATE smart_folders SET sort_order = $1 WHERE id = $2",
-      [sortOrder, id],
-    );
+    await db.execute("UPDATE smart_folders SET sort_order = $1 WHERE id = $2", [
+      sortOrder,
+      id,
+    ]);
   }
 }

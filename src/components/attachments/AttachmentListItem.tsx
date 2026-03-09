@@ -1,6 +1,10 @@
 import { useTranslation } from "react-i18next";
 import { Download, Eye, ExternalLink } from "lucide-react";
-import { formatFileSize, getFileIcon, canPreview } from "@/utils/fileTypeHelpers";
+import {
+  formatFileSize,
+  getFileIcon,
+  canPreview,
+} from "@/utils/fileTypeHelpers";
 import type { AttachmentWithContext } from "@/services/db/attachments";
 
 interface AttachmentListItemProps {
@@ -19,23 +23,37 @@ function formatShortDate(timestamp: number | null): string {
   });
 }
 
-export function AttachmentListItem({ attachment, onPreview, onDownload, onJumpToEmail }: AttachmentListItemProps) {
+export function AttachmentListItem({
+  attachment,
+  onPreview,
+  onDownload,
+  onJumpToEmail,
+}: AttachmentListItemProps) {
   const { t } = useTranslation("attachments");
   const previewable = canPreview(attachment.mime_type, attachment.filename);
-  const senderName = attachment.from_name || attachment.from_address || t("unknown");
+  const senderName =
+    attachment.from_name || attachment.from_address || t("unknown");
 
   return (
     <div className="group flex items-center gap-3 px-3 py-2 hover:bg-bg-hover rounded-md transition-colors">
       {/* Icon */}
-      <span className="text-lg shrink-0 w-7 text-center">{getFileIcon(attachment.mime_type)}</span>
+      <span className="text-lg shrink-0 w-7 text-center">
+        {getFileIcon(attachment.mime_type)}
+      </span>
 
       {/* Filename */}
-      <span className="text-sm text-text-primary truncate min-w-0 flex-1" title={attachment.filename ?? undefined}>
+      <span
+        className="text-sm text-text-primary truncate min-w-0 flex-1"
+        title={attachment.filename ?? undefined}
+      >
         {attachment.filename ?? t("unnamed")}
       </span>
 
       {/* Sender */}
-      <span className="text-xs text-text-secondary truncate w-36 shrink-0 hidden md:block" title={senderName}>
+      <span
+        className="text-xs text-text-secondary truncate w-36 shrink-0 hidden md:block"
+        title={senderName}
+      >
         {senderName}
       </span>
 

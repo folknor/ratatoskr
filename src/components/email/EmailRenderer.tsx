@@ -1,4 +1,11 @@
-import { useRef, useCallback, useLayoutEffect, useMemo, useState, useEffect } from "react";
+import {
+  useRef,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  useEffect,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { ImageOff } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -37,8 +44,10 @@ export function EmailRenderer({
   const [cidMap, setCidMap] = useState<Map<string, string>>(new Map());
 
   const theme = useUIStore((s) => s.theme);
-  const isDark = theme === "dark"
-    || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  const isDark =
+    theme === "dark" ||
+    (theme === "system" &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches);
 
   const shouldBlock = blockImages && !senderAllowlisted && !overrideShow;
 
@@ -55,7 +64,9 @@ export function EmailRenderer({
 
     (async () => {
       try {
-        const { getEmailProvider } = await import("@/services/email/providerFactory");
+        const { getEmailProvider } = await import(
+          "@/services/email/providerFactory"
+        );
         const provider = await getEmailProvider(accountId);
         const resolved = new Map<string, string>();
 
@@ -66,8 +77,13 @@ export function EmailRenderer({
                 messageId,
                 att.gmail_attachment_id!,
               );
-              const base64 = response.data.replace(/-/g, "+").replace(/_/g, "/");
-              resolved.set(att.content_id!, `data:${att.mime_type ?? "image/png"};base64,${base64}`);
+              const base64 = response.data
+                .replace(/-/g, "+")
+                .replace(/_/g, "/");
+              resolved.set(
+                att.content_id!,
+                `data:${att.mime_type ?? "image/png"};base64,${base64}`,
+              );
             } catch {
               // Skip individual failures
             }
@@ -82,7 +98,9 @@ export function EmailRenderer({
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [accountId, messageId, inlineAttachments]);
 
   // Sanitize once — reused by both content and blocked-image check
@@ -94,8 +112,9 @@ export function EmailRenderer({
   const isPlainText = !sanitizedBody;
 
   const bodyHtml = useMemo(() => {
-    let body = sanitizedBody
-      ?? `<pre style="white-space: pre-wrap; font-family: inherit;">${escapeHtml(text ?? "")}</pre>`;
+    let body =
+      sanitizedBody ??
+      `<pre style="white-space: pre-wrap; font-family: inherit;">${escapeHtml(text ?? "")}</pre>`;
 
     if (shouldBlock && sanitizedBody) {
       body = stripRemoteImages(body);
@@ -218,9 +237,7 @@ export function EmailRenderer({
       {blocked && (
         <div className="flex items-center gap-2 px-3 py-2 mb-2 text-xs bg-bg-tertiary rounded-md border border-border-secondary">
           <ImageOff size={14} className="text-text-tertiary shrink-0" />
-          <span className="text-text-secondary">
-            {t("imagesBlocked")}
-          </span>
+          <span className="text-text-secondary">{t("imagesBlocked")}</span>
           <button
             onClick={handleLoadImages}
             className="text-accent hover:text-accent-hover font-medium"
@@ -247,4 +264,3 @@ export function EmailRenderer({
     </div>
   );
 }
-

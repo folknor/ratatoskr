@@ -19,7 +19,9 @@ export function HelpTooltip({ contextId, size = 14 }: HelpTooltipProps) {
   const closeTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
-    return () => { clearTimeout(closeTimeout.current); };
+    return () => {
+      clearTimeout(closeTimeout.current);
+    };
   }, []);
 
   if (!tip) return null;
@@ -67,7 +69,9 @@ export function HelpTooltip({ contextId, size = 14 }: HelpTooltipProps) {
             }}
           >
             <p className="font-medium text-text-primary mb-1">{t(tip.title)}</p>
-            <p className="text-text-secondary text-xs leading-relaxed">{t(tip.body)}</p>
+            <p className="text-text-secondary text-xs leading-relaxed">
+              {t(tip.body)}
+            </p>
             <button
               onClick={handleLearnMore}
               className="mt-2 text-xs text-accent hover:text-accent-hover transition-colors"

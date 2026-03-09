@@ -35,7 +35,10 @@ export async function matchSmartLabels(
   const allRulesForAi: { labelId: string; description: string }[] = [];
 
   for (const rule of rules) {
-    allRulesForAi.push({ labelId: rule.label_id, description: rule.ai_description });
+    allRulesForAi.push({
+      labelId: rule.label_id,
+      description: rule.ai_description,
+    });
 
     if (rule.criteria_json) {
       try {
@@ -65,12 +68,17 @@ export async function matchSmartLabels(
 
   // Phase 2: AI path — classify threads that weren't fully matched by criteria
   // Send all threads to AI for labels that didn't match via criteria
-  const threadsForAi: { id: string; subject: string; snippet: string; fromAddress: string }[] = [];
+  const threadsForAi: {
+    id: string;
+    subject: string;
+    snippet: string;
+    fromAddress: string;
+  }[] = [];
   for (const [threadId, msg] of threadMap) {
     // Include thread if any label rule hasn't been matched by criteria for this thread
     const matchedLabels = criteriaMatches.get(threadId);
-    const allLabelsMatched = allRulesForAi.every(
-      (r) => matchedLabels?.has(r.labelId),
+    const allLabelsMatched = allRulesForAi.every((r) =>
+      matchedLabels?.has(r.labelId),
     );
     if (!allLabelsMatched) {
       threadsForAi.push({
@@ -84,7 +92,10 @@ export async function matchSmartLabels(
 
   if (threadsForAi.length > 0 && allRulesForAi.length > 0) {
     try {
-      const aiResults = await classifyThreadsBySmartLabels(threadsForAi, allRulesForAi);
+      const aiResults = await classifyThreadsBySmartLabels(
+        threadsForAi,
+        allRulesForAi,
+      );
 
       // Merge AI results (skip pairs already matched by criteria)
       for (const [threadId, labelIds] of aiResults) {

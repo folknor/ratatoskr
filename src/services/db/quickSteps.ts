@@ -79,12 +79,17 @@ export async function updateQuickStep(
   const db = await getDb();
   const fields: [string, unknown][] = [];
   if (updates.name !== undefined) fields.push(["name", updates.name]);
-  if (updates.description !== undefined) fields.push(["description", updates.description]);
-  if (updates.shortcut !== undefined) fields.push(["shortcut", updates.shortcut]);
-  if (updates.actions !== undefined) fields.push(["actions_json", JSON.stringify(updates.actions)]);
+  if (updates.description !== undefined)
+    fields.push(["description", updates.description]);
+  if (updates.shortcut !== undefined)
+    fields.push(["shortcut", updates.shortcut]);
+  if (updates.actions !== undefined)
+    fields.push(["actions_json", JSON.stringify(updates.actions)]);
   if (updates.icon !== undefined) fields.push(["icon", updates.icon]);
-  if (updates.isEnabled !== undefined) fields.push(["is_enabled", boolToInt(updates.isEnabled)]);
-  if (updates.continueOnError !== undefined) fields.push(["continue_on_error", boolToInt(updates.continueOnError)]);
+  if (updates.isEnabled !== undefined)
+    fields.push(["is_enabled", boolToInt(updates.isEnabled)]);
+  if (updates.continueOnError !== undefined)
+    fields.push(["continue_on_error", boolToInt(updates.continueOnError)]);
 
   const query = buildDynamicUpdate("quick_steps", "id", id, fields);
   if (query) {

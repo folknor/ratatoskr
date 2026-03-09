@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 vi.mock("@/services/db/connection", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/db/connection")>();
+  const actual =
+    await importOriginal<typeof import("@/services/db/connection")>();
   return {
     ...actual,
     getDb: vi.fn(),
@@ -10,9 +11,13 @@ vi.mock("@/services/db/connection", async (importOriginal) => {
 
 import { getDb } from "@/services/db/connection";
 import {
-  getAllContacts, updateContact, deleteContact,
-  updateContactNotes, getAttachmentsFromContact,
-  getContactsFromSameDomain, getLatestAuthResult,
+  getAllContacts,
+  updateContact,
+  deleteContact,
+  updateContactNotes,
+  getAttachmentsFromContact,
+  getContactsFromSameDomain,
+  getLatestAuthResult,
 } from "./contacts";
 import { createMockDb } from "@/test/mocks";
 
@@ -21,7 +26,9 @@ const mockDb = createMockDb();
 describe("contacts service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getDb).mockResolvedValue(mockDb as unknown as Awaited<ReturnType<typeof getDb>>);
+    vi.mocked(getDb).mockResolvedValue(
+      mockDb as unknown as Awaited<ReturnType<typeof getDb>>,
+    );
   });
 
   describe("getAllContacts", () => {
@@ -103,10 +110,10 @@ describe("contacts service", () => {
     it("passes custom limit", async () => {
       await getAttachmentsFromContact("sender@test.com", 10);
 
-      expect(mockDb.select).toHaveBeenCalledWith(
-        expect.any(String),
-        ["sender@test.com", 10],
-      );
+      expect(mockDb.select).toHaveBeenCalledWith(expect.any(String), [
+        "sender@test.com",
+        10,
+      ]);
     });
   });
 
@@ -137,7 +144,9 @@ describe("contacts service", () => {
 
   describe("getLatestAuthResult", () => {
     it("queries most recent auth_results", async () => {
-      mockDb.select.mockResolvedValueOnce([{ auth_results: '{"aggregate":"pass"}' }]);
+      mockDb.select.mockResolvedValueOnce([
+        { auth_results: '{"aggregate":"pass"}' },
+      ]);
 
       const result = await getLatestAuthResult("sender@test.com");
 

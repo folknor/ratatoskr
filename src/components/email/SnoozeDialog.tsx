@@ -45,7 +45,11 @@ function getSnoozeTimestamps() {
   };
 }
 
-export function SnoozeDialog({ isOpen = true, onSnooze, onClose }: SnoozeDialogProps) {
+export function SnoozeDialog({
+  isOpen = true,
+  onSnooze,
+  onClose,
+}: SnoozeDialogProps) {
   const { t } = useTranslation("email");
   const ts = getSnoozeTimestamps();
   const presets = [

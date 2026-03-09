@@ -25,7 +25,10 @@ export const TEMPLATE_VARIABLES: TemplateVariable[] = [
   { key: "{{day}}", desc: "Day of week" },
 ];
 
-function splitName(fullName: string | undefined): { first: string; last: string } {
+function splitName(fullName: string | undefined): {
+  first: string;
+  last: string;
+} {
   if (!fullName) return { first: "", last: "" };
   const parts = fullName.trim().split(/\s+/);
   return {

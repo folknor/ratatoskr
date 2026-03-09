@@ -9,9 +9,15 @@ import {
 import { getRecentSentMessages, type DbMessage } from "@/services/db/messages";
 import { getAccount } from "@/services/db/accounts";
 import { getSetting } from "@/services/db/settings";
-import { WRITING_STYLE_ANALYSIS_PROMPT, AUTO_DRAFT_REPLY_PROMPT } from "./prompts";
+import {
+  WRITING_STYLE_ANALYSIS_PROMPT,
+  AUTO_DRAFT_REPLY_PROMPT,
+} from "./prompts";
 
-async function callAi(systemPrompt: string, userContent: string): Promise<string> {
+async function callAi(
+  systemPrompt: string,
+  userContent: string,
+): Promise<string> {
   try {
     const provider = await getActiveProvider();
     return await provider.complete({ systemPrompt, userContent });
@@ -22,7 +28,10 @@ async function callAi(systemPrompt: string, userContent: string): Promise<string
       throw new AiError("AUTH_ERROR", "Invalid API key");
     }
     if (message.includes("429") || message.includes("rate")) {
-      throw new AiError("RATE_LIMITED", "Rate limited — please try again shortly");
+      throw new AiError(
+        "RATE_LIMITED",
+        "Rate limited — please try again shortly",
+      );
     }
     throw new AiError("NETWORK_ERROR", message);
   }
@@ -31,7 +40,9 @@ async function callAi(systemPrompt: string, userContent: string): Promise<string
 /**
  * Analyze writing style from sent email samples.
  */
-export async function analyzeWritingStyle(samples: DbMessage[]): Promise<string> {
+export async function analyzeWritingStyle(
+  samples: DbMessage[],
+): Promise<string> {
   const formatted = samples
     .map((msg) => {
       const body = (msg.body_text ?? msg.snippet ?? "").trim().slice(0, 1000);
@@ -45,7 +56,9 @@ export async function analyzeWritingStyle(samples: DbMessage[]): Promise<string>
 /**
  * Get existing style profile or create one by analyzing recent sent emails.
  */
-export async function getOrCreateStyleProfile(accountId: string): Promise<string | null> {
+export async function getOrCreateStyleProfile(
+  accountId: string,
+): Promise<string | null> {
   const styleEnabled = await getSetting("ai_writing_style_enabled");
   if (styleEnabled === "false") return null;
 
@@ -58,7 +71,11 @@ export async function getOrCreateStyleProfile(accountId: string): Promise<string
   if (!account) return null;
 
   // Fetch recent sent messages
-  const sentMessages = await getRecentSentMessages(accountId, account.email, 15);
+  const sentMessages = await getRecentSentMessages(
+    accountId,
+    account.email,
+    15,
+  );
   if (sentMessages.length < 3) return null; // Not enough samples
 
   // Analyze and cache
@@ -70,7 +87,9 @@ export async function getOrCreateStyleProfile(accountId: string): Promise<string
 /**
  * Force re-analysis of writing style from latest sent emails.
  */
-export async function refreshWritingStyle(accountId: string): Promise<string | null> {
+export async function refreshWritingStyle(
+  accountId: string,
+): Promise<string | null> {
   await deleteWritingStyleProfile(accountId);
   return getOrCreateStyleProfile(accountId);
 }
@@ -120,10 +139,11 @@ export async function generateAutoDraft(
     ? `\n\nUser's writing style:\n${styleProfile}`
     : "";
 
-  const userContent = `<email_content>Subject: ${subject}\n\n${threadContent}</email_content>${styleSection}`.slice(
-    0,
-    6000,
-  );
+  const userContent =
+    `<email_content>Subject: ${subject}\n\n${threadContent}</email_content>${styleSection}`.slice(
+      0,
+      6000,
+    );
 
   const draft = await callAi(AUTO_DRAFT_REPLY_PROMPT, userContent);
 

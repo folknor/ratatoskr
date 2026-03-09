@@ -42,7 +42,7 @@ describe("sanitizeHtml", () => {
   });
 
   it("strips style tags", () => {
-    const html = '<style>body{display:none}</style><p>Content</p>';
+    const html = "<style>body{display:none}</style><p>Content</p>";
     const result = sanitizeHtml(html);
     expect(result).not.toContain("<style");
     expect(result).toContain("<p>Content</p>");
@@ -76,7 +76,8 @@ describe("sanitizeHtml", () => {
   });
 
   it("preserves data-blocked-src attribute", () => {
-    const html = '<img data-blocked-src="https://example.com/img.png" src="" />';
+    const html =
+      '<img data-blocked-src="https://example.com/img.png" src="" />';
     const result = sanitizeHtml(html);
     expect(result).toContain("data-blocked-src");
   });
@@ -89,13 +90,15 @@ describe("sanitizeHtml", () => {
   });
 
   it("strips form tags", () => {
-    const html = '<form action="https://evil.com"><input type="password" /></form>';
+    const html =
+      '<form action="https://evil.com"><input type="password" /></form>';
     const result = sanitizeHtml(html);
     expect(result).not.toContain("<form");
   });
 
   it("preserves basic email HTML structure", () => {
-    const html = '<div><p>Hello <strong>World</strong></p><br><a href="https://example.com">Link</a></div>';
+    const html =
+      '<div><p>Hello <strong>World</strong></p><br><a href="https://example.com">Link</a></div>';
     const result = sanitizeHtml(html);
     expect(result).toContain("<p>Hello <strong>World</strong></p>");
     expect(result).toContain("<br>");

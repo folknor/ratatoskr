@@ -49,10 +49,17 @@ export interface CalDavDiscoveryResult {
  * Discover CalDAV settings from an email address.
  * Matches known providers by domain, or attempts .well-known/caldav discovery.
  */
-export async function discoverCalDavSettings(email: string): Promise<CalDavDiscoveryResult> {
+export async function discoverCalDavSettings(
+  email: string,
+): Promise<CalDavDiscoveryResult> {
   const domain = email.split("@")[1]?.toLowerCase();
   if (!domain) {
-    return { providerName: null, caldavUrl: null, authMethod: "basic", needsAppPassword: false };
+    return {
+      providerName: null,
+      caldavUrl: null,
+      authMethod: "basic",
+      needsAppPassword: false,
+    };
   }
 
   // Check known presets
@@ -89,7 +96,12 @@ export async function discoverCalDavSettings(email: string): Promise<CalDavDisco
     };
   }
 
-  return { providerName: null, caldavUrl: null, authMethod: "basic", needsAppPassword: false };
+  return {
+    providerName: null,
+    caldavUrl: null,
+    authMethod: "basic",
+    needsAppPassword: false,
+  };
 }
 
 async function tryWellKnownDiscovery(domain: string): Promise<string | null> {

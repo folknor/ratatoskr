@@ -90,7 +90,9 @@ describe("threadStore", () => {
       id: "thread-3",
       subject: "Third Thread",
     };
-    useThreadStore.getState().setThreads([mockThread, mockThread2, mockThread3]);
+    useThreadStore
+      .getState()
+      .setThreads([mockThread, mockThread2, mockThread3]);
     useThreadStore.getState().selectThread("thread-2");
     useThreadStore.getState().selectAllFromHere();
     const state = useThreadStore.getState();
@@ -114,7 +116,9 @@ describe("threadStore", () => {
       id: "thread-3",
       subject: "Third Thread",
     };
-    useThreadStore.getState().setThreads([mockThread, mockThread2, mockThread3]);
+    useThreadStore
+      .getState()
+      .setThreads([mockThread, mockThread2, mockThread3]);
     // Select thread-2 as the current thread
     useThreadStore.getState().selectThread("thread-2");
     // Manually add thread-1 to multi-select (after selectThread since it clears multiselect)
@@ -131,13 +135,19 @@ describe("threadStore", () => {
       useThreadStore.getState().setThreads([mockThread, mockThread2]);
       const { threadMap } = useThreadStore.getState();
       expect(threadMap.size).toBe(2);
-      expect(threadMap.get("thread-1")).toBe(useThreadStore.getState().threads[0]);
-      expect(threadMap.get("thread-2")).toBe(useThreadStore.getState().threads[1]);
+      expect(threadMap.get("thread-1")).toBe(
+        useThreadStore.getState().threads[0],
+      );
+      expect(threadMap.get("thread-2")).toBe(
+        useThreadStore.getState().threads[1],
+      );
     });
 
     it("should return undefined for non-existent thread in threadMap", () => {
       useThreadStore.getState().setThreads([mockThread]);
-      expect(useThreadStore.getState().threadMap.get("non-existent")).toBeUndefined();
+      expect(
+        useThreadStore.getState().threadMap.get("non-existent"),
+      ).toBeUndefined();
     });
 
     it("should update threadMap when updating a thread", () => {
@@ -159,7 +169,9 @@ describe("threadStore", () => {
 
     it("should remove from threadMap when removing multiple threads", () => {
       const mockThread3: Thread = { ...mockThread, id: "thread-3" };
-      useThreadStore.getState().setThreads([mockThread, mockThread2, mockThread3]);
+      useThreadStore
+        .getState()
+        .setThreads([mockThread, mockThread2, mockThread3]);
       useThreadStore.getState().removeThreads(["thread-1", "thread-3"]);
       const { threadMap } = useThreadStore.getState();
       expect(threadMap.size).toBe(1);
@@ -173,15 +185,21 @@ describe("threadStore", () => {
 
   it("should update a specific thread", () => {
     useThreadStore.getState().setThreads([mockThread, mockThread2]);
-    useThreadStore.getState().updateThread("thread-1", { isRead: true, isStarred: true });
+    useThreadStore
+      .getState()
+      .updateThread("thread-1", { isRead: true, isStarred: true });
 
-    const updated = useThreadStore.getState().threads.find((t) => t.id === "thread-1");
+    const updated = useThreadStore
+      .getState()
+      .threads.find((t) => t.id === "thread-1");
     expect(updated?.isRead).toBe(true);
     expect(updated?.isStarred).toBe(true);
     expect(updated?.subject).toBe("Test Subject"); // unchanged
 
     // Other thread should be untouched
-    const other = useThreadStore.getState().threads.find((t) => t.id === "thread-2");
+    const other = useThreadStore
+      .getState()
+      .threads.find((t) => t.id === "thread-2");
     expect(other?.isRead).toBe(true); // was already true
   });
 });

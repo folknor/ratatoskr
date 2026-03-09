@@ -75,8 +75,7 @@ describe("parseAuthenticationResults", () => {
   it("should fallback to ARC-Authentication-Results", () => {
     const headers = makeHeaders({
       name: "ARC-Authentication-Results",
-      value:
-        "i=1; mx.google.com; spf=pass; dkim=pass; dmarc=pass",
+      value: "i=1; mx.google.com; spf=pass; dkim=pass; dmarc=pass",
     });
 
     const result = parseAuthenticationResults(headers);
@@ -90,7 +89,8 @@ describe("parseAuthenticationResults", () => {
   it("should fallback to Received-SPF for SPF only", () => {
     const headers = makeHeaders({
       name: "Received-SPF",
-      value: "pass (google.com: domain of user@example.com designates 1.2.3.4 as permitted sender)",
+      value:
+        "pass (google.com: domain of user@example.com designates 1.2.3.4 as permitted sender)",
     });
 
     const result = parseAuthenticationResults(headers);

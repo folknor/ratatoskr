@@ -37,7 +37,10 @@ describe("copilotProvider", () => {
         choices: [{ message: { content: "Hello!" } }],
       });
 
-      const provider = createCopilotProvider("ghp_test123", "openai/gpt-4o-mini");
+      const provider = createCopilotProvider(
+        "ghp_test123",
+        "openai/gpt-4o-mini",
+      );
       const result = await provider.complete({
         systemPrompt: "You are helpful",
         userContent: "Hi",
@@ -59,7 +62,10 @@ describe("copilotProvider", () => {
         choices: [{ message: { content: "OK" } }],
       });
 
-      const provider = createCopilotProvider("ghp_test123", "openai/gpt-4o-mini");
+      const provider = createCopilotProvider(
+        "ghp_test123",
+        "openai/gpt-4o-mini",
+      );
       await provider.complete({
         systemPrompt: "sys",
         userContent: "user",
@@ -72,9 +78,14 @@ describe("copilotProvider", () => {
     });
 
     it("returns empty string when no content in response", async () => {
-      mockCreate.mockResolvedValue({ choices: [{ message: { content: null } }] });
+      mockCreate.mockResolvedValue({
+        choices: [{ message: { content: null } }],
+      });
 
-      const provider = createCopilotProvider("ghp_test123", "openai/gpt-4o-mini");
+      const provider = createCopilotProvider(
+        "ghp_test123",
+        "openai/gpt-4o-mini",
+      );
       const result = await provider.complete({
         systemPrompt: "sys",
         userContent: "user",
@@ -90,14 +101,20 @@ describe("copilotProvider", () => {
         choices: [{ message: { content: "hi" } }],
       });
 
-      const provider = createCopilotProvider("ghp_test123", "openai/gpt-4o-mini");
+      const provider = createCopilotProvider(
+        "ghp_test123",
+        "openai/gpt-4o-mini",
+      );
       expect(await provider.testConnection()).toBe(true);
     });
 
     it("returns false when completion throws", async () => {
       mockCreate.mockRejectedValue(new Error("Unauthorized"));
 
-      const provider = createCopilotProvider("ghp_test123", "openai/gpt-4o-mini");
+      const provider = createCopilotProvider(
+        "ghp_test123",
+        "openai/gpt-4o-mini",
+      );
       expect(await provider.testConnection()).toBe(false);
     });
   });

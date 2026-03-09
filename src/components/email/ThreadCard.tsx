@@ -26,9 +26,19 @@ interface ThreadCardProps {
   hasFollowUp?: boolean;
 }
 
-export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick, onContextMenu, category, showCategoryBadge, hasFollowUp }: ThreadCardProps) {
+export const ThreadCard = memo(function ThreadCard({
+  thread,
+  isSelected,
+  onClick,
+  onContextMenu,
+  category,
+  showCategoryBadge,
+  hasFollowUp,
+}: ThreadCardProps) {
   const { t } = useTranslation("email");
-  const isMultiSelected = useThreadStore((s) => s.selectedThreadIds.has(thread.id));
+  const isMultiSelected = useThreadStore((s) =>
+    s.selectedThreadIds.has(thread.id),
+  );
   const hasMultiSelect = useThreadStore((s) => s.selectedThreadIds.size > 0);
   const toggleThreadSelection = useThreadStore((s) => s.toggleThreadSelection);
   const selectThreadRange = useThreadStore((s) => s.selectThreadRange);
@@ -37,12 +47,16 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
   const isSpam = thread.labelIds.includes("SPAM");
 
   // Read selectedThreadIds lazily for drag — avoids subscribing all cards to the Set reference
-  const dragData: DragData = useMemo(() => ({
-    threadIds: hasMultiSelect && isMultiSelected
-      ? [...useThreadStore.getState().selectedThreadIds]
-      : [thread.id],
-    sourceLabel: activeLabel,
-  }), [hasMultiSelect, isMultiSelected, thread.id, activeLabel]);
+  const dragData: DragData = useMemo(
+    () => ({
+      threadIds:
+        hasMultiSelect && isMultiSelected
+          ? [...useThreadStore.getState().selectedThreadIds]
+          : [thread.id],
+      sourceLabel: activeLabel,
+    }),
+    [hasMultiSelect, isMultiSelected, thread.id, activeLabel],
+  );
 
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `thread-${thread.id}`,
@@ -82,7 +96,11 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
       aria-label={`${thread.isRead ? "" : "Unread "}email from ${thread.fromName ?? thread.fromAddress ?? t("common:unknown")}: ${thread.subject ?? t("common:noSubject")}`}
       aria-selected={isSelected}
       className={`w-full text-left border-b border-border-secondary group hover-lift press-scale ${
-        emailDensity === "compact" ? "px-3 py-1.5" : emailDensity === "spacious" ? "px-4 py-4" : "px-4 py-3"
+        emailDensity === "compact"
+          ? "px-3 py-1.5"
+          : emailDensity === "spacious"
+            ? "px-4 py-4"
+            : "px-4 py-3"
       } ${
         isDragging
           ? "opacity-50"
@@ -97,12 +115,24 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
         {/* Avatar */}
         <div
           className={`rounded-full flex items-center justify-center shrink-0 font-medium text-white ${
-            emailDensity === "compact" ? "w-7 h-7 text-xs" : emailDensity === "spacious" ? "w-10 h-10 text-sm" : "w-9 h-9 text-sm"
+            emailDensity === "compact"
+              ? "w-7 h-7 text-xs"
+              : emailDensity === "spacious"
+                ? "w-10 h-10 text-sm"
+                : "w-9 h-9 text-sm"
           } ${
-            isMultiSelected ? "bg-accent" : thread.isRead ? "bg-text-tertiary" : "bg-accent"
+            isMultiSelected
+              ? "bg-accent"
+              : thread.isRead
+                ? "bg-text-tertiary"
+                : "bg-accent"
           }`}
         >
-          {isMultiSelected ? <Check size={emailDensity === "compact" ? 14 : 16} /> : initial}
+          {isMultiSelected ? (
+            <Check size={emailDensity === "compact" ? 14 : 16} />
+          ) : (
+            initial
+          )}
         </div>
 
         {/* Content */}
@@ -133,17 +163,27 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
           </div>
 
           {/* Snippet + indicators */}
-          <div className={`flex items-center gap-1.5 mt-0.5 ${emailDensity === "compact" ? "hidden" : ""}`}>
+          <div
+            className={`flex items-center gap-1.5 mt-0.5 ${emailDensity === "compact" ? "hidden" : ""}`}
+          >
             <span className="text-xs text-text-tertiary truncate flex-1">
               {thread.snippet}
             </span>
-            {showCategoryBadge && category && category !== "Primary" && CATEGORY_COLORS[category] && (
-              <span className={`shrink-0 text-[0.625rem] px-1.5 rounded-full leading-normal ${CATEGORY_COLORS[category]}`}>
-                {t(`sidebar:${category.toLowerCase()}`)}
-              </span>
-            )}
+            {showCategoryBadge &&
+              category &&
+              category !== "Primary" &&
+              CATEGORY_COLORS[category] && (
+                <span
+                  className={`shrink-0 text-[0.625rem] px-1.5 rounded-full leading-normal ${CATEGORY_COLORS[category]}`}
+                >
+                  {t(`sidebar:${category.toLowerCase()}`)}
+                </span>
+              )}
             {hasFollowUp && (
-              <span className="shrink-0 text-accent" title={t("followUpReminderSet")}>
+              <span
+                className="shrink-0 text-accent"
+                title={t("followUpReminderSet")}
+              >
                 <BellRing size={12} />
               </span>
             )}
@@ -158,12 +198,18 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
               </span>
             )}
             {thread.hasAttachments && (
-              <span className="shrink-0 text-text-tertiary" title={t("hasAttachments")}>
+              <span
+                className="shrink-0 text-text-tertiary"
+                title={t("hasAttachments")}
+              >
                 <Paperclip size={12} />
               </span>
             )}
             {thread.isStarred && (
-              <span className="shrink-0 text-warning star-animate" title="Starred">
+              <span
+                className="shrink-0 text-warning star-animate"
+                title="Starred"
+              >
                 <Star size={12} className="fill-current" />
               </span>
             )}
@@ -175,7 +221,6 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
           </div>
         </div>
       </div>
-
     </button>
   );
 });

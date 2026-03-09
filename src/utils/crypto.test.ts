@@ -33,7 +33,9 @@ describe("crypto", () => {
 
   it("decryptValue throws on invalid format", async () => {
     const { decryptValue } = await import("./crypto");
-    await expect(decryptValue("not-valid")).rejects.toThrow("Invalid encrypted value format");
+    await expect(decryptValue("not-valid")).rejects.toThrow(
+      "Invalid encrypted value format",
+    );
   });
 
   it("isEncrypted returns true for encrypted values", async () => {

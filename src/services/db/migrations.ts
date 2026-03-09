@@ -264,7 +264,8 @@ const MIGRATIONS = [
   },
   {
     version: 5,
-    description: "Pin support, AI cache, thread categories, calendar events, contact enrichment, attachment caching",
+    description:
+      "Pin support, AI cache, thread categories, calendar events, contact enrichment, attachment caching",
     sql: `
       -- Pin support
       ALTER TABLE threads ADD COLUMN is_pinned INTEGER DEFAULT 0;
@@ -333,7 +334,8 @@ const MIGRATIONS = [
   },
   {
     version: 6,
-    description: "Follow-up reminders, smart notifications, unsubscribe manager, newsletter bundling",
+    description:
+      "Follow-up reminders, smart notifications, unsubscribe manager, newsletter bundling",
     sql: `
       -- Follow-up reminders (Feature 1)
       CREATE TABLE IF NOT EXISTS follow_up_reminders (
@@ -847,7 +849,9 @@ export async function runMigrations(): Promise<void> {
       "PRAGMA table_info(labels)",
     );
     if (!labelCols.some((c) => c.name === "imap_folder_path")) {
-      console.warn("Migration v14 marked applied but imap_folder_path column missing — re-running");
+      console.warn(
+        "Migration v14 marked applied but imap_folder_path column missing — re-running",
+      );
       await db.execute("DELETE FROM _migrations WHERE version >= 14");
       const maxVersion = MIGRATIONS[MIGRATIONS.length - 1]!.version;
       for (let v = 14; v <= maxVersion; v++) {
@@ -863,7 +867,9 @@ export async function runMigrations(): Promise<void> {
       "SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'",
     );
     if (tables.length === 0) {
-      console.warn("Migration v18 marked applied but tasks table missing — re-running");
+      console.warn(
+        "Migration v18 marked applied but tasks table missing — re-running",
+      );
       await db.execute("DELETE FROM _migrations WHERE version = 18");
       appliedVersions.delete(18);
     }
@@ -891,7 +897,9 @@ export async function runMigrations(): Promise<void> {
           // in case a migration was partially applied previously
           const msg = err instanceof Error ? err.message : String(err);
           if (msg.includes("duplicate column")) {
-            console.warn(`Skipping duplicate column in v${migration.version}: ${msg}`);
+            console.warn(
+              `Skipping duplicate column in v${migration.version}: ${msg}`,
+            );
           } else {
             throw err;
           }
@@ -922,7 +930,9 @@ export async function runMigrations(): Promise<void> {
       "SELECT id FROM accounts WHERE provider = 'imap'",
     );
     if (imapAccounts.length > 0) {
-      console.log("[repair] Forcing IMAP attachment resync with corrected part IDs...");
+      console.log(
+        "[repair] Forcing IMAP attachment resync with corrected part IDs...",
+      );
       await db.execute(
         "DELETE FROM attachments WHERE account_id IN (SELECT id FROM accounts WHERE provider = 'imap')",
       );

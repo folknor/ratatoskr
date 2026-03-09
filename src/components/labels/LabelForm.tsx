@@ -38,12 +38,22 @@ interface LabelFormProps {
   variant?: "settings" | "sidebar";
 }
 
-export function LabelForm({ accountId, label, onDone, variant = "settings" }: LabelFormProps) {
+export function LabelForm({
+  accountId,
+  label,
+  onDone,
+  variant = "settings",
+}: LabelFormProps) {
   const { t } = useTranslation("settings");
   const { createLabel, updateLabel } = useLabelStore();
   const [name, setName] = useState(label?.name ?? "");
-  const [selectedColor, setSelectedColor] = useState<{ bg: string; fg: string } | null>(
-    label?.colorBg ? { bg: label.colorBg, fg: label.colorFg ?? "#000000" } : null,
+  const [selectedColor, setSelectedColor] = useState<{
+    bg: string;
+    fg: string;
+  } | null>(
+    label?.colorBg
+      ? { bg: label.colorBg, fg: label.colorFg ?? "#000000" }
+      : null,
   );
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,15 +86,27 @@ export function LabelForm({ accountId, label, onDone, variant = "settings" }: La
     } finally {
       setIsSaving(false);
     }
-  }, [accountId, name, selectedColor, label, isSaving, updateLabel, createLabel, onDone]);
+  }, [
+    accountId,
+    name,
+    selectedColor,
+    label,
+    isSaving,
+    updateLabel,
+    createLabel,
+    onDone,
+  ]);
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && name.trim() && !isSaving) {
-      handleSave();
-    } else if (e.key === "Escape") {
-      onDone();
-    }
-  }, [handleSave, onDone, name, isSaving]);
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" && name.trim() && !isSaving) {
+        handleSave();
+      } else if (e.key === "Escape") {
+        onDone();
+      }
+    },
+    [handleSave, onDone, name, isSaving],
+  );
 
   const isSidebar = variant === "sidebar";
 
@@ -121,7 +143,9 @@ export function LabelForm({ accountId, label, onDone, variant = "settings" }: La
 
       {/* Color picker */}
       <div>
-        <div className={`flex flex-wrap gap-1 ${isSidebar ? "gap-1" : "gap-1.5"}`}>
+        <div
+          className={`flex flex-wrap gap-1 ${isSidebar ? "gap-1" : "gap-1.5"}`}
+        >
           <button
             onClick={() => setSelectedColor(null)}
             className={`${isSidebar ? "w-4 h-4" : "w-5 h-5"} rounded-full border-2 transition-colors ${
@@ -131,7 +155,10 @@ export function LabelForm({ accountId, label, onDone, variant = "settings" }: La
             }`}
             title={t("labelForm.noColor")}
           >
-            <X size={isSidebar ? 8 : 10} className="mx-auto text-text-tertiary" />
+            <X
+              size={isSidebar ? 8 : 10}
+              className="mx-auto text-text-tertiary"
+            />
           </button>
           {GMAIL_LABEL_COLORS.map((color) => (
             <button
@@ -157,7 +184,11 @@ export function LabelForm({ accountId, label, onDone, variant = "settings" }: La
             isSidebar ? "px-2 py-1 text-[0.625rem]" : "px-3 py-1.5 text-xs"
           } font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
         >
-          {isSaving ? t("labelForm.saving") : label ? t("labelForm.update") : t("labelForm.save")}
+          {isSaving
+            ? t("labelForm.saving")
+            : label
+              ? t("labelForm.update")
+              : t("labelForm.save")}
         </button>
         <button
           onClick={onDone}

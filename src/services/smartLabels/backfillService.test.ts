@@ -41,9 +41,7 @@ describe("backfillSmartLabels", () => {
       id: `msg-${i}`,
     }));
 
-    mockSelect
-      .mockResolvedValueOnce(batch1)
-      .mockResolvedValueOnce([]); // second batch empty
+    mockSelect.mockResolvedValueOnce(batch1).mockResolvedValueOnce([]); // second batch empty
 
     vi.mocked(matchSmartLabels).mockResolvedValue([
       { threadId: "t0", labelIds: ["label-1"] },
@@ -67,13 +65,33 @@ describe("backfillSmartLabels", () => {
 
   it("counts total labels applied across batches", async () => {
     const batch1 = [
-      { thread_id: "t1", subject: "A", snippet: "a", from_address: "a@b.com", from_name: null, body_text: null, body_html: null, to_addresses: null, has_attachments: 0, id: "m1" },
-      { thread_id: "t2", subject: "B", snippet: "b", from_address: "b@b.com", from_name: null, body_text: null, body_html: null, to_addresses: null, has_attachments: 0, id: "m2" },
+      {
+        thread_id: "t1",
+        subject: "A",
+        snippet: "a",
+        from_address: "a@b.com",
+        from_name: null,
+        body_text: null,
+        body_html: null,
+        to_addresses: null,
+        has_attachments: 0,
+        id: "m1",
+      },
+      {
+        thread_id: "t2",
+        subject: "B",
+        snippet: "b",
+        from_address: "b@b.com",
+        from_name: null,
+        body_text: null,
+        body_html: null,
+        to_addresses: null,
+        has_attachments: 0,
+        id: "m2",
+      },
     ];
 
-    mockSelect
-      .mockResolvedValueOnce(batch1)
-      .mockResolvedValueOnce([]); // terminates because batch1.length < batchSize
+    mockSelect.mockResolvedValueOnce(batch1).mockResolvedValueOnce([]); // terminates because batch1.length < batchSize
 
     vi.mocked(matchSmartLabels).mockResolvedValue([
       { threadId: "t1", labelIds: ["label-a", "label-b"] },
@@ -87,7 +105,18 @@ describe("backfillSmartLabels", () => {
 
   it("stops when batch returns fewer than batchSize rows", async () => {
     const smallBatch = [
-      { thread_id: "t1", subject: "A", snippet: "a", from_address: "a@b.com", from_name: null, body_text: null, body_html: null, to_addresses: null, has_attachments: 0, id: "m1" },
+      {
+        thread_id: "t1",
+        subject: "A",
+        snippet: "a",
+        from_address: "a@b.com",
+        from_name: null,
+        body_text: null,
+        body_html: null,
+        to_addresses: null,
+        has_attachments: 0,
+        id: "m1",
+      },
     ];
 
     mockSelect.mockResolvedValueOnce(smallBatch);

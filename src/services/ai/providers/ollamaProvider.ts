@@ -19,7 +19,10 @@ function getClient(serverUrl: string, model: string): OpenAI {
   return instance;
 }
 
-export function createOllamaProvider(serverUrl: string, model: string): AiProviderClient {
+export function createOllamaProvider(
+  serverUrl: string,
+  model: string,
+): AiProviderClient {
   const client = getClient(serverUrl, model);
 
   return {

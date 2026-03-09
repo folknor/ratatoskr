@@ -1,4 +1,9 @@
-import { getDb, buildDynamicUpdate, selectFirstBy, boolToInt } from "./connection";
+import {
+  getDb,
+  buildDynamicUpdate,
+  selectFirstBy,
+  boolToInt,
+} from "./connection";
 
 export interface DbSignature {
   id: string;
@@ -74,8 +79,10 @@ export async function updateSignature(
 
   const fields: [string, unknown][] = [];
   if (updates.name !== undefined) fields.push(["name", updates.name]);
-  if (updates.bodyHtml !== undefined) fields.push(["body_html", updates.bodyHtml]);
-  if (updates.isDefault !== undefined) fields.push(["is_default", boolToInt(updates.isDefault)]);
+  if (updates.bodyHtml !== undefined)
+    fields.push(["body_html", updates.bodyHtml]);
+  if (updates.isDefault !== undefined)
+    fields.push(["is_default", boolToInt(updates.isDefault)]);
 
   const query = buildDynamicUpdate("signatures", "id", id, fields);
   if (query) {

@@ -71,11 +71,15 @@ export function ThreadView({ thread }: ThreadViewProps) {
   const markedReadRef = useRef<string | null>(null);
   // null = not yet loaded; defer iframe rendering until setting is known
   const [blockImages, setBlockImages] = useState<boolean | null>(null);
-  const [allowlistedSenders, setAllowlistedSenders] = useState<Set<string>>(new Set());
+  const [allowlistedSenders, setAllowlistedSenders] = useState<Set<string>>(
+    new Set(),
+  );
 
   // Preload settings eagerly on mount (parallel with message loading)
   useEffect(() => {
-    getSetting("block_remote_images").then((val) => setBlockImages(val !== "false"));
+    getSetting("block_remote_images").then((val) =>
+      setBlockImages(val !== "false"),
+    );
   }, []);
 
   // Load messages
@@ -103,13 +107,20 @@ export function ThreadView({ thread }: ThreadViewProps) {
       if (!cancelled) setAllowlistedSenders(allowed);
     });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [activeAccountId, messages]);
 
   // Auto-mark unread threads as read when opened (respects mark-as-read setting)
   const markAsReadBehavior = useUIStore((s) => s.markAsReadBehavior);
   useEffect(() => {
-    if (!activeAccountId || thread.isRead || markedReadRef.current === thread.id) return;
+    if (
+      !activeAccountId ||
+      thread.isRead ||
+      markedReadRef.current === thread.id
+    )
+      return;
     if (markAsReadBehavior === "manual") return;
 
     const markRead = () => {
@@ -126,19 +137,28 @@ export function ThreadView({ thread }: ThreadViewProps) {
 
     // instant
     markRead();
-  }, [activeAccountId, thread.id, thread.isRead, updateThread, markAsReadBehavior]);
+  }, [
+    activeAccountId,
+    thread.id,
+    thread.isRead,
+    updateThread,
+    markAsReadBehavior,
+  ]);
 
   const openComposer = useComposerStore((s) => s.openComposer);
   const openMenu = useContextMenuStore((s) => s.openMenu);
   const defaultReplyMode = useUIStore((s) => s.defaultReplyMode);
   const lastMessage = messages[messages.length - 1];
 
-  const forwardLabels: ForwardI18n = useMemo(() => ({
-    separator: t("forwardedMessageSeparator"),
-    from: t("from"),
-    date: t("date"),
-    to: t("to"),
-  }), [t]);
+  const forwardLabels: ForwardI18n = useMemo(
+    () => ({
+      separator: t("forwardedMessageSeparator"),
+      from: t("from"),
+      date: t("date"),
+      to: t("to"),
+    }),
+    [t],
+  );
 
   const handleReply = useCallback(() => {
     if (!lastMessage) return;
@@ -166,7 +186,9 @@ export function ThreadView({ thread }: ThreadViewProps) {
     const allRecipients = new Set<string>();
     if (replyTo) allRecipients.add(replyTo);
     if (lastMessage.to_addresses) {
-      lastMessage.to_addresses.split(",").forEach((a) => allRecipients.add(a.trim()));
+      lastMessage.to_addresses
+        .split(",")
+        .forEach((a) => allRecipients.add(a.trim()));
     }
     const ccList: string[] = [];
     if (lastMessage.cc_addresses) {
@@ -178,10 +200,14 @@ export function ThreadView({ thread }: ThreadViewProps) {
       cc: ccList,
       subject: `Re: ${lastMessage.subject ?? ""}`,
       bodyHtml: buildQuote(lastMessage, {
-        quoteOn: t("quoteOn", { date: new Date(lastMessage.date).toLocaleString() }),
-        quoteWrote: t("quoteWrote", { name: lastMessage.from_name
-          ? `${lastMessage.from_name} <${lastMessage.from_address ?? ""}>`
-          : (lastMessage.from_address ?? "Unknown") }),
+        quoteOn: t("quoteOn", {
+          date: new Date(lastMessage.date).toLocaleString(),
+        }),
+        quoteWrote: t("quoteWrote", {
+          name: lastMessage.from_name
+            ? `${lastMessage.from_name} <${lastMessage.from_address ?? ""}>`
+            : (lastMessage.from_address ?? "Unknown"),
+        }),
       }),
       threadId: lastMessage.thread_id,
       inReplyToMessageId: lastMessage.id,
@@ -211,16 +237,22 @@ export function ThreadView({ thread }: ThreadViewProps) {
     document.body.appendChild(iframe);
 
     const doc = iframe.contentDocument ?? iframe.contentWindow?.document;
-    if (!doc) { document.body.removeChild(iframe); return; }
+    if (!doc) {
+      document.body.removeChild(iframe);
+      return;
+    }
 
-    const messagesHtml = messages.map((msg) => {
-      const date = new Date(msg.date).toLocaleString();
-      const from = msg.from_name
-        ? `${escapeHtml(msg.from_name)} &lt;${escapeHtml(msg.from_address ?? "")}&gt;`
-        : escapeHtml(msg.from_address ?? "Unknown");
-      const to = escapeHtml(msg.to_addresses ?? "");
-      const body = msg.body_html ? sanitizeHtml(msg.body_html) : escapeHtml(msg.body_text ?? "");
-      return `
+    const messagesHtml = messages
+      .map((msg) => {
+        const date = new Date(msg.date).toLocaleString();
+        const from = msg.from_name
+          ? `${escapeHtml(msg.from_name)} &lt;${escapeHtml(msg.from_address ?? "")}&gt;`
+          : escapeHtml(msg.from_address ?? "Unknown");
+        const to = escapeHtml(msg.to_addresses ?? "");
+        const body = msg.body_html
+          ? sanitizeHtml(msg.body_html)
+          : escapeHtml(msg.body_text ?? "");
+        return `
         <div style="margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid #e5e5e5">
           <div style="margin-bottom:8px;color:#666;font-size:12px">
             <strong>${escapeHtml(t("from"))}</strong> ${from}<br/>
@@ -229,7 +261,8 @@ export function ThreadView({ thread }: ThreadViewProps) {
           </div>
           <div>${body}</div>
         </div>`;
-    }).join("");
+      })
+      .join("");
 
     const safeSubject = escapeHtml(thread.subject ?? "");
     doc.open();
@@ -256,7 +289,10 @@ export function ThreadView({ thread }: ThreadViewProps) {
   // Scroll focused message into view
   useEffect(() => {
     if (focusedMsgIdx >= 0 && messageRefs.current[focusedMsgIdx]) {
-      messageRefs.current[focusedMsgIdx]!.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      messageRefs.current[focusedMsgIdx]!.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
     }
   }, [focusedMsgIdx]);
 
@@ -313,7 +349,9 @@ export function ThreadView({ thread }: ThreadViewProps) {
   // Listen for extract-task event from keyboard shortcut
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail as { threadId: string } | undefined;
+      const detail = (e as CustomEvent).detail as
+        | { threadId: string }
+        | undefined;
       if (detail?.threadId === thread.id) {
         setShowTaskExtract(true);
       }
@@ -322,23 +360,30 @@ export function ThreadView({ thread }: ThreadViewProps) {
     return () => window.removeEventListener("velo-extract-task", handler);
   }, [thread.id]);
 
-  const handleMessageContextMenu = useCallback((e: React.MouseEvent, msg: DbMessage) => {
-    e.preventDefault();
-    openMenu("message", { x: e.clientX, y: e.clientY }, {
-      messageId: msg.id,
-      threadId: msg.thread_id,
-      accountId: msg.account_id,
-      fromAddress: msg.from_address,
-      fromName: msg.from_name,
-      replyTo: msg.reply_to,
-      toAddresses: msg.to_addresses,
-      ccAddresses: msg.cc_addresses,
-      subject: msg.subject,
-      date: msg.date,
-      bodyHtml: msg.body_html,
-      bodyText: msg.body_text,
-    });
-  }, [openMenu]);
+  const handleMessageContextMenu = useCallback(
+    (e: React.MouseEvent, msg: DbMessage) => {
+      e.preventDefault();
+      openMenu(
+        "message",
+        { x: e.clientX, y: e.clientY },
+        {
+          messageId: msg.id,
+          threadId: msg.thread_id,
+          accountId: msg.account_id,
+          fromAddress: msg.from_address,
+          fromName: msg.from_name,
+          replyTo: msg.reply_to,
+          toAddresses: msg.to_addresses,
+          ccAddresses: msg.cc_addresses,
+          subject: msg.subject,
+          date: msg.date,
+          bodyHtml: msg.body_html,
+          bodyText: msg.body_text,
+        },
+      );
+    },
+    [openMenu],
+  );
 
   const handleExport = useCallback(async () => {
     if (messages.length === 0) return;
@@ -392,7 +437,9 @@ export function ThreadView({ thread }: ThreadViewProps) {
   }
 
   // Detect no-reply senders — disable reply buttons but still allow forward
-  const noReply = isNoReplyAddress(lastMessage?.reply_to ?? lastMessage?.from_address);
+  const noReply = isNoReplyAddress(
+    lastMessage?.reply_to ?? lastMessage?.from_address,
+  );
 
   // Get the primary sender for the contact sidebar
   const primarySender = lastMessage?.from_address ?? null;
@@ -449,12 +496,18 @@ export function ThreadView({ thread }: ThreadViewProps) {
             {messages.map((msg, i) => (
               <MessageItem
                 key={msg.id}
-                ref={(el) => { messageRefs.current[i] = el; }}
+                ref={(el) => {
+                  messageRefs.current[i] = el;
+                }}
                 message={msg}
                 isLast={i === messages.length - 1}
                 focused={i === focusedMsgIdx}
                 blockImages={blockImages}
-                senderAllowlisted={msg.from_address ? allowlistedSenders.has(msg.from_address) : false}
+                senderAllowlisted={
+                  msg.from_address
+                    ? allowlistedSenders.has(msg.from_address)
+                    : false
+                }
                 isSpam={thread.labelIds.includes("SPAM")}
                 onContextMenu={(e) => handleMessageContextMenu(e, msg)}
               />
@@ -542,7 +595,9 @@ interface QuoteI18n {
 }
 
 function buildQuote(msg: DbMessage, labels: QuoteI18n): string {
-  const body = msg.body_html ? sanitizeHtml(msg.body_html) : escapeHtml(msg.body_text ?? "");
+  const body = msg.body_html
+    ? sanitizeHtml(msg.body_html)
+    : escapeHtml(msg.body_text ?? "");
   return `<br><br><div style="border-left:2px solid #ccc;padding-left:12px;margin-left:0;color:#666">${escapeHtml(labels.quoteOn + labels.quoteWrote)}<br>${body}</div>`;
 }
 
@@ -555,6 +610,8 @@ interface ForwardI18n {
 
 function buildForwardQuote(msg: DbMessage, labels: ForwardI18n): string {
   const date = new Date(msg.date).toLocaleString();
-  const body = msg.body_html ? sanitizeHtml(msg.body_html) : escapeHtml(msg.body_text ?? "");
+  const body = msg.body_html
+    ? sanitizeHtml(msg.body_html)
+    : escapeHtml(msg.body_text ?? "");
   return `<br><br>${escapeHtml(labels.separator)}<br>${escapeHtml(labels.from)} ${escapeHtml(msg.from_name ?? "")} &lt;${escapeHtml(msg.from_address ?? "")}&gt;<br>${escapeHtml(labels.date)} ${date}<br>Subject: ${escapeHtml(msg.subject ?? "")}<br>${escapeHtml(labels.to)} ${escapeHtml(msg.to_addresses ?? "")}<br><br>${body}`;
 }

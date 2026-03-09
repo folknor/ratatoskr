@@ -2,7 +2,14 @@ import { router } from "./index";
 
 /** Known system labels that map to /mail/$label */
 const SYSTEM_LABELS = new Set([
-  "inbox", "starred", "snoozed", "sent", "drafts", "trash", "spam", "all",
+  "inbox",
+  "starred",
+  "snoozed",
+  "sent",
+  "drafts",
+  "trash",
+  "spam",
+  "all",
 ]);
 
 /**
@@ -34,7 +41,10 @@ export function navigateToLabel(
   }
 
   if (label === "help") {
-    router.navigate({ to: "/help/$topic", params: { topic: "getting-started" } });
+    router.navigate({
+      to: "/help/$topic",
+      params: { topic: "getting-started" },
+    });
     return;
   }
 
@@ -197,13 +207,22 @@ export function navigateBack(): void {
 export function getActiveLabel(): string {
   const matches = router.state.matches;
   for (const match of matches) {
-    if (match.routeId === "/mail/$label" || match.routeId === "/mail/$label/thread/$threadId") {
+    if (
+      match.routeId === "/mail/$label" ||
+      match.routeId === "/mail/$label/thread/$threadId"
+    ) {
       return (match.params as { label: string }).label;
     }
-    if (match.routeId === "/label/$labelId" || match.routeId === "/label/$labelId/thread/$threadId") {
+    if (
+      match.routeId === "/label/$labelId" ||
+      match.routeId === "/label/$labelId/thread/$threadId"
+    ) {
       return (match.params as { labelId: string }).labelId;
     }
-    if (match.routeId === "/smart-folder/$folderId" || match.routeId === "/smart-folder/$folderId/thread/$threadId") {
+    if (
+      match.routeId === "/smart-folder/$folderId" ||
+      match.routeId === "/smart-folder/$folderId/thread/$threadId"
+    ) {
       return `smart-folder:${(match.params as { folderId: string }).folderId}`;
     }
     if (match.routeId === "/settings/$tab" || match.routeId === "/settings") {

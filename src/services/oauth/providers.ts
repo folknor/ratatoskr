@@ -15,8 +15,7 @@ const providers: Record<string, OAuthProviderConfig> = {
     name: "Microsoft",
     authUrl:
       "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize",
-    tokenUrl:
-      "https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
+    tokenUrl: "https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
     scopes: [
       "https://outlook.office.com/IMAP.AccessAsUser.All",
       "https://outlook.office.com/SMTP.Send",

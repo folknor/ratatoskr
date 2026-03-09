@@ -24,10 +24,42 @@ export function NoSearchResultsIllustration({ size = 140, className }: Props) {
         stroke="var(--color-border-primary)"
         strokeWidth="1.5"
       />
-      <rect x="40" y="65" width="40" height="3" rx="1.5" fill="var(--color-border-primary)" opacity="0.5" />
-      <rect x="40" y="74" width="30" height="3" rx="1.5" fill="var(--color-border-primary)" opacity="0.35" />
-      <rect x="40" y="83" width="35" height="3" rx="1.5" fill="var(--color-border-primary)" opacity="0.25" />
-      <rect x="40" y="92" width="20" height="3" rx="1.5" fill="var(--color-border-primary)" opacity="0.15" />
+      <rect
+        x="40"
+        y="65"
+        width="40"
+        height="3"
+        rx="1.5"
+        fill="var(--color-border-primary)"
+        opacity="0.5"
+      />
+      <rect
+        x="40"
+        y="74"
+        width="30"
+        height="3"
+        rx="1.5"
+        fill="var(--color-border-primary)"
+        opacity="0.35"
+      />
+      <rect
+        x="40"
+        y="83"
+        width="35"
+        height="3"
+        rx="1.5"
+        fill="var(--color-border-primary)"
+        opacity="0.25"
+      />
+      <rect
+        x="40"
+        y="92"
+        width="20"
+        height="3"
+        rx="1.5"
+        fill="var(--color-border-primary)"
+        opacity="0.15"
+      />
       {/* Magnifying glass (tilted) */}
       <g transform="translate(80, 30) rotate(15)">
         {/* Glass circle */}

@@ -30,7 +30,12 @@ describe("GoogleCalendarProvider", () => {
     it("maps Google API response to CalendarInfo array", async () => {
       mockClient.request.mockResolvedValue({
         items: [
-          { id: "primary", summary: "My Calendar", backgroundColor: "#0000ff", primary: true },
+          {
+            id: "primary",
+            summary: "My Calendar",
+            backgroundColor: "#0000ff",
+            primary: true,
+          },
           { id: "work@example.com", summary: "Work", accessRole: "owner" },
         ],
       });
@@ -41,8 +46,18 @@ describe("GoogleCalendarProvider", () => {
         `${CALENDAR_API_BASE}/users/me/calendarList`,
       );
       expect(result).toEqual([
-        { remoteId: "primary", displayName: "My Calendar", color: "#0000ff", isPrimary: true },
-        { remoteId: "work@example.com", displayName: "Work", color: null, isPrimary: false },
+        {
+          remoteId: "primary",
+          displayName: "My Calendar",
+          color: "#0000ff",
+          isPrimary: true,
+        },
+        {
+          remoteId: "work@example.com",
+          displayName: "Work",
+          color: null,
+          isPrimary: false,
+        },
       ]);
     });
 
@@ -74,7 +89,11 @@ describe("GoogleCalendarProvider", () => {
 
       mockClient.request.mockResolvedValue({ items: [googleEvent] });
 
-      const result = await provider.fetchEvents("cal-id", "2025-06-01T00:00:00Z", "2025-06-30T23:59:59Z");
+      const result = await provider.fetchEvents(
+        "cal-id",
+        "2025-06-01T00:00:00Z",
+        "2025-06-30T23:59:59Z",
+      );
 
       const calledUrl = mockClient.request.mock.calls[0][0] as string;
       expect(calledUrl).toContain("/calendars/cal-id/events?");
@@ -97,14 +116,22 @@ describe("GoogleCalendarProvider", () => {
         uid: "uid-1@google.com",
         etag: '"etag-1"',
       });
-      expect(result[0].startTime).toBe(Math.floor(new Date("2025-06-15T10:00:00Z").getTime() / 1000));
-      expect(result[0].endTime).toBe(Math.floor(new Date("2025-06-15T11:00:00Z").getTime() / 1000));
+      expect(result[0].startTime).toBe(
+        Math.floor(new Date("2025-06-15T10:00:00Z").getTime() / 1000),
+      );
+      expect(result[0].endTime).toBe(
+        Math.floor(new Date("2025-06-15T11:00:00Z").getTime() / 1000),
+      );
     });
 
     it("encodes calendar ID in URL", async () => {
       mockClient.request.mockResolvedValue({ items: [] });
 
-      await provider.fetchEvents("user@example.com", "2025-01-01T00:00:00Z", "2025-01-31T23:59:59Z");
+      await provider.fetchEvents(
+        "user@example.com",
+        "2025-01-01T00:00:00Z",
+        "2025-01-31T23:59:59Z",
+      );
 
       const calledUrl = mockClient.request.mock.calls[0][0] as string;
       expect(calledUrl).toContain("/calendars/user%40example.com/events?");
@@ -163,7 +190,9 @@ describe("GoogleCalendarProvider", () => {
         isAllDay: true,
       });
 
-      const body = JSON.parse(mockClient.request.mock.calls[0][1].body as string);
+      const body = JSON.parse(
+        mockClient.request.mock.calls[0][1].body as string,
+      );
       expect(body.start).toEqual({ date: "2025-12-25" });
       expect(body.end).toEqual({ date: "2025-12-26" });
     });
@@ -183,7 +212,9 @@ describe("GoogleCalendarProvider", () => {
         attendees: [{ email: "bob@example.com" }],
       });
 
-      const body = JSON.parse(mockClient.request.mock.calls[0][1].body as string);
+      const body = JSON.parse(
+        mockClient.request.mock.calls[0][1].body as string,
+      );
       expect(body.attendees).toEqual([{ email: "bob@example.com" }]);
     });
   });
@@ -227,7 +258,9 @@ describe("GoogleCalendarProvider", () => {
         endTime: "2025-06-21T10:00:00Z",
       });
 
-      const body = JSON.parse(mockClient.request.mock.calls[0][1].body as string);
+      const body = JSON.parse(
+        mockClient.request.mock.calls[0][1].body as string,
+      );
       expect(body.start.dateTime).toBeDefined();
       expect(body.end.dateTime).toBeDefined();
     });
@@ -250,7 +283,9 @@ describe("GoogleCalendarProvider", () => {
       await provider.deleteEvent("user@example.com", "evt/special");
 
       const calledUrl = mockClient.request.mock.calls[0][0] as string;
-      expect(calledUrl).toContain("/calendars/user%40example.com/events/evt%2Fspecial");
+      expect(calledUrl).toContain(
+        "/calendars/user%40example.com/events/evt%2Fspecial",
+      );
     });
   });
 
@@ -308,7 +343,9 @@ describe("GoogleCalendarProvider", () => {
     });
 
     it("handles 410 error (expired sync token) gracefully", async () => {
-      mockClient.request.mockRejectedValue(new Error("410 Gone: sync token expired"));
+      mockClient.request.mockRejectedValue(
+        new Error("410 Gone: sync token expired"),
+      );
 
       const result = await provider.syncEvents("cal-1", "expired-token");
 
@@ -338,20 +375,32 @@ describe("GoogleCalendarProvider", () => {
     it("rethrows non-sync-token errors", async () => {
       mockClient.request.mockRejectedValue(new Error("Network error"));
 
-      await expect(provider.syncEvents("cal-1", "token")).rejects.toThrow("Network error");
+      await expect(provider.syncEvents("cal-1", "token")).rejects.toThrow(
+        "Network error",
+      );
     });
 
     it("follows pagination with nextPageToken", async () => {
       mockClient.request
         .mockResolvedValueOnce({
           items: [
-            { id: "evt-1", summary: "Page 1", start: { dateTime: "2025-06-15T10:00:00Z" }, end: { dateTime: "2025-06-15T11:00:00Z" } },
+            {
+              id: "evt-1",
+              summary: "Page 1",
+              start: { dateTime: "2025-06-15T10:00:00Z" },
+              end: { dateTime: "2025-06-15T11:00:00Z" },
+            },
           ],
           nextPageToken: "page-2-token",
         })
         .mockResolvedValueOnce({
           items: [
-            { id: "evt-2", summary: "Page 2", start: { dateTime: "2025-06-16T10:00:00Z" }, end: { dateTime: "2025-06-16T11:00:00Z" } },
+            {
+              id: "evt-2",
+              summary: "Page 2",
+              start: { dateTime: "2025-06-16T10:00:00Z" },
+              end: { dateTime: "2025-06-16T11:00:00Z" },
+            },
           ],
           nextSyncToken: "final-sync-token",
         });
@@ -375,7 +424,10 @@ describe("GoogleCalendarProvider", () => {
 
       const result = await provider.testConnection();
 
-      expect(result).toEqual({ success: true, message: "Connected to Google Calendar" });
+      expect(result).toEqual({
+        success: true,
+        message: "Connected to Google Calendar",
+      });
     });
 
     it("returns failure with error message on error", async () => {

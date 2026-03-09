@@ -1,6 +1,11 @@
 import { getDb } from "./connection";
 
-export type ThreadCategory = "Primary" | "Updates" | "Promotions" | "Social" | "Newsletters";
+export type ThreadCategory =
+  | "Primary"
+  | "Updates"
+  | "Promotions"
+  | "Social"
+  | "Newsletters";
 
 export const ALL_CATEGORIES: ThreadCategory[] = [
   "Primary",
@@ -45,7 +50,9 @@ export async function getThreadCategoryWithManual(
 export async function getRecentRuleCategorizedThreadIds(
   accountId: string,
   limit = 20,
-): Promise<{ id: string; subject: string; snippet: string; fromAddress: string }[]> {
+): Promise<
+  { id: string; subject: string; snippet: string; fromAddress: string }[]
+> {
   const db = await getDb();
   return db.select(
     `SELECT t.id, t.subject, t.snippet, m.from_address as fromAddress
@@ -142,7 +149,9 @@ export async function getCategoryUnreadCounts(
 export async function getUncategorizedInboxThreadIds(
   accountId: string,
   limit = 20,
-): Promise<{ id: string; subject: string; snippet: string; fromAddress: string }[]> {
+): Promise<
+  { id: string; subject: string; snippet: string; fromAddress: string }[]
+> {
   const db = await getDb();
   return db.select(
     `SELECT t.id, t.subject, t.snippet, m.from_address as fromAddress

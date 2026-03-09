@@ -7,7 +7,11 @@ interface HelpCardGridProps {
   onToggleCard: (cardId: string) => void;
 }
 
-export function HelpCardGrid({ cards, expandedCardId, onToggleCard }: HelpCardGridProps) {
+export function HelpCardGrid({
+  cards,
+  expandedCardId,
+  onToggleCard,
+}: HelpCardGridProps) {
   return (
     <div className="grid grid-cols-1 gap-3">
       {cards.map((card) => (

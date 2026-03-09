@@ -35,9 +35,7 @@ describe("parseMailtoUrl", () => {
   });
 
   it("parses mailto with multiple cc addresses", () => {
-    const result = parseMailtoUrl(
-      "mailto:user@example.com?cc=a@b.com,c@d.com",
-    );
+    const result = parseMailtoUrl("mailto:user@example.com?cc=a@b.com,c@d.com");
     expect(result.cc).toEqual(["a@b.com", "c@d.com"]);
   });
 

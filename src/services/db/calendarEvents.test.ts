@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 vi.mock("@/services/db/connection", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/db/connection")>();
+  const actual =
+    await importOriginal<typeof import("@/services/db/connection")>();
   return {
     ...actual,
     getDb: vi.fn(),
@@ -24,7 +25,9 @@ import { createMockDb } from "@/test/mocks";
 
 const mockDb = createMockDb();
 
-const makeEvent = (overrides: Partial<DbCalendarEvent> = {}): DbCalendarEvent => ({
+const makeEvent = (
+  overrides: Partial<DbCalendarEvent> = {},
+): DbCalendarEvent => ({
   id: "evt-1",
   account_id: "acc-1",
   google_event_id: "gev-1",
@@ -50,7 +53,9 @@ const makeEvent = (overrides: Partial<DbCalendarEvent> = {}): DbCalendarEvent =>
 describe("calendarEvents service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getDb).mockResolvedValue(mockDb as unknown as Awaited<ReturnType<typeof getDb>>);
+    vi.mocked(getDb).mockResolvedValue(
+      mockDb as unknown as Awaited<ReturnType<typeof getDb>>,
+    );
   });
 
   describe("upsertCalendarEvent", () => {
@@ -78,7 +83,9 @@ describe("calendarEvents service", () => {
       expect(mockDb.execute).toHaveBeenCalledTimes(1);
       const [sql, params] = mockDb.execute.mock.calls[0] as [string, unknown[]];
       expect(sql).toContain("INSERT INTO calendar_events");
-      expect(sql).toContain("ON CONFLICT(account_id, google_event_id) DO UPDATE");
+      expect(sql).toContain(
+        "ON CONFLICT(account_id, google_event_id) DO UPDATE",
+      );
       // params[0] is the generated UUID id, skip it
       expect(params[1]).toBe("acc-1");
       expect(params[2]).toBe("gev-1");
@@ -165,7 +172,9 @@ describe("calendarEvents service", () => {
       });
 
       const [sql, params] = mockDb.execute.mock.calls[0] as [string, unknown[]];
-      expect(sql).toContain("ON CONFLICT(account_id, google_event_id) DO UPDATE SET");
+      expect(sql).toContain(
+        "ON CONFLICT(account_id, google_event_id) DO UPDATE SET",
+      );
       expect(sql).toContain("calendar_id = $14");
       expect(sql).toContain("remote_event_id = $15");
       expect(sql).toContain("etag = $16");
@@ -181,7 +190,10 @@ describe("calendarEvents service", () => {
 
   describe("getCalendarEventsInRange", () => {
     it("returns events within the given time range", async () => {
-      const events = [makeEvent(), makeEvent({ id: "evt-2", start_time: 1500 })];
+      const events = [
+        makeEvent(),
+        makeEvent({ id: "evt-2", start_time: 1500 }),
+      ];
       mockDb.select.mockResolvedValueOnce(events);
 
       const result = await getCalendarEventsInRange("acc-1", 500, 2500);
@@ -189,7 +201,9 @@ describe("calendarEvents service", () => {
       expect(result).toEqual(events);
       expect(mockDb.select).toHaveBeenCalledTimes(1);
       const [sql, params] = mockDb.select.mock.calls[0] as [string, unknown[]];
-      expect(sql).toContain("WHERE account_id = $1 AND start_time < $3 AND end_time > $2");
+      expect(sql).toContain(
+        "WHERE account_id = $1 AND start_time < $3 AND end_time > $2",
+      );
       expect(sql).toContain("ORDER BY start_time ASC");
       expect(params).toEqual(["acc-1", 500, 2500]);
     });
@@ -211,7 +225,12 @@ describe("calendarEvents service", () => {
       ];
       mockDb.select.mockResolvedValueOnce(events);
 
-      const result = await getCalendarEventsInRangeMulti("acc-1", ["cal-1", "cal-2"], 500, 2500);
+      const result = await getCalendarEventsInRangeMulti(
+        "acc-1",
+        ["cal-1", "cal-2"],
+        500,
+        2500,
+      );
 
       expect(result).toEqual(events);
       expect(mockDb.select).toHaveBeenCalledTimes(1);
@@ -225,14 +244,21 @@ describe("calendarEvents service", () => {
       const events = [makeEvent()];
       mockDb.select.mockResolvedValueOnce(events);
 
-      const result = await getCalendarEventsInRangeMulti("acc-1", [], 500, 2500);
+      const result = await getCalendarEventsInRangeMulti(
+        "acc-1",
+        [],
+        500,
+        2500,
+      );
 
       expect(result).toEqual(events);
       expect(mockDb.select).toHaveBeenCalledTimes(1);
       const [sql, params] = mockDb.select.mock.calls[0] as [string, unknown[]];
       // Should use the simple range query (no calendar_id filter)
       expect(sql).not.toContain("calendar_id IN");
-      expect(sql).toContain("WHERE account_id = $1 AND start_time < $3 AND end_time > $2");
+      expect(sql).toContain(
+        "WHERE account_id = $1 AND start_time < $3 AND end_time > $2",
+      );
       expect(params).toEqual(["acc-1", 500, 2500]);
     });
   });
@@ -250,14 +276,20 @@ describe("calendarEvents service", () => {
 
   describe("getEventByRemoteId", () => {
     it("returns event matching calendar_id and remote_event_id", async () => {
-      const event = makeEvent({ calendar_id: "cal-1", remote_event_id: "remote-1" });
+      const event = makeEvent({
+        calendar_id: "cal-1",
+        remote_event_id: "remote-1",
+      });
       vi.mocked(selectFirstBy).mockResolvedValueOnce(event);
 
       const result = await getEventByRemoteId("cal-1", "remote-1");
 
       expect(result).toEqual(event);
       expect(selectFirstBy).toHaveBeenCalledTimes(1);
-      const [sql, params] = vi.mocked(selectFirstBy).mock.calls[0] as [string, unknown[]];
+      const [sql, params] = vi.mocked(selectFirstBy).mock.calls[0] as [
+        string,
+        unknown[],
+      ];
       expect(sql).toContain("WHERE calendar_id = $1 AND remote_event_id = $2");
       expect(params).toEqual(["cal-1", "remote-1"]);
     });
@@ -277,7 +309,9 @@ describe("calendarEvents service", () => {
 
       expect(mockDb.execute).toHaveBeenCalledTimes(1);
       const [sql, params] = mockDb.execute.mock.calls[0] as [string, unknown[]];
-      expect(sql).toBe("DELETE FROM calendar_events WHERE calendar_id = $1 AND remote_event_id = $2");
+      expect(sql).toBe(
+        "DELETE FROM calendar_events WHERE calendar_id = $1 AND remote_event_id = $2",
+      );
       expect(params).toEqual(["cal-1", "remote-1"]);
     });
   });

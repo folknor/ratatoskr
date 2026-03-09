@@ -32,7 +32,8 @@ describe("RawMessageModal", () => {
   });
 
   it("displays raw message content after loading", async () => {
-    const rawSource = "From: test@example.com\r\nSubject: Hello\r\n\r\nBody text";
+    const rawSource =
+      "From: test@example.com\r\nSubject: Hello\r\n\r\nBody text";
     mockFetchRawMessage.mockResolvedValue(rawSource);
 
     render(

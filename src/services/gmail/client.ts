@@ -23,7 +23,12 @@ export class GmailClient {
   private tokenInfo: TokenInfo;
   private refreshPromise: Promise<void> | null = null;
 
-  constructor(accountId: string, clientId: string, tokenInfo: TokenInfo, clientSecret?: string) {
+  constructor(
+    accountId: string,
+    clientId: string,
+    tokenInfo: TokenInfo,
+    clientSecret?: string,
+  ) {
     this.accountId = accountId;
     this.clientId = clientId;
     this.clientSecret = clientSecret;
@@ -94,10 +99,7 @@ export class GmailClient {
     return lastResponse!;
   }
 
-  async request<T>(
-    path: string,
-    options: RequestInit = {},
-  ): Promise<T> {
+  async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const token = await this.getValidToken();
     const url = path.startsWith("http")
       ? path
@@ -130,7 +132,9 @@ export class GmailClient {
         },
       });
       if (!retry.ok) {
-        throw new Error(`Gmail API error: ${retry.status} ${await retry.text()}`);
+        throw new Error(
+          `Gmail API error: ${retry.status} ${await retry.text()}`,
+        );
       }
       if (retry.status === 204) return undefined as T;
       return retry.json();
@@ -146,7 +150,12 @@ export class GmailClient {
     return response.json();
   }
 
-  async getProfile(): Promise<{ emailAddress: string; messagesTotal: number; threadsTotal: number; historyId: string }> {
+  async getProfile(): Promise<{
+    emailAddress: string;
+    messagesTotal: number;
+    threadsTotal: number;
+    historyId: string;
+  }> {
     return this.request("/profile");
   }
 
@@ -154,30 +163,48 @@ export class GmailClient {
     return this.request("/labels");
   }
 
-  async listThreads(params: {
-    labelIds?: string[];
-    maxResults?: number;
-    pageToken?: string;
-    q?: string;
-  } = {}): Promise<{ threads?: GmailThreadStub[]; nextPageToken?: string; resultSizeEstimate?: number }> {
+  async listThreads(
+    params: {
+      labelIds?: string[];
+      maxResults?: number;
+      pageToken?: string;
+      q?: string;
+    } = {},
+  ): Promise<{
+    threads?: GmailThreadStub[];
+    nextPageToken?: string;
+    resultSizeEstimate?: number;
+  }> {
     const searchParams = new URLSearchParams();
-    if (params.labelIds) searchParams.set("labelIds", params.labelIds.join(","));
-    if (params.maxResults) searchParams.set("maxResults", String(params.maxResults));
+    if (params.labelIds)
+      searchParams.set("labelIds", params.labelIds.join(","));
+    if (params.maxResults)
+      searchParams.set("maxResults", String(params.maxResults));
     if (params.pageToken) searchParams.set("pageToken", params.pageToken);
     if (params.q) searchParams.set("q", params.q);
     const qs = searchParams.toString();
     return this.request(`/threads${qs ? `?${qs}` : ""}`);
   }
 
-  async getThread(threadId: string, format: "full" | "metadata" | "minimal" = "full"): Promise<GmailThread> {
+  async getThread(
+    threadId: string,
+    format: "full" | "metadata" | "minimal" = "full",
+  ): Promise<GmailThread> {
     return this.request(`/threads/${threadId}?format=${format}`);
   }
 
-  async getMessage(messageId: string, format: "full" | "metadata" | "minimal" | "raw" = "full"): Promise<GmailMessage> {
+  async getMessage(
+    messageId: string,
+    format: "full" | "metadata" | "minimal" | "raw" = "full",
+  ): Promise<GmailMessage> {
     return this.request(`/messages/${messageId}?format=${format}`);
   }
 
-  async modifyThread(threadId: string, addLabelIds?: string[], removeLabelIds?: string[]): Promise<GmailThread> {
+  async modifyThread(
+    threadId: string,
+    addLabelIds?: string[],
+    removeLabelIds?: string[],
+  ): Promise<GmailThread> {
     return this.request(`/threads/${threadId}/modify`, {
       method: "POST",
       body: JSON.stringify({ addLabelIds, removeLabelIds }),
@@ -186,7 +213,12 @@ export class GmailClient {
 
   async getHistory(
     startHistoryId: string,
-    historyTypes: string[] = ["messageAdded", "messageDeleted", "labelAdded", "labelRemoved"],
+    historyTypes: string[] = [
+      "messageAdded",
+      "messageDeleted",
+      "labelAdded",
+      "labelRemoved",
+    ],
     pageToken?: string,
   ): Promise<{
     history?: GmailHistoryItem[];
@@ -206,7 +238,10 @@ export class GmailClient {
   /**
    * Create a new user label.
    */
-  async createLabel(name: string, color?: { textColor: string; backgroundColor: string }): Promise<GmailLabel> {
+  async createLabel(
+    name: string,
+    color?: { textColor: string; backgroundColor: string },
+  ): Promise<GmailLabel> {
     const body: Record<string, unknown> = {
       name,
       labelListVisibility: "labelShow",
@@ -222,7 +257,13 @@ export class GmailClient {
   /**
    * Update an existing label's name and/or color.
    */
-  async updateLabel(labelId: string, updates: { name?: string; color?: { textColor: string; backgroundColor: string } | null }): Promise<GmailLabel> {
+  async updateLabel(
+    labelId: string,
+    updates: {
+      name?: string;
+      color?: { textColor: string; backgroundColor: string } | null;
+    },
+  ): Promise<GmailLabel> {
     const body: Record<string, unknown> = {};
     if (updates.name !== undefined) body.name = updates.name;
     if (updates.color !== undefined) body.color = updates.color;
@@ -243,7 +284,9 @@ export class GmailClient {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!response.ok) {
-      throw new Error(`Gmail API error: ${response.status} ${await response.text()}`);
+      throw new Error(
+        `Gmail API error: ${response.status} ${await response.text()}`,
+      );
     }
   }
 
@@ -259,7 +302,9 @@ export class GmailClient {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!response.ok) {
-      throw new Error(`Gmail API error: ${response.status} ${await response.text()}`);
+      throw new Error(
+        `Gmail API error: ${response.status} ${await response.text()}`,
+      );
     }
   }
 
@@ -280,14 +325,20 @@ export class GmailClient {
    * Fetch a message attachment's binary data.
    * Returns base64url-encoded data.
    */
-  async getAttachment(messageId: string, attachmentId: string): Promise<{ attachmentId: string; size: number; data: string }> {
+  async getAttachment(
+    messageId: string,
+    attachmentId: string,
+  ): Promise<{ attachmentId: string; size: number; data: string }> {
     return this.request(`/messages/${messageId}/attachments/${attachmentId}`);
   }
 
   /**
    * Create a draft in Gmail.
    */
-  async createDraft(raw: string, threadId?: string): Promise<{ id: string; message: GmailMessage }> {
+  async createDraft(
+    raw: string,
+    threadId?: string,
+  ): Promise<{ id: string; message: GmailMessage }> {
     const message: Record<string, string> = { raw };
     if (threadId) message.threadId = threadId;
     return this.request("/drafts", {
@@ -299,7 +350,11 @@ export class GmailClient {
   /**
    * Update an existing draft.
    */
-  async updateDraft(draftId: string, raw: string, threadId?: string): Promise<{ id: string; message: GmailMessage }> {
+  async updateDraft(
+    draftId: string,
+    raw: string,
+    threadId?: string,
+  ): Promise<{ id: string; message: GmailMessage }> {
     const message: Record<string, string> = { raw };
     if (threadId) message.threadId = threadId;
     return this.request(`/drafts/${draftId}`, {
@@ -318,8 +373,12 @@ export class GmailClient {
   /**
    * List drafts. Returns draft stubs with draft ID and message ID/threadId.
    */
-  async listDrafts(): Promise<{ id: string; message: { id: string; threadId: string } }[]> {
-    const resp = await this.request<{ drafts?: { id: string; message: { id: string; threadId: string } }[] }>("/drafts?maxResults=500");
+  async listDrafts(): Promise<
+    { id: string; message: { id: string; threadId: string } }[]
+  > {
+    const resp = await this.request<{
+      drafts?: { id: string; message: { id: string; threadId: string } }[];
+    }>("/drafts?maxResults=500");
     return resp.drafts ?? [];
   }
 }

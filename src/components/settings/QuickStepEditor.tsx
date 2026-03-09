@@ -105,7 +105,18 @@ export function QuickStepEditor() {
 
     resetForm();
     await loadQuickSteps();
-  }, [activeAccountId, name, description, shortcut, icon, continueOnError, actions, editingId, resetForm, loadQuickSteps]);
+  }, [
+    activeAccountId,
+    name,
+    description,
+    shortcut,
+    icon,
+    continueOnError,
+    actions,
+    editingId,
+    resetForm,
+    loadQuickSteps,
+  ]);
 
   const handleEdit = useCallback((qs: DbQuickStep) => {
     setEditingId(qs.id);
@@ -124,16 +135,22 @@ export function QuickStepEditor() {
     setShowForm(true);
   }, []);
 
-  const handleDelete = useCallback(async (id: string) => {
-    await deleteQuickStep(id);
-    if (editingId === id) resetForm();
-    await loadQuickSteps();
-  }, [editingId, resetForm, loadQuickSteps]);
+  const handleDelete = useCallback(
+    async (id: string) => {
+      await deleteQuickStep(id);
+      if (editingId === id) resetForm();
+      await loadQuickSteps();
+    },
+    [editingId, resetForm, loadQuickSteps],
+  );
 
-  const handleToggleEnabled = useCallback(async (qs: DbQuickStep) => {
-    await updateQuickStep(qs.id, { isEnabled: qs.is_enabled !== 1 });
-    await loadQuickSteps();
-  }, [loadQuickSteps]);
+  const handleToggleEnabled = useCallback(
+    async (qs: DbQuickStep) => {
+      await updateQuickStep(qs.id, { isEnabled: qs.is_enabled !== 1 });
+      await loadQuickSteps();
+    },
+    [loadQuickSteps],
+  );
 
   const addAction = useCallback(() => {
     setActions((prev) => [...prev, { type: "archive" }]);
@@ -143,25 +160,34 @@ export function QuickStepEditor() {
     setActions((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
-  const updateAction = useCallback((index: number, type: QuickStepActionType) => {
-    setActions((prev) => {
-      const next = [...prev];
-      const meta = ACTION_TYPE_METADATA.find((m) => m.type === type);
-      next[index] = { type, ...(meta?.requiresParams ? { params: {} } : {}) };
-      return next;
-    });
-  }, []);
+  const updateAction = useCallback(
+    (index: number, type: QuickStepActionType) => {
+      setActions((prev) => {
+        const next = [...prev];
+        const meta = ACTION_TYPE_METADATA.find((m) => m.type === type);
+        next[index] = { type, ...(meta?.requiresParams ? { params: {} } : {}) };
+        return next;
+      });
+    },
+    [],
+  );
 
-  const updateActionParams = useCallback((index: number, params: QuickStepAction["params"]) => {
-    setActions((prev) => {
-      const next = [...prev];
-      const existing = next[index];
-      if (existing) {
-        next[index] = { ...existing, params: { ...existing.params, ...params } };
-      }
-      return next;
-    });
-  }, []);
+  const updateActionParams = useCallback(
+    (index: number, params: QuickStepAction["params"]) => {
+      setActions((prev) => {
+        const next = [...prev];
+        const existing = next[index];
+        if (existing) {
+          next[index] = {
+            ...existing,
+            params: { ...existing.params, ...params },
+          };
+        }
+        return next;
+      });
+    },
+    [],
+  );
 
   return (
     <div className="space-y-3">
@@ -187,7 +213,10 @@ export function QuickStepEditor() {
                 )}
               </div>
               <div className="text-xs text-text-tertiary truncate">
-                {describeActions(qs.actions_json, t("quickStepEditor.invalidActions"))}
+                {describeActions(
+                  qs.actions_json,
+                  t("quickStepEditor.invalidActions"),
+                )}
               </div>
             </div>
           </div>
@@ -197,7 +226,11 @@ export function QuickStepEditor() {
               className={`w-8 h-4 rounded-full transition-colors relative ${
                 qs.is_enabled === 1 ? "bg-accent" : "bg-bg-tertiary"
               }`}
-              title={qs.is_enabled === 1 ? t("quickStepEditor.disable") : t("quickStepEditor.enable")}
+              title={
+                qs.is_enabled === 1
+                  ? t("quickStepEditor.disable")
+                  : t("quickStepEditor.enable")
+              }
             >
               <span
                 className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform shadow ${
@@ -240,7 +273,9 @@ export function QuickStepEditor() {
 
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="text-xs text-text-secondary block mb-1">{t("quickStepEditor.shortcutOptional")}</label>
+              <label className="text-xs text-text-secondary block mb-1">
+                {t("quickStepEditor.shortcutOptional")}
+              </label>
               <input
                 type="text"
                 value={shortcut}
@@ -250,7 +285,9 @@ export function QuickStepEditor() {
               />
             </div>
             <div className="flex-1">
-              <label className="text-xs text-text-secondary block mb-1">{t("quickStepEditor.iconOptional")}</label>
+              <label className="text-xs text-text-secondary block mb-1">
+                {t("quickStepEditor.iconOptional")}
+              </label>
               <input
                 type="text"
                 value={icon}
@@ -262,10 +299,13 @@ export function QuickStepEditor() {
           </div>
 
           <div>
-            <div className="text-xs font-medium text-text-secondary mb-1.5">{t("quickStepEditor.actionChain")}</div>
+            <div className="text-xs font-medium text-text-secondary mb-1.5">
+              {t("quickStepEditor.actionChain")}
+            </div>
             <div className="space-y-2">
               {actions.map((action, index) => {
-                const needsLabelParam = action.type === "applyLabel" || action.type === "removeLabel";
+                const needsLabelParam =
+                  action.type === "applyLabel" || action.type === "removeLabel";
                 const needsCategoryParam = action.type === "moveToCategory";
                 const needsSnoozeDuration = action.type === "snooze";
 
@@ -278,7 +318,12 @@ export function QuickStepEditor() {
                       <div className="relative">
                         <select
                           value={action.type}
-                          onChange={(e) => updateAction(index, e.target.value as QuickStepActionType)}
+                          onChange={(e) =>
+                            updateAction(
+                              index,
+                              e.target.value as QuickStepActionType,
+                            )
+                          }
                           className="w-full bg-bg-tertiary text-text-primary text-xs px-2 py-1.5 rounded border border-border-primary appearance-none pr-6"
                         >
                           {ACTION_TYPE_METADATA.map((m) => (
@@ -287,44 +332,79 @@ export function QuickStepEditor() {
                             </option>
                           ))}
                         </select>
-                        <ChevronDown size={10} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
+                        <ChevronDown
+                          size={10}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none"
+                        />
                       </div>
                       {needsLabelParam && labels.length > 0 && (
                         <select
                           value={action.params?.labelId ?? ""}
-                          onChange={(e) => updateActionParams(index, { labelId: e.target.value })}
+                          onChange={(e) =>
+                            updateActionParams(index, {
+                              labelId: e.target.value,
+                            })
+                          }
                           className="w-full bg-bg-tertiary text-text-primary text-xs px-2 py-1 rounded border border-border-primary"
                         >
-                          <option value="">{t("quickStepEditor.selectLabel")}</option>
+                          <option value="">
+                            {t("quickStepEditor.selectLabel")}
+                          </option>
                           {labels.map((l) => (
-                            <option key={l.id} value={l.id}>{l.name}</option>
+                            <option key={l.id} value={l.id}>
+                              {l.name}
+                            </option>
                           ))}
                         </select>
                       )}
                       {needsCategoryParam && (
                         <select
                           value={action.params?.category ?? ""}
-                          onChange={(e) => updateActionParams(index, { category: e.target.value })}
+                          onChange={(e) =>
+                            updateActionParams(index, {
+                              category: e.target.value,
+                            })
+                          }
                           className="w-full bg-bg-tertiary text-text-primary text-xs px-2 py-1 rounded border border-border-primary"
                         >
-                          <option value="">{t("quickStepEditor.selectCategory")}</option>
+                          <option value="">
+                            {t("quickStepEditor.selectCategory")}
+                          </option>
                           {ALL_CATEGORIES.map((cat) => (
-                            <option key={cat} value={cat}>{cat}</option>
+                            <option key={cat} value={cat}>
+                              {cat}
+                            </option>
                           ))}
                         </select>
                       )}
                       {needsSnoozeDuration && (
                         <select
                           value={action.params?.snoozeDuration ?? ""}
-                          onChange={(e) => updateActionParams(index, { snoozeDuration: Number(e.target.value) })}
+                          onChange={(e) =>
+                            updateActionParams(index, {
+                              snoozeDuration: Number(e.target.value),
+                            })
+                          }
                           className="w-full bg-bg-tertiary text-text-primary text-xs px-2 py-1 rounded border border-border-primary"
                         >
-                          <option value="">{t("quickStepEditor.selectDuration")}</option>
-                          <option value={3600000}>{t("quickStepEditor.duration1h")}</option>
-                          <option value={14400000}>{t("quickStepEditor.duration4h")}</option>
-                          <option value={86400000}>{t("quickStepEditor.durationTomorrow")}</option>
-                          <option value={172800000}>{t("quickStepEditor.duration2d")}</option>
-                          <option value={604800000}>{t("quickStepEditor.duration1w")}</option>
+                          <option value="">
+                            {t("quickStepEditor.selectDuration")}
+                          </option>
+                          <option value={3600000}>
+                            {t("quickStepEditor.duration1h")}
+                          </option>
+                          <option value={14400000}>
+                            {t("quickStepEditor.duration4h")}
+                          </option>
+                          <option value={86400000}>
+                            {t("quickStepEditor.durationTomorrow")}
+                          </option>
+                          <option value={172800000}>
+                            {t("quickStepEditor.duration2d")}
+                          </option>
+                          <option value={604800000}>
+                            {t("quickStepEditor.duration1w")}
+                          </option>
                         </select>
                       )}
                     </div>
@@ -364,7 +444,9 @@ export function QuickStepEditor() {
               disabled={!name.trim() || actions.length === 0}
               className="px-3 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-50"
             >
-              {editingId ? t("quickStepEditor.update") : t("quickStepEditor.save")}
+              {editingId
+                ? t("quickStepEditor.update")
+                : t("quickStepEditor.save")}
             </button>
             <button
               onClick={resetForm}

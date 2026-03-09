@@ -35,7 +35,8 @@ class MockResizeObserver {
   unobserve() {}
   disconnect() {}
 }
-globalThis.ResizeObserver = MockResizeObserver as unknown as typeof ResizeObserver;
+globalThis.ResizeObserver =
+  MockResizeObserver as unknown as typeof ResizeObserver;
 
 function makeAttachment(overrides: Partial<DbAttachment> = {}): DbAttachment {
   return {
@@ -151,8 +152,17 @@ describe("EmailRenderer", () => {
       .mockResolvedValueOnce({ data: btoa("img2"), size: 60 });
 
     const inlineAttachments = [
-      makeAttachment({ id: "att-1", content_id: "img1@ex.com", gmail_attachment_id: "g1" }),
-      makeAttachment({ id: "att-2", content_id: "img2@ex.com", gmail_attachment_id: "g2", mime_type: "image/jpeg" }),
+      makeAttachment({
+        id: "att-1",
+        content_id: "img1@ex.com",
+        gmail_attachment_id: "g1",
+      }),
+      makeAttachment({
+        id: "att-2",
+        content_id: "img2@ex.com",
+        gmail_attachment_id: "g2",
+        mime_type: "image/jpeg",
+      }),
     ];
 
     render(
