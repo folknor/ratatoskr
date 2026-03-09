@@ -10,6 +10,7 @@ mod commands;
 mod db;
 mod imap;
 mod oauth;
+mod search;
 mod smtp;
 
 #[allow(clippy::needless_pass_by_value)]
@@ -184,6 +185,16 @@ pub fn run() {
             db::queries_extra::db_add_vip_sender,
             db::queries_extra::db_remove_vip_sender,
             db::queries_extra::db_is_vip_sender,
+            db::queries_extra::db_set_thread_category,
+            db::queries_extra::db_get_bundle_rules,
+            db::queries_extra::db_get_bundle_summaries,
+            db::queries_extra::db_get_held_thread_ids,
+            // Tantivy full-text search (Phase 3)
+            search::commands::search_messages,
+            search::commands::index_message,
+            search::commands::index_messages_batch,
+            search::commands::delete_search_document,
+            search::commands::rebuild_search_index,
         ])
         .setup(|app| {
             {
@@ -201,6 +212,7 @@ pub fn run() {
             }
 
             // Initialize Rust-owned SQLite database (same velo.db file)
+            // and tantivy search index
             {
                 let app_data_dir = app.path().app_data_dir().map_err(|e| {
                     Box::new(std::io::Error::other(format!("app data dir: {e}")))
@@ -209,6 +221,11 @@ pub fn run() {
                     Box::new(std::io::Error::other(format!("db init: {e}")))
                 })?;
                 app.manage(db_state);
+
+                let search_state = search::SearchState::init(&app_data_dir).map_err(|e| {
+                    Box::new(std::io::Error::other(format!("search init: {e}")))
+                })?;
+                app.manage(search_state);
             }
 
             #[cfg(not(target_os = "linux"))]
