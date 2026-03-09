@@ -8,6 +8,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
+import type { DbBundleRule } from "@/services/db/bundleRules";
 import type {
   ContactAttachment,
   ContactStats,
@@ -641,4 +642,75 @@ export async function isVipSender(
   email: string,
 ): Promise<boolean> {
   return invoke<boolean>("db_is_vip_sender", { accountId, email });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// THREAD CATEGORIES — set
+// ═══════════════════════════════════════════════════════════════
+
+export async function setThreadCategory(
+  accountId: string,
+  threadId: string,
+  category: string,
+  isManual: boolean,
+): Promise<void> {
+  return invoke<void>("db_set_thread_category", {
+    accountId,
+    threadId,
+    category,
+    isManual,
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// BUNDLE RULES
+// ═══════════════════════════════════════════════════════════════
+
+/** Row returned by `db_get_bundle_summaries` */
+interface BundleSummaryRow {
+  category: string;
+  count: number;
+  latestSubject: string | null;
+  latestSender: string | null;
+}
+
+export async function getBundleRules(
+  accountId: string,
+): Promise<DbBundleRule[]> {
+  return invoke<DbBundleRule[]>("db_get_bundle_rules", { accountId });
+}
+
+export async function getBundleSummaries(
+  accountId: string,
+  categories: string[],
+): Promise<
+  Map<
+    string,
+    { count: number; latestSubject: string | null; latestSender: string | null }
+  >
+> {
+  if (categories.length === 0) return new Map();
+  const rows = await invoke<BundleSummaryRow[]>("db_get_bundle_summaries", {
+    accountId,
+    categories,
+  });
+  const map = new Map<
+    string,
+    { count: number; latestSubject: string | null; latestSender: string | null }
+  >();
+  for (const row of rows) {
+    map.set(row.category, {
+      count: row.count,
+      latestSubject: row.latestSubject,
+      latestSender: row.latestSender,
+    });
+  }
+  return map;
+}
+
+export async function getHeldThreadIds(
+  accountId: string,
+): Promise<Set<string>> {
+  const ids = await invoke<string[]>("db_get_held_thread_ids", { accountId });
+  return new Set(ids);
 }

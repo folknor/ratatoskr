@@ -7,8 +7,9 @@ use tauri::State;
 use super::DbState;
 use super::queries::row_to_contact;
 use super::types::{
-    ContactAttachmentRow, ContactStats, DbContact, DbFilterRule, DbFollowUpReminder, DbQuickStep,
-    DbSmartFolder, DbSmartLabelRule, RecentThread, SameDomainContact, SortOrderItem,
+    BundleSummary, ContactAttachmentRow, ContactStats, DbBundleRule, DbContact, DbFilterRule,
+    DbFollowUpReminder, DbQuickStep, DbSmartFolder, DbSmartLabelRule, RecentThread,
+    SameDomainContact, SortOrderItem,
 };
 
 // ── Dynamic update helper ───────────────────────────────────
@@ -1035,6 +1036,184 @@ pub async fn db_is_vip_sender(
                 )
                 .map_err(|e| e.to_string())?;
             Ok(count > 0)
+        })
+        .await
+}
+
+// ═══════════════════════════════════════════════════════════════
+// THREAD CATEGORIES — set
+// ═══════════════════════════════════════════════════════════════
+
+#[tauri::command]
+pub async fn db_set_thread_category(
+    state: State<'_, DbState>,
+    account_id: String,
+    thread_id: String,
+    category: String,
+    is_manual: bool,
+) -> Result<(), String> {
+    state
+        .with_conn(move |conn| {
+            conn.execute(
+                "INSERT INTO thread_categories (account_id, thread_id, category, is_manual)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(account_id, thread_id) DO UPDATE SET category = ?3, is_manual = ?4",
+                params![account_id, thread_id, category, is_manual as i64],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })
+        .await
+}
+
+// ═══════════════════════════════════════════════════════════════
+// BUNDLE RULES
+// ═══════════════════════════════════════════════════════════════
+
+fn row_to_bundle_rule(row: &Row<'_>) -> rusqlite::Result<DbBundleRule> {
+    Ok(DbBundleRule {
+        id: row.get("id")?,
+        account_id: row.get("account_id")?,
+        category: row.get("category")?,
+        is_bundled: row.get("is_bundled")?,
+        delivery_enabled: row.get("delivery_enabled")?,
+        delivery_schedule: row.get("delivery_schedule")?,
+        last_delivered_at: row.get("last_delivered_at")?,
+        created_at: row.get("created_at")?,
+    })
+}
+
+#[tauri::command]
+pub async fn db_get_bundle_rules(
+    state: State<'_, DbState>,
+    account_id: String,
+) -> Result<Vec<DbBundleRule>, String> {
+    state
+        .with_conn(move |conn| {
+            let mut stmt = conn
+                .prepare("SELECT * FROM bundle_rules WHERE account_id = ?1")
+                .map_err(|e| e.to_string())?;
+            stmt.query_map(params![account_id], row_to_bundle_rule)
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn db_get_bundle_summaries(
+    state: State<'_, DbState>,
+    account_id: String,
+    categories: Vec<String>,
+) -> Result<Vec<BundleSummary>, String> {
+    if categories.is_empty() {
+        return Ok(Vec::new());
+    }
+    state
+        .with_conn(move |conn| {
+            let placeholders: String = categories
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("?{}", i + 2))
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            // Query 1: counts per category
+            let count_sql = format!(
+                "SELECT tc.category, COUNT(DISTINCT t.id) as count
+                 FROM threads t
+                 JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id AND tl.label_id = 'INBOX'
+                 JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id AND tc.category IN ({placeholders})
+                 WHERE t.account_id = ?1
+                 GROUP BY tc.category"
+            );
+            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+            param_values.push(Box::new(account_id.clone()));
+            for cat in &categories {
+                param_values.push(Box::new(cat.clone()));
+            }
+            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                param_values.iter().map(AsRef::as_ref).collect();
+
+            let mut stmt = conn.prepare(&count_sql).map_err(|e| e.to_string())?;
+            let count_rows: Vec<(String, i64)> = stmt
+                .query_map(param_refs.as_slice(), |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+
+            // Query 2: latest subject/sender per category
+            let latest_sql = format!(
+                "SELECT tc.category, t.subject, m.from_name
+                 FROM threads t
+                 JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id AND tl.label_id = 'INBOX'
+                 JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id AND tc.category IN ({placeholders})
+                 JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id
+                 WHERE t.account_id = ?1
+                 GROUP BY tc.category
+                 HAVING t.last_message_at = MAX(t.last_message_at)"
+            );
+            let mut stmt2 = conn.prepare(&latest_sql).map_err(|e| e.to_string())?;
+            let latest_rows: Vec<(String, Option<String>, Option<String>)> = stmt2
+                .query_map(param_refs.as_slice(), |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                })
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+
+            // Build result with defaults for every requested category
+            let mut results = Vec::with_capacity(categories.len());
+            for cat in &categories {
+                let count = count_rows
+                    .iter()
+                    .find(|(c, _)| c == cat)
+                    .map(|(_, n)| *n)
+                    .unwrap_or(0);
+                let (latest_subject, latest_sender) = latest_rows
+                    .iter()
+                    .find(|(c, _, _)| c == cat)
+                    .map(|(_, s, f)| (s.clone(), f.clone()))
+                    .unwrap_or((None, None));
+                results.push(BundleSummary {
+                    category: cat.clone(),
+                    count,
+                    latest_subject,
+                    latest_sender,
+                });
+            }
+            Ok(results)
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn db_get_held_thread_ids(
+    state: State<'_, DbState>,
+    account_id: String,
+) -> Result<Vec<String>, String> {
+    state
+        .with_conn(move |conn| {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_secs() as i64;
+            let mut stmt = conn
+                .prepare(
+                    "SELECT thread_id FROM bundled_threads WHERE account_id = ?1 AND held_until > ?2",
+                )
+                .map_err(|e| e.to_string())?;
+            stmt.query_map(params![account_id, now], |row| row.get::<_, String>(0))
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())
         })
         .await
 }

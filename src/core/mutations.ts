@@ -40,8 +40,8 @@ export {
   upsertContact,
 } from "./rustDb";
 
-// Thread category writes (still TS)
-export { setThreadCategory } from "@/services/db/threadCategories";
+// Thread category writes (Rust-backed)
+export { setThreadCategory } from "./rustDb";
 
 // Gmail client & sync triggers
 export { deleteDraftsForThread } from "@/services/gmail/draftDeletion";

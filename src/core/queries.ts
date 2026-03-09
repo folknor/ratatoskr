@@ -97,13 +97,9 @@ export type { DbQuickStep } from "@/services/db/quickSteps";
 export type { DbSmartFolder } from "@/services/db/smartFolders";
 export type { DbSmartLabelRule } from "@/services/db/smartLabelRules";
 
-// ── Bundle Rules (still TS — complex joins/summaries) ────────
-export {
-  type DbBundleRule,
-  getBundleRules,
-  getBundleSummaries,
-  getHeldThreadIds,
-} from "@/services/db/bundleRules";
+// ── Bundle Rules (Rust-backed) ───────────────────────────────
+export { getBundleRules, getBundleSummaries, getHeldThreadIds } from "./rustDb";
+export type { DbBundleRule } from "@/services/db/bundleRules";
 
 // ── Quick Step Types ────────────────────────────────────────
 export {

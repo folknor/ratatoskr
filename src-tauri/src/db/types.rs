@@ -219,6 +219,30 @@ pub struct SortOrderItem {
     pub sort_order: i64,
 }
 
+// ── Bundle Rule ─────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DbBundleRule {
+    pub id: String,
+    pub account_id: String,
+    pub category: String,
+    pub is_bundled: i64,
+    pub delivery_enabled: i64,
+    pub delivery_schedule: Option<String>,
+    pub last_delivered_at: Option<i64>,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BundleSummary {
+    pub category: String,
+    pub count: i64,
+    pub latest_subject: Option<String>,
+    pub latest_sender: Option<String>,
+}
+
 // ── Attachment ──────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
