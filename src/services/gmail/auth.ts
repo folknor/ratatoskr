@@ -91,7 +91,7 @@ export async function startOAuthFlow(
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: "code",
-    scope: SCOPES,
+    scope: SCOPES.join(" "),
     code_challenge: codeChallenge,
     code_challenge_method: "S256",
     access_type: "offline",

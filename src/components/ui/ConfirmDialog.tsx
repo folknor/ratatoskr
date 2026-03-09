@@ -28,12 +28,13 @@ export function ConfirmDialog({
 }: ConfirmDialogProps): React.ReactNode {
   const confirmRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
+  useEffect((): (() => void) | undefined => {
     if (isOpen) {
       // Delay focus to allow modal transition
       const id = setTimeout(() => confirmRef.current?.focus(), 50);
       return () => clearTimeout(id);
     }
+    return undefined;
   }, [isOpen]);
 
   const handleKeyDown = (e: React.KeyboardEvent): void => {

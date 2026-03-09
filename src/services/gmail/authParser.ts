@@ -28,7 +28,7 @@ function parseVerdict(
   const match = normalized.match(regex);
   if (!match) return null;
   return {
-    result: match[1]?.toLowerCase(),
+    result: match[1]?.toLowerCase() ?? "unknown",
     detail: match[2]?.trim() ?? null,
   };
 }
@@ -42,7 +42,7 @@ function parseReceivedSpf(headerValue: string): AuthVerdict | null {
   const match = normalized.match(/^(\w+)(?:\s*\(([^)]+)\))?/i);
   if (!match) return null;
   return {
-    result: match[1]?.toLowerCase(),
+    result: match[1]?.toLowerCase() ?? "unknown",
     detail: match[2]?.trim() ?? null,
   };
 }
@@ -157,7 +157,7 @@ export function parseAuthenticationResults(
       } else {
         // Use the first result
         dkim = {
-          result: dkimMatches[0]?.[1]?.toLowerCase(),
+          result: dkimMatches[0]?.[1]?.toLowerCase() ?? "unknown",
           detail: dkimMatches[0]?.[2]?.trim() ?? null,
         };
       }

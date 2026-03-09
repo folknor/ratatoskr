@@ -489,12 +489,14 @@ export default function App(): React.ReactNode {
   }, []);
 
   // Sync theme class to <html> element
-  useEffect(() => {
+  useEffect((): (() => void) | undefined => {
     const root = document.documentElement;
     if (theme === "dark") {
       root.classList.add("dark");
+      return undefined;
     } else if (theme === "light") {
       root.classList.remove("dark");
+      return undefined;
     } else {
       const mq = window.matchMedia("(prefers-color-scheme: dark)");
       const apply = (): void => {
@@ -529,7 +531,7 @@ export default function App(): React.ReactNode {
   }, [reduceMotion]);
 
   // Apply color theme CSS custom properties to <html>
-  useEffect(() => {
+  useEffect((): (() => void) | undefined => {
     const root = document.documentElement;
     const props = [
       "--color-accent",
@@ -565,6 +567,7 @@ export default function App(): React.ReactNode {
       mq.addEventListener("change", apply);
       return (): void => mq.removeEventListener("change", apply);
     }
+    return undefined;
   }, [colorTheme, theme]);
 
   const handleAddAccountSuccess = useCallback(async () => {

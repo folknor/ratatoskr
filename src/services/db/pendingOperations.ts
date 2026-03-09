@@ -200,7 +200,9 @@ export async function compactQueue(accountId?: string): Promise<number> {
         return rParams.labelId === addParams.labelId;
       });
       if (matchIdx !== -1) {
-        toDelete.push(addOp.id, removeLabelOps[matchIdx]?.id);
+        const matchId = removeLabelOps[matchIdx]?.id;
+        toDelete.push(addOp.id);
+        if (matchId != null) toDelete.push(matchId);
         removeLabelOps.splice(matchIdx, 1);
       }
     }
@@ -212,7 +214,8 @@ export async function compactQueue(accountId?: string): Promise<number> {
     if (moveOps.length > 1) {
       // Delete all but the last
       for (let i = 0; i < moveOps.length - 1; i++) {
-        toDelete.push(moveOps[i]?.id);
+        const moveId = moveOps[i]?.id;
+        if (moveId != null) toDelete.push(moveId);
       }
     }
   }

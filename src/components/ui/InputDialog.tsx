@@ -37,12 +37,13 @@ export function InputDialog({
   const firstInputRef = useRef<HTMLInputElement>(null);
 
   // Reset values when the dialog opens or fields change
-  useEffect(() => {
+  useEffect((): (() => void) | undefined => {
     if (isOpen) {
       setValues(buildInitial());
       const id = setTimeout(() => firstInputRef.current?.focus(), 50);
       return () => clearTimeout(id);
     }
+    return undefined;
   }, [isOpen, buildInitial]);
 
   const isValid = fields.every((f) => {

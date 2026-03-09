@@ -128,12 +128,14 @@ export default function ComposerWindow(): React.ReactNode {
 
   // Sync theme class to <html>
   const theme = useUIStore((s) => s.theme);
-  useEffect(() => {
+  useEffect((): (() => void) | undefined => {
     const root = document.documentElement;
     if (theme === "dark") {
       root.classList.add("dark");
+      return undefined;
     } else if (theme === "light") {
       root.classList.remove("dark");
+      return undefined;
     } else {
       const mq = window.matchMedia("(prefers-color-scheme: dark)");
       const apply = (): void => {
@@ -161,7 +163,7 @@ export default function ComposerWindow(): React.ReactNode {
 
   // Apply color theme CSS custom properties to <html>
   const colorTheme = useUIStore((s) => s.colorTheme);
-  useEffect(() => {
+  useEffect((): (() => void) | undefined => {
     const root = document.documentElement;
     const props = [
       "--color-accent",
@@ -196,6 +198,7 @@ export default function ComposerWindow(): React.ReactNode {
       mq.addEventListener("change", apply);
       return (): void => mq.removeEventListener("change", apply);
     }
+    return undefined;
   }, [colorTheme, theme]);
 
   if (loading) {

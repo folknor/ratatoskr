@@ -479,7 +479,7 @@ export async function sendEmail(
   const result = await executeEmailAction(accountId, {
     type: "sendMessage",
     rawBase64Url,
-    threadId,
+    ...(threadId != null && { threadId }),
   });
 
   // Notify the UI to refresh (so sent message appears in Sent folder)
@@ -498,7 +498,7 @@ export function createDraft(
   return executeEmailAction(accountId, {
     type: "createDraft",
     rawBase64Url,
-    threadId,
+    ...(threadId != null && { threadId }),
   });
 }
 
@@ -512,7 +512,7 @@ export function updateDraft(
     type: "updateDraft",
     draftId,
     rawBase64Url,
-    threadId,
+    ...(threadId != null && { threadId }),
   });
 }
 

@@ -47,11 +47,11 @@ export function isDocument(
       return true;
   }
   const ext = filename?.toLowerCase();
-  return (
+  return Boolean(
     ext?.endsWith(".doc") ||
     ext?.endsWith(".docx") ||
     ext?.endsWith(".odt") ||
-    ext?.endsWith(".rtf")
+    ext?.endsWith(".rtf"),
   );
 }
 
@@ -68,11 +68,11 @@ export function isSpreadsheet(
       return true;
   }
   const ext = filename?.toLowerCase();
-  return (
+  return Boolean(
     ext?.endsWith(".xls") ||
     ext?.endsWith(".xlsx") ||
     ext?.endsWith(".ods") ||
-    ext?.endsWith(".csv")
+    ext?.endsWith(".csv"),
   );
 }
 

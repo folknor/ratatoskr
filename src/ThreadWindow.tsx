@@ -23,14 +23,17 @@ export default function ThreadWindow(): React.ReactNode {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const threadId = params.get("thread");
-    const accountId = params.get("account");
+    const threadIdParam = params.get("thread");
+    const accountIdParam = params.get("account");
 
-    if (!(threadId && accountId)) {
+    if (!(threadIdParam && accountIdParam)) {
       setError("Missing thread or account parameter");
       setLoading(false);
       return;
     }
+
+    const threadId: string = threadIdParam;
+    const accountId: string = accountIdParam;
 
     async function init(): Promise<void> {
       try {
@@ -126,12 +129,14 @@ export default function ThreadWindow(): React.ReactNode {
 
   // Sync theme class to <html>
   const theme = useUIStore((s) => s.theme);
-  useEffect(() => {
+  useEffect((): (() => void) | undefined => {
     const root = document.documentElement;
     if (theme === "dark") {
       root.classList.add("dark");
+      return undefined;
     } else if (theme === "light") {
       root.classList.remove("dark");
+      return undefined;
     } else {
       const mq = window.matchMedia("(prefers-color-scheme: dark)");
       const apply = (): void => {
@@ -159,7 +164,7 @@ export default function ThreadWindow(): React.ReactNode {
 
   // Apply color theme CSS custom properties to <html>
   const colorTheme = useUIStore((s) => s.colorTheme);
-  useEffect(() => {
+  useEffect((): (() => void) | undefined => {
     const root = document.documentElement;
     const props = [
       "--color-accent",
@@ -194,6 +199,7 @@ export default function ThreadWindow(): React.ReactNode {
       mq.addEventListener("change", apply);
       return (): void => mq.removeEventListener("change", apply);
     }
+    return undefined;
   }, [colorTheme, theme]);
 
   if (loading) {
