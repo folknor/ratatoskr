@@ -12,23 +12,8 @@ import searchEN from "./locales/en/search.json";
 import settingsEN from "./locales/en/settings.json";
 import sidebarEN from "./locales/en/sidebar.json";
 import tasksEN from "./locales/en/tasks.json";
-import accountsIT from "./locales/it/accounts.json";
-import attachmentsIT from "./locales/it/attachments.json";
-import calendarIT from "./locales/it/calendar.json";
-import commonIT from "./locales/it/common.json";
-import composerIT from "./locales/it/composer.json";
-import emailIT from "./locales/it/email.json";
-import helpIT from "./locales/it/help.json";
-import notificationsIT from "./locales/it/notifications.json";
-import searchIT from "./locales/it/search.json";
-import settingsIT from "./locales/it/settings.json";
-import sidebarIT from "./locales/it/sidebar.json";
-import tasksIT from "./locales/it/tasks.json";
 
-export const SUPPORTED_LANGUAGES = [
-  { code: "en", name: "English" },
-  { code: "it", name: "Italiano" },
-] as const;
+export const SUPPORTED_LANGUAGES = [{ code: "en", name: "English" }] as const;
 
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number]["code"];
 
@@ -48,22 +33,8 @@ i18n.use(initReactI18next).init({
       attachments: attachmentsEN,
       help: helpEN,
     },
-    it: {
-      common: commonIT,
-      sidebar: sidebarIT,
-      email: emailIT,
-      composer: composerIT,
-      settings: settingsIT,
-      search: searchIT,
-      accounts: accountsIT,
-      tasks: tasksIT,
-      notifications: notificationsIT,
-      calendar: calendarIT,
-      attachments: attachmentsIT,
-      help: helpIT,
-    },
   },
-  supportedLngs: ["en", "it"],
+  supportedLngs: ["en"],
   load: "languageOnly",
   fallbackLng: "en",
   defaultNS: "common",
