@@ -3,8 +3,10 @@ import type React from "react";
 import { useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { CSSTransition } from "react-transition-group";
-import { deleteThread as deleteThreadFromDb } from "@/services/db/threads";
-import { getGmailClient } from "@/services/gmail/tokenManager";
+import {
+  deleteThread as deleteThreadFromDb,
+  getGmailClient,
+} from "@/core/mutations";
 import { useThreadStore } from "@/stores/threadStore";
 
 export function MultiSelectBar({

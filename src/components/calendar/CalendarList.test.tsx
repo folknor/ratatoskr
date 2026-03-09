@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { vi } from "vitest";
-import type { DbCalendar } from "@/services/db/calendars";
+import type { DbCalendar } from "@/core/calendar";
 import { CalendarList } from "./CalendarList";
 
 function makeCalendar(overrides: Partial<DbCalendar> = {}): DbCalendar {

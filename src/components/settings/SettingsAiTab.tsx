@@ -3,8 +3,8 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
-import { PROVIDER_MODELS } from "@/services/ai/types";
-import { setSecureSetting, setSetting } from "@/services/db/settings";
+import { PROVIDER_MODELS } from "@/core/ai";
+import { setSecureSetting, setSetting } from "@/core/settings";
 import { useAccountStore } from "@/stores/accountStore";
 import { Section, SettingRow, ToggleRow } from "./SettingsShared";
 
@@ -128,7 +128,7 @@ export function SettingsAiTab({
               setAiTestResult(null);
               await setSetting("ai_provider", val);
               const { clearProviderClients } = await import(
-                "@/services/ai/providerManager"
+                "@/core/ai"
               );
               clearProviderClients();
             }}
@@ -183,7 +183,7 @@ export function SettingsAiTab({
                   await setSetting("ollama_server_url", ollamaServerUrl.trim());
                   await setSetting("ollama_model", ollamaModel.trim());
                   const { clearProviderClients } = await import(
-                    "@/services/ai/providerManager"
+                    "@/core/ai"
                   );
                   clearProviderClients();
                   setAiKeySaved(true);
@@ -201,7 +201,7 @@ export function SettingsAiTab({
                   setAiTestResult(null);
                   try {
                     const { testConnection } = await import(
-                      "@/services/ai/aiService"
+                      "@/core/ai"
                     );
                     const ok = await testConnection();
                     setAiTestResult(ok ? "success" : "fail");
@@ -298,7 +298,7 @@ export function SettingsAiTab({
                   else setGeminiModel(val);
                   await setSetting(modelSettingMap[aiProvider], val);
                   const { clearProviderClients } = await import(
-                    "@/services/ai/providerManager"
+                    "@/core/ai"
                   );
                   clearProviderClients();
                 }}
@@ -333,7 +333,7 @@ export function SettingsAiTab({
                   if (keyValue) {
                     await setSecureSetting(keySettingMap[aiProvider], keyValue);
                     const { clearProviderClients } = await import(
-                      "@/services/ai/providerManager"
+                      "@/core/ai"
                     );
                     clearProviderClients();
                   }
@@ -360,7 +360,7 @@ export function SettingsAiTab({
                   setAiTestResult(null);
                   try {
                     const { testConnection } = await import(
-                      "@/services/ai/aiService"
+                      "@/core/ai"
                     );
                     const ok = await testConnection();
                     setAiTestResult(ok ? "success" : "fail");
@@ -476,7 +476,7 @@ export function SettingsAiTab({
                   const activeId = accounts.find((a) => a.isActive)?.id;
                   if (activeId) {
                     const { refreshWritingStyle } = await import(
-                      "@/services/ai/writingStyleService"
+                      "@/core/ai"
                     );
                     await refreshWritingStyle(activeId);
                     setStyleAnalyzeDone(true);

@@ -8,11 +8,8 @@ import {
   navigateBack,
   navigateToLabel,
 } from "@/router/navigate";
-import {
-  type DbTemplate,
-  getTemplatesForAccount,
-} from "@/services/db/templates";
-import { getGmailClient } from "@/services/gmail/tokenManager";
+import { type DbTemplate, getTemplatesForAccount } from "@/core/composer";
+import { getGmailClient } from "@/core/sync";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useThreadStore } from "@/stores/threadStore";

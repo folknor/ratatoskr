@@ -1,7 +1,7 @@
 import type React from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/Button";
-import { setSetting } from "@/services/db/settings";
+import { setSetting } from "@/core/settings";
 import { useAccountStore } from "@/stores/accountStore";
 import { Section, ToggleRow } from "./SettingsShared";
 

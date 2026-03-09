@@ -10,8 +10,8 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import type { DbAttachment } from "@/services/db/attachments";
-import { addToAllowlist } from "@/services/db/imageAllowlist";
+import { addToAllowlist } from "@/core/mutations";
+import type { DbAttachment } from "@/core/queries";
 import { useUIStore } from "@/stores/uiStore";
 import { hasBlockedImages, stripRemoteImages } from "@/utils/imageBlocker";
 import { escapeHtml, sanitizeHtml } from "@/utils/sanitize";
@@ -66,7 +66,7 @@ export function EmailRenderer({
     void (async () => {
       try {
         const { getEmailProvider } = await import(
-          "@/services/email/providerFactory"
+          "@/core/attachments"
         );
         const provider = await getEmailProvider(accountId);
         const resolved = new Map<string, string>();

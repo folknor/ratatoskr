@@ -1,7 +1,7 @@
 import type { StoreApi, UseBoundStore } from "zustand";
 import { create } from "zustand";
 import type { ColorThemeId } from "@/constants/themes";
-import { setSetting } from "@/services/db/settings";
+import { setSetting } from "@/core/settings";
 
 type Theme = "light" | "dark" | "system";
 type ReadingPanePosition = "right" | "bottom" | "hidden";

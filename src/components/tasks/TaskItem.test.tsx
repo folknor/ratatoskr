@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { vi } from "vitest";
-import type { DbTask } from "@/services/db/tasks";
+import type { DbTask } from "@/core/tasks";
 import { TaskItem } from "./TaskItem";
 
 function makeTask(overrides: Partial<DbTask> = {}): DbTask {

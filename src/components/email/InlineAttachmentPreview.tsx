@@ -2,8 +2,7 @@ import { FileText } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { DbAttachment } from "@/services/db/attachments";
-import { getEmailProvider } from "@/services/email/providerFactory";
+import { type DbAttachment, getEmailProvider } from "@/core/attachments";
 import { formatFileSize, isImage, isPdf } from "@/utils/fileTypeHelpers";
 
 /** Dedup attachments by filename+size (content-based) */

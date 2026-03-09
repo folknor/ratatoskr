@@ -8,22 +8,22 @@ import {
   navigateToLabel,
   navigateToThread,
 } from "@/router/navigate";
-import { getMessagesForThread } from "@/services/db/messages";
-import { deleteThread as deleteThreadFromDb } from "@/services/db/threads";
 import {
   archiveThread,
+  deleteThread as deleteThreadFromDb,
+  deleteDraftsForThread,
+  getGmailClient,
   muteThread,
   permanentDeleteThread,
   pinThread,
   spamThread,
   starThread,
   trashThread,
+  triggerSync,
   unmuteThread,
   unpinThread,
-} from "@/services/emailActions";
-import { deleteDraftsForThread } from "@/services/gmail/draftDeletion";
-import { triggerSync } from "@/services/gmail/syncManager";
-import { getGmailClient } from "@/services/gmail/tokenManager";
+} from "@/core/mutations";
+import { getMessagesForThread } from "@/core/queries";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useContextMenuStore } from "@/stores/contextMenuStore";

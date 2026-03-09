@@ -2,7 +2,7 @@ import { Check, Copy } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
-import { getEmailProvider } from "@/services/email/providerFactory";
+import { getEmailProvider } from "@/core/attachments";
 
 interface RawMessageModalProps {
   isOpen: boolean;

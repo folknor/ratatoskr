@@ -3,7 +3,7 @@ import type React from "react";
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { InputDialog } from "@/components/ui/InputDialog";
-import { searchMessages } from "@/services/db/search";
+import { searchMessages } from "@/core/queries";
 import { useAccountStore } from "@/stores/accountStore";
 import { useSmartFolderStore } from "@/stores/smartFolderStore";
 import { useThreadStore } from "@/stores/threadStore";

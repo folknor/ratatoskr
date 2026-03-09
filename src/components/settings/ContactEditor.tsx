@@ -7,7 +7,7 @@ import {
   deleteContact,
   getAllContacts,
   updateContact,
-} from "@/services/db/contacts";
+} from "@/core/queries";
 
 export function ContactEditor(): React.ReactNode {
   const { t } = useTranslation("settings");

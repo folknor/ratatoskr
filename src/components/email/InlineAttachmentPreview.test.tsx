@@ -1,13 +1,13 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
-import type { DbAttachment } from "@/services/db/attachments";
+import type { DbAttachment } from "@/core/attachments";
 import { InlineAttachmentPreview } from "./InlineAttachmentPreview";
 
-vi.mock("@/services/email/providerFactory", () => ({
+vi.mock("@/core/attachments", () => ({
   getEmailProvider: vi.fn(),
 }));
 
-import { getEmailProvider } from "@/services/email/providerFactory";
+import { getEmailProvider } from "@/core/attachments";
 
 // Mock IntersectionObserver to trigger immediately
 beforeAll(() => {

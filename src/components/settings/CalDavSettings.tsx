@@ -7,9 +7,9 @@ import { TextField } from "@/components/ui/TextField";
 import {
   discoverCalDavSettings,
   testCalDavConnection,
-} from "@/services/calendar/autoDiscovery";
-import { removeCalendarProvider } from "@/services/calendar/providerFactory";
-import { type DbAccount, updateAccountCalDav } from "@/services/db/accounts";
+  removeCalendarProvider,
+} from "@/core/calendar";
+import { type DbAccount, updateAccountCalDav } from "@/core/accounts";
 
 interface CalDavSettingsProps {
   account: DbAccount;

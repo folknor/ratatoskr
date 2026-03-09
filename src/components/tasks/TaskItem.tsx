@@ -12,7 +12,7 @@ import {
 import type React from "react";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { DbTask, TaskPriority } from "@/services/db/tasks";
+import type { DbTask, TaskPriority } from "@/core/tasks";
 
 const PRIORITY_COLORS: Record<TaskPriority, string> = {
   none: "text-text-tertiary",

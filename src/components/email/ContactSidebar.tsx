@@ -17,28 +17,27 @@ import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { navigateToThread } from "@/router/navigate";
-import { fetchAndCacheGravatarUrl } from "@/services/contacts/gravatar";
+import { fetchAndCacheGravatarUrl } from "@/core/queries";
 import {
   type ContactAttachment,
   type ContactStats,
   type DbContact,
+  type SameDomainContact,
+  addVipSender,
   getAttachmentsFromContact,
   getContactByEmail,
   getContactStats,
   getContactsFromSameDomain,
   getLatestAuthResult,
   getRecentThreadsWithContact,
-  type SameDomainContact,
+  getThreadById,
+  getThreadLabelIds,
+  isVipSender,
+  removeVipSender,
   updateContact,
   updateContactNotes,
   upsertContact,
-} from "@/services/db/contacts";
-import {
-  addVipSender,
-  isVipSender,
-  removeVipSender,
-} from "@/services/db/notificationVips";
-import { getThreadById, getThreadLabelIds } from "@/services/db/threads";
+} from "@/core/queries";
 import { useComposerStore } from "@/stores/composerStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { formatRelativeDate } from "@/utils/date";

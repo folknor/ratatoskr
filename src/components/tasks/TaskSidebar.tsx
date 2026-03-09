@@ -2,16 +2,16 @@ import { ExternalLink, X } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { navigateToLabel } from "@/router/navigate";
-import type { DbTask } from "@/services/db/tasks";
 import {
   completeTask,
+  type DbTask,
   deleteTask as dbDeleteTask,
   getSubtasks,
   getTasksForThread,
+  handleRecurringTaskCompletion,
   insertTask,
   uncompleteTask,
-} from "@/services/db/tasks";
-import { handleRecurringTaskCompletion } from "@/services/tasks/taskManager";
+} from "@/core/tasks";
 import { useTaskStore } from "@/stores/taskStore";
 import { useUIStore } from "@/stores/uiStore";
 import { TaskItem } from "./TaskItem";

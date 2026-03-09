@@ -3,16 +3,19 @@ import type React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { TextField } from "@/components/ui/TextField";
-import type { FilterCriteria } from "@/services/db/filters";
-import { type DbLabel, getLabelsForAccount } from "@/services/db/labels";
 import {
-  type DbSmartLabelRule,
+  backfillSmartLabels,
   deleteSmartLabelRule,
-  getSmartLabelRulesForAccount,
   insertSmartLabelRule,
   updateSmartLabelRule,
-} from "@/services/db/smartLabelRules";
-import { backfillSmartLabels } from "@/services/smartLabels/backfillService";
+} from "@/core/mutations";
+import {
+  type DbLabel,
+  type DbSmartLabelRule,
+  type FilterCriteria,
+  getLabelsForAccount,
+  getSmartLabelRulesForAccount,
+} from "@/core/queries";
 import { useAccountStore } from "@/stores/accountStore";
 
 export function SmartLabelEditor(): React.ReactNode {

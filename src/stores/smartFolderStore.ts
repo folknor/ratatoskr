@@ -1,14 +1,14 @@
 import type { StoreApi, UseBoundStore } from "zustand";
 import { create } from "zustand";
-import { getDb } from "@/services/db/connection";
 import {
   type DbSmartFolder,
   deleteSmartFolder as deleteSmartFolderDb,
   getSmartFolders,
+  getSmartFolderUnreadCount,
   insertSmartFolder,
+  querySmartFolderUnreadCount,
   updateSmartFolder as updateSmartFolderDb,
-} from "@/services/db/smartFolders";
-import { getSmartFolderUnreadCount } from "@/services/search/smartFolderQuery";
+} from "@/core/queries";
 
 export interface SmartFolder {
   id: string;
@@ -133,15 +133,13 @@ export const useSmartFolderStore: UseBoundStore<StoreApi<SmartFolderState>> =
       const counts: Record<string, number> = {};
 
       try {
-        const db = await getDb();
         for (const folder of folders) {
           try {
             const { sql, params } = getSmartFolderUnreadCount(
               folder.query,
               accountId,
             );
-            const rows = await db.select<{ count: number }[]>(sql, params);
-            counts[folder.id] = rows[0]?.count ?? 0;
+            counts[folder.id] = await querySmartFolderUnreadCount(sql, params);
           } catch {
             counts[folder.id] = 0;
           }

@@ -7,7 +7,7 @@ import {
   getSubscriptions,
   parseUnsubscribeHeaders,
   type SubscriptionEntry,
-} from "@/services/unsubscribe/unsubscribeManager";
+} from "@/core/mutations";
 import { useAccountStore } from "@/stores/accountStore";
 import { formatRelativeDate } from "@/utils/date";
 

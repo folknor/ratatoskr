@@ -1,7 +1,7 @@
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { type DbContact, searchContacts } from "@/services/db/contacts";
+import { type DbContact, searchContacts } from "@/core/queries";
 
 interface AddressInputProps {
   label: string;

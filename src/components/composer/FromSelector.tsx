@@ -1,5 +1,5 @@
 import type React from "react";
-import type { SendAsAlias } from "@/services/db/sendAsAliases";
+import type { SendAsAlias } from "@/core/composer";
 
 interface FromSelectorProps {
   aliases: SendAsAlias[];

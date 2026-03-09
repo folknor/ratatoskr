@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type DbTemplate,
   getTemplatesForAccount,
-} from "@/services/db/templates";
+} from "@/core/composer";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 

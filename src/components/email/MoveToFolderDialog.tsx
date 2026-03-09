@@ -10,7 +10,7 @@ import {
   removeThreadLabel,
   spamThread,
   trashThread,
-} from "@/services/emailActions";
+} from "@/core/mutations";
 import { useAccountStore } from "@/stores/accountStore";
 import { useLabelStore } from "@/stores/labelStore";
 import { useThreadStore } from "@/stores/threadStore";

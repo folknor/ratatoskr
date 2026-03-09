@@ -1,6 +1,6 @@
 import type React from "react";
 import { useTranslation } from "react-i18next";
-import type { DbCalendarEvent } from "@/services/db/calendarEvents";
+import type { DbCalendarEvent } from "@/core/calendar";
 
 interface EventCardProps {
   event: DbCalendarEvent;

@@ -5,10 +5,12 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { TextField } from "@/components/ui/TextField";
-import { getCalendarProvider } from "@/services/calendar/providerFactory";
-import type { DbCalendarEvent } from "@/services/db/calendarEvents";
-import { deleteCalendarEvent as deleteCalendarEventDb } from "@/services/db/calendarEvents";
-import type { DbCalendar } from "@/services/db/calendars";
+import {
+  type DbCalendar,
+  type DbCalendarEvent,
+  deleteCalendarEvent as deleteCalendarEventDb,
+  getCalendarProvider,
+} from "@/core/calendar";
 
 interface EventDetailModalProps {
   event: DbCalendarEvent;

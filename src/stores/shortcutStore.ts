@@ -1,7 +1,7 @@
 import type { StoreApi, UseBoundStore } from "zustand";
 import { create } from "zustand";
 import { getDefaultKeyMap } from "@/constants/shortcuts";
-import { getSetting, setSetting } from "@/services/db/settings";
+import { getSetting, setSetting } from "@/core/settings";
 
 interface ShortcutState {
   /** Map of shortcut ID -> current key binding */

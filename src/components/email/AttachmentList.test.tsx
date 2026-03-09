@@ -1,13 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
-import type { DbAttachment } from "@/services/db/attachments";
+import type { DbAttachment } from "@/core/attachments";
 import { AttachmentList } from "./AttachmentList";
 
-vi.mock("@/services/email/providerFactory", () => ({
+vi.mock("@/core/attachments", () => ({
   getEmailProvider: vi.fn(),
-}));
-
-vi.mock("@/services/db/attachments", () => ({
   getAttachmentsForMessage: vi.fn(),
 }));
 
@@ -21,7 +18,7 @@ vi.mock("@tauri-apps/plugin-fs", () => ({
 
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
-import { getEmailProvider } from "@/services/email/providerFactory";
+import { getEmailProvider } from "@/core/attachments";
 
 const makeAttachment = (
   overrides: Partial<DbAttachment> = {},

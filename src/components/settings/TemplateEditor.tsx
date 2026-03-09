@@ -13,7 +13,7 @@ import {
   getTemplatesForAccount,
   insertTemplate,
   updateTemplate,
-} from "@/services/db/templates";
+} from "@/core/composer";
 import { useAccountStore } from "@/stores/accountStore";
 import { TEMPLATE_VARIABLES } from "@/utils/templateVariables";
 

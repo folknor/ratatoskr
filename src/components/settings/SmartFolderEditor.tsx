@@ -8,7 +8,7 @@ import {
   getSmartFolders,
   insertSmartFolder,
   updateSmartFolder,
-} from "@/services/db/smartFolders";
+} from "@/core/queries";
 import { useAccountStore } from "@/stores/accountStore";
 import { useSmartFolderStore } from "@/stores/smartFolderStore";
 

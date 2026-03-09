@@ -9,8 +9,8 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import type { DbAttachment } from "@/services/db/attachments";
-import type { DbMessage } from "@/services/db/messages";
+import type { DbAttachment } from "@/core/attachments";
+import type { DbMessage } from "@/core/queries";
 import { formatFullDate } from "@/utils/date";
 import { AttachmentList, getAttachmentsForMessage } from "./AttachmentList";
 import { AuthBadge } from "./AuthBadge";

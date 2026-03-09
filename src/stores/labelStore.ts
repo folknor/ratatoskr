@@ -5,8 +5,8 @@ import {
   getLabelsForAccount,
   updateLabelSortOrder,
   upsertLabel,
-} from "@/services/db/labels";
-import { getGmailClient } from "@/services/gmail/tokenManager";
+} from "@/core/labels";
+import { getGmailClient } from "@/core/mutations";
 
 export interface Label {
   id: string;

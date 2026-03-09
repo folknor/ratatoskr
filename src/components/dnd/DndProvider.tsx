@@ -10,7 +10,7 @@ import {
 import type React from "react";
 import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { addThreadLabel, removeThreadLabel } from "@/services/emailActions";
+import { addThreadLabel, removeThreadLabel } from "@/core/mutations";
 import { useAccountStore } from "@/stores/accountStore";
 import { useThreadStore } from "@/stores/threadStore";
 

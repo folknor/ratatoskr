@@ -1,10 +1,9 @@
 import { Calendar, Flag, Loader2, Sparkles, X } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useState } from "react";
-import { extractTask } from "@/services/ai/taskExtraction";
-import type { DbMessage } from "@/services/db/messages";
-import type { TaskPriority } from "@/services/db/tasks";
-import { getIncompleteTaskCount, insertTask } from "@/services/db/tasks";
+import { extractTask } from "@/core/ai";
+import { getIncompleteTaskCount, insertTask, type TaskPriority } from "@/core/tasks";
+import type { DbMessage } from "@/core/queries";
 import { useTaskStore } from "@/stores/taskStore";
 
 const PRIORITY_OPTIONS: {

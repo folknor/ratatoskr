@@ -6,7 +6,7 @@ import {
   DEFAULT_SHORTCUT,
   getCurrentShortcut,
   registerComposeShortcut,
-} from "@/services/globalShortcut";
+} from "@/core/settings";
 import { useShortcutStore } from "@/stores/shortcutStore";
 import { Section } from "./SettingsShared";
 

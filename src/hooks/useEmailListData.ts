@@ -5,24 +5,18 @@ import {
   type DbBundleRule,
   getBundleRules,
   getBundleSummaries,
-  getHeldThreadIds,
-} from "@/services/db/bundleRules";
-import { getDb } from "@/services/db/connection";
-import { getActiveFollowUpThreadIds } from "@/services/db/followUpReminders";
-import {
+  getActiveFollowUpThreadIds,
   getCategoriesForThreads,
   getCategoryUnreadCounts,
-} from "@/services/db/threadCategories";
-import {
+  getHeldThreadIds,
+  getSmartFolderSearchQuery,
   getThreadLabelIds,
   getThreadsForAccount,
   getThreadsForCategory,
-} from "@/services/db/threads";
-import {
-  getSmartFolderSearchQuery,
   mapSmartFolderRows,
+  querySmartFolderThreads,
   type SmartFolderRow,
-} from "@/services/search/smartFolderQuery";
+} from "@/core/queries";
 import { useAccountStore } from "@/stores/accountStore";
 import { useSmartFolderStore } from "@/stores/smartFolderStore";
 import { type Thread, useThreadStore } from "@/stores/threadStore";
@@ -231,8 +225,7 @@ export function useEmailListData(): EmailListData {
           activeAccountId,
           PAGE_SIZE,
         );
-        const db = await getDb();
-        const rows = await db.select<SmartFolderRow[]>(sql, params);
+        const rows = await querySmartFolderThreads<SmartFolderRow>(sql, params);
         const mapped = await mapSmartFolderRows(rows);
         setThreads(mapped);
         setHasMore(false); // Smart folders load all at once

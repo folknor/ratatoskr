@@ -10,7 +10,7 @@ import {
   setAppLanguage,
   type SupportedLanguage,
 } from "@/i18n";
-import { setSetting } from "@/services/db/settings";
+import { setSetting } from "@/core/settings";
 import type { SidebarNavItem } from "@/stores/uiStore";
 import { useUIStore } from "@/stores/uiStore";
 import { Section, SettingRow, ToggleRow } from "./SettingsShared";

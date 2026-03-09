@@ -27,14 +27,12 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/Button";
 import { useActiveLabel } from "@/hooks/useRouteNavigation";
 import {
-  cancelFollowUpForThread,
-  getFollowUpForThread,
-  insertFollowUpReminder,
-} from "@/services/db/followUpReminders";
-import type { DbMessage } from "@/services/db/messages";
-import { deleteThread as deleteThreadFromDb } from "@/services/db/threads";
-import {
   archiveThread,
+  cancelFollowUpForThread,
+  deleteThread as deleteThreadFromDb,
+  deleteDraftsForThread,
+  getGmailClient,
+  insertFollowUpReminder,
   markThreadRead,
   muteThread,
   permanentDeleteThread,
@@ -45,9 +43,8 @@ import {
   trashThread,
   unmuteThread,
   unpinThread,
-} from "@/services/emailActions";
-import { deleteDraftsForThread } from "@/services/gmail/draftDeletion";
-import { getGmailClient } from "@/services/gmail/tokenManager";
+} from "@/core/mutations";
+import { type DbMessage, getFollowUpForThread } from "@/core/queries";
 import { useAccountStore } from "@/stores/accountStore";
 import type { Thread } from "@/stores/threadStore";
 import { useThreadStore } from "@/stores/threadStore";

@@ -12,8 +12,8 @@ import {
   type AttachmentWithContext,
   getAttachmentSenders,
   getAttachmentsForAccount,
-} from "@/services/db/attachments";
-import { getEmailProvider } from "@/services/email/providerFactory";
+  getEmailProvider,
+} from "@/core/attachments";
 import { useAccountStore } from "@/stores/accountStore";
 import {
   isArchive,

@@ -1,7 +1,7 @@
 import type React from "react";
 import { useState } from "react";
 import { Modal } from "@/components/ui/Modal";
-import { setSecureSetting, setSetting } from "@/services/db/settings";
+import { setSecureSetting, setSetting } from "@/core/settings";
 
 interface SetupClientIdProps {
   onComplete: () => void;

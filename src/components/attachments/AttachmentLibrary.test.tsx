@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AttachmentSender,
   AttachmentWithContext,
-} from "@/services/db/attachments";
+} from "@/core/attachments";
 import { AttachmentLibrary } from "./AttachmentLibrary";
 
 // Mock dependencies
@@ -17,12 +17,9 @@ vi.mock("@/stores/accountStore", () => ({
   ),
 }));
 
-vi.mock("@/services/db/attachments", () => ({
+vi.mock("@/core/attachments", () => ({
   getAttachmentsForAccount: vi.fn(() => Promise.resolve([])),
   getAttachmentSenders: vi.fn(() => Promise.resolve([])),
-}));
-
-vi.mock("@/services/email/providerFactory", () => ({
   getEmailProvider: vi.fn(),
 }));
 
@@ -45,7 +42,7 @@ vi.mock("@/router/navigate", () => ({
 import {
   getAttachmentSenders,
   getAttachmentsForAccount,
-} from "@/services/db/attachments";
+} from "@/core/attachments";
 
 const mockAttachments: AttachmentWithContext[] = [
   {

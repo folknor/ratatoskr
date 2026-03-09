@@ -7,8 +7,8 @@ import { Modal } from "@/components/ui/Modal";
 import {
   type DbAttachment,
   getAttachmentsForMessage,
-} from "@/services/db/attachments";
-import { getEmailProvider } from "@/services/email/providerFactory";
+  getEmailProvider,
+} from "@/core/attachments";
 import {
   canPreview,
   formatFileSize,

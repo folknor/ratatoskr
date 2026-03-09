@@ -14,7 +14,7 @@ import {
   getSignaturesForAccount,
   insertSignature,
   updateSignature,
-} from "@/services/db/signatures";
+} from "@/core/composer";
 import { useAccountStore } from "@/stores/accountStore";
 
 export function SignatureEditor(): React.ReactNode {

@@ -9,8 +9,8 @@ import {
   mapDbAlias,
   type SendAsAlias,
   setDefaultAlias,
-} from "@/services/db/sendAsAliases";
-import { setSetting } from "@/services/db/settings";
+} from "@/core/composer";
+import { setSetting } from "@/core/settings";
 import { useAccountStore } from "@/stores/accountStore";
 import { Section, SettingRow } from "./SettingsShared";
 

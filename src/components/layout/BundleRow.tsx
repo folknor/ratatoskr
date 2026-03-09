@@ -1,6 +1,6 @@
 import { ChevronRight, Package } from "lucide-react";
 import type React from "react";
-import type { DbBundleRule } from "@/services/db/bundleRules";
+import type { DbBundleRule } from "@/core/queries";
 import type { Thread } from "@/stores/threadStore";
 import { ThreadCard } from "../email/ThreadCard";
 

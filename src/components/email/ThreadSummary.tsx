@@ -2,10 +2,8 @@ import { ChevronDown, ChevronUp, RefreshCw, Sparkles } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { summarizeThread } from "@/services/ai/aiService";
-import { isAiAvailable } from "@/services/ai/providerManager";
-import { deleteAiCache } from "@/services/db/aiCache";
-import type { DbMessage } from "@/services/db/messages";
+import { deleteAiCache, isAiAvailable, summarizeThread } from "@/core/ai";
+import type { DbMessage } from "@/core/queries";
 
 interface ThreadSummaryProps {
   threadId: string;

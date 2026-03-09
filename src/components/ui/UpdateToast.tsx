@@ -5,7 +5,7 @@ import {
   getAvailableUpdate,
   installUpdate,
   setUpdateCallback,
-} from "@/services/updateManager";
+} from "@/core/app";
 
 export function UpdateToast(): React.ReactNode {
   const [version, setVersion] = useState<string | null>(null);

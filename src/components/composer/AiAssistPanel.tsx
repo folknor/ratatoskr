@@ -6,10 +6,10 @@ import { useTranslation } from "react-i18next";
 import {
   composeFromPrompt,
   generateReply,
+  isAiAvailable,
   type TransformType,
   transformText,
-} from "@/services/ai/aiService";
-import { isAiAvailable } from "@/services/ai/providerManager";
+} from "@/core/ai";
 import { useComposerStore } from "@/stores/composerStore";
 
 interface AiAssistPanelProps {

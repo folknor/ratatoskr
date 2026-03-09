@@ -1,6 +1,6 @@
 import type React from "react";
 import { useTranslation } from "react-i18next";
-import type { SecurityType } from "@/services/imap/autoDiscovery";
+import type { SecurityType } from "@/core/accounts";
 import type { FormState } from "./addImapAccountTypes";
 import { inputClass, labelClass, selectClass } from "./addImapAccountTypes";
 

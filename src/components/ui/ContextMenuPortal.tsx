@@ -24,36 +24,35 @@ import {
 import type React from "react";
 import { useEffect, useState } from "react";
 import { getActiveLabel } from "@/router/navigate";
-import { getMessagesForThread } from "@/services/db/messages";
-import {
-  type DbQuickStep,
-  getEnabledQuickStepsForAccount,
-} from "@/services/db/quickSteps";
-import {
-  ALL_CATEGORIES,
-  setThreadCategory,
-} from "@/services/db/threadCategories";
-import { deleteThread as deleteThreadFromDb } from "@/services/db/threads";
 import {
   addThreadLabel,
   archiveThread,
+  deleteThread as deleteThreadFromDb,
+  deleteDraftsForThread,
+  executeQuickStep,
+  getGmailClient,
   markThreadRead,
   muteThread,
   permanentDeleteThread,
   pinThread,
   removeThreadLabel,
+  setThreadCategory,
+  snoozeThread,
   spamThread,
   starThread,
   trashThread,
+  triggerSync,
   unmuteThread,
-  snoozeThread,
   unpinThread,
-} from "@/services/emailActions";
-import { deleteDraftsForThread } from "@/services/gmail/draftDeletion";
-import { triggerSync } from "@/services/gmail/syncManager";
-import { getGmailClient } from "@/services/gmail/tokenManager";
-import { executeQuickStep } from "@/services/quickSteps/executor";
-import type { QuickStep, QuickStepAction } from "@/services/quickSteps/types";
+} from "@/core/mutations";
+import {
+  getMessagesForThread,
+  type DbQuickStep,
+  getEnabledQuickStepsForAccount,
+  ALL_CATEGORIES,
+  type QuickStep,
+  type QuickStepAction,
+} from "@/core/queries";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useContextMenuStore } from "@/stores/contextMenuStore";

@@ -5,14 +5,15 @@ import { useTranslation } from "react-i18next";
 import { TextField } from "@/components/ui/TextField";
 import {
   type DbFilterRule,
+  type DbLabel,
   deleteFilter,
   type FilterActions,
   type FilterCriteria,
   getFiltersForAccount,
+  getLabelsForAccount,
   insertFilter,
   updateFilter,
-} from "@/services/db/filters";
-import { type DbLabel, getLabelsForAccount } from "@/services/db/labels";
+} from "@/core/queries";
 import { useAccountStore } from "@/stores/accountStore";
 
 export function FilterEditor(): React.ReactNode {

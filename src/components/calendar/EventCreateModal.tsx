@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { TextField } from "@/components/ui/TextField";
-import type { DbCalendar } from "@/services/db/calendars";
+import type { DbCalendar } from "@/core/calendar";
 
 interface EventCreateModalProps {
   calendars?: DbCalendar[];

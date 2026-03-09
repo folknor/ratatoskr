@@ -17,22 +17,20 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getPersistedLanguage, getSystemLanguageName } from "@/i18n";
 import { navigateToLabel, navigateToSettings } from "@/router/navigate";
-import { deleteAccount } from "@/services/db/accounts";
+import { deleteAccount } from "@/core/accounts";
 import {
   getSecureSetting,
   getSetting,
   setSecureSetting,
   setSetting,
-} from "@/services/db/settings";
+} from "@/core/settings";
 import {
   forceFullSync,
-  resyncAccount,
-  triggerSync,
-} from "@/services/gmail/syncManager";
-import {
   reauthorizeAccount,
   removeClient,
-} from "@/services/gmail/tokenManager";
+  resyncAccount,
+  triggerSync,
+} from "@/core/sync";
 import { useAccountStore } from "@/stores/accountStore";
 import { SettingsAboutTab } from "./SettingsAboutTab";
 import { SettingsAccountsTab } from "./SettingsAccountsTab";

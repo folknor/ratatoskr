@@ -9,25 +9,25 @@ import { useTranslation } from "react-i18next";
 import { CSSTransition } from "react-transition-group";
 
 import { Button } from "@/components/ui/Button";
-import { startAutoSave, stopAutoSave } from "@/services/composer/draftAutoSave";
-import { upsertContact } from "@/services/db/contacts";
-import { insertScheduledEmail } from "@/services/db/scheduledEmails";
-import {
-  getAliasesForAccount,
-  mapDbAlias,
-  type SendAsAlias,
-} from "@/services/db/sendAsAliases";
-import { getSetting } from "@/services/db/settings";
-import { getDefaultSignature } from "@/services/db/signatures";
 import {
   type DbTemplate,
+  getAliasesForAccount,
+  getDefaultSignature,
   getTemplatesForAccount,
-} from "@/services/db/templates";
+  insertScheduledEmail,
+  mapDbAlias,
+  type SendAsAlias,
+  startAutoSave,
+  stopAutoSave,
+  updateScheduledEmailAttachments,
+} from "@/core/composer";
 import {
   archiveThread,
   deleteDraft as deleteDraftAction,
   sendEmail,
-} from "@/services/emailActions";
+  upsertContact,
+} from "@/core/mutations";
+import { getSetting } from "@/core/settings";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useUIStore } from "@/stores/uiStore";
@@ -378,21 +378,7 @@ export function Composer(): React.ReactNode {
 
       // Store attachment data if present
       if (attachmentData) {
-        // The insertScheduledEmail doesn't have an attachmentPaths param,
-        // so we update it separately via the existing column
-        const { getDb } = await import("@/services/db/connection");
-        const db = await getDb();
-        // Get the most recently inserted scheduled email for this account
-        const rows = await db.select<{ id: string }[]>(
-          "SELECT id FROM scheduled_emails WHERE account_id = $1 ORDER BY created_at DESC LIMIT 1",
-          [activeAccountId],
-        );
-        if (rows[0]) {
-          await db.execute(
-            "UPDATE scheduled_emails SET attachment_paths = $1 WHERE id = $2",
-            [attachmentData, rows[0].id],
-          );
-        }
+        await updateScheduledEmailAttachments(activeAccountId, attachmentData);
       }
 
       stopAutoSave();

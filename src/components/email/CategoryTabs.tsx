@@ -15,7 +15,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { ALL_CATEGORIES } from "@/services/db/threadCategories";
+import { ALL_CATEGORIES } from "@/core/queries";
 
 export interface CategoryTabsProps {
   activeCategory: string;

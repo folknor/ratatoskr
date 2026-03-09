@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import {
   type DbSignature,
   getSignaturesForAccount,
-} from "@/services/db/signatures";
+} from "@/core/composer";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 

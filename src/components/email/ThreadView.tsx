@@ -6,10 +6,13 @@ import { AiTaskExtractDialog } from "@/components/tasks/AiTaskExtractDialog";
 import { TaskSidebar } from "@/components/tasks/TaskSidebar";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { MessageSkeleton } from "@/components/ui/Skeleton";
-import { getAllowlistedSenders } from "@/services/db/imageAllowlist";
-import { type DbMessage, getMessagesForThread } from "@/services/db/messages";
-import { getSetting } from "@/services/db/settings";
-import { markThreadRead } from "@/services/emailActions";
+import {
+  type DbMessage,
+  getAllowlistedSenders,
+  getMessagesForThread,
+  getSetting,
+} from "@/core/queries";
+import { markThreadRead } from "@/core/mutations";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useContextMenuStore } from "@/stores/contextMenuStore";

@@ -2,21 +2,24 @@ import { ChevronDown, GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { type DbLabel, getLabelsForAccount } from "@/services/db/labels";
 import {
-  type DbQuickStep,
   deleteQuickStep,
-  getQuickStepsForAccount,
   insertQuickStep,
+  seedDefaultQuickSteps,
   updateQuickStep,
-} from "@/services/db/quickSteps";
-import { ALL_CATEGORIES } from "@/services/db/threadCategories";
-import { seedDefaultQuickSteps } from "@/services/quickSteps/defaults";
+} from "@/core/mutations";
+import {
+  ALL_CATEGORIES,
+  type DbLabel,
+  type DbQuickStep,
+  getLabelsForAccount,
+  getQuickStepsForAccount,
+} from "@/core/queries";
 import {
   ACTION_TYPE_METADATA,
   type QuickStepAction,
   type QuickStepActionType,
-} from "@/services/quickSteps/types";
+} from "@/core/queries";
 import { useAccountStore } from "@/stores/accountStore";
 
 function describeActions(actionsJson: string, invalidLabel: string): string {

@@ -14,15 +14,13 @@ import { Modal } from "@/components/ui/Modal";
 import {
   insertImapAccount,
   insertOAuthImapAccount,
-} from "@/services/db/accounts";
-import {
   discoverSettings,
   getDefaultImapPort,
   getDefaultSmtpPort,
   type SecurityType,
-} from "@/services/imap/autoDiscovery";
-import { startProviderOAuthFlow } from "@/services/oauth/oauthFlow";
-import { getOAuthProvider } from "@/services/oauth/providers";
+  startProviderOAuthFlow,
+  getOAuthProvider,
+} from "@/core/accounts";
 import { useAccountStore } from "@/stores/accountStore";
 import { AddImapAccountBasicStep } from "./AddImapAccountBasicStep";
 import { AddImapAccountImapStep } from "./AddImapAccountImapStep";

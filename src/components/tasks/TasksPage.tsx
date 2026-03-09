@@ -9,11 +9,11 @@ import {
   getIncompleteTaskCount,
   getSubtasks,
   getTasksForAccount,
+  handleRecurringTaskCompletion,
   insertTask,
   type TaskPriority,
   uncompleteTask,
-} from "@/services/db/tasks";
-import { handleRecurringTaskCompletion } from "@/services/tasks/taskManager";
+} from "@/core/tasks";
 import { useAccountStore } from "@/stores/accountStore";
 import {
   type TaskFilterStatus,

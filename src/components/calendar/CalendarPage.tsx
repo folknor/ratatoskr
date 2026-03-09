@@ -2,24 +2,18 @@ import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  getCalendarProvider,
-  hasCalendarSupport,
-} from "@/services/calendar/providerFactory";
-import type {
-  CalendarEventData,
-  CreateEventInput,
-} from "@/services/calendar/types";
-import {
+  type CalendarEventData,
+  type CreateEventInput,
+  type DbCalendar,
   type DbCalendarEvent,
   getCalendarEventsInRangeMulti,
-  upsertCalendarEvent,
-} from "@/services/db/calendarEvents";
-import {
-  type DbCalendar,
+  getCalendarProvider,
   getCalendarsForAccount,
   getVisibleCalendars,
+  hasCalendarSupport,
   upsertCalendar,
-} from "@/services/db/calendars";
+  upsertCalendarEvent,
+} from "@/core/calendar";
 import { useAccountStore } from "@/stores/accountStore";
 import { CalendarList } from "./CalendarList";
 import { CalendarReauthBanner } from "./CalendarReauthBanner";

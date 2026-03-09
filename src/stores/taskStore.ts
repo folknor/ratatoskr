@@ -1,6 +1,6 @@
 import type { StoreApi, UseBoundStore } from "zustand";
 import { create } from "zustand";
-import type { DbTask, TaskPriority } from "@/services/db/tasks";
+import type { DbTask, TaskPriority } from "@/core/tasks";
 
 export type TaskGroupBy = "none" | "priority" | "dueDate" | "tag";
 export type TaskFilterStatus = "all" | "incomplete" | "completed";

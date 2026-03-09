@@ -13,8 +13,8 @@ import { TextField } from "@/components/ui/TextField";
 import {
   discoverCalDavSettings,
   testCalDavConnection,
-} from "@/services/calendar/autoDiscovery";
-import { insertCalDavAccount } from "@/services/db/accounts";
+} from "@/core/calendar";
+import { insertCalDavAccount } from "@/core/accounts";
 import { useAccountStore } from "@/stores/accountStore";
 
 interface AddCalDavAccountProps {

@@ -2,10 +2,8 @@ import { RefreshCw, Sparkles } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { generateSmartReplies } from "@/services/ai/aiService";
-import { isAiAvailable } from "@/services/ai/providerManager";
-import { deleteAiCache } from "@/services/db/aiCache";
-import type { DbMessage } from "@/services/db/messages";
+import { deleteAiCache, generateSmartReplies, isAiAvailable } from "@/core/ai";
+import type { DbMessage } from "@/core/queries";
 import { useComposerStore } from "@/stores/composerStore";
 
 interface SmartReplySuggestionsProps {

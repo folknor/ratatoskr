@@ -2,11 +2,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
 import { RawMessageModal } from "./RawMessageModal";
 
-vi.mock("@/services/email/providerFactory", () => ({
+vi.mock("@/core/attachments", () => ({
   getEmailProvider: vi.fn(),
 }));
 
-import { getEmailProvider } from "@/services/email/providerFactory";
+import { getEmailProvider } from "@/core/attachments";
 
 describe("RawMessageModal", () => {
   const mockFetchRawMessage = vi.fn();

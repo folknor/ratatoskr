@@ -1,6 +1,6 @@
 import { render, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
-import type { DbAttachment } from "@/services/db/attachments";
+import type { DbAttachment } from "@/core/attachments";
 import { EmailRenderer } from "./EmailRenderer";
 
 // Mock dependencies
@@ -24,7 +24,7 @@ vi.mock("@/stores/uiStore", () => ({
 
 const mockFetchAttachment = vi.fn();
 
-vi.mock("@/services/email/providerFactory", () => ({
+vi.mock("@/core/attachments", () => ({
   getEmailProvider: vi.fn().mockResolvedValue({
     fetchAttachment: (...args: unknown[]) => mockFetchAttachment(...args),
   }),

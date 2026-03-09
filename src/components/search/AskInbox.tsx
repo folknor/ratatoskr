@@ -3,7 +3,7 @@ import type React from "react";
 import { useCallback, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { navigateToLabel } from "@/router/navigate";
-import { type AskInboxResult, askMyInbox } from "@/services/ai/askInbox";
+import { type AskInboxResult, askMyInbox } from "@/core/ai";
 import { useAccountStore } from "@/stores/accountStore";
 
 interface AskInboxProps {

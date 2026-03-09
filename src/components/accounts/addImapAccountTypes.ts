@@ -1,4 +1,4 @@
-import type { SecurityType } from "@/services/imap/autoDiscovery";
+import type { SecurityType } from "@/core/accounts";
 
 export type Step = "basic" | "imap" | "smtp" | "test";
 export type AuthMode = "password" | "oauth2";

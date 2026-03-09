@@ -1,6 +1,6 @@
 import type { StoreApi, UseBoundStore } from "zustand";
 import { create } from "zustand";
-import { setSetting } from "../services/db/settings";
+import { setSetting } from "@/core/settings";
 
 export interface Account {
   id: string;
