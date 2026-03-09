@@ -41,17 +41,11 @@
 
 ### CRITICAL
 
-- [ ] **Thread label ops implemented in 3 places**
-  - `src/services/emailActions.ts:162-225` — direct `DELETE/INSERT FROM thread_labels`
-  - `src/services/snooze/snoozeManager.ts:32-67` — direct label manipulation for snooze
-  - `src/services/db/threads.ts:122-140` — `setThreadLabels()` function
-  Consolidate to `setThreadLabels()` in `db/threads.ts` as the canonical implementation.
+- [x] ~~**Thread label ops implemented in 3 places** — snooze now routes through emailActions~~
 
-- [ ] **Snooze bypasses offline action queue**
-  `src/services/snooze/snoozeManager.ts` does direct DB label manipulation instead of going through `emailActions`. Won't work offline, won't sync to provider. Refactor to use `emailActions.removeThreadLabel()` / `addThreadLabel()`.
+- [x] ~~**Snooze bypasses offline action queue** — snooze now goes through `executeEmailAction()` with optimistic UI, local DB update, offline queue, and provider sync (archive)~~
 
-- [ ] **Pin/unpin not offline-safe**
-  `src/services/db/threads.ts:209-229` and `src/services/quickSteps/executor.ts:68-84` call direct DB updates, bypassing the offline queue system that archive/trash/star use. Add pin/unpin wrappers in `emailActions.ts`.
+- [x] ~~**Pin/unpin not offline-safe** — pin/unpin/mute/unmute now go through `executeEmailAction()` with optimistic UI and local DB updates. Pin/unpin/unmute are local-only; mute delegates to `provider.archive()`~~
 
 ### MEDIUM
 
@@ -70,13 +64,13 @@
 
 ## Refactoring — Large Files
 
-- [ ] **SettingsPage.tsx** (2992 lines) — Extract each tab into its own component (GeneralSettingsTab, AISettingsTab, ComposingSettingsTab, etc.). 65+ useState hooks could become a single settings state object.
+- [x] ~~**SettingsPage.tsx** (2992→600 lines) — Extracted 10 tab components + SettingsShared.tsx~~
 
-- [ ] **imapSync.ts** (1209 lines) — Split into phases: folder discovery, message fetch (with circuit breaker), JWZ threading, DB storage.
+- [x] ~~**imapSync.ts** (1209→865 lines) — Extracted imapSyncConvert.ts, imapSyncFetch.ts, imapSyncStore.ts~~
 
-- [ ] **EmailList.tsx** (1045 lines) — Separate list orchestration, pagination/virtualization, and search/filter logic.
+- [x] ~~**EmailList.tsx** (1045→271 lines) — Extracted useEmailListData hook, EmailListHeader, MultiSelectBar, EmptyStateForContext, BundleRow~~
 
-- [ ] **AddImapAccount.tsx** (1005 lines) — Extract each wizard step (basic, IMAP config, SMTP config, connection test) into its own component. Move OAuth discovery logic to a helper.
+- [x] ~~**AddImapAccount.tsx** (1005→498 lines) — Extracted 4 wizard step components + shared types~~
 
 - [ ] **ContextMenuPortal.tsx** (796 lines) — Extract per-menu-type components (ThreadContextMenu, MessageContextMenu, SidebarLabelContextMenu). Move quote builders to `utils/emailQuoteBuilders.ts`.
 
@@ -112,4 +106,4 @@
 
 ## TypeScript Strictness
 
-- [ ] **52 remaining TS errors** — Mostly from `exactOptionalPropertyTypes` (34 TS2375/TS2379) and other type mismatches (TS2322, TS2345). Decide whether to fix all or relax the option.
+- [ ] **39 remaining TS errors** — Mostly from `exactOptionalPropertyTypes` (34 TS2375/TS2379) and other type mismatches (TS2322, TS2345). Decide whether to fix all or relax the option.
