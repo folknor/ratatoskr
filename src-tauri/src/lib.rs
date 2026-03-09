@@ -7,6 +7,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::MacosLauncher;
 
 mod commands;
+mod db;
 mod imap;
 mod oauth;
 mod smtp;
@@ -116,6 +117,18 @@ pub fn run() {
             commands::imap_delta_check,
             commands::smtp_send_email,
             commands::smtp_test_connection,
+            // Rust-owned DB commands (Phase 1)
+            db::queries::db_get_threads,
+            db::queries::db_get_threads_for_category,
+            db::queries::db_get_thread_by_id,
+            db::queries::db_get_thread_label_ids,
+            db::queries::db_get_messages_for_thread,
+            db::queries::db_get_labels,
+            db::queries::db_get_setting,
+            db::queries::db_get_all_settings,
+            db::queries::db_set_setting,
+            db::queries::db_get_category_unread_counts,
+            db::queries::db_get_categories_for_threads,
         ])
         .setup(|app| {
             {
@@ -130,6 +143,17 @@ pub fn run() {
                         .level_for("sqlx::query", log::LevelFilter::Warn)
                         .build(),
                 )?;
+            }
+
+            // Initialize Rust-owned SQLite database (same velo.db file)
+            {
+                let app_data_dir = app.path().app_data_dir().map_err(|e| {
+                    Box::new(std::io::Error::other(format!("app data dir: {e}")))
+                })?;
+                let db_state = db::DbState::init(&app_data_dir).map_err(|e| {
+                    Box::new(std::io::Error::other(format!("db init: {e}")))
+                })?;
+                app.manage(db_state);
             }
 
             #[cfg(not(target_os = "linux"))]
