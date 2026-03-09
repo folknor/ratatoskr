@@ -7,14 +7,14 @@ export interface DbThread {
   snippet: string | null;
   last_message_at: number | null;
   message_count: number;
-  is_read: number;
-  is_starred: number;
-  is_important: number;
-  has_attachments: number;
-  is_snoozed: number;
+  is_read: number | boolean;
+  is_starred: number | boolean;
+  is_important: number | boolean;
+  has_attachments: number | boolean;
+  is_snoozed: number | boolean;
   snooze_until: number | null;
-  is_pinned: number;
-  is_muted: number;
+  is_pinned: number | boolean;
+  is_muted: number | boolean;
   from_name: string | null;
   from_address: string | null;
 }

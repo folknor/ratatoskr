@@ -95,3 +95,32 @@ pub struct ThreadCategoryRow {
     pub thread_id: String,
     pub category: String,
 }
+
+// ── Contact ─────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct DbContact {
+    pub id: String,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub frequency: i64,
+    pub last_contacted_at: Option<String>,
+    pub notes: Option<String>,
+}
+
+// ── Attachment ──────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct DbAttachment {
+    pub id: String,
+    pub message_id: String,
+    pub account_id: String,
+    pub filename: Option<String>,
+    pub mime_type: Option<String>,
+    pub size: Option<i64>,
+    pub gmail_attachment_id: Option<String>,
+    pub content_id: Option<String>,
+    pub is_inline: bool,
+    pub local_path: Option<String>,
+}

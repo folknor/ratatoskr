@@ -5,7 +5,10 @@ use rusqlite::{params, Row};
 use tauri::State;
 
 use super::DbState;
-use super::types::{CategoryCount, DbLabel, DbMessage, DbThread, SettingRow, ThreadCategoryRow};
+use super::types::{
+    CategoryCount, DbAttachment, DbContact, DbLabel, DbMessage, DbThread, SettingRow,
+    ThreadCategoryRow,
+};
 
 // ── Row mappers ──────────────────────────────────────────────
 
@@ -435,4 +438,333 @@ pub async fn db_get_categories_for_threads(
     }
 
     Ok(all_results)
+}
+
+// ── Thread mutations ─────────────────────────────────────────
+
+#[tauri::command]
+#[specta::specta]
+pub async fn db_set_thread_read(
+    state: State<'_, DbState>,
+    account_id: String,
+    thread_id: String,
+    is_read: bool,
+) -> Result<(), String> {
+    let conn = state.conn().await;
+    conn.execute(
+        "UPDATE threads SET is_read = ?3 WHERE account_id = ?1 AND id = ?2",
+        params![account_id, thread_id, is_read],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn db_set_thread_starred(
+    state: State<'_, DbState>,
+    account_id: String,
+    thread_id: String,
+    is_starred: bool,
+) -> Result<(), String> {
+    let conn = state.conn().await;
+    conn.execute(
+        "UPDATE threads SET is_starred = ?3 WHERE account_id = ?1 AND id = ?2",
+        params![account_id, thread_id, is_starred],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn db_set_thread_pinned(
+    state: State<'_, DbState>,
+    account_id: String,
+    thread_id: String,
+    is_pinned: bool,
+) -> Result<(), String> {
+    let conn = state.conn().await;
+    conn.execute(
+        "UPDATE threads SET is_pinned = ?3 WHERE account_id = ?1 AND id = ?2",
+        params![account_id, thread_id, is_pinned],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn db_set_thread_muted(
+    state: State<'_, DbState>,
+    account_id: String,
+    thread_id: String,
+    is_muted: bool,
+) -> Result<(), String> {
+    let conn = state.conn().await;
+    conn.execute(
+        "UPDATE threads SET is_muted = ?3 WHERE account_id = ?1 AND id = ?2",
+        params![account_id, thread_id, is_muted],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn db_delete_thread(
+    state: State<'_, DbState>,
+    account_id: String,
+    thread_id: String,
+) -> Result<(), String> {
+    let conn = state.conn().await;
+    conn.execute(
+        "DELETE FROM threads WHERE account_id = ?1 AND id = ?2",
+        params![account_id, thread_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ── Thread label mutations ───────────────────────────────────
+
+#[tauri::command]
+#[specta::specta]
+pub async fn db_add_thread_label(
+    state: State<'_, DbState>,
+    account_id: String,
+    thread_id: String,
+    label_id: String,
+) -> Result<(), String> {
+    let conn = state.conn().await;
+    conn.execute(
+        "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) VALUES (?1, ?2, ?3)",
+        params![account_id, thread_id, label_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn db_remove_thread_label(
+    state: State<'_, DbState>,
+    account_id: String,
+    thread_id: String,
+    label_id: String,
+) -> Result<(), String> {
+    let conn = state.conn().await;
+    conn.execute(
+        "DELETE FROM thread_labels WHERE account_id = ?1 AND thread_id = ?2 AND label_id = ?3",
+        params![account_id, thread_id, label_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ── Label mutations ──────────────────────────────────────────
+
+#[tauri::command]
+#[specta::specta]
+pub async fn db_upsert_label(
+    state: State<'_, DbState>,
+    label: DbLabel,
+) -> Result<(), String> {
+    let conn = state.conn().await;
+    conn.execute(
+        "INSERT OR REPLACE INTO labels (account_id, id, name, type, color_bg, color_fg, visible, sort_order, imap_folder_path, imap_special_use)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            label.account_id,
+            label.id,
+            label.name,
+            label.label_type,
+            label.color_bg,
+            label.color_fg,
+            label.visible,
+            label.sort_order,
+            label.imap_folder_path,
+            label.imap_special_use
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn db_delete_label(
+    state: State<'_, DbState>,
+    account_id: String,
+    label_id: String,
+) -> Result<(), String> {
+    let conn = state.conn().await;
+    conn.execute(
+        "DELETE FROM labels WHERE account_id = ?1 AND id = ?2",
+        params![account_id, label_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ── Row mappers (contacts / attachments) ─────────────────────
+
+fn row_to_contact(row: &Row<'_>) -> rusqlite::Result<DbContact> {
+    Ok(DbContact {
+        id: row.get("id")?,
+        email: row.get("email")?,
+        display_name: row.get("display_name")?,
+        avatar_url: row.get("avatar_url")?,
+        frequency: row.get("frequency")?,
+        last_contacted_at: row.get("last_contacted_at")?,
+        notes: row.get("notes")?,
+    })
+}
+
+fn row_to_attachment(row: &Row<'_>) -> rusqlite::Result<DbAttachment> {
+    Ok(DbAttachment {
+        id: row.get("id")?,
+        message_id: row.get("message_id")?,
+        account_id: row.get("account_id")?,
+        filename: row.get("filename")?,
+        mime_type: row.get("mime_type")?,
+        size: row.get("size")?,
+        gmail_attachment_id: row.get("gmail_attachment_id")?,
+        content_id: row.get("content_id")?,
+        is_inline: row.get::<_, i64>("is_inline")? != 0,
+        local_path: row.get("local_path")?,
+    })
+}
+
+// ── Contact queries ─────────────────────────────────────────
+
+#[tauri::command]
+#[specta::specta]
+pub async fn db_search_contacts(
+    state: State<'_, DbState>,
+    query: String,
+    limit: i64,
+) -> Result<Vec<DbContact>, String> {
+    let conn = state.conn().await;
+    let pattern = format!("%{query}%");
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT * FROM contacts
+             WHERE email LIKE ?1 OR display_name LIKE ?1
+             ORDER BY frequency DESC, display_name ASC
+             LIMIT ?2",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let contacts = stmt
+        .query_map(params![pattern, limit], row_to_contact)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    Ok(contacts)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn db_get_contact_by_email(
+    state: State<'_, DbState>,
+    email: String,
+) -> Result<Option<DbContact>, String> {
+    let conn = state.conn().await;
+    let normalized = email.to_lowercase();
+
+    let mut stmt = conn
+        .prepare("SELECT * FROM contacts WHERE email = ?1 LIMIT 1")
+        .map_err(|e| e.to_string())?;
+
+    let mut rows = stmt
+        .query_map(params![normalized], row_to_contact)
+        .map_err(|e| e.to_string())?;
+
+    match rows.next() {
+        Some(Ok(c)) => Ok(Some(c)),
+        Some(Err(e)) => Err(e.to_string()),
+        None => Ok(None),
+    }
+}
+
+// ── Attachment queries ──────────────────────────────────────
+
+#[tauri::command]
+#[specta::specta]
+pub async fn db_get_attachments_for_message(
+    state: State<'_, DbState>,
+    account_id: String,
+    message_id: String,
+) -> Result<Vec<DbAttachment>, String> {
+    let conn = state.conn().await;
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT * FROM attachments WHERE account_id = ?1 AND message_id = ?2 ORDER BY filename ASC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let attachments = stmt
+        .query_map(params![account_id, message_id], row_to_attachment)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    Ok(attachments)
+}
+
+// ── Count queries ───────────────────────────────────────────
+
+#[tauri::command]
+#[specta::specta]
+pub async fn db_get_thread_count(
+    state: State<'_, DbState>,
+    account_id: String,
+    label_id: Option<String>,
+) -> Result<i64, String> {
+    let conn = state.conn().await;
+
+    let count = if let Some(ref lid) = label_id {
+        conn.query_row(
+            "SELECT COUNT(DISTINCT t.id) FROM threads t
+             INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
+             WHERE t.account_id = ?1 AND tl.label_id = ?2",
+            params![account_id, lid],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|e| e.to_string())?
+    } else {
+        conn.query_row(
+            "SELECT COUNT(*) FROM threads WHERE account_id = ?1",
+            params![account_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|e| e.to_string())?
+    };
+
+    Ok(count)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn db_get_unread_count(
+    state: State<'_, DbState>,
+    account_id: String,
+) -> Result<i64, String> {
+    let conn = state.conn().await;
+
+    let count = conn
+        .query_row(
+            "SELECT COUNT(*) FROM threads t
+             INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
+             WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND t.is_read = 0",
+            params![account_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    Ok(count)
 }

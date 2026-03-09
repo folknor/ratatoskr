@@ -129,6 +129,22 @@ pub fn run() {
             db::queries::db_set_setting,
             db::queries::db_get_category_unread_counts,
             db::queries::db_get_categories_for_threads,
+            // Rust-owned DB commands (Phase 1 — mutations)
+            db::queries::db_set_thread_read,
+            db::queries::db_set_thread_starred,
+            db::queries::db_set_thread_pinned,
+            db::queries::db_set_thread_muted,
+            db::queries::db_delete_thread,
+            db::queries::db_add_thread_label,
+            db::queries::db_remove_thread_label,
+            db::queries::db_upsert_label,
+            db::queries::db_delete_label,
+            // Rust-owned DB commands (Phase 2 — contacts, attachments, counts)
+            db::queries::db_search_contacts,
+            db::queries::db_get_contact_by_email,
+            db::queries::db_get_attachments_for_message,
+            db::queries::db_get_thread_count,
+            db::queries::db_get_unread_count,
         ])
         .setup(|app| {
             {

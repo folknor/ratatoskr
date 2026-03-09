@@ -67,7 +67,7 @@ export async function backfillSmartLabels(
       rawSize: 0,
       internalDate: 0,
       labelIds: [],
-      hasAttachments: row.has_attachments === 1,
+      hasAttachments: Boolean(row.has_attachments),
       attachments: [],
       listUnsubscribe: null,
       listUnsubscribePost: null,
