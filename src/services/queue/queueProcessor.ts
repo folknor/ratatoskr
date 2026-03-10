@@ -45,14 +45,28 @@ async function processQueue(): Promise<void> {
       await deleteOperation(op.id);
     } catch (err) {
       const classified = classifyError(err);
+      const originalError = err instanceof Error ? err : null;
+      const fullErrorContext = [
+        `[${classified.type}] ${classified.message}`,
+        originalError?.stack ? `Stack: ${originalError.stack}` : null,
+        originalError?.cause
+          ? `Cause: ${String(originalError.cause)}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join("\n");
 
       if (classified.isRetryable) {
         // Increment retry with exponential backoff
-        await updateOperationStatus(op.id, "pending", classified.message);
+        await updateOperationStatus(op.id, "pending", fullErrorContext);
         await incrementRetry(op.id);
       } else {
-        // Permanent failure
-        await updateOperationStatus(op.id, "failed", classified.message);
+        // Permanent failure — preserve full error context for debugging
+        console.error(
+          `[QueueProcessor] permanent failure for op ${op.id} (${op.operation_type}):`,
+          err,
+        );
+        await updateOperationStatus(op.id, "failed", fullErrorContext);
       }
     }
   }
