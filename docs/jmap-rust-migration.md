@@ -1,7 +1,7 @@
 # JMAP → Rust Migration Plan
 
 **Date**: March 2026
-**Status**: Planning (blocked on Gmail migration completion)
+**Status**: Phase 1 complete — Rust provider implemented. Phase 2 (TS integration + UI) not started.
 **Goal**: Implement JMAP (RFC 8620/8621) as a Rust-native email provider, reusing infrastructure established by the Gmail migration. This is step 2 in the execution order from `docs/rust-provider-crate-research.md`.
 
 ---
