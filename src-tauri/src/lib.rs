@@ -17,6 +17,7 @@ mod filters;
 mod gmail;
 mod graph;
 mod imap;
+mod inline_image_store;
 mod jmap;
 mod oauth;
 mod provider;
@@ -350,6 +351,10 @@ pub fn run() {
             body_store::commands::body_store_delete,
             body_store::commands::body_store_stats,
             body_store::commands::body_store_migrate,
+            // Inline image store (content-addressed blob store)
+            inline_image_store::commands::inline_image_get,
+            inline_image_store::commands::inline_image_stats,
+            inline_image_store::commands::inline_image_clear,
             // Tantivy full-text search (Phase 3)
             search::commands::search_messages,
             search::commands::index_message,
@@ -493,6 +498,12 @@ pub fn run() {
                         Box::new(std::io::Error::other(format!("body store init: {e}")))
                     })?;
                 app.manage(body_store_state);
+
+                let inline_image_store_state =
+                    inline_image_store::InlineImageStoreState::init(&app_data_dir).map_err(
+                        |e| Box::new(std::io::Error::other(format!("inline image store init: {e}"))),
+                    )?;
+                app.manage(inline_image_store_state);
 
                 let search_state = search::SearchState::init(&app_data_dir)
                     .map_err(|e| Box::new(std::io::Error::other(format!("search init: {e}"))))?;

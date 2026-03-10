@@ -159,15 +159,12 @@ describe("smartFolders service", () => {
         { id: "sf-2", sortOrder: 0 },
       ]);
 
-      expect(invoke).toHaveBeenCalledWith(
-        "db_update_smart_folder_sort_order",
-        {
-          orders: [
-            { id: "sf-1", sort_order: 2 },
-            { id: "sf-2", sort_order: 0 },
-          ],
-        },
-      );
+      expect(invoke).toHaveBeenCalledWith("db_update_smart_folder_sort_order", {
+        orders: [
+          { id: "sf-1", sort_order: 2 },
+          { id: "sf-2", sort_order: 0 },
+        ],
+      });
     });
   });
 });

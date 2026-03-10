@@ -233,10 +233,9 @@ describe("folderSyncState", () => {
 
       await getAllFolderSyncStates("acc-1");
 
-      expect(mockInvoke).toHaveBeenCalledWith(
-        "db_get_all_folder_sync_states",
-        { accountId: "acc-1" },
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_get_all_folder_sync_states", {
+        accountId: "acc-1",
+      });
     });
   });
 });

@@ -3,6 +3,7 @@ use tauri::AppHandle;
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
+use crate::inline_image_store::InlineImageStoreState;
 use crate::search::SearchState;
 
 /// Standardized sync result across all providers.
@@ -19,6 +20,7 @@ pub struct ProviderCtx<'a> {
     pub account_id: &'a str,
     pub db: &'a DbState,
     pub body_store: &'a BodyStoreState,
+    pub inline_images: &'a InlineImageStoreState,
     pub search: &'a SearchState,
     pub app_handle: &'a AppHandle,
 }

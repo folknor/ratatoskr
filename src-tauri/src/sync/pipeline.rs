@@ -4,6 +4,7 @@ use rusqlite::Connection;
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
+use crate::inline_image_store::{InlineImage, InlineImageStoreState};
 use crate::search::{SearchDocument, SearchState};
 use crate::threading::ThreadGroup;
 
@@ -209,10 +210,11 @@ impl DbInsertData {
 // Shared helper: store a chunk of converted messages to DB + body store + search
 // ---------------------------------------------------------------------------
 
-/// Store a chunk of converted messages to all three subsystems.
+/// Store a chunk of converted messages to all four subsystems.
 pub(crate) async fn store_chunk(
     db: &DbState,
     body_store: &BodyStoreState,
+    inline_images: &InlineImageStoreState,
     search: &SearchState,
     chunk: &[ConvertedMessage],
     account_id: &str,
@@ -237,7 +239,10 @@ pub(crate) async fn store_chunk(
     // 2. Store bodies (async, fire-and-forget)
     store_bodies(body_store, chunk).await;
 
-    // 3. Index in tantivy (async, fire-and-forget)
+    // 3. Store small inline images (fire-and-forget)
+    store_inline_images(inline_images, chunk).await;
+
+    // 4. Index in tantivy (async, fire-and-forget)
     index_messages(search, chunk, account_id).await;
 
     Ok(())
@@ -266,6 +271,35 @@ pub async fn store_bodies(body_store: &BodyStoreState, messages: &[ConvertedMess
 
     if let Err(e) = body_store.put_batch(bodies).await {
         log::warn!("Failed to store bodies in body store: {e}");
+    }
+}
+
+/// Store small inline images in the content-addressed blob store. Fire-and-forget.
+pub async fn store_inline_images(
+    inline_images: &InlineImageStoreState,
+    messages: &[ConvertedMessage],
+) {
+    let images: Vec<InlineImage> = messages
+        .iter()
+        .flat_map(|m| &m.imap_msg.attachments)
+        .filter_map(|att| {
+            let data = att.inline_data.as_ref()?;
+            let hash = att.content_hash.as_ref()?;
+            Some(InlineImage {
+                content_hash: hash.clone(),
+                data: data.clone(),
+                mime_type: att.mime_type.clone(),
+            })
+        })
+        .collect();
+
+    if images.is_empty() {
+        return;
+    }
+
+    log::debug!("Storing {} inline images in blob store", images.len());
+    if let Err(e) = inline_images.put_batch(images).await {
+        log::warn!("Failed to store inline images: {e}");
     }
 }
 

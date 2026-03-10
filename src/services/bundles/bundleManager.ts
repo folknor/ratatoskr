@@ -53,8 +53,7 @@ async function checkBundleDelivery(): Promise<void> {
       if (isDeliveryTime(schedule)) {
         // Avoid double-delivery: check lastDeliveredAt
         const now = getCurrentUnixTimestamp();
-        if (rule.lastDeliveredAt && now - rule.lastDeliveredAt < 120)
-          continue;
+        if (rule.lastDeliveredAt && now - rule.lastDeliveredAt < 120) continue;
 
         const released = await releaseHeldThreads(account.id, rule.category);
         if (released > 0) {

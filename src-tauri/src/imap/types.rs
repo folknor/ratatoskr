@@ -60,6 +60,10 @@ pub struct ImapAttachment {
     pub content_id: Option<String>,
     pub is_inline: bool,
     pub content_hash: Option<String>,
+    /// Raw bytes for small inline images (≤ MAX_INLINE_SIZE).
+    /// Only populated at IMAP parse time; `None` for non-inline or large parts.
+    #[serde(skip)]
+    pub inline_data: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

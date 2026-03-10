@@ -167,11 +167,25 @@ pub(crate) fn parse_message(
                     })
                     .unwrap_or_else(|| "application/octet-stream".to_string());
 
-                let raw_hash = xxh3_64(att.contents());
+                let contents = att.contents();
+                let raw_hash = xxh3_64(contents);
                 let content_hash = format!("{raw_hash:016x}");
 
                 #[allow(clippy::cast_possible_truncation)]
                 let size = att.len() as u32;
+                let is_inline = att.content_disposition().is_some_and(mail_parser::ContentType::is_inline);
+
+                // Carry raw bytes for small inline images so we can store them
+                // in the inline image SQLite cache during sync.
+                let inline_data = if is_inline
+                    && (size as usize) <= crate::inline_image_store::MAX_INLINE_SIZE
+                    && mime_type.starts_with("image/")
+                {
+                    Some(contents.to_vec())
+                } else {
+                    None
+                };
+
                 let attachment = ImapAttachment {
                     part_id: section,
                     filename: att
@@ -181,8 +195,9 @@ pub(crate) fn parse_message(
                     mime_type,
                     size,
                     content_id: att.content_id().map(ToString::to_string),
-                    is_inline: att.content_disposition().is_some_and(mail_parser::ContentType::is_inline),
+                    is_inline,
                     content_hash: Some(content_hash),
+                    inline_data,
                 };
                 Some((raw_hash, attachment))
             })
@@ -275,7 +290,7 @@ pub(crate) fn build_imap_section_map(
 /// a `content_id` so CID references in the HTML body resolve correctly.
 fn dedup_attachments_by_hash(parts: Vec<(u64, ImapAttachment)>) -> Vec<ImapAttachment> {
     let mut seen: HashMap<u64, ImapAttachment> = HashMap::new();
-    for (hash, att) in parts {
+    for (hash, mut att) in parts {
         seen.entry(hash)
             .and_modify(|existing| {
                 // Prefer whichever has a real filename
@@ -291,6 +306,10 @@ fn dedup_attachments_by_hash(parts: Vec<(u64, ImapAttachment)>) -> Vec<ImapAttac
                 // Mark as inline if either copy is
                 if att.is_inline {
                     existing.is_inline = true;
+                }
+                // Keep inline_data if either copy has it
+                if existing.inline_data.is_none() && att.inline_data.is_some() {
+                    existing.inline_data = att.inline_data.take();
                 }
             })
             .or_insert(att);

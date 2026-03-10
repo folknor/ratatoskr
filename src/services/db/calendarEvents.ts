@@ -84,10 +84,12 @@ export async function getCalendarEventsInRangeMulti(
   if (calendarIds.length === 0) {
     return getCalendarEventsInRange(accountId, startTime, endTime);
   }
-  return invoke<DbCalendarEvent[]>(
-    "db_get_calendar_events_in_range_multi",
-    { accountId, calendarIds, startTime, endTime },
-  );
+  return invoke<DbCalendarEvent[]>("db_get_calendar_events_in_range_multi", {
+    accountId,
+    calendarIds,
+    startTime,
+    endTime,
+  });
 }
 
 export async function deleteEventsForCalendar(

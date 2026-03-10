@@ -82,7 +82,7 @@ pub fn find_cache_info(
 ) -> Result<Option<CacheInfo>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, content_hash, local_path \
+            "SELECT id, content_hash, local_path, mime_type \
              FROM attachments \
              WHERE account_id = ?1 AND message_id = ?2 AND gmail_attachment_id = ?3 \
              LIMIT 1",
@@ -97,6 +97,7 @@ pub fn find_cache_info(
                     id: row.get(0)?,
                     content_hash: row.get(1)?,
                     local_path: row.get(2)?,
+                    mime_type: row.get(3)?,
                 })
             },
         )
@@ -145,4 +146,5 @@ pub struct CacheInfo {
     pub id: String,
     pub content_hash: Option<String>,
     pub local_path: Option<String>,
+    pub mime_type: Option<String>,
 }

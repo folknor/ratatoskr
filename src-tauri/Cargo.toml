@@ -1,6 +1,6 @@
 [package]
 name = "ratatoskr"
-version = "0.1.0" # x-release-please-version
+version = "0.1.0"
 description = "Email at the speed of thought"
 authors = ["folknor"]
 license = "Apache-2.0"
@@ -97,11 +97,16 @@ windows = { version = "0.61", features = ["Win32_UI_Shell"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 tray-item = { version = "0.10.0", default-features = false, features = ["ksni"] }
 
+[profile.release]
+lto = "thin"
+opt-level = "s"
+codegen-units = 1
+panic = "abort"
+strip = true
+
 [profile.dev]
 debug = 0
 incremental = true
-codegen-units = 256
 
-[profile.release]
-lto = "thin"
-codegen-units = 16
+[profile.dev.package."*"]
+opt-level = 2

@@ -30,10 +30,9 @@ describe("writingStyleProfiles", () => {
 
       const result = await getWritingStyleProfile("acc1");
       expect(result).toEqual(profile);
-      expect(mockInvoke).toHaveBeenCalledWith(
-        "db_get_writing_style_profile",
-        { accountId: "acc1" },
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_get_writing_style_profile", {
+        accountId: "acc1",
+      });
     });
 
     it("returns null when not found", async () => {

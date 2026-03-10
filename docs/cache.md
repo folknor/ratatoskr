@@ -1,27 +1,32 @@
-# Attachment Cache
+# Attachment & Inline Image Cache
 
-Content-addressed cache for email attachments. Identical blobs (signatures, logos, etc.) store one copy on disk regardless of how many messages reference them.
+Two caching layers for email attachments:
 
-## How it works
+1. **Inline image store** (`inline_images.db`) — SQLite blob store for small inline images (≤256KB). Content-addressed by xxh3 hash. One copy per unique image across all messages.
+2. **File cache** (`attachment_cache/`) — On-disk file cache for all attachment sizes. Content-addressed by xxh3 hash.
 
-Cache files live at `{AppData}/attachment_cache/{content_hash}` where `content_hash` is a 16-char hex xxh3_64 of the raw bytes.
-
-### Fetch path (`provider_fetch_attachment`)
+## Fetch path (`provider_fetch_attachment`)
 
 ```
-1. DB lookup: find attachment row by (account_id, message_id, gmail_attachment_id)
-2. If content_hash is set AND cache file exists on disk → return from cache
-3. Otherwise → fetch from provider API
-4. Background task: decode base64 → xxh3 hash → write file → update DB
+1. Check inline image store (SQLite lookup by content_hash)
+2. Check file cache (content_hash → disk file)
+3. Cache miss → fetch from provider API
+4. Background: decode base64 → xxh3 hash → store to inline image store (if small image)
+   AND write to file cache → update DB columns
 ```
 
-The cache-on-miss is fire-and-forget so it doesn't delay the response.
+Both cache-on-miss writes are fire-and-forget so they don't delay the response.
 
-### IMAP sync-time hashing
+### IMAP sync-time storage
 
-IMAP has access to raw part bytes during `parse_message()`. The xxh3 hash is computed there and stored in the `content_hash` column at insert time. This means IMAP attachments have their hash before the first fetch — the fetch path just needs to write the file.
+IMAP has access to raw part bytes during `parse_message()`. Two things happen at parse time:
 
-Gmail/JMAP/Graph don't have bytes at sync time (only a reference ID), so `content_hash` stays NULL until first fetch.
+1. xxh3 hash is computed and stored in the `content_hash` column.
+2. For small inline images (≤256KB, `image/*`, `is_inline`), the raw bytes are carried through `ImapAttachment.inline_data` and batch-stored into `inline_images.db` during `store_chunk()`.
+
+This means IMAP inline images are available instantly — no on-demand fetch needed.
+
+Gmail/JMAP/Graph don't have bytes at sync time (only a reference ID), so `content_hash` stays NULL and inline images are only stored reactively on first fetch.
 
 ### Per-message MIME dedup
 
@@ -37,13 +42,25 @@ Before content hits the DB, inline MIME parts are deduplicated within each messa
 
 ## Schema
 
+### `inline_images` table (`inline_images.db` — separate SQLite file)
+
+```sql
+CREATE TABLE inline_images (
+    content_hash TEXT PRIMARY KEY,
+    data         BLOB NOT NULL,
+    mime_type    TEXT NOT NULL,
+    size         INTEGER NOT NULL,
+    created_at   INTEGER NOT NULL DEFAULT (unixepoch())
+);
+```
+
+### `attachments` table columns (`ratatoskr.db`)
+
 ```sql
 -- Migration v25
 ALTER TABLE attachments ADD COLUMN content_hash TEXT;
 CREATE INDEX idx_attachments_content_hash ON attachments(content_hash);
 ```
-
-Cache-related columns on `attachments`:
 
 | Column | Purpose |
 |--------|---------|
@@ -64,6 +81,8 @@ User configures max cache size in settings (100MB–2GB, default 500MB).
 
 `clearAllCache()` deletes the entire `attachment_cache/` directory and nulls all cache fields.
 
+**Not yet implemented**: eviction for `inline_images.db`. See `TODO.md`.
+
 ## Pre-caching
 
 `preCacheManager.ts` runs every 15 minutes. Finds uncached attachments from the last 7 days under 5MB, calls `provider_fetch_attachment` which handles caching automatically.
@@ -72,11 +91,14 @@ User configures max cache size in settings (100MB–2GB, default 500MB).
 
 | File | What |
 |------|------|
-| `src-tauri/src/attachment_cache.rs` | Hash, read, write, DB helpers |
-| `src-tauri/src/provider/commands.rs` | Cache check + cache-on-miss in `provider_fetch_attachment` |
-| `src-tauri/src/imap/parse.rs` | Sync-time hashing + per-message dedup |
+| `src-tauri/src/inline_image_store/mod.rs` | Inline image SQLite blob store |
+| `src-tauri/src/inline_image_store/commands.rs` | Tauri commands: get, stats, clear |
+| `src-tauri/src/attachment_cache.rs` | File cache: hash, read, write, DB helpers |
+| `src-tauri/src/provider/commands.rs` | Fetch path: inline check → file cache → provider → cache-on-miss |
+| `src-tauri/src/imap/parse.rs` | Sync-time hashing + per-message dedup + inline_data extraction |
+| `src-tauri/src/sync/pipeline.rs` | `store_chunk` → `store_inline_images` batch insert |
 | `src-tauri/src/gmail/parse.rs` | Per-message dedup by attachment_id |
-| `src/services/attachments/cacheManager.ts` | Eviction, clear |
+| `src/services/attachments/cacheManager.ts` | File cache eviction, clear |
 | `src/services/attachments/preCacheManager.ts` | Background pre-caching |
 
 ## Sync INSERT preservation

@@ -1,5 +1,5 @@
-import { getCurrentUnixTimestamp } from "@/utils/timestamp";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentUnixTimestamp } from "@/utils/timestamp";
 
 export interface DbScheduledEmail {
   id: string;
@@ -28,10 +28,9 @@ export async function getPendingScheduledEmails(): Promise<DbScheduledEmail[]> {
 export async function getScheduledEmailsForAccount(
   accountId: string,
 ): Promise<DbScheduledEmail[]> {
-  return invoke<DbScheduledEmail[]>(
-    "db_get_scheduled_emails_for_account",
-    { accountId },
-  );
+  return invoke<DbScheduledEmail[]>("db_get_scheduled_emails_for_account", {
+    accountId,
+  });
 }
 
 export async function insertScheduledEmail(email: {

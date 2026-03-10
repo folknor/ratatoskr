@@ -69,10 +69,9 @@ describe("calendars service", () => {
       const result = await getCalendarsForAccount("acc-1");
 
       expect(result).toEqual(calendars);
-      expect(mockInvoke).toHaveBeenCalledWith(
-        "db_get_calendars_for_account",
-        { accountId: "acc-1" },
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_get_calendars_for_account", {
+        accountId: "acc-1",
+      });
     });
 
     it("returns empty array when no calendars exist", async () => {
@@ -122,28 +121,31 @@ describe("calendars service", () => {
     it("updates sync_token and ctag", async () => {
       await updateCalendarSyncToken("cal-1", "sync-abc", "ctag-xyz");
 
-      expect(mockInvoke).toHaveBeenCalledWith(
-        "db_update_calendar_sync_token",
-        { calendarId: "cal-1", syncToken: "sync-abc", ctag: "ctag-xyz" },
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_update_calendar_sync_token", {
+        calendarId: "cal-1",
+        syncToken: "sync-abc",
+        ctag: "ctag-xyz",
+      });
     });
 
     it("sets ctag to null when not provided", async () => {
       await updateCalendarSyncToken("cal-1", "sync-abc");
 
-      expect(mockInvoke).toHaveBeenCalledWith(
-        "db_update_calendar_sync_token",
-        { calendarId: "cal-1", syncToken: "sync-abc", ctag: null },
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_update_calendar_sync_token", {
+        calendarId: "cal-1",
+        syncToken: "sync-abc",
+        ctag: null,
+      });
     });
 
     it("allows null sync_token", async () => {
       await updateCalendarSyncToken("cal-1", null, "ctag-xyz");
 
-      expect(mockInvoke).toHaveBeenCalledWith(
-        "db_update_calendar_sync_token",
-        { calendarId: "cal-1", syncToken: null, ctag: "ctag-xyz" },
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_update_calendar_sync_token", {
+        calendarId: "cal-1",
+        syncToken: null,
+        ctag: "ctag-xyz",
+      });
     });
   });
 

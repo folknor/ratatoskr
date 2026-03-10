@@ -9,6 +9,7 @@ use crate::db::DbState;
 use crate::imap::client;
 use crate::imap::connection::connect;
 use crate::imap::types::ImapConfig;
+use crate::inline_image_store::InlineImageStoreState;
 use crate::search::SearchState;
 use crate::threading;
 
@@ -61,10 +62,12 @@ fn emit_progress(app: &AppHandle, event: &SyncProgressEvent) {
 
 /// Run initial IMAP sync for an account.
 #[allow(clippy::cognitive_complexity, clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 pub async fn imap_initial_sync(
     app: &AppHandle,
     db: &DbState,
     body_store: &BodyStoreState,
+    inline_images: &InlineImageStoreState,
     search: &SearchState,
     account_id: &str,
     config: &ImapConfig,
@@ -167,6 +170,7 @@ pub async fn imap_initial_sync(
             app,
             db,
             body_store,
+            inline_images,
             search,
             config,
             account_id,
@@ -326,6 +330,7 @@ async fn sync_single_folder(
     app: &AppHandle,
     db: &DbState,
     body_store: &BodyStoreState,
+    inline_images: &InlineImageStoreState,
     search: &SearchState,
     config: &ImapConfig,
     account_id: &str,
@@ -413,7 +418,7 @@ async fn sync_single_folder(
         }
 
         if !chunk_converted.is_empty() {
-            store_chunk(db, body_store, search, &chunk_converted, account_id).await?;
+            store_chunk(db, body_store, inline_images, search, &chunk_converted, account_id).await?;
 
             for c in &chunk_converted {
                 all_meta.insert(c.id.clone(), c.meta.clone());

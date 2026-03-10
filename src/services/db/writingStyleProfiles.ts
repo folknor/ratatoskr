@@ -12,10 +12,9 @@ export interface DbWritingStyleProfile {
 export async function getWritingStyleProfile(
   accountId: string,
 ): Promise<DbWritingStyleProfile | null> {
-  return invoke<DbWritingStyleProfile | null>(
-    "db_get_writing_style_profile",
-    { accountId },
-  );
+  return invoke<DbWritingStyleProfile | null>("db_get_writing_style_profile", {
+    accountId,
+  });
 }
 
 export async function upsertWritingStyleProfile(

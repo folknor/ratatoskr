@@ -206,10 +206,9 @@ describe("calendarEvents service", () => {
     it("removes all events for a given calendar_id", async () => {
       await deleteEventsForCalendar("cal-1");
 
-      expect(mockInvoke).toHaveBeenCalledWith(
-        "db_delete_events_for_calendar",
-        { calendarId: "cal-1" },
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_delete_events_for_calendar", {
+        calendarId: "cal-1",
+      });
     });
   });
 
@@ -243,10 +242,10 @@ describe("calendarEvents service", () => {
     it("removes event matching calendar_id and remote_event_id", async () => {
       await deleteEventByRemoteId("cal-1", "remote-1");
 
-      expect(mockInvoke).toHaveBeenCalledWith(
-        "db_delete_event_by_remote_id",
-        { calendarId: "cal-1", remoteEventId: "remote-1" },
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_delete_event_by_remote_id", {
+        calendarId: "cal-1",
+        remoteEventId: "remote-1",
+      });
     });
   });
 

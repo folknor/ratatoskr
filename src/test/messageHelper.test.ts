@@ -7,9 +7,9 @@ vi.mock("@tauri-apps/api/core", () => ({
 import { invoke } from "@tauri-apps/api/core";
 import {
   findSpecialFolder,
+  getImapUidsForMessages,
   groupMessagesByFolder,
   type ImapMessageInfo,
-  getImapUidsForMessages,
   securityToConfigType,
   updateMessageImapFolder,
 } from "./messageHelper";

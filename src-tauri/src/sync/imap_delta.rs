@@ -9,6 +9,7 @@ use crate::db::DbState;
 use crate::imap::client;
 use crate::imap::connection::connect;
 use crate::imap::types::{DeltaCheckRequest, DeltaCheckResult, ImapConfig};
+use crate::inline_image_store::InlineImageStoreState;
 use crate::search::SearchState;
 use crate::threading;
 
@@ -45,6 +46,7 @@ pub async fn imap_delta_sync(
     _app: &AppHandle,
     db: &DbState,
     body_store: &BodyStoreState,
+    inline_images: &InlineImageStoreState,
     search: &SearchState,
     account_id: &str,
     config: &ImapConfig,
@@ -116,6 +118,7 @@ pub async fn imap_delta_sync(
             &since_date,
             db,
             body_store,
+            inline_images,
             search,
             &mut all_threadable,
             &mut all_meta,
@@ -172,6 +175,7 @@ pub async fn imap_delta_sync(
                 days_back,
                 db,
                 body_store,
+                inline_images,
                 search,
                 &mut all_threadable,
                 &mut all_meta,
@@ -329,6 +333,7 @@ async fn fetch_folder_uids(
     since_date: &str,
     db: &DbState,
     body_store: &BodyStoreState,
+    inline_images: &InlineImageStoreState,
     search: &SearchState,
     all_threadable: &mut Vec<crate::threading::ThreadableMessage>,
     all_meta: &mut HashMap<String, MessageMeta>,
@@ -360,6 +365,7 @@ async fn fetch_folder_uids(
         &sr.uids,
         db,
         body_store,
+        inline_images,
         search,
         all_threadable,
         all_meta,
@@ -390,6 +396,7 @@ async fn fetch_uids_on_session(
     uids: &[u32],
     db: &DbState,
     body_store: &BodyStoreState,
+    inline_images: &InlineImageStoreState,
     search: &SearchState,
     all_threadable: &mut Vec<crate::threading::ThreadableMessage>,
     all_meta: &mut HashMap<String, MessageMeta>,
@@ -417,7 +424,7 @@ async fn fetch_uids_on_session(
         }
 
         if !converted.is_empty() {
-            store_chunk(db, body_store, search, &converted, account_id).await?;
+            store_chunk(db, body_store, inline_images, search, &converted, account_id).await?;
 
             for c in &converted {
                 all_meta.insert(c.id.clone(), c.meta.clone());
@@ -447,6 +454,7 @@ async fn process_folder_delta(
     days_back: i64,
     db: &DbState,
     body_store: &BodyStoreState,
+    inline_images: &InlineImageStoreState,
     search: &SearchState,
     all_threadable: &mut Vec<crate::threading::ThreadableMessage>,
     all_meta: &mut HashMap<String, MessageMeta>,
@@ -487,6 +495,7 @@ async fn process_folder_delta(
             &sr.uids,
             db,
             body_store,
+            inline_images,
             search,
             all_threadable,
             all_meta,
@@ -518,6 +527,7 @@ async fn process_folder_delta(
         &delta.new_uids,
         db,
         body_store,
+        inline_images,
         search,
         all_threadable,
         all_meta,

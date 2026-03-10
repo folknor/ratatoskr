@@ -130,9 +130,12 @@ describe("cacheManager", () => {
       expect(tauriFs.mock.remove).toHaveBeenCalledWith("attachment_cache/old", {
         baseDir: 26,
       });
-      expect(mockInvoke).toHaveBeenCalledWith("db_clear_attachment_cache_entry", {
-        attachmentId: "att-old",
-      });
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_clear_attachment_cache_entry",
+        {
+          attachmentId: "att-old",
+        },
+      );
     });
 
     it("does nothing when under limit", async () => {

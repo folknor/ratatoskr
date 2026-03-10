@@ -33,11 +33,14 @@ describe("attachments DB service", () => {
 
       const result = await getAttachmentsForAccount("acc-1");
 
-      expect(mockInvoke).toHaveBeenCalledWith("db_get_attachments_for_account", {
-        accountId: "acc-1",
-        limit: 200,
-        offset: 0,
-      });
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_get_attachments_for_account",
+        {
+          accountId: "acc-1",
+          limit: 200,
+          offset: 0,
+        },
+      );
       expect(result).toEqual(mockData);
     });
 
@@ -46,11 +49,14 @@ describe("attachments DB service", () => {
 
       await getAttachmentsForAccount("acc-1", 50, 100);
 
-      expect(mockInvoke).toHaveBeenCalledWith("db_get_attachments_for_account", {
-        accountId: "acc-1",
-        limit: 50,
-        offset: 100,
-      });
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_get_attachments_for_account",
+        {
+          accountId: "acc-1",
+          limit: 50,
+          offset: 100,
+        },
+      );
     });
   });
 
@@ -106,10 +112,13 @@ describe("attachments DB service", () => {
 
       await getAttachmentsForMessage("acc-1", "msg-1");
 
-      expect(mockInvoke).toHaveBeenCalledWith("db_get_attachments_for_message", {
-        accountId: "acc-1",
-        messageId: "msg-1",
-      });
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_get_attachments_for_message",
+        {
+          accountId: "acc-1",
+          messageId: "msg-1",
+        },
+      );
     });
   });
 });

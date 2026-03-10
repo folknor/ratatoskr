@@ -4,6 +4,7 @@ use tauri::{AppHandle, State};
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
+use crate::inline_image_store::InlineImageStoreState;
 use crate::search::SearchState;
 
 use super::SyncState;
@@ -14,11 +15,13 @@ use super::types::ImapSyncResult;
 ///
 /// Called from TS when an IMAP account has no history_id (first sync).
 /// Returns sync result with new message IDs for post-sync hooks (filters, notifications).
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn sync_imap_initial(
     app: AppHandle,
     db: State<'_, DbState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     sync_state: State<'_, SyncState>,
     account_id: String,
@@ -51,6 +54,7 @@ pub async fn sync_imap_initial(
             &app,
             &db,
             &body_store,
+            &inline_images,
             &search,
             &account_id,
             &imap_config,
@@ -72,11 +76,13 @@ pub async fn sync_imap_initial(
 /// Includes automatic recovery: if delta finds 0 new messages and the DB has
 /// 0 threads (indicating a failed initial sync), clears sync state and falls
 /// back to a full initial sync — all within a single invoke, no extra IPC.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn sync_imap_delta(
     app: AppHandle,
     db: State<'_, DbState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     sync_state: State<'_, SyncState>,
     account_id: String,
@@ -106,6 +112,7 @@ pub async fn sync_imap_delta(
             &app,
             &db,
             &body_store,
+            &inline_images,
             &search,
             &account_id,
             &imap_config,
@@ -145,6 +152,7 @@ pub async fn sync_imap_delta(
                     &app,
                     &db,
                     &body_store,
+                    &inline_images,
                     &search,
                     &account_id,
                     &imap_config,

@@ -22,6 +22,20 @@
 
 ---
 
+## Cache & Inline Image Store
+
+- [ ] **Cache eviction not implemented** — `remove_cached` and `count_by_hash` in `attachment_cache.rs` exist but nothing calls them. The UI has a cache size setting but no code enforces it. Old cached attachments accumulate forever on disk.
+
+- [ ] **Inline image store has no size limit** — `inline_images.db` grows unbounded. No eviction, no cap. Heavy users with lots of signature images will see this grow indefinitely.
+
+- [ ] **Non-IMAP providers don't get inline images during sync** — IMAP stores inline images proactively at sync time. Gmail/JMAP/Graph only store them reactively on first fetch via `cache_after_fetch` in `provider/commands.rs`. First render of every email with inline images is slow for those providers.
+
+- [ ] **`gmail_attachment_id` column naming** — `find_cache_info` in `attachment_cache.rs` queries `gmail_attachment_id` for all providers. For IMAP, the `part_id` is stored in that column. Works, but the name is misleading.
+
+- [ ] **`CacheInfo.local_path` fetched but never read** — `try_cache_hit` in `provider/commands.rs` uses `content_hash` → `read_cached` (which resolves the path itself), so the stored `local_path` in `CacheInfo` is redundant.
+
+---
+
 ## Phase 4 (Rust Sync Engine) Follow-ups
 
 ### LOW

@@ -1,11 +1,12 @@
 #![allow(clippy::let_underscore_must_use)]
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
 use crate::gmail::client::GmailState;
 use crate::graph::client::GraphState;
+use crate::inline_image_store::InlineImageStoreState;
 use crate::jmap::client::JmapState;
 use crate::search::SearchState;
 
@@ -24,6 +25,7 @@ pub async fn provider_sync_initial(
     jmap: State<'_, JmapState>,
     graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
@@ -41,6 +43,7 @@ pub async fn provider_sync_initial(
         account_id: &account_id,
         db: &db,
         body_store: &body_store,
+        inline_images: &inline_images,
         search: &search,
         app_handle: &app_handle,
     };
@@ -56,6 +59,7 @@ pub async fn provider_sync_delta(
     jmap: State<'_, JmapState>,
     graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<SyncResult, String> {
@@ -73,6 +77,7 @@ pub async fn provider_sync_delta(
         account_id: &account_id,
         db: &db,
         body_store: &body_store,
+        inline_images: &inline_images,
         search: &search,
         app_handle: &app_handle,
     };
@@ -91,6 +96,7 @@ pub async fn provider_archive(
     jmap: State<'_, JmapState>,
     graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
@@ -108,6 +114,7 @@ pub async fn provider_archive(
         account_id: &account_id,
         db: &db,
         body_store: &body_store,
+        inline_images: &inline_images,
         search: &search,
         app_handle: &app_handle,
     };
@@ -124,6 +131,7 @@ pub async fn provider_trash(
     jmap: State<'_, JmapState>,
     graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
@@ -141,6 +149,7 @@ pub async fn provider_trash(
         account_id: &account_id,
         db: &db,
         body_store: &body_store,
+        inline_images: &inline_images,
         search: &search,
         app_handle: &app_handle,
     };
@@ -157,6 +166,7 @@ pub async fn provider_permanent_delete(
     jmap: State<'_, JmapState>,
     graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
@@ -174,6 +184,7 @@ pub async fn provider_permanent_delete(
         account_id: &account_id,
         db: &db,
         body_store: &body_store,
+        inline_images: &inline_images,
         search: &search,
         app_handle: &app_handle,
     };
@@ -191,6 +202,7 @@ pub async fn provider_mark_read(
     jmap: State<'_, JmapState>,
     graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
@@ -208,6 +220,7 @@ pub async fn provider_mark_read(
         account_id: &account_id,
         db: &db,
         body_store: &body_store,
+        inline_images: &inline_images,
         search: &search,
         app_handle: &app_handle,
     };
@@ -225,6 +238,7 @@ pub async fn provider_star(
     jmap: State<'_, JmapState>,
     graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
@@ -242,6 +256,7 @@ pub async fn provider_star(
         account_id: &account_id,
         db: &db,
         body_store: &body_store,
+        inline_images: &inline_images,
         search: &search,
         app_handle: &app_handle,
     };
@@ -259,6 +274,7 @@ pub async fn provider_spam(
     jmap: State<'_, JmapState>,
     graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
@@ -276,6 +292,7 @@ pub async fn provider_spam(
         account_id: &account_id,
         db: &db,
         body_store: &body_store,
+        inline_images: &inline_images,
         search: &search,
         app_handle: &app_handle,
     };
@@ -293,6 +310,7 @@ pub async fn provider_move_to_folder(
     jmap: State<'_, JmapState>,
     graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
@@ -310,6 +328,7 @@ pub async fn provider_move_to_folder(
         account_id: &account_id,
         db: &db,
         body_store: &body_store,
+        inline_images: &inline_images,
         search: &search,
         app_handle: &app_handle,
     };
@@ -327,6 +346,7 @@ pub async fn provider_add_tag(
     jmap: State<'_, JmapState>,
     graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
@@ -344,6 +364,7 @@ pub async fn provider_add_tag(
         account_id: &account_id,
         db: &db,
         body_store: &body_store,
+        inline_images: &inline_images,
         search: &search,
         app_handle: &app_handle,
     };
@@ -361,6 +382,7 @@ pub async fn provider_remove_tag(
     jmap: State<'_, JmapState>,
     graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
@@ -378,6 +400,7 @@ pub async fn provider_remove_tag(
         account_id: &account_id,
         db: &db,
         body_store: &body_store,
+        inline_images: &inline_images,
         search: &search,
         app_handle: &app_handle,
     };
@@ -397,6 +420,7 @@ pub async fn provider_send_email(
     jmap: State<'_, JmapState>,
     graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
@@ -414,6 +438,7 @@ pub async fn provider_send_email(
         account_id: &account_id,
         db: &db,
         body_store: &body_store,
+        inline_images: &inline_images,
         search: &search,
         app_handle: &app_handle,
     };
@@ -432,6 +457,7 @@ pub async fn provider_create_draft(
     jmap: State<'_, JmapState>,
     graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
@@ -449,6 +475,7 @@ pub async fn provider_create_draft(
         account_id: &account_id,
         db: &db,
         body_store: &body_store,
+        inline_images: &inline_images,
         search: &search,
         app_handle: &app_handle,
     };
@@ -468,6 +495,7 @@ pub async fn provider_update_draft(
     jmap: State<'_, JmapState>,
     graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
@@ -485,6 +513,7 @@ pub async fn provider_update_draft(
         account_id: &account_id,
         db: &db,
         body_store: &body_store,
+        inline_images: &inline_images,
         search: &search,
         app_handle: &app_handle,
     };
@@ -502,6 +531,7 @@ pub async fn provider_delete_draft(
     jmap: State<'_, JmapState>,
     graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
@@ -519,6 +549,7 @@ pub async fn provider_delete_draft(
         account_id: &account_id,
         db: &db,
         body_store: &body_store,
+        inline_images: &inline_images,
         search: &search,
         app_handle: &app_handle,
     };
@@ -538,15 +569,21 @@ pub async fn provider_fetch_attachment(
     jmap: State<'_, JmapState>,
     graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<AttachmentData, String> {
-    // 1. Check cache
+    // 1. Check inline image store (fast SQLite lookup for small images)
+    if let Some(hit) = try_inline_image_hit(&db, &inline_images, &account_id, &message_id, &attachment_id).await? {
+        return Ok(hit);
+    }
+
+    // 2. Check file-based cache
     if let Some(hit) = try_cache_hit(&db, &app_handle, &account_id, &message_id, &attachment_id).await? {
         return Ok(hit);
     }
 
-    // 2. Cache miss — fetch from provider
+    // 3. Cache miss — fetch from provider
     let provider = get_provider_type(&db, &account_id).await?;
     let ops = get_ops(
         &provider,
@@ -561,6 +598,7 @@ pub async fn provider_fetch_attachment(
         account_id: &account_id,
         db: &db,
         body_store: &body_store,
+        inline_images: &inline_images,
         search: &search,
         app_handle: &app_handle,
     };
@@ -568,13 +606,46 @@ pub async fn provider_fetch_attachment(
         .fetch_attachment(&ctx, &message_id, &attachment_id)
         .await?;
 
-    // 3. Cache the result (fire-and-forget — don't delay response)
+    // 4. Cache the result (fire-and-forget — don't delay response)
     cache_after_fetch(&db, &app_handle, &account_id, &message_id, &attachment_id, &result.data);
 
     Ok(result)
 }
 
-/// Check the content-addressed cache for a previously fetched attachment.
+/// Check the inline image SQLite store for small cached images.
+async fn try_inline_image_hit(
+    db: &DbState,
+    inline_images: &InlineImageStoreState,
+    account_id: &str,
+    message_id: &str,
+    attachment_id: &str,
+) -> Result<Option<AttachmentData>, String> {
+    use crate::attachment_cache::{encode_base64, find_cache_info};
+
+    let (acct, msg, att) = (
+        account_id.to_string(),
+        message_id.to_string(),
+        attachment_id.to_string(),
+    );
+
+    let hash = db
+        .with_conn(move |conn| {
+            let info = find_cache_info(conn, &acct, &msg, &att)?;
+            Ok(info.and_then(|i| i.content_hash))
+        })
+        .await?;
+
+    let Some(hash) = hash else { return Ok(None) };
+
+    let result = inline_images.get(hash).await?;
+    Ok(result.map(|(bytes, _mime)| {
+        let size = bytes.len();
+        let data = encode_base64(&bytes);
+        AttachmentData { data, size }
+    }))
+}
+
+/// Check the content-addressed file cache for a previously fetched attachment.
 async fn try_cache_hit(
     db: &DbState,
     app_handle: &AppHandle,
@@ -621,6 +692,8 @@ fn cache_after_fetch(
     use crate::attachment_cache::{
         decode_base64, find_cache_info, hash_bytes, update_cache_fields, write_cached,
     };
+    use crate::inline_image_store::{InlineImageStoreState, MAX_INLINE_SIZE};
+    use tauri::Manager;
 
     let app = app_handle.clone();
     let (acct, msg, att, data) = (
@@ -634,6 +707,30 @@ fn cache_after_fetch(
         let result: Result<(), String> = async {
             let bytes = decode_base64(&data)?;
             let content_hash = hash_bytes(&bytes);
+
+            // Small inline images → SQLite blob store
+            if bytes.len() <= MAX_INLINE_SIZE {
+                let inline_store: tauri::State<'_, InlineImageStoreState> = app.state();
+                // Look up mime_type from DB for proper storage
+                let mime = {
+                    let db: tauri::State<'_, DbState> = app.state();
+                    let (a, m, at) = (acct.clone(), msg.clone(), att.clone());
+                    db.with_conn(move |conn| {
+                        let info = find_cache_info(conn, &a, &m, &at)?;
+                        Ok(info.and_then(|i| i.mime_type))
+                    })
+                    .await?
+                };
+                if let Some(ref mime) = mime {
+                    if mime.starts_with("image/") {
+                        inline_store
+                            .put(content_hash.clone(), bytes.clone(), mime.clone())
+                            .await?;
+                    }
+                }
+            }
+
+            // File-based cache for all sizes
             let local_path = write_cached(&app, &content_hash, &bytes)?;
 
             #[allow(clippy::cast_possible_wrap)]
@@ -670,6 +767,7 @@ pub async fn provider_list_folders(
     jmap: State<'_, JmapState>,
     graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<Vec<ProviderFolder>, String> {
@@ -687,6 +785,7 @@ pub async fn provider_list_folders(
         account_id: &account_id,
         db: &db,
         body_store: &body_store,
+        inline_images: &inline_images,
         search: &search,
         app_handle: &app_handle,
     };
