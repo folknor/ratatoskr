@@ -33,7 +33,7 @@ export async function backfillSmartLabels(
     const rows = await db.select<BackfillRow[]>(
       `SELECT t.id AS thread_id, t.subject, t.snippet,
               m.from_address, m.from_name,
-              m.to_addresses, m.has_attachments, m.id
+              m.to_addresses, t.has_attachments, m.id
        FROM threads t
        INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
        LEFT JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id

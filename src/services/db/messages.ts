@@ -2,6 +2,15 @@ import { bodyStorePut } from "@/core/rustDb";
 
 import { getDb } from "./connection";
 
+/**
+ * Must match the `messages` CREATE TABLE schema (migrations.ts) and
+ * the Rust `DbMessage` struct (src-tauri/src/db/types.rs).
+ *
+ * When fetched via direct SQL (getDb()), is_read/is_starred are 0|1 integers.
+ * When fetched via Rust (db_get_messages_for_thread), they are booleans.
+ * Both representations are truthy/falsy-compatible but strict === 1 checks
+ * only work on the direct SQL path.
+ */
 export interface DbMessage {
   id: string;
   account_id: string;
@@ -17,7 +26,6 @@ export interface DbMessage {
   date: number;
   is_read: number;
   is_starred: number;
-  has_attachments: number;
   body_html: string | null;
   body_text: string | null;
   body_cached: number;
