@@ -10,6 +10,7 @@ import { updateMessageThreadIds, upsertMessage } from "../db/messages";
 import { getPendingOpsForResource } from "../db/pendingOperations";
 import { deleteThread, setThreadLabels, upsertThread } from "../db/threads";
 import type { SyncResult } from "../email/types";
+import { applyFiltersToMessages } from "../filters/filterEngine";
 import type { ParsedMessage } from "../gmail/messageParser";
 import {
   buildThreads,
@@ -875,6 +876,33 @@ export async function imapDeltaSync(
     allImapMsgs,
     labelsByRfcId,
   );
+
+  // Apply filters to new inbox messages (matching Gmail delta sync behavior)
+  const inboxMessages = storedMessages.filter((m) =>
+    m.labelIds.includes("INBOX"),
+  );
+  if (inboxMessages.length > 0) {
+    try {
+      await applyFiltersToMessages(accountId, inboxMessages);
+    } catch (err) {
+      console.error(
+        `[imapSync] Failed to apply filters during delta sync:`,
+        err,
+      );
+    }
+
+    // Apply smart labels (fire-and-forget, non-blocking)
+    import("@/services/smartLabels/smartLabelManager")
+      .then(({ applySmartLabelsToMessages }) =>
+        applySmartLabelsToMessages(accountId, inboxMessages),
+      )
+      .catch((err) => console.error("[imapSync] Smart label error:", err));
+  }
+
+  // Fire-and-forget AI categorization for new threads
+  import("@/services/ai/categorizationManager")
+    .then(({ categorizeNewThreads }) => categorizeNewThreads(accountId))
+    .catch((err) => console.error("[imapSync] Categorization error:", err));
 
   // Update sync state timestamp
   await updateAccountSyncState(accountId, `imap-synced-${Date.now()}`);
