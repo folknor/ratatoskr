@@ -12,7 +12,7 @@ export async function deleteDraftsForThread(
   threadId: string,
 ): Promise<void> {
   const drafts = await client.listDrafts();
-  const threadDrafts = drafts.filter((d) => d.message.threadId === threadId);
+  const threadDrafts = drafts.filter((d) => d.message?.threadId === threadId);
   for (const d of threadDrafts) {
     await client.deleteDraft(d.id);
   }

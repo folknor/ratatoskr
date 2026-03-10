@@ -83,8 +83,8 @@
 
 ## Refactoring — Patterns & Boilerplate
 
-- [ ] **Rust IMAP session boilerplate** — `src-tauri/src/commands.rs`
-  8 command functions with identical connect → work → logout pattern. Create a `with_imap_session()` helper.
+- [x] **Rust IMAP session boilerplate** — `src-tauri/src/commands.rs`
+  15 command functions with identical connect → work → logout pattern. Created `with_imap_session!` macro.
 
 - [ ] **`moveToFolder` only adds label, doesn't remove source** — `src-tauri/src/email_actions/commands.rs`
   `email_action_move_to_folder` inserts the target folder label but doesn't remove the old label (e.g., INBOX). The TS code had the same behavior, so it's a pre-existing gap — the provider-side move handles the actual folder change, but the local DB state is incomplete until next sync.

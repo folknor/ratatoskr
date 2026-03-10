@@ -80,7 +80,7 @@ export function EmailList({
         try {
           const client = await getGmailClient(activeAccountId);
           const drafts = await client.listDrafts();
-          const match = drafts.find((d) => d.message.id === draftMsg.id);
+          const match = drafts.find((d) => d.message?.id === draftMsg.id);
           if (match) draftId = match.id;
         } catch {
           // If we can't get draft ID, composer will create a new draft on save
