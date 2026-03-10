@@ -63,6 +63,10 @@ pub async fn sync_imap_initial(
 ///
 /// Called from TS when an IMAP account has a history_id (subsequent syncs).
 /// Returns sync result with new message IDs for post-sync hooks.
+///
+/// Includes automatic recovery: if delta finds 0 new messages and the DB has
+/// 0 threads (indicating a failed initial sync), clears sync state and falls
+/// back to a full initial sync — all within a single invoke, no extra IPC.
 #[tauri::command]
 pub async fn sync_imap_delta(
     app: AppHandle,
@@ -93,7 +97,7 @@ pub async fn sync_imap_delta(
 
         let days = days_back.unwrap_or(actual_days_back);
 
-        super::imap_delta::imap_delta_sync(
+        let result = super::imap_delta::imap_delta_sync(
             &app,
             &db,
             &body_store,
@@ -101,7 +105,47 @@ pub async fn sync_imap_delta(
             &account_id,
             &imap_config,
             days,
-        ).await
+        ).await?;
+
+        // Recovery: if delta found nothing and DB has no threads, the previous
+        // initial sync likely failed. Clear sync state and run initial sync.
+        if result.stored_count == 0 {
+            let needs_recovery = {
+                let aid = account_id.clone();
+                db.with_conn(move |conn| {
+                    super::pipeline::get_thread_count(conn, &aid)
+                }).await?
+            };
+
+            if needs_recovery == 0 {
+                log::warn!(
+                    "[sync] Delta found 0 messages, DB has 0 threads for {} — forcing full re-sync",
+                    account_id
+                );
+
+                // Clear history_id and folder sync states in one DB call
+                {
+                    let aid = account_id.clone();
+                    db.with_conn(move |conn| {
+                        super::pipeline::clear_account_history_id(conn, &aid)?;
+                        super::pipeline::clear_all_folder_sync_states(conn, &aid)?;
+                        Ok(())
+                    }).await?
+                }
+
+                return super::imap_initial::imap_initial_sync(
+                    &app,
+                    &db,
+                    &body_store,
+                    &search,
+                    &account_id,
+                    &imap_config,
+                    days,
+                ).await;
+            }
+        }
+
+        Ok(result)
     }.await;
 
     sync_state.unlock_account(&account_id);

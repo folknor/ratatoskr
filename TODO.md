@@ -38,11 +38,7 @@
 
   The audit should compare every column in the `messages` CREATE TABLE statement (in `migrations.ts`) against the `DbMessage` interface fields, checking types (`number` vs `string` vs `null`), and verifying that Rust's `db_get_messages_for_thread` return type matches too. Could also consider switching from `SELECT *` to explicit column lists to make mismatches a hard error, though that's more verbose. Low-effort task, just needs someone to sit down and diff the schema against the types.
 
-- [ ] **Recovery logic duplicated between TS wrapper and Rust** — `src/services/gmail/syncManager.ts:163-174`
-
-  The "delta found 0 messages + DB has 0 threads → force full resync" recovery lives in the TS `syncImapAccountRust()` function. After `syncImapDelta()` returns, it calls `getThreadCountForAccount()` (IPC #1), and if 0, calls `clearAccountHistoryId()` (IPC #2), `clearAllFolderSyncStates()` (IPC #3), then `syncImapInitial()` (IPC #4). The same pattern also exists in the TS IMAP fallback path at lines 292-307.
-
-  This could be moved entirely into the Rust `sync_imap_delta` command — Rust already has direct DB access and could check thread count, clear state, and trigger initial sync in a single invoke. That would eliminate 3 extra IPC round-trips. However, this recovery path is rare (only fires when a delta sync returns nothing and the DB is completely empty, which indicates a failed initial sync), so the performance gain is negligible. The real benefit would be code deduplication — the TS fallback path has the same logic, and if the Rust command handled recovery internally, both callers would get it for free. Medium priority for cleanliness, low priority for performance.
+- [x] **~~Recovery logic duplicated between TS wrapper and Rust~~** — Moved into `sync_imap_delta` Rust command (`src-tauri/src/sync/commands.rs`). Recovery (thread count check → clear history_id + folder sync states → initial sync) now happens entirely within the single `sync_imap_delta` invoke, eliminating 3 IPC round-trips. The TS fallback path (`syncManager.ts:282-307`) retains its own recovery since it doesn't use the Rust engine.
 
 ### LOW
 

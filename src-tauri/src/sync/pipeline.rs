@@ -573,3 +573,33 @@ pub struct FolderSyncState {
     pub _modseq: Option<i64>,
     pub _last_sync_at: Option<i64>,
 }
+
+/// Get thread count for an account (used for recovery detection).
+pub fn get_thread_count(conn: &Connection, account_id: &str) -> Result<i64, String> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM threads WHERE account_id = ?1",
+        rusqlite::params![account_id],
+        |row| row.get(0),
+    )
+    .map_err(|e| format!("get thread count: {e}"))
+}
+
+/// Clear account history_id (forces next sync to be initial).
+pub fn clear_account_history_id(conn: &Connection, account_id: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE accounts SET history_id = NULL, updated_at = unixepoch() WHERE id = ?1",
+        rusqlite::params![account_id],
+    )
+    .map_err(|e| format!("clear account history_id: {e}"))?;
+    Ok(())
+}
+
+/// Clear all folder sync states for an account (forces full folder resync).
+pub fn clear_all_folder_sync_states(conn: &Connection, account_id: &str) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM folder_sync_state WHERE account_id = ?1",
+        rusqlite::params![account_id],
+    )
+    .map_err(|e| format!("clear folder sync states: {e}"))?;
+    Ok(())
+}

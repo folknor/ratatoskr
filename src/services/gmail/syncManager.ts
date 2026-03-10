@@ -158,20 +158,9 @@ async function syncImapAccountRust(accountId: string): Promise<void> {
     const isDelta = !!account.history_id;
 
     if (isDelta) {
+      // Recovery (0 messages + 0 threads → force initial) is handled
+      // inside the Rust sync_imap_delta command — no extra IPC needed.
       result = await syncImapDelta(accountId);
-
-      // Recovery: if delta found nothing but DB has no threads, force full resync
-      if (result.storedCount === 0) {
-        const threadCount = await getThreadCountForAccount(accountId);
-        if (threadCount === 0) {
-          console.warn(
-            `[syncManager] Rust delta sync found 0 messages, DB has 0 threads — forcing full re-sync`,
-          );
-          await clearAccountHistoryId(accountId);
-          await clearAllFolderSyncStates(accountId);
-          result = await syncImapInitial(accountId);
-        }
-      }
     } else {
       result = await syncImapInitial(accountId);
     }
