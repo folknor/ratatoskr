@@ -6,53 +6,28 @@
 
 - [ ] **Auto-updater should check local permissions** — Don't show update prompts if the user lacks write access to the app installation directory (e.g., installed system-wide without admin rights). The update would fail anyway — detect this upfront and either hide the prompt or show a helpful message.
 
-### MEDIUM
-
-- [ ] **Queue processor loses error context** — `src/services/queue/queueProcessor.ts:46-56`
-  Original error details lost on permanent failures; only the classified message is stored.
-
 ### LOW
 
-- [ ] **Silent attachment pre-cache failures** — `src/services/attachments/preCacheManager.ts:78-80`
-  Empty catch block; no visibility when attachment caching fails systematically.
+- [ ] **pendingOperations.ts still uses direct SQL** — `src/services/db/pendingOperations.ts`
 
-- [ ] **Migration rollback error swallowed** — `src/services/db/migrations.ts:915`
-  `ROLLBACK` failure caught and ignored. Could leave transaction open.
+  All 10 functions in this file use `getDb()` direct SQL instead of Rust Tauri commands. The Rust side already has `db_enqueue_pending_operation` in `email_actions/commands.rs` and a pending-ops conflict check in `sync/pipeline.rs:457`, but the TS `enqueuePendingOperation` doesn't even call the Rust one — it has its own INSERT. The reads (`getPendingOperations`, `updateOperationStatus`, `deleteOperation`, `incrementRetry`, `getPendingOpsCount`, `getFailedOpsCount`, `getPendingOpsForResource`, `clearFailedOperations`, `retryFailedOperations`) are all direct SQL too.
 
-- [ ] **pendingOperations.ts still uses direct SQL for reads** — `src/services/db/pendingOperations.ts`
-  Queue writes now go through Rust (`db_enqueue_pending_operation`), but reads (`getPendingOperations`, `compactQueue`, `incrementRetry`, `deleteOperation`, etc.) still use `getDb()` direct SQL. Port to Rust commands for consistency.
+  The hardest function to port is `compactQueue()` — it loads all pending ops, groups by resource, detects toggle-pair cancellations (star on/off, markRead on/off), cancels matching addLabel/removeLabel pairs, and collapses sequential moveToFolder ops into just the latest. This is ~80 lines of non-trivial JS logic that would need to be reimplemented in Rust.
 
----
-
-## Duplicated Business Logic
-
-- [ ] **IMAP messages may skip filter engine**
-  `src/services/filters/filterEngine.ts` runs for Gmail sync but appears missing from the IMAP sync flow (`src/services/imap/imapSync.ts`). Verify and add if missing.
-
----
-
-## Refactoring — Large Files
-
-- [ ] **ContextMenuPortal.tsx** (796 lines) — Extract per-menu-type components (ThreadContextMenu, MessageContextMenu, SidebarLabelContextMenu). Move quote builders to `utils/emailQuoteBuilders.ts`.
-
-- [ ] **Composer.tsx** (691 lines) — Extract template shortcut engine and editor config setup.
+  The main consumer is `queueProcessor.ts`, which calls `compactQueue()` → `getPendingOperations()` → loops over ops calling `updateOperationStatus("executing")` → `executeQueuedAction()` → `deleteOperation()` or `incrementRetry()` — that's 5+ IPC round-trips per queued operation. Moving the whole compact+fetch+status-update loop into a single Rust command would reduce this, but the queue typically processes 0-5 ops every 30 seconds, so the IPC overhead is negligible. Other callers: `getPendingOpsForResource()` is used for conflict detection in `imapSync.ts`, `imapSyncStore.ts`, and `gmail/sync.ts`. Low priority — consistency improvement, not a performance or correctness issue.
 
 ---
 
 ## Refactoring — Patterns & Boilerplate
 
 - [ ] **`moveToFolder` only adds label, doesn't remove source** — `src-tauri/src/email_actions/commands.rs`
-  `email_action_move_to_folder` inserts the target folder label but doesn't remove the old label (e.g., INBOX). The TS code had the same behavior, so it's a pre-existing gap — the provider-side move handles the actual folder change, but the local DB state is incomplete until next sync.
+
+  `email_action_move_to_folder` inserts the target folder label into `thread_labels` but doesn't remove the old label (e.g., INBOX). The TS code had the same behavior, so it's a pre-existing gap — the provider-side IMAP MOVE or Gmail API call handles the actual folder change on the server, but the local DB state shows both labels until the next sync refreshes thread labels.
+
+  In practice this means a thread moved from Inbox to Archive will briefly appear in both views until the next delta sync (≤60s). Not a functional bug since the server state is correct and the UI will self-correct, but it can cause momentary confusion. The fix would be to DELETE the old label in the same transaction, but that requires knowing which label to remove — for archive it's always INBOX, but for arbitrary folder moves the source isn't passed to the command. Would need to either pass the source label as a parameter or query existing labels in the command.
 
 - [ ] **Unsafe type assertions** — `src/services/email/gmailProvider.ts:140`, `src/utils/crypto.ts:54`, `src/components/ui/ContextMenuPortal.tsx:167-268`
   Multiple `as unknown as` casts and untyped context menu data. Create typed payload interfaces and guards.
-
----
-
-## Refactoring — State Management
-
-- [ ] **Split uiStore** (17+ properties mixing layout, preferences, and sync state)
-  Consider splitting into `uiLayoutStore`, `uiPreferencesStore`, `syncStateStore` to reduce re-render scope.
 
 ---
 
@@ -61,24 +36,38 @@
 ### MEDIUM
 
 - [ ] **Body text unavailable for filter body matching** — `src/services/filters/filterEngine.ts:168`
-  `dbMessageToParsedMessage()` reads `body_html`/`body_text` from the messages table, but these are always NULL (bodies live in `bodies.db`). `criteria.body` filter matching will never match. Options: hydrate from body store, move filter evaluation into Rust pipeline, or accept the limitation.
 
-- [ ] **`is_starred` column audit** — `src/services/db/messages.ts:5`
-  `DbMessage` uses `SELECT *` which works if schema and interface stay aligned, but there's no compile-time check. Audit the full column list against the interface to catch any mismatches.
+  `dbMessageToParsedMessage()` reads `body_html`/`body_text` from the `messages` table columns, but these are always NULL — message bodies live in the separate `bodies.db` file (zstd-compressed, accessed via `body_store_get`/`body_store_get_batch`). This means any filter rule with `criteria.body` set will never match, because the body fields on the `DbMessage` object are null.
 
-- [ ] **Recovery logic duplicated between TS wrapper and Rust** — `src/services/gmail/syncManager.ts:151-163`
-  The "delta found 0 + DB has 0 threads → force full resync" recovery is in TS (`syncImapAccountRust`), requiring 2 extra IPC calls. Could move entirely into Rust commands for fewer round-trips.
+  This affects the `applyFiltersToNewMessageIds()` path used by the Rust sync engine (`syncManager.ts:182`) and the `applyFiltersToMessages()` path used by TS IMAP delta sync (`imapSync.ts:886`). The Gmail delta sync path (`sync.ts:510`) is not affected because it passes `ParsedMessage` objects that already have bodies populated from the API response before they're stored.
+
+  Options: (1) Hydrate bodies from the body store in `applyFiltersToNewMessageIds()` by calling `bodyStoreGetBatch()` for the message IDs — simplest fix, adds one IPC call but only when filters with body criteria exist. (2) Move filter evaluation into the Rust sync pipeline where bodies are available before compression — more efficient but much larger change. (3) Accept the limitation and document that body-matching filters only work on Gmail API accounts — least effort, but surprising to users. Option 1 is probably the right call.
+
+- [ ] **`DbMessage` / schema column audit** — `src/services/db/messages.ts:5`
+
+  `DbMessage` interface uses `SELECT *` queries, which works as long as the TS interface and SQLite schema stay perfectly aligned, but there's no compile-time or runtime check. If a migration adds/renames/removes a column and the interface isn't updated to match, the mismatch will silently produce undefined values or ignore data. This has already bitten us once with `has_attachments` being missing from the interface.
+
+  The audit should compare every column in the `messages` CREATE TABLE statement (in `migrations.ts`) against the `DbMessage` interface fields, checking types (`number` vs `string` vs `null`), and verifying that Rust's `db_get_messages_for_thread` return type matches too. Could also consider switching from `SELECT *` to explicit column lists to make mismatches a hard error, though that's more verbose. Low-effort task, just needs someone to sit down and diff the schema against the types.
+
+- [ ] **Recovery logic duplicated between TS wrapper and Rust** — `src/services/gmail/syncManager.ts:163-174`
+
+  The "delta found 0 messages + DB has 0 threads → force full resync" recovery lives in the TS `syncImapAccountRust()` function. After `syncImapDelta()` returns, it calls `getThreadCountForAccount()` (IPC #1), and if 0, calls `clearAccountHistoryId()` (IPC #2), `clearAllFolderSyncStates()` (IPC #3), then `syncImapInitial()` (IPC #4). The same pattern also exists in the TS IMAP fallback path at lines 292-307.
+
+  This could be moved entirely into the Rust `sync_imap_delta` command — Rust already has direct DB access and could check thread count, clear state, and trigger initial sync in a single invoke. That would eliminate 3 extra IPC round-trips. However, this recovery path is rare (only fires when a delta sync returns nothing and the DB is completely empty, which indicates a failed initial sync), so the performance gain is negligible. The real benefit would be code deduplication — the TS fallback path has the same logic, and if the Rust command handled recovery internally, both callers would get it for free. Medium priority for cleanliness, low priority for performance.
 
 ### LOW
 
-- [ ] **Gmail sync still fully in TS** — `src/services/gmail/syncManager.ts:69`
-  `syncGmailAccount` is unchanged. HTTP-based with OAuth coupling, so lower priority, but Gmail accounts don't benefit from Phase 4. Consider porting long-term.
+- [ ] **Gmail sync still fully in TS** — `src/services/gmail/syncManager.ts:80-112`
+
+  `syncGmailAccount()` uses the Gmail REST API via `GmailClient` (HTTP, not IMAP), so it doesn't benefit from the Rust IMAP sync engine at all. The function calls `initialSync()` or `deltaSync()` from `sync.ts`, which make HTTP requests to `googleapis.com` via the Tauri HTTP plugin, parse JSON responses, and store to the TS-side DB layer.
+
+  Porting would mean: (1) implementing Gmail REST API calls in Rust with `reqwest` (threads.list, threads.get, history.list, messages.get), (2) handling OAuth token refresh in Rust (currently `GmailClient` auto-refreshes 5min before expiry), (3) reimplementing the batched thread fetch logic, history-based delta sync, and HISTORY_EXPIRED fallback. This is a large effort because the Gmail API has different semantics from IMAP — it returns threads natively (no JWZ threading needed), uses history IDs instead of UIDs, and requires OAuth2 bearer tokens. The current TS implementation works well and the HTTP overhead dominates anyway (not IPC), so the benefit of porting is minimal. Only worth considering if we want a unified Rust sync pipeline for architectural consistency.
 
 - [ ] **No per-operation timeout on Rust IMAP fetches** — `src-tauri/src/sync/imap_initial.rs`
-  Connection timeouts exist via `async-imap`, but long-running fetches on large folders have no operation-level timeout. A 50K-message folder could hang indefinitely.
 
-- [ ] **`ratatoskr-sync-done` event dispatch not verified** — `src/services/gmail/syncManager.ts`
-  The Rust path emits `statusCallback?.(accountId, "done")` but other UI side-channel events (`ratatoskr-sync-done` in `App.tsx`) should be verified during integration testing.
+  Connection-level timeouts exist via `async-imap`'s TCP stream configuration, but there's no operation-level timeout on individual FETCH commands. A folder with 50K+ messages could result in a single IMAP FETCH that takes arbitrarily long — the server might be slow, rate-limiting, or the connection could be half-open (TCP keepalive not triggered yet).
+
+  The risk is a sync that hangs indefinitely on a large folder, blocking the sync timer for that account. Since sync runs sequentially per account (`syncAccountInternal` is awaited), a hang blocks all subsequent accounts too. The fix would be wrapping each `imap_fetch_messages` call (or the entire folder sync) in a `tokio::time::timeout()`. Need to choose a reasonable duration — probably 5-10 minutes per folder, since legitimate large-folder fetches can take a while. The `async-imap` session would need to be dropped on timeout to close the connection cleanly. Low priority because it's a rare edge case (most IMAP servers handle large fetches fine), but it's a robustness improvement for pathological cases.
 
 ---
 
