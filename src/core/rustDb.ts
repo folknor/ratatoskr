@@ -716,6 +716,189 @@ export async function getHeldThreadIds(
 }
 
 // ═══════════════════════════════════════════════════════════════
+// EMAIL ACTIONS (Phase 5 — local DB + pending op queue)
+// ═══════════════════════════════════════════════════════════════
+
+export async function emailActionArchive(
+  accountId: string,
+  threadId: string,
+  operationId: string,
+): Promise<void> {
+  return invoke<void>("email_action_archive", {
+    accountId,
+    threadId,
+    operationId,
+  });
+}
+
+export async function emailActionTrash(
+  accountId: string,
+  threadId: string,
+  operationId: string,
+): Promise<void> {
+  return invoke<void>("email_action_trash", {
+    accountId,
+    threadId,
+    operationId,
+  });
+}
+
+export async function emailActionPermanentDelete(
+  accountId: string,
+  threadId: string,
+  operationId: string,
+): Promise<void> {
+  return invoke<void>("email_action_permanent_delete", {
+    accountId,
+    threadId,
+    operationId,
+  });
+}
+
+export async function emailActionSpam(
+  accountId: string,
+  threadId: string,
+  isSpam: boolean,
+  operationId: string,
+): Promise<void> {
+  return invoke<void>("email_action_spam", {
+    accountId,
+    threadId,
+    isSpam,
+    operationId,
+  });
+}
+
+export async function emailActionMarkRead(
+  accountId: string,
+  threadId: string,
+  isRead: boolean,
+  operationId: string,
+): Promise<void> {
+  return invoke<void>("email_action_mark_read", {
+    accountId,
+    threadId,
+    isRead,
+    operationId,
+  });
+}
+
+export async function emailActionStar(
+  accountId: string,
+  threadId: string,
+  isStarred: boolean,
+  operationId: string,
+): Promise<void> {
+  return invoke<void>("email_action_star", {
+    accountId,
+    threadId,
+    isStarred,
+    operationId,
+  });
+}
+
+export async function emailActionSnooze(
+  accountId: string,
+  threadId: string,
+  snoozeUntil: string,
+  operationId: string,
+): Promise<void> {
+  return invoke<void>("email_action_snooze", {
+    accountId,
+    threadId,
+    snoozeUntil,
+    operationId,
+  });
+}
+
+export async function emailActionUnsnooze(
+  accountId: string,
+  threadId: string,
+  operationId: string,
+): Promise<void> {
+  return invoke<void>("email_action_unsnooze", {
+    accountId,
+    threadId,
+    operationId,
+  });
+}
+
+export async function emailActionPin(
+  accountId: string,
+  threadId: string,
+): Promise<void> {
+  return invoke<void>("email_action_pin", { accountId, threadId });
+}
+
+export async function emailActionUnpin(
+  accountId: string,
+  threadId: string,
+): Promise<void> {
+  return invoke<void>("email_action_unpin", { accountId, threadId });
+}
+
+export async function emailActionMute(
+  accountId: string,
+  threadId: string,
+  operationId: string,
+): Promise<void> {
+  return invoke<void>("email_action_mute", {
+    accountId,
+    threadId,
+    operationId,
+  });
+}
+
+export async function emailActionUnmute(
+  accountId: string,
+  threadId: string,
+): Promise<void> {
+  return invoke<void>("email_action_unmute", { accountId, threadId });
+}
+
+export async function emailActionAddLabel(
+  accountId: string,
+  threadId: string,
+  labelId: string,
+  operationId: string,
+): Promise<void> {
+  return invoke<void>("email_action_add_label", {
+    accountId,
+    threadId,
+    labelId,
+    operationId,
+  });
+}
+
+export async function emailActionRemoveLabel(
+  accountId: string,
+  threadId: string,
+  labelId: string,
+  operationId: string,
+): Promise<void> {
+  return invoke<void>("email_action_remove_label", {
+    accountId,
+    threadId,
+    labelId,
+    operationId,
+  });
+}
+
+export async function emailActionMoveToFolder(
+  accountId: string,
+  threadId: string,
+  folderLabelId: string,
+  operationId: string,
+): Promise<void> {
+  return invoke<void>("email_action_move_to_folder", {
+    accountId,
+    threadId,
+    folderLabelId,
+    operationId,
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
 // BODY STORE (Phase 2 — compressed body storage)
 // ═══════════════════════════════════════════════════════════════
 

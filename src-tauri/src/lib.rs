@@ -9,6 +9,7 @@ use tauri_plugin_autostart::MacosLauncher;
 mod body_store;
 mod commands;
 mod db;
+mod email_actions;
 mod imap;
 mod oauth;
 mod search;
@@ -204,6 +205,22 @@ pub fn run() {
             search::commands::index_messages_batch,
             search::commands::delete_search_document,
             search::commands::rebuild_search_index,
+            // Email actions — local DB + pending op queue (Phase 5)
+            email_actions::commands::email_action_archive,
+            email_actions::commands::email_action_trash,
+            email_actions::commands::email_action_permanent_delete,
+            email_actions::commands::email_action_spam,
+            email_actions::commands::email_action_mark_read,
+            email_actions::commands::email_action_star,
+            email_actions::commands::email_action_snooze,
+            email_actions::commands::email_action_unsnooze,
+            email_actions::commands::email_action_pin,
+            email_actions::commands::email_action_unpin,
+            email_actions::commands::email_action_mute,
+            email_actions::commands::email_action_unmute,
+            email_actions::commands::email_action_add_label,
+            email_actions::commands::email_action_remove_label,
+            email_actions::commands::email_action_move_to_folder,
         ])
         .setup(|app| {
             {

@@ -1,5 +1,20 @@
+import {
+  emailActionAddLabel,
+  emailActionArchive,
+  emailActionMarkRead,
+  emailActionMoveToFolder,
+  emailActionMute,
+  emailActionPermanentDelete,
+  emailActionPin,
+  emailActionRemoveLabel,
+  emailActionSnooze,
+  emailActionSpam,
+  emailActionStar,
+  emailActionTrash,
+  emailActionUnmute,
+  emailActionUnpin,
+} from "@/core/rustDb";
 import { getSelectedThreadId, navigateToThread } from "@/router/navigate";
-import { getDb } from "@/services/db/connection";
 import { enqueuePendingOperation } from "@/services/db/pendingOperations";
 import { getEmailProvider } from "@/services/email/providerFactory";
 import { useThreadStore } from "@/stores/threadStore";
@@ -175,137 +190,104 @@ function revertOptimisticUpdate(action: EmailAction): void {
 }
 
 // ---------------------------------------------------------------------------
-// Local DB updates (so offline reads reflect changes)
+// Local DB updates (Rust commands handle DB + pending op queue atomically)
 // ---------------------------------------------------------------------------
 
+/**
+ * Apply local DB update via Rust. For actions that need remote execution
+ * (archive, trash, etc.), Rust also inserts into pending_operations in the
+ * same transaction. Returns true if queueing was handled by Rust.
+ */
 async function applyLocalDbUpdate(
   accountId: string,
   action: EmailAction,
-): Promise<void> {
-  const db = await getDb();
+  operationId: string,
+): Promise<boolean> {
   switch (action.type) {
-    case "markRead":
-      await db.execute(
-        "UPDATE threads SET is_read = $1 WHERE account_id = $2 AND id = $3",
-        [action.read ? 1 : 0, accountId, action.threadId],
-      );
-      break;
-    case "star":
-      await db.execute(
-        "UPDATE threads SET is_starred = $1 WHERE account_id = $2 AND id = $3",
-        [action.starred ? 1 : 0, accountId, action.threadId],
-      );
-      if (action.starred) {
-        await db.execute(
-          "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) VALUES ($1, $2, 'STARRED')",
-          [accountId, action.threadId],
-        );
-      } else {
-        await db.execute(
-          "DELETE FROM thread_labels WHERE account_id = $1 AND thread_id = $2 AND label_id = 'STARRED'",
-          [accountId, action.threadId],
-        );
-      }
-      break;
     case "archive":
-      await db.execute(
-        "DELETE FROM thread_labels WHERE account_id = $1 AND thread_id = $2 AND label_id = 'INBOX'",
-        [accountId, action.threadId],
-      );
-      break;
+      await emailActionArchive(accountId, action.threadId, operationId);
+      return true;
     case "trash":
-      await db.execute(
-        "DELETE FROM thread_labels WHERE account_id = $1 AND thread_id = $2 AND label_id = 'INBOX'",
-        [accountId, action.threadId],
-      );
-      await db.execute(
-        "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) VALUES ($1, $2, 'TRASH')",
-        [accountId, action.threadId],
-      );
-      break;
+      await emailActionTrash(accountId, action.threadId, operationId);
+      return true;
     case "permanentDelete":
-      await db.execute(
-        "DELETE FROM threads WHERE account_id = $1 AND id = $2",
-        [accountId, action.threadId],
+      await emailActionPermanentDelete(
+        accountId,
+        action.threadId,
+        operationId,
       );
-      break;
+      return true;
+    case "markRead":
+      await emailActionMarkRead(
+        accountId,
+        action.threadId,
+        action.read,
+        operationId,
+      );
+      return true;
+    case "star":
+      await emailActionStar(
+        accountId,
+        action.threadId,
+        action.starred,
+        operationId,
+      );
+      return true;
     case "spam":
-      if (action.isSpam) {
-        await db.execute(
-          "DELETE FROM thread_labels WHERE account_id = $1 AND thread_id = $2 AND label_id = 'INBOX'",
-          [accountId, action.threadId],
-        );
-        await db.execute(
-          "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) VALUES ($1, $2, 'SPAM')",
-          [accountId, action.threadId],
-        );
-      } else {
-        await db.execute(
-          "DELETE FROM thread_labels WHERE account_id = $1 AND thread_id = $2 AND label_id = 'SPAM'",
-          [accountId, action.threadId],
-        );
-        await db.execute(
-          "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) VALUES ($1, $2, 'INBOX')",
-          [accountId, action.threadId],
-        );
-      }
-      break;
+      await emailActionSpam(
+        accountId,
+        action.threadId,
+        action.isSpam,
+        operationId,
+      );
+      return true;
     case "snooze":
-      await db.execute(
-        "UPDATE threads SET is_snoozed = 1, snooze_until = $1 WHERE account_id = $2 AND id = $3",
-        [action.snoozeUntil, accountId, action.threadId],
+      await emailActionSnooze(
+        accountId,
+        action.threadId,
+        String(action.snoozeUntil),
+        operationId,
       );
-      await db.execute(
-        "DELETE FROM thread_labels WHERE account_id = $1 AND thread_id = $2 AND label_id = 'INBOX'",
-        [accountId, action.threadId],
-      );
-      await db.execute(
-        "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) VALUES ($1, $2, 'SNOOZED')",
-        [accountId, action.threadId],
-      );
-      break;
+      return true;
     case "addLabel":
-      await db.execute(
-        "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) VALUES ($1, $2, $3)",
-        [accountId, action.threadId, action.labelId],
+      await emailActionAddLabel(
+        accountId,
+        action.threadId,
+        action.labelId,
+        operationId,
       );
-      break;
+      return true;
     case "removeLabel":
-      await db.execute(
-        "DELETE FROM thread_labels WHERE account_id = $1 AND thread_id = $2 AND label_id = $3",
-        [accountId, action.threadId, action.labelId],
+      await emailActionRemoveLabel(
+        accountId,
+        action.threadId,
+        action.labelId,
+        operationId,
       );
-      break;
+      return true;
+    case "moveToFolder":
+      await emailActionMoveToFolder(
+        accountId,
+        action.threadId,
+        action.folderPath,
+        operationId,
+      );
+      return true;
     case "pin":
-      await db.execute(
-        "UPDATE threads SET is_pinned = 1 WHERE account_id = $1 AND id = $2",
-        [accountId, action.threadId],
-      );
-      break;
+      await emailActionPin(accountId, action.threadId);
+      return false; // local-only, no queue
     case "unpin":
-      await db.execute(
-        "UPDATE threads SET is_pinned = 0 WHERE account_id = $1 AND id = $2",
-        [accountId, action.threadId],
-      );
-      break;
+      await emailActionUnpin(accountId, action.threadId);
+      return false;
     case "mute":
-      await db.execute(
-        "UPDATE threads SET is_muted = 1 WHERE account_id = $1 AND id = $2",
-        [accountId, action.threadId],
-      );
-      await db.execute(
-        "DELETE FROM thread_labels WHERE account_id = $1 AND thread_id = $2 AND label_id = 'INBOX'",
-        [accountId, action.threadId],
-      );
-      break;
+      await emailActionMute(accountId, action.threadId, operationId);
+      return true;
     case "unmute":
-      await db.execute(
-        "UPDATE threads SET is_muted = 0 WHERE account_id = $1 AND id = $2",
-        [accountId, action.threadId],
-      );
-      break;
+      await emailActionUnmute(accountId, action.threadId);
+      return false; // local-only
     default:
-      break;
+      // sendMessage, createDraft, updateDraft, deleteDraft — no local DB update
+      return false;
   }
 }
 
@@ -383,24 +365,29 @@ export async function executeEmailAction(
   accountId: string,
   action: EmailAction,
 ): Promise<ActionResult> {
+  const operationId = crypto.randomUUID();
+
   // 1. Optimistic UI update
   applyOptimisticUpdate(action);
 
-  // 2. Local DB update
+  // 2. Local DB update (Rust handles DB + pending op queue atomically)
+  let queuedByRust = false;
   try {
-    await applyLocalDbUpdate(accountId, action);
+    queuedByRust = await applyLocalDbUpdate(accountId, action, operationId);
   } catch (err) {
     console.warn("Local DB update failed:", err);
   }
 
-  // 3. If offline, queue
+  // 3. If offline, queue (only for actions not already queued by Rust)
   if (!useUIStore.getState().isOnline) {
-    await enqueuePendingOperation(
-      accountId,
-      action.type,
-      getResourceId(action),
-      actionToParams(action),
-    );
+    if (!queuedByRust) {
+      await enqueuePendingOperation(
+        accountId,
+        action.type,
+        getResourceId(action),
+        actionToParams(action),
+      );
+    }
     return { success: true, queued: true };
   }
 
@@ -412,13 +399,15 @@ export async function executeEmailAction(
     const classified = classifyError(err);
 
     if (classified.isRetryable) {
-      // Queue for retry
-      await enqueuePendingOperation(
-        accountId,
-        action.type,
-        getResourceId(action),
-        actionToParams(action),
-      );
+      // Already queued by Rust for most actions; only queue draft/send actions
+      if (!queuedByRust) {
+        await enqueuePendingOperation(
+          accountId,
+          action.type,
+          getResourceId(action),
+          actionToParams(action),
+        );
+      }
       return { success: true, queued: true };
     }
 
