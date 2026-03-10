@@ -14,6 +14,7 @@ mod email_actions;
 mod filters;
 mod gmail;
 mod imap;
+mod jmap;
 mod oauth;
 mod provider;
 mod search;
@@ -279,6 +280,32 @@ pub fn run() {
             // Gmail sync engine (Phase 2)
             gmail::commands::gmail_sync_initial,
             gmail::commands::gmail_sync_delta,
+            // JMAP provider
+            jmap::commands::jmap_init_client,
+            jmap::commands::jmap_remove_client,
+            jmap::commands::jmap_test_connection,
+            jmap::commands::jmap_discover_url,
+            jmap::commands::jmap_get_profile,
+            jmap::commands::jmap_sync_initial,
+            jmap::commands::jmap_sync_delta,
+            jmap::commands::jmap_list_folders,
+            jmap::commands::jmap_create_folder,
+            jmap::commands::jmap_rename_folder,
+            jmap::commands::jmap_delete_folder,
+            jmap::commands::jmap_archive,
+            jmap::commands::jmap_trash,
+            jmap::commands::jmap_permanent_delete,
+            jmap::commands::jmap_mark_read,
+            jmap::commands::jmap_star,
+            jmap::commands::jmap_spam,
+            jmap::commands::jmap_move_to_folder,
+            jmap::commands::jmap_add_label,
+            jmap::commands::jmap_remove_label,
+            jmap::commands::jmap_send_email,
+            jmap::commands::jmap_create_draft,
+            jmap::commands::jmap_update_draft,
+            jmap::commands::jmap_delete_draft,
+            jmap::commands::jmap_fetch_attachment,
         ])
         .setup(|app| {
             {
@@ -326,6 +353,9 @@ pub fn run() {
                         [0u8; 32]
                     });
                 app.manage(gmail::client::GmailState::new(encryption_key));
+
+                // JMAP provider state — shares the same encryption key
+                app.manage(jmap::client::JmapState::new(encryption_key));
             }
 
             #[cfg(not(target_os = "linux"))]

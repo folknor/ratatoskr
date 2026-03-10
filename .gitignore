@@ -50,6 +50,9 @@ nul
 .claude/*
 !.claude/skills/
 
+# Reference code
+docs/discovery/
+
 # Debug files
 debug-*.mjs
 
