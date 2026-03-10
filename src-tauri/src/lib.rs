@@ -306,6 +306,24 @@ pub fn run() {
             jmap::commands::jmap_update_draft,
             jmap::commands::jmap_delete_draft,
             jmap::commands::jmap_fetch_attachment,
+            // Provider-agnostic commands (Phase 3a)
+            provider::commands::provider_sync_initial,
+            provider::commands::provider_sync_delta,
+            provider::commands::provider_archive,
+            provider::commands::provider_trash,
+            provider::commands::provider_permanent_delete,
+            provider::commands::provider_mark_read,
+            provider::commands::provider_star,
+            provider::commands::provider_spam,
+            provider::commands::provider_move_to_folder,
+            provider::commands::provider_add_tag,
+            provider::commands::provider_remove_tag,
+            provider::commands::provider_send_email,
+            provider::commands::provider_create_draft,
+            provider::commands::provider_update_draft,
+            provider::commands::provider_delete_draft,
+            provider::commands::provider_fetch_attachment,
+            provider::commands::provider_list_folders,
         ])
         .setup(|app| {
             {

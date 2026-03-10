@@ -273,208 +273,106 @@ function actionToParams(action: EmailAction): Record<string, unknown> {
 }
 
 // ---------------------------------------------------------------------------
-// Gmail execution via Rust Tauri commands
+// Provider-agnostic execution via Rust provider_* commands
 // ---------------------------------------------------------------------------
 
-async function executeViaGmailRust(
+async function executeViaProviderRust(
   accountId: string,
   action: EmailAction,
 ): Promise<unknown> {
   switch (action.type) {
     case "archive":
-      return invoke("gmail_modify_thread", {
+      return invoke("provider_archive", {
         accountId,
         threadId: action.threadId,
-        addLabels: [],
-        removeLabels: ["INBOX"],
       });
     case "trash":
-      return invoke("gmail_modify_thread", {
+      return invoke("provider_trash", {
         accountId,
         threadId: action.threadId,
-        addLabels: ["TRASH"],
-        removeLabels: ["INBOX"],
       });
     case "permanentDelete":
-      return invoke("gmail_delete_thread", {
+      return invoke("provider_permanent_delete", {
         accountId,
         threadId: action.threadId,
       });
     case "markRead":
-      return invoke("gmail_modify_thread", {
-        accountId,
-        threadId: action.threadId,
-        addLabels: action.read ? [] : ["UNREAD"],
-        removeLabels: action.read ? ["UNREAD"] : [],
-      });
-    case "star":
-      return invoke("gmail_modify_thread", {
-        accountId,
-        threadId: action.threadId,
-        addLabels: action.starred ? ["STARRED"] : [],
-        removeLabels: action.starred ? [] : ["STARRED"],
-      });
-    case "spam":
-      return invoke("gmail_modify_thread", {
-        accountId,
-        threadId: action.threadId,
-        addLabels: action.isSpam ? ["SPAM"] : ["INBOX"],
-        removeLabels: action.isSpam ? ["INBOX"] : ["SPAM"],
-      });
-    case "moveToFolder":
-      return invoke("gmail_modify_thread", {
-        accountId,
-        threadId: action.threadId,
-        addLabels: [action.folderPath],
-        removeLabels: [],
-      });
-    case "addLabel":
-      return invoke("gmail_modify_thread", {
-        accountId,
-        threadId: action.threadId,
-        addLabels: [action.labelId],
-        removeLabels: [],
-      });
-    case "removeLabel":
-      return invoke("gmail_modify_thread", {
-        accountId,
-        threadId: action.threadId,
-        addLabels: [],
-        removeLabels: [action.labelId],
-      });
-    case "sendMessage":
-      return invoke("gmail_send_email", {
-        accountId,
-        raw: action.rawBase64Url,
-        threadId: action.threadId ?? null,
-      });
-    case "createDraft":
-      return invoke("gmail_create_draft", {
-        accountId,
-        raw: action.rawBase64Url,
-        threadId: action.threadId ?? null,
-      });
-    case "updateDraft":
-      return invoke("gmail_update_draft", {
-        accountId,
-        draftId: action.draftId,
-        raw: action.rawBase64Url,
-        threadId: action.threadId ?? null,
-      });
-    case "deleteDraft":
-      return invoke("gmail_delete_draft", {
-        accountId,
-        draftId: action.draftId,
-      });
-    case "snooze":
-    case "mute":
-      // Snooze/mute are local state; on the provider side we just archive
-      return invoke("gmail_modify_thread", {
-        accountId,
-        threadId: action.threadId,
-        addLabels: [],
-        removeLabels: ["INBOX"],
-      });
-    case "pin":
-    case "unpin":
-    case "unmute":
-      // Local-only operations — no Gmail concept of pin or unmute
-      return;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// JMAP execution via Rust Tauri commands
-// ---------------------------------------------------------------------------
-
-async function executeViaJmapRust(
-  accountId: string,
-  action: EmailAction,
-): Promise<unknown> {
-  switch (action.type) {
-    case "archive":
-      return invoke("jmap_archive", { accountId, threadId: action.threadId });
-    case "trash":
-      return invoke("jmap_trash", { accountId, threadId: action.threadId });
-    case "permanentDelete":
-      return invoke("jmap_permanent_delete", {
-        accountId,
-        emailIds: action.messageIds,
-      });
-    case "markRead":
-      return invoke("jmap_mark_read", {
+      return invoke("provider_mark_read", {
         accountId,
         threadId: action.threadId,
         read: action.read,
       });
     case "star":
-      return invoke("jmap_star", {
+      return invoke("provider_star", {
         accountId,
         threadId: action.threadId,
         starred: action.starred,
       });
     case "spam":
-      return invoke("jmap_spam", {
+      return invoke("provider_spam", {
         accountId,
         threadId: action.threadId,
         isSpam: action.isSpam,
       });
     case "moveToFolder":
-      return invoke("jmap_move_to_folder", {
+      return invoke("provider_move_to_folder", {
         accountId,
         threadId: action.threadId,
         folderId: action.folderPath,
       });
     case "addLabel":
-      return invoke("jmap_add_label", {
+      return invoke("provider_add_tag", {
         accountId,
         threadId: action.threadId,
-        labelId: action.labelId,
+        tagId: action.labelId,
       });
     case "removeLabel":
-      return invoke("jmap_remove_label", {
+      return invoke("provider_remove_tag", {
         accountId,
         threadId: action.threadId,
-        labelId: action.labelId,
+        tagId: action.labelId,
       });
     case "sendMessage":
-      return invoke("jmap_send_email", {
+      return invoke("provider_send_email", {
         accountId,
         rawBase64url: action.rawBase64Url,
         threadId: action.threadId ?? null,
       });
     case "createDraft":
-      return invoke("jmap_create_draft", {
+      return invoke("provider_create_draft", {
         accountId,
         rawBase64url: action.rawBase64Url,
         threadId: action.threadId ?? null,
       });
     case "updateDraft":
-      return invoke("jmap_update_draft", {
+      return invoke("provider_update_draft", {
         accountId,
         draftId: action.draftId,
         rawBase64url: action.rawBase64Url,
         threadId: action.threadId ?? null,
       });
     case "deleteDraft":
-      return invoke("jmap_delete_draft", {
+      return invoke("provider_delete_draft", {
         accountId,
         draftId: action.draftId,
       });
     case "snooze":
     case "mute":
       // Snooze/mute are local state; on the provider side we just archive
-      return invoke("jmap_archive", { accountId, threadId: action.threadId });
+      return invoke("provider_archive", {
+        accountId,
+        threadId: action.threadId,
+      });
     case "pin":
     case "unpin":
     case "unmute":
-      // Local-only operations — no JMAP concept of pin or unmute
+      // Local-only operations — no provider concept of pin or unmute
       return;
   }
 }
 
 // ---------------------------------------------------------------------------
-// IMAP execution via EmailProvider
+// IMAP execution via TS EmailProvider (not yet ported to Rust)
 // ---------------------------------------------------------------------------
 
 async function executeViaImapProvider(
@@ -518,16 +416,14 @@ async function executeViaImapProvider(
     case "deleteDraft":
       return provider.deleteDraft(action.draftId);
     case "snooze":
-      // Snooze is local state; on the provider side we just archive
+    case "mute":
+      // Snooze/mute are local state; on the provider side we just archive
       return provider.archive(action.threadId, action.messageIds);
     case "pin":
     case "unpin":
     case "unmute":
-      // Local-only operations — no IMAP concept of pin or unmute
+      // Local-only operations
       return;
-    case "mute":
-      // Mute auto-archives; on the provider side we archive
-      return provider.archive(action.threadId, action.messageIds);
   }
 }
 
@@ -542,13 +438,13 @@ async function executeViaProvider(
   const account = await getAccount(accountId);
   if (!account) throw new Error(`Account ${accountId} not found`);
 
-  if (account.provider === "jmap") {
-    return executeViaJmapRust(accountId, action);
-  } else if (account.provider === "gmail_api" || account.provider !== "imap") {
-    return executeViaGmailRust(accountId, action);
-  } else {
+  // IMAP still uses TS provider path until ported to Rust
+  if (account.provider === "imap") {
     return executeViaImapProvider(accountId, action);
   }
+
+  // Gmail, JMAP, and future Graph all use provider_* Rust commands
+  return executeViaProviderRust(accountId, action);
 }
 
 export async function executeEmailAction(

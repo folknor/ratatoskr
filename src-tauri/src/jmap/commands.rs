@@ -561,7 +561,7 @@ pub struct JmapAttachmentData {
 // ---------------------------------------------------------------------------
 
 /// Get all email IDs in a JMAP thread.
-async fn query_thread_email_ids(
+pub(crate) async fn query_thread_email_ids(
     client: &JmapClient,
     thread_id: &str,
 ) -> Result<Vec<String>, String> {
@@ -582,7 +582,7 @@ async fn query_thread_email_ids(
 }
 
 /// Get the full mailbox list as (id, role, name) tuples.
-async fn get_mailbox_list(
+pub(crate) async fn get_mailbox_list(
     client: &JmapClient,
 ) -> Result<Vec<(String, Option<String>, String)>, String> {
     use jmap_client::mailbox::Role;
@@ -601,7 +601,9 @@ async fn get_mailbox_list(
 }
 
 /// Get the first identity ID for email submission.
-async fn get_first_identity_id(client: &jmap_client::client::Client) -> Result<String, String> {
+pub(crate) async fn get_first_identity_id(
+    client: &jmap_client::client::Client,
+) -> Result<String, String> {
     let mut request = client.build();
     request.get_identity();
     let response = request
@@ -623,7 +625,7 @@ async fn get_first_identity_id(client: &jmap_client::client::Client) -> Result<S
 }
 
 /// Resolve a Gmail-style label ID to a JMAP mailbox ID.
-async fn resolve_mailbox_id(
+pub(crate) async fn resolve_mailbox_id(
     client: &JmapClient,
     label_id: &str,
 ) -> Result<String, String> {
