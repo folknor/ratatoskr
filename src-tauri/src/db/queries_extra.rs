@@ -1,7 +1,7 @@
 // tauri::command macro generates code that trips let_underscore_must_use
 #![allow(clippy::let_underscore_must_use)]
 
-use rusqlite::{params, Connection, Row};
+use rusqlite::{Connection, Row, params};
 use tauri::State;
 
 use super::DbState;
@@ -204,10 +204,7 @@ pub async fn db_update_contact_notes(
 }
 
 #[tauri::command]
-pub async fn db_delete_contact(
-    state: State<'_, DbState>,
-    id: String,
-) -> Result<(), String> {
+pub async fn db_delete_contact(state: State<'_, DbState>, id: String) -> Result<(), String> {
     state
         .with_conn(move |conn| {
             conn.execute("DELETE FROM contacts WHERE id = ?1", params![id])
@@ -444,10 +441,7 @@ pub async fn db_update_filter(
 }
 
 #[tauri::command]
-pub async fn db_delete_filter(
-    state: State<'_, DbState>,
-    id: String,
-) -> Result<(), String> {
+pub async fn db_delete_filter(state: State<'_, DbState>, id: String) -> Result<(), String> {
     state
         .with_conn(move |conn| {
             conn.execute("DELETE FROM filter_rules WHERE id = ?1", params![id])
@@ -532,7 +526,14 @@ pub async fn db_insert_smart_folder(
             conn.execute(
                 "INSERT INTO smart_folders (id, account_id, name, query, icon, color)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![id, account_id, name, query, icon.unwrap_or_else(|| "search".to_owned()), color],
+                params![
+                    id,
+                    account_id,
+                    name,
+                    query,
+                    icon.unwrap_or_else(|| "search".to_owned()),
+                    color
+                ],
             )
             .map_err(|e| e.to_string())?;
             Ok(())
@@ -570,10 +571,7 @@ pub async fn db_update_smart_folder(
 }
 
 #[tauri::command]
-pub async fn db_delete_smart_folder(
-    state: State<'_, DbState>,
-    id: String,
-) -> Result<(), String> {
+pub async fn db_delete_smart_folder(state: State<'_, DbState>, id: String) -> Result<(), String> {
     state
         .with_conn(move |conn| {
             conn.execute("DELETE FROM smart_folders WHERE id = ?1", params![id])
@@ -823,10 +821,13 @@ pub async fn db_check_follow_up_reminders(
 ) -> Result<Vec<TriggeredFollowUp>, String> {
     state
         .with_conn(move |conn| {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|e| e.to_string())?
-                .as_secs() as i64;
+            let now = i64::try_from(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_err(|e| e.to_string())?
+                    .as_secs(),
+            )
+            .map_err(|_| "current time exceeds i64 range".to_string())?;
 
             let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
 
@@ -983,8 +984,14 @@ pub async fn db_update_quick_step(
                  actions_json = ?5, icon = ?6, is_enabled = ?7, continue_on_error = ?8
                  WHERE id = ?1",
                 params![
-                    step.id, step.name, step.description, step.shortcut,
-                    step.actions_json, step.icon, step.is_enabled, step.continue_on_error
+                    step.id,
+                    step.name,
+                    step.description,
+                    step.shortcut,
+                    step.actions_json,
+                    step.icon,
+                    step.is_enabled,
+                    step.continue_on_error
                 ],
             )
             .map_err(|e| e.to_string())?;
@@ -994,10 +1001,7 @@ pub async fn db_update_quick_step(
 }
 
 #[tauri::command]
-pub async fn db_delete_quick_step(
-    state: State<'_, DbState>,
-    id: String,
-) -> Result<(), String> {
+pub async fn db_delete_quick_step(state: State<'_, DbState>, id: String) -> Result<(), String> {
     state
         .with_conn(move |conn| {
             conn.execute("DELETE FROM quick_steps WHERE id = ?1", params![id])
@@ -1297,10 +1301,13 @@ pub async fn db_get_held_thread_ids(
 ) -> Result<Vec<String>, String> {
     state
         .with_conn(move |conn| {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|e| e.to_string())?
-                .as_secs() as i64;
+            let now = i64::try_from(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_err(|e| e.to_string())?
+                    .as_secs(),
+            )
+            .map_err(|_| "current time exceeds i64 range".to_string())?;
             let mut stmt = conn
                 .prepare(
                     "SELECT thread_id FROM bundled_threads WHERE account_id = ?1 AND held_until > ?2",
@@ -1317,9 +1324,7 @@ pub async fn db_get_held_thread_ids(
 // ── Attachment pre-cache queries ─────────────────────────────
 
 #[tauri::command]
-pub async fn db_attachment_cache_total_size(
-    state: State<'_, DbState>,
-) -> Result<i64, String> {
+pub async fn db_attachment_cache_total_size(state: State<'_, DbState>) -> Result<i64, String> {
     state
         .with_conn(move |conn| {
             conn.query_row(

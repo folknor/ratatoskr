@@ -114,12 +114,12 @@ pub fn normalize_subject(subject: Option<&str>) -> String {
         changed = false;
 
         // Strip leading [list-prefix] tags
-        if s.starts_with('[') {
-            if let Some(end) = s.find(']') {
-                let rest = s[end + 1..].trim_start().to_string();
-                s = rest;
-                changed = true;
-            }
+        if s.starts_with('[')
+            && let Some(end) = s.find(']')
+        {
+            let rest = s[end + 1..].trim_start().to_string();
+            s = rest;
+            changed = true;
         }
 
         // Strip leading Re:/Fwd:/Fw: (case-insensitive)
@@ -236,10 +236,10 @@ pub fn build_threads(messages: &[ThreadableMessage]) -> Vec<ThreadGroup> {
         }
 
         // Current message's container is a child of the last reference
-        if let Some(prev) = prev_idx {
-            if prev != container_idx {
-                arena.link_parent_child(prev, container_idx);
-            }
+        if let Some(prev) = prev_idx
+            && prev != container_idx
+        {
+            arena.link_parent_child(prev, container_idx);
         }
     }
 
@@ -342,10 +342,10 @@ fn collect_messages<'a>(
 }
 
 fn get_subject_for_container(arena: &Arena, idx: usize) -> Option<String> {
-    if let Some(ref msg) = arena.containers[idx].message {
-        if let Some(ref subject) = msg.subject {
-            return Some(subject.clone());
-        }
+    if let Some(ref msg) = arena.containers[idx].message
+        && let Some(ref subject) = msg.subject
+    {
+        return Some(subject.clone());
     }
     for &child_idx in &arena.containers[idx].children {
         if let Some(s) = get_subject_for_container(arena, child_idx) {
@@ -366,8 +366,10 @@ pub fn update_threads(
 
     // Build lookup maps
     let mut thread_to_message_ids: HashMap<String, Vec<String>> = HashMap::new();
-    let existing_thread_ids: std::collections::HashSet<String> =
-        existing_threads.iter().map(|t| t.thread_id.clone()).collect();
+    let existing_thread_ids: std::collections::HashSet<String> = existing_threads
+        .iter()
+        .map(|t| t.thread_id.clone())
+        .collect();
 
     for thread in existing_threads {
         thread_to_message_ids.insert(thread.thread_id.clone(), thread.message_ids.clone());
@@ -416,23 +418,22 @@ pub fn update_threads(
 
                 for ref_id in &refs {
                     let potential_thread_id = generate_thread_id(ref_id);
-                    if existing_thread_ids.contains(&potential_thread_id) {
-                        if let Some(existing_msg_ids) =
+                    if existing_thread_ids.contains(&potential_thread_id)
+                        && let Some(existing_msg_ids) =
                             thread_to_message_ids.get(&potential_thread_id)
-                        {
-                            let mut merged: Vec<String> = existing_msg_ids.clone();
-                            for id in &new_thread.message_ids {
-                                if !merged.contains(id) {
-                                    merged.push(id.clone());
-                                }
+                    {
+                        let mut merged: Vec<String> = existing_msg_ids.clone();
+                        for id in &new_thread.message_ids {
+                            if !merged.contains(id) {
+                                merged.push(id.clone());
                             }
-                            result.push(ThreadGroup {
-                                thread_id: potential_thread_id,
-                                message_ids: merged,
-                            });
-                            merged_into_existing = true;
-                            break 'outer;
                         }
+                        result.push(ThreadGroup {
+                            thread_id: potential_thread_id,
+                            message_ids: merged,
+                        });
+                        merged_into_existing = true;
+                        break 'outer;
                     }
                 }
             }
@@ -516,7 +517,10 @@ mod tests {
 
     #[test]
     fn normalize_subject_list_prefix() {
-        assert_eq!(normalize_subject(Some("[node-dev] Some topic")), "Some topic");
+        assert_eq!(
+            normalize_subject(Some("[node-dev] Some topic")),
+            "Some topic"
+        );
         assert_eq!(
             normalize_subject(Some("[node-dev] Re: Some topic")),
             "Some topic"
@@ -548,7 +552,10 @@ mod tests {
 
     #[test]
     fn parse_references_single() {
-        assert_eq!(parse_references(Some("<abc@host.com>")), vec!["abc@host.com"]);
+        assert_eq!(
+            parse_references(Some("<abc@host.com>")),
+            vec!["abc@host.com"]
+        );
     }
 
     #[test]
@@ -821,7 +828,14 @@ mod tests {
     fn build_threads_null_subjects() {
         let messages = vec![
             msg("la", "a@host", None, None, None, 1000),
-            msg("lb", "b@host", Some("<a@host>"), Some("<a@host>"), None, 2000),
+            msg(
+                "lb",
+                "b@host",
+                Some("<a@host>"),
+                Some("<a@host>"),
+                None,
+                2000,
+            ),
         ];
         let threads = build_threads(&messages);
         assert_eq!(threads.len(), 1);

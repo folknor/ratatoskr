@@ -1,6 +1,6 @@
 pub mod commands;
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 // ── DB helpers ────────────────────────────────────────────────
 

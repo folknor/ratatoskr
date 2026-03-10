@@ -10,8 +10,8 @@ use crate::search::{SearchDocument, SearchState};
 
 use super::client::GraphClient;
 use super::folder_mapper::FolderMap;
-use super::parse::{parse_graph_message, ParsedGraphMessage};
-use super::types::{GraphMailFolder, GraphMessage, ODataCollection, MESSAGE_SELECT};
+use super::parse::{ParsedGraphMessage, parse_graph_message};
+use super::types::{GraphMailFolder, GraphMessage, MESSAGE_SELECT, ODataCollection};
 
 const BATCH_SIZE: usize = 50;
 
@@ -90,7 +90,14 @@ pub(crate) async fn graph_initial_sync(
 
         #[allow(clippy::cast_possible_truncation)]
         let current = i as u64;
-        emit_progress(&sctx, "messages", folder_name, current, total_folders, total_messages);
+        emit_progress(
+            &sctx,
+            "messages",
+            folder_name,
+            current,
+            total_folders,
+            total_messages,
+        );
 
         let messages =
             fetch_folder_messages(client, ctx.db, folder_id, &since_iso, &folder_map).await?;
@@ -104,7 +111,14 @@ pub(crate) async fn graph_initial_sync(
     }
 
     // Phase 3: Bootstrap delta tokens for all folders
-    emit_progress(&sctx, "delta-bootstrap", "", 0, total_folders, total_messages);
+    emit_progress(
+        &sctx,
+        "delta-bootstrap",
+        "",
+        0,
+        total_folders,
+        total_messages,
+    );
 
     for (i, &(folder_id, _)) in folder_list.iter().enumerate() {
         let delta_link = bootstrap_delta_token(client, ctx.db, folder_id).await?;
@@ -112,10 +126,24 @@ pub(crate) async fn graph_initial_sync(
 
         #[allow(clippy::cast_possible_truncation)]
         let current = (i + 1) as u64;
-        emit_progress(&sctx, "delta-bootstrap", "", current, total_folders, total_messages);
+        emit_progress(
+            &sctx,
+            "delta-bootstrap",
+            "",
+            current,
+            total_folders,
+            total_messages,
+        );
     }
 
-    emit_progress(&sctx, "done", "", total_folders, total_folders, total_messages);
+    emit_progress(
+        &sctx,
+        "done",
+        "",
+        total_folders,
+        total_folders,
+        total_messages,
+    );
 
     Ok(())
 }
@@ -156,14 +184,13 @@ pub(crate) async fn graph_delta_sync(
     }
 
     // Every 10th cycle, refresh the folder tree to discover new/removed folders
-    let folder_map = if cycle % 10 == 0 {
+    let folder_map = if cycle.is_multiple_of(10) {
         let map = sync_folders(client, ctx).await?;
         client.set_folder_map(map.clone()).await;
         client.set_folder_map_synced().await;
 
         // Bootstrap delta tokens for newly discovered folders
-        let known_folder_ids: HashSet<&str> =
-            map.folder_entries().map(|(fid, _)| fid).collect();
+        let known_folder_ids: HashSet<&str> = map.folder_entries().map(|(fid, _)| fid).collect();
         let token_folder_ids: HashSet<String> = tokens.keys().cloned().collect();
 
         for folder_id in &known_folder_ids {
@@ -175,9 +202,7 @@ pub(crate) async fn graph_delta_sync(
                         tokens.insert(folder_id.to_string(), delta_link);
                     }
                     Err(e) => {
-                        log::warn!(
-                            "Graph delta sync: failed to bootstrap folder {folder_id}: {e}"
-                        );
+                        log::warn!("Graph delta sync: failed to bootstrap folder {folder_id}: {e}");
                     }
                 }
             }
@@ -234,9 +259,9 @@ pub(crate) async fn graph_delta_sync(
 /// Decide whether a folder should be synced this cycle based on its priority tier.
 fn should_sync_folder(label_id: &str, cycle: u32) -> bool {
     match folder_priority(label_id) {
-        0 => true,            // Tier 0: every cycle
-        1 => cycle % 5 == 0,  // Tier 1: every 5th cycle
-        _ => cycle % 20 == 0, // Tier 2: every 20th cycle
+        0 => true,                     // Tier 0: every cycle
+        1 => cycle.is_multiple_of(5),  // Tier 1: every 5th cycle
+        _ => cycle.is_multiple_of(20), // Tier 2: every 20th cycle
     }
 }
 
@@ -255,10 +280,8 @@ async fn sync_folder_delta(
     let mut current_link = delta_link.to_string();
 
     loop {
-        let page: ODataCollection<serde_json::Value> = sctx
-            .client
-            .get_absolute(&current_link, sctx.db)
-            .await?;
+        let page: ODataCollection<serde_json::Value> =
+            sctx.client.get_absolute(&current_link, sctx.db).await?;
 
         let mut created_or_updated = Vec::new();
         let mut deleted_ids = Vec::new();
@@ -273,12 +296,10 @@ async fn sync_folder_delta(
             } else {
                 // Deserialize full message
                 match serde_json::from_value::<GraphMessage>(item.clone()) {
-                    Ok(msg) => {
-                        match parse_graph_message(&msg, folder_map) {
-                            Ok(parsed) => created_or_updated.push(parsed),
-                            Err(e) => log::warn!("Failed to parse Graph delta message {id}: {e}"),
-                        }
-                    }
+                    Ok(msg) => match parse_graph_message(&msg, folder_map) {
+                        Ok(parsed) => created_or_updated.push(parsed),
+                        Err(e) => log::warn!("Failed to parse Graph delta message {id}: {e}"),
+                    },
                     Err(e) => log::warn!("Failed to deserialize Graph delta message {id}: {e}"),
                 }
             }
@@ -331,10 +352,7 @@ pub(crate) async fn sync_folders_public(
 }
 
 /// Resolve well-known folders, fetch full tree, persist labels, return FolderMap.
-async fn sync_folders(
-    client: &GraphClient,
-    ctx: &ProviderCtx<'_>,
-) -> Result<FolderMap, String> {
+async fn sync_folders(client: &GraphClient, ctx: &ProviderCtx<'_>) -> Result<FolderMap, String> {
     // Phase 1: Resolve well-known aliases to opaque IDs
     let mut resolved = HashMap::new();
     for &(alias, label_id, label_name) in FolderMap::well_known_aliases() {
@@ -497,8 +515,7 @@ fn fetch_child_folders<'a>(
     Box::pin(async move {
         let mut children = Vec::new();
         let enc_parent_id = urlencoding::encode(parent_id);
-        let initial_url =
-            format!("/me/mailFolders/{enc_parent_id}/childFolders?$top=250");
+        let initial_url = format!("/me/mailFolders/{enc_parent_id}/childFolders?$top=250");
         let mut next_link: Option<String> = None;
 
         loop {
@@ -542,9 +559,7 @@ async fn bootstrap_delta_token(
     folder_id: &str,
 ) -> Result<String, String> {
     let enc_folder_id = urlencoding::encode(folder_id);
-    let initial_url = format!(
-        "/me/mailFolders/{enc_folder_id}/messages/delta?$select=id"
-    );
+    let initial_url = format!("/me/mailFolders/{enc_folder_id}/messages/delta?$select=id");
     let mut next_link: Option<String> = None;
 
     loop {
@@ -630,9 +645,7 @@ async fn bootstrap_delta_token_latest(
     folder_id: &str,
 ) -> Result<String, String> {
     let enc_folder_id = urlencoding::encode(folder_id);
-    let url = format!(
-        "/me/mailFolders/{enc_folder_id}/messages/delta?$deltatoken=latest"
-    );
+    let url = format!("/me/mailFolders/{enc_folder_id}/messages/delta?$deltatoken=latest");
     let page: ODataCollection<serde_json::Value> = client.get_json(&url, db).await?;
 
     page.delta_link.ok_or_else(|| {
@@ -641,11 +654,7 @@ async fn bootstrap_delta_token_latest(
 }
 
 /// Delete a delta token for a folder that no longer exists.
-async fn delete_delta_token(
-    db: &DbState,
-    account_id: &str,
-    folder_id: &str,
-) -> Result<(), String> {
+async fn delete_delta_token(db: &DbState, account_id: &str, folder_id: &str) -> Result<(), String> {
     let aid = account_id.to_string();
     let fid = folder_id.to_string();
 
@@ -955,6 +964,7 @@ fn store_thread_to_db(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn upsert_thread_record(
     tx: &rusqlite::Transaction,
     account_id: &str,
@@ -1227,11 +1237,7 @@ async fn store_bodies(body_store: &BodyStoreState, messages: &[ParsedGraphMessag
 // Search index helper
 // ---------------------------------------------------------------------------
 
-async fn index_messages(
-    search: &SearchState,
-    account_id: &str,
-    messages: &[ParsedGraphMessage],
-) {
+async fn index_messages(search: &SearchState, account_id: &str, messages: &[ParsedGraphMessage]) {
     let docs: Vec<SearchDocument> = messages
         .iter()
         .map(|m| SearchDocument {
@@ -1279,7 +1285,7 @@ fn emit_progress(
     total_folders: u64,
     messages_processed: u64,
 ) {
-    let _ = sctx.app_handle.emit(
+    if let Err(err) = sctx.app_handle.emit(
         "graph-sync-progress",
         GraphSyncProgress {
             account_id: sctx.account_id.to_string(),
@@ -1289,5 +1295,10 @@ fn emit_progress(
             total_folders,
             messages_processed,
         },
-    );
+    ) {
+        log::warn!(
+            "Failed to emit Graph sync progress for {}: {err}",
+            sctx.account_id
+        );
+    }
 }

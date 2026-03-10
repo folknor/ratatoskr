@@ -14,18 +14,12 @@ use crate::provider::crypto;
 #[derive(Clone)]
 pub struct JmapClient {
     inner: Arc<Client>,
-    account_id: String,
 }
 
 impl JmapClient {
     /// Direct access to the underlying `jmap-client` Client.
     pub fn inner(&self) -> &Client {
         &self.inner
-    }
-
-    /// Our internal account ID (not the JMAP account ID).
-    pub fn account_id(&self) -> &str {
-        &self.account_id
     }
 
     /// Create a JMAP client from a DB account record.
@@ -52,7 +46,6 @@ impl JmapClient {
 
         Ok(Self {
             inner: Arc::new(client),
-            account_id: account_id.to_string(),
         })
     }
 }
@@ -91,8 +84,7 @@ fn read_jmap_credentials(
     let login = row.3.unwrap_or_else(|| email.clone());
 
     let password = if crypto::is_encrypted(&enc_password) {
-        crypto::decrypt_value(key, &enc_password)
-            .unwrap_or_else(|_| enc_password.clone())
+        crypto::decrypt_value(key, &enc_password).unwrap_or_else(|_| enc_password.clone())
     } else {
         enc_password
     };

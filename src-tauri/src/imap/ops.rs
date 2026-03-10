@@ -18,9 +18,12 @@ fn random_hex8() -> String {
     let mut buf = [0u8; 4];
     if getrandom::getrandom(&mut buf).is_err() {
         // Fallback: use timestamp-based value (extremely unlikely to reach here)
-        return format!("{:08x}", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.subsec_nanos()));
+        return format!(
+            "{:08x}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.subsec_nanos())
+        );
     }
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -64,15 +67,22 @@ fn build_imap_config(
             let accept: Option<i64> = row.get(7)?;
 
             Ok((
-                email, host, port, security, username, password, auth_method, accept,
+                email,
+                host,
+                port,
+                security,
+                username,
+                password,
+                auth_method,
+                accept,
             ))
         },
     )
     .map_err(|e| format!("Failed to read IMAP config for {account_id}: {e}"))
     .and_then(
         |(email, host, port, security, username, password, auth_method, accept)| {
-            let host = host
-                .ok_or_else(|| format!("Account {account_id} has no IMAP host configured"))?;
+            let host =
+                host.ok_or_else(|| format!("Account {account_id} has no IMAP host configured"))?;
 
             let mapped_security = match security.as_deref().map(str::to_lowercase).as_deref() {
                 Some("ssl") | Some("tls") | None => "tls",
@@ -135,15 +145,22 @@ fn build_smtp_config(
             let accept: Option<i64> = row.get(7)?;
 
             Ok((
-                email, host, port, security, username, password, auth_method, accept,
+                email,
+                host,
+                port,
+                security,
+                username,
+                password,
+                auth_method,
+                accept,
             ))
         },
     )
     .map_err(|e| format!("Failed to read SMTP config for {account_id}: {e}"))
     .and_then(
         |(email, host, port, security, username, password, auth_method, accept)| {
-            let host = host
-                .ok_or_else(|| format!("Account {account_id} has no SMTP host configured"))?;
+            let host =
+                host.ok_or_else(|| format!("Account {account_id} has no SMTP host configured"))?;
 
             let mapped_security = match security.as_deref().map(str::to_lowercase).as_deref() {
                 Some("ssl") | Some("tls") | None => "tls",
@@ -429,11 +446,7 @@ impl ProviderOps for ImapOps {
         Ok(())
     }
 
-    async fn permanent_delete(
-        &self,
-        ctx: &ProviderCtx<'_>,
-        thread_id: &str,
-    ) -> Result<(), String> {
+    async fn permanent_delete(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
         let key = self.encryption_key;

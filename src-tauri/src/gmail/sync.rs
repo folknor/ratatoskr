@@ -1,6 +1,6 @@
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -10,7 +10,7 @@ use crate::db::DbState;
 use crate::search::{SearchDocument, SearchState};
 
 use super::client::GmailClient;
-use super::parse::{parse_gmail_message, ParsedGmailMessage};
+use super::parse::{ParsedGmailMessage, parse_gmail_message};
 use super::types::GmailLabel;
 
 // ---------------------------------------------------------------------------
@@ -71,10 +71,7 @@ pub async fn gmail_initial_sync(
     run_initial_sync(&ctx, days_back).await
 }
 
-async fn run_initial_sync(
-    ctx: &SyncCtx<'_>,
-    days_back: i64,
-) -> Result<(), String> {
+async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), String> {
     // Phase 1: Sync labels
     emit_progress(ctx, "labels", 0, 1);
     sync_labels(ctx).await?;
@@ -124,9 +121,7 @@ pub async fn gmail_delta_sync(
     run_delta_sync(&ctx).await
 }
 
-async fn run_delta_sync(
-    ctx: &SyncCtx<'_>,
-) -> Result<GmailSyncResult, String> {
+async fn run_delta_sync(ctx: &SyncCtx<'_>) -> Result<GmailSyncResult, String> {
     // Read current history_id from account
     let last_history_id = {
         let aid = ctx.account_id.to_string();
@@ -150,8 +145,7 @@ async fn run_delta_sync(
     }
 
     // Filter out threads with pending local ops
-    let thread_ids_to_sync =
-        filter_pending_ops(ctx, &history_result.affected_thread_ids).await?;
+    let thread_ids_to_sync = filter_pending_ops(ctx, &history_result.affected_thread_ids).await?;
 
     // Re-fetch affected threads in parallel (concurrency 5)
     if !thread_ids_to_sync.is_empty() {
@@ -186,10 +180,7 @@ fn persist_labels(
     labels: &[GmailLabel],
 ) -> Result<(), String> {
     for label in labels {
-        let color_bg = label
-            .color
-            .as_ref()
-            .map(|c| c.background_color.clone());
+        let color_bg = label.color.as_ref().map(|c| c.background_color.clone());
         let color_fg = label.color.as_ref().map(|c| c.text_color.clone());
         let label_type = label.label_type.as_deref().unwrap_or("user");
 
@@ -198,12 +189,7 @@ fn persist_labels(
              (id, account_id, name, type, color_bg, color_fg) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             rusqlite::params![
-                label.id,
-                account_id,
-                label.name,
-                label_type,
-                color_bg,
-                color_fg,
+                label.id, account_id, label.name, label_type, color_bg, color_fg,
             ],
         )
         .map_err(|e| format!("upsert label: {e}"))?;
@@ -215,10 +201,7 @@ fn persist_labels(
 // Thread list (paginated)
 // ---------------------------------------------------------------------------
 
-async fn list_thread_ids(
-    ctx: &SyncCtx<'_>,
-    days_back: i64,
-) -> Result<Vec<String>, String> {
+async fn list_thread_ids(ctx: &SyncCtx<'_>, days_back: i64) -> Result<Vec<String>, String> {
     let after_date = chrono::Utc::now() - chrono::Duration::days(days_back);
     let after_str = format!(
         "{}/{}/{}",
@@ -342,17 +325,14 @@ async fn process_single_thread(
         return Ok(history_id);
     }
 
-    let parsed: Vec<ParsedGmailMessage> =
-        thread.messages.iter().map(parse_gmail_message).collect();
+    let parsed: Vec<ParsedGmailMessage> = thread.messages.iter().map(parse_gmail_message).collect();
 
     // DB writes
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
     let parsed_clone = parsed.clone();
-    db.with_conn(move |conn| {
-        store_thread_to_db(conn, &aid, &tid, &parsed_clone)
-    })
-    .await?;
+    db.with_conn(move |conn| store_thread_to_db(conn, &aid, &tid, &parsed_clone))
+        .await?;
 
     // Body store writes
     store_bodies(body_store, &parsed).await;
@@ -386,6 +366,7 @@ fn store_thread_to_db(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn upsert_thread_record(
     tx: &rusqlite::Transaction,
     account_id: &str,
@@ -643,10 +624,7 @@ fn upsert_attachments(
 // Body store helper
 // ---------------------------------------------------------------------------
 
-async fn store_bodies(
-    body_store: &BodyStoreState,
-    messages: &[ParsedGmailMessage],
-) {
+async fn store_bodies(body_store: &BodyStoreState, messages: &[ParsedGmailMessage]) {
     let bodies: Vec<MessageBody> = messages
         .iter()
         .filter(|m| m.body_html.is_some() || m.body_text.is_some())
@@ -670,11 +648,7 @@ async fn store_bodies(
 // Search index helper
 // ---------------------------------------------------------------------------
 
-async fn index_messages(
-    search: &SearchState,
-    account_id: &str,
-    messages: &[ParsedGmailMessage],
-) {
+async fn index_messages(search: &SearchState, account_id: &str, messages: &[ParsedGmailMessage]) {
     let docs: Vec<SearchDocument> = messages
         .iter()
         .map(|m| SearchDocument {
@@ -735,11 +709,7 @@ async fn collect_history(
         latest_history_id.clone_from(&response.history_id);
 
         for item in &response.history {
-            collect_from_history_item(
-                item,
-                &mut affected_thread_ids,
-                &mut new_inbox_message_ids,
-            );
+            collect_from_history_item(item, &mut affected_thread_ids, &mut new_inbox_message_ids);
         }
 
         page_token = response.next_page_token.clone();
@@ -763,9 +733,7 @@ fn collect_from_history_item(
     for added in &item.messages_added {
         affected.insert(added.message.thread_id.clone());
         let labels = &added.message.label_ids;
-        if labels.contains(&"INBOX".to_string())
-            && labels.contains(&"UNREAD".to_string())
-        {
+        if labels.contains(&"INBOX".to_string()) && labels.contains(&"UNREAD".to_string()) {
             new_inbox.insert(added.message.id.clone());
         }
     }
@@ -860,10 +828,7 @@ fn read_account_history_id(
     .map_err(|e| format!("read history_id: {e}"))
 }
 
-async fn update_history_id(
-    ctx: &SyncCtx<'_>,
-    history_id: &str,
-) -> Result<(), String> {
+async fn update_history_id(ctx: &SyncCtx<'_>, history_id: &str) -> Result<(), String> {
     let aid = ctx.account_id.to_string();
     let hid = history_id.to_string();
     ctx.db

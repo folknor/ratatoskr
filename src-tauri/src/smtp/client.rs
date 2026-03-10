@@ -1,10 +1,10 @@
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use lettre::{
+    AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
     transport::smtp::{
         authentication::{Credentials, Mechanism},
         client::{Tls, TlsParametersBuilder},
     },
-    AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
 };
 
 use super::types::{SmtpConfig, SmtpSendResult};
@@ -17,9 +17,7 @@ fn decode_base64url(input: &str) -> Result<Vec<u8>, String> {
 }
 
 /// Build an async SMTP transport from the given config.
-fn build_transport(
-    config: &SmtpConfig,
-) -> Result<AsyncSmtpTransport<Tokio1Executor>, String> {
+fn build_transport(config: &SmtpConfig) -> Result<AsyncSmtpTransport<Tokio1Executor>, String> {
     let credentials = Credentials::new(config.username.clone(), config.password.clone());
 
     // For OAuth2, force XOAUTH2 mechanism; for password, use default mechanisms
@@ -189,7 +187,7 @@ mod tests {
     fn test_decode_base64url_valid() {
         // "Hello" in base64url
         let encoded = "SGVsbG8";
-        let decoded = decode_base64url(encoded).unwrap();
+        let decoded = decode_base64url(encoded).expect("valid base64url should decode");
         assert_eq!(decoded, b"Hello");
     }
 
@@ -197,13 +195,17 @@ mod tests {
     fn test_decode_base64url_invalid() {
         let result = decode_base64url("!!!invalid!!!");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Base64 decode error"));
+        assert!(
+            result
+                .expect_err("invalid base64url should fail")
+                .contains("Base64 decode error")
+        );
     }
 
     #[test]
     fn test_extract_envelope_valid() {
         let raw = b"From: alice@example.com\r\nTo: bob@example.com\r\nCc: carol@example.com\r\nSubject: Test\r\n\r\nBody";
-        let envelope = extract_envelope(raw).unwrap();
+        let envelope = extract_envelope(raw).expect("valid envelope should parse");
         // Envelope should have from and 2 recipients (To + Cc)
         assert!(envelope.from().is_some());
         assert_eq!(envelope.to().len(), 2);
@@ -214,7 +216,11 @@ mod tests {
         let raw = b"To: bob@example.com\r\nSubject: Test\r\n\r\nBody";
         let result = extract_envelope(raw);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("No From address"));
+        assert!(
+            result
+                .expect_err("missing from should fail")
+                .contains("No From address")
+        );
     }
 
     #[test]
@@ -222,13 +228,17 @@ mod tests {
         let raw = b"From: alice@example.com\r\nSubject: Test\r\n\r\nBody";
         let result = extract_envelope(raw);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("No recipients found"));
+        assert!(
+            result
+                .expect_err("missing recipients should fail")
+                .contains("No recipients found")
+        );
     }
 
     #[test]
     fn test_extract_envelope_with_bcc() {
         let raw = b"From: alice@example.com\r\nTo: bob@example.com\r\nBcc: secret@example.com\r\nSubject: Test\r\n\r\nBody";
-        let envelope = extract_envelope(raw).unwrap();
+        let envelope = extract_envelope(raw).expect("bcc recipient should parse");
         assert_eq!(envelope.to().len(), 2);
     }
 }

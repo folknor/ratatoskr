@@ -4,8 +4,8 @@
 use rusqlite::params;
 use tauri::State;
 
-use crate::db::DbState;
 use super::{insert_label, remove_inbox_label, remove_label};
+use crate::db::DbState;
 
 // ── Archive ──────────────────────────────────────────────────
 
@@ -16,9 +16,7 @@ pub async fn email_action_archive(
     thread_id: String,
 ) -> Result<(), String> {
     state
-        .with_conn(move |conn| {
-            remove_inbox_label(conn, &account_id, &thread_id)
-        })
+        .with_conn(move |conn| remove_inbox_label(conn, &account_id, &thread_id))
         .await
 }
 
@@ -313,9 +311,7 @@ pub async fn email_action_add_label(
     label_id: String,
 ) -> Result<(), String> {
     state
-        .with_conn(move |conn| {
-            insert_label(conn, &account_id, &thread_id, &label_id)
-        })
+        .with_conn(move |conn| insert_label(conn, &account_id, &thread_id, &label_id))
         .await
 }
 
@@ -327,9 +323,7 @@ pub async fn email_action_remove_label(
     label_id: String,
 ) -> Result<(), String> {
     state
-        .with_conn(move |conn| {
-            remove_label(conn, &account_id, &thread_id, &label_id)
-        })
+        .with_conn(move |conn| remove_label(conn, &account_id, &thread_id, &label_id))
         .await
 }
 

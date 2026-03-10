@@ -81,7 +81,10 @@ fn normalize_header(value: &str) -> String {
     while let Some(c) = chars.next() {
         if c == '\r' || c == '\n' {
             // Skip whitespace after line breaks
-            while chars.peek().is_some_and(|&ch| ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
+            while chars
+                .peek()
+                .is_some_and(|&ch| ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n')
+            {
                 chars.next();
             }
             result.push(' ');
@@ -171,7 +174,10 @@ fn parse_received_spf(header_value: &str) -> Option<AuthVerdict> {
     let normalized = normalize_header(header_value);
     let trimmed = normalized.trim();
 
-    let result_word: String = trimmed.chars().take_while(|c| c.is_alphanumeric()).collect();
+    let result_word: String = trimmed
+        .chars()
+        .take_while(|c| c.is_alphanumeric())
+        .collect();
     if result_word.is_empty() {
         return None;
     }

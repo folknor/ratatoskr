@@ -1,7 +1,7 @@
 // tauri::command macro generates code that trips let_underscore_must_use
 #![allow(clippy::let_underscore_must_use)]
 
-use rusqlite::{params, Row};
+use rusqlite::{Row, params};
 use tauri::State;
 
 use super::DbState;
@@ -318,11 +318,12 @@ pub async fn db_get_messages_for_thread(
             .collect();
 
         for msg in &mut messages {
-            if msg.body_html.is_none() && msg.body_text.is_none() {
-                if let Some(body) = body_map.get(&msg.id) {
-                    msg.body_html = body.body_html.clone();
-                    msg.body_text = body.body_text.clone();
-                }
+            if msg.body_html.is_none()
+                && msg.body_text.is_none()
+                && let Some(body) = body_map.get(&msg.id)
+            {
+                msg.body_html = body.body_html.clone();
+                msg.body_text = body.body_text.clone();
             }
         }
     }
@@ -641,10 +642,7 @@ pub async fn db_remove_thread_label(
 // ── Label mutations ──────────────────────────────────────────
 
 #[tauri::command]
-pub async fn db_upsert_label(
-    state: State<'_, DbState>,
-    label: DbLabel,
-) -> Result<(), String> {
+pub async fn db_upsert_label(state: State<'_, DbState>, label: DbLabel) -> Result<(), String> {
     state
         .with_conn(move |conn| {
             conn.execute(

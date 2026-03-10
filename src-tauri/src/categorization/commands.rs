@@ -1,4 +1,6 @@
-use super::{categorize_batch, categorize_by_rules, CategorizationInput};
+#![allow(clippy::needless_pass_by_value)]
+
+use super::{CategorizationInput, categorize_batch, categorize_by_rules};
 
 /// Categorize a single thread by deterministic rules.
 /// Returns the category string ("Primary", "Updates", "Promotions", "Social", "Newsletters").

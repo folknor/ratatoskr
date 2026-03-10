@@ -10,22 +10,6 @@ pub struct ODataCollection<T> {
     pub delta_link: Option<String>,
 }
 
-/// A message in the delta response that has been removed.
-#[derive(Debug, Deserialize)]
-pub struct ODataDeltaItem<T> {
-    #[serde(flatten)]
-    pub data: Option<T>,
-    /// Present on deleted items in delta responses.
-    #[serde(rename = "@removed")]
-    pub removed: Option<ODataRemoved>,
-    pub id: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ODataRemoved {
-    pub reason: String,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphMessage {
@@ -34,7 +18,6 @@ pub struct GraphMessage {
     pub subject: Option<String>,
     pub body_preview: Option<String>,
     pub body: Option<GraphBody>,
-    pub unique_body: Option<GraphBody>,
     pub from: Option<GraphRecipient>,
     pub to_recipients: Option<Vec<GraphRecipient>>,
     pub cc_recipients: Option<Vec<GraphRecipient>>,
@@ -43,15 +26,11 @@ pub struct GraphMessage {
     pub received_date_time: Option<String>,
     pub sent_date_time: Option<String>,
     pub is_read: Option<bool>,
-    pub is_draft: Option<bool>,
     pub has_attachments: Option<bool>,
-    pub importance: Option<String>,
     pub parent_folder_id: Option<String>,
     pub categories: Option<Vec<String>>,
     pub flag: Option<GraphFlag>,
-    pub inference_classification: Option<String>,
     pub internet_message_headers: Option<Vec<GraphInternetHeader>>,
-    pub internet_message_id: Option<String>,
     pub attachments: Option<Vec<GraphAttachment>>,
 }
 
@@ -93,11 +72,7 @@ pub struct GraphInternetHeader {
 pub struct GraphMailFolder {
     pub id: String,
     pub display_name: String,
-    pub parent_folder_id: Option<String>,
     pub child_folder_count: Option<i32>,
-    pub total_item_count: Option<i32>,
-    pub unread_item_count: Option<i32>,
-    pub is_hidden: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -192,15 +167,6 @@ pub struct GraphAttachmentInput {
     pub content_id: Option<String>,
 }
 
-// ── Command result types ────────────────────────────────────
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GraphTestResult {
-    pub success: bool,
-    pub message: String,
-}
-
 /// The `$select` fields we request for sync messages.
 pub const MESSAGE_SELECT: &str = "\
 id,conversationId,subject,bodyPreview,body,uniqueBody,from,\
@@ -208,6 +174,3 @@ toRecipients,ccRecipients,bccRecipients,replyTo,\
 receivedDateTime,sentDateTime,isRead,isDraft,hasAttachments,\
 importance,parentFolderId,categories,flag,\
 inferenceClassification,internetMessageHeaders,internetMessageId";
-
-/// Minimal `$select` for delta token bootstrap (we only need the token).
-pub const DELTA_BOOTSTRAP_SELECT: &str = "id";

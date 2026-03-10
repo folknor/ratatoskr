@@ -4,7 +4,7 @@ pub mod queries;
 pub mod queries_extra;
 pub mod types;
 
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
@@ -20,7 +20,7 @@ pub struct DbState {
 
 impl DbState {
     /// Open (or create) the SQLite database and apply all pending migrations.
-    pub fn init(app_data_dir: &PathBuf) -> Result<Self, String> {
+    pub fn init(app_data_dir: &Path) -> Result<Self, String> {
         std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create app dir: {e}"))?;
 
         // Migrate from old database name (velo.db → ratatoskr.db)
@@ -33,11 +33,15 @@ impl DbState {
             // Also migrate WAL files if they exist
             let old_shm = app_data_dir.join("velo.db-shm");
             let old_wal = app_data_dir.join("velo.db-wal");
-            if old_shm.exists() {
-                let _ = std::fs::rename(&old_shm, app_data_dir.join("ratatoskr.db-shm"));
+            if old_shm.exists()
+                && let Err(err) = std::fs::rename(&old_shm, app_data_dir.join("ratatoskr.db-shm"))
+            {
+                log::warn!("Failed to migrate WAL shm file: {err}");
             }
-            if old_wal.exists() {
-                let _ = std::fs::rename(&old_wal, app_data_dir.join("ratatoskr.db-wal"));
+            if old_wal.exists()
+                && let Err(err) = std::fs::rename(&old_wal, app_data_dir.join("ratatoskr.db-wal"))
+            {
+                log::warn!("Failed to migrate WAL file: {err}");
             }
         }
         let conn = Connection::open(&db_path)

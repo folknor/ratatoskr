@@ -24,7 +24,6 @@ pub struct FolderMap {
 
 #[derive(Debug, Clone)]
 pub struct FolderLabelMapping {
-    pub folder_id: String,
     pub label_id: String,
     pub label_name: String,
     pub label_type: &'static str, // "system" or "user"
@@ -44,18 +43,15 @@ impl FolderMap {
         let mut by_label = HashMap::new();
 
         for folder in all_folders {
-            let mapping = if let Some(&(label_id, label_name)) =
-                resolved_wellknown.get(&folder.id)
+            let mapping = if let Some(&(label_id, label_name)) = resolved_wellknown.get(&folder.id)
             {
                 FolderLabelMapping {
-                    folder_id: folder.id.clone(),
                     label_id: label_id.to_string(),
                     label_name: label_name.to_string(),
                     label_type: "system",
                 }
             } else {
                 FolderLabelMapping {
-                    folder_id: folder.id.clone(),
                     label_id: format!("graph-{}", folder.id),
                     label_name: folder.display_name.clone(),
                     label_type: "user",
@@ -118,9 +114,7 @@ impl FolderMap {
     /// Iterate over all (opaque_folder_id, mapping) pairs.
     /// Used by sync to enumerate folders for message fetching and delta tokens.
     pub fn folder_entries(&self) -> impl Iterator<Item = (&str, &FolderLabelMapping)> + '_ {
-        self.by_id
-            .iter()
-            .map(|(fid, m)| (fid.as_str(), m))
+        self.by_id.iter().map(|(fid, m)| (fid.as_str(), m))
     }
 
     /// The well-known alias list (used by the resolution step in sync).

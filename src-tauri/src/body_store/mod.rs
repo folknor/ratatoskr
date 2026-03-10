@@ -1,6 +1,6 @@
 pub mod commands;
 
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use rusqlite::{Connection, params};
@@ -36,12 +36,11 @@ fn decompress(data: &[u8]) -> Result<String, String> {
 
 impl BodyStoreState {
     /// Open (or create) the body store database.
-    pub fn init(app_data_dir: &PathBuf) -> Result<Self, String> {
+    pub fn init(app_data_dir: &Path) -> Result<Self, String> {
         std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create app dir: {e}"))?;
 
         let db_path = app_data_dir.join("bodies.db");
-        let conn =
-            Connection::open(&db_path).map_err(|e| format!("open body store: {e}"))?;
+        let conn = Connection::open(&db_path).map_err(|e| format!("open body store: {e}"))?;
 
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
@@ -75,7 +74,9 @@ impl BodyStoreState {
     {
         let conn = Arc::clone(&self.conn);
         tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().map_err(|e| format!("body store lock poisoned: {e}"))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| format!("body store lock poisoned: {e}"))?;
             f(&conn)
         })
         .await
@@ -120,10 +121,8 @@ impl BodyStoreState {
                     .map_err(|e| format!("prepare batch put: {e}"))?;
 
                 for body in &bodies {
-                    let html_blob =
-                        body.body_html.as_deref().map(compress).transpose()?;
-                    let text_blob =
-                        body.body_text.as_deref().map(compress).transpose()?;
+                    let html_blob = body.body_html.as_deref().map(compress).transpose()?;
+                    let text_blob = body.body_text.as_deref().map(compress).transpose()?;
 
                     stmt.execute(params![body.message_id, html_blob, text_blob])
                         .map_err(|e| format!("batch put row: {e}"))?;
@@ -168,10 +167,7 @@ impl BodyStoreState {
     }
 
     /// Retrieve multiple message bodies in a single query.
-    pub async fn get_batch(
-        &self,
-        message_ids: Vec<String>,
-    ) -> Result<Vec<MessageBody>, String> {
+    pub async fn get_batch(&self, message_ids: Vec<String>) -> Result<Vec<MessageBody>, String> {
         if message_ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -243,10 +239,14 @@ impl BodyStoreState {
                     .join(", ");
 
                 let sql = format!("DELETE FROM bodies WHERE message_id IN ({placeholders})");
-                let mut stmt = conn.prepare(&sql).map_err(|e| format!("prepare delete: {e}"))?;
+                let mut stmt = conn
+                    .prepare(&sql)
+                    .map_err(|e| format!("prepare delete: {e}"))?;
 
-                let param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
-                    chunk.iter().map(|id| Box::new(id.clone()) as Box<dyn rusqlite::types::ToSql>).collect();
+                let param_values: Vec<Box<dyn rusqlite::types::ToSql>> = chunk
+                    .iter()
+                    .map(|id| Box::new(id.clone()) as Box<dyn rusqlite::types::ToSql>)
+                    .collect();
                 let param_refs: Vec<&dyn rusqlite::types::ToSql> =
                     param_values.iter().map(AsRef::as_ref).collect();
 

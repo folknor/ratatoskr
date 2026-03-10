@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use tokio::sync::{Mutex, RwLock, Semaphore};
 
 use crate::db::DbState;
@@ -14,8 +14,7 @@ use crate::provider::token::{self, TokenState};
 use super::folder_mapper::FolderMap;
 
 const GRAPH_API_BASE: &str = "https://graph.microsoft.com/v1.0";
-const MS_TOKEN_ENDPOINT: &str =
-    "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+const MS_TOKEN_ENDPOINT: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
 
 /// Graph allows max 4 concurrent requests per app per mailbox.
 /// Reserve 1 for user-initiated actions during sync.
@@ -120,10 +119,6 @@ impl GraphClient {
         })
     }
 
-    pub fn account_id(&self) -> &str {
-        &self.inner.account_id
-    }
-
     /// Get or rebuild the cached folder map.
     pub async fn folder_map(&self) -> Option<FolderMap> {
         self.inner.folder_map.read().await.clone()
@@ -151,11 +146,6 @@ impl GraphClient {
             + 1
     }
 
-    /// Read the current sync cycle counter value.
-    pub fn sync_cycle(&self) -> u32 {
-        self.inner.sync_cycle_counter.load(Ordering::Relaxed)
-    }
-
     /// Record that the folder map was just synced from the server.
     pub async fn set_folder_map_synced(&self) {
         *self.inner.folder_map_last_sync.write().await = Some(std::time::Instant::now());
@@ -174,11 +164,7 @@ impl GraphClient {
     }
 
     /// Authenticated GET returning raw bytes (for attachment `/$value`).
-    pub async fn get_bytes(
-        &self,
-        path: &str,
-        db: &DbState,
-    ) -> Result<Vec<u8>, String> {
+    pub async fn get_bytes(&self, path: &str, db: &DbState) -> Result<Vec<u8>, String> {
         let url = format!("{GRAPH_API_BASE}{path}");
         self.request_bytes(&url, db).await
     }
@@ -304,11 +290,15 @@ impl GraphClient {
             .acquire()
             .await
             .map_err(|e| format!("Semaphore closed: {e}"))?;
-        let response = self.execute_with_retry(url, method, body, &access_token).await?;
+        let response = self
+            .execute_with_retry(url, method, body, &access_token)
+            .await?;
 
         if response.status().as_u16() == 401 {
             let new_token = self.force_refresh(db).await?;
-            let retry = self.execute_with_retry(url, method, body, &new_token).await?;
+            let retry = self
+                .execute_with_retry(url, method, body, &new_token)
+                .await?;
             return parse_json_response(retry).await;
         }
 
@@ -316,11 +306,7 @@ impl GraphClient {
     }
 
     /// Request returning raw bytes (for `/$value` endpoints).
-    async fn request_bytes(
-        &self,
-        url: &str,
-        db: &DbState,
-    ) -> Result<Vec<u8>, String> {
+    async fn request_bytes(&self, url: &str, db: &DbState) -> Result<Vec<u8>, String> {
         let access_token = self.ensure_valid_token(db).await?;
         let _permit = self
             .inner
@@ -528,10 +514,7 @@ fn decrypt_or_raw(key: &[u8; 32], value: &str) -> String {
     }
 }
 
-fn read_ms_client_id(
-    conn: &rusqlite::Connection,
-    key: &[u8; 32],
-) -> Result<String, String> {
+fn read_ms_client_id(conn: &rusqlite::Connection, key: &[u8; 32]) -> Result<String, String> {
     let raw: String = conn
         .query_row(
             "SELECT value FROM settings WHERE key = 'microsoft_client_id'",

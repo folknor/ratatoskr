@@ -1,10 +1,12 @@
+#![allow(clippy::let_underscore_must_use)]
+
 use std::collections::HashMap;
 
 use tauri::State;
 
 use crate::db::DbState;
 
-use super::{evaluate_filters, FilterActions, FilterCriteria, FilterResult, FilterableMessage};
+use super::{FilterActions, FilterCriteria, FilterResult, FilterableMessage, evaluate_filters};
 
 /// Evaluate enabled filters for an account against a set of messages.
 /// Reads filter rules from DB, runs matching in Rust, returns per-thread actions.
@@ -40,7 +42,8 @@ pub async fn filters_evaluate(
 
             let mut filters = Vec::new();
             for row in rows {
-                let (criteria_json, actions_json) = row.map_err(|e| format!("read filter row: {e}"))?;
+                let (criteria_json, actions_json) =
+                    row.map_err(|e| format!("read filter row: {e}"))?;
                 // Skip filters with invalid JSON (same as TS flatMap + try/catch)
                 let criteria: FilterCriteria = match serde_json::from_str(&criteria_json) {
                     Ok(c) => c,

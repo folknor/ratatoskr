@@ -35,13 +35,10 @@ pub async fn start_oauth_server(port: u16, state: String) -> Result<OAuthResult,
     log::info!("OAuth callback server listening on port {actual_port}");
 
     // Wait for exactly one connection (the redirect from Google) with 5-minute timeout
-    let (mut stream, _) = tokio::time::timeout(
-        Duration::from_secs(300),
-        listener.accept(),
-    )
-    .await
-    .map_err(|_| "OAuth timed out — please try again".to_string())?
-    .map_err(|e| format!("Failed to accept: {e}"))?;
+    let (mut stream, _) = tokio::time::timeout(Duration::from_secs(300), listener.accept())
+        .await
+        .map_err(|_| "OAuth timed out — please try again".to_string())?
+        .map_err(|e| format!("Failed to accept: {e}"))?;
 
     // Read the HTTP request
     let mut buf = vec![0u8; 4096];
@@ -81,7 +78,10 @@ pub async fn start_oauth_server(port: u16, state: String) -> Result<OAuthResult,
 
     drop(listener);
 
-    Ok(OAuthResult { code, state: returned_state })
+    Ok(OAuthResult {
+        code,
+        state: returned_state,
+    })
 }
 
 fn parse_auth_code_and_state(request: &str) -> Result<(String, String), String> {

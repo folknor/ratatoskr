@@ -1,3 +1,5 @@
+#![allow(clippy::let_underscore_must_use)]
+
 use serde::Serialize;
 use tauri::State;
 
@@ -14,8 +16,7 @@ pub async fn graph_init_client(
     db: State<'_, DbState>,
     graph: State<'_, GraphState>,
 ) -> Result<(), String> {
-    let client =
-        GraphClient::from_account(&db, &account_id, *graph.encryption_key()).await?;
+    let client = GraphClient::from_account(&db, &account_id, *graph.encryption_key()).await?;
     graph.insert(account_id, client).await;
     Ok(())
 }

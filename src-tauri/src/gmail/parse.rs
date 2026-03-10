@@ -1,4 +1,4 @@
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::Serialize;
 
 use super::auth_parser::parse_authentication_results;
@@ -65,8 +65,8 @@ pub fn parse_gmail_message(msg: &GmailMessage) -> ParsedGmailMessage {
 
     let attachments = payload.map_or_else(Vec::new, extract_attachments);
 
-    let auth_results = parse_authentication_results(headers)
-        .and_then(|r| serde_json::to_string(&r).ok());
+    let auth_results =
+        parse_authentication_results(headers).and_then(|r| serde_json::to_string(&r).ok());
 
     let internal_date = msg
         .internal_date
@@ -118,17 +118,17 @@ fn parse_email_address(raw: Option<&str>) -> (Option<String>, Option<String>) {
     };
 
     // Format: "Display Name <email@example.com>" or "\"Name\" <email>"
-    if let Some(angle_start) = raw.rfind('<') {
-        if let Some(angle_end) = raw[angle_start..].find('>') {
-            let address = raw[angle_start + 1..angle_start + angle_end].trim();
-            let name_part = raw[..angle_start].trim().trim_matches('"').trim();
-            let name = if name_part.is_empty() || name_part == address {
-                None
-            } else {
-                Some(name_part.to_string())
-            };
-            return (name, Some(address.to_string()));
-        }
+    if let Some(angle_start) = raw.rfind('<')
+        && let Some(angle_end) = raw[angle_start..].find('>')
+    {
+        let address = raw[angle_start + 1..angle_start + angle_end].trim();
+        let name_part = raw[..angle_start].trim().trim_matches('"').trim();
+        let name = if name_part.is_empty() || name_part == address {
+            None
+        } else {
+            Some(name_part.to_string())
+        };
+        return (name, Some(address.to_string()));
     }
 
     // Bare email
@@ -137,12 +137,11 @@ fn parse_email_address(raw: Option<&str>) -> (Option<String>, Option<String>) {
 
 /// Recursively extract a body part matching the given MIME type.
 fn extract_body(part: &GmailPayload, mime_type: &str) -> Option<String> {
-    if part.mime_type == mime_type {
-        if let Some(body) = &part.body {
-            if let Some(data) = &body.data {
-                return Some(data.clone());
-            }
-        }
+    if part.mime_type == mime_type
+        && let Some(body) = &part.body
+        && let Some(data) = &body.data
+    {
+        return Some(data.clone());
     }
 
     for child in &part.parts {
@@ -162,42 +161,42 @@ fn extract_attachments(part: &GmailPayload) -> Vec<ParsedAttachment> {
 }
 
 fn collect_attachments(part: &GmailPayload, results: &mut Vec<ParsedAttachment>) {
-    if let Some(body) = &part.body {
-        if let Some(attachment_id) = &body.attachment_id {
-            let content_id_header = part
-                .headers
-                .iter()
-                .find(|h| h.name.eq_ignore_ascii_case("content-id"));
-            let content_disposition = part
-                .headers
-                .iter()
-                .find(|h| h.name.eq_ignore_ascii_case("content-disposition"));
+    if let Some(body) = &part.body
+        && let Some(attachment_id) = &body.attachment_id
+    {
+        let content_id_header = part
+            .headers
+            .iter()
+            .find(|h| h.name.eq_ignore_ascii_case("content-id"));
+        let content_disposition = part
+            .headers
+            .iter()
+            .find(|h| h.name.eq_ignore_ascii_case("content-disposition"));
 
-            let has_filename = !part.filename.is_empty();
-            let has_cid = content_id_header.is_some();
-            let is_inline = content_disposition
-                .is_some_and(|h| h.value.to_lowercase().starts_with("inline"));
+        let has_filename = !part.filename.is_empty();
+        let has_cid = content_id_header.is_some();
+        let is_inline =
+            content_disposition.is_some_and(|h| h.value.to_lowercase().starts_with("inline"));
 
-            // Collect parts with a filename or Content-ID (inline images)
-            if has_filename || has_cid {
-                let cid = content_id_header
-                    .map(|h| h.value.trim_matches(|c| c == '<' || c == '>').to_string());
+        // Collect parts with a filename or Content-ID (inline images)
+        if has_filename || has_cid {
+            let cid = content_id_header
+                .map(|h| h.value.trim_matches(|c| c == '<' || c == '>').to_string());
 
-                let filename = if has_filename {
-                    part.filename.clone()
-                } else {
-                    cid.clone().unwrap_or_else(|| "inline".to_string())
-                };
+            let filename = if has_filename {
+                part.filename.clone()
+            } else {
+                cid.clone().unwrap_or_else(|| "inline".to_string())
+            };
 
-                results.push(ParsedAttachment {
-                    filename,
-                    mime_type: part.mime_type.clone(),
-                    size: body.size,
-                    gmail_attachment_id: attachment_id.clone(),
-                    content_id: cid,
-                    is_inline: is_inline && !has_filename,
-                });
-            }
+            results.push(ParsedAttachment {
+                filename,
+                mime_type: part.mime_type.clone(),
+                size: body.size,
+                gmail_attachment_id: attachment_id.clone(),
+                content_id: cid,
+                is_inline: is_inline && !has_filename,
+            });
         }
     }
 

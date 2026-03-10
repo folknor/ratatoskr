@@ -69,11 +69,7 @@ pub fn message_matches_filter(message: &FilterableMessage, criteria: &FilterCrit
     }
 
     if let Some(ref to) = criteria.to {
-        let to_str = message
-            .to_addresses
-            .as_deref()
-            .unwrap_or("")
-            .to_lowercase();
+        let to_str = message.to_addresses.as_deref().unwrap_or("").to_lowercase();
         if !to_str.contains(&to.to_lowercase()) {
             return false;
         }

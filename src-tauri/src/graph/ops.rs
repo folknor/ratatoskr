@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use mail_parser::MimeHeaders;
 
 use crate::provider::ops::ProviderOps;
@@ -7,9 +7,7 @@ use crate::provider::types::{AttachmentData, ProviderCtx, ProviderFolder, SyncRe
 
 use super::client::GraphClient;
 use super::folder_mapper::FolderMap;
-use super::types::{
-    GraphAttachment, GraphFlagInput, GraphMessagePatch, GraphMoveRequest,
-};
+use super::types::{GraphAttachment, GraphFlagInput, GraphMessagePatch, GraphMoveRequest};
 
 /// Graph implementation of the provider operations trait.
 pub struct GraphOps {
@@ -18,11 +16,7 @@ pub struct GraphOps {
 
 #[async_trait]
 impl ProviderOps for GraphOps {
-    async fn sync_initial(
-        &self,
-        ctx: &ProviderCtx<'_>,
-        days_back: i64,
-    ) -> Result<(), String> {
+    async fn sync_initial(&self, ctx: &ProviderCtx<'_>, days_back: i64) -> Result<(), String> {
         super::sync::graph_initial_sync(&self.client, ctx, days_back).await
     }
 
@@ -30,11 +24,7 @@ impl ProviderOps for GraphOps {
         super::sync::graph_delta_sync(&self.client, ctx).await
     }
 
-    async fn archive(
-        &self,
-        ctx: &ProviderCtx<'_>,
-        thread_id: &str,
-    ) -> Result<(), String> {
+    async fn archive(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
         let folder_map = require_folder_map(&self.client).await?;
         let archive_id = folder_map
             .resolve_folder_id("archive")
@@ -44,11 +34,7 @@ impl ProviderOps for GraphOps {
         move_messages(&self.client, ctx, &msg_ids, &archive_id).await
     }
 
-    async fn trash(
-        &self,
-        ctx: &ProviderCtx<'_>,
-        thread_id: &str,
-    ) -> Result<(), String> {
+    async fn trash(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
         let folder_map = require_folder_map(&self.client).await?;
         let trash_id = folder_map
             .resolve_folder_id("TRASH")
@@ -58,11 +44,7 @@ impl ProviderOps for GraphOps {
         move_messages(&self.client, ctx, &msg_ids, &trash_id).await
     }
 
-    async fn permanent_delete(
-        &self,
-        ctx: &ProviderCtx<'_>,
-        thread_id: &str,
-    ) -> Result<(), String> {
+    async fn permanent_delete(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
         for msg_id in &msg_ids {
             let enc_id = urlencoding::encode(msg_id);
@@ -198,11 +180,7 @@ impl ProviderOps for GraphOps {
         create_draft_impl(&self.client, ctx, raw_base64url, thread_id).await
     }
 
-    async fn delete_draft(
-        &self,
-        ctx: &ProviderCtx<'_>,
-        draft_id: &str,
-    ) -> Result<(), String> {
+    async fn delete_draft(&self, ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), String> {
         let enc_id = urlencoding::encode(draft_id);
         self.client
             .delete(&format!("/me/messages/{enc_id}"), ctx.db)
@@ -234,16 +212,12 @@ impl ProviderOps for GraphOps {
             let raw = self
                 .client
                 .get_bytes(
-                    &format!(
-                        "/me/messages/{enc_msg_id}/attachments/{enc_att_id}/$value"
-                    ),
+                    &format!("/me/messages/{enc_msg_id}/attachments/{enc_att_id}/$value"),
                     ctx.db,
                 )
                 .await?;
             if raw.is_empty() {
-                return Err(format!(
-                    "Attachment {attachment_id} has no content"
-                ));
+                return Err(format!("Attachment {attachment_id} has no content"));
             }
             raw
         };
@@ -255,10 +229,7 @@ impl ProviderOps for GraphOps {
         })
     }
 
-    async fn list_folders(
-        &self,
-        ctx: &ProviderCtx<'_>,
-    ) -> Result<Vec<ProviderFolder>, String> {
+    async fn list_folders(&self, ctx: &ProviderCtx<'_>) -> Result<Vec<ProviderFolder>, String> {
         // Use cached folder map if it was synced less than 60 seconds ago
         let use_cache = if let Some(age) = self.client.folder_map_age().await {
             age < std::time::Duration::from_secs(60) && self.client.folder_map().await.is_some()
@@ -268,7 +239,10 @@ impl ProviderOps for GraphOps {
 
         let folder_map = if use_cache {
             // Safe to unwrap: we just checked is_some() above
-            self.client.folder_map().await.ok_or("Folder map vanished")?
+            self.client
+                .folder_map()
+                .await
+                .ok_or("Folder map vanished")?
         } else {
             let map = super::sync::sync_folders_public(&self.client, ctx).await?;
             self.client.set_folder_map(map.clone()).await;
@@ -370,10 +344,7 @@ async fn add_category(
     // Fetch current categories, add the new one
     let enc_id = urlencoding::encode(message_id);
     let msg: serde_json::Value = client
-        .get_json(
-            &format!("/me/messages/{enc_id}?$select=categories"),
-            ctx.db,
-        )
+        .get_json(&format!("/me/messages/{enc_id}?$select=categories"), ctx.db)
         .await?;
     let mut cats: Vec<String> = msg
         .get("categories")
@@ -401,10 +372,7 @@ async fn remove_category(
 ) -> Result<(), String> {
     let enc_id = urlencoding::encode(message_id);
     let msg: serde_json::Value = client
-        .get_json(
-            &format!("/me/messages/{enc_id}?$select=categories"),
-            ctx.db,
-        )
+        .get_json(&format!("/me/messages/{enc_id}?$select=categories"), ctx.db)
         .await?;
     let mut cats: Vec<String> = msg
         .get("categories")
@@ -466,9 +434,7 @@ async fn create_draft_impl(
     let create_msg = mime_to_graph_message(&parsed)?;
 
     // Create draft via POST /me/messages
-    let draft: serde_json::Value = client
-        .post("/me/messages", &create_msg, ctx.db)
-        .await?;
+    let draft: serde_json::Value = client.post("/me/messages", &create_msg, ctx.db).await?;
 
     let draft_id = draft
         .get("id")
@@ -508,16 +474,14 @@ fn mime_to_graph_message(
     let bcc = addr_to_recipients(parsed.bcc());
     let reply_to = addr_to_recipients(parsed.reply_to());
 
-    fn addr_to_recipients(
-        addr: Option<&mail_parser::Address<'_>>,
-    ) -> Option<Vec<GraphRecipient>> {
+    fn addr_to_recipients(addr: Option<&mail_parser::Address<'_>>) -> Option<Vec<GraphRecipient>> {
         let addr = addr?;
         let recips: Vec<GraphRecipient> = addr
             .iter()
             .filter_map(|group| {
                 group.address.as_ref().map(|email| GraphRecipient {
                     email_address: GraphEmailAddress {
-                        name: group.name.as_ref().map(|n| n.to_string()),
+                        name: group.name.as_ref().map(std::string::ToString::to_string),
                         address: email.to_string(),
                     },
                 })
@@ -597,4 +561,3 @@ async fn upload_attachments_from_mime(
 
     Ok(())
 }
-

@@ -1,5 +1,5 @@
-use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit, Nonce};
-use base64::{engine::general_purpose::STANDARD, Engine};
+use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::Aead};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use std::path::Path;
 
 /// Load the AES-256-GCM encryption key from the key file.
@@ -24,7 +24,9 @@ pub fn load_encryption_key(app_data_dir: &Path) -> Result<[u8; 32], String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        if let Err(err) = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)) {
+            log::warn!("Failed to set key permissions on {}: {err}", path.display());
+        }
     }
 
     let key_bytes = STANDARD

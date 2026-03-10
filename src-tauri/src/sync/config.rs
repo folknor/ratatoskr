@@ -80,7 +80,8 @@ pub fn build_imap_config(account: &SyncAccount) -> Result<ImapConfig, String> {
 
     Ok(ImapConfig {
         host: host.to_string(),
-        port: account.imap_port.unwrap_or(993) as u16,
+        port: u16::try_from(account.imap_port.unwrap_or(993))
+            .map_err(|_| format!("Account {} has invalid IMAP port", account.id))?,
         security: map_security(account.imap_security.as_deref()),
         username,
         password: account.imap_password.clone().unwrap_or_default(),

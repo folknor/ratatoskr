@@ -1,3 +1,5 @@
+#![allow(clippy::let_underscore_must_use)]
+
 use std::collections::{HashMap, HashSet};
 
 use tauri::{AppHandle, Emitter};
@@ -13,7 +15,7 @@ use crate::threading;
 use super::convert::convert_imap_message;
 use super::folder_mapper::{get_syncable_folders, map_folder_to_label};
 use super::pipeline;
-use super::pipeline::{store_chunk, CHUNK_SIZE};
+use super::pipeline::{CHUNK_SIZE, store_chunk};
 use super::types::{ImapSyncResult, MessageMeta, SyncProgressEvent};
 
 // ---------------------------------------------------------------------------
@@ -58,6 +60,7 @@ fn emit_progress(app: &AppHandle, event: &SyncProgressEvent) {
 // ---------------------------------------------------------------------------
 
 /// Run initial IMAP sync for an account.
+#[allow(clippy::cognitive_complexity, clippy::too_many_lines)]
 pub async fn imap_initial_sync(
     app: &AppHandle,
     db: &DbState,
@@ -82,8 +85,7 @@ pub async fn imap_initial_sync(
     let all_folders = {
         let mut session = connect(config).await?;
         let folders = client::list_folders(&mut session).await?;
-        let _ =
-            tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
         folders
     };
 
@@ -152,8 +154,7 @@ pub async fn imap_initial_sync(
                 "[sync] Circuit breaker cooldown: {}s",
                 CIRCUIT_BREAKER_DELAY_MS / 1000
             );
-            tokio::time::sleep(std::time::Duration::from_millis(CIRCUIT_BREAKER_DELAY_MS))
-                .await;
+            tokio::time::sleep(std::time::Duration::from_millis(CIRCUIT_BREAKER_DELAY_MS)).await;
         }
 
         if folder_idx > 0 {
@@ -189,7 +190,7 @@ pub async fn imap_initial_sync(
                 fetched_total += folder_uid_count;
             }
             Err(e) => {
-                let err_str = e.to_string();
+                let err_str = e.clone();
                 log::error!("[sync] Failed to sync folder {}: {err_str}", folder.path);
                 folder_errors.push(format!("{}: {err_str}", folder.path));
                 if is_connection_error(&err_str) {
@@ -268,10 +269,8 @@ pub async fn imap_initial_sync(
     let msg_ids: HashSet<String> = all_meta.keys().cloned().collect();
     let orphans = {
         let aid = account_id.to_string();
-        db.with_conn(move |conn| {
-            pipeline::cleanup_orphan_threads(conn, &aid, &msg_ids, &final_ids)
-        })
-        .await?
+        db.with_conn(move |conn| pipeline::cleanup_orphan_threads(conn, &aid, &msg_ids, &final_ids))
+            .await?
     };
     if orphans > 0 {
         log::info!("[sync] Cleaned up {orphans} orphaned placeholder threads");
@@ -322,6 +321,7 @@ pub async fn imap_initial_sync(
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::cognitive_complexity, clippy::too_many_lines)]
 async fn sync_single_folder(
     app: &AppHandle,
     db: &DbState,
@@ -342,17 +342,12 @@ async fn sync_single_folder(
 ) -> Result<(u64, u64, u64), String> {
     let mut session = connect(config).await?;
 
-    let search_result = client::search_folder(
-        &mut session,
-        &folder.raw_path,
-        Some(since_date.to_string()),
-    )
-    .await?;
+    let search_result =
+        client::search_folder(&mut session, &folder.raw_path, Some(since_date.to_string())).await?;
 
     let uids = search_result.uids;
     if uids.is_empty() {
-        let _ =
-            tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
         return Ok((0, 0, 0));
     }
 
@@ -372,39 +367,31 @@ async fn sync_single_folder(
             .collect::<Vec<_>>()
             .join(",");
 
-        let fetch_result =
-            match client::fetch_messages(&mut session, &folder.raw_path, &uid_set).await {
-                Ok(r) => r,
-                Err(e) => {
-                    if is_connection_error(&e) {
-                        log::warn!(
-                            "[sync] Chunk fetch failed in {}, retrying: {e}",
-                            folder.path
-                        );
-                        tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
-                        session = connect(config).await?;
-                        match client::fetch_messages(
-                            &mut session,
-                            &folder.raw_path,
-                            &uid_set,
-                        )
-                        .await
-                        {
-                            Ok(r) => r,
-                            Err(e2) => {
-                                log::error!(
-                                    "[sync] Chunk retry failed in {}: {e2}",
-                                    folder.path
-                                );
-                                continue;
-                            }
+        let fetch_result = match client::fetch_messages(&mut session, &folder.raw_path, &uid_set)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                if is_connection_error(&e) {
+                    log::warn!(
+                        "[sync] Chunk fetch failed in {}, retrying: {e}",
+                        folder.path
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                    session = connect(config).await?;
+                    match client::fetch_messages(&mut session, &folder.raw_path, &uid_set).await {
+                        Ok(r) => r,
+                        Err(e2) => {
+                            log::error!("[sync] Chunk retry failed in {}: {e2}", folder.path);
+                            continue;
                         }
-                    } else {
-                        log::error!("[sync] Chunk error in {}: {e}", folder.path);
-                        continue;
                     }
+                } else {
+                    log::error!("[sync] Chunk error in {}: {e}", folder.path);
+                    continue;
                 }
-            };
+            }
+        };
 
         let mut chunk_converted = Vec::new();
 

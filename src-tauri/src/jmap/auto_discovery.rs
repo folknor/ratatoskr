@@ -31,13 +31,13 @@ pub async fn discover_jmap_url(email: &str) -> Option<JmapDiscoveryResult> {
 
     // Try .well-known/jmap
     let well_known = format!("https://{domain}/.well-known/jmap");
-    if let Ok(resp) = reqwest::get(&well_known).await {
-        if resp.status().is_success() {
-            return Some(JmapDiscoveryResult {
-                session_url: well_known,
-                source: "well-known".into(),
-            });
-        }
+    if let Ok(resp) = reqwest::get(&well_known).await
+        && resp.status().is_success()
+    {
+        return Some(JmapDiscoveryResult {
+            session_url: well_known,
+            source: "well-known".into(),
+        });
     }
 
     None

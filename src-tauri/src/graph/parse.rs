@@ -65,14 +65,8 @@ pub fn parse_graph_message(
         .unwrap_or_else(|| msg.id.clone());
 
     // Sender
-    let from_address = msg
-        .from
-        .as_ref()
-        .map(|r| r.email_address.address.clone());
-    let from_name = msg
-        .from
-        .as_ref()
-        .and_then(|r| r.email_address.name.clone());
+    let from_address = msg.from.as_ref().map(|r| r.email_address.address.clone());
+    let from_name = msg.from.as_ref().and_then(|r| r.email_address.name.clone());
 
     // Recipients
     let to_addresses = format_recipients(msg.to_recipients.as_deref());
@@ -85,10 +79,7 @@ pub fn parse_graph_message(
 
     // Dates: ISO 8601 → epoch milliseconds
     let sent_date = msg.sent_date_time.as_deref().and_then(parse_iso_date);
-    let received_date = msg
-        .received_date_time
-        .as_deref()
-        .and_then(parse_iso_date);
+    let received_date = msg.received_date_time.as_deref().and_then(parse_iso_date);
     let date = sent_date.or(received_date).unwrap_or(0);
     let internal_date = received_date.unwrap_or(date);
 
@@ -208,13 +199,11 @@ fn format_recipients(recipients: Option<&[GraphRecipient]>) -> Option<String> {
     }
     let formatted: Vec<String> = recipients
         .iter()
-        .map(|r| {
-            match &r.email_address.name {
-                Some(name) if !name.is_empty() => {
-                    format!("{name} <{}>", r.email_address.address)
-                }
-                _ => r.email_address.address.clone(),
+        .map(|r| match &r.email_address.name {
+            Some(name) if !name.is_empty() => {
+                format!("{name} <{}>", r.email_address.address)
             }
+            _ => r.email_address.address.clone(),
         })
         .collect();
     Some(formatted.join(", "))

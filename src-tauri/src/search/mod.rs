@@ -1,14 +1,13 @@
 pub mod commands;
 
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tantivy::collector::TopDocs;
 use tantivy::query::{BooleanQuery, Occur, Query, QueryParser, RangeQuery, TermQuery};
 use tantivy::schema::{
-    DateOptions, Field, NumericOptions, Schema, TextFieldIndexing, TextOptions, STORED,
-    STRING,
+    DateOptions, Field, NumericOptions, STORED, STRING, Schema, TextFieldIndexing, TextOptions,
 };
 use tantivy::{DateTime as TantivyDateTime, Index, IndexReader, IndexWriter, ReloadPolicy, Term};
 use tokio::sync::Mutex;
@@ -56,9 +55,27 @@ pub fn build_schema() -> Schema {
     );
 
     // Fast filter fields
-    builder.add_u64_field("is_read", NumericOptions::default().set_indexed().set_fast().set_stored());
-    builder.add_u64_field("is_starred", NumericOptions::default().set_indexed().set_fast().set_stored());
-    builder.add_u64_field("has_attachment", NumericOptions::default().set_indexed().set_fast().set_stored());
+    builder.add_u64_field(
+        "is_read",
+        NumericOptions::default()
+            .set_indexed()
+            .set_fast()
+            .set_stored(),
+    );
+    builder.add_u64_field(
+        "is_starred",
+        NumericOptions::default()
+            .set_indexed()
+            .set_fast()
+            .set_stored(),
+    );
+    builder.add_u64_field(
+        "has_attachment",
+        NumericOptions::default()
+            .set_indexed()
+            .set_fast()
+            .set_stored(),
+    );
 
     builder.build()
 }
@@ -139,8 +156,12 @@ impl Fields {
         Self {
             subject: schema.get_field("subject").expect("subject field"),
             from_name: schema.get_field("from_name").expect("from_name field"),
-            from_address: schema.get_field("from_address").expect("from_address field"),
-            to_addresses: schema.get_field("to_addresses").expect("to_addresses field"),
+            from_address: schema
+                .get_field("from_address")
+                .expect("from_address field"),
+            to_addresses: schema
+                .get_field("to_addresses")
+                .expect("to_addresses field"),
             body_text: schema.get_field("body_text").expect("body_text field"),
             snippet: schema.get_field("snippet").expect("snippet field"),
             message_id: schema.get_field("message_id").expect("message_id field"),
@@ -149,7 +170,9 @@ impl Fields {
             date: schema.get_field("date").expect("date field"),
             is_read: schema.get_field("is_read").expect("is_read field"),
             is_starred: schema.get_field("is_starred").expect("is_starred field"),
-            has_attachment: schema.get_field("has_attachment").expect("has_attachment field"),
+            has_attachment: schema
+                .get_field("has_attachment")
+                .expect("has_attachment field"),
         }
     }
 }
@@ -174,15 +197,17 @@ const WRITER_HEAP_BYTES: usize = 50_000_000; // 50 MB
 
 impl SearchState {
     /// Open or create the tantivy index in `{app_data_dir}/search_index/`.
-    pub fn init(app_data_dir: &PathBuf) -> Result<Self, String> {
+    pub fn init(app_data_dir: &Path) -> Result<Self, String> {
         let index_dir = app_data_dir.join("search_index");
-        std::fs::create_dir_all(&index_dir)
-            .map_err(|e| format!("create search index dir: {e}"))?;
+        std::fs::create_dir_all(&index_dir).map_err(|e| format!("create search index dir: {e}"))?;
 
         let schema = build_schema();
 
-        let index = if Index::exists(&tantivy::directory::MmapDirectory::open(&index_dir).map_err(|e| format!("open mmap dir: {e}"))?)
-            .map_err(|e| format!("check index exists: {e}"))?
+        let index = if Index::exists(
+            &tantivy::directory::MmapDirectory::open(&index_dir)
+                .map_err(|e| format!("open mmap dir: {e}"))?,
+        )
+        .map_err(|e| format!("check index exists: {e}"))?
         {
             Index::open_in_dir(&index_dir).map_err(|e| format!("open index: {e}"))?
         } else {
@@ -340,6 +365,7 @@ impl SearchState {
     }
 
     /// Advanced search with structured filters.
+    #[allow(clippy::too_many_lines)]
     pub fn search_with_filters(&self, params: &SearchParams) -> Result<Vec<SearchResult>, String> {
         let searcher = self.reader.searcher();
         let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
@@ -354,64 +380,66 @@ impl SearchState {
         ));
 
         // Free text → QueryParser on subject+from_name+body_text+snippet
-        if let Some(ref text) = params.free_text {
-            if !text.is_empty() {
-                let qp = QueryParser::for_index(
-                    searcher.index(),
-                    vec![
-                        self.fields.subject,
-                        self.fields.from_name,
-                        self.fields.body_text,
-                        self.fields.snippet,
-                    ],
-                );
-                let q = qp.parse_query(text).map_err(|e| format!("parse free text: {e}"))?;
-                clauses.push((Occur::Must, q));
-            }
+        if let Some(ref text) = params.free_text
+            && !text.is_empty()
+        {
+            let qp = QueryParser::for_index(
+                searcher.index(),
+                vec![
+                    self.fields.subject,
+                    self.fields.from_name,
+                    self.fields.body_text,
+                    self.fields.snippet,
+                ],
+            );
+            let q = qp
+                .parse_query(text)
+                .map_err(|e| format!("parse free text: {e}"))?;
+            clauses.push((Occur::Must, q));
         }
 
         // from → TermQuery on from_address OR phrase on from_name
-        if let Some(ref from) = params.from {
-            if !from.is_empty() {
-                let from_addr: Box<dyn Query> = Box::new(TermQuery::new(
-                    Term::from_field_text(self.fields.from_address, from),
-                    tantivy::schema::IndexRecordOption::Basic,
-                ));
-                let from_name_qp =
-                    QueryParser::for_index(searcher.index(), vec![self.fields.from_name]);
-                let from_name = from_name_qp
-                    .parse_query(from)
-                    .map_err(|e| format!("parse from: {e}"))?;
-                clauses.push((
-                    Occur::Must,
-                    Box::new(BooleanQuery::new(vec![
-                        (Occur::Should, from_addr),
-                        (Occur::Should, from_name),
-                    ])),
-                ));
-            }
+        if let Some(ref from) = params.from
+            && !from.is_empty()
+        {
+            let from_addr: Box<dyn Query> = Box::new(TermQuery::new(
+                Term::from_field_text(self.fields.from_address, from),
+                tantivy::schema::IndexRecordOption::Basic,
+            ));
+            let from_name_qp =
+                QueryParser::for_index(searcher.index(), vec![self.fields.from_name]);
+            let from_name = from_name_qp
+                .parse_query(from)
+                .map_err(|e| format!("parse from: {e}"))?;
+            clauses.push((
+                Occur::Must,
+                Box::new(BooleanQuery::new(vec![
+                    (Occur::Should, from_addr),
+                    (Occur::Should, from_name),
+                ])),
+            ));
         }
 
         // to → phrase on to_addresses
-        if let Some(ref to) = params.to {
-            if !to.is_empty() {
-                let to_qp =
-                    QueryParser::for_index(searcher.index(), vec![self.fields.to_addresses]);
-                let q = to_qp.parse_query(to).map_err(|e| format!("parse to: {e}"))?;
-                clauses.push((Occur::Must, q));
-            }
+        if let Some(ref to) = params.to
+            && !to.is_empty()
+        {
+            let to_qp = QueryParser::for_index(searcher.index(), vec![self.fields.to_addresses]);
+            let q = to_qp
+                .parse_query(to)
+                .map_err(|e| format!("parse to: {e}"))?;
+            clauses.push((Occur::Must, q));
         }
 
         // subject → phrase on subject
-        if let Some(ref subject) = params.subject {
-            if !subject.is_empty() {
-                let subj_qp =
-                    QueryParser::for_index(searcher.index(), vec![self.fields.subject]);
-                let q = subj_qp
-                    .parse_query(subject)
-                    .map_err(|e| format!("parse subject: {e}"))?;
-                clauses.push((Occur::Must, q));
-            }
+        if let Some(ref subject) = params.subject
+            && !subject.is_empty()
+        {
+            let subj_qp = QueryParser::for_index(searcher.index(), vec![self.fields.subject]);
+            let q = subj_qp
+                .parse_query(subject)
+                .map_err(|e| format!("parse subject: {e}"))?;
+            clauses.push((Occur::Must, q));
         }
 
         // has_attachment flag
@@ -452,18 +480,23 @@ impl SearchState {
         if params.after.is_some() || params.before.is_some() {
             let lower = params
                 .after
-                .map(|ts| std::ops::Bound::Included(Term::from_field_date(self.fields.date, Self::to_tantivy_date(ts))))
+                .map(|ts| {
+                    std::ops::Bound::Included(Term::from_field_date(
+                        self.fields.date,
+                        Self::to_tantivy_date(ts),
+                    ))
+                })
                 .unwrap_or(std::ops::Bound::Unbounded);
             let upper = params
                 .before
-                .map(|ts| std::ops::Bound::Included(Term::from_field_date(self.fields.date, Self::to_tantivy_date(ts))))
+                .map(|ts| {
+                    std::ops::Bound::Included(Term::from_field_date(
+                        self.fields.date,
+                        Self::to_tantivy_date(ts),
+                    ))
+                })
                 .unwrap_or(std::ops::Bound::Unbounded);
-            clauses.push((
-                Occur::Must,
-                Box::new(
-                    RangeQuery::new(lower, upper),
-                ),
-            ));
+            clauses.push((Occur::Must, Box::new(RangeQuery::new(lower, upper))));
         }
 
         // label filter is not supported in tantivy (lives in SQLite); caller post-filters.
@@ -485,7 +518,9 @@ impl SearchState {
     /// Clear all documents from the index.
     pub async fn clear_index(&self) -> Result<(), String> {
         let mut writer = self.writer.lock().await;
-        writer.delete_all_documents().map_err(|e| format!("delete all: {e}"))?;
+        writer
+            .delete_all_documents()
+            .map_err(|e| format!("delete all: {e}"))?;
         writer.commit().map_err(|e| format!("commit clear: {e}"))?;
         Ok(())
     }
@@ -501,7 +536,11 @@ impl SearchState {
     fn get_date_secs(doc: &tantivy::TantivyDocument, field: Field) -> i64 {
         use tantivy::schema::document::Value;
         doc.get_first(field)
-            .and_then(|v| v.as_value().as_datetime().map(|d| d.into_timestamp_secs()))
+            .and_then(|v| {
+                v.as_value()
+                    .as_datetime()
+                    .map(tantivy::DateTime::into_timestamp_secs)
+            })
             .unwrap_or(0)
     }
 

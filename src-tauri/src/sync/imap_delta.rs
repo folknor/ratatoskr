@@ -1,3 +1,5 @@
+#![allow(clippy::let_underscore_must_use)]
+
 use std::collections::{HashMap, HashSet};
 
 use tauri::AppHandle;
@@ -10,10 +12,10 @@ use crate::imap::types::{DeltaCheckRequest, DeltaCheckResult, ImapConfig};
 use crate::search::SearchState;
 use crate::threading;
 
-use super::convert::{convert_imap_message, ConvertedMessage};
+use super::convert::{ConvertedMessage, convert_imap_message};
 use super::folder_mapper::{get_syncable_folders, map_folder_to_label};
 use super::pipeline;
-use super::pipeline::{store_chunk, CHUNK_SIZE};
+use super::pipeline::{CHUNK_SIZE, store_chunk};
 use super::types::{ImapSyncResult, MessageMeta};
 
 const CIRCUIT_BREAKER_THRESHOLD: u32 = 3;
@@ -38,6 +40,7 @@ fn compute_since_date(days_back: i64) -> String {
 }
 
 /// Run delta IMAP sync for an account.
+#[allow(clippy::too_many_lines)]
 pub async fn imap_delta_sync(
     _app: &AppHandle,
     db: &DbState,
@@ -122,7 +125,7 @@ pub async fn imap_delta_sync(
         {
             Ok(()) => consecutive_failures = 0,
             Err(e) => {
-                let s = e.to_string();
+                let s = e.clone();
                 log::error!("[sync] Delta new folder {} failed: {s}", folder.path);
                 delta_errors.push(format!("{}: {s}", folder.path));
                 if is_connection_error(&s) {
@@ -176,7 +179,7 @@ pub async fn imap_delta_sync(
             )
             .await
             {
-                let s = e.to_string();
+                let s = e.clone();
                 log::error!("[sync] Delta {} failed: {s}", folder.path);
                 delta_errors.push(format!("{}: {s}", folder.path));
             }
@@ -293,8 +296,7 @@ async fn per_folder_check(
     let mut session = connect(config).await?;
     let status = client::get_folder_status(&mut session, folder_path).await?;
 
-    let changed =
-        saved.uidvalidity.is_some() && saved.uidvalidity != Some(status.uidvalidity);
+    let changed = saved.uidvalidity.is_some() && saved.uidvalidity != Some(status.uidvalidity);
 
     if changed {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
@@ -306,8 +308,7 @@ async fn per_folder_check(
         });
     }
 
-    let new_uids =
-        client::fetch_new_uids(&mut session, folder_path, saved.last_uid).await?;
+    let new_uids = client::fetch_new_uids(&mut session, folder_path, saved.last_uid).await?;
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
 
     Ok(DeltaCheckResult {
@@ -334,8 +335,8 @@ async fn fetch_folder_uids(
     labels_by_rfc_id: &mut HashMap<String, HashSet<String>>,
 ) -> Result<(), String> {
     let mut session = connect(config).await?;
-    let sr = client::search_folder(&mut session, &folder.raw_path, Some(since_date.to_string()))
-        .await?;
+    let sr =
+        client::search_folder(&mut session, &folder.raw_path, Some(since_date.to_string())).await?;
 
     if sr.uids.is_empty() {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
@@ -361,8 +362,10 @@ async fn fetch_folder_uids(
     let fp = folder.raw_path.clone();
     let uv = sr.folder_status.uidvalidity;
     let sat = chrono::Utc::now().timestamp();
-    db.with_conn(move |conn| pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, last_uid, sat))
-        .await?;
+    db.with_conn(move |conn| {
+        pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, last_uid, sat)
+    })
+    .await?;
 
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
     Ok(())
@@ -453,8 +456,7 @@ async fn process_folder_delta(
         let sr = client::search_folder(&mut session, &folder.raw_path, Some(since_date)).await?;
 
         if sr.uids.is_empty() {
-            let _ =
-                tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
             return Ok(());
         }
 
@@ -477,10 +479,8 @@ async fn process_folder_delta(
         let fp = folder.raw_path.clone();
         let uv = sr.folder_status.uidvalidity;
         let sat = chrono::Utc::now().timestamp();
-        db.with_conn(move |conn| {
-            pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, lu, sat)
-        })
-        .await?;
+        db.with_conn(move |conn| pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, lu, sat))
+            .await?;
 
         let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
         return Ok(());
@@ -510,8 +510,10 @@ async fn process_folder_delta(
     let aid = account_id.to_string();
     let fp = folder.raw_path.clone();
     let sat = chrono::Utc::now().timestamp();
-    db.with_conn(move |conn| pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, last_uid, sat))
-        .await?;
+    db.with_conn(move |conn| {
+        pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, last_uid, sat)
+    })
+    .await?;
 
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
     Ok(())

@@ -1,7 +1,7 @@
 // tauri::command macro generates code that trips let_underscore_must_use
 #![allow(clippy::let_underscore_must_use)]
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -77,10 +77,13 @@ pub async fn db_pending_ops_get(
     state
         .with_conn(move |conn| {
             let lim = limit.unwrap_or(50);
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|e| e.to_string())?
-                .as_secs() as i64;
+            let now = i64::try_from(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_err(|e| e.to_string())?
+                    .as_secs(),
+            )
+            .map_err(|_| "current time exceeds i64 range".to_string())?;
 
             if let Some(ref aid) = account_id {
                 let mut stmt = conn
@@ -133,10 +136,7 @@ pub async fn db_pending_ops_update_status(
 }
 
 #[tauri::command]
-pub async fn db_pending_ops_delete(
-    state: State<'_, DbState>,
-    id: String,
-) -> Result<(), String> {
+pub async fn db_pending_ops_delete(state: State<'_, DbState>, id: String) -> Result<(), String> {
     state
         .with_conn(move |conn| {
             conn.execute("DELETE FROM pending_operations WHERE id = ?1", params![id])
@@ -171,15 +171,17 @@ pub async fn db_pending_ops_increment_retry(
                 return Ok(());
             }
 
-            let backoff_idx = std::cmp::min(
-                (new_count - 1) as usize,
-                BACKOFF_SCHEDULE.len() - 1,
-            );
+            let retry_idx = usize::try_from(new_count - 1)
+                .map_err(|_| format!("invalid retry count for pending op {id}: {new_count}"))?;
+            let backoff_idx = std::cmp::min(retry_idx, BACKOFF_SCHEDULE.len() - 1);
             let delay_sec = BACKOFF_SCHEDULE[backoff_idx];
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|e| e.to_string())?
-                .as_secs() as i64;
+            let now = i64::try_from(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_err(|e| e.to_string())?
+                    .as_secs(),
+            )
+            .map_err(|_| "current time exceeds i64 range".to_string())?;
             let next_retry_at = now + delay_sec;
 
             conn.execute(
@@ -291,11 +293,8 @@ pub async fn db_pending_ops_clear_failed(
                 )
                 .map_err(|e| format!("clear failed: {e}"))?;
             } else {
-                conn.execute(
-                    "DELETE FROM pending_operations WHERE status = 'failed'",
-                    [],
-                )
-                .map_err(|e| format!("clear failed: {e}"))?;
+                conn.execute("DELETE FROM pending_operations WHERE status = 'failed'", [])
+                    .map_err(|e| format!("clear failed: {e}"))?;
             }
             Ok(())
         })
@@ -336,6 +335,7 @@ pub async fn db_pending_ops_retry_failed(
 // 2. Cancels matching addLabel/removeLabel for same label
 // 3. Collapses sequential moveToFolder ops (keeps only the latest)
 
+#[allow(clippy::too_many_lines)]
 fn compact_queue(conn: &Connection, account_id: Option<&str>) -> Result<i64, String> {
     // Fetch all pending ops, optionally filtered by account
     let ops: Vec<PendingOperation> = if let Some(aid) = account_id {
@@ -442,7 +442,8 @@ fn compact_queue(conn: &Connection, account_id: Option<&str>) -> Result<i64, Str
     }
 
     // Delete compacted ops
-    let deleted = to_delete.len() as i64;
+    let deleted =
+        i64::try_from(to_delete.len()).map_err(|_| "too many operations to delete".to_string())?;
     if !to_delete.is_empty() {
         // Batch delete in chunks to stay within SQLite parameter limits
         for chunk in to_delete.chunks(100) {
@@ -452,9 +453,7 @@ fn compact_queue(conn: &Connection, account_id: Option<&str>) -> Result<i64, Str
                 .map(|(i, _)| format!("?{}", i + 1))
                 .collect::<Vec<_>>()
                 .join(", ");
-            let sql = format!(
-                "DELETE FROM pending_operations WHERE id IN ({placeholders})"
-            );
+            let sql = format!("DELETE FROM pending_operations WHERE id IN ({placeholders})");
             let param_values: Vec<Box<dyn rusqlite::types::ToSql>> = chunk
                 .iter()
                 .map(|id| Box::new(id.to_string()) as Box<dyn rusqlite::types::ToSql>)

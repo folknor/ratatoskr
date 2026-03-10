@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use jmap_client::mailbox::Role;
 
 use crate::provider::ops::ProviderOps;
@@ -265,23 +265,28 @@ impl ProviderOps for JmapOps {
         let email_id = email.take_id();
         let identity_id = get_first_identity_id(self.client.inner()).await?;
 
-        let _ = self
-            .client
+        self.client
             .inner()
             .email_submission_create(&email_id, &identity_id)
             .await
             .map_err(|e| format!("EmailSubmission/set: {e}"))?;
 
-        let _ = self
+        if let Err(err) = self
             .client
             .inner()
             .email_set_keyword(&email_id, "$draft", false)
-            .await;
-        let _ = self
+            .await
+        {
+            log::warn!("Failed to clear draft keyword for sent email {email_id}: {err}");
+        }
+        if let Err(err) = self
             .client
             .inner()
             .email_set_keyword(&email_id, "$seen", true)
-            .await;
+            .await
+        {
+            log::warn!("Failed to mark sent email as seen {email_id}: {err}");
+        }
 
         Ok(email_id)
     }

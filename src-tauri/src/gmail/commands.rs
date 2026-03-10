@@ -1,3 +1,5 @@
+#![allow(clippy::let_underscore_must_use)]
+
 use tauri::{AppHandle, State};
 
 use crate::body_store::BodyStoreState;
@@ -5,7 +7,7 @@ use crate::db::DbState;
 use crate::search::SearchState;
 
 use super::client::GmailState;
-use super::parse::{parse_gmail_message, ParsedGmailMessage};
+use super::parse::{ParsedGmailMessage, parse_gmail_message};
 use super::sync::GmailSyncResult;
 use super::types::{
     GmailAttachmentData, GmailDraft, GmailDraftStub, GmailHistoryResponse, GmailLabel,
@@ -23,8 +25,7 @@ pub async fn gmail_init_client(
     gmail: State<'_, GmailState>,
 ) -> Result<(), String> {
     let client =
-        super::client::GmailClient::from_account(&db, &account_id, *gmail.encryption_key())
-            .await?;
+        super::client::GmailClient::from_account(&db, &account_id, *gmail.encryption_key()).await?;
     gmail.insert(account_id, client).await;
     Ok(())
 }
@@ -146,12 +147,7 @@ pub async fn gmail_list_threads(
 ) -> Result<(Vec<GmailThreadStub>, Option<String>), String> {
     let client = gmail.get(&account_id).await?;
     client
-        .list_threads(
-            query.as_deref(),
-            max_results,
-            page_token.as_deref(),
-            &db,
-        )
+        .list_threads(query.as_deref(), max_results, page_token.as_deref(), &db)
         .await
 }
 
@@ -231,9 +227,7 @@ pub async fn gmail_send_email(
     gmail: State<'_, GmailState>,
 ) -> Result<GmailMessage, String> {
     let client = gmail.get(&account_id).await?;
-    client
-        .send_message(&raw, thread_id.as_deref(), &db)
-        .await
+    client.send_message(&raw, thread_id.as_deref(), &db).await
 }
 
 #[tauri::command]
@@ -245,7 +239,9 @@ pub async fn gmail_fetch_attachment(
     gmail: State<'_, GmailState>,
 ) -> Result<GmailAttachmentData, String> {
     let client = gmail.get(&account_id).await?;
-    client.get_attachment(&message_id, &attachment_id, &db).await
+    client
+        .get_attachment(&message_id, &attachment_id, &db)
+        .await
 }
 
 // ── History ─────────────────────────────────────────────────
@@ -275,9 +271,7 @@ pub async fn gmail_create_draft(
     gmail: State<'_, GmailState>,
 ) -> Result<GmailDraft, String> {
     let client = gmail.get(&account_id).await?;
-    client
-        .create_draft(&raw, thread_id.as_deref(), &db)
-        .await
+    client.create_draft(&raw, thread_id.as_deref(), &db).await
 }
 
 #[tauri::command]
@@ -343,16 +337,8 @@ pub async fn gmail_sync_initial(
 ) -> Result<(), String> {
     let client = gmail.get(&account_id).await?;
     let days = days_back.unwrap_or(365);
-    super::sync::gmail_initial_sync(
-        &client,
-        &account_id,
-        days,
-        &db,
-        &body_store,
-        &search,
-        &app,
-    )
-    .await
+    super::sync::gmail_initial_sync(&client, &account_id, days, &db, &body_store, &search, &app)
+        .await
 }
 
 /// Run delta Gmail sync via History API.
@@ -366,13 +352,5 @@ pub async fn gmail_sync_delta(
     gmail: State<'_, GmailState>,
 ) -> Result<GmailSyncResult, String> {
     let client = gmail.get(&account_id).await?;
-    super::sync::gmail_delta_sync(
-        &client,
-        &account_id,
-        &db,
-        &body_store,
-        &search,
-        &app,
-    )
-    .await
+    super::sync::gmail_delta_sync(&client, &account_id, &db, &body_store, &search, &app).await
 }

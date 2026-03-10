@@ -5,9 +5,7 @@ use base64::Engine;
 use futures::StreamExt;
 use mail_parser::MessageParser;
 
-use super::connection::{
-    ImapSession, IMAP_CMD_TIMEOUT, IMAP_FETCH_TIMEOUT, IMAP_SEARCH_TIMEOUT,
-};
+use super::connection::{IMAP_CMD_TIMEOUT, IMAP_FETCH_TIMEOUT, IMAP_SEARCH_TIMEOUT, ImapSession};
 use super::parse::{build_imap_section_map, detect_special_use, parse_message};
 use super::types::*;
 
@@ -58,7 +56,9 @@ pub async fn list_folders(session: &mut ImapSession) -> Result<Vec<ImapFolder>, 
         let (exists, unseen) = match tokio::time::timeout(
             IMAP_CMD_TIMEOUT,
             session.status(&raw_path, "(MESSAGES UNSEEN)"),
-        ).await {
+        )
+        .await
+        {
             Ok(Ok(mailbox)) => (mailbox.exists, mailbox.unseen.unwrap_or(0)),
             _ => (0, 0),
         };
@@ -121,15 +121,24 @@ pub async fn fetch_messages(
     let mut fetches = Vec::new();
     for r in raw_fetches {
         match r {
-            Ok(f) => { fetch_ok += 1; fetches.push(f); }
-            Err(e) => { fetch_err += 1; log::warn!("IMAP fetch stream error in {folder}: {e}"); }
+            Ok(f) => {
+                fetch_ok += 1;
+                fetches.push(f);
+            }
+            Err(e) => {
+                fetch_err += 1;
+                log::warn!("IMAP fetch stream error in {folder}: {e}");
+            }
         }
     }
     log::info!("IMAP FETCH {folder}: {fetch_ok} ok, {fetch_err} errors from uid_fetch");
 
     // If async-imap returned nothing but messages exist, fallback to raw TCP fetch
     if fetches.is_empty() && mailbox.exists > 0 {
-        log::warn!("IMAP {folder}: async-imap returned 0 items but exists={}. Falling back to raw TCP fetch...", mailbox.exists);
+        log::warn!(
+            "IMAP {folder}: async-imap returned 0 items but exists={}. Falling back to raw TCP fetch...",
+            mailbox.exists
+        );
         // Return early with raw fetch result — caller doesn't need to know about the fallback
         return Err(format!("ASYNC_IMAP_EMPTY:{folder}"));
     }
@@ -139,12 +148,18 @@ pub async fn fetch_messages(
     for fetch in &fetches {
         let uid = match fetch.uid {
             Some(u) => u,
-            None => { log::warn!("IMAP FETCH {folder}: response missing UID"); continue; }
+            None => {
+                log::warn!("IMAP FETCH {folder}: response missing UID");
+                continue;
+            }
         };
 
         let raw = match fetch.body() {
             Some(b) => b,
-            None => { log::warn!("IMAP FETCH {folder}: UID {uid} has no body"); continue; }
+            None => {
+                log::warn!("IMAP FETCH {folder}: UID {uid} has no body");
+                continue;
+            }
         };
 
         #[allow(clippy::cast_possible_truncation)]
@@ -159,7 +174,17 @@ pub async fn fetch_messages(
         // Extract INTERNALDATE as fallback for messages with unparseable Date headers
         let internal_date = fetch.internal_date().map(|dt| dt.timestamp());
 
-        match parse_message(&parser, raw, uid, folder, raw_size, is_read, is_starred, is_draft, internal_date) {
+        match parse_message(
+            &parser,
+            raw,
+            uid,
+            folder,
+            raw_size,
+            is_read,
+            is_starred,
+            is_draft,
+            internal_date,
+        ) {
             Ok(msg) => messages.push(msg),
             Err(e) => {
                 log::warn!("Failed to parse message UID {uid}: {e}");
@@ -193,8 +218,7 @@ pub async fn fetch_message_body(
         Ok::<_, String>(stream.collect::<Vec<_>>().await)
     })
     .await
-    .map_err(|_| timeout_err(&format!("UID FETCH for UID {uid}"), IMAP_FETCH_TIMEOUT))?
-    ?
+    .map_err(|_| timeout_err(&format!("UID FETCH for UID {uid}"), IMAP_FETCH_TIMEOUT))??
     .into_iter()
     .filter_map(Result::ok)
     .collect();
@@ -215,7 +239,9 @@ pub async fn fetch_message_body(
     let is_draft = flags.iter().any(|f| matches!(f, Flag::Draft));
 
     let parser = MessageParser::default();
-    parse_message(&parser, raw, uid, folder, raw_size, is_read, is_starred, is_draft, None)
+    parse_message(
+        &parser, raw, uid, folder, raw_size, is_read, is_starred, is_draft, None,
+    )
 }
 
 /// Get UIDs of messages newer than `last_uid`.
@@ -243,10 +269,7 @@ pub async fn fetch_new_uids(
 
 /// Search for all UIDs in a folder using `UID SEARCH ALL`.
 /// Returns real UIDs sorted ascending — avoids the sparse UID gap problem.
-pub async fn search_all_uids(
-    session: &mut ImapSession,
-    folder: &str,
-) -> Result<Vec<u32>, String> {
+pub async fn search_all_uids(session: &mut ImapSession, folder: &str) -> Result<Vec<u32>, String> {
     tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
         .await
         .map_err(|_| timeout_err(&format!("SELECT {folder}"), IMAP_CMD_TIMEOUT))?
@@ -385,10 +408,13 @@ pub async fn append_message(
     flags: Option<&str>,
     raw_message: &[u8],
 ) -> Result<(), String> {
-    tokio::time::timeout(IMAP_FETCH_TIMEOUT, session.append(folder, flags, None, raw_message))
-        .await
-        .map_err(|_| timeout_err("APPEND", IMAP_FETCH_TIMEOUT))?
-        .map_err(|e| format!("APPEND failed: {e}"))
+    tokio::time::timeout(
+        IMAP_FETCH_TIMEOUT,
+        session.append(folder, flags, None, raw_message),
+    )
+    .await
+    .map_err(|_| timeout_err("APPEND", IMAP_FETCH_TIMEOUT))?
+    .map_err(|e| format!("APPEND failed: {e}"))
 }
 
 /// Get folder status (UIDVALIDITY, UIDNEXT, MESSAGES, UNSEEN).
@@ -439,8 +465,7 @@ pub async fn fetch_attachment(
         Ok::<_, String>(stream.collect::<Vec<_>>().await)
     })
     .await
-    .map_err(|_| timeout_err("UID FETCH attachment", IMAP_FETCH_TIMEOUT))?
-    ?
+    .map_err(|_| timeout_err("UID FETCH attachment", IMAP_FETCH_TIMEOUT))??
     .into_iter()
     .filter_map(Result::ok)
     .collect();
@@ -484,7 +509,9 @@ pub async fn fetch_attachment(
             msg.raw_message.as_ref().to_vec()
         }
         mail_parser::PartType::Multipart(_) => {
-            return Err(format!("Part {part_id} is a multipart container, not a leaf part"));
+            return Err(format!(
+                "Part {part_id} is a multipart container, not a leaf part"
+            ));
         }
     };
 
@@ -512,8 +539,7 @@ pub async fn fetch_raw_message(
         Ok::<_, String>(stream.collect::<Vec<_>>().await)
     })
     .await
-    .map_err(|_| timeout_err("UID FETCH raw message", IMAP_FETCH_TIMEOUT))?
-    ?
+    .map_err(|_| timeout_err("UID FETCH raw message", IMAP_FETCH_TIMEOUT))??
     .into_iter()
     .filter_map(Result::ok)
     .collect();
@@ -541,17 +567,22 @@ pub async fn delta_check_folders(
     let mut results = Vec::with_capacity(folders.len());
 
     for req in folders {
-        let mailbox = match tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(&req.folder)).await {
-            Ok(Ok(m)) => m,
-            Ok(Err(e)) => {
-                log::warn!("delta_check: SELECT {} failed: {e}", req.folder);
-                continue;
-            }
-            Err(_) => {
-                log::warn!("delta_check: SELECT {} timed out after {}s", req.folder, IMAP_CMD_TIMEOUT.as_secs());
-                continue;
-            }
-        };
+        let mailbox =
+            match tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(&req.folder)).await {
+                Ok(Ok(m)) => m,
+                Ok(Err(e)) => {
+                    log::warn!("delta_check: SELECT {} failed: {e}", req.folder);
+                    continue;
+                }
+                Err(_) => {
+                    log::warn!(
+                        "delta_check: SELECT {} timed out after {}s",
+                        req.folder,
+                        IMAP_CMD_TIMEOUT.as_secs()
+                    );
+                    continue;
+                }
+            };
 
         let current_uidvalidity = mailbox.uid_validity.unwrap_or(0);
         let uidvalidity_changed = req.uidvalidity != 0 && current_uidvalidity != req.uidvalidity;
@@ -568,7 +599,9 @@ pub async fn delta_check_folders(
 
         // UID SEARCH for messages newer than last_uid
         let query = format!("{}:*", req.last_uid + 1);
-        let new_uids = match tokio::time::timeout(IMAP_SEARCH_TIMEOUT, session.uid_search(&query)).await {
+        let new_uids = match tokio::time::timeout(IMAP_SEARCH_TIMEOUT, session.uid_search(&query))
+            .await
+        {
             Ok(Ok(uids)) => {
                 let mut result: Vec<u32> = uids.into_iter().filter(|&u| u > req.last_uid).collect();
                 result.sort();
@@ -579,7 +612,11 @@ pub async fn delta_check_folders(
                 vec![]
             }
             Err(_) => {
-                log::warn!("delta_check: UID SEARCH {} timed out after {}s", req.folder, IMAP_SEARCH_TIMEOUT.as_secs());
+                log::warn!(
+                    "delta_check: UID SEARCH {} timed out after {}s",
+                    req.folder,
+                    IMAP_SEARCH_TIMEOUT.as_secs()
+                );
                 vec![]
             }
         };
@@ -625,7 +662,12 @@ pub async fn search_folder(
     };
     let uids_raw = tokio::time::timeout(IMAP_SEARCH_TIMEOUT, session.uid_search(&search_query))
         .await
-        .map_err(|_| timeout_err(&format!("UID SEARCH {search_query} {folder}"), IMAP_SEARCH_TIMEOUT))?
+        .map_err(|_| {
+            timeout_err(
+                &format!("UID SEARCH {search_query} {folder}"),
+                IMAP_SEARCH_TIMEOUT,
+            )
+        })?
         .map_err(|e| format!("UID SEARCH {search_query} {folder} failed: {e}"))?;
 
     let mut uids: Vec<u32> = uids_raw.into_iter().collect();
@@ -651,6 +693,7 @@ pub async fn search_folder(
 /// This avoids creating multiple TCP connections per folder (one for search,
 /// one per batch for fetch) which causes connection storms on servers with
 /// many folders.
+#[allow(clippy::too_many_lines)]
 pub async fn sync_folder(
     session: &mut ImapSession,
     folder: &str,
@@ -678,7 +721,12 @@ pub async fn sync_folder(
     };
     let uids_raw = tokio::time::timeout(IMAP_SEARCH_TIMEOUT, session.uid_search(&search_query))
         .await
-        .map_err(|_| timeout_err(&format!("UID SEARCH {search_query} {folder}"), IMAP_SEARCH_TIMEOUT))?
+        .map_err(|_| {
+            timeout_err(
+                &format!("UID SEARCH {search_query} {folder}"),
+                IMAP_SEARCH_TIMEOUT,
+            )
+        })?
         .map_err(|e| format!("UID SEARCH {search_query} {folder} failed: {e}"))?;
 
     let mut uids: Vec<u32> = uids_raw.into_iter().collect();
@@ -727,11 +775,17 @@ pub async fn sync_folder(
                 Ok(f) => {
                     let uid = match f.uid {
                         Some(u) => u,
-                        None => { log::warn!("IMAP sync_folder {folder}: response missing UID"); continue; }
+                        None => {
+                            log::warn!("IMAP sync_folder {folder}: response missing UID");
+                            continue;
+                        }
                     };
                     let raw = match f.body() {
                         Some(b) => b,
-                        None => { log::warn!("IMAP sync_folder {folder}: UID {uid} has no body"); continue; }
+                        None => {
+                            log::warn!("IMAP sync_folder {folder}: UID {uid} has no body");
+                            continue;
+                        }
                     };
                     #[allow(clippy::cast_possible_truncation)]
                     let raw_size = raw.len() as u32;
@@ -741,7 +795,17 @@ pub async fn sync_folder(
                     let is_draft = flags.iter().any(|fl| matches!(fl, Flag::Draft));
                     let internal_date = f.internal_date().map(|dt| dt.timestamp());
 
-                    match parse_message(&parser, raw, uid, folder, raw_size, is_read, is_starred, is_draft, internal_date) {
+                    match parse_message(
+                        &parser,
+                        raw,
+                        uid,
+                        folder,
+                        raw_size,
+                        is_read,
+                        is_starred,
+                        is_draft,
+                        internal_date,
+                    ) {
                         Ok(msg) => all_messages.push(msg),
                         Err(e) => log::warn!("sync_folder: failed to parse UID {uid}: {e}"),
                     }
@@ -751,7 +815,10 @@ pub async fn sync_folder(
         }
     }
 
-    log::info!("IMAP sync_folder {folder}: fetched {} messages", all_messages.len());
+    log::info!(
+        "IMAP sync_folder {folder}: fetched {} messages",
+        all_messages.len()
+    );
 
     Ok(ImapFolderSyncResult {
         uids,
@@ -773,8 +840,7 @@ pub async fn test_connection(config: &ImapConfig) -> Result<String, String> {
         Ok::<_, String>(names.collect::<Vec<_>>().await.len())
     })
     .await
-    .map_err(|_| timeout_err("LIST", IMAP_CMD_TIMEOUT))?
-    ?;
+    .map_err(|_| timeout_err("LIST", IMAP_CMD_TIMEOUT))??;
 
     _ = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.logout()).await;
 

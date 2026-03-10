@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use super::{build_threads, update_threads, ThreadGroup, ThreadableMessage};
+use super::{ThreadGroup, ThreadableMessage, build_threads, update_threads};
 
 #[derive(Deserialize)]
 pub struct ThreadableMessageInput {

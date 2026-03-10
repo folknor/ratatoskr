@@ -27,14 +27,12 @@ pub(crate) fn detect_special_use(name: &async_imap::types::Name) -> Option<Strin
     let lower = name.name().to_lowercase();
     match lower.as_str() {
         "inbox" => Some("\\Inbox".to_string()),
-        "sent" | "sent messages" | "sent items" | "[gmail]/sent mail" => {
-            Some("\\Sent".to_string())
-        }
+        "sent" | "sent messages" | "sent items" | "[gmail]/sent mail" => Some("\\Sent".to_string()),
         "trash" | "deleted" | "deleted items" | "deleted messages" | "bin" | "corbeille"
-        | "unsolbox" | "[gmail]/trash" => {
-            Some("\\Trash".to_string())
+        | "unsolbox" | "[gmail]/trash" => Some("\\Trash".to_string()),
+        "drafts" | "draft" | "draftbox" | "brouillons" | "[gmail]/drafts" => {
+            Some("\\Drafts".to_string())
         }
-        "drafts" | "draft" | "draftbox" | "brouillons" | "[gmail]/drafts" => Some("\\Drafts".to_string()),
         "junk" | "spam" | "junk e-mail" | "[gmail]/spam" => Some("\\Junk".to_string()),
         "archive" | "archives" | "[gmail]/all mail" => Some("\\Archive".to_string()),
         _ => None,
@@ -114,15 +112,16 @@ pub(crate) fn parse_message(
     });
 
     // List-Unsubscribe headers
-    let list_unsubscribe = extract_header_text(message.header(mail_parser::HeaderName::ListUnsubscribe));
-    let list_unsubscribe_post = extract_header_text(
-        message.header(mail_parser::HeaderName::Other("List-Unsubscribe-Post".into())),
-    );
+    let list_unsubscribe =
+        extract_header_text(message.header(mail_parser::HeaderName::ListUnsubscribe));
+    let list_unsubscribe_post = extract_header_text(message.header(
+        mail_parser::HeaderName::Other("List-Unsubscribe-Post".into()),
+    ));
 
     // Authentication-Results header
-    let auth_results = extract_header_text(
-        message.header(mail_parser::HeaderName::Other("Authentication-Results".into())),
-    );
+    let auth_results = extract_header_text(message.header(mail_parser::HeaderName::Other(
+        "Authentication-Results".into(),
+    )));
 
     // Build a map from mail-parser part index → IMAP MIME section path.
     // IMAP numbers children of multipart containers starting at 1 (e.g. "1", "2", "1.2.3").
@@ -212,7 +211,9 @@ pub(crate) fn parse_message(
 /// IMAP section numbering: children of a multipart container are numbered 1, 2, 3, ...
 /// Nested multipart children get dot-separated paths (e.g., "1.2" for the 2nd child of the 1st child).
 /// For non-multipart messages, the single body is section "1".
-pub(crate) fn build_imap_section_map(message: &mail_parser::Message) -> std::collections::HashMap<usize, String> {
+pub(crate) fn build_imap_section_map(
+    message: &mail_parser::Message,
+) -> std::collections::HashMap<usize, String> {
     use mail_parser::PartType;
 
     let mut map = std::collections::HashMap::new();
@@ -258,17 +259,18 @@ pub(crate) fn build_imap_section_map(message: &mail_parser::Message) -> std::col
 fn extract_header_text(hv: Option<&mail_parser::HeaderValue>) -> Option<String> {
     match hv {
         Some(mail_parser::HeaderValue::Text(t)) => Some(t.to_string()),
-        Some(mail_parser::HeaderValue::TextList(list)) => {
-            Some(list.iter().map(AsRef::as_ref).collect::<Vec<_>>().join(", "))
-        }
+        Some(mail_parser::HeaderValue::TextList(list)) => Some(
+            list.iter()
+                .map(AsRef::as_ref)
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
         _ => None,
     }
 }
 
 /// Extract the first address (email, display name) from an Address field.
-fn extract_first_address(
-    addr: Option<&mail_parser::Address>,
-) -> (Option<String>, Option<String>) {
+fn extract_first_address(addr: Option<&mail_parser::Address>) -> (Option<String>, Option<String>) {
     let addr = match addr {
         Some(a) => a,
         None => return (None, None),

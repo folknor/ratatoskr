@@ -37,25 +37,18 @@ pub fn convert_imap_message(
         .clone()
         .unwrap_or_else(|| synthetic_message_id(account_id, &msg.folder, msg.uid));
 
-    let label_ids = get_labels_for_message(
-        folder_label_id,
-        msg.is_read,
-        msg.is_starred,
-        msg.is_draft,
-    );
+    let label_ids =
+        get_labels_for_message(folder_label_id, msg.is_read, msg.is_starred, msg.is_draft);
 
-    let snippet = msg
-        .snippet
-        .clone()
-        .unwrap_or_else(|| {
-            msg.body_text
-                .as_deref()
-                .map(|t| {
-                    let chars: String = t.chars().take(200).collect();
-                    chars
-                })
-                .unwrap_or_default()
-        });
+    let snippet = msg.snippet.clone().unwrap_or_else(|| {
+        msg.body_text
+            .as_deref()
+            .map(|t| {
+                let chars: String = t.chars().take(200).collect();
+                chars
+            })
+            .unwrap_or_default()
+    });
 
     let has_attachments = !msg.attachments.is_empty();
     // TS stores date in milliseconds
@@ -153,6 +146,9 @@ mod tests {
         msg.snippet = None;
         msg.body_text = Some("This is the body text for snippet generation".to_string());
         let result = convert_imap_message(msg, "acc-1", "INBOX");
-        assert_eq!(result.meta.snippet, "This is the body text for snippet generation");
+        assert_eq!(
+            result.meta.snippet,
+            "This is the body text for snippet generation"
+        );
     }
 }

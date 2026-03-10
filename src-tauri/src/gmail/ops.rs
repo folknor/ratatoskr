@@ -103,15 +103,9 @@ impl ProviderOps for GmailOps {
         is_spam: bool,
     ) -> Result<(), String> {
         let (add, remove) = if is_spam {
-            (
-                vec!["SPAM".to_string()],
-                vec!["INBOX".to_string()],
-            )
+            (vec!["SPAM".to_string()], vec!["INBOX".to_string()])
         } else {
-            (
-                vec!["INBOX".to_string()],
-                vec!["SPAM".to_string()],
-            )
+            (vec!["INBOX".to_string()], vec!["SPAM".to_string()])
         };
         self.client
             .modify_thread(thread_id, &add, &remove, ctx.db)

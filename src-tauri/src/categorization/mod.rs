@@ -192,12 +192,11 @@ pub fn categorize_by_rules(input: &CategorizationInput) -> ThreadCategory {
     // Layer 3: List-Unsubscribe header
     if input.list_unsubscribe.is_some() {
         // If from a newsletter-ish domain, classify as newsletter
-        if let Some(ref from_address) = input.from_address {
-            if let Some(d) = get_domain(from_address) {
-                if NEWSLETTER_DOMAINS.contains(d.as_str()) {
-                    return ThreadCategory::Newsletters;
-                }
-            }
+        if let Some(ref from_address) = input.from_address
+            && let Some(d) = get_domain(from_address)
+            && NEWSLETTER_DOMAINS.contains(d.as_str())
+        {
+            return ThreadCategory::Newsletters;
         }
         // Generic unsubscribable mail -> Promotions
         return ThreadCategory::Promotions;
@@ -267,11 +266,7 @@ mod tests {
     #[test]
     fn gmail_category_takes_priority_over_domain() {
         // Even though from a social domain, the Gmail label wins
-        let input = make_input(
-            vec!["CATEGORY_UPDATES"],
-            Some("noreply@facebook.com"),
-            None,
-        );
+        let input = make_input(vec!["CATEGORY_UPDATES"], Some("noreply@facebook.com"), None);
         assert_eq!(categorize_by_rules(&input), ThreadCategory::Updates);
     }
 

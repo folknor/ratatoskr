@@ -42,6 +42,7 @@ pub async fn delete_search_document(
 const REBUILD_BATCH_SIZE: usize = 10_000;
 
 #[tauri::command]
+#[allow(clippy::too_many_lines)]
 pub async fn rebuild_search_index(
     state: State<'_, SearchState>,
     db_state: State<'_, crate::db::DbState>,
@@ -147,10 +148,10 @@ pub async fn rebuild_search_index(
                 .collect();
 
             for doc in &mut docs {
-                if doc.body_text.is_none() {
-                    if let Some(text) = body_map.get(&doc.message_id) {
-                        doc.body_text = Some(text.clone());
-                    }
+                if doc.body_text.is_none()
+                    && let Some(text) = body_map.get(&doc.message_id)
+                {
+                    doc.body_text = Some(text.clone());
                 }
             }
         }

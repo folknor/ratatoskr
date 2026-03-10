@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use tokio::sync::{Mutex, RwLock};
 
 use crate::db::DbState;
@@ -85,9 +85,7 @@ impl GmailClient {
         let key = encryption_key;
 
         let (access_token, refresh_token, expires_at, client_id, client_secret) = db
-            .with_conn(move |conn| {
-                read_account_tokens(conn, &aid, &key)
-            })
+            .with_conn(move |conn| read_account_tokens(conn, &aid, &key))
             .await?;
 
         let token_state = TokenState {
@@ -127,11 +125,7 @@ impl GmailClient {
     }
 
     /// Make an authenticated GET request to the Gmail API.
-    pub async fn get<T: DeserializeOwned>(
-        &self,
-        path: &str,
-        db: &DbState,
-    ) -> Result<T, String> {
+    pub async fn get<T: DeserializeOwned>(&self, path: &str, db: &DbState) -> Result<T, String> {
         let url = format!("{GMAIL_API_BASE}{path}");
         self.request::<T, ()>(&url, "GET", None, db).await
     }
@@ -203,11 +197,15 @@ impl GmailClient {
         db: &DbState,
     ) -> Result<T, String> {
         let access_token = self.ensure_valid_token(db).await?;
-        let response = self.execute_with_retry(url, method, body, &access_token).await?;
+        let response = self
+            .execute_with_retry(url, method, body, &access_token)
+            .await?;
 
         if response.status().as_u16() == 401 {
             let new_token = self.force_refresh(db).await?;
-            let retry = self.execute_with_retry(url, method, body, &new_token).await?;
+            let retry = self
+                .execute_with_retry(url, method, body, &new_token)
+                .await?;
             return parse_json_response(retry).await;
         }
 
@@ -236,11 +234,8 @@ impl GmailClient {
                 break;
             }
 
-            let delay_ms = http::compute_retry_delay(
-                last_response.as_ref(),
-                attempt,
-                &RETRY_CONFIG,
-            );
+            let delay_ms =
+                http::compute_retry_delay(last_response.as_ref(), attempt, &RETRY_CONFIG);
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         }
 
@@ -396,7 +391,13 @@ fn read_account_tokens(
     // Client secret: read from global settings (optional)
     let client_secret = read_global_client_secret(conn, key);
 
-    Ok((access_token, refresh_token, expires_at, client_id, client_secret))
+    Ok((
+        access_token,
+        refresh_token,
+        expires_at,
+        client_id,
+        client_secret,
+    ))
 }
 
 /// Try to decrypt, falling back to raw value for pre-encryption data.

@@ -6,7 +6,7 @@ pub struct ImapConfig {
     pub port: u16,
     pub security: String, // "tls", "starttls", "none"
     pub username: String,
-    pub password: String, // plaintext password or OAuth2 access token
+    pub password: String,    // plaintext password or OAuth2 access token
     pub auth_method: String, // "password" or "oauth2"
     #[serde(default)]
     pub accept_invalid_certs: bool,
@@ -14,9 +14,9 @@ pub struct ImapConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImapFolder {
-    pub path: String,      // decoded UTF-8 display name
-    pub raw_path: String,  // original modified UTF-7 path for IMAP commands
-    pub name: String,      // decoded display name (last segment)
+    pub path: String,     // decoded UTF-8 display name
+    pub raw_path: String, // original modified UTF-7 path for IMAP commands
+    pub name: String,     // decoded display name (last segment)
     pub delimiter: String,
     pub special_use: Option<String>, // "\Sent", "\Trash", "\Drafts", "\Junk", "\Archive", "\All"
     pub exists: u32,

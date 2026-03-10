@@ -1,20 +1,3 @@
-use std::time::Duration;
-
-const DEFAULT_TIMEOUT_SECS: u64 = 30;
-const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 10;
-
-/// Build a `reqwest::Client` with shared defaults (timeouts, TLS).
-///
-/// Used by providers that make direct HTTP calls outside their primary
-/// API client (e.g. JMAP blob upload/download, Gmail raw requests).
-pub fn build_http_client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
-        .connect_timeout(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {e}"))
-}
-
 /// Retry configuration for HTTP requests.
 pub struct RetryConfig {
     pub max_attempts: u32,

@@ -807,7 +807,8 @@ mod tests {
 
     #[test]
     fn split_handles_triggers() {
-        let sql = "CREATE TRIGGER t AFTER INSERT ON m BEGIN INSERT INTO f VALUES(1); END; SELECT 1;";
+        let sql =
+            "CREATE TRIGGER t AFTER INSERT ON m BEGIN INSERT INTO f VALUES(1); END; SELECT 1;";
         let stmts = split_statements(sql);
         assert_eq!(stmts.len(), 2);
         assert!(stmts[0].contains("BEGIN"));
@@ -834,9 +835,7 @@ mod tests {
 
         // Verify latest migration recorded
         let max_ver: u32 = conn
-            .query_row("SELECT MAX(version) FROM _migrations", [], |row| {
-                row.get(0)
-            })
+            .query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))
             .expect("query");
         assert_eq!(max_ver, 25);
     }

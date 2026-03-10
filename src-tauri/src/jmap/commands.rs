@@ -1,3 +1,5 @@
+#![allow(clippy::let_underscore_must_use)]
+
 use base64::Engine;
 use serde::Serialize;
 use tauri::{AppHandle, State};
@@ -6,10 +8,10 @@ use crate::body_store::BodyStoreState;
 use crate::db::DbState;
 use crate::search::SearchState;
 
-use super::auto_discovery::{discover_jmap_url, JmapDiscoveryResult};
+use super::auto_discovery::{JmapDiscoveryResult, discover_jmap_url};
 use super::client::{JmapClient, JmapState};
 use super::mailbox_mapper::{label_id_to_mailbox_id, map_mailbox_to_label};
-use super::sync::{jmap_delta_sync, jmap_initial_sync, JmapSyncResult};
+use super::sync::{JmapSyncResult, jmap_delta_sync, jmap_initial_sync};
 
 // ---------------------------------------------------------------------------
 // Lifecycle commands
@@ -21,8 +23,7 @@ pub async fn jmap_init_client(
     db: State<'_, DbState>,
     jmap: State<'_, JmapState>,
 ) -> Result<(), String> {
-    let client =
-        JmapClient::from_account(&db, &account_id, jmap.encryption_key()).await?;
+    let client = JmapClient::from_account(&db, &account_id, jmap.encryption_key()).await?;
     jmap.insert(account_id, client).await;
     Ok(())
 }
@@ -95,7 +96,16 @@ pub async fn jmap_sync_initial(
 ) -> Result<(), String> {
     let client = jmap.get(&account_id).await?;
     let days = days_back.unwrap_or(365);
-    jmap_initial_sync(&client, &account_id, days, &db, &body_store, &search, &app_handle).await
+    jmap_initial_sync(
+        &client,
+        &account_id,
+        days,
+        &db,
+        &body_store,
+        &search,
+        &app_handle,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -130,7 +140,11 @@ pub async fn jmap_list_folders(
         let Some(id) = mb.id() else { continue };
         let name = mb.name().unwrap_or("(unnamed)");
         let role = mb.role();
-        let role_str = if role == Role::None { None } else { Some(super::sync::role_to_str(&role)) };
+        let role_str = if role == Role::None {
+            None
+        } else {
+            Some(super::sync::role_to_str(&role))
+        };
         let mapping = map_mailbox_to_label(role_str, id, name);
 
         folders.push(JmapFolder {
@@ -267,10 +281,7 @@ pub(crate) async fn query_thread_email_ids(
         email::query::Filter::in_thread(thread_id).into();
     let result = client
         .inner()
-        .email_query(
-            Some(filter),
-            None::<Vec<_>>,
-        )
+        .email_query(Some(filter), None::<Vec<_>>)
         .await
         .map_err(|e| format!("Email/query inThread: {e}"))?;
 
@@ -290,7 +301,11 @@ pub(crate) async fn get_mailbox_list(
         let Some(id) = mb.id() else { continue };
         let name = mb.name().unwrap_or("(unnamed)");
         let role = mb.role();
-        let role_str = if role == Role::None { None } else { Some(super::sync::role_to_str(&role).to_string()) };
+        let role_str = if role == Role::None {
+            None
+        } else {
+            Some(super::sync::role_to_str(&role).to_string())
+        };
         result.push((id.to_string(), role_str, name.to_string()));
     }
     Ok(result)
@@ -311,12 +326,7 @@ pub(crate) async fn get_first_identity_id(
         .unwrap_method_responses()
         .pop()
         .and_then(|r| r.unwrap_get_identity().ok())
-        .and_then(|mut r| {
-            r.take_list()
-                .into_iter()
-                .next()
-                .and_then(|mut i| Some(i.take_id()))
-        })
+        .and_then(|mut r| r.take_list().into_iter().next().map(|mut i| i.take_id()))
         .ok_or_else(|| "No identity found for email submission".to_string())
 }
 

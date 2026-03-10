@@ -10,8 +10,8 @@ use crate::db::DbState;
 use crate::search::{SearchDocument, SearchState};
 
 use super::client::JmapClient;
-use super::mailbox_mapper::{map_mailbox_to_label, MailboxInfo};
-use super::parse::{email_get_properties, parse_jmap_email, ParsedJmapMessage};
+use super::mailbox_mapper::{MailboxInfo, map_mailbox_to_label};
+use super::parse::{ParsedJmapMessage, email_get_properties, parse_jmap_email};
 
 const BATCH_SIZE: usize = 50;
 
@@ -91,10 +91,7 @@ pub async fn jmap_initial_sync(
         email::query::Filter::after(since_ts).into();
     let total = client
         .inner()
-        .email_query(
-            Some(filter),
-            None::<Vec<_>>,
-        )
+        .email_query(Some(filter), None::<Vec<_>>)
         .await
         .map_err(|e| format!("Email/query count: {e}"))?
         .total()
@@ -125,7 +122,12 @@ pub async fn jmap_initial_sync(
         }
 
         // Skip to the right position and take a batch
-        let batch_ids: Vec<&str> = ids.iter().skip(position).take(BATCH_SIZE).map(String::as_str).collect();
+        let batch_ids: Vec<&str> = ids
+            .iter()
+            .skip(position)
+            .take(BATCH_SIZE)
+            .map(String::as_str)
+            .collect();
         if batch_ids.is_empty() {
             break;
         }
@@ -218,7 +220,11 @@ pub async fn jmap_delta_sync(
         let destroyed = changes.destroyed();
 
         // Batch-fetch created + updated emails
-        let ids_to_fetch: Vec<&str> = created.iter().chain(updated.iter()).map(String::as_str).collect();
+        let ids_to_fetch: Vec<&str> = created
+            .iter()
+            .chain(updated.iter())
+            .map(String::as_str)
+            .collect();
 
         if !ids_to_fetch.is_empty() {
             for chunk in ids_to_fetch.chunks(BATCH_SIZE) {
@@ -270,7 +276,13 @@ pub async fn jmap_delta_sync(
 /// Fetch all mailboxes, persist as labels, return (mailbox_map, mailbox_data).
 async fn sync_mailboxes(
     ctx: &SyncCtx<'_>,
-) -> Result<(HashMap<String, MailboxInfo>, Vec<(String, Option<String>, String)>), String> {
+) -> Result<
+    (
+        HashMap<String, MailboxInfo>,
+        Vec<(String, Option<String>, String)>,
+    ),
+    String,
+> {
     let mailboxes = fetch_all_mailboxes(ctx.client).await?;
 
     let mut mailbox_map = HashMap::new();
@@ -283,7 +295,11 @@ async fn sync_mailboxes(
         let Some(id) = mb.id() else { continue };
         let name = mb.name().unwrap_or("(unnamed)");
         let role = mb.role();
-        let role_str = if role == Role::None { None } else { Some(role_to_str(&role)) };
+        let role_str = if role == Role::None {
+            None
+        } else {
+            Some(role_to_str(&role))
+        };
 
         mailbox_map.insert(
             id.to_string(),
@@ -293,11 +309,7 @@ async fn sync_mailboxes(
             },
         );
 
-        mailbox_data.push((
-            id.to_string(),
-            role_str.map(String::from),
-            name.to_string(),
-        ));
+        mailbox_data.push((id.to_string(), role_str.map(String::from), name.to_string()));
 
         let mapping = map_mailbox_to_label(role_str, id, name);
         label_rows.push((
@@ -309,7 +321,12 @@ async fn sync_mailboxes(
     }
 
     // Also add pseudo-labels
-    label_rows.push(("UNREAD".to_string(), aid.clone(), "Unread".to_string(), "system".to_string()));
+    label_rows.push((
+        "UNREAD".to_string(),
+        aid.clone(),
+        "Unread".to_string(),
+        "system".to_string(),
+    ));
 
     // Persist labels to DB
     let aid2 = aid.clone();
@@ -338,11 +355,7 @@ async fn sync_mailboxes(
 
 /// Handle Mailbox/changes during delta sync.
 async fn sync_mailbox_changes(ctx: &SyncCtx<'_>, since_state: &str) -> Result<(), String> {
-    let result = ctx
-        .client
-        .inner()
-        .mailbox_changes(since_state, 500)
-        .await;
+    let result = ctx.client.inner().mailbox_changes(since_state, 500).await;
 
     match result {
         Ok(changes) => {
@@ -489,10 +502,7 @@ async fn persist_messages(
     // Group messages by thread for thread-level aggregation
     let mut threads: HashMap<&str, Vec<&ParsedJmapMessage>> = HashMap::new();
     for msg in messages {
-        threads
-            .entry(&msg.thread_id)
-            .or_default()
-            .push(msg);
+        threads.entry(&msg.thread_id).or_default().push(msg);
     }
 
     // 1. DB writes (metadata + thread aggregation)
@@ -711,6 +721,7 @@ fn store_thread_to_db(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn upsert_thread_record(
     tx: &rusqlite::Transaction,
     account_id: &str,
@@ -980,11 +991,7 @@ async fn store_bodies(body_store: &BodyStoreState, messages: &[ParsedJmapMessage
 // Search index helper
 // ---------------------------------------------------------------------------
 
-async fn index_messages(
-    search: &SearchState,
-    account_id: &str,
-    messages: &[ParsedJmapMessage],
-) {
+async fn index_messages(search: &SearchState, account_id: &str, messages: &[ParsedJmapMessage]) {
     let docs: Vec<SearchDocument> = messages
         .iter()
         .map(|m| SearchDocument {
@@ -1119,7 +1126,7 @@ pub(super) async fn fetch_all_mailboxes(
 }
 
 fn emit_progress(ctx: &SyncCtx<'_>, phase: &str, current: u64, total: u64) {
-    let _ = ctx.app_handle.emit(
+    if let Err(err) = ctx.app_handle.emit(
         "jmap-sync-progress",
         JmapSyncProgress {
             account_id: ctx.account_id.to_string(),
@@ -1127,7 +1134,12 @@ fn emit_progress(ctx: &SyncCtx<'_>, phase: &str, current: u64, total: u64) {
             current,
             total,
         },
-    );
+    ) {
+        log::warn!(
+            "Failed to emit JMAP sync progress for {}: {err}",
+            ctx.account_id
+        );
+    }
 }
 
 pub(crate) fn role_to_str(role: &jmap_client::mailbox::Role) -> &'static str {

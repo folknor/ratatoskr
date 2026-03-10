@@ -1,9 +1,9 @@
+use tauri::{Emitter, Manager};
 #[cfg(not(target_os = "linux"))]
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{TrayIconBuilder, TrayIconId},
 };
-use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::MacosLauncher;
 
 mod body_store;
@@ -69,8 +69,8 @@ pub fn run() {
     // instead of "Windows PowerShell"
     #[cfg(windows)]
     {
-        use windows::core::w;
         use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+        use windows::core::w;
         unsafe {
             _ = SetCurrentProcessExplicitAppUserModelID(w!("com.folknor.ratatoskr"));
         }
@@ -338,12 +338,12 @@ pub fn run() {
             // Initialize Rust-owned SQLite database (same ratatoskr.db file)
             // and tantivy search index
             {
-                let app_data_dir = app.path().app_data_dir().map_err(|e| {
-                    Box::new(std::io::Error::other(format!("app data dir: {e}")))
-                })?;
-                let db_state = db::DbState::init(&app_data_dir).map_err(|e| {
-                    Box::new(std::io::Error::other(format!("db init: {e}")))
-                })?;
+                let app_data_dir = app
+                    .path()
+                    .app_data_dir()
+                    .map_err(|e| Box::new(std::io::Error::other(format!("app data dir: {e}"))))?;
+                let db_state = db::DbState::init(&app_data_dir)
+                    .map_err(|e| Box::new(std::io::Error::other(format!("db init: {e}"))))?;
                 app.manage(db_state);
 
                 let body_store_state =
@@ -352,9 +352,8 @@ pub fn run() {
                     })?;
                 app.manage(body_store_state);
 
-                let search_state = search::SearchState::init(&app_data_dir).map_err(|e| {
-                    Box::new(std::io::Error::other(format!("search init: {e}")))
-                })?;
+                let search_state = search::SearchState::init(&app_data_dir)
+                    .map_err(|e| Box::new(std::io::Error::other(format!("search init: {e}"))))?;
                 app.manage(search_state);
 
                 app.manage(sync::SyncState::new());
@@ -362,7 +361,9 @@ pub fn run() {
                 // Gmail provider state — load encryption key for token decryption
                 let encryption_key = provider::crypto::load_encryption_key(&app_data_dir)
                     .unwrap_or_else(|e| {
-                        log::warn!("Gmail provider: no encryption key ({e}), will init on first use");
+                        log::warn!(
+                            "Gmail provider: no encryption key ({e}), will init on first use"
+                        );
                         [0u8; 32]
                     });
                 app.manage(gmail::client::GmailState::new(encryption_key));
@@ -429,13 +430,14 @@ pub fn run() {
                 let app_handle = app.handle().clone();
 
                 std::thread::spawn(move || {
-                    let mut tray = match TrayItem::new("Ratatoskr", IconSource::Resource("mail-read")) {
-                        Ok(t) => t,
-                        Err(e) => {
-                            log::warn!("Failed to create system tray: {e}");
-                            return;
-                        }
-                    };
+                    let mut tray =
+                        match TrayItem::new("Ratatoskr", IconSource::Resource("mail-read")) {
+                            Ok(t) => t,
+                            Err(e) => {
+                                log::warn!("Failed to create system tray: {e}");
+                                return;
+                            }
+                        };
 
                     let app_handle_show = app_handle.clone();
                     if let Err(e) = tray.add_menu_item("Show Ratatoskr", move || {

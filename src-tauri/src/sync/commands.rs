@@ -1,11 +1,13 @@
+#![allow(clippy::let_underscore_must_use)]
+
 use tauri::{AppHandle, State};
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
 use crate::search::SearchState;
 
-use super::config;
 use super::SyncState;
+use super::config;
 use super::types::ImapSyncResult;
 
 /// Run initial IMAP sync for an account.
@@ -34,12 +36,13 @@ pub async fn sync_imap_initial(
             db.with_conn(move |conn| {
                 let account = config::get_account(conn, &account_id)?;
                 if account.provider != "imap" {
-                    return Err(format!("Account {} is not an IMAP account", account_id));
+                    return Err(format!("Account {account_id} is not an IMAP account"));
                 }
                 let imap_config = config::build_imap_config(&account)?;
                 let days = config::get_sync_period_days(conn);
                 Ok((imap_config, days))
-            }).await?
+            })
+            .await?
         };
 
         let days = days_back.unwrap_or(actual_days_back);
@@ -52,8 +55,10 @@ pub async fn sync_imap_initial(
             &account_id,
             &imap_config,
             days,
-        ).await
-    }.await;
+        )
+        .await
+    }
+    .await;
 
     sync_state.unlock_account(&account_id);
     result
@@ -87,7 +92,7 @@ pub async fn sync_imap_delta(
             db.with_conn(move |conn| {
                 let account = config::get_account(conn, &account_id)?;
                 if account.provider != "imap" {
-                    return Err(format!("Account {} is not an IMAP account", account_id));
+                    return Err(format!("Account {account_id} is not an IMAP account"));
                 }
                 let imap_config = config::build_imap_config(&account)?;
                 let days = config::get_sync_period_days(conn);
@@ -119,8 +124,7 @@ pub async fn sync_imap_delta(
 
             if needs_recovery == 0 {
                 log::warn!(
-                    "[sync] Delta found 0 messages, DB has 0 threads for {} — forcing full re-sync",
-                    account_id
+                    "[sync] Delta found 0 messages, DB has 0 threads for {account_id} — forcing full re-sync"
                 );
 
                 // Clear history_id and folder sync states in one DB call
@@ -130,7 +134,7 @@ pub async fn sync_imap_delta(
                         super::pipeline::clear_account_history_id(conn, &aid)?;
                         super::pipeline::clear_all_folder_sync_states(conn, &aid)?;
                         Ok(())
-                    }).await?
+                    }).await?;
                 }
 
                 return super::imap_initial::imap_initial_sync(

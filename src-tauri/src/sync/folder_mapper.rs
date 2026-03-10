@@ -56,22 +56,21 @@ fn folder_name_to_special_use(name: &str) -> Option<&'static str> {
 /// Map an IMAP folder to a Gmail-style label.
 pub fn map_folder_to_label(folder: &ImapFolder) -> FolderLabelMapping {
     // Check special-use attribute first
-    if let Some(ref su) = folder.special_use {
-        if let Some(mapping) = special_use_mapping(su) {
-            return mapping;
-        }
+    if let Some(ref su) = folder.special_use
+        && let Some(mapping) = special_use_mapping(su)
+    {
+        return mapping;
     }
 
     // Fall back to name-based detection
     let lower_path = folder.path.to_lowercase();
     let lower_name = folder.name.to_lowercase();
 
-    if let Some(su) = folder_name_to_special_use(&lower_path)
-        .or_else(|| folder_name_to_special_use(&lower_name))
+    if let Some(su) =
+        folder_name_to_special_use(&lower_path).or_else(|| folder_name_to_special_use(&lower_name))
+        && let Some(mapping) = special_use_mapping(su)
     {
-        if let Some(mapping) = special_use_mapping(su) {
-            return mapping;
-        }
+        return mapping;
     }
 
     // User-defined folder
@@ -108,9 +107,7 @@ pub fn get_syncable_folders(folders: &[ImapFolder]) -> Vec<&ImapFolder> {
         .iter()
         .filter(|f| {
             let lower = f.path.to_lowercase();
-            lower != "[gmail]"
-                && lower != "[google mail]"
-                && !lower.starts_with("[nostromo]")
+            lower != "[gmail]" && lower != "[google mail]" && !lower.starts_with("[nostromo]")
         })
         .collect()
 }

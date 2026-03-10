@@ -55,9 +55,7 @@ pub async fn body_store_delete(
 
 /// Get body store statistics (count, compressed sizes).
 #[tauri::command]
-pub async fn body_store_stats(
-    state: State<'_, BodyStoreState>,
-) -> Result<BodyStoreStats, String> {
+pub async fn body_store_stats(state: State<'_, BodyStoreState>) -> Result<BodyStoreStats, String> {
     state.stats().await
 }
 
@@ -69,6 +67,7 @@ pub async fn body_store_stats(
 const MIGRATE_BATCH_SIZE: i64 = 1000;
 
 #[tauri::command]
+#[allow(clippy::too_many_lines)]
 pub async fn body_store_migrate(
     state: State<'_, BodyStoreState>,
     db_state: State<'_, crate::db::DbState>,
@@ -190,8 +189,8 @@ pub async fn body_store_migrate(
 
         log::info!("Body store migration: {migrated}/{total} messages migrated");
 
-        #[allow(clippy::cast_possible_truncation)]
-        if (batch_len as i64) < MIGRATE_BATCH_SIZE {
+        let batch_len_i64 = i64::try_from(batch_len).unwrap_or(i64::MAX);
+        if batch_len_i64 < MIGRATE_BATCH_SIZE {
             break;
         }
     }

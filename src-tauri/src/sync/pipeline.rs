@@ -361,7 +361,7 @@ pub fn store_threads(
                     first.subject,
                     last.snippet,
                     last.date,
-                    messages.len() as i64,
+                    i64::try_from(messages.len()).unwrap_or(i64::MAX),
                     is_read,
                     is_starred,
                     has_attachments,

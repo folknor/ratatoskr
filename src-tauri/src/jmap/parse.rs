@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use jmap_client::email::{Email, Property};
 
-use super::mailbox_mapper::{get_labels_for_email, MailboxInfo};
+use super::mailbox_mapper::{MailboxInfo, get_labels_for_email};
 
 /// Parsed JMAP email ready for DB persistence.
 ///
@@ -87,7 +87,10 @@ pub fn parse_jmap_email(
     mailbox_map: &HashMap<String, MailboxInfo>,
 ) -> Result<ParsedJmapMessage, String> {
     let id = email.id().ok_or("Email missing id")?.to_string();
-    let thread_id = email.thread_id().ok_or("Email missing threadId")?.to_string();
+    let thread_id = email
+        .thread_id()
+        .ok_or("Email missing threadId")?
+        .to_string();
 
     let from = email.from().and_then(|addrs| addrs.first());
     let from_address = from.map(|a| a.email().to_string());
@@ -103,12 +106,16 @@ pub fn parse_jmap_email(
 
     let sent_at = email.sent_at().unwrap_or(0);
     let received_at = email.received_at().unwrap_or(0);
-    let date = if sent_at > 0 { sent_at * 1000 } else { received_at * 1000 };
+    let date = if sent_at > 0 {
+        sent_at * 1000
+    } else {
+        received_at * 1000
+    };
     let internal_date = received_at * 1000;
 
     let keywords = email.keywords();
-    let is_read = keywords.iter().any(|k| *k == "$seen");
-    let is_starred = keywords.iter().any(|k| *k == "$flagged");
+    let is_read = keywords.contains(&"$seen");
+    let is_starred = keywords.contains(&"$flagged");
 
     let mailbox_ids = email.mailbox_ids();
     let label_ids = get_labels_for_email(&mailbox_ids, &keywords, mailbox_map);
@@ -130,8 +137,11 @@ pub fn parse_jmap_email(
                     Some(ParsedJmapAttachment {
                         blob_id,
                         filename: part.name().unwrap_or("attachment").to_string(),
-                        mime_type: part.content_type().unwrap_or("application/octet-stream").to_string(),
-                        size: part.size() as i64,
+                        mime_type: part
+                            .content_type()
+                            .unwrap_or("application/octet-stream")
+                            .to_string(),
+                        size: i64::try_from(part.size()).unwrap_or(i64::MAX),
                         content_id: part.content_id().map(String::from),
                         is_inline: part.content_disposition() == Some("inline"),
                     })
@@ -141,18 +151,11 @@ pub fn parse_jmap_email(
         .unwrap_or_default();
 
     // Header arrays → joined strings for DB storage
-    let message_id_header = email
-        .message_id()
-        .map(|ids| ids.join(" "));
-    let references_header = email
-        .references()
-        .map(|refs| refs.join(" "));
-    let in_reply_to_header = email
-        .in_reply_to()
-        .map(|ids| ids.join(" "));
+    let message_id_header = email.message_id().map(|ids| ids.join(" "));
+    let references_header = email.references().map(|refs| refs.join(" "));
+    let in_reply_to_header = email.in_reply_to().map(|ids| ids.join(" "));
 
-    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
-    let raw_size = email.size() as i64;
+    let raw_size = i64::try_from(email.size()).unwrap_or(i64::MAX);
 
     Ok(ParsedJmapMessage {
         id,
@@ -182,9 +185,7 @@ pub fn parse_jmap_email(
 }
 
 /// Format JMAP EmailAddress array to "Name <email>, ..." string.
-fn format_addresses(
-    addrs: Option<&[jmap_client::email::EmailAddress]>,
-) -> Option<String> {
+fn format_addresses(addrs: Option<&[jmap_client::email::EmailAddress]>) -> Option<String> {
     let addrs = addrs?;
     if addrs.is_empty() {
         return None;
@@ -214,7 +215,5 @@ fn extract_body_value(email: &Email, html: bool) -> Option<String> {
     let part_id = part.part_id()?;
 
     // Access bodyValues through the email's body_values field
-    email
-        .body_value(part_id)
-        .map(|bv| bv.value().to_string())
+    email.body_value(part_id).map(|bv| bv.value().to_string())
 }

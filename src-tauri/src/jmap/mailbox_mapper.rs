@@ -26,14 +26,14 @@ pub fn map_mailbox_to_label(
     mailbox_id: &str,
     name: &str,
 ) -> MailboxLabelMapping {
-    if let Some(r) = role {
-        if let Some(&(_, label_id, label_name)) = ROLE_MAP.iter().find(|&&(rr, _, _)| rr == r) {
-            return MailboxLabelMapping {
-                label_id: label_id.to_string(),
-                label_name: label_name.to_string(),
-                label_type: "system",
-            };
-        }
+    if let Some(r) = role
+        && let Some(&(_, label_id, label_name)) = ROLE_MAP.iter().find(|&&(rr, _, _)| rr == r)
+    {
+        return MailboxLabelMapping {
+            label_id: label_id.to_string(),
+            label_name: label_name.to_string(),
+            label_type: "system",
+        };
     }
     MailboxLabelMapping {
         label_id: format!("jmap-{mailbox_id}"),
