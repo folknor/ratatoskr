@@ -4,6 +4,8 @@
  * is:starred, before:, after:, label:
  */
 
+import { parseDateToTimestamp } from "@/utils/date";
+
 export interface ParsedSearchQuery {
   freeText: string;
   from?: string;
@@ -20,23 +22,6 @@ export interface ParsedSearchQuery {
 
 const OPERATOR_REGEX =
   /(?:^|\s)(from|to|subject|has|is|before|after|label):\s*(?:"([^"]+)"|(\S+))/gi;
-
-/**
- * Parse a date string like YYYY/MM/DD or YYYY-MM-DD into a unix timestamp (seconds).
- * Returns undefined if the string is not a valid date.
- */
-function parseDateToTimestamp(dateStr: string): number | undefined {
-  const normalized = dateStr.replace(/-/g, "/");
-  const parts = normalized.split("/");
-  if (parts.length !== 3) return;
-  const year = parseInt(parts[0] ?? "", 10);
-  const month = parseInt(parts[1] ?? "", 10);
-  const day = parseInt(parts[2] ?? "", 10);
-  if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) return;
-  const date = new Date(year, month - 1, day);
-  if (Number.isNaN(date.getTime())) return;
-  return Math.floor(date.getTime() / 1000);
-}
 
 export function parseSearchQuery(input: string): ParsedSearchQuery {
   const result: ParsedSearchQuery = { freeText: "" };
