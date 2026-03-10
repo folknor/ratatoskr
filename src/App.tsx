@@ -468,7 +468,7 @@ export default function App(): React.ReactNode {
   }, []);
 
   // Listen for sync status updates
-  const backfillDoneRef = useRef(false);
+  const backfillDoneRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const unsub = onSyncStatus((accountId, status, progress, error) => {
       if (status === "syncing") {
@@ -492,9 +492,9 @@ export default function App(): React.ReactNode {
         window.dispatchEvent(new Event("velo-sync-done"));
         void updateBadgeCount();
 
-        // Backfill uncategorized threads after first successful sync
-        if (!backfillDoneRef.current) {
-          backfillDoneRef.current = true;
+        // Backfill uncategorized threads after first successful sync per account
+        if (!backfillDoneRef.current.has(accountId)) {
+          backfillDoneRef.current.add(accountId);
           import("./services/categorization/backfillService")
             .then(({ backfillUncategorizedThreads }) =>
               backfillUncategorizedThreads(accountId),
