@@ -12,17 +12,17 @@
 
 ### MEDIUM
 
-- [ ] **15× silent settings failures** — `src/stores/uiStore.ts:94-168`
-  All `setSetting().catch(() => {})` silently swallow errors. User preferences lost on DB error with no indication. Add logging or a central persist helper.
+- [x] ~~**15× silent settings failures** — `src/stores/uiStore.ts`
+  Fixed: `persistSetting()` helper replaces silent catches with error logging.~~
 
-- [ ] **Backfill only runs once per app lifetime** — `src/App.tsx:471`
-  `backfillDoneRef` is a permanent boolean flag. After re-auth or re-sync, uncategorized threads are never backfilled. Track per-account instead.
+- [x] ~~**Backfill only runs once per app lifetime** — `src/App.tsx`
+  Fixed: `backfillDoneRef` now tracks per account ID via `Set<string>`.~~
 
-- [ ] **Draft null access** — `src/components/layout/EmailList.tsx:181`
-  `d.message.id` accessed without checking if `d.message` exists. Runtime error if draft has no message.
+- [x] ~~**Draft null access** — `src/components/layout/EmailList.tsx` + `src/services/gmail/draftDeletion.ts`
+  Fixed: optional chaining for `d.message?.id` and `d.message?.threadId`.~~
 
-- [ ] **Sync queue race** — `src/services/gmail/syncManager.ts:289-317`
-  `pendingAccountIds` can lose IDs under rapid concurrent triggers. Needs proper async locking.
+- [x] ~~**Sync queue race** — `src/services/gmail/syncManager.ts`
+  Fixed: synchronous check + Set-based merging with drain loop.~~
 
 - [ ] **Queue processor loses error context** — `src/services/queue/queueProcessor.ts:46-56`
   Original error details lost on permanent failures; only the classified message is stored.
@@ -52,10 +52,7 @@
 
 ### MEDIUM
 
-- [ ] **Date parsing duplicated**
-  - `src/services/search/searchParser.ts:28-39` — `parseDateToTimestamp()`
-  - `src/services/imap/imapSync.ts:104-120` — `formatImapDate()` / `computeSinceDate()`
-  Move to a shared `src/utils/date.ts`.
+- [x] ~~**Date parsing duplicated** — consolidated into `src/utils/date.ts`~~
 
 - [ ] **IMAP messages may skip filter engine**
   `src/services/filters/filterEngine.ts` runs for Gmail sync but appears missing from the IMAP sync flow (`src/services/imap/imapSync.ts`). Verify and add if missing.
@@ -92,11 +89,11 @@
 - [x] **Rust timeout error messages** — `src-tauri/src/imap/client.rs`
   Same `format!("...timed out after {}s — check your server...")` repeated 10+ times. Create a timeout error helper or macro. *(Done — `timeout_err()` helper function.)*
 
-- [ ] **Zustand settings persistence** — `src/stores/uiStore.ts`
-  15× identical `setSetting("key", value).catch(() => {})`. Create a `persistSetting()` helper with logging.
+- [x] ~~**Zustand settings persistence** — `src/stores/uiStore.ts`
+  Fixed: `persistSetting()` helper with error logging.~~
 
-- [ ] **ContextMenuPortal batch operations** — `src/components/ui/ContextMenuPortal.tsx:344-422`
-  `handleToggleRead`, `handleToggleStar`, `handleTogglePin` all follow the same for-loop-find-toggle pattern. Create a `ThreadBatchOperation` helper.
+- [x] ~~**ContextMenuPortal batch operations** — `src/components/ui/ContextMenuPortal.tsx`
+  Fixed: `batchToggle()` helper for toggle read/star/pin/mute.~~
 
 - [ ] **Unsafe type assertions** — `src/services/email/gmailProvider.ts:140`, `src/utils/crypto.ts:54`, `src/components/ui/ContextMenuPortal.tsx:167-268`
   Multiple `as unknown as` casts and untyped context menu data. Create typed payload interfaces and guards.
