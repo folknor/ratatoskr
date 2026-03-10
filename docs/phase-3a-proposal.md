@@ -1,7 +1,7 @@
 # Phase 3a: Provider Consolidation Proposal
 
 **Date**: March 2026
-**Status**: Draft v2 — revised after review
+**Status**: Implemented (steps 1-8 complete)
 **Prerequisite for**: Graph provider (Phase 3b/3c)
 
 ---
@@ -429,33 +429,33 @@ pub struct ProviderFolder {
 
 ## Implementation Order
 
-1. **Add `provider/types.rs`** — shared `SyncResult`, `SyncCtx`, `ProviderFolder` (extract from Gmail/JMAP)
-2. **Add `provider/ops.rs`** — `ProviderOps` trait definition
-3. **Add `gmail/ops.rs`** — `GmailOps` implementing `ProviderOps`, delegating to existing functions
-4. **Add `jmap/ops.rs`** — `JmapOps` implementing `ProviderOps`, delegating to existing functions
-5. **Add `provider/router.rs`** — `get_ops()` dispatch + `get_provider_type()` DB lookup
-6. **Add `provider/commands.rs`** — ~17 `provider_*` Tauri commands (thin wrappers via macro)
-7. **Register commands in `lib.rs`**
-8. **Simplify `emailActions.ts`** — replace `executeViaGmailRust`/`executeViaJmapRust` with `provider_*` calls
+1. ~~**Add `provider/types.rs`**~~ — `SyncResult`, `ProviderCtx`, `ProviderFolder`, `AttachmentData` ✅
+2. ~~**Add `provider/ops.rs`**~~ — `ProviderOps` trait (17 async methods via `async-trait`) ✅
+3. ~~**Add `gmail/ops.rs`**~~ — `GmailOps` implementing `ProviderOps` ✅
+4. ~~**Add `jmap/ops.rs`**~~ — `JmapOps` implementing `ProviderOps` ✅
+5. ~~**Add `provider/router.rs`**~~ — `get_provider_type()` DB lookup + `get_ops()` dispatch ✅
+6. ~~**Add `provider/commands.rs`**~~ — 17 `provider_*` Tauri commands ✅
+7. ~~**Register commands in `lib.rs`**~~ ✅
+8. ~~**Simplify `emailActions.ts`**~~ — `executeViaProviderRust()` replaces Gmail+JMAP dispatchers ✅
 9. **Build Graph** (Phase 3b) — add `GraphOps` + one arm in `get_ops()`
 
-Steps 1-8 are Phase 3a. Step 9 is Phase 3b.
+Steps 1-8 are Phase 3a (complete). Step 9 is Phase 3b.
 
-### Estimated scope
+### Actual scope
 
-| Step | Lines | Difficulty |
-|------|-------|------------|
-| 1. `provider/types.rs` | ~40 | Trivial |
-| 2. `provider/ops.rs` | ~40 | Low — trait definition only |
-| 3. `gmail/ops.rs` | ~150 | Low — delegation to existing functions |
-| 4. `jmap/ops.rs` | ~150 | Low — delegation to existing functions |
-| 5. `provider/router.rs` | ~40 | Low |
-| 6. `provider/commands.rs` | ~100 | Low — macro-generated thin wrappers |
-| 7. `lib.rs` registration | ~5 | Trivial |
-| 8. `emailActions.ts` simplification | -200, +50 | Low — delete two dispatcher functions |
-| **Total** | ~525 new Rust, ~150 net TS reduction | |
+| Step | Lines | Notes |
+|------|-------|-------|
+| 1. `provider/types.rs` | 43 | `ProviderCtx` instead of `SyncCtx` (clearer name) |
+| 2. `provider/ops.rs` | 92 | `async-trait` for dyn dispatch |
+| 3. `gmail/ops.rs` | 211 | Delegates to `GmailClient` methods |
+| 4. `jmap/ops.rs` | 304 | Delegates to existing JMAP helpers (made `pub(crate)`) |
+| 5. `provider/router.rs` | 42 | |
+| 6. `provider/commands.rs` | 370 | No macro — explicit commands for clarity, `#[allow(too_many_arguments)]` |
+| 7. `lib.rs` registration | 17 | |
+| 8. `emailActions.ts` | -139 net | Deleted `executeViaGmailRust` + `executeViaJmapRust` |
+| **Total** | ~1080 new Rust, -139 net TS | |
 
-Note: ~100 more Rust lines than v1, but the added lines are in the trait + impl files. The commands file shrinks from ~350 to ~100 because the macro eliminates per-command match boilerplate. More importantly, adding Graph in Phase 3b is ~150 lines (one `GraphOps` impl + one router arm) instead of ~350 (match arm in every command).
+The commands file ended up larger than estimated (~370 vs ~100) because we used explicit command functions instead of a macro. Each command is ~20 lines of boilerplate (resolve provider, get ops, build ctx, call trait method). This is more readable and debuggable than a macro, and the boilerplate is mechanical — adding Graph still only requires one `GraphOps` impl + one router arm.
 
 ---
 

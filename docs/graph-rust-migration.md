@@ -114,40 +114,31 @@ That changes how the Graph send decision should be framed:
 
 The important correction is: Graph is not choosing between existing abstractions. It is either adapting to the current MIME boundary or forcing a new boundary across all Rust providers.
 
-### 5. The auth-method normalization issue is still real
+### 5. The auth-method normalization issue — DONE
 
-This part of the original plan still holds and should remain in the document.
-
-The mismatch is still present:
-
-- DB migrations default `accounts.auth_method` to `"oauth"`
-- runtime IMAP/OAuth paths still branch on `"oauth2"`
-
-That is not specific to Graph, but Graph would expose it immediately if we create Microsoft-backed accounts that rely on the same shared account model.
-
-This should stay as a concrete cleanup prerequisite.
+Fixed via migration v24 (Rust) / v26 (TS): `UPDATE accounts SET auth_method = 'oauth2' WHERE auth_method = 'oauth'`. No longer a Graph blocker.
 
 ### 6. Recommended reframing of phase 3
 
 Given the repo state after phases 1 and 2, phase 3 should be thought of as three pieces, not one:
 
-1. **Phase 3a: Rust provider consolidation**
-   - extract the shared Rust provider trait from Gmail + JMAP
-   - decide command-shape strategy (`graph_*` first vs provider-agnostic now)
-   - settle send-contract direction
-   - settle label/mailbox/folder operation semantics
+1. **Phase 3a: Rust provider consolidation — DONE**
+   - `ProviderOps` trait extracted from Gmail + JMAP (17 async methods)
+   - Provider-agnostic `provider_*` Tauri commands route via `get_ops()` → `Box<dyn ProviderOps>`
+   - Raw MIME send boundary kept; Graph adapts internally
+   - `add_tag`/`remove_tag` + `move_to_folder` replaces overloaded `addLabel`/`removeLabel`
+   - `emailActions.ts` simplified from 3 dispatch paths to 2 (Rust providers + IMAP TS)
+   - See `docs/phase-3a-proposal.md` for design decisions and rationale
 2. **Phase 3b: Graph Rust provider**
    - Graph client
    - Graph sync engine
-   - Graph actions
+   - Graph actions (implement `ProviderOps` for `GraphOps`)
    - Graph folder/category mapping
+   - Add one arm to `get_ops()` in `provider/router.rs`
 3. **Phase 3c: Graph TS/UI integration**
    - account setup
-   - providerFactory/emailActions/queue wiring
-   - syncManager routing
+   - syncManager routing (already simplified — just add `"graph"` to non-IMAP path)
    - startup/init behavior
-
-This is a better fit for the actual codebase than the older framing where Graph starts only after a trait that does not yet exist.
 
 ---
 
@@ -327,27 +318,22 @@ The sync engine must use `tokio::sync::Semaphore` with a much lower permit count
 
 Additionally: 10,000 API requests per 10 minutes per app per mailbox. This is generous for delta sync but could be hit during large initial syncs. Track request count and back off if approaching the limit.
 
-### 5. Shared trait readiness
+### 5. Shared trait readiness — DECIDED (Phase 3a complete)
 
-By the time Graph starts, will the `EmailProvider` trait be extracted from Gmail + JMAP? If yes, Graph is the first provider built against it. If no, Graph is another one-off and we have three providers to reconcile later.
+The `ProviderOps` trait has been extracted from Gmail + JMAP. Graph will be the first provider built against it. See `docs/phase-3a-proposal.md` for the full design.
 
-### 6. Send and draft contract
+Key files:
+- `src-tauri/src/provider/ops.rs` — trait definition (17 async methods)
+- `src-tauri/src/provider/router.rs` — `get_ops()` resolves account → `Box<dyn ProviderOps>`
+- `src-tauri/src/provider/commands.rs` — 17 `provider_*` Tauri commands
+- `src-tauri/src/gmail/ops.rs` — `GmailOps` implementing the trait
+- `src-tauri/src/jmap/ops.rs` — `JmapOps` implementing the trait
 
-This is a trait-level decision, not just a Graph adapter detail.
+Graph implementation: add `graph/ops.rs` with `GraphOps` implementing `ProviderOps`, add one arm to `get_ops()`.
 
-**The current provider contract**: `sendMessage(rawBase64Url: string, threadId?: string) → { id: string }` (see `types.ts:71`). All providers accept raw MIME and return a sent message ID. `emailActions.ts:418` dispatches through this interface.
+### 6. Send and draft contract — DECIDED
 
-**Graph breaks this contract in two ways:**
-1. **Input format**: Graph's `/me/sendMail` accepts a JSON `Message` object, not raw RFC 822 MIME. The JSON API flattens MIME structure — inline images, Content-ID references, and multipart/alternative become the caller's responsibility.
-2. **Return value**: `/me/sendMail` typically does not return the sent message ID. The sent message appears in the Sent Items folder but the API doesn't give you its ID synchronously.
-
-**Options:**
-
-- **A. Graph adapts internally to the raw MIME contract**: Accept `rawBase64Url` like other providers. Internally, use the **create-draft-then-send** path: `POST /me/messages` (create draft from parsed MIME data) → `POST /me/messages/{id}/send` (send draft, we have the ID from creation). This preserves the trait contract at the cost of two API calls per send and a MIME→JSON conversion step in Rust.
-- **B. Split the trait's send interface**: The trait accepts structured message data (recipients, subject, body, attachments) instead of raw MIME. Each provider serializes to its native format internally. Gmail and JMAP would need to move away from the current TS-built raw MIME boundary, and Graph would build its JSON payload from the structured input. This is a cleaner abstraction but requires changing the existing send contract for all providers.
-- **C. Raw MIME send via undocumented Graph endpoint**: POST to `/me/sendMail` with `Content-Type: text/plain` and raw MIME bytes (undocumented but reportedly works). Preserves the raw MIME contract. But: undocumented API surface is risky for production.
-
-Until this is decided, the command signatures for `graph_send_email` and `graph_create_draft` in this document are provisional. The Phase 1 code samples assume Option A (create-draft-then-send) as the most conservative choice, but this may change.
+**Decision: Option A (create-draft-then-send).** Graph accepts `raw_base64url` like Gmail and JMAP. Internally uses `POST /me/messages` (MIME → JSON) then `POST /me/messages/{id}/send`. This preserves the trait contract. See `docs/phase-3a-proposal.md` Decision 3 for rationale and known complexity areas (inline attachments, multipart, threading, address normalization — estimated 100-200 lines of adapter code, verify during Phase 3b).
 
 ### 7. Thread action scope: local vs remote enumeration
 
@@ -1275,12 +1261,14 @@ Smaller than Gmail (~2,700-3,500 Rust lines) because:
 
 ## What We Defer
 
-### Phase 3a: Consolidation Work
+### Phase 3a: Consolidation Work — DONE
 
-1. **Shared Rust provider trait extraction** — extract the provider shape from the real Gmail + JMAP implementations, now that both exist in Rust and both have TS integration. This is no longer an assumed byproduct of phases 1 and 2; it is explicit phase 3 work.
-2. **Provider-agnostic Tauri commands decision** — decide whether Graph launches on `graph_*` commands first or whether phase 3 also introduces generic provider-routed commands. This depends on item 1.
-3. **Send contract decision** — keep the current TS-built raw MIME boundary and adapt Graph internally, or intentionally redesign the send/draft interface around structured input for all providers.
-4. **Folder/label operation semantics** — decide whether the shared abstraction tolerates provider-specific `add_label` meaning, or whether folder moves and category/label changes must become separate operations before Graph lands.
+All four items resolved and implemented. See `docs/phase-3a-proposal.md` for design decisions.
+
+1. ~~**Shared Rust provider trait extraction**~~ — `ProviderOps` trait in `provider/ops.rs`, implemented by `GmailOps` and `JmapOps`. ✅
+2. ~~**Provider-agnostic Tauri commands**~~ — 17 `provider_*` commands dispatch via `get_ops()` → `Box<dyn ProviderOps>`. ✅
+3. ~~**Send contract decision**~~ — raw MIME boundary kept. Graph adapts internally (create-draft-then-send). ✅
+4. ~~**Folder/label operation semantics**~~ — `add_tag`/`remove_tag` + `move_to_folder` replaces overloaded `addLabel`/`removeLabel`. ✅
 
 ### Graph-specific
 
@@ -1297,7 +1285,7 @@ Smaller than Gmail (~2,700-3,500 Rust lines) because:
 15. **JSON batching optimization** — the `/$batch` endpoint supports up to 20 requests per batch. Investigate using it for initial sync (batch message fetches) in addition to thread-level actions.
 16. **`$expand` for attachments** — `GET /me/messages/{id}?$expand=attachments` can inline attachment metadata in message responses. May eliminate separate attachment list calls during sync.
 17. **`uniqueBody` usage** — Graph's `uniqueBody` field returns the message body without quoted replies. Could improve body store efficiency and thread display. Investigate reliability.
-18. **`auth_method` normalization** — resolve the existing `"oauth"` vs `"oauth2"` inconsistency across migration defaults and runtime checks before Graph accounts are created.
+18. ~~**`auth_method` normalization**~~ — DONE. Migration v24/v26 normalizes to `"oauth2"`.
 
 ### Quick win (can happen before full Graph)
 
@@ -1307,7 +1295,8 @@ Smaller than Gmail (~2,700-3,500 Rust lines) because:
 
 ## References
 
-- `docs/microsoft-exchange-assessment.md` — full ecosystem assessment (EWS vs Graph, crate evaluation, auth details, rate limits)
+- `docs/phase-3a-proposal.md` — Phase 3a consolidation design decisions (ProviderOps trait, tag/folder split, send contract)
+- ~~`docs/microsoft-exchange-assessment.md`~~ — removed (content folded into this doc)
 - `docs/rust-provider-crate-research.md` — crate decisions and strategic plan (Graph endpoints table, architecture decisions)
 - `docs/gmail-rust-migration.md` — Gmail patterns that Graph will follow (token management, reqwest setup, sync-with-DB-writes)
 - `docs/jmap-rust-migration.md` — JMAP patterns (thread-level action semantics, mailbox mapping, trait extraction trigger)
