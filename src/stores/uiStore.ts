@@ -3,6 +3,13 @@ import { create } from "zustand";
 import type { ColorThemeId } from "@/constants/themes";
 import { setSetting } from "@/core/settings";
 
+/** Fire-and-forget setting persistence with error logging. */
+function persistSetting(key: string, value: string): void {
+  setSetting(key, value).catch((err: unknown) => {
+    console.error(`Failed to persist setting "${key}":`, err);
+  });
+}
+
 type Theme = "light" | "dark" | "system";
 type ReadingPanePosition = "right" | "bottom" | "hidden";
 type ReadFilter = "all" | "read" | "unread";
@@ -91,7 +98,7 @@ export const useUIStore: UseBoundStore<StoreApi<UIState>> = create<UIState>(
     toggleSidebar: () =>
       set((state) => {
         const collapsed = !state.sidebarCollapsed;
-        setSetting("sidebar_collapsed", String(collapsed)).catch(() => {});
+        persistSetting("sidebar_collapsed", String(collapsed));
         return { sidebarCollapsed: collapsed };
       }),
     setSidebarCollapsed: (sidebarCollapsed: boolean) =>
@@ -99,73 +106,71 @@ export const useUIStore: UseBoundStore<StoreApi<UIState>> = create<UIState>(
     toggleContactSidebar: () =>
       set((state) => {
         const visible = !state.contactSidebarVisible;
-        setSetting("contact_sidebar_visible", String(visible)).catch(() => {});
+        persistSetting("contact_sidebar_visible", String(visible));
         return { contactSidebarVisible: visible };
       }),
     setContactSidebarVisible: (contactSidebarVisible: boolean) =>
       set({ contactSidebarVisible }),
     setReadingPanePosition: (readingPanePosition: ReadingPanePosition) => {
-      setSetting("reading_pane_position", readingPanePosition).catch(() => {});
+      persistSetting("reading_pane_position", readingPanePosition);
       set({ readingPanePosition });
     },
     setReadFilter: (readFilter: ReadFilter) => {
-      setSetting("read_filter", readFilter).catch(() => {});
+      persistSetting("read_filter", readFilter);
       set({ readFilter });
     },
     setEmailListWidth: (emailListWidth: number) => {
-      setSetting("email_list_width", String(emailListWidth)).catch(() => {});
+      persistSetting("email_list_width", String(emailListWidth));
       set({ emailListWidth });
     },
     setEmailDensity: (emailDensity: EmailDensity) => {
-      setSetting("email_density", emailDensity).catch(() => {});
+      persistSetting("email_density", emailDensity);
       set({ emailDensity });
     },
     setDefaultReplyMode: (defaultReplyMode: DefaultReplyMode) => {
-      setSetting("default_reply_mode", defaultReplyMode).catch(() => {});
+      persistSetting("default_reply_mode", defaultReplyMode);
       set({ defaultReplyMode });
     },
     setMarkAsReadBehavior: (markAsReadBehavior: MarkAsReadBehavior) => {
-      setSetting("mark_as_read_behavior", markAsReadBehavior).catch(() => {});
+      persistSetting("mark_as_read_behavior", markAsReadBehavior);
       set({ markAsReadBehavior });
     },
     setFontScale: (fontScale: FontScale) => {
-      setSetting("font_size", fontScale).catch(() => {});
+      persistSetting("font_size", fontScale);
       set({ fontScale });
     },
     setColorTheme: (colorTheme: ColorThemeId) => {
-      setSetting("color_theme", colorTheme).catch(() => {});
+      persistSetting("color_theme", colorTheme);
       set({ colorTheme });
     },
     setSendAndArchive: (sendAndArchive: boolean) => {
-      setSetting("send_and_archive", String(sendAndArchive)).catch(() => {});
+      persistSetting("send_and_archive", String(sendAndArchive));
       set({ sendAndArchive });
     },
     setInboxViewMode: (inboxViewMode: InboxViewMode) => {
-      setSetting("inbox_view_mode", inboxViewMode).catch(() => {});
+      persistSetting("inbox_view_mode", inboxViewMode);
       set({ inboxViewMode });
     },
     toggleTaskSidebar: () =>
       set((state) => {
         const visible = !state.taskSidebarVisible;
-        setSetting("task_sidebar_visible", String(visible)).catch(() => {});
+        persistSetting("task_sidebar_visible", String(visible));
         return { taskSidebarVisible: visible };
       }),
     setTaskSidebarVisible: (taskSidebarVisible: boolean) =>
       set({ taskSidebarVisible }),
     setSidebarNavConfig: (sidebarNavConfig: SidebarNavItem[]) => {
-      setSetting("sidebar_nav_config", JSON.stringify(sidebarNavConfig)).catch(
-        () => {},
-      );
+      persistSetting("sidebar_nav_config", JSON.stringify(sidebarNavConfig));
       set({ sidebarNavConfig });
     },
     restoreSidebarNavConfig: (sidebarNavConfig: SidebarNavItem[]) =>
       set({ sidebarNavConfig }),
     setReduceMotion: (reduceMotion: boolean) => {
-      setSetting("reduce_motion", String(reduceMotion)).catch(() => {});
+      persistSetting("reduce_motion", String(reduceMotion));
       set({ reduceMotion });
     },
     setShowSyncStatusBar: (showSyncStatusBar: boolean) => {
-      setSetting("show_sync_status", String(showSyncStatusBar)).catch(() => {});
+      persistSetting("show_sync_status", String(showSyncStatusBar));
       set({ showSyncStatusBar });
     },
     setOnline: (isOnline: boolean) => set({ isOnline }),
