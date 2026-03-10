@@ -1132,3 +1132,37 @@ export async function threadingUpdateThreads(
     newMessages,
   });
 }
+
+// ═══════════════════════════════════════════════════════════════
+// CATEGORIZATION RULE ENGINE (Phase 6 — deterministic rules in Rust)
+// ═══════════════════════════════════════════════════════════════
+
+import type { ThreadCategory } from "@/services/db/threadCategories";
+
+/** Input for rule-based categorization (sent to Rust). */
+export interface CategorizationInput {
+  label_ids: string[];
+  from_address: string | null;
+  list_unsubscribe: string | null;
+}
+
+/**
+ * Categorize a single thread using deterministic rules (Rust).
+ * Returns "Primary", "Updates", "Promotions", "Social", or "Newsletters".
+ */
+export async function categorizeThreadByRules(
+  input: CategorizationInput,
+): Promise<ThreadCategory> {
+  return invoke<ThreadCategory>("categorize_thread_by_rules", { input });
+}
+
+/**
+ * Batch-categorize multiple threads using deterministic rules (Rust).
+ * Returns categories in the same order as the inputs.
+ */
+export async function categorizeThreadsByRules(
+  inputs: CategorizationInput[],
+): Promise<ThreadCategory[]> {
+  if (inputs.length === 0) return [];
+  return invoke<ThreadCategory[]>("categorize_threads_by_rules", { inputs });
+}

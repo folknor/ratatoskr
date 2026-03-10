@@ -7,6 +7,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::MacosLauncher;
 
 mod body_store;
+mod categorization;
 mod commands;
 mod db;
 mod email_actions;
@@ -229,6 +230,9 @@ pub fn run() {
             // JWZ threading (Phase 6)
             threading::commands::threading_build_threads,
             threading::commands::threading_update_threads,
+            // Categorization rule engine (Phase 6)
+            categorization::commands::categorize_thread_by_rules,
+            categorization::commands::categorize_threads_by_rules,
         ])
         .setup(|app| {
             {

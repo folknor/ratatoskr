@@ -4,11 +4,11 @@
 
 ### HIGH
 
-- [ ] **Draft auto-save race condition** — `src/services/composer/draftAutoSave.ts:15-75`
-  `currentAccountId` captured as closure variable. If user switches accounts during the 3s debounce, draft saves to wrong account. Fix: use a ref or read account at save time.
+- [x] ~~**Draft auto-save race condition** — `src/services/composer/draftAutoSave.ts`
+  Fixed: `saveDraft()` now reads `activeAccountId` from account store at save time instead of capturing as a closure variable.~~
 
-- [ ] **Stale closure in EmailList mapDbThreads** — `src/components/layout/EmailList.tsx:356`
-  `mapDbThreads` has empty dependency array `[]` but uses `activeAccountId`. Thread metadata may be fetched for wrong account.
+- [x] ~~**Stale closure in EmailList mapDbThreads** — `src/hooks/useEmailListData.ts:208`
+  `mapDbThreads` had empty dependency array `[]`. Added `activeAccountId` to deps.~~
 
 ### MEDIUM
 
