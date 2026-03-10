@@ -5,6 +5,62 @@
 
 ---
 
+## Strategic Plan
+
+### Current state
+
+Ratatoskr has four email provider paths:
+
+| Provider | Protocol | Implementation | Status |
+|----------|----------|---------------|--------|
+| **IMAP/SMTP** | TCP/TLS custom protocol | **Rust** (`src-tauri/src/imap/`, `smtp/`) | Production |
+| **Gmail API** | REST/JSON over HTTPS | **TypeScript** (`src/services/gmail/`) | Production, moving to Rust |
+| **JMAP** | JSON-over-HTTP (RFC 8620/8621) | **Not yet implemented** | Planned — reference impl in `docs/jmap.md` |
+| **Microsoft Graph** | REST/JSON over HTTPS | **Not yet implemented** | Planned — research in `docs/microsoft-exchange-assessment.md` |
+
+The problem: Gmail lives in TypeScript, which means token refresh, HTTP calls, message parsing, sync logic, and DB writes all cross the IPC boundary repeatedly. JMAP and Graph would add two more TS provider implementations with the same overhead. Meanwhile IMAP already proves the Rust-native pattern works — direct DB access, direct body store writes, direct search indexing, no serialization per message.
+
+### Target state
+
+All four providers implemented in Rust as Tauri commands. The TypeScript layer is reduced to:
+
+- **UI**: components, stores, rendering
+- **Orchestration**: 60s sync timer, post-sync hooks (filters, smart labels, notifications, AI categorization)
+- **Offline queue**: optimistic UI updates, operation queueing, dispatch to Rust commands
+- **OAuth flow initiation**: browser interaction for initial token acquisition
+
+Everything below the Tauri command boundary — HTTP calls, token management, message parsing, sync logic, DB writes, body compression, search indexing — lives in Rust.
+
+### Execution order
+
+1. **Gmail API → Rust** (first, see `docs/gmail-rust-migration.md`): Establishes patterns for token management, reqwest+retry HTTP client, message parsing, sync-with-direct-DB-writes, Tauri event progress reporting. Most-used provider, known-good TS reference to port from.
+
+2. **JMAP → Rust** (second): Uses `jmap-client` crate (Stalwart). HTTP-based like Gmail, so it reuses the same token management and retry infrastructure. JMAP is simpler than Gmail in some ways (native `threadId`, state-string delta sync, no History API quirks) but adds mailbox↔label mapping and `EmailSubmission` for sending.
+
+3. **Microsoft Graph → Rust** (third): Same HTTP/JSON pattern as Gmail. Adds Microsoft OAuth2 endpoints (Entra ID, `/common/oauth2/v2.0/`), OData query parameters, per-folder delta tokens, and folder-centric (not label-centric) semantics. Reuses token refresh infrastructure with Microsoft-specific endpoint configuration.
+
+4. **IMAP stays as-is**: Already in Rust. May benefit from shared infrastructure built during the above (e.g., `mail-builder` for message construction), but requires no migration.
+
+### What we do NOT do prematurely
+
+- **No shared `EmailProvider` trait until two providers exist in Rust.** Gmail is label-centric, Graph is folder-centric, JMAP uses mailboxes + `jmap-client`'s API. Forcing a common trait before seeing real implementations will produce a leaky abstraction. Build Gmail-specific Rust services first, extract shared traits after Gmail + one more provider are working.
+- **No provider-agnostic Tauri commands until the trait exists.** Commands are `gmail_*`, `jmap_*`, `graph_*` prefixed. Provider routing stays in TS until Rust has a trait to route against.
+
+### Crate strategy
+
+For each provider, the approach depends on ecosystem maturity:
+
+| Provider | Approach | Rationale |
+|----------|----------|-----------|
+| **JMAP** | Use `jmap-client` crate | Only viable Rust JMAP client. Full RFC 8620/8621 coverage. Same Stalwart ecosystem as `mail-parser`. |
+| **Gmail API** | Hand-roll on `reqwest` | ~17 REST endpoints. The auto-generated `google-gmail1` crate is in maintenance mode and uses hyper (not reqwest). Not worth the dependency. |
+| **Microsoft Graph** | Hand-roll on `reqwest` | ~18 REST endpoints. `graph-rs-sdk` covers the entire Graph API (not just Mail), has single-maintainer risk, and brings its own OAuth layer. Too heavy. |
+| **OAuth2** | Keep existing hand-rolled `oauth.rs` | Already handles PKCE, localhost redirect, token exchange/refresh, CSRF validation. Extend with Microsoft endpoints. |
+
+The rest of this document evaluates each crate option in detail.
+
+---
+
 ## Table of Contents
 
 - [Current Rust Dependencies](#current-rust-dependencies)
