@@ -104,25 +104,27 @@ export function AddImapAccount({
 
   const handleEmailBlur = useCallback((): void => {
     if (discoveryApplied) return;
-    const result = discoverSettings(form.email);
-    if (result && !form.imapHost && !form.smtpHost) {
-      setForm((prev) => ({
-        ...prev,
-        imapHost: result.settings.imapHost,
-        imapPort: result.settings.imapPort,
-        imapSecurity: result.settings.imapSecurity,
-        smtpHost: result.settings.smtpHost,
-        smtpPort: result.settings.smtpPort,
-        smtpSecurity: result.settings.smtpSecurity,
-        acceptInvalidCerts: result.acceptInvalidCerts ?? false,
-        // Auto-select OAuth2 if it's the only option (e.g. Outlook)
-        authMode: result.authMethods[0] === "oauth2" ? "oauth2" : prev.authMode,
-        oauthProvider: result.oauthProviderId ?? null,
-      }));
-      setDetectedAuthMethods(result.authMethods);
-      setDetectedOAuthProviderId(result.oauthProviderId ?? null);
-      setDiscoveryApplied(true);
-    }
+    void discoverSettings(form.email).then((result) => {
+      if (result && !form.imapHost && !form.smtpHost) {
+        setForm((prev) => ({
+          ...prev,
+          imapHost: result.settings.imapHost,
+          imapPort: result.settings.imapPort,
+          imapSecurity: result.settings.imapSecurity,
+          smtpHost: result.settings.smtpHost,
+          smtpPort: result.settings.smtpPort,
+          smtpSecurity: result.settings.smtpSecurity,
+          acceptInvalidCerts: result.acceptInvalidCerts ?? false,
+          // Auto-select OAuth2 if it's the only option (e.g. Outlook)
+          authMode:
+            result.authMethods[0] === "oauth2" ? "oauth2" : prev.authMode,
+          oauthProvider: result.oauthProviderId ?? null,
+        }));
+        setDetectedAuthMethods(result.authMethods);
+        setDetectedOAuthProviderId(result.oauthProviderId ?? null);
+        setDiscoveryApplied(true);
+      }
+    });
   }, [form.email, form.imapHost, form.smtpHost, discoveryApplied]);
 
   const handleImapSecurityChange = useCallback(

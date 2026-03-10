@@ -10,6 +10,7 @@ mod body_store;
 mod categorization;
 mod commands;
 mod db;
+mod discovery;
 mod email_actions;
 mod filters;
 mod gmail;
@@ -425,7 +426,6 @@ pub fn run() {
             jmap::commands::jmap_init_client,
             jmap::commands::jmap_remove_client,
             jmap::commands::jmap_test_connection,
-            jmap::commands::jmap_discover_url,
             jmap::commands::jmap_get_profile,
             jmap::commands::jmap_sync_initial,
             jmap::commands::jmap_sync_delta,
@@ -457,6 +457,8 @@ pub fn run() {
             provider::commands::provider_delete_draft,
             provider::commands::provider_fetch_attachment,
             provider::commands::provider_list_folders,
+            // Discovery
+            discovery::commands::discover_email_config,
         ])
         .setup(|app| {
             {

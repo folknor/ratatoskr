@@ -22,12 +22,11 @@ export {
   getClientId,
   getClientSecret,
 } from "@/services/gmail/tokenManager";
-// IMAP auto-discovery
+// IMAP auto-discovery (backed by Rust discover_email_config command)
 export {
   type AuthMethod,
   discoverSettings,
   extractDomain,
-  findWellKnownProvider,
   getDefaultImapPort,
   getDefaultSmtpPort,
   guessServerSettings,

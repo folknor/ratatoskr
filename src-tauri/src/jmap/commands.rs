@@ -8,7 +8,6 @@ use crate::body_store::BodyStoreState;
 use crate::db::DbState;
 use crate::search::SearchState;
 
-use super::auto_discovery::{JmapDiscoveryResult, discover_jmap_url};
 use super::client::{JmapClient, JmapState};
 use super::mailbox_mapper::{label_id_to_mailbox_id, map_mailbox_to_label};
 use super::sync::{JmapSyncResult, jmap_delta_sync, jmap_initial_sync};
@@ -55,11 +54,6 @@ pub async fn jmap_test_connection(
 pub struct JmapTestResult {
     pub success: bool,
     pub message: String,
-}
-
-#[tauri::command]
-pub async fn jmap_discover_url(email: String) -> Result<Option<JmapDiscoveryResult>, String> {
-    Ok(discover_jmap_url(&email).await)
 }
 
 #[tauri::command]
