@@ -1,7 +1,7 @@
 # Microsoft Graph → Rust Migration Plan
 
 **Date**: March 2026
-**Status**: Ready for implementation (Phase 3a consolidation complete; Phase 3b/3c remain)
+**Status**: Phase 3b complete (Rust provider fully implemented); Phase 3c (TS/UI integration) remains
 **Goal**: Implement Microsoft Graph Mail API as a Rust-native email provider. This is step 3 in the execution order from `docs/rust-provider-crate-research.md`.
 
 Unlike Gmail (migrating existing TS → Rust) and JMAP (new provider, no production TS code), Graph is the first provider built against the shared `ProviderOps` trait. The consolidation prerequisite (Phase 3a) is complete — provider-agnostic Tauri commands exist, the trait is extracted, and Graph implementation can begin directly.

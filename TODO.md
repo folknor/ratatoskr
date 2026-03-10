@@ -76,6 +76,34 @@
 
 ---
 
+## Phase 3b (Graph Provider) Known Issues
+
+- [x] **~~`fetch_all_folders` pagination bug~~** — Fixed. Moved folder fetching to `src-tauri/src/graph/sync.rs` with consistent `get_absolute()` for OData `@odata.nextLink` pagination. Both `fetch_all_folders()` and `fetch_child_folders()` now use `get_json()` for the initial request and `get_absolute()` for all subsequent pages.
+
+- [ ] **`addr_to_recipients` mail-parser API unverified** — `src-tauri/src/graph/ops.rs`
+
+  Uses `mail_parser::Address::iter()` assuming it yields individual `Addr` structs. If mail-parser 0.11 has a `Group` vs `Addr` enum situation, this may silently drop addresses. Needs verification against actual MIME before relying on it for send.
+
+- [ ] **Category add/remove is racy** — `src-tauri/src/graph/ops.rs`
+
+  `add_category`/`remove_category` do a read-then-write (fetch current categories, modify, PATCH back). Two concurrent actions on the same message could clobber each other. Graph has no atomic "add to array" operation, so this is unavoidable but worth knowing.
+
+- [ ] **No `$batch` optimization for thread actions** — `src-tauri/src/graph/ops.rs`
+
+  Thread-level actions loop through messages one-by-one. The plan doc describes batching up to 20 requests per `/$batch` call. Left as follow-up — per-message approach is correct but slower under the 4-concurrent limit.
+
+- [ ] **`update_draft` changes the draft ID** — `src-tauri/src/graph/ops.rs`
+
+  Implemented as delete-then-create since Graph has no draft mutation. The trait returns the new ID, but need to verify the TS call sites in `draftAutoSave.ts` and composer actually use the returned value rather than caching the old ID.
+
+- [x] **~~Sync is fully stubbed~~** — Fixed. Implemented in `src-tauri/src/graph/sync.rs` (~550 lines) + `src-tauri/src/graph/parse.rs` (~170 lines). Covers: folder sync + label persistence, per-folder paginated message fetch with date filter, message parsing (GraphMessage → DB-ready struct with header extraction, label derivation, ISO date parsing), per-folder delta token bootstrap and incremental delta sync, DB writes (thread/message/label upsert), body store (zstd-compressed), Tantivy search indexing, pending-ops conflict filter, and progress events.
+
+- [ ] **`microsoft_client_id` settings key has no UI** — `src-tauri/src/graph/client.rs`
+
+  The client reads `microsoft_client_id` from the settings table but there's no migration, settings UI, or `AddGraphAccount` flow to set it. Need setup flow before any real Graph account can connect.
+
+---
+
 ## TypeScript Strictness
 
 - [ ] **39 remaining TS errors** — Mostly from `exactOptionalPropertyTypes` (34 TS2375/TS2379) and other type mismatches (TS2322, TS2345). Decide whether to fix all or relax the option.

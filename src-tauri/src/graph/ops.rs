@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
 use mail_parser::MimeHeaders;
@@ -10,7 +8,7 @@ use crate::provider::types::{AttachmentData, ProviderCtx, ProviderFolder, SyncRe
 use super::client::GraphClient;
 use super::folder_mapper::FolderMap;
 use super::types::{
-    GraphAttachment, GraphFlagInput, GraphMailFolder, GraphMessagePatch, GraphMoveRequest,
+    GraphAttachment, GraphFlagInput, GraphMessagePatch, GraphMoveRequest,
 };
 
 /// Graph implementation of the provider operations trait.
@@ -25,11 +23,11 @@ impl ProviderOps for GraphOps {
         ctx: &ProviderCtx<'_>,
         days_back: i64,
     ) -> Result<(), String> {
-        sync_initial_impl(&self.client, ctx, days_back).await
+        super::sync::graph_initial_sync(&self.client, ctx, days_back).await
     }
 
     async fn sync_delta(&self, ctx: &ProviderCtx<'_>) -> Result<SyncResult, String> {
-        sync_delta_impl(&self.client, ctx).await
+        super::sync::graph_delta_sync(&self.client, ctx).await
     }
 
     async fn archive(
@@ -256,7 +254,9 @@ impl ProviderOps for GraphOps {
         &self,
         ctx: &ProviderCtx<'_>,
     ) -> Result<Vec<ProviderFolder>, String> {
-        let folder_map = build_or_get_folder_map(&self.client, ctx).await?;
+        // Refresh folder map (re-syncs from server)
+        let folder_map = super::sync::sync_folders_public(&self.client, ctx).await?;
+        self.client.set_folder_map(folder_map.clone()).await;
         let folders = folder_map
             .all_mappings()
             .map(|m| ProviderFolder {
@@ -282,135 +282,6 @@ async fn require_folder_map(client: &GraphClient) -> Result<FolderMap, String> {
         .folder_map()
         .await
         .ok_or_else(|| "Folder map not initialized — run sync first".to_string())
-}
-
-/// Build a new folder map (or return cached one).
-async fn build_or_get_folder_map(
-    client: &GraphClient,
-    ctx: &ProviderCtx<'_>,
-) -> Result<FolderMap, String> {
-    if let Some(map) = client.folder_map().await {
-        return Ok(map);
-    }
-    let map = resolve_folder_map(client, ctx).await?;
-    client.set_folder_map(map.clone()).await;
-    Ok(map)
-}
-
-/// Resolve well-known folders and build the folder map.
-#[allow(clippy::too_many_lines)]
-async fn resolve_folder_map(
-    client: &GraphClient,
-    ctx: &ProviderCtx<'_>,
-) -> Result<FolderMap, String> {
-    // Phase 1: Resolve well-known aliases to opaque IDs
-    let mut resolved = HashMap::new();
-    for &(alias, label_id, label_name) in FolderMap::well_known_aliases() {
-        match client
-            .get_json::<GraphMailFolder>(&format!("/me/mailFolders/{alias}"), ctx.db)
-            .await
-        {
-            Ok(folder) => {
-                resolved.insert(folder.id, (label_id, label_name));
-            }
-            Err(_) => {
-                // 404 or error — this well-known folder doesn't exist
-                log::debug!("Well-known folder '{alias}' not found, skipping");
-            }
-        }
-    }
-
-    // Phase 2: Fetch full folder tree
-    let all_folders = fetch_all_folders(client, ctx).await?;
-
-    Ok(FolderMap::build(&resolved, &all_folders))
-}
-
-/// Recursively fetch all folders in the mailbox.
-async fn fetch_all_folders(
-    client: &GraphClient,
-    ctx: &ProviderCtx<'_>,
-) -> Result<Vec<GraphMailFolder>, String> {
-    use super::types::ODataCollection;
-
-    let mut all = Vec::new();
-    let mut url = "/me/mailFolders?$top=250".to_string();
-
-    // Fetch top-level folders with pagination
-    loop {
-        let page: ODataCollection<GraphMailFolder> =
-            client.get_json(&url, ctx.db).await?;
-        let next = page.next_link.clone();
-
-        for folder in &page.value {
-            // Recursively fetch children if any
-            if folder.child_folder_count.unwrap_or(0) > 0 {
-                let children =
-                    fetch_child_folders(client, ctx, &folder.id).await?;
-                all.extend(children);
-            }
-        }
-
-        all.extend(page.value);
-
-        match next {
-            Some(link) => {
-                // OData next links are absolute URLs
-                let page: ODataCollection<GraphMailFolder> =
-                    client.get_absolute(&link, ctx.db).await?;
-                let next2 = page.next_link.clone();
-                all.extend(page.value);
-                if next2.is_none() {
-                    break;
-                }
-                url = next2.unwrap_or_default();
-                if url.is_empty() {
-                    break;
-                }
-            }
-            None => break,
-        }
-    }
-
-    Ok(all)
-}
-
-/// Recursively fetch child folders of a given parent.
-fn fetch_child_folders<'a>(
-    client: &'a GraphClient,
-    ctx: &'a ProviderCtx<'_>,
-    parent_id: &'a str,
-) -> futures::future::BoxFuture<'a, Result<Vec<GraphMailFolder>, String>> {
-    use super::types::ODataCollection;
-
-    Box::pin(async move {
-        let mut children = Vec::new();
-        let mut url = format!("/me/mailFolders/{parent_id}/childFolders?$top=250");
-
-        loop {
-            let page: ODataCollection<GraphMailFolder> =
-                client.get_json(&url, ctx.db).await?;
-            let next = page.next_link.clone();
-
-            for folder in &page.value {
-                if folder.child_folder_count.unwrap_or(0) > 0 {
-                    let sub = fetch_child_folders(client, ctx, &folder.id).await?;
-                    children.extend(sub);
-                }
-            }
-
-            children.extend(page.value);
-
-            match next {
-                Some(link) => {
-                    url = link;
-                }
-                None => break,
-            }
-        }
-
-        Ok(children)
-    })
 }
 
 /// Query local DB for message IDs belonging to a thread.
@@ -702,21 +573,3 @@ async fn upload_attachments_from_mime(
     Ok(())
 }
 
-// ── Sync stubs (will be fleshed out) ────────────────────────
-
-async fn sync_initial_impl(
-    _client: &GraphClient,
-    _ctx: &ProviderCtx<'_>,
-    _days_back: i64,
-) -> Result<(), String> {
-    // TODO: implement Graph initial sync
-    Err("Graph initial sync not yet implemented".into())
-}
-
-async fn sync_delta_impl(
-    _client: &GraphClient,
-    _ctx: &ProviderCtx<'_>,
-) -> Result<SyncResult, String> {
-    // TODO: implement Graph delta sync
-    Err("Graph delta sync not yet implemented".into())
-}

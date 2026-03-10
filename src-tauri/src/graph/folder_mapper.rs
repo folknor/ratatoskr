@@ -115,6 +115,14 @@ impl FolderMap {
         self.by_id.values()
     }
 
+    /// Iterate over all (opaque_folder_id, mapping) pairs.
+    /// Used by sync to enumerate folders for message fetching and delta tokens.
+    pub fn folder_entries(&self) -> impl Iterator<Item = (&str, &FolderLabelMapping)> + '_ {
+        self.by_id
+            .iter()
+            .map(|(fid, m)| (fid.as_str(), m))
+    }
+
     /// The well-known alias list (used by the resolution step in sync).
     pub fn well_known_aliases() -> &'static [(&'static str, &'static str, &'static str)] {
         WELL_KNOWN_ALIASES
