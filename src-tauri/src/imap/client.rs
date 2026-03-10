@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use async_imap::types::Flag;
 use base64::Engine;
 use futures::StreamExt;
@@ -9,6 +11,14 @@ use super::connection::{
 use super::parse::{build_imap_section_map, detect_special_use, parse_message};
 use super::types::*;
 
+/// Build a standardised timeout error message for IMAP operations.
+fn timeout_err(operation: &str, timeout: Duration) -> String {
+    format!(
+        "{operation} timed out after {}s — check your server settings or network connection",
+        timeout.as_secs()
+    )
+}
+
 // Re-export items that commands.rs imports via `imap::client::*`
 pub use super::connection::connect;
 pub use super::raw::{raw_fetch_diagnostic, raw_fetch_messages};
@@ -17,12 +27,12 @@ pub use super::raw::{raw_fetch_diagnostic, raw_fetch_messages};
 pub async fn list_folders(session: &mut ImapSession) -> Result<Vec<ImapFolder>, String> {
     let names_stream = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.list(Some(""), Some("*")))
         .await
-        .map_err(|_| format!("LIST timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+        .map_err(|_| timeout_err("LIST", IMAP_CMD_TIMEOUT))?
         .map_err(|e| format!("LIST failed: {e}"))?;
 
     let names: Vec<_> = tokio::time::timeout(IMAP_CMD_TIMEOUT, names_stream.collect::<Vec<_>>())
         .await
-        .map_err(|_| format!("LIST stream timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+        .map_err(|_| timeout_err("LIST stream", IMAP_CMD_TIMEOUT))?
         .into_iter()
         .filter_map(Result::ok)
         .collect();
@@ -75,7 +85,7 @@ pub async fn fetch_messages(
 ) -> Result<ImapFetchResult, String> {
     let mailbox = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
         .await
-        .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+        .map_err(|_| timeout_err(&format!("SELECT {folder}"), IMAP_CMD_TIMEOUT))?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
     let folder_status = ImapFolderStatus {
@@ -103,7 +113,7 @@ pub async fn fetch_messages(
         Ok::<_, String>(stream.collect::<Vec<_>>().await)
     })
     .await
-    .map_err(|_| format!("UID FETCH {folder} timed out after {}s — check your server settings or network connection", IMAP_FETCH_TIMEOUT.as_secs()))?;
+    .map_err(|_| timeout_err(&format!("UID FETCH {folder}"), IMAP_FETCH_TIMEOUT))?;
 
     let raw_fetches: Vec<_> = fetches?;
     let mut fetch_ok = 0u32;
@@ -171,7 +181,7 @@ pub async fn fetch_message_body(
 ) -> Result<ImapMessage, String> {
     tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
         .await
-        .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+        .map_err(|_| timeout_err(&format!("SELECT {folder}"), IMAP_CMD_TIMEOUT))?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
     let uid_str = uid.to_string();
@@ -183,7 +193,7 @@ pub async fn fetch_message_body(
         Ok::<_, String>(stream.collect::<Vec<_>>().await)
     })
     .await
-    .map_err(|_| format!("UID FETCH for UID {uid} timed out after {}s — check your server settings or network connection", IMAP_FETCH_TIMEOUT.as_secs()))?
+    .map_err(|_| timeout_err(&format!("UID FETCH for UID {uid}"), IMAP_FETCH_TIMEOUT))?
     ?
     .into_iter()
     .filter_map(Result::ok)
@@ -216,13 +226,13 @@ pub async fn fetch_new_uids(
 ) -> Result<Vec<u32>, String> {
     tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
         .await
-        .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+        .map_err(|_| timeout_err(&format!("SELECT {folder}"), IMAP_CMD_TIMEOUT))?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
     let query = format!("{}:*", last_uid + 1);
     let uids = tokio::time::timeout(IMAP_SEARCH_TIMEOUT, session.uid_search(&query))
         .await
-        .map_err(|_| format!("UID SEARCH timed out after {}s — check your server settings or network connection", IMAP_SEARCH_TIMEOUT.as_secs()))?
+        .map_err(|_| timeout_err("UID SEARCH", IMAP_SEARCH_TIMEOUT))?
         .map_err(|e| format!("UID SEARCH failed: {e}"))?;
 
     // Filter out last_uid itself (IMAP returns it if it's the highest UID)
@@ -239,12 +249,12 @@ pub async fn search_all_uids(
 ) -> Result<Vec<u32>, String> {
     tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
         .await
-        .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+        .map_err(|_| timeout_err(&format!("SELECT {folder}"), IMAP_CMD_TIMEOUT))?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
     let uids = tokio::time::timeout(IMAP_SEARCH_TIMEOUT, session.uid_search("ALL"))
         .await
-        .map_err(|_| format!("UID SEARCH ALL timed out after {}s — check your server settings or network connection", IMAP_SEARCH_TIMEOUT.as_secs()))?
+        .map_err(|_| timeout_err("UID SEARCH ALL", IMAP_SEARCH_TIMEOUT))?
         .map_err(|e| format!("UID SEARCH ALL failed: {e}"))?;
 
     let mut result: Vec<u32> = uids.into_iter().collect();
@@ -265,7 +275,7 @@ pub async fn set_flags(
 ) -> Result<(), String> {
     tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
         .await
-        .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+        .map_err(|_| timeout_err(&format!("SELECT {folder}"), IMAP_CMD_TIMEOUT))?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
     let query = format!("{flag_op} {flags}");
@@ -278,7 +288,7 @@ pub async fn set_flags(
         Ok::<_, String>(())
     })
     .await
-    .map_err(|_| format!("UID STORE timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+    .map_err(|_| timeout_err("UID STORE", IMAP_CMD_TIMEOUT))?
 }
 
 /// Move messages between folders.
@@ -292,7 +302,7 @@ pub async fn move_messages(
 ) -> Result<(), String> {
     tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(source_folder))
         .await
-        .map_err(|_| format!("SELECT {source_folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+        .map_err(|_| timeout_err(&format!("SELECT {source_folder}"), IMAP_CMD_TIMEOUT))?
         .map_err(|e| format!("SELECT {source_folder} failed: {e}"))?;
 
     // Try MOVE extension first
@@ -302,7 +312,7 @@ pub async fn move_messages(
             // Fallback: COPY, then mark Deleted, then EXPUNGE
             tokio::time::timeout(IMAP_CMD_TIMEOUT, session.uid_copy(uid_set, dest_folder))
                 .await
-                .map_err(|_| format!("UID COPY timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+                .map_err(|_| timeout_err("UID COPY", IMAP_CMD_TIMEOUT))?
                 .map_err(|e| format!("UID COPY failed: {e}"))?;
 
             tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
@@ -314,7 +324,7 @@ pub async fn move_messages(
                 Ok::<_, String>(())
             })
             .await
-            .map_err(|_| format!("UID STORE +Deleted timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))??;
+            .map_err(|_| timeout_err("UID STORE +Deleted", IMAP_CMD_TIMEOUT))??;
 
             tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
                 let expunge_stream = session
@@ -325,7 +335,7 @@ pub async fn move_messages(
                 Ok::<_, String>(())
             })
             .await
-            .map_err(|_| format!("EXPUNGE timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))??;
+            .map_err(|_| timeout_err("EXPUNGE", IMAP_CMD_TIMEOUT))??;
         }
     }
 
@@ -340,7 +350,7 @@ pub async fn delete_messages(
 ) -> Result<(), String> {
     tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
         .await
-        .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+        .map_err(|_| timeout_err(&format!("SELECT {folder}"), IMAP_CMD_TIMEOUT))?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
     tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
@@ -352,7 +362,7 @@ pub async fn delete_messages(
         Ok::<_, String>(())
     })
     .await
-    .map_err(|_| format!("UID STORE +Deleted timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))??;
+    .map_err(|_| timeout_err("UID STORE +Deleted", IMAP_CMD_TIMEOUT))??;
 
     tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
         let expunge_stream = session
@@ -363,7 +373,7 @@ pub async fn delete_messages(
         Ok::<_, String>(())
     })
     .await
-    .map_err(|_| format!("EXPUNGE timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))??;
+    .map_err(|_| timeout_err("EXPUNGE", IMAP_CMD_TIMEOUT))??;
 
     Ok(())
 }
@@ -377,7 +387,7 @@ pub async fn append_message(
 ) -> Result<(), String> {
     tokio::time::timeout(IMAP_FETCH_TIMEOUT, session.append(folder, flags, None, raw_message))
         .await
-        .map_err(|_| format!("APPEND timed out after {}s — check your server settings or network connection", IMAP_FETCH_TIMEOUT.as_secs()))?
+        .map_err(|_| timeout_err("APPEND", IMAP_FETCH_TIMEOUT))?
         .map_err(|e| format!("APPEND failed: {e}"))
 }
 
@@ -391,7 +401,7 @@ pub async fn get_folder_status(
         session.status(folder, "(UIDVALIDITY UIDNEXT MESSAGES UNSEEN)"),
     )
     .await
-    .map_err(|_| format!("STATUS timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+    .map_err(|_| timeout_err("STATUS", IMAP_CMD_TIMEOUT))?
     .map_err(|e| format!("STATUS failed: {e}"))?;
 
     Ok(ImapFolderStatus {
@@ -417,7 +427,7 @@ pub async fn fetch_attachment(
 ) -> Result<String, String> {
     tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
         .await
-        .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+        .map_err(|_| timeout_err(&format!("SELECT {folder}"), IMAP_CMD_TIMEOUT))?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
     let uid_str = uid.to_string();
@@ -429,7 +439,7 @@ pub async fn fetch_attachment(
         Ok::<_, String>(stream.collect::<Vec<_>>().await)
     })
     .await
-    .map_err(|_| format!("UID FETCH attachment timed out after {}s — check your server settings or network connection", IMAP_FETCH_TIMEOUT.as_secs()))?
+    .map_err(|_| timeout_err("UID FETCH attachment", IMAP_FETCH_TIMEOUT))?
     ?
     .into_iter()
     .filter_map(Result::ok)
@@ -490,7 +500,7 @@ pub async fn fetch_raw_message(
 ) -> Result<String, String> {
     tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
         .await
-        .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+        .map_err(|_| timeout_err(&format!("SELECT {folder}"), IMAP_CMD_TIMEOUT))?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
     let uid_str = uid.to_string();
@@ -502,7 +512,7 @@ pub async fn fetch_raw_message(
         Ok::<_, String>(stream.collect::<Vec<_>>().await)
     })
     .await
-    .map_err(|_| format!("UID FETCH raw message timed out after {}s — check your server settings or network connection", IMAP_FETCH_TIMEOUT.as_secs()))?
+    .map_err(|_| timeout_err("UID FETCH raw message", IMAP_FETCH_TIMEOUT))?
     ?
     .into_iter()
     .filter_map(Result::ok)
@@ -597,7 +607,7 @@ pub async fn search_folder(
     // SELECT the folder
     let mailbox = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
         .await
-        .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+        .map_err(|_| timeout_err(&format!("SELECT {folder}"), IMAP_CMD_TIMEOUT))?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
     let folder_status = ImapFolderStatus {
@@ -615,7 +625,7 @@ pub async fn search_folder(
     };
     let uids_raw = tokio::time::timeout(IMAP_SEARCH_TIMEOUT, session.uid_search(&search_query))
         .await
-        .map_err(|_| format!("UID SEARCH {search_query} {folder} timed out after {}s — check your server settings or network connection", IMAP_SEARCH_TIMEOUT.as_secs()))?
+        .map_err(|_| timeout_err(&format!("UID SEARCH {search_query} {folder}"), IMAP_SEARCH_TIMEOUT))?
         .map_err(|e| format!("UID SEARCH {search_query} {folder} failed: {e}"))?;
 
     let mut uids: Vec<u32> = uids_raw.into_iter().collect();
@@ -650,7 +660,7 @@ pub async fn sync_folder(
     // SELECT the folder
     let mailbox = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
         .await
-        .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+        .map_err(|_| timeout_err(&format!("SELECT {folder}"), IMAP_CMD_TIMEOUT))?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
     let folder_status = ImapFolderStatus {
@@ -668,7 +678,7 @@ pub async fn sync_folder(
     };
     let uids_raw = tokio::time::timeout(IMAP_SEARCH_TIMEOUT, session.uid_search(&search_query))
         .await
-        .map_err(|_| format!("UID SEARCH {search_query} {folder} timed out after {}s — check your server settings or network connection", IMAP_SEARCH_TIMEOUT.as_secs()))?
+        .map_err(|_| timeout_err(&format!("UID SEARCH {search_query} {folder}"), IMAP_SEARCH_TIMEOUT))?
         .map_err(|e| format!("UID SEARCH {search_query} {folder} failed: {e}"))?;
 
     let mut uids: Vec<u32> = uids_raw.into_iter().collect();
@@ -709,7 +719,7 @@ pub async fn sync_folder(
             Ok::<_, String>(stream.collect::<Vec<_>>().await)
         })
         .await
-        .map_err(|_| format!("UID FETCH {folder} timed out after {}s — check your server settings or network connection", IMAP_FETCH_TIMEOUT.as_secs()))?;
+        .map_err(|_| timeout_err(&format!("UID FETCH {folder}"), IMAP_FETCH_TIMEOUT))?;
 
         let raw_fetches: Vec<_> = fetches?;
         for r in raw_fetches {
@@ -763,7 +773,7 @@ pub async fn test_connection(config: &ImapConfig) -> Result<String, String> {
         Ok::<_, String>(names.collect::<Vec<_>>().await.len())
     })
     .await
-    .map_err(|_| format!("LIST timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+    .map_err(|_| timeout_err("LIST", IMAP_CMD_TIMEOUT))?
     ?;
 
     _ = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.logout()).await;
