@@ -401,6 +401,15 @@ export default function App(): React.ReactNode {
           }
         }
 
+        // Initialize Graph clients
+        for (const account of dbAccounts.filter(a => a.is_active && a.provider === "graph")) {
+          try {
+            await invoke("graph_init_client", { accountId: account.id });
+          } catch (err) {
+            console.warn(`Failed to init Graph client for ${account.id}:`, err);
+          }
+        }
+
         // Fetch send-as aliases for each active email account (skip CalDAV-only)
         const activeIds = mapped.filter((a) => a.isActive).map((a) => a.id);
         const emailAccountIds = mapped

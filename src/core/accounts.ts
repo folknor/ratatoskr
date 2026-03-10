@@ -11,6 +11,7 @@ export {
   getAllAccounts,
   insertAccount,
   insertCalDavAccount,
+  insertGraphAccount,
   insertImapAccount,
   insertOAuthImapAccount,
   updateAccountCalDav,

@@ -100,7 +100,7 @@ export async function initializeClients(): Promise<void> {
   for (const account of accounts) {
     if (account.is_active && account.access_token && account.refresh_token) {
       // Initialize Rust-side Gmail client (canonical path)
-      if (account.provider !== "imap") {
+      if (account.provider === "gmail_api") {
         try {
           await invoke<void>("gmail_init_client", { accountId: account.id });
         } catch (err) {

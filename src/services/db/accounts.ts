@@ -271,6 +271,33 @@ export async function insertJmapAccount(account: {
   );
 }
 
+export async function insertGraphAccount(account: {
+  id: string;
+  email: string;
+  displayName: string | null;
+  avatarUrl?: string | null;
+  accessToken: string;
+  refreshToken: string;
+  tokenExpiresAt: number;
+}): Promise<void> {
+  const db = await getDb();
+  const encAccessToken = await encryptValue(account.accessToken);
+  const encRefreshToken = await encryptValue(account.refreshToken);
+  await db.execute(
+    `INSERT INTO accounts (id, email, display_name, avatar_url, provider, auth_method, access_token, refresh_token, token_expires_at)
+     VALUES ($1, $2, $3, $4, 'graph', 'oauth2', $5, $6, $7)`,
+    [
+      account.id,
+      account.email,
+      account.displayName,
+      account.avatarUrl ?? null,
+      encAccessToken,
+      encRefreshToken,
+      account.tokenExpiresAt,
+    ],
+  );
+}
+
 export async function updateAccountCalDav(
   accountId: string,
   fields: {

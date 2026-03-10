@@ -8,6 +8,7 @@ import { startOAuthFlow, getClientId, getClientSecret } from "@/core/accounts";
 import { useAccountStore } from "@/stores/accountStore";
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
 import { AddCalDavAccount } from "./AddCalDavAccount";
+import { AddGraphAccount } from "./AddGraphAccount";
 import { AddImapAccount } from "./AddImapAccount";
 import { SetupClientId } from "./SetupClientId";
 
@@ -16,7 +17,7 @@ interface AddAccountProps {
   onSuccess: () => void;
 }
 
-type View = "select-provider" | "gmail" | "imap" | "caldav";
+type View = "select-provider" | "gmail" | "imap" | "caldav" | "graph";
 
 export function AddAccount({
   onClose,
@@ -101,6 +102,16 @@ export function AddAccount({
   if (view === "imap") {
     return (
       <AddImapAccount
+        onClose={onClose}
+        onSuccess={onSuccess}
+        onBack={(): void => setView("select-provider")}
+      />
+    );
+  }
+
+  if (view === "graph") {
+    return (
+      <AddGraphAccount
         onClose={onClose}
         onSuccess={onSuccess}
         onBack={(): void => setView("select-provider")}
@@ -224,6 +235,29 @@ export function AddAccount({
               </div>
               <div className="text-xs text-text-tertiary mt-0.5">
                 {t("gmailOauthDescription")}
+              </div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={(): void => setView("graph")}
+            className="w-full flex items-center gap-4 p-4 rounded-lg border border-border-primary bg-bg-secondary hover:bg-bg-hover transition-colors text-left group"
+          >
+            <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-bg-tertiary flex items-center justify-center">
+              <svg className="w-5 h-5" viewBox="0 0 21 21" aria-label="Microsoft logo">
+                <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+                <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+                <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+                <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium text-text-primary group-hover:text-accent transition-colors">
+                {t("microsoftOutlook", "Microsoft Outlook")}
+              </div>
+              <div className="text-xs text-text-tertiary mt-0.5">
+                {t("microsoftDescription", "Outlook.com, Hotmail, Microsoft 365")}
               </div>
             </div>
           </button>

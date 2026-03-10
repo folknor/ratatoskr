@@ -1,6 +1,6 @@
 import type { ParsedMessage } from "../gmail/messageParser";
 
-export type AccountProvider = "gmail_api" | "imap" | "caldav" | "jmap";
+export type AccountProvider = "gmail_api" | "imap" | "caldav" | "jmap" | "graph";
 
 export interface EmailFolder {
   id: string;

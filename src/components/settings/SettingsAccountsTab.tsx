@@ -19,6 +19,8 @@ export interface SettingsAccountsTabProps {
   setClientId: (val: string) => void;
   clientSecret: string;
   setClientSecret: (val: string) => void;
+  microsoftClientId: string;
+  setMicrosoftClientId: (val: string) => void;
   apiSettingsSaved: boolean;
   handleSaveApiSettings: () => Promise<void>;
   isSyncing: boolean;
@@ -38,6 +40,8 @@ export function SettingsAccountsTab({
   setClientId,
   clientSecret,
   setClientSecret,
+  microsoftClientId,
+  setMicrosoftClientId,
   apiSettingsSaved,
   handleSaveApiSettings,
   isSyncing,
@@ -203,6 +207,30 @@ export function SettingsAccountsTab({
           >
             {apiSettingsSaved ? t("saved") : t("save")}
           </Button>
+        </div>
+      </Section>
+
+      <Section title={t("microsoftApi")}>
+        <div className="space-y-3">
+          <TextField
+            label={t("microsoftClientId")}
+            size="md"
+            type="text"
+            value={microsoftClientId}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+              setMicrosoftClientId(e.target.value)
+            }
+            onBlur={async (): Promise<void> => {
+              const trimmed = microsoftClientId.trim();
+              if (trimmed) {
+                await setSetting("microsoft_client_id", trimmed);
+              }
+            }}
+            placeholder={t("microsoftClientIdPlaceholder")}
+          />
+          <p className="text-xs text-text-tertiary">
+            {t("microsoftClientIdDescription")}
+          </p>
         </div>
       </Section>
 

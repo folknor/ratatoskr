@@ -27,6 +27,24 @@ const providers: Record<string, OAuthProviderConfig> = {
     userInfoUrl: undefined,
     usePkce: true,
   },
+  microsoft_graph: {
+    id: "microsoft_graph",
+    name: "Microsoft (Graph)",
+    authUrl:
+      "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+    tokenUrl: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+    scopes: [
+      "Mail.ReadWrite",
+      "Mail.Send",
+      "MailboxSettings.ReadWrite",
+      "offline_access",
+      "openid",
+      "profile",
+      "email",
+    ],
+    userInfoUrl: undefined,
+    usePkce: true,
+  },
   yahoo: {
     id: "yahoo",
     name: "Yahoo",

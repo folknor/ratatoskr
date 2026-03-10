@@ -105,6 +105,7 @@ export function SettingsPage(): React.ReactNode {
   const [undoSendDelay, setUndoSendDelay] = useState("5");
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
+  const [microsoftClientId, setMicrosoftClientId] = useState("");
   const [apiSettingsSaved, setApiSettingsSaved] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncPeriodDays, setSyncPeriodDays] = useState("365");
@@ -176,6 +177,8 @@ export function SettingsPage(): React.ReactNode {
       setClientId(id ?? "");
       const secret = await getSecureSetting("google_client_secret");
       setClientSecret(secret ?? "");
+      const msClientId = await getSetting("microsoft_client_id");
+      setMicrosoftClientId(msClientId ?? "");
       const blockImg = await getSetting("block_remote_images");
       setBlockRemoteImages(blockImg !== "false");
       const phishingEnabled = await getSetting("phishing_detection_enabled");
@@ -522,6 +525,8 @@ export function SettingsPage(): React.ReactNode {
                   setClientId={setClientId}
                   clientSecret={clientSecret}
                   setClientSecret={setClientSecret}
+                  microsoftClientId={microsoftClientId}
+                  setMicrosoftClientId={setMicrosoftClientId}
                   apiSettingsSaved={apiSettingsSaved}
                   handleSaveApiSettings={handleSaveApiSettings}
                   isSyncing={isSyncing}

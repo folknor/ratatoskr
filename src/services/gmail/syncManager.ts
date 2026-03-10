@@ -310,6 +310,103 @@ async function syncJmapAccount(accountId: string): Promise<void> {
 }
 
 /**
+ * Run a sync for a single Graph account (initial or delta).
+ *
+ * The entire sync pipeline runs in Rust: Graph API calls → message parsing →
+ * DB writes → body store → tantivy indexing.
+ * TS only calls the Rust command and runs post-sync hooks on the result.
+ */
+async function syncGraphAccount(accountId: string): Promise<void> {
+  try {
+    const result: { newInboxMessageIds: string[]; affectedThreadIds: string[] } =
+      await invoke("provider_sync_delta", { accountId });
+
+    // Post-sync hooks: apply filters and smart labels to new inbox messages
+    if (result.newInboxMessageIds.length > 0) {
+      try {
+        await applyFiltersToNewMessageIds(
+          accountId,
+          result.newInboxMessageIds,
+        );
+      } catch (err) {
+        console.error("[syncManager] Filter application failed:", err);
+      }
+
+      // Smart labels (fire-and-forget)
+      applySmartLabelsToNewMessageIds(
+        accountId,
+        result.newInboxMessageIds,
+      ).catch((err) =>
+        console.error("[syncManager] Smart label error:", err),
+      );
+
+      // Notifications for new inbox messages
+      try {
+        const smartNotifSetting = await getSetting("smart_notifications");
+        const smartEnabled = smartNotifSetting === "true";
+        const notifCatSetting =
+          (await getSetting("notify_categories")) ?? "Primary";
+        const allowedCategories = new Set(
+          notifCatSetting.split(",").map((s) => s.trim()),
+        );
+        const vipSenders = smartEnabled
+          ? await getVipSenders(accountId)
+          : new Set<string>();
+        const mutedThreadIds = await getMutedThreadIds(accountId);
+
+        const newMsgs = await getMessagesByIds(
+          accountId,
+          result.newInboxMessageIds,
+        );
+        for (const msg of newMsgs) {
+          if (mutedThreadIds.has(msg.thread_id)) continue;
+          const category = await getThreadCategory(
+            accountId,
+            msg.thread_id,
+          );
+          if (
+            shouldNotifyForMessage(
+              smartEnabled,
+              allowedCategories,
+              vipSenders,
+              category,
+              msg.from_address ?? undefined,
+            )
+          ) {
+            queueNewEmailNotification(
+              msg.from_name ?? msg.from_address ?? "Unknown",
+              msg.subject ?? "",
+              msg.thread_id,
+              accountId,
+              msg.from_address ?? undefined,
+            );
+          }
+        }
+      } catch (err) {
+        console.error("[syncManager] Notification dispatch failed:", err);
+      }
+    }
+
+    // AI categorization (fire-and-forget)
+    if (result.affectedThreadIds.length > 0) {
+      categorizeNewThreads(accountId).catch((err) =>
+        console.error("[syncManager] Categorization error:", err),
+      );
+    }
+  } catch (err) {
+    const message = String(err ?? "");
+    if (message === "GRAPH_NO_DELTA_STATE" || message.includes("GRAPH_NO_DELTA_STATE")) {
+      // Fallback to full initial sync
+      const syncPeriodStr = await getSetting("sync_period_days");
+      const syncDays = parseInt(syncPeriodStr ?? "365", 10) || 365;
+      await invoke("provider_sync_initial", { accountId, daysBack: syncDays });
+    } else {
+      throw err;
+    }
+  }
+}
+
+/**
  * Run IMAP sync via the Rust sync engine (Phase 4).
  *
  * The entire pipeline runs in Rust: IMAP fetch → parse → DB write →
@@ -619,6 +716,8 @@ async function syncAccountInternal(accountId: string): Promise<void> {
 
     if (account.provider === "jmap") {
       await syncJmapAccount(accountId);
+    } else if (account.provider === "graph") {
+      await syncGraphAccount(accountId);
     } else if (account.provider === "imap") {
       await syncImapAccount(accountId);
     } else {

@@ -84,7 +84,7 @@ export async function startProviderOAuthFlow(
   }
 
   // Provider-specific auth params
-  if (provider.id === "microsoft") {
+  if (provider.id === "microsoft" || provider.id === "microsoft_graph") {
     params.prompt = "consent";
     params.response_mode = "query";
   }
@@ -138,7 +138,7 @@ async function exchangeCode(
     redirectUri,
     codeVerifier: provider.usePkce ? codeVerifier : null,
     clientSecret: clientSecret || null,
-    scope: provider.id === "microsoft" ? provider.scopes.join(" ") : null,
+    scope: provider.id === "microsoft" || provider.id === "microsoft_graph" ? provider.scopes.join(" ") : null,
   });
 }
 
@@ -157,7 +157,7 @@ export async function refreshProviderToken(
     refreshToken,
     clientId,
     clientSecret: clientSecret || null,
-    scope: provider.id === "microsoft" ? provider.scopes.join(" ") : null,
+    scope: provider.id === "microsoft" || provider.id === "microsoft_graph" ? provider.scopes.join(" ") : null,
   });
 }
 
@@ -172,8 +172,8 @@ async function fetchUserInfo(
   provider: OAuthProviderConfig,
   tokens: TokenResponse,
 ): Promise<ProviderUserInfo> {
-  // Microsoft: extract user info from ID token (can't use Graph API with Outlook scopes)
-  if (provider.id === "microsoft") {
+  // Microsoft: extract user info from ID token
+  if (provider.id === "microsoft" || provider.id === "microsoft_graph") {
     if (tokens.id_token) {
       const claims = parseIdToken(tokens.id_token);
       return {

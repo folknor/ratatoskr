@@ -25,6 +25,8 @@ export async function getEmailProvider(
     provider = new JmapProvider(accountId);
   } else if (account.provider === "imap") {
     provider = new ImapSmtpProvider(accountId);
+  } else if (account.provider === "graph") {
+    throw new Error("Graph accounts use Rust provider commands directly");
   } else {
     // Default: gmail_api — uses Rust Gmail client via Tauri commands
     provider = new GmailApiProvider(accountId);

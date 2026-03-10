@@ -94,9 +94,7 @@
 
 - [x] **~~Sync is fully stubbed~~** — Fixed. Implemented in `src-tauri/src/graph/sync.rs` (~550 lines) + `src-tauri/src/graph/parse.rs` (~170 lines). Covers: folder sync + label persistence, per-folder paginated message fetch with date filter, message parsing (GraphMessage → DB-ready struct with header extraction, label derivation, ISO date parsing), per-folder delta token bootstrap and incremental delta sync, DB writes (thread/message/label upsert), body store (zstd-compressed), Tantivy search indexing, pending-ops conflict filter, and progress events.
 
-- [ ] **`microsoft_client_id` settings key has no UI** — `src-tauri/src/graph/client.rs`
-
-  The client reads `microsoft_client_id` from the settings table but there's no migration, settings UI, or `AddGraphAccount` flow to set it. Need setup flow before any real Graph account can connect.
+- [x] **~~`microsoft_client_id` settings key has no UI~~** — Fixed. Added `microsoft_client_id` field to Settings page (`SettingsAccountsTab.tsx`), `AddGraphAccount.tsx` OAuth setup wizard, `insertGraphAccount()` DB function, `syncGraphAccount()` in syncManager, Graph client init in `App.tsx` startup, and `"graph"` routing across providerFactory/syncManager/AddAccount.
 
 - [x] **~~No attachment enumeration during sync~~** — Fixed. Added `$expand=attachments($select=id,name,contentType,size,isInline,contentId)` to message fetch URLs, `GraphAttachment` fields on `GraphMessage`, `ParsedGraphAttachment` struct in parse.rs, and `upsert_attachments()` in sync.rs following the JMAP pattern. Graph attachment IDs stored in `gmail_attachment_id` column.
 
