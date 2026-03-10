@@ -7,11 +7,14 @@ use tokio::sync::{Mutex, RwLock};
 
 use crate::db::DbState;
 use crate::provider::crypto;
+use crate::provider::http::{self, RetryConfig};
 use crate::provider::token::{self, TokenState};
 
 const GMAIL_API_BASE: &str = "https://www.googleapis.com/gmail/v1/users/me";
-const MAX_RETRY_ATTEMPTS: u32 = 3;
-const INITIAL_BACKOFF_MS: u64 = 1000;
+const RETRY_CONFIG: RetryConfig = RetryConfig {
+    max_attempts: 3,
+    initial_backoff_ms: 1000,
+};
 
 /// Per-account Gmail API client.
 ///
@@ -209,7 +212,7 @@ impl GmailClient {
     ) -> Result<reqwest::Response, String> {
         let mut last_response = None;
 
-        for attempt in 0..MAX_RETRY_ATTEMPTS {
+        for attempt in 0..RETRY_CONFIG.max_attempts {
             let response = self.execute_once(url, method, body, access_token).await?;
 
             if response.status().as_u16() != 429 {
@@ -217,11 +220,15 @@ impl GmailClient {
             }
 
             last_response = Some(response);
-            if attempt == MAX_RETRY_ATTEMPTS - 1 {
+            if attempt == RETRY_CONFIG.max_attempts - 1 {
                 break;
             }
 
-            let delay_ms = compute_retry_delay(last_response.as_ref(), attempt);
+            let delay_ms = http::compute_retry_delay(
+                last_response.as_ref(),
+                attempt,
+                &RETRY_CONFIG,
+            );
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         }
 
@@ -424,18 +431,6 @@ async fn persist_refreshed_token(
         Ok(())
     })
     .await
-}
-
-/// Compute retry delay from Retry-After header or exponential backoff.
-fn compute_retry_delay(response: Option<&reqwest::Response>, attempt: u32) -> u64 {
-    if let Some(resp) = response
-        && let Some(retry_after) = resp.headers().get("Retry-After")
-        && let Ok(s) = retry_after.to_str()
-        && let Ok(secs) = s.parse::<u64>()
-    {
-        return secs * 1000;
-    }
-    INITIAL_BACKOFF_MS * 2u64.pow(attempt)
 }
 
 /// Check HTTP response status, returning error details on failure.

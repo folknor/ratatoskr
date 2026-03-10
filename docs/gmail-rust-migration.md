@@ -24,8 +24,13 @@ All Gmail API logic has been moved from TypeScript to Rust.
 
 | File | Purpose |
 |------|---------|
-| `crypto.rs` | AES-256-GCM encrypt/decrypt matching TS format |
-| `token.rs` | `TokenState` + `refresh_google_token()` — reusable for any Google OAuth provider |
+| `crypto.rs` | AES-256-GCM encrypt/decrypt matching TS format. Used by all providers (Gmail, IMAP, future JMAP). |
+| `token.rs` | `TokenState` struct + `refresh_google_token()`. Currently **Google-specific** — hardcodes `https://oauth2.googleapis.com/token`. The PKCE/client-secret logic is generic, only the endpoint is baked in. Needs generalization (endpoint as parameter) before reuse by other OAuth providers. |
+
+#### What `provider/` does NOT include (yet)
+
+- **No shared HTTP client builder** — Gmail's retry logic (429 exponential backoff, 401 force-refresh) lives inline in `gmail/client.rs`. A `provider/http.rs` with `build_http_client()` and a reusable retry helper should be extracted before the next Rust provider.
+- **No RFC 5322 message construction** — the TS composer builds raw RFC 5322 messages; Rust commands accept pre-built `raw_base64url` bytes. This is the correct boundary — there is no need for a `provider/message.rs`.
 
 ### TS layer (Rust-backed)
 

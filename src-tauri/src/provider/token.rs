@@ -29,9 +29,14 @@ struct TokenResponse {
     expires_in: i64,
 }
 
-/// Refresh an OAuth2 access token via Google's token endpoint.
-pub async fn refresh_google_token(
+/// Refresh an OAuth2 access token against any RFC 6749 token endpoint.
+///
+/// Works with any provider that accepts a standard `grant_type=refresh_token`
+/// form POST (Google, Microsoft, Fastmail, etc.). The `client_secret` is
+/// optional — PKCE-only flows omit it.
+pub async fn refresh_oauth_token(
     http: &reqwest::Client,
+    token_endpoint: &str,
     refresh_token: &str,
     client_id: &str,
     client_secret: Option<&str>,
@@ -48,7 +53,7 @@ pub async fn refresh_google_token(
     }
 
     let response = http
-        .post(GOOGLE_TOKEN_ENDPOINT)
+        .post(token_endpoint)
         .form(&params)
         .send()
         .await
@@ -70,4 +75,21 @@ pub async fn refresh_google_token(
         access_token: resp.access_token,
         expires_at: now + resp.expires_in,
     })
+}
+
+/// Convenience wrapper: refresh via Google's OAuth2 token endpoint.
+pub async fn refresh_google_token(
+    http: &reqwest::Client,
+    refresh_token: &str,
+    client_id: &str,
+    client_secret: Option<&str>,
+) -> Result<TokenRefreshResult, String> {
+    refresh_oauth_token(
+        http,
+        GOOGLE_TOKEN_ENDPOINT,
+        refresh_token,
+        client_id,
+        client_secret,
+    )
+    .await
 }

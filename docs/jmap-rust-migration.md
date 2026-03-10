@@ -150,10 +150,11 @@ These already exist in `provider/` after the Gmail migration:
 
 | Module | What JMAP uses |
 |--------|---------------|
-| `provider/http.rs` | `build_api_client()` — for blob upload/download retries (not for core JMAP API calls) |
-| `provider/message.rs` | `mail-builder` RFC 5322 construction — for `Email/import` (send/draft) |
+| `provider/crypto.rs` | AES-256-GCM encrypt/decrypt — for decrypting Basic auth passwords from DB |
+| `provider/token.rs` | `TokenState` + `refresh_oauth_token()` — provider-agnostic OAuth2 refresh. NOT used in Phase 1 (Basic auth is static). Will be used when Bearer/OAuth JMAP is added later. |
+| `provider/http.rs` | `build_http_client()` + `RetryConfig` + `compute_retry_delay()` — for blob upload/download retries (not for core JMAP API calls, which go through `jmap-client`'s own reqwest) |
 
-Note: `provider/token.rs` is NOT used in Phase 1 (Basic auth is static). It will be used when Bearer/OAuth JMAP is added later.
+RFC 5322 message construction stays in the TS composer — Rust commands receive pre-built `raw_base64url` bytes for send/draft operations. No `provider/message.rs` is needed.
 
 ### Tauri command surface (`jmap_*` prefixed)
 
