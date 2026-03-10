@@ -184,6 +184,44 @@ pub async fn email_action_unsnooze(
         .await
 }
 
+// ── Batch unsnooze ──────────────────────────────────────────
+
+#[tauri::command]
+pub async fn email_action_unsnooze_batch(
+    state: State<'_, DbState>,
+    thread_ids: Vec<String>,
+) -> Result<usize, String> {
+    state
+        .with_conn(move |conn| {
+            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+            let mut count: usize = 0;
+            for thread_id in &thread_ids {
+                // Look up account_id for this thread
+                let account_id: Option<String> = tx
+                    .query_row(
+                        "SELECT account_id FROM threads WHERE id = ?1 AND is_snoozed = 1",
+                        params![thread_id],
+                        |row| row.get(0),
+                    )
+                    .ok();
+
+                if let Some(account_id) = account_id {
+                    tx.execute(
+                        "UPDATE threads SET is_snoozed = 0, snooze_until = NULL WHERE account_id = ?1 AND id = ?2",
+                        params![account_id, thread_id],
+                    )
+                    .map_err(|e| e.to_string())?;
+                    remove_label(&tx, &account_id, thread_id, "SNOOZED")?;
+                    insert_label(&tx, &account_id, thread_id, "INBOX")?;
+                    count += 1;
+                }
+            }
+            tx.commit().map_err(|e| e.to_string())?;
+            Ok(count)
+        })
+        .await
+}
+
 // ── Pin / unpin (local only) ─────────────────────────────────
 
 #[tauri::command]

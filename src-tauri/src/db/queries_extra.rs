@@ -9,7 +9,7 @@ use super::queries::row_to_contact;
 use super::types::{
     BundleSummary, ContactAttachmentRow, ContactStats, DbBundleRule, DbContact, DbFilterRule,
     DbFollowUpReminder, DbQuickStep, DbSmartFolder, DbSmartLabelRule, RecentThread,
-    SameDomainContact, SortOrderItem,
+    SameDomainContact, SortOrderItem, TriggeredFollowUp,
 };
 
 // ── Dynamic update helper ───────────────────────────────────
@@ -805,6 +805,102 @@ pub async fn db_get_active_follow_up_thread_ids(
                 results.extend(rows);
             }
             Ok(results)
+        })
+        .await
+}
+
+/// Batch-check all pending follow-up reminders in a single transaction.
+///
+/// For each reminder that is due (status = 'pending', remind_at <= now):
+///   - If a reply exists in the thread (from someone other than the account owner,
+///     dated after the tracked message) → set status = 'cancelled'
+///   - If no reply → set status = 'triggered' and include in result
+///
+/// Returns the list of triggered reminders with thread subjects for notification dispatch.
+#[tauri::command]
+pub async fn db_check_follow_up_reminders(
+    state: State<'_, DbState>,
+) -> Result<Vec<TriggeredFollowUp>, String> {
+    state
+        .with_conn(move |conn| {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_secs() as i64;
+
+            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+
+            // 1. Fetch all pending, due reminders
+            let reminders: Vec<DbFollowUpReminder> = {
+                let mut stmt = tx
+                    .prepare(
+                        "SELECT * FROM follow_up_reminders WHERE status = 'pending' AND remind_at <= ?1",
+                    )
+                    .map_err(|e| e.to_string())?;
+                let rows = stmt.query_map(params![now], row_to_follow_up)
+                    .map_err(|e| e.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string());
+                drop(stmt);
+                rows?
+            };
+
+            if reminders.is_empty() {
+                tx.commit().map_err(|e| e.to_string())?;
+                return Ok(Vec::new());
+            }
+
+            let mut triggered = Vec::new();
+
+            for reminder in &reminders {
+                // 2. Check if a reply exists: any message in the thread from someone
+                //    other than the account owner, dated after the tracked message
+                let reply_count: i64 = tx
+                    .query_row(
+                        "SELECT COUNT(*) FROM messages m
+                         WHERE m.account_id = ?1 AND m.thread_id = ?2
+                           AND m.date > (SELECT date FROM messages WHERE id = ?3 AND account_id = ?1)
+                           AND m.from_address != (SELECT email FROM accounts WHERE id = ?1)",
+                        params![reminder.account_id, reminder.thread_id, reminder.message_id],
+                        |row| row.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+
+                if reply_count > 0 {
+                    // 3. Reply exists → cancel
+                    tx.execute(
+                        "UPDATE follow_up_reminders SET status = 'cancelled' WHERE id = ?1",
+                        params![reminder.id],
+                    )
+                    .map_err(|e| e.to_string())?;
+                } else {
+                    // 4. No reply → trigger
+                    tx.execute(
+                        "UPDATE follow_up_reminders SET status = 'triggered' WHERE id = ?1",
+                        params![reminder.id],
+                    )
+                    .map_err(|e| e.to_string())?;
+
+                    // 5. Get thread subject for notification
+                    let subject: String = tx
+                        .query_row(
+                            "SELECT COALESCE(subject, '') FROM threads WHERE account_id = ?1 AND id = ?2",
+                            params![reminder.account_id, reminder.thread_id],
+                            |row| row.get(0),
+                        )
+                        .unwrap_or_default();
+
+                    triggered.push(TriggeredFollowUp {
+                        id: reminder.id.clone(),
+                        account_id: reminder.account_id.clone(),
+                        thread_id: reminder.thread_id.clone(),
+                        subject,
+                    });
+                }
+            }
+
+            tx.commit().map_err(|e| e.to_string())?;
+            Ok(triggered)
         })
         .await
 }

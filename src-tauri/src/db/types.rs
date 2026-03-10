@@ -211,6 +211,16 @@ pub struct DbQuickStep {
     pub created_at: i64,
 }
 
+// ── Triggered Follow-Up (returned by batch check) ──────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TriggeredFollowUp {
+    pub id: String,
+    pub account_id: String,
+    pub thread_id: String,
+    pub subject: String,
+}
+
 // ── Sort order helper ───────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

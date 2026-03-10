@@ -1,4 +1,4 @@
-import { emailActionUnsnooze } from "@/core/rustDb";
+import { emailActionUnsnoozeBatch } from "@/core/rustDb";
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
 import {
   type BackgroundChecker,
@@ -22,9 +22,8 @@ async function checkSnoozedThreads(): Promise<void> {
   );
 
   if (snoozed.length > 0) {
-    for (const thread of snoozed) {
-      await emailActionUnsnooze(thread.account_id, thread.id);
-    }
+    const threadIds = snoozed.map((t) => t.id);
+    await emailActionUnsnoozeBatch(threadIds);
 
     // Notify the UI to refresh
     window.dispatchEvent(new Event("velo-sync-done"));

@@ -503,6 +503,23 @@ export async function getActiveFollowUpThreadIds(
   return new Set(ids);
 }
 
+/** Result of a triggered follow-up reminder (returned by batch check). */
+export interface TriggeredFollowUp {
+  id: string;
+  account_id: string;
+  thread_id: string;
+  subject: string;
+}
+
+/**
+ * Batch-check all pending follow-up reminders in a single transaction.
+ * Cancels reminders where a reply exists, triggers those that are due,
+ * and returns the triggered ones for notification dispatch.
+ */
+export async function checkFollowUpReminders(): Promise<TriggeredFollowUp[]> {
+  return invoke<TriggeredFollowUp[]>("db_check_follow_up_reminders");
+}
+
 // ═══════════════════════════════════════════════════════════════
 // QUICK STEPS
 // ═══════════════════════════════════════════════════════════════
@@ -792,6 +809,12 @@ export async function emailActionUnsnooze(
   threadId: string,
 ): Promise<void> {
   return invoke<void>("email_action_unsnooze", { accountId, threadId });
+}
+
+export function emailActionUnsnoozeBatch(
+  threadIds: string[],
+): Promise<number> {
+  return invoke<number>("email_action_unsnooze_batch", { threadIds });
 }
 
 export async function emailActionPin(
