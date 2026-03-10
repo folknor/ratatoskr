@@ -222,7 +222,8 @@ export function InlineReply({
 
       const { setUndoSendVisible, setUndoSendTimer } =
         useComposerStore.getState();
-      setUndoSendVisible(true);
+      const delaySeconds = parseInt(delaySetting ?? "5", 10);
+      setUndoSendVisible(true, delaySeconds);
 
       const timer = setTimeout(async () => {
         try {
@@ -369,6 +370,7 @@ export function InlineReply({
       }
       if (e.key === "Escape") {
         e.preventDefault();
+        e.stopPropagation();
         editor?.commands.setContent("");
         setMode(null);
         setHasAutoDraft(false);

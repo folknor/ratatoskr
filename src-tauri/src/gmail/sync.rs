@@ -377,10 +377,10 @@ fn store_thread_to_db(
         .unchecked_transaction()
         .map_err(|e| format!("begin tx: {e}"))?;
 
+    // upsert_thread_record calls upsert_messages internally before aggregating
+    upsert_attachments(&tx, account_id, messages)?;
     upsert_thread_record(&tx, account_id, thread_id, messages)?;
     set_thread_labels(&tx, account_id, thread_id, messages)?;
-    upsert_messages(&tx, account_id, messages)?;
-    upsert_attachments(&tx, account_id, messages)?;
 
     tx.commit().map_err(|e| format!("commit: {e}"))?;
     Ok(())
@@ -392,16 +392,74 @@ fn upsert_thread_record(
     thread_id: &str,
     messages: &[ParsedGmailMessage],
 ) -> Result<(), String> {
-    let Some(first) = messages.first() else {
+    if messages.is_empty() {
         return Ok(());
-    };
-    let Some(last) = messages.last() else {
-        return Ok(());
-    };
+    }
 
-    let is_read = messages.iter().all(|m| m.is_read);
-    let is_starred = messages.iter().any(|m| m.is_starred);
-    let has_attachments = messages.iter().any(|m| m.has_attachments);
+    // First upsert the incoming messages so they are visible in DB queries
+    upsert_messages(tx, account_id, messages)?;
+
+    // Now aggregate thread fields from ALL messages in the DB for this thread
+    let message_count: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND account_id = ?2",
+            rusqlite::params![thread_id, account_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("count messages: {e}"))?;
+
+    let is_read: bool = tx
+        .query_row(
+            "SELECT COUNT(*) FROM messages \
+             WHERE thread_id = ?1 AND account_id = ?2 AND is_read = 0",
+            rusqlite::params![thread_id, account_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|unread| unread == 0)
+        .map_err(|e| format!("check is_read: {e}"))?;
+
+    let is_starred: bool = tx
+        .query_row(
+            "SELECT COUNT(*) FROM messages \
+             WHERE thread_id = ?1 AND account_id = ?2 AND is_starred = 1",
+            rusqlite::params![thread_id, account_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|starred| starred > 0)
+        .map_err(|e| format!("check is_starred: {e}"))?;
+
+    let has_attachments: bool = tx
+        .query_row(
+            "SELECT COUNT(*) FROM attachments a \
+             JOIN messages m ON a.message_id = m.id \
+             WHERE m.thread_id = ?1 AND m.account_id = ?2",
+            rusqlite::params![thread_id, account_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count > 0)
+        .map_err(|e| format!("check has_attachments: {e}"))?;
+
+    // Get snippet + date from the most recent message in the thread
+    let (snippet, last_date): (String, i64) = tx
+        .query_row(
+            "SELECT COALESCE(snippet, ''), date FROM messages \
+             WHERE thread_id = ?1 AND account_id = ?2 \
+             ORDER BY date DESC LIMIT 1",
+            rusqlite::params![thread_id, account_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| format!("get latest message: {e}"))?;
+
+    // Get subject from the earliest message (thread subject)
+    let subject: Option<String> = tx
+        .query_row(
+            "SELECT subject FROM messages \
+             WHERE thread_id = ?1 AND account_id = ?2 \
+             ORDER BY date ASC LIMIT 1",
+            rusqlite::params![thread_id, account_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("get subject: {e}"))?;
 
     let all_labels: HashSet<&str> = messages
         .iter()
@@ -409,28 +467,57 @@ fn upsert_thread_record(
         .collect();
     let is_important = all_labels.contains("IMPORTANT");
 
-    #[allow(clippy::cast_possible_wrap)]
-    let message_count = messages.len() as i64;
+    // Check if thread already exists to preserve fields like is_pinned, is_muted
+    let exists: bool = tx
+        .query_row(
+            "SELECT COUNT(*) FROM threads WHERE id = ?1 AND account_id = ?2",
+            rusqlite::params![thread_id, account_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|c| c > 0)
+        .map_err(|e| format!("check thread exists: {e}"))?;
 
-    tx.execute(
-        "INSERT OR REPLACE INTO threads \
-         (id, account_id, subject, snippet, last_message_at, message_count, \
-          is_read, is_starred, is_important, has_attachments) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        rusqlite::params![
-            thread_id,
-            account_id,
-            first.subject,
-            last.snippet,
-            last.date,
-            message_count,
-            is_read,
-            is_starred,
-            is_important,
-            has_attachments,
-        ],
-    )
-    .map_err(|e| format!("upsert thread: {e}"))?;
+    if exists {
+        tx.execute(
+            "UPDATE threads SET subject = ?1, snippet = ?2, last_message_at = ?3, \
+             message_count = ?4, is_read = ?5, is_starred = ?6, is_important = ?7, \
+             has_attachments = ?8 \
+             WHERE id = ?9 AND account_id = ?10",
+            rusqlite::params![
+                subject,
+                snippet,
+                last_date,
+                message_count,
+                is_read,
+                is_starred,
+                is_important,
+                has_attachments,
+                thread_id,
+                account_id,
+            ],
+        )
+        .map_err(|e| format!("update thread: {e}"))?;
+    } else {
+        tx.execute(
+            "INSERT INTO threads \
+             (id, account_id, subject, snippet, last_message_at, message_count, \
+              is_read, is_starred, is_important, has_attachments) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            rusqlite::params![
+                thread_id,
+                account_id,
+                subject,
+                snippet,
+                last_date,
+                message_count,
+                is_read,
+                is_starred,
+                is_important,
+                has_attachments,
+            ],
+        )
+        .map_err(|e| format!("insert thread: {e}"))?;
+    }
 
     Ok(())
 }

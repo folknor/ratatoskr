@@ -420,7 +420,14 @@ impl GraphClient {
     }
 
     /// Force a token refresh (e.g. after a 401 response).
+    ///
+    /// Sets the expiry to the past so the double-check inside `do_refresh`
+    /// won't short-circuit with a stale (server-revoked) token.
     async fn force_refresh(&self, db: &DbState) -> Result<String, String> {
+        {
+            let mut state = self.inner.token.write().await;
+            state.expires_at = 0;
+        }
         self.do_refresh(db).await
     }
 

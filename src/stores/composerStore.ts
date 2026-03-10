@@ -16,6 +16,8 @@ export interface ComposerAttachment {
 export interface ComposerState {
   isOpen: boolean;
   mode: ComposerMode;
+  /** The account ID this composer session belongs to, captured at open time. */
+  accountId: string | null;
   to: string[];
   cc: string[];
   bcc: string[];
@@ -27,6 +29,7 @@ export interface ComposerState {
   draftId: string | null;
   undoSendTimer: ReturnType<typeof setTimeout> | null;
   undoSendVisible: boolean;
+  undoSendDelaySeconds: number;
   attachments: ComposerAttachment[];
   lastSavedAt: number | null;
   isSaving: boolean;
@@ -37,6 +40,7 @@ export interface ComposerState {
 
   openComposer: (opts?: {
     mode?: ComposerMode;
+    accountId?: string | null;
     to?: string[];
     cc?: string[];
     bcc?: string[];
@@ -55,7 +59,7 @@ export interface ComposerState {
   setShowCcBcc: (show: boolean) => void;
   setDraftId: (id: string | null) => void;
   setUndoSendTimer: (timer: ReturnType<typeof setTimeout> | null) => void;
-  setUndoSendVisible: (visible: boolean) => void;
+  setUndoSendVisible: (visible: boolean, delaySeconds?: number) => void;
   addAttachment: (attachment: ComposerAttachment) => void;
   removeAttachment: (id: string) => void;
   clearAttachments: () => void;
@@ -71,6 +75,7 @@ export const useComposerStore: UseBoundStore<StoreApi<ComposerState>> =
   create<ComposerState>((set) => ({
     isOpen: false,
     mode: "new",
+    accountId: null,
     to: [],
     cc: [],
     bcc: [],
@@ -82,6 +87,7 @@ export const useComposerStore: UseBoundStore<StoreApi<ComposerState>> =
     draftId: null,
     undoSendTimer: null,
     undoSendVisible: false,
+    undoSendDelaySeconds: 5,
     attachments: [],
     viewMode: "modal",
     fromEmail: null,
@@ -92,6 +98,7 @@ export const useComposerStore: UseBoundStore<StoreApi<ComposerState>> =
 
     openComposer: (opts?: {
       mode?: ComposerMode;
+      accountId?: string | null;
       to?: string[];
       cc?: string[];
       bcc?: string[];
@@ -104,6 +111,7 @@ export const useComposerStore: UseBoundStore<StoreApi<ComposerState>> =
       set({
         isOpen: true,
         mode: opts?.mode ?? "new",
+        accountId: opts?.accountId ?? null,
         to: opts?.to ?? [],
         cc: opts?.cc ?? [],
         bcc: opts?.bcc ?? [],
@@ -125,6 +133,7 @@ export const useComposerStore: UseBoundStore<StoreApi<ComposerState>> =
       set({
         isOpen: false,
         mode: "new",
+        accountId: null,
         to: [],
         cc: [],
         bcc: [],
@@ -151,7 +160,11 @@ export const useComposerStore: UseBoundStore<StoreApi<ComposerState>> =
     setDraftId: (draftId: string | null) => set({ draftId }),
     setUndoSendTimer: (undoSendTimer: ReturnType<typeof setTimeout> | null) =>
       set({ undoSendTimer }),
-    setUndoSendVisible: (undoSendVisible: boolean) => set({ undoSendVisible }),
+    setUndoSendVisible: (undoSendVisible: boolean, delaySeconds?: number) =>
+      set({
+        undoSendVisible,
+        ...(delaySeconds != null ? { undoSendDelaySeconds: delaySeconds } : {}),
+      }),
     addAttachment: (attachment: ComposerAttachment) =>
       set((state) => ({ attachments: [...state.attachments, attachment] })),
     removeAttachment: (id: string) =>

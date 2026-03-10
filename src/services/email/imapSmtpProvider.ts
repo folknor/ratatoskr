@@ -1,11 +1,4 @@
-import { indexMessage } from "@/core/rustDb";
 import { type DbAccount, getAccount } from "../db/accounts";
-import { upsertMessage } from "../db/messages";
-import {
-  getThreadLabelIds,
-  setThreadLabels,
-  upsertThread,
-} from "../db/threads";
 import type { ParsedMessage } from "../gmail/messageParser";
 import { getSyncableFolders, mapFolderToLabel } from "../imap/folderMapper";
 import { buildImapConfig, buildSmtpConfig } from "../imap/imapConfigBuilder";
@@ -33,80 +26,6 @@ import {
 } from "../imap/tauriCommands";
 import { ensureFreshToken } from "../oauth/oauthTokenManager";
 import type { EmailFolder, EmailProvider, SyncResult } from "./types";
-
-/**
- * Decode base64url (Gmail/RFC 4648 URL-safe, no padding) to a UTF-8 string.
- */
-function base64UrlDecode(input: string): string {
-  // Convert base64url to standard base64
-  let base64 = input.replace(/-/g, "+").replace(/_/g, "/");
-  // Add padding if needed
-  while (base64.length % 4 !== 0) {
-    base64 += "=";
-  }
-  const binary = atob(base64);
-  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
-}
-
-/**
- * Parse basic RFC 2822 headers from a raw email string.
- * Returns a map of header name (lowercase) → header value.
- */
-function parseBasicHeaders(raw: string): Map<string, string> {
-  const headers = new Map<string, string>();
-  // Headers end at the first blank line
-  const headerEnd = raw.indexOf("\r\n\r\n");
-  const headerSection = headerEnd !== -1 ? raw.slice(0, headerEnd) : raw;
-
-  // Unfold continuation lines (lines starting with space/tab are continuations)
-  const unfolded = headerSection.replace(/\r\n([ \t])/g, " ");
-
-  for (const line of unfolded.split("\r\n")) {
-    const colonIdx = line.indexOf(":");
-    if (colonIdx === -1) continue;
-    const name = line.slice(0, colonIdx).trim().toLowerCase();
-    const value = line.slice(colonIdx + 1).trim();
-    headers.set(name, value);
-  }
-
-  return headers;
-}
-
-/**
- * Extract a plain-text snippet from a raw RFC 2822 email body.
- */
-function extractSnippet(raw: string, maxLen: number = 200): string {
-  const bodyStart = raw.indexOf("\r\n\r\n");
-  if (bodyStart === -1) return "";
-
-  let body = raw.slice(bodyStart + 4);
-
-  // For multipart messages, try to find the text/plain part
-  const contentType = parseBasicHeaders(raw).get("content-type") ?? "";
-  const boundaryMatch = contentType.match(/boundary="?([^";\s]+)"?/);
-  if (boundaryMatch) {
-    const boundary = boundaryMatch[1] ?? "";
-    const parts = body.split(`--${boundary}`);
-    for (const part of parts) {
-      if (part.toLowerCase().includes("content-type: text/plain")) {
-        const partBodyStart = part.indexOf("\r\n\r\n");
-        if (partBodyStart !== -1) {
-          body = part.slice(partBodyStart + 4);
-          break;
-        }
-      }
-    }
-  }
-
-  // Strip HTML tags if present, trim, and truncate
-  return body
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, maxLen);
-}
 
 /**
  * EmailProvider adapter for IMAP/SMTP accounts.
@@ -406,14 +325,8 @@ export class ImapSmtpProvider implements EmailProvider {
 
     const messageId = `imap-sent-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-    // Save sent message to local DB so it appears in Sent folder immediately
-    try {
-      await this.saveSentMessageLocally(rawBase64Url, messageId, _threadId);
-    } catch (err) {
-      console.warn("[IMAP] Failed to save sent message to local DB:", err);
-    }
-
-    // Copy sent message to Sent folder on IMAP server
+    // Copy sent message to Sent folder on IMAP server.
+    // The message will appear locally after the next delta sync (≤60s).
     try {
       const imapConfig = await this.getImapConfig();
       const sentFolder =
@@ -428,110 +341,6 @@ export class ImapSmtpProvider implements EmailProvider {
     }
 
     return { id: messageId };
-  }
-
-  /**
-   * Save a sent message to the local SQLite DB with the SENT label.
-   * This ensures the message appears in the Sent folder view immediately
-   * without waiting for the next IMAP delta sync.
-   */
-  private async saveSentMessageLocally(
-    rawBase64Url: string,
-    messageId: string,
-    threadId?: string,
-  ): Promise<void> {
-    const raw = base64UrlDecode(rawBase64Url);
-    const headers = parseBasicHeaders(raw);
-    const snippet = extractSnippet(raw);
-
-    const from = headers.get("from") ?? "";
-    const to = headers.get("to") ?? "";
-    const cc = headers.get("cc") ?? null;
-    const subject = headers.get("subject") ?? null;
-    const messageIdHeader = headers.get("message-id") ?? null;
-    const inReplyTo = headers.get("in-reply-to") ?? null;
-    const references = headers.get("references") ?? null;
-    const now = Date.now();
-
-    // For replies, add the SENT label to the existing thread.
-    // For new compositions, create a new thread.
-    const effectiveThreadId = threadId ?? messageId;
-
-    if (threadId) {
-      // Reply: add SENT label to existing thread
-      const existingLabels = await getThreadLabelIds(this.accountId, threadId);
-      if (!existingLabels.includes("SENT")) {
-        await setThreadLabels(this.accountId, threadId, [
-          ...existingLabels,
-          "SENT",
-        ]);
-      }
-    } else {
-      // New thread: create thread record
-      await upsertThread({
-        id: effectiveThreadId,
-        accountId: this.accountId,
-        subject,
-        snippet,
-        lastMessageAt: now,
-        messageCount: 1,
-        isRead: true,
-        isStarred: false,
-        isImportant: false,
-        hasAttachments: false,
-      });
-      await setThreadLabels(this.accountId, effectiveThreadId, ["SENT"]);
-    }
-
-    // Extract sender name from "Name <email>" format
-    const fromNameMatch = from.match(/^([^<]*)<[^>]+>/);
-    const fromName = fromNameMatch ? (fromNameMatch[1]?.trim() ?? null) : null;
-    const fromAddress = from.replace(/.*<([^>]+)>.*/, "$1").trim();
-
-    // Parse body for HTML and text
-    const bodyStart = raw.indexOf("\r\n\r\n");
-    const bodyHtml = bodyStart !== -1 ? raw.slice(bodyStart + 4) : null;
-
-    await upsertMessage({
-      id: messageId,
-      accountId: this.accountId,
-      threadId: effectiveThreadId,
-      fromAddress,
-      fromName,
-      toAddresses: to,
-      ccAddresses: cc,
-      bccAddresses: null, // BCC is intentionally omitted from stored messages
-      replyTo: null,
-      subject,
-      snippet,
-      date: now,
-      isRead: true,
-      isStarred: false,
-      bodyHtml: bodyHtml ? bodyHtml.slice(0, 50000) : null, // Limit stored body size
-      bodyText: snippet,
-      rawSize: raw.length,
-      internalDate: now,
-      messageIdHeader,
-      referencesHeader: references,
-      inReplyToHeader: inReplyTo,
-    });
-
-    // Index into tantivy search (fire-and-forget)
-    indexMessage({
-      messageId,
-      accountId: this.accountId,
-      threadId: effectiveThreadId,
-      subject,
-      fromName,
-      fromAddress,
-      toAddresses: to,
-      bodyText: snippet,
-      snippet,
-      date: now,
-      isRead: true,
-      isStarred: false,
-      hasAttachment: false,
-    }).catch(() => {});
   }
 
   async createDraft(

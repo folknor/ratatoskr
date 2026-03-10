@@ -49,36 +49,38 @@ export interface EmailProvider {
   fetchRawMessage(messageId: string): Promise<string>;
 
   // Actions (operate on thread/message level)
-  archive(threadId: string, messageIds: string[]): Promise<void>;
-  trash(threadId: string, messageIds: string[]): Promise<void>;
-  permanentDelete(threadId: string, messageIds: string[]): Promise<void>;
-  markRead(
+  // Only implemented by IMAP provider — Gmail/JMAP/Graph route through Rust provider_* commands.
+  archive?(threadId: string, messageIds: string[]): Promise<void>;
+  trash?(threadId: string, messageIds: string[]): Promise<void>;
+  permanentDelete?(threadId: string, messageIds: string[]): Promise<void>;
+  markRead?(
     threadId: string,
     messageIds: string[],
     read: boolean,
   ): Promise<void>;
-  star(threadId: string, messageIds: string[], starred: boolean): Promise<void>;
-  spam(threadId: string, messageIds: string[], isSpam: boolean): Promise<void>;
-  moveToFolder(
+  star?(threadId: string, messageIds: string[], starred: boolean): Promise<void>;
+  spam?(threadId: string, messageIds: string[], isSpam: boolean): Promise<void>;
+  moveToFolder?(
     threadId: string,
     messageIds: string[],
     folderPath: string,
   ): Promise<void>;
-  addLabel(threadId: string, labelId: string): Promise<void>;
-  removeLabel(threadId: string, labelId: string): Promise<void>;
+  addLabel?(threadId: string, labelId: string): Promise<void>;
+  removeLabel?(threadId: string, labelId: string): Promise<void>;
 
   // Send/Draft operations
-  sendMessage(rawBase64Url: string, threadId?: string): Promise<{ id: string }>;
-  createDraft(
+  // Only implemented by IMAP provider — Gmail/JMAP/Graph route through Rust provider_* commands.
+  sendMessage?(rawBase64Url: string, threadId?: string): Promise<{ id: string }>;
+  createDraft?(
     rawBase64Url: string,
     threadId?: string,
   ): Promise<{ draftId: string }>;
-  updateDraft(
+  updateDraft?(
     draftId: string,
     rawBase64Url: string,
     threadId?: string,
   ): Promise<{ draftId: string }>;
-  deleteDraft(draftId: string): Promise<void>;
+  deleteDraft?(draftId: string): Promise<void>;
 
   // Connection
   testConnection(): Promise<{ success: boolean; message: string }>;

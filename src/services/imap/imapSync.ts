@@ -1,7 +1,7 @@
 import { indexMessage } from "@/core/rustDb";
 import { getAccount, updateAccountSyncState } from "../db/accounts";
 import { upsertAttachment } from "../db/attachments";
-import { withTransaction } from "../db/connection";
+import { withSerializedExecution } from "../db/connection";
 import {
   getAllFolderSyncStates,
   upsertFolderSyncState,
@@ -265,7 +265,7 @@ export async function imapInitialSync(
 
         // Write entire chunk to DB in a single transaction
         if (chunkParsed.length > 0) {
-          await withTransaction(async () => {
+          await withSerializedExecution(async () => {
             for (const { parsed, msg } of chunkParsed) {
               // Create placeholder thread first to satisfy FK constraint
               await upsertThread({
@@ -467,7 +467,7 @@ export async function imapInitialSync(
       }
     }
 
-    await withTransaction(async () => {
+    await withSerializedExecution(async () => {
       for (const group of batch) {
         if (skippedThreadIds.has(group.threadId)) continue;
 

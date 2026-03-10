@@ -1,6 +1,4 @@
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useRef } from "react";
-import { parseUnsubscribeUrl } from "@/components/email/MessageItem";
 import {
   getActiveLabel,
   getSelectedThreadId,
@@ -436,11 +434,16 @@ async function executeAction(actionId: string): Promise<void> {
           const msgs = await getMessagesForThread(activeAccountId, selectedId);
           const unsubMsg = msgs.find((m) => m.list_unsubscribe);
           if (unsubMsg?.list_unsubscribe) {
-            const url = parseUnsubscribeUrl(unsubMsg.list_unsubscribe);
-            if (url) {
-              await openUrl(url);
-              await archiveThread(activeAccountId, selectedId, []);
-            }
+            const { executeUnsubscribe } = await import("@/core/mutations");
+            await executeUnsubscribe(
+              activeAccountId,
+              selectedId,
+              unsubMsg.from_address ?? "",
+              unsubMsg.from_name ?? null,
+              unsubMsg.list_unsubscribe,
+              unsubMsg.list_unsubscribe_post ?? null,
+            );
+            await archiveThread(activeAccountId, selectedId, []);
           }
         } catch (err) {
           console.error("Unsubscribe failed:", err);

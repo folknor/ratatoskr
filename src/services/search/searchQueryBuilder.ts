@@ -23,14 +23,21 @@ export function buildSearchQuery(
   // Base query - we'll add FTS join conditionally
   let fromClause = "FROM messages m";
 
-  // Free text search via FTS5
+  // Free text search via FTS5 — sanitize to prevent FTS5 syntax injection
   if (parsed.freeText) {
-    needsFts = true;
-    fromClause =
-      "FROM messages_fts JOIN messages m ON m.rowid = messages_fts.rowid";
-    whereClauses.push(`messages_fts MATCH $${paramIdx}`);
-    params.push(parsed.freeText);
-    paramIdx++;
+    const sanitized = parsed.freeText
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((term) => `"${term.replace(/"/g, '""')}"`)
+      .join(" ");
+    if (sanitized) {
+      needsFts = true;
+      fromClause =
+        "FROM messages_fts JOIN messages m ON m.rowid = messages_fts.rowid";
+      whereClauses.push(`messages_fts MATCH $${paramIdx}`);
+      params.push(sanitized);
+      paramIdx++;
+    }
   }
 
   // Account filter

@@ -6,6 +6,54 @@
 
 - [ ] **Auto-updater should check local permissions** — Don't show update prompts if the user lacks write access to the app installation directory (e.g., installed system-wide without admin rights). The update would fail anyway — detect this upfront and either hide the prompt or show a helpful message.
 
+### LOW
+
+- [ ] **IMAP `fetchAttachment` returns base64 `data.length` as `size`** — `src/services/email/imapSmtpProvider.ts:267-269`
+
+  Base64 inflates size by ~33%. The `EmailProvider` interface says `size` is in bytes, but the returned value is the base64 string length.
+
+  Fix: Return `Math.floor(data.length * 3 / 4)` or decode and measure.
+
+---
+
+## Security & Data Safety
+
+### HIGH
+
+- [ ] **`withSerializedExecution` has no real SQL transaction** — `src/services/db/connection.ts:51-78`
+
+  Serializes operations via a JS promise queue but explicitly does NOT use `BEGIN`/`COMMIT`/`ROLLBACK` (comment on line 70-73 explains tauri-plugin-sql pool constraint). If the app crashes mid-"transaction", partial writes persist. For example, during IMAP sync, a crash after `upsertThread` but before `upsertMessage` leaves an empty thread. `setThreadLabels` (DELETE-then-INSERT pattern) can lose all labels on a crash between the two statements.
+
+  Fix: Use `SAVEPOINT`/`RELEASE` if the pool issue is specifically with nested transactions. Or move critical multi-step writes to Rust-side `DbState::with_conn` where real transactions are available.
+
+### MEDIUM
+
+- [ ] **AI API keys may be stored in plaintext** — `src/services/db/settings.ts`
+
+  `getSecureSetting`/`setSecureSetting` exist, but if any code path uses `setSetting` instead of `setSecureSetting` for API keys, they are stored unencrypted.
+
+  Fix: Audit all settings writes for credential-like keys to ensure they use `setSecureSetting`.
+
+- [ ] **`sql:allow-execute` grants arbitrary SQL from frontend** — `src-tauri/capabilities/default.json:17`
+
+  The frontend can execute arbitrary SQL (INSERT, UPDATE, DELETE, DROP). Any XSS could do `__TAURI__.invoke('plugin:sql|execute', {query: 'DROP TABLE accounts'})`. Inherent to the architecture.
+
+  Fix: Migrate remaining critical DB operations to Rust Tauri commands (partially done with `db_*` commands), eventually remove `sql:allow-execute`.
+
+### LOW
+
+- [ ] **Decryption failure fallback returns plaintext** — `src/services/db/accounts.ts:40-81`
+
+  When decryption fails, code falls back to the raw (potentially plaintext) value with only `console.warn`. Credentials stored before encryption was enabled remain accessible in plaintext indefinitely.
+
+- [ ] **`synchronous=NORMAL` with WAL mode** — `src/services/db/connection.ts:10`, `src-tauri/src/db/mod.rs:50`
+
+  Committed transactions can be lost on power failure (DB won't corrupt, but data lost). Acceptable for server-synced email, but locally-composed drafts, tasks, and settings could be lost.
+
+- [ ] **Draft auto-save has no crash-recovery guarantee** — `src/services/composer/draftAutoSave.ts`
+
+  3-second debounce means up to 3s of content lost on crash. Combined with `synchronous=NORMAL`, even locally-persisted drafts in `local_drafts` might not survive power failure.
+
 ---
 
 ## Refactoring — Patterns & Boilerplate
@@ -16,19 +64,45 @@
 
   In practice this means a thread moved from Inbox to Archive will briefly appear in both views until the next delta sync (≤60s). Not a functional bug since the server state is correct and the UI will self-correct, but it can cause momentary confusion. The fix would be to DELETE the old label in the same transaction, but that requires knowing which label to remove — for archive it's always INBOX, but for arbitrary folder moves the source isn't passed to the command. Would need to either pass the source label as a parameter or query existing labels in the command.
 
-- [x] **~~Unsafe type assertions~~** — Fixed. `gmailProvider.ts` cast eliminated via `GmailRawMessage` type + function overloads on `getMessage()`. `crypto.ts` cast is a genuine TS lib limitation (Uint8Array vs BufferSource generics) — kept with explanatory comment. `ContextMenuPortal.tsx` casts were removed during the earlier component split refactor.
+---
+
+## Consolidation — Dead Code & Duplication
+
+- [ ] **JMAP `commands.rs` action commands duplicate `ops.rs` trait implementations** — `src-tauri/src/jmap/commands.rs:228-555`
+
+  ~330 lines of `jmap_archive`, `jmap_trash`, `jmap_mark_read`, etc. are exact duplicates of the `JmapOps` trait methods. Since `emailActions.ts` now routes through unified `provider_*` commands, these per-provider commands are dead from the action dispatch path. The `jmap_*` lifecycle/sync/folder/attachment commands should remain.
+
+  Fix: Remove ~330 lines from `commands.rs` and registrations from `lib.rs`. **Risk: MEDIUM** — verify no TS code calls `jmap_archive` etc. directly.
+
+- [ ] **Wizard step indicator duplicated across account components** — `AddImapAccount.tsx:363-391`, `AddJmapAccount.tsx:226-254`
+
+  Nearly identical `renderStepIndicator()` functions with same CSS, layout, and active/completed state logic.
+
+  Fix: Extract `<StepIndicator steps={...} currentStep={...} />`. Saves ~60 lines. **Risk: LOW.**
+
+- [ ] **`GmailClient` TS class (461 lines) + legacy `tokenManager.ts` kept for one caller** — `src/services/gmail/client.ts`, `tokenManager.ts`
+
+  `GmailClient` is `@deprecated`. Only `googleCalendarProvider.ts` uses it. `tokenManager.ts` creates legacy TS clients for every Gmail account on startup solely for this.
+
+  Fix: Migrate calendar provider to use Rust HTTP or direct `fetch` with token from DB. Removes ~600 lines. **Risk: MEDIUM.**
+
+- [ ] **Duplicate email action dispatchers** — `src/services/emailActions.ts:278-428`
+
+  `executeViaProviderRust` and `executeViaImapProvider` are nearly identical switch statements. When IMAP actions go through Rust `provider_*` commands, `executeViaImapProvider` becomes dead code.
+
+  Fix: Remove ~50 lines once IMAP is fully ported. **Risk: MEDIUM.**
+
+- [ ] **TS IMAP sync fallback path (1,259 lines)** — `imapSync.ts`, `imapSyncConvert.ts`, `imapSyncFetch.ts`, `imapSyncStore.ts`
+
+  Only used when `use_rust_sync` setting is `"false"`. Default is `true` (Rust sync). Legacy fallback for the old TS IMAP sync pipeline.
+
+  Fix: Remove once Rust IMAP sync is proven stable. **Risk: HIGH** — gate on release milestone.
+
+- [ ] **`emailActions.test.ts` references old command names** — Tests assert `gmail_modify_thread`, `gmail_delete_thread`, `gmail_send_email`, `gmail_create_draft` etc., but code now calls `provider_*` commands. Tests may be broken or giving false confidence.
 
 ---
 
 ## Gmail→Rust Migration Follow-ups
-
-- [x] **~~`scheduledSendManager` is Gmail-only~~** — Fixed. Now uses `sendEmail()` from `emailActions.ts` (provider-agnostic).
-
-- [x] **~~`unsubscribeManager` mailto send is Gmail-only~~** — Fixed. Now uses `sendEmail()` from `emailActions.ts` via dynamic import.
-
-- [x] **~~`EmailList` draft lookup is Gmail-only~~** — Fixed. Now branches on `account.provider`: Gmail calls `gmail_list_drafts`, IMAP/JMAP use message ID directly as draft ID.
-
-- [x] **~~`MultiSelectBar` permanent delete double-deletes locally~~** — Fixed. Removed redundant `deleteThreadFromDb()` call — `permanentDeleteThread()` already executes the identical `DELETE FROM threads` via Rust.
 
 - [ ] **`getGmailClient()` retained for Calendar only** — `src/services/calendar/googleCalendarProvider.ts`
 
@@ -48,10 +122,6 @@
 
   Options: (1) Hydrate bodies from the body store in `applyFiltersToNewMessageIds()` by calling `bodyStoreGetBatch()` for the message IDs — simplest fix, adds one IPC call but only when filters with body criteria exist. (2) Move filter evaluation into the Rust sync pipeline where bodies are available before compression — more efficient but much larger change. (3) Accept the limitation and document that body-matching filters only work on Gmail API accounts — least effort, but surprising to users. Option 1 is probably the right call.
 
-- [x] **~~`DbMessage` / schema column audit~~** — Audited and fixed. Removed phantom `has_attachments` from TS `DbMessage` (column only exists on `threads`, not `messages`). Fixed Rust `DbMessage.date` from `Option<String>` → `i64` and `internal_date` from `Option<String>` → `Option<i64>` to match schema INTEGER types. Fixed `backfillService.ts` SQL query referencing `m.has_attachments` (nonexistent column) → `t.has_attachments`. Remaining minor: TS `DbMessage` types `is_read`/`is_starred` as `number` (matches direct SQL 0/1) but Rust returns `bool` — both paths work correctly with their respective consumers.
-
-- [x] **~~Recovery logic duplicated between TS wrapper and Rust~~** — Moved into `sync_imap_delta` Rust command (`src-tauri/src/sync/commands.rs`). Recovery (thread count check → clear history_id + folder sync states → initial sync) now happens entirely within the single `sync_imap_delta` invoke, eliminating 3 IPC round-trips. The TS fallback path (`syncManager.ts:282-307`) retains its own recovery since it doesn't use the Rust engine.
-
 ### LOW
 
 - [ ] **Gmail sync still fully in TS** — `src/services/gmail/syncManager.ts:80-112`
@@ -66,6 +136,12 @@
 
   The risk is a sync that hangs indefinitely on a large folder, blocking the sync timer for that account. Since sync runs sequentially per account (`syncAccountInternal` is awaited), a hang blocks all subsequent accounts too. The fix would be wrapping each `imap_fetch_messages` call (or the entire folder sync) in a `tokio::time::timeout()`. Need to choose a reasonable duration — probably 5-10 minutes per folder, since legitimate large-folder fetches can take a while. The `async-imap` session would need to be dropped on timeout to close the connection cleanly. Low priority because it's a rare edge case (most IMAP servers handle large fetches fine), but it's a robustness improvement for pathological cases.
 
+- [ ] **JMAP initial sync re-queries entire result set every batch** — `src-tauri/src/jmap/sync.rs:108-146`
+
+  The loop re-executes `email_query` on every iteration, getting the full result set, then does `.skip(position).take(BATCH_SIZE)`. For 10,000 emails with `BATCH_SIZE=50`, this makes 200 queries each returning 10,000 IDs. If the result set changes between queries, position-based skip can miss messages or process duplicates.
+
+  Fix: Use JMAP query's `position` + `limit` parameters for server-side pagination, or cache IDs from the first query and batch-fetch from the cached list.
+
 ---
 
 ## Branding / Assets
@@ -78,10 +154,6 @@
 
 ## Phase 3b (Graph Provider) Known Issues
 
-- [x] **~~`fetch_all_folders` pagination bug~~** — Fixed. Moved folder fetching to `src-tauri/src/graph/sync.rs` with consistent `get_absolute()` for OData `@odata.nextLink` pagination. Both `fetch_all_folders()` and `fetch_child_folders()` now use `get_json()` for the initial request and `get_absolute()` for all subsequent pages.
-
-- [x] **~~`addr_to_recipients` mail-parser API unverified~~** — Verified correct. `Address::iter()` in mail-parser 0.11 transparently yields `&Addr` items from both `List` and `Group` variants. The code matches the proven pattern in `imap/parse.rs`.
-
 - [ ] **Category add/remove is racy** — `src-tauri/src/graph/ops.rs`
 
   `add_category`/`remove_category` do a read-then-write (fetch current categories, modify, PATCH back). Two concurrent actions on the same message could clobber each other. Graph has no atomic "add to array" operation, so this is unavoidable but worth knowing.
@@ -90,23 +162,9 @@
 
   Thread-level actions loop through messages one-by-one. The plan doc describes batching up to 20 requests per `/$batch` call. Left as follow-up — per-message approach is correct but slower under the 4-concurrent limit.
 
-- [x] **~~`update_draft` changes the draft ID~~** — Fixed. `draftAutoSave.ts` now captures the returned `ActionResult` from `updateDraftAction()` and calls `setDraftId()` with the new ID when it differs. Handles both plain string (Rust Graph) and `{ draftId }` object (IMAP TS) return shapes.
-
-- [x] **~~Sync is fully stubbed~~** — Fixed. Implemented in `src-tauri/src/graph/sync.rs` (~550 lines) + `src-tauri/src/graph/parse.rs` (~170 lines). Covers: folder sync + label persistence, per-folder paginated message fetch with date filter, message parsing (GraphMessage → DB-ready struct with header extraction, label derivation, ISO date parsing), per-folder delta token bootstrap and incremental delta sync, DB writes (thread/message/label upsert), body store (zstd-compressed), Tantivy search indexing, pending-ops conflict filter, and progress events.
-
-- [x] **~~`microsoft_client_id` settings key has no UI~~** — Fixed. Added `microsoft_client_id` field to Settings page (`SettingsAccountsTab.tsx`), `AddGraphAccount.tsx` OAuth setup wizard, `insertGraphAccount()` DB function, `syncGraphAccount()` in syncManager, Graph client init in `App.tsx` startup, and `"graph"` routing across providerFactory/syncManager/AddAccount.
-
-- [x] **~~No attachment enumeration during sync~~** — Fixed. Added `$expand=attachments($select=id,name,contentType,size,isInline,contentId)` to message fetch URLs, `GraphAttachment` fields on `GraphMessage`, `ParsedGraphAttachment` struct in parse.rs, and `upsert_attachments()` in sync.rs following the JMAP pattern. Graph attachment IDs stored in `gmail_attachment_id` column.
-
 - [ ] **`raw_size` is always 0 for Graph messages** — `src-tauri/src/graph/sync.rs`
 
   Graph's message API has no first-class size property. The MAPI extended property `PidTagMessageSize` (`0x0E08`) is available via `$expand=singleValueExtendedProperties($filter=id eq 'Integer 0x0E08')`, but this can't be combined with `$select` (Microsoft treats it as an advanced query conflict). Dropping `$select` to get size would fetch full message objects — unacceptable for sync performance under the 4-concurrent limit. Separate per-message calls are equally impractical. Accepted as a cosmetic limitation — only affects storage stats display, not functional.
-
-- [x] **~~`list_folders` always re-syncs from server~~** — Fixed. Added `folder_map_last_sync: RwLock<Option<Instant>>` to `ClientInner`. `list_folders` now returns the cached `FolderMap` if it was synced within the last 60 seconds, avoiding unnecessary API calls.
-
-- [x] **~~Delta sync processes all folders every cycle~~** — Fixed. Added `sync_cycle_counter: AtomicU32` to `ClientInner`. `graph_delta_sync` increments on each run and filters folders by priority tier: INBOX/SENT/DRAFT every cycle, TRASH/SPAM/archive every 5th, user folders every 20th.
-
-- [x] **~~No folder tree re-traversal during delta sync~~** — Fixed. Every 10th sync cycle, `graph_delta_sync` calls `sync_folders()` to discover new/renamed/deleted folders. New folders get delta tokens bootstrapped via `$deltatoken=latest`. Stale tokens for removed folders are cleaned up from the DB.
 
 ---
 

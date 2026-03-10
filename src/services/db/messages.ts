@@ -103,16 +103,16 @@ export async function upsertMessage(msg: {
 }): Promise<void> {
   const db = await getDb();
 
-  // Store bodies in the compressed body store (Phase 2) — fire-and-forget
-  // so it doesn't block the metadata upsert
-  if (msg.bodyHtml || msg.bodyText) {
-    bodyStorePut(msg.id, msg.bodyHtml, msg.bodyText).catch((e) =>
-      console.warn("body_store_put failed:", e),
-    );
+  const hasBody = !!(msg.bodyHtml || msg.bodyText);
+
+  // Store bodies in the compressed body store first, then set body_cached = 1.
+  // This ensures body_cached is only set after the body is actually persisted.
+  if (hasBody) {
+    await bodyStorePut(msg.id, msg.bodyHtml, msg.bodyText);
   }
 
   // Metadata DB — no longer stores body_html/body_text.
-  // body_cached flag is still set so existing code knows a body exists.
+  // body_cached flag is set only after bodyStorePut succeeds above.
   await db.execute(
     `INSERT INTO messages (id, account_id, thread_id, from_address, from_name, to_addresses, cc_addresses, bcc_addresses, reply_to, subject, snippet, date, is_read, is_starred, body_html, body_text, body_cached, raw_size, internal_date, list_unsubscribe, list_unsubscribe_post, auth_results, message_id_header, references_header, in_reply_to_header, imap_uid, imap_folder)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NULL, NULL, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
@@ -142,7 +142,7 @@ export async function upsertMessage(msg: {
       msg.date,
       msg.isRead ? 1 : 0,
       msg.isStarred ? 1 : 0,
-      msg.bodyHtml || msg.bodyText ? 1 : 0,
+      hasBody ? 1 : 0,
       msg.rawSize,
       msg.internalDate,
       msg.listUnsubscribe ?? null,

@@ -1,5 +1,5 @@
 import { upsertAttachment } from "../db/attachments";
-import { withTransaction } from "../db/connection";
+import { withSerializedExecution } from "../db/connection";
 import { upsertMessage } from "../db/messages";
 import { getPendingOpsForResource } from "../db/pendingOperations";
 import { setThreadLabels, upsertThread } from "../db/threads";
@@ -45,7 +45,7 @@ export async function storeThreadsAndMessages(
   for (let i = 0; i < threadGroups.length; i += THREAD_BATCH_SIZE) {
     const batch = threadGroups.slice(i, i + THREAD_BATCH_SIZE);
 
-    await withTransaction(async () => {
+    await withSerializedExecution(async () => {
       for (const group of batch) {
         if (skippedThreadIds.has(group.threadId)) continue;
 

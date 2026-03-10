@@ -12,9 +12,9 @@ vi.mock("@tauri-apps/plugin-sql", () => ({
 }));
 
 // Use dynamic import so mocks are in place
-const { withTransaction, getDb } = await import("./connection");
+const { withSerializedExecution, getDb } = await import("./connection");
 
-describe("withTransaction", () => {
+describe("withSerializedExecution", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockExecute.mockResolvedValue(undefined);
@@ -22,7 +22,7 @@ describe("withTransaction", () => {
 
   it("executes callback", async () => {
     let callbackRan = false;
-    await withTransaction(async () => {
+    await withSerializedExecution(async () => {
       callbackRan = true;
     });
 
@@ -31,7 +31,7 @@ describe("withTransaction", () => {
 
   it("propagates callback error", async () => {
     await expect(
-      withTransaction(async () => {
+      withSerializedExecution(async () => {
         throw new Error("callback failed");
       }),
     ).rejects.toThrow("callback failed");
@@ -41,14 +41,14 @@ describe("withTransaction", () => {
     const executionLog: string[] = [];
 
     // Launch two transactions concurrently
-    const tx1 = withTransaction(async () => {
+    const tx1 = withSerializedExecution(async () => {
       executionLog.push("tx1-start");
       // Simulate async work
       await new Promise((r) => setTimeout(r, 10));
       executionLog.push("tx1-done");
     });
 
-    const tx2 = withTransaction(async () => {
+    const tx2 = withSerializedExecution(async () => {
       executionLog.push("tx2-start");
       executionLog.push("tx2-done");
     });
@@ -66,7 +66,7 @@ describe("withTransaction", () => {
 
   it("unblocks next transaction even if current one fails", async () => {
     // First transaction fails
-    const tx1 = withTransaction(async () => {
+    const tx1 = withSerializedExecution(async () => {
       throw new Error("tx1 failed");
     }).catch(() => {
       /* expected */
@@ -74,7 +74,7 @@ describe("withTransaction", () => {
 
     // Second transaction should still run
     let tx2Ran = false;
-    const tx2 = withTransaction(async () => {
+    const tx2 = withSerializedExecution(async () => {
       tx2Ran = true;
     });
 

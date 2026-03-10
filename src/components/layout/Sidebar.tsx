@@ -238,6 +238,7 @@ function getSmartFolderIcon(iconName: string): LucideIcon {
   return SMART_FOLDER_ICON_MAP[iconName] ?? Search;
 }
 
+const SECTION_IDS = new Set(["smart-folders", "labels"]);
 const LABELS_COLLAPSED_COUNT = 3;
 
 export function Sidebar({
@@ -264,8 +265,6 @@ export function Sidebar({
     (s) => s.refreshUnreadCounts,
   );
   const createSmartFolder = useSmartFolderStore((s) => s.createFolder);
-  const SECTION_IDS = new Set(["smart-folders", "labels"]);
-
   const { visibleNavItems, showSmartFolders, showLabels } = useMemo(() => {
     if (!sidebarNavConfig) {
       const navOnly = ALL_NAV_ITEMS.filter((i) => !SECTION_IDS.has(i.id));
@@ -304,7 +303,7 @@ export function Sidebar({
       showSmartFolders: smartFoldersVisible,
       showLabels: labelsVisible,
     };
-  }, [sidebarNavConfig, SECTION_IDS.has]);
+  }, [sidebarNavConfig]);
 
   const [labelsExpanded, setLabelsExpanded] = useState(false);
 

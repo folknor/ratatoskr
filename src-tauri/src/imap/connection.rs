@@ -130,7 +130,6 @@ pub(crate) fn build_tls_connector(accept_invalid_certs: bool) -> Result<native_t
     let mut builder = native_tls::TlsConnector::builder();
     if accept_invalid_certs {
         builder.danger_accept_invalid_certs(true);
-        builder.danger_accept_invalid_hostnames(true);
     }
     builder.build().map_err(|e| format!("Failed to create TLS connector: {e}"))
 }

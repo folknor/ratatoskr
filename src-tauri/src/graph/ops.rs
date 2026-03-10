@@ -65,8 +65,9 @@ impl ProviderOps for GraphOps {
     ) -> Result<(), String> {
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
         for msg_id in &msg_ids {
+            let enc_id = urlencoding::encode(msg_id);
             self.client
-                .delete(&format!("/me/messages/{msg_id}"), ctx.db)
+                .delete(&format!("/me/messages/{enc_id}"), ctx.db)
                 .await?;
         }
         Ok(())
@@ -190,8 +191,9 @@ impl ProviderOps for GraphOps {
         thread_id: Option<&str>,
     ) -> Result<String, String> {
         // Graph has no draft mutation — delete and recreate
+        let enc_id = urlencoding::encode(draft_id);
         self.client
-            .delete(&format!("/me/messages/{draft_id}"), ctx.db)
+            .delete(&format!("/me/messages/{enc_id}"), ctx.db)
             .await?;
         create_draft_impl(&self.client, ctx, raw_base64url, thread_id).await
     }
@@ -201,8 +203,9 @@ impl ProviderOps for GraphOps {
         ctx: &ProviderCtx<'_>,
         draft_id: &str,
     ) -> Result<(), String> {
+        let enc_id = urlencoding::encode(draft_id);
         self.client
-            .delete(&format!("/me/messages/{draft_id}"), ctx.db)
+            .delete(&format!("/me/messages/{enc_id}"), ctx.db)
             .await
     }
 
@@ -213,10 +216,12 @@ impl ProviderOps for GraphOps {
         message_id: &str,
         attachment_id: &str,
     ) -> Result<AttachmentData, String> {
+        let enc_msg_id = urlencoding::encode(message_id);
+        let enc_att_id = urlencoding::encode(attachment_id);
         let attachment: GraphAttachment = self
             .client
             .get_json(
-                &format!("/me/messages/{message_id}/attachments/{attachment_id}"),
+                &format!("/me/messages/{enc_msg_id}/attachments/{enc_att_id}"),
                 ctx.db,
             )
             .await?;
@@ -230,7 +235,7 @@ impl ProviderOps for GraphOps {
                 .client
                 .get_bytes(
                     &format!(
-                        "/me/messages/{message_id}/attachments/{attachment_id}/$value"
+                        "/me/messages/{enc_msg_id}/attachments/{enc_att_id}/$value"
                     ),
                     ctx.db,
                 )
@@ -331,8 +336,9 @@ async fn move_messages(
         destination_id: destination_id.to_string(),
     };
     for msg_id in message_ids {
+        let enc_id = urlencoding::encode(msg_id);
         let _: serde_json::Value = client
-            .post(&format!("/me/messages/{msg_id}/move"), &body, ctx.db)
+            .post(&format!("/me/messages/{enc_id}/move"), &body, ctx.db)
             .await?;
     }
     Ok(())
@@ -346,8 +352,9 @@ async fn patch_messages(
     patch: &GraphMessagePatch,
 ) -> Result<(), String> {
     for msg_id in message_ids {
+        let enc_id = urlencoding::encode(msg_id);
         client
-            .patch(&format!("/me/messages/{msg_id}"), patch, ctx.db)
+            .patch(&format!("/me/messages/{enc_id}"), patch, ctx.db)
             .await?;
     }
     Ok(())
@@ -361,9 +368,10 @@ async fn add_category(
     category: &str,
 ) -> Result<(), String> {
     // Fetch current categories, add the new one
+    let enc_id = urlencoding::encode(message_id);
     let msg: serde_json::Value = client
         .get_json(
-            &format!("/me/messages/{message_id}?$select=categories"),
+            &format!("/me/messages/{enc_id}?$select=categories"),
             ctx.db,
         )
         .await?;
@@ -378,7 +386,7 @@ async fn add_category(
             ..Default::default()
         };
         client
-            .patch(&format!("/me/messages/{message_id}"), &patch, ctx.db)
+            .patch(&format!("/me/messages/{enc_id}"), &patch, ctx.db)
             .await?;
     }
     Ok(())
@@ -391,9 +399,10 @@ async fn remove_category(
     message_id: &str,
     category: &str,
 ) -> Result<(), String> {
+    let enc_id = urlencoding::encode(message_id);
     let msg: serde_json::Value = client
         .get_json(
-            &format!("/me/messages/{message_id}?$select=categories"),
+            &format!("/me/messages/{enc_id}?$select=categories"),
             ctx.db,
         )
         .await?;
@@ -409,7 +418,7 @@ async fn remove_category(
             ..Default::default()
         };
         client
-            .patch(&format!("/me/messages/{message_id}"), &patch, ctx.db)
+            .patch(&format!("/me/messages/{enc_id}"), &patch, ctx.db)
             .await?;
     }
     Ok(())
@@ -426,8 +435,9 @@ async fn send_via_draft(
 ) -> Result<String, String> {
     let draft_id = create_draft_impl(client, ctx, raw_base64url, thread_id).await?;
     // Send the draft — no response body (202 Accepted)
+    let enc_draft_id = urlencoding::encode(&draft_id);
     client
-        .post_no_content::<()>(&format!("/me/messages/{draft_id}/send"), None, ctx.db)
+        .post_no_content::<()>(&format!("/me/messages/{enc_draft_id}/send"), None, ctx.db)
         .await?;
     Ok(draft_id)
 }
@@ -543,6 +553,7 @@ async fn upload_attachments_from_mime(
 ) -> Result<(), String> {
     use super::types::GraphAttachmentInput;
 
+    let enc_draft_id = urlencoding::encode(draft_id);
     for attachment in parsed.attachments() {
         let name = attachment
             .attachment_name()
@@ -577,7 +588,7 @@ async fn upload_attachments_from_mime(
 
         let _: serde_json::Value = client
             .post(
-                &format!("/me/messages/{draft_id}/attachments"),
+                &format!("/me/messages/{enc_draft_id}/attachments"),
                 &input,
                 ctx.db,
             )

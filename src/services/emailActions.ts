@@ -382,43 +382,43 @@ async function executeViaImapProvider(
   const provider = await getEmailProvider(accountId);
   switch (action.type) {
     case "archive":
-      return provider.archive(action.threadId, action.messageIds);
+      return provider.archive?.(action.threadId, action.messageIds);
     case "trash":
-      return provider.trash(action.threadId, action.messageIds);
+      return provider.trash?.(action.threadId, action.messageIds);
     case "permanentDelete":
-      return provider.permanentDelete(action.threadId, action.messageIds);
+      return provider.permanentDelete?.(action.threadId, action.messageIds);
     case "markRead":
-      return provider.markRead(action.threadId, action.messageIds, action.read);
+      return provider.markRead?.(action.threadId, action.messageIds, action.read);
     case "star":
-      return provider.star(action.threadId, action.messageIds, action.starred);
+      return provider.star?.(action.threadId, action.messageIds, action.starred);
     case "spam":
-      return provider.spam(action.threadId, action.messageIds, action.isSpam);
+      return provider.spam?.(action.threadId, action.messageIds, action.isSpam);
     case "moveToFolder":
-      return provider.moveToFolder(
+      return provider.moveToFolder?.(
         action.threadId,
         action.messageIds,
         action.folderPath,
       );
     case "addLabel":
-      return provider.addLabel(action.threadId, action.labelId);
+      return provider.addLabel?.(action.threadId, action.labelId);
     case "removeLabel":
-      return provider.removeLabel(action.threadId, action.labelId);
+      return provider.removeLabel?.(action.threadId, action.labelId);
     case "sendMessage":
-      return provider.sendMessage(action.rawBase64Url, action.threadId);
+      return provider.sendMessage?.(action.rawBase64Url, action.threadId);
     case "createDraft":
-      return provider.createDraft(action.rawBase64Url, action.threadId);
+      return provider.createDraft?.(action.rawBase64Url, action.threadId);
     case "updateDraft":
-      return provider.updateDraft(
+      return provider.updateDraft?.(
         action.draftId,
         action.rawBase64Url,
         action.threadId,
       );
     case "deleteDraft":
-      return provider.deleteDraft(action.draftId);
+      return provider.deleteDraft?.(action.draftId);
     case "snooze":
     case "mute":
       // Snooze/mute are local state; on the provider side we just archive
-      return provider.archive(action.threadId, action.messageIds);
+      return provider.archive?.(action.threadId, action.messageIds);
     case "pin":
     case "unpin":
     case "unmute":

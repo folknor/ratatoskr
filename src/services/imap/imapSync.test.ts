@@ -54,7 +54,7 @@ vi.mock("../db/accounts", () => ({
   updateAccountSyncState: vi.fn(),
 }));
 vi.mock("../db/connection", () => ({
-  withTransaction: vi.fn(async (fn: () => Promise<void>) => fn()),
+  withSerializedExecution: vi.fn(async (fn: () => Promise<void>) => fn()),
 }));
 vi.mock("../db/folderSyncState", () => ({
   upsertFolderSyncState: vi.fn(),
@@ -73,7 +73,7 @@ import {
 } from "@/test/mocks";
 import { getAccount } from "../db/accounts";
 import { upsertAttachment } from "../db/attachments";
-import { withTransaction } from "../db/connection";
+import { withSerializedExecution } from "../db/connection";
 import { updateMessageThreadIds, upsertMessage } from "../db/messages";
 import { deleteThread, upsertThread } from "../db/threads";
 import {
@@ -268,7 +268,7 @@ describe("imapInitialSync", () => {
   const mockImapListFolders = vi.mocked(imapListFolders);
   const mockImapSearchFolder = vi.mocked(imapSearchFolder);
   const mockImapFetchMessages = vi.mocked(imapFetchMessages);
-  const mockWithTransaction = vi.mocked(withTransaction);
+  const mockWithTransaction = vi.mocked(withSerializedExecution);
   const mockUpsertMessage = vi.mocked(upsertMessage);
   const mockUpdateMessageThreadIds = vi.mocked(updateMessageThreadIds);
   const mockUpsertThread = vi.mocked(upsertThread);
@@ -541,7 +541,7 @@ describe("imapInitialSync", () => {
 
     await imapInitialSync("acc-1");
 
-    // withTransaction should be called: once for Phase 2 chunk + once for Phase 4 batch
+    // withSerializedExecution should be called: once for Phase 2 chunk + once for Phase 4 batch
     expect(mockWithTransaction).toHaveBeenCalledTimes(2);
   });
 

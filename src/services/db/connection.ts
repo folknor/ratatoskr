@@ -41,14 +41,14 @@ export function buildDynamicUpdate(
 }
 
 /**
- * Simple async mutex to prevent concurrent SQLite transactions.
- * SQLite only supports one writer at a time; overlapping BEGIN/COMMIT/ROLLBACK
- * on the same connection causes "cannot start a transaction within a transaction"
- * or "database is locked" errors.
+ * Serializes database operations through a promise queue.
+ * NOTE: This does NOT provide SQL transaction semantics (no BEGIN/COMMIT/ROLLBACK).
+ * Partial writes are NOT rolled back on failure. For true atomicity, use Rust-side
+ * DbState::with_conn which supports real SQLite transactions.
  */
 let txQueue: Promise<void> = Promise.resolve();
 
-export async function withTransaction(
+export async function withSerializedExecution(
   fn: (database: Database) => Promise<void>,
 ): Promise<void> {
   // Queue this transaction behind any currently-running one.

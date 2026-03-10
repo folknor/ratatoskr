@@ -90,10 +90,13 @@ export class GmailClient {
       lastResponse = response;
       if (attempt === MAX_RETRY_ATTEMPTS - 1) break;
 
+      const backoffMs = INITIAL_BACKOFF_MS * 2 ** attempt;
       const retryAfter = response.headers.get("Retry-After");
-      const delayMs = retryAfter
-        ? parseInt(retryAfter, 10) * 1000
-        : INITIAL_BACKOFF_MS * 2 ** attempt;
+      let delayMs = backoffMs;
+      if (retryAfter) {
+        const seconds = parseInt(retryAfter, 10);
+        delayMs = !isNaN(seconds) ? seconds * 1000 : backoffMs;
+      }
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
     // biome-ignore lint/style/noNonNullAssertion: lastResponse is always assigned after at least one loop iteration
@@ -286,17 +289,7 @@ export class GmailClient {
    * Delete a user label.
    */
   async deleteLabel(labelId: string): Promise<void> {
-    const token = await this.getValidToken();
-    const url = `${GMAIL_API_BASE}/users/me/labels/${labelId}`;
-    const response = await fetch(url, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!response.ok) {
-      throw new Error(
-        `Gmail API error: ${response.status} ${await response.text()}`,
-      );
-    }
+    await this.request(`/labels/${labelId}`, { method: "DELETE" });
   }
 
   /**
@@ -304,17 +297,7 @@ export class GmailClient {
    * Used when deleting from Trash.
    */
   async deleteThread(threadId: string): Promise<void> {
-    const token = await this.getValidToken();
-    const url = `${GMAIL_API_BASE}/users/me/threads/${threadId}`;
-    const response = await fetch(url, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!response.ok) {
-      throw new Error(
-        `Gmail API error: ${response.status} ${await response.text()}`,
-      );
-    }
+    await this.request(`/threads/${threadId}`, { method: "DELETE" });
   }
 
   /**

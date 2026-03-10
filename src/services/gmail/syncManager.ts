@@ -50,6 +50,80 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 const SYNC_INTERVAL_MS = 60_000; // 60 seconds — delta syncs are lightweight (single API call when idle)
 
+/**
+ * Shared post-sync hooks: apply filters, smart labels, notifications, and AI categorization.
+ * Called after every successful sync (Gmail, JMAP, Graph, IMAP).
+ * Notifications are only dispatched on delta syncs (`isDelta = true`).
+ */
+async function runPostSyncHooks(
+  accountId: string,
+  newInboxEmailIds: string[],
+  affectedThreadIds: string[],
+  isDelta: boolean,
+): Promise<void> {
+  if (newInboxEmailIds.length > 0) {
+    try {
+      await applyFiltersToNewMessageIds(accountId, newInboxEmailIds);
+    } catch (err) {
+      console.error("[syncManager] Filter application failed:", err);
+    }
+
+    // Smart labels (fire-and-forget)
+    applySmartLabelsToNewMessageIds(accountId, newInboxEmailIds).catch((err) =>
+      console.error("[syncManager] Smart label error:", err),
+    );
+
+    // Notifications — only on delta sync (not initial)
+    if (isDelta) {
+      try {
+        const smartNotifSetting = await getSetting("smart_notifications");
+        const smartEnabled = smartNotifSetting === "true";
+        const notifCatSetting =
+          (await getSetting("notify_categories")) ?? "Primary";
+        const allowedCategories = new Set(
+          notifCatSetting.split(",").map((s) => s.trim()),
+        );
+        const vipSenders = smartEnabled
+          ? await getVipSenders(accountId)
+          : new Set<string>();
+        const mutedThreadIds = await getMutedThreadIds(accountId);
+
+        const newMsgs = await getMessagesByIds(accountId, newInboxEmailIds);
+        for (const msg of newMsgs) {
+          if (mutedThreadIds.has(msg.thread_id)) continue;
+          const category = await getThreadCategory(accountId, msg.thread_id);
+          if (
+            shouldNotifyForMessage(
+              smartEnabled,
+              allowedCategories,
+              vipSenders,
+              category,
+              msg.from_address ?? undefined,
+            )
+          ) {
+            queueNewEmailNotification(
+              msg.from_name ?? msg.from_address ?? "Unknown",
+              msg.subject ?? "",
+              msg.thread_id,
+              accountId,
+              msg.from_address ?? undefined,
+            );
+          }
+        }
+      } catch (err) {
+        console.error("[syncManager] Notification dispatch failed:", err);
+      }
+    }
+  }
+
+  // AI categorization (fire-and-forget)
+  if (affectedThreadIds.length > 0) {
+    categorizeNewThreads(accountId).catch((err) =>
+      console.error("[syncManager] Categorization error:", err),
+    );
+  }
+}
+
 /** Map IMAP sync phases to the SyncProgress phases the UI understands. */
 function mapImapPhase(
   phase: string,
@@ -122,79 +196,12 @@ async function syncGmailAccount(accountId: string): Promise<void> {
       // Delta sync
       try {
         const result = await syncGmailDelta(accountId);
-
-        // Post-sync hooks: apply filters and smart labels to new inbox messages
-        if (result.newInboxMessageIds.length > 0) {
-          try {
-            await applyFiltersToNewMessageIds(
-              accountId,
-              result.newInboxMessageIds,
-            );
-          } catch (err) {
-            console.error("[syncManager] Filter application failed:", err);
-          }
-
-          // Smart labels (fire-and-forget)
-          applySmartLabelsToNewMessageIds(
-            accountId,
-            result.newInboxMessageIds,
-          ).catch((err) =>
-            console.error("[syncManager] Smart label error:", err),
-          );
-
-          // Notifications for new inbox messages
-          try {
-            const smartNotifSetting = await getSetting("smart_notifications");
-            const smartEnabled = smartNotifSetting === "true";
-            const notifCatSetting =
-              (await getSetting("notify_categories")) ?? "Primary";
-            const allowedCategories = new Set(
-              notifCatSetting.split(",").map((s) => s.trim()),
-            );
-            const vipSenders = smartEnabled
-              ? await getVipSenders(accountId)
-              : new Set<string>();
-            const mutedThreadIds = await getMutedThreadIds(accountId);
-
-            const newMsgs = await getMessagesByIds(
-              accountId,
-              result.newInboxMessageIds,
-            );
-            for (const msg of newMsgs) {
-              if (mutedThreadIds.has(msg.thread_id)) continue;
-              const category = await getThreadCategory(
-                accountId,
-                msg.thread_id,
-              );
-              if (
-                shouldNotifyForMessage(
-                  smartEnabled,
-                  allowedCategories,
-                  vipSenders,
-                  category,
-                  msg.from_address ?? undefined,
-                )
-              ) {
-                queueNewEmailNotification(
-                  msg.from_name ?? msg.from_address ?? "Unknown",
-                  msg.subject ?? "",
-                  msg.thread_id,
-                  accountId,
-                  msg.from_address ?? undefined,
-                );
-              }
-            }
-          } catch (err) {
-            console.error("[syncManager] Notification dispatch failed:", err);
-          }
-        }
-
-        // AI categorization (fire-and-forget)
-        if (result.affectedThreadIds.length > 0) {
-          categorizeNewThreads(accountId).catch((err) =>
-            console.error("[syncManager] Categorization error:", err),
-          );
-        }
+        await runPostSyncHooks(
+          accountId,
+          result.newInboxMessageIds,
+          result.affectedThreadIds,
+          true,
+        );
       } catch (err) {
         const message = String(err ?? "");
         if (message === "HISTORY_EXPIRED" || message.includes("HISTORY_EXPIRED")) {
@@ -221,82 +228,20 @@ async function syncGmailAccount(accountId: string): Promise<void> {
  * TS only calls the Rust command and runs post-sync hooks on the result.
  */
 async function syncJmapAccount(accountId: string): Promise<void> {
+  // Check if this account has been synced before (has a state token)
+  const account = await getAccount(accountId);
+  const isDelta = !!account?.history_id;
+
   try {
     const result: { newInboxEmailIds: string[]; affectedThreadIds: string[] } =
       await invoke("jmap_sync_delta", { accountId });
 
-    // Post-sync hooks: apply filters and smart labels to new inbox messages
-    if (result.newInboxEmailIds.length > 0) {
-      try {
-        await applyFiltersToNewMessageIds(
-          accountId,
-          result.newInboxEmailIds,
-        );
-      } catch (err) {
-        console.error("[syncManager] Filter application failed:", err);
-      }
-
-      // Smart labels (fire-and-forget)
-      applySmartLabelsToNewMessageIds(
-        accountId,
-        result.newInboxEmailIds,
-      ).catch((err) =>
-        console.error("[syncManager] Smart label error:", err),
-      );
-
-      // Notifications for new inbox messages
-      try {
-        const smartNotifSetting = await getSetting("smart_notifications");
-        const smartEnabled = smartNotifSetting === "true";
-        const notifCatSetting =
-          (await getSetting("notify_categories")) ?? "Primary";
-        const allowedCategories = new Set(
-          notifCatSetting.split(",").map((s) => s.trim()),
-        );
-        const vipSenders = smartEnabled
-          ? await getVipSenders(accountId)
-          : new Set<string>();
-        const mutedThreadIds = await getMutedThreadIds(accountId);
-
-        const newMsgs = await getMessagesByIds(
-          accountId,
-          result.newInboxEmailIds,
-        );
-        for (const msg of newMsgs) {
-          if (mutedThreadIds.has(msg.thread_id)) continue;
-          const category = await getThreadCategory(
-            accountId,
-            msg.thread_id,
-          );
-          if (
-            shouldNotifyForMessage(
-              smartEnabled,
-              allowedCategories,
-              vipSenders,
-              category,
-              msg.from_address ?? undefined,
-            )
-          ) {
-            queueNewEmailNotification(
-              msg.from_name ?? msg.from_address ?? "Unknown",
-              msg.subject ?? "",
-              msg.thread_id,
-              accountId,
-              msg.from_address ?? undefined,
-            );
-          }
-        }
-      } catch (err) {
-        console.error("[syncManager] Notification dispatch failed:", err);
-      }
-    }
-
-    // AI categorization (fire-and-forget)
-    if (result.affectedThreadIds.length > 0) {
-      categorizeNewThreads(accountId).catch((err) =>
-        console.error("[syncManager] Categorization error:", err),
-      );
-    }
+    await runPostSyncHooks(
+      accountId,
+      result.newInboxEmailIds,
+      result.affectedThreadIds,
+      isDelta,
+    );
   } catch (err) {
     const message = String(err ?? "");
     if (message === "JMAP_STATE_EXPIRED" || message === "JMAP_NO_STATE" ||
@@ -317,82 +262,20 @@ async function syncJmapAccount(accountId: string): Promise<void> {
  * TS only calls the Rust command and runs post-sync hooks on the result.
  */
 async function syncGraphAccount(accountId: string): Promise<void> {
+  // Check if this account has been synced before (has a delta state token)
+  const account = await getAccount(accountId);
+  const isDelta = !!account?.history_id;
+
   try {
     const result: { newInboxMessageIds: string[]; affectedThreadIds: string[] } =
       await invoke("provider_sync_delta", { accountId });
 
-    // Post-sync hooks: apply filters and smart labels to new inbox messages
-    if (result.newInboxMessageIds.length > 0) {
-      try {
-        await applyFiltersToNewMessageIds(
-          accountId,
-          result.newInboxMessageIds,
-        );
-      } catch (err) {
-        console.error("[syncManager] Filter application failed:", err);
-      }
-
-      // Smart labels (fire-and-forget)
-      applySmartLabelsToNewMessageIds(
-        accountId,
-        result.newInboxMessageIds,
-      ).catch((err) =>
-        console.error("[syncManager] Smart label error:", err),
-      );
-
-      // Notifications for new inbox messages
-      try {
-        const smartNotifSetting = await getSetting("smart_notifications");
-        const smartEnabled = smartNotifSetting === "true";
-        const notifCatSetting =
-          (await getSetting("notify_categories")) ?? "Primary";
-        const allowedCategories = new Set(
-          notifCatSetting.split(",").map((s) => s.trim()),
-        );
-        const vipSenders = smartEnabled
-          ? await getVipSenders(accountId)
-          : new Set<string>();
-        const mutedThreadIds = await getMutedThreadIds(accountId);
-
-        const newMsgs = await getMessagesByIds(
-          accountId,
-          result.newInboxMessageIds,
-        );
-        for (const msg of newMsgs) {
-          if (mutedThreadIds.has(msg.thread_id)) continue;
-          const category = await getThreadCategory(
-            accountId,
-            msg.thread_id,
-          );
-          if (
-            shouldNotifyForMessage(
-              smartEnabled,
-              allowedCategories,
-              vipSenders,
-              category,
-              msg.from_address ?? undefined,
-            )
-          ) {
-            queueNewEmailNotification(
-              msg.from_name ?? msg.from_address ?? "Unknown",
-              msg.subject ?? "",
-              msg.thread_id,
-              accountId,
-              msg.from_address ?? undefined,
-            );
-          }
-        }
-      } catch (err) {
-        console.error("[syncManager] Notification dispatch failed:", err);
-      }
-    }
-
-    // AI categorization (fire-and-forget)
-    if (result.affectedThreadIds.length > 0) {
-      categorizeNewThreads(accountId).catch((err) =>
-        console.error("[syncManager] Categorization error:", err),
-      );
-    }
+    await runPostSyncHooks(
+      accountId,
+      result.newInboxMessageIds,
+      result.affectedThreadIds,
+      isDelta,
+    );
   } catch (err) {
     const message = String(err ?? "");
     if (message === "GRAPH_NO_DELTA_STATE" || message.includes("GRAPH_NO_DELTA_STATE")) {
@@ -460,80 +343,15 @@ async function syncImapAccountRust(accountId: string): Promise<void> {
       result = await syncImapInitial(accountId);
     }
 
-    // Post-sync hooks: apply filters and categorization to new inbox messages
-    if (result.newInboxMessageIds.length > 0) {
-      try {
-        await applyFiltersToNewMessageIds(
-          accountId,
-          result.newInboxMessageIds,
-        );
-      } catch (err) {
-        console.error("[syncManager] Filter application failed:", err);
-      }
-
-      // Smart labels (fire-and-forget)
-      applySmartLabelsToNewMessageIds(
-        accountId,
-        result.newInboxMessageIds,
-      ).catch((err) =>
-        console.error("[syncManager] Smart label error:", err),
-      );
-
-      // Notifications — only on delta sync (not initial)
-      if (isDelta) {
-        try {
-          const smartNotifSetting = await getSetting("smart_notifications");
-          const smartEnabled = smartNotifSetting === "true";
-          const notifCatSetting =
-            (await getSetting("notify_categories")) ?? "Primary";
-          const allowedCategories = new Set(
-            notifCatSetting.split(",").map((s) => s.trim()),
-          );
-          const vipSenders = smartEnabled
-            ? await getVipSenders(accountId)
-            : new Set<string>();
-          const mutedThreadIds = await getMutedThreadIds(accountId);
-
-          const newMsgs = await getMessagesByIds(
-            accountId,
-            result.newInboxMessageIds,
-          );
-          for (const msg of newMsgs) {
-            if (mutedThreadIds.has(msg.thread_id)) continue;
-            const category = await getThreadCategory(
-              accountId,
-              msg.thread_id,
-            );
-            if (
-              shouldNotifyForMessage(
-                smartEnabled,
-                allowedCategories,
-                vipSenders,
-                category,
-                msg.from_address ?? undefined,
-              )
-            ) {
-              queueNewEmailNotification(
-                msg.from_name ?? msg.from_address ?? "Unknown",
-                msg.subject ?? "",
-                msg.thread_id,
-                accountId,
-                msg.from_address ?? undefined,
-              );
-            }
-          }
-        } catch (err) {
-          console.error("[syncManager] Notification dispatch failed:", err);
-        }
-      }
-    }
-
-    // AI categorization (fire-and-forget)
-    if (result.storedCount > 0) {
-      categorizeNewThreads(accountId).catch((err) =>
-        console.error("[syncManager] Categorization error:", err),
-      );
-    }
+    // IMAP uses storedCount as a proxy for affected threads (no thread IDs returned).
+    // Build a synthetic affectedThreadIds array to gate AI categorization.
+    const affectedThreadIds = result.storedCount > 0 ? ["_imap_stored"] : [];
+    await runPostSyncHooks(
+      accountId,
+      result.newInboxMessageIds,
+      affectedThreadIds,
+      isDelta,
+    );
   } finally {
     unlisten?.();
   }

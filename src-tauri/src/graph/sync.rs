@@ -416,8 +416,9 @@ async fn fetch_folder_messages(
     folder_map: &FolderMap,
 ) -> Result<Vec<ParsedGraphMessage>, String> {
     let mut messages = Vec::new();
+    let enc_folder_id = urlencoding::encode(folder_id);
     let initial_url = format!(
-        "/me/mailFolders/{folder_id}/messages\
+        "/me/mailFolders/{enc_folder_id}/messages\
          ?$filter=receivedDateTime ge {since_iso}\
          &$select={MESSAGE_SELECT}\
          &$expand=attachments($select=id,name,contentType,size,isInline,contentId)\
@@ -495,8 +496,9 @@ fn fetch_child_folders<'a>(
 ) -> futures::future::BoxFuture<'a, Result<Vec<GraphMailFolder>, String>> {
     Box::pin(async move {
         let mut children = Vec::new();
+        let enc_parent_id = urlencoding::encode(parent_id);
         let initial_url =
-            format!("/me/mailFolders/{parent_id}/childFolders?$top=250");
+            format!("/me/mailFolders/{enc_parent_id}/childFolders?$top=250");
         let mut next_link: Option<String> = None;
 
         loop {
@@ -539,8 +541,9 @@ async fn bootstrap_delta_token(
     db: &DbState,
     folder_id: &str,
 ) -> Result<String, String> {
+    let enc_folder_id = urlencoding::encode(folder_id);
     let initial_url = format!(
-        "/me/mailFolders/{folder_id}/messages/delta?$select=id"
+        "/me/mailFolders/{enc_folder_id}/messages/delta?$select=id"
     );
     let mut next_link: Option<String> = None;
 
@@ -626,8 +629,9 @@ async fn bootstrap_delta_token_latest(
     db: &DbState,
     folder_id: &str,
 ) -> Result<String, String> {
+    let enc_folder_id = urlencoding::encode(folder_id);
     let url = format!(
-        "/me/mailFolders/{folder_id}/messages/delta?$deltatoken=latest"
+        "/me/mailFolders/{enc_folder_id}/messages/delta?$deltatoken=latest"
     );
     let page: ODataCollection<serde_json::Value> = client.get_json(&url, db).await?;
 
@@ -684,7 +688,8 @@ async fn filter_pending_ops(
                 let count: i64 = conn
                     .query_row(
                         "SELECT COUNT(*) FROM pending_operations \
-                         WHERE account_id = ?1 AND resource_id = ?2",
+                         WHERE account_id = ?1 AND resource_id = ?2 \
+                         AND status != 'failed'",
                         rusqlite::params![aid, tid],
                         |row| row.get(0),
                     )
@@ -761,6 +766,7 @@ async fn persist_messages(
 }
 
 /// Delete messages from DB, body store, and search index.
+/// Also updates or removes parent threads as needed.
 async fn delete_messages(sctx: &SyncCtx<'_>, message_ids: &[String]) -> Result<(), String> {
     if message_ids.is_empty() {
         return Ok(());
@@ -769,12 +775,26 @@ async fn delete_messages(sctx: &SyncCtx<'_>, message_ids: &[String]) -> Result<(
     let aid = sctx.account_id.to_string();
     let ids = message_ids.to_vec();
 
-    // Delete from DB
+    // Delete from DB and update parent threads
     sctx.db
         .with_conn(move |conn| {
             let tx = conn
                 .unchecked_transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
+
+            // Collect affected thread IDs before deleting
+            let mut affected_threads = HashSet::new();
+            for id in &ids {
+                if let Ok(tid) = tx.query_row(
+                    "SELECT thread_id FROM messages WHERE account_id = ?1 AND id = ?2",
+                    rusqlite::params![aid, id],
+                    |row| row.get::<_, String>(0),
+                ) {
+                    affected_threads.insert(tid);
+                }
+            }
+
+            // Delete the messages
             for id in &ids {
                 tx.execute(
                     "DELETE FROM messages WHERE account_id = ?1 AND id = ?2",
@@ -782,6 +802,35 @@ async fn delete_messages(sctx: &SyncCtx<'_>, message_ids: &[String]) -> Result<(
                 )
                 .map_err(|e| format!("delete message: {e}"))?;
             }
+
+            // Update or remove affected threads
+            for tid in &affected_threads {
+                let remaining: i64 = tx
+                    .query_row(
+                        "SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND account_id = ?2",
+                        rusqlite::params![tid, aid],
+                        |row| row.get(0),
+                    )
+                    .map_err(|e| format!("count remaining: {e}"))?;
+
+                if remaining == 0 {
+                    // Orphan thread — remove it and its labels
+                    tx.execute(
+                        "DELETE FROM threads WHERE id = ?1 AND account_id = ?2",
+                        rusqlite::params![tid, aid],
+                    )
+                    .map_err(|e| format!("delete orphan thread: {e}"))?;
+                    tx.execute(
+                        "DELETE FROM thread_labels WHERE thread_id = ?1 AND account_id = ?2",
+                        rusqlite::params![tid, aid],
+                    )
+                    .map_err(|e| format!("delete orphan thread labels: {e}"))?;
+                } else {
+                    // Re-aggregate thread fields from remaining messages
+                    reaggregate_thread(&tx, &aid, tid)?;
+                }
+            }
+
             tx.commit().map_err(|e| format!("commit: {e}"))?;
             Ok(())
         })
@@ -802,6 +851,93 @@ async fn delete_messages(sctx: &SyncCtx<'_>, message_ids: &[String]) -> Result<(
     Ok(())
 }
 
+/// Re-aggregate thread fields from remaining messages after deletion.
+fn reaggregate_thread(
+    tx: &rusqlite::Transaction,
+    account_id: &str,
+    thread_id: &str,
+) -> Result<(), String> {
+    let message_count: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND account_id = ?2",
+            rusqlite::params![thread_id, account_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("count messages: {e}"))?;
+
+    let is_read: bool = tx
+        .query_row(
+            "SELECT COUNT(*) FROM messages \
+             WHERE thread_id = ?1 AND account_id = ?2 AND is_read = 0",
+            rusqlite::params![thread_id, account_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|unread| unread == 0)
+        .map_err(|e| format!("check is_read: {e}"))?;
+
+    let is_starred: bool = tx
+        .query_row(
+            "SELECT COUNT(*) FROM messages \
+             WHERE thread_id = ?1 AND account_id = ?2 AND is_starred = 1",
+            rusqlite::params![thread_id, account_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|starred| starred > 0)
+        .map_err(|e| format!("check is_starred: {e}"))?;
+
+    let has_attachments: bool = tx
+        .query_row(
+            "SELECT COUNT(*) FROM attachments a \
+             JOIN messages m ON a.message_id = m.id \
+             WHERE m.thread_id = ?1 AND m.account_id = ?2",
+            rusqlite::params![thread_id, account_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count > 0)
+        .map_err(|e| format!("check has_attachments: {e}"))?;
+
+    let (snippet, last_date): (String, i64) = tx
+        .query_row(
+            "SELECT COALESCE(snippet, ''), date FROM messages \
+             WHERE thread_id = ?1 AND account_id = ?2 \
+             ORDER BY date DESC LIMIT 1",
+            rusqlite::params![thread_id, account_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| format!("get latest message: {e}"))?;
+
+    let subject: Option<String> = tx
+        .query_row(
+            "SELECT subject FROM messages \
+             WHERE thread_id = ?1 AND account_id = ?2 \
+             ORDER BY date ASC LIMIT 1",
+            rusqlite::params![thread_id, account_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("get subject: {e}"))?;
+
+    tx.execute(
+        "UPDATE threads SET subject = ?1, snippet = ?2, last_message_at = ?3, \
+         message_count = ?4, is_read = ?5, is_starred = ?6, \
+         has_attachments = ?7 \
+         WHERE id = ?8 AND account_id = ?9",
+        rusqlite::params![
+            subject,
+            snippet,
+            last_date,
+            message_count,
+            is_read,
+            is_starred,
+            has_attachments,
+            thread_id,
+            account_id,
+        ],
+    )
+    .map_err(|e| format!("reaggregate thread: {e}"))?;
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // DB write helpers
 // ---------------------------------------------------------------------------
@@ -812,10 +948,10 @@ fn store_thread_to_db(
     thread_id: &str,
     messages: &[ParsedGraphMessage],
 ) -> Result<(), String> {
+    // upsert_thread_record calls upsert_messages internally before aggregating
+    upsert_attachments(tx, account_id, messages)?;
     upsert_thread_record(tx, account_id, thread_id, messages)?;
     set_thread_labels(tx, account_id, thread_id, messages)?;
-    upsert_messages(tx, account_id, messages)?;
-    upsert_attachments(tx, account_id, messages)?;
     Ok(())
 }
 
@@ -825,16 +961,74 @@ fn upsert_thread_record(
     thread_id: &str,
     messages: &[ParsedGraphMessage],
 ) -> Result<(), String> {
-    let Some(first) = messages.first() else {
+    if messages.is_empty() {
         return Ok(());
-    };
-    let Some(last) = messages.last() else {
-        return Ok(());
-    };
+    }
 
-    let is_read = messages.iter().all(|m| m.is_read);
-    let is_starred = messages.iter().any(|m| m.is_starred);
-    let has_attachments = messages.iter().any(|m| m.has_attachments);
+    // First upsert the incoming messages so they are visible in DB queries
+    upsert_messages(tx, account_id, messages)?;
+
+    // Now aggregate thread fields from ALL messages in the DB for this thread
+    let message_count: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND account_id = ?2",
+            rusqlite::params![thread_id, account_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("count messages: {e}"))?;
+
+    let is_read: bool = tx
+        .query_row(
+            "SELECT COUNT(*) FROM messages \
+             WHERE thread_id = ?1 AND account_id = ?2 AND is_read = 0",
+            rusqlite::params![thread_id, account_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|unread| unread == 0)
+        .map_err(|e| format!("check is_read: {e}"))?;
+
+    let is_starred: bool = tx
+        .query_row(
+            "SELECT COUNT(*) FROM messages \
+             WHERE thread_id = ?1 AND account_id = ?2 AND is_starred = 1",
+            rusqlite::params![thread_id, account_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|starred| starred > 0)
+        .map_err(|e| format!("check is_starred: {e}"))?;
+
+    let has_attachments: bool = tx
+        .query_row(
+            "SELECT COUNT(*) FROM attachments a \
+             JOIN messages m ON a.message_id = m.id \
+             WHERE m.thread_id = ?1 AND m.account_id = ?2",
+            rusqlite::params![thread_id, account_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count > 0)
+        .map_err(|e| format!("check has_attachments: {e}"))?;
+
+    // Get snippet + date from the most recent message in the thread
+    let (snippet, last_date): (String, i64) = tx
+        .query_row(
+            "SELECT COALESCE(snippet, ''), date FROM messages \
+             WHERE thread_id = ?1 AND account_id = ?2 \
+             ORDER BY date DESC LIMIT 1",
+            rusqlite::params![thread_id, account_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| format!("get latest message: {e}"))?;
+
+    // Get subject from the earliest message (thread subject)
+    let subject: Option<String> = tx
+        .query_row(
+            "SELECT subject FROM messages \
+             WHERE thread_id = ?1 AND account_id = ?2 \
+             ORDER BY date ASC LIMIT 1",
+            rusqlite::params![thread_id, account_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("get subject: {e}"))?;
 
     let all_labels: HashSet<&str> = messages
         .iter()
@@ -842,28 +1036,57 @@ fn upsert_thread_record(
         .collect();
     let is_important = all_labels.contains("IMPORTANT");
 
-    #[allow(clippy::cast_possible_wrap)]
-    let message_count = messages.len() as i64;
+    // Check if thread already exists to preserve fields like is_pinned, is_muted
+    let exists: bool = tx
+        .query_row(
+            "SELECT COUNT(*) FROM threads WHERE id = ?1 AND account_id = ?2",
+            rusqlite::params![thread_id, account_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|c| c > 0)
+        .map_err(|e| format!("check thread exists: {e}"))?;
 
-    tx.execute(
-        "INSERT OR REPLACE INTO threads \
-         (id, account_id, subject, snippet, last_message_at, message_count, \
-          is_read, is_starred, is_important, has_attachments) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        rusqlite::params![
-            thread_id,
-            account_id,
-            first.subject,
-            last.snippet,
-            last.date,
-            message_count,
-            is_read,
-            is_starred,
-            is_important,
-            has_attachments,
-        ],
-    )
-    .map_err(|e| format!("upsert thread: {e}"))?;
+    if exists {
+        tx.execute(
+            "UPDATE threads SET subject = ?1, snippet = ?2, last_message_at = ?3, \
+             message_count = ?4, is_read = ?5, is_starred = ?6, is_important = ?7, \
+             has_attachments = ?8 \
+             WHERE id = ?9 AND account_id = ?10",
+            rusqlite::params![
+                subject,
+                snippet,
+                last_date,
+                message_count,
+                is_read,
+                is_starred,
+                is_important,
+                has_attachments,
+                thread_id,
+                account_id,
+            ],
+        )
+        .map_err(|e| format!("update thread: {e}"))?;
+    } else {
+        tx.execute(
+            "INSERT INTO threads \
+             (id, account_id, subject, snippet, last_message_at, message_count, \
+              is_read, is_starred, is_important, has_attachments) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            rusqlite::params![
+                thread_id,
+                account_id,
+                subject,
+                snippet,
+                last_date,
+                message_count,
+                is_read,
+                is_starred,
+                is_important,
+                has_attachments,
+            ],
+        )
+        .map_err(|e| format!("insert thread: {e}"))?;
+    }
 
     Ok(())
 }

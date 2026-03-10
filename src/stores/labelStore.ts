@@ -7,6 +7,7 @@ import {
   updateLabelSortOrder,
   upsertLabel,
 } from "@/core/labels";
+import { useAccountStore } from "@/stores/accountStore";
 
 export interface Label {
   id: string;
@@ -94,6 +95,19 @@ export const useLabelStore: UseBoundStore<StoreApi<LabelState>> =
       name: string,
       color?: { textColor: string; backgroundColor: string },
     ) => {
+      const account = useAccountStore
+        .getState()
+        .accounts.find((a) => a.id === accountId);
+      const provider = account?.provider ?? "gmail_api";
+
+      if (provider !== "gmail_api") {
+        // TODO: implement provider-agnostic folder creation for IMAP/JMAP/Graph
+        console.error(
+          `createLabel not supported for provider "${provider}". Only Gmail API is currently supported.`,
+        );
+        return;
+      }
+
       const gmailLabel = await invoke<{
         id: string;
         name: string;
@@ -124,6 +138,19 @@ export const useLabelStore: UseBoundStore<StoreApi<LabelState>> =
         color?: { textColor: string; backgroundColor: string } | null;
       },
     ) => {
+      const account = useAccountStore
+        .getState()
+        .accounts.find((a) => a.id === accountId);
+      const provider = account?.provider ?? "gmail_api";
+
+      if (provider !== "gmail_api") {
+        // TODO: implement provider-agnostic folder rename for IMAP/JMAP/Graph
+        console.error(
+          `updateLabel not supported for provider "${provider}". Only Gmail API is currently supported.`,
+        );
+        return;
+      }
+
       const gmailLabel = await invoke<{
         id: string;
         name: string;
@@ -148,6 +175,19 @@ export const useLabelStore: UseBoundStore<StoreApi<LabelState>> =
     },
 
     deleteLabel: async (accountId: string, labelId: string) => {
+      const account = useAccountStore
+        .getState()
+        .accounts.find((a) => a.id === accountId);
+      const provider = account?.provider ?? "gmail_api";
+
+      if (provider !== "gmail_api") {
+        // TODO: implement provider-agnostic folder deletion for IMAP/JMAP/Graph
+        console.error(
+          `deleteLabel not supported for provider "${provider}". Only Gmail API is currently supported.`,
+        );
+        return;
+      }
+
       await invoke("gmail_delete_label", { accountId, labelId });
       await dbDeleteLabel(accountId, labelId);
       await get().loadLabels(accountId);

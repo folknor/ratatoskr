@@ -12,7 +12,7 @@ import {
 import type React from "react";
 import { useCallback, useRef, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
-import { insertJmapAccount } from "@/services/db/accounts";
+import { deleteAccount, insertJmapAccount } from "@/services/db/accounts";
 import { useAccountStore } from "@/stores/accountStore";
 
 type Step = "credentials" | "discovery" | "test";
@@ -145,6 +145,11 @@ export function AddJmapAccount({
         await invoke("jmap_remove_client", {
           accountId: accountIdRef.current,
         });
+      } catch {
+        // Best-effort cleanup
+      }
+      try {
+        await deleteAccount(accountIdRef.current);
       } catch {
         // Best-effort cleanup
       }

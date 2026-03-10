@@ -66,17 +66,6 @@ interface RustGmailAttachmentData {
   data: string;
 }
 
-/** Shape returned by the Rust gmail_send_email command */
-interface RustGmailSendResult {
-  id: string;
-}
-
-/** Shape returned by the Rust gmail_create_draft / gmail_update_draft commands */
-interface RustGmailDraft {
-  id: string;
-  message: { id: string; threadId: string };
-}
-
 /**
  * EmailProvider adapter that delegates to Rust Gmail Tauri commands.
  * All operations invoke the corresponding `gmail_*` Tauri command.
@@ -96,7 +85,7 @@ export class GmailApiProvider implements EmailProvider {
     return labels.map((label) => ({
       id: label.id,
       name: label.name,
-      path: label.name,
+      path: label.id,
       type: label.labelType === "system" ? ("system" as const) : ("user" as const),
       specialUse:
         label.labelType === "system"
@@ -117,7 +106,7 @@ export class GmailApiProvider implements EmailProvider {
     return {
       id: label.id,
       name: label.name,
-      path: label.name,
+      path: label.id,
       type: "user",
       specialUse: null,
       delimiter: "/",
@@ -231,149 +220,6 @@ export class GmailApiProvider implements EmailProvider {
     const raw = resp.raw ?? "";
     const base64 = raw.replace(/-/g, "+").replace(/_/g, "/");
     return atob(base64);
-  }
-
-  async archive(threadId: string, _messageIds: string[]): Promise<void> {
-    await invoke<unknown>("gmail_modify_thread", {
-      accountId: this.accountId,
-      threadId,
-      addLabels: [],
-      removeLabels: ["INBOX"],
-    });
-  }
-
-  async trash(threadId: string, _messageIds: string[]): Promise<void> {
-    await invoke<unknown>("gmail_modify_thread", {
-      accountId: this.accountId,
-      threadId,
-      addLabels: ["TRASH"],
-      removeLabels: ["INBOX"],
-    });
-  }
-
-  async permanentDelete(
-    threadId: string,
-    _messageIds: string[],
-  ): Promise<void> {
-    await invoke<void>("gmail_delete_thread", {
-      accountId: this.accountId,
-      threadId,
-    });
-  }
-
-  async markRead(
-    threadId: string,
-    _messageIds: string[],
-    read: boolean,
-  ): Promise<void> {
-    await invoke<unknown>("gmail_modify_thread", {
-      accountId: this.accountId,
-      threadId,
-      addLabels: read ? [] : ["UNREAD"],
-      removeLabels: read ? ["UNREAD"] : [],
-    });
-  }
-
-  async star(
-    threadId: string,
-    _messageIds: string[],
-    starred: boolean,
-  ): Promise<void> {
-    await invoke<unknown>("gmail_modify_thread", {
-      accountId: this.accountId,
-      threadId,
-      addLabels: starred ? ["STARRED"] : [],
-      removeLabels: starred ? [] : ["STARRED"],
-    });
-  }
-
-  async spam(
-    threadId: string,
-    _messageIds: string[],
-    isSpam: boolean,
-  ): Promise<void> {
-    await invoke<unknown>("gmail_modify_thread", {
-      accountId: this.accountId,
-      threadId,
-      addLabels: isSpam ? ["SPAM"] : ["INBOX"],
-      removeLabels: isSpam ? ["INBOX"] : ["SPAM"],
-    });
-  }
-
-  async moveToFolder(
-    threadId: string,
-    _messageIds: string[],
-    folderPath: string,
-  ): Promise<void> {
-    await invoke<unknown>("gmail_modify_thread", {
-      accountId: this.accountId,
-      threadId,
-      addLabels: [folderPath],
-      removeLabels: [],
-    });
-  }
-
-  async addLabel(threadId: string, labelId: string): Promise<void> {
-    await invoke<unknown>("gmail_modify_thread", {
-      accountId: this.accountId,
-      threadId,
-      addLabels: [labelId],
-      removeLabels: [],
-    });
-  }
-
-  async removeLabel(threadId: string, labelId: string): Promise<void> {
-    await invoke<unknown>("gmail_modify_thread", {
-      accountId: this.accountId,
-      threadId,
-      addLabels: [],
-      removeLabels: [labelId],
-    });
-  }
-
-  async sendMessage(
-    rawBase64Url: string,
-    threadId?: string,
-  ): Promise<{ id: string }> {
-    const resp = await invoke<RustGmailSendResult>("gmail_send_email", {
-      accountId: this.accountId,
-      raw: rawBase64Url,
-      threadId: threadId ?? null,
-    });
-    return { id: resp.id };
-  }
-
-  async createDraft(
-    rawBase64Url: string,
-    threadId?: string,
-  ): Promise<{ draftId: string }> {
-    const resp = await invoke<RustGmailDraft>("gmail_create_draft", {
-      accountId: this.accountId,
-      raw: rawBase64Url,
-      threadId: threadId ?? null,
-    });
-    return { draftId: resp.id };
-  }
-
-  async updateDraft(
-    draftId: string,
-    rawBase64Url: string,
-    threadId?: string,
-  ): Promise<{ draftId: string }> {
-    const resp = await invoke<RustGmailDraft>("gmail_update_draft", {
-      accountId: this.accountId,
-      draftId,
-      raw: rawBase64Url,
-      threadId: threadId ?? null,
-    });
-    return { draftId: resp.id };
-  }
-
-  async deleteDraft(draftId: string): Promise<void> {
-    await invoke<void>("gmail_delete_draft", {
-      accountId: this.accountId,
-      draftId,
-    });
   }
 
   async testConnection(): Promise<{ success: boolean; message: string }> {

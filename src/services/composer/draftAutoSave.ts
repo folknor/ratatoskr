@@ -13,9 +13,11 @@ const DEBOUNCE_MS = 3000;
 
 async function saveDraft(): Promise<void> {
   const state = useComposerStore.getState();
-  // Read the active account ID at save time (not capture time) so that
-  // switching accounts during the 3s debounce window doesn't save to the wrong account.
-  const accountId = useAccountStore.getState().activeAccountId;
+  // Use the account ID captured when the composer was opened, falling back to
+  // the active account. This prevents saving to the wrong account if the user
+  // switches accounts during the 3s debounce window.
+  const accountId =
+    state.accountId ?? useAccountStore.getState().activeAccountId;
   if (!(state.isOpen && accountId)) return;
 
   const accounts = useAccountStore.getState().accounts;
@@ -96,11 +98,17 @@ function scheduleSave(): void {
 /**
  * Start watching composerStore changes and auto-saving drafts.
  */
-export function startAutoSave(_accountId?: string): void {
-  // Note: _accountId is accepted for backward compatibility but ignored.
-  // The active account ID is read from the account store at save time to
-  // prevent saving to the wrong account if the user switches during debounce.
+export function startAutoSave(accountId?: string): void {
   stopAutoSave();
+
+  // Capture the account ID into the composer store at the time auto-save starts,
+  // so drafts are always saved to the correct account even if the user switches.
+  if (accountId) {
+    const state = useComposerStore.getState();
+    if (!state.accountId) {
+      useComposerStore.setState({ accountId });
+    }
+  }
 
   // Subscribe to store changes — trigger debounced save on any field change
   unsubscribe = useComposerStore.subscribe((state, prevState) => {

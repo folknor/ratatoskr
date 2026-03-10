@@ -41,7 +41,6 @@ fn build_transport(
             if config.accept_invalid_certs {
                 let tls_params = TlsParametersBuilder::new(config.host.clone())
                     .dangerous_accept_invalid_certs(true)
-                    .dangerous_accept_invalid_hostnames(true)
                     .build()
                     .map_err(|e| format!("SMTP TLS params error: {e}"))?;
                 builder = builder.tls(Tls::Required(tls_params));
@@ -60,7 +59,6 @@ fn build_transport(
             if config.accept_invalid_certs {
                 let tls_params = TlsParametersBuilder::new(config.host.clone())
                     .dangerous_accept_invalid_certs(true)
-                    .dangerous_accept_invalid_hostnames(true)
                     .build()
                     .map_err(|e| format!("SMTP TLS params error: {e}"))?;
                 builder = builder.tls(Tls::Required(tls_params));

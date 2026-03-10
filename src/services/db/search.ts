@@ -2,6 +2,20 @@ import { hasSearchOperators, parseSearchQuery } from "../search/searchParser";
 import { buildSearchQuery } from "../search/searchQueryBuilder";
 import { getDb } from "./connection";
 
+/**
+ * Sanitize user input for use in an FTS5 MATCH clause.
+ * Wraps each whitespace-delimited token in double quotes so FTS5 special
+ * characters (*, ^, OR, AND, NOT, NEAR, etc.) are treated as literals.
+ * Internal double quotes are escaped by doubling them per FTS5 rules.
+ */
+function sanitizeFts5Query(input: string): string {
+  return input
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((term) => `"${term.replace(/"/g, '""')}"`)
+    .join(" ");
+}
+
 export interface SearchResult {
   message_id: string;
   account_id: string;
@@ -51,6 +65,9 @@ export async function searchMessages(
   }
 
   // Fall through to standard FTS5 search
+  const sanitized = sanitizeFts5Query(ftsQuery);
+  if (!sanitized) return [];
+
   if (accountId) {
     return db.select<SearchResult[]>(
       `SELECT
@@ -68,7 +85,7 @@ export async function searchMessages(
       WHERE messages_fts MATCH $1 AND m.account_id = $2
       ORDER BY rank
       LIMIT $3`,
-      [ftsQuery, accountId, limit],
+      [sanitized, accountId, limit],
     );
   }
 
@@ -88,6 +105,6 @@ export async function searchMessages(
     WHERE messages_fts MATCH $1
     ORDER BY rank
     LIMIT $2`,
-    [ftsQuery, limit],
+    [sanitized, limit],
   );
 }

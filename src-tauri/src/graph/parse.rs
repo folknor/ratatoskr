@@ -221,8 +221,22 @@ fn format_recipients(recipients: Option<&[GraphRecipient]>) -> Option<String> {
 }
 
 /// Parse an ISO 8601 date string to epoch milliseconds.
+///
+/// Tries RFC 3339 first (has timezone), then falls back to naive datetime
+/// formats without timezone (assumed UTC). Graph API sometimes returns dates
+/// without a timezone suffix.
 fn parse_iso_date(s: &str) -> Option<i64> {
-    chrono::DateTime::parse_from_rfc3339(s)
-        .ok()
-        .map(|dt| dt.timestamp_millis())
+    // Try RFC 3339 first (has timezone)
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+        return Some(dt.timestamp_millis());
+    }
+    // Fallback: naive datetime without timezone (assume UTC), with fractional seconds
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f") {
+        return Some(dt.and_utc().timestamp_millis());
+    }
+    // Fallback: naive datetime without timezone (assume UTC), no fractional seconds
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S") {
+        return Some(dt.and_utc().timestamp_millis());
+    }
+    None
 }

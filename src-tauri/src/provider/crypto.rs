@@ -20,6 +20,13 @@ pub fn load_encryption_key(app_data_dir: &Path) -> Result<[u8; 32], String> {
     let contents =
         std::fs::read_to_string(&path).map_err(|e| format!("Failed to read key file: {e}"))?;
 
+    // Retroactively fix permissions on existing key files
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+
     let key_bytes = STANDARD
         .decode(contents.trim())
         .map_err(|e| format!("Failed to decode key: {e}"))?;

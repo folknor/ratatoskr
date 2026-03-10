@@ -229,8 +229,9 @@ export function Composer(): React.ReactNode {
     const delay = parseInt(delaySetting ?? "5", 10) * 1000;
     const currentDraftId = state.draftId;
 
-    // Show undo send UI
-    state.setUndoSendVisible(true);
+    // Show undo send UI (pass delay in seconds for the countdown animation)
+    const delaySeconds = parseInt(delaySetting ?? "5", 10);
+    state.setUndoSendVisible(true, delaySeconds);
 
     const timer = setTimeout(async () => {
       try {

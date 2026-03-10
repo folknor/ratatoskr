@@ -45,10 +45,18 @@ export function EmailRenderer({
   const [cidMap, setCidMap] = useState<Map<string, string>>(new Map());
 
   const theme = useUIPreferencesStore((s) => s.theme);
-  const isDark =
-    theme === "dark" ||
-    (theme === "system" &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches);
+  const [systemDark, setSystemDark] = useState(
+    () => window.matchMedia("(prefers-color-scheme: dark)").matches,
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = (e: MediaQueryListEvent): void => setSystemDark(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
+  const isDark = theme === "dark" || (theme === "system" && systemDark);
 
   const shouldBlock = blockImages && !senderAllowlisted && !overrideShow;
 
@@ -158,6 +166,7 @@ export function EmailRenderer({
     doc.write(`<!DOCTYPE html>
 <html>
 <head>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data: cid:;">
   <style>
     body {
       margin: 0;

@@ -89,11 +89,19 @@ export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
   // Load messages
   useEffect(() => {
     if (!activeAccountId) return;
+    let cancelled = false;
     setLoading(true);
     getMessagesForThread(activeAccountId, thread.id)
-      .then(setMessages)
+      .then((msgs) => {
+        if (!cancelled) setMessages(msgs);
+      })
       .catch(console.error)
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [activeAccountId, thread.id]);
 
   // Check per-sender allowlist (single batch query instead of N queries)
@@ -181,6 +189,10 @@ export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
     });
   }, [lastMessage, openComposer, t]);
 
+  const activeAccount = useAccountStore((s) =>
+    s.accounts.find((a) => a.id === s.activeAccountId),
+  );
+
   const handleReplyAll = useCallback(() => {
     if (!lastMessage) return;
     const replyTo = lastMessage.reply_to ?? lastMessage.from_address;
@@ -191,10 +203,14 @@ export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
         allRecipients.add(a.trim());
       }
     }
+    // Remove user's own email from recipients
+    if (activeAccount?.email) allRecipients.delete(activeAccount.email);
+
     const ccList: string[] = [];
     if (lastMessage.cc_addresses) {
       for (const a of lastMessage.cc_addresses.split(",")) {
-        ccList.push(a.trim());
+        const trimmed = a.trim();
+        if (trimmed && trimmed !== activeAccount?.email) ccList.push(trimmed);
       }
     }
     openComposer({
@@ -215,7 +231,7 @@ export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
       threadId: lastMessage.thread_id,
       inReplyToMessageId: lastMessage.id,
     });
-  }, [lastMessage, openComposer, t]);
+  }, [lastMessage, openComposer, t, activeAccount?.email]);
 
   const handleForward = useCallback(() => {
     if (!lastMessage) return;
@@ -287,7 +303,7 @@ export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
   // Reset focused index when thread changes
   useEffect(() => {
     setFocusedMsgIdx(-1);
-  }, []);
+  }, [thread.id]);
 
   // Scroll focused message into view
   useEffect(() => {

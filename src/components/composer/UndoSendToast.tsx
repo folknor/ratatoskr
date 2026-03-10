@@ -4,13 +4,12 @@ import { useTranslation } from "react-i18next";
 import { CSSTransition } from "react-transition-group";
 import { useComposerStore } from "@/stores/composerStore";
 
-const UNDO_DELAY_SECONDS = 5;
-
 export function UndoSendToast(): React.ReactNode {
   const { t } = useTranslation("composer");
   const {
     undoSendVisible,
     undoSendTimer,
+    undoSendDelaySeconds,
     setUndoSendTimer,
     setUndoSendVisible,
   } = useComposerStore();
@@ -50,7 +49,7 @@ export function UndoSendToast(): React.ReactNode {
           <div
             className="h-full bg-accent rounded-full"
             style={{
-              animation: `countdownBar ${UNDO_DELAY_SECONDS}s linear forwards`,
+              animation: `countdownBar ${undoSendDelaySeconds}s linear forwards`,
             }}
           />
         </div>
