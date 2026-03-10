@@ -1,33 +1,24 @@
+import { invoke } from "@tauri-apps/api/core";
 import { upsertAlias } from "../db/sendAsAliases";
-import type { GmailClient } from "./client";
 
-interface GmailSendAsEntry {
+interface GmailSendAs {
   sendAsEmail: string;
   displayName?: string;
   replyToAddress?: string;
   isPrimary?: boolean;
   treatAsAlias?: boolean;
   verificationStatus?: string;
-  signature?: string;
-}
-
-interface GmailSendAsResponse {
-  sendAs: GmailSendAsEntry[];
 }
 
 /**
- * Fetch send-as aliases from Gmail API and store them locally.
+ * Fetch send-as aliases from the Rust backend and store them locally.
  */
-export async function fetchSendAsAliases(
-  client: GmailClient,
-  accountId: string,
-): Promise<void> {
-  const response =
-    await client.request<GmailSendAsResponse>("/settings/sendAs");
+export async function fetchSendAsAliases(accountId: string): Promise<void> {
+  const aliases = await invoke<GmailSendAs[]>("gmail_fetch_send_as", {
+    accountId,
+  });
 
-  if (!response.sendAs) return;
-
-  for (const entry of response.sendAs) {
+  for (const entry of aliases) {
     await upsertAlias({
       accountId,
       email: entry.sendAsEmail,

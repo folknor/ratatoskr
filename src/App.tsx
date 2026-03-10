@@ -52,10 +52,7 @@ import {
   syncAccount,
   triggerSync,
 } from "./services/gmail/syncManager";
-import {
-  getGmailClient,
-  initializeClients,
-} from "./services/gmail/tokenManager";
+import { initializeClients } from "./services/gmail/tokenManager";
 import { initNotifications } from "./services/notifications/notificationManager";
 import {
   startQueueProcessor,
@@ -402,8 +399,7 @@ export default function App(): React.ReactNode {
           .map((a) => a.id);
         for (const accountId of emailAccountIds) {
           try {
-            const client = await getGmailClient(accountId);
-            await fetchSendAsAliases(client, accountId);
+            await fetchSendAsAliases(accountId);
           } catch (err) {
             console.warn(
               `Failed to fetch send-as aliases for ${accountId}:`,
@@ -623,14 +619,12 @@ export default function App(): React.ReactNode {
 
       // Fetch send-as aliases in the background (non-blocking, skip CalDAV-only accounts)
       if (newest.provider !== "caldav") {
-        getGmailClient(newest.id)
-          .then((client) => fetchSendAsAliases(client, newest.id))
-          .catch((err) =>
-            console.warn(
-              `Failed to fetch send-as aliases for new account:`,
-              err,
-            ),
-          );
+        fetchSendAsAliases(newest.id).catch((err) =>
+          console.warn(
+            `Failed to fetch send-as aliases for new account:`,
+            err,
+          ),
+        );
       }
     }
 

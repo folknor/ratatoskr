@@ -12,7 +12,6 @@ import {
   archiveThread,
   deleteThread as deleteThreadFromDb,
   deleteDraftsForThread,
-  getGmailClient,
   muteThread,
   permanentDeleteThread,
   pinThread,
@@ -376,8 +375,7 @@ async function executeAction(actionId: string): Promise<void> {
             await deleteThreadFromDb(activeAccountId, id);
           } else if (isDraftsView) {
             try {
-              const client = await getGmailClient(activeAccountId);
-              await deleteDraftsForThread(client, activeAccountId, id);
+              await deleteDraftsForThread(activeAccountId, id);
               useThreadStore.getState().removeThread(id);
             } catch (err) {
               console.error("Draft delete failed:", err);

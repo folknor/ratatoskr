@@ -21,7 +21,12 @@ import {
 } from "../db/threads";
 import { imapDeltaSync, imapInitialSync } from "../imap/imapSync";
 import { ensureFreshToken } from "../oauth/oauthTokenManager";
-import { type SyncProgress } from "./sync";
+export interface SyncProgress {
+  phase: "labels" | "threads" | "messages" | "done";
+  current: number;
+  total: number;
+}
+
 import {
   syncImapInitial,
   syncImapDelta,

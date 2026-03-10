@@ -31,7 +31,6 @@ import {
   cancelFollowUpForThread,
   deleteThread as deleteThreadFromDb,
   deleteDraftsForThread,
-  getGmailClient,
   insertFollowUpReminder,
   markThreadRead,
   muteThread,
@@ -131,8 +130,7 @@ export function ActionBar({
     } else if (isDraftsView) {
       removeThread(thread.id);
       try {
-        const client = await getGmailClient(activeAccountId);
-        await deleteDraftsForThread(client, activeAccountId, thread.id);
+        await deleteDraftsForThread(activeAccountId, thread.id);
       } catch (err) {
         console.error("Failed to delete drafts:", err);
       }

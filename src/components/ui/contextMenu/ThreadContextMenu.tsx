@@ -26,7 +26,6 @@ import {
   deleteThread as deleteThreadFromDb,
   deleteDraftsForThread,
   executeQuickStep,
-  getGmailClient,
   markThreadRead,
   muteThread,
   permanentDeleteThread,
@@ -173,8 +172,7 @@ export function ThreadContextMenu({
       } else if (isDraftsView) {
         useThreadStore.getState().removeThread(id);
         try {
-          const client = await getGmailClient(activeAccountId);
-          await deleteDraftsForThread(client, activeAccountId, id);
+          await deleteDraftsForThread(activeAccountId, id);
         } catch (err) {
           console.error("Failed to delete drafts:", err);
         }
