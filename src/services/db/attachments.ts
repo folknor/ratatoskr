@@ -1,4 +1,4 @@
-import { getDb } from "./connection";
+import { invoke } from "@tauri-apps/api/core";
 
 export interface DbAttachment {
   id: string;
@@ -24,25 +24,17 @@ export async function upsertAttachment(att: {
   contentId: string | null;
   isInline: boolean;
 }): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    `INSERT INTO attachments (id, message_id, account_id, filename, mime_type, size, gmail_attachment_id, content_id, is_inline)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-     ON CONFLICT(id) DO UPDATE SET
-       filename = $4, mime_type = $5, size = $6,
-       gmail_attachment_id = $7, content_id = $8, is_inline = $9`,
-    [
-      att.id,
-      att.messageId,
-      att.accountId,
-      att.filename,
-      att.mimeType,
-      att.size,
-      att.gmailAttachmentId,
-      att.contentId,
-      att.isInline ? 1 : 0,
-    ],
-  );
+  return invoke<void>("db_upsert_attachment", {
+    id: att.id,
+    messageId: att.messageId,
+    accountId: att.accountId,
+    filename: att.filename,
+    mimeType: att.mimeType,
+    size: att.size,
+    gmailAttachmentId: att.gmailAttachmentId,
+    contentId: att.contentId,
+    isInline: att.isInline,
+  });
 }
 
 export interface AttachmentWithContext {
@@ -68,16 +60,11 @@ export async function getAttachmentsForAccount(
   limit: number = 200,
   offset: number = 0,
 ): Promise<AttachmentWithContext[]> {
-  const db = await getDb();
-  return db.select<AttachmentWithContext[]>(
-    `SELECT a.*, m.from_address, m.from_name, m.date, m.subject, m.thread_id
-     FROM attachments a
-     JOIN messages m ON a.message_id = m.id AND a.account_id = m.account_id
-     WHERE a.account_id = $1 AND a.filename IS NOT NULL AND a.filename != ''
-     ORDER BY m.date DESC
-     LIMIT $2 OFFSET $3`,
-    [accountId, limit, offset],
-  );
+  return invoke<AttachmentWithContext[]>("db_get_attachments_for_account", {
+    accountId,
+    limit,
+    offset,
+  });
 }
 
 export interface AttachmentSender {
@@ -89,26 +76,17 @@ export interface AttachmentSender {
 export async function getAttachmentSenders(
   accountId: string,
 ): Promise<AttachmentSender[]> {
-  const db = await getDb();
-  return db.select<AttachmentSender[]>(
-    `SELECT m.from_address, m.from_name, COUNT(*) as count
-     FROM attachments a
-     JOIN messages m ON a.message_id = m.id AND a.account_id = m.account_id
-     WHERE a.account_id = $1 AND a.filename IS NOT NULL AND a.filename != ''
-       AND m.from_address IS NOT NULL
-     GROUP BY m.from_address
-     ORDER BY count DESC`,
-    [accountId],
-  );
+  return invoke<AttachmentSender[]>("db_get_attachment_senders", {
+    accountId,
+  });
 }
 
 export async function getAttachmentsForMessage(
   accountId: string,
   messageId: string,
 ): Promise<DbAttachment[]> {
-  const db = await getDb();
-  return db.select<DbAttachment[]>(
-    "SELECT * FROM attachments WHERE account_id = $1 AND message_id = $2 ORDER BY filename ASC",
-    [accountId, messageId],
-  );
+  return invoke<DbAttachment[]>("db_get_attachments_for_message", {
+    accountId,
+    messageId,
+  });
 }

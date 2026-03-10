@@ -1,4 +1,4 @@
-import { boolToInt, buildDynamicUpdate, getDb } from "./connection";
+import { invoke } from "@tauri-apps/api/core";
 
 export interface FilterCriteria {
   from?: string;
@@ -20,7 +20,7 @@ export interface DbFilterRule {
   id: string;
   account_id: string;
   name: string;
-  is_enabled: number;
+  is_enabled: boolean;
   criteria_json: string;
   actions_json: string;
   sort_order: number;
@@ -30,21 +30,14 @@ export interface DbFilterRule {
 export async function getFiltersForAccount(
   accountId: string,
 ): Promise<DbFilterRule[]> {
-  const db = await getDb();
-  return db.select<DbFilterRule[]>(
-    "SELECT * FROM filter_rules WHERE account_id = $1 ORDER BY sort_order, created_at",
-    [accountId],
-  );
+  return invoke<DbFilterRule[]>("db_get_filters_for_account", { accountId });
 }
 
 export async function getEnabledFiltersForAccount(
   accountId: string,
 ): Promise<DbFilterRule[]> {
-  const db = await getDb();
-  return db.select<DbFilterRule[]>(
-    "SELECT * FROM filter_rules WHERE account_id = $1 AND is_enabled = 1 ORDER BY sort_order, created_at",
-    [accountId],
-  );
+  const all = await getFiltersForAccount(accountId);
+  return all.filter((f) => f.is_enabled);
 }
 
 export async function insertFilter(filter: {
@@ -54,19 +47,15 @@ export async function insertFilter(filter: {
   actions: FilterActions;
   isEnabled?: boolean;
 }): Promise<string> {
-  const db = await getDb();
   const id = crypto.randomUUID();
-  await db.execute(
-    "INSERT INTO filter_rules (id, account_id, name, is_enabled, criteria_json, actions_json) VALUES ($1, $2, $3, $4, $5, $6)",
-    [
-      id,
-      filter.accountId,
-      filter.name,
-      boolToInt(filter.isEnabled !== false),
-      JSON.stringify(filter.criteria),
-      JSON.stringify(filter.actions),
-    ],
-  );
+  await invoke("db_insert_filter", {
+    id,
+    accountId: filter.accountId,
+    name: filter.name,
+    criteriaJson: JSON.stringify(filter.criteria),
+    actionsJson: JSON.stringify(filter.actions),
+    isEnabled: filter.isEnabled ?? true,
+  });
   return id;
 }
 
@@ -79,23 +68,17 @@ export async function updateFilter(
     isEnabled?: boolean;
   },
 ): Promise<void> {
-  const db = await getDb();
-  const fields: [string, unknown][] = [];
-  if (updates.name !== undefined) fields.push(["name", updates.name]);
-  if (updates.criteria !== undefined)
-    fields.push(["criteria_json", JSON.stringify(updates.criteria)]);
-  if (updates.actions !== undefined)
-    fields.push(["actions_json", JSON.stringify(updates.actions)]);
-  if (updates.isEnabled !== undefined)
-    fields.push(["is_enabled", boolToInt(updates.isEnabled)]);
-
-  const query = buildDynamicUpdate("filter_rules", "id", id, fields);
-  if (query) {
-    await db.execute(query.sql, query.params);
-  }
+  await invoke("db_update_filter", {
+    id,
+    name: updates.name,
+    criteriaJson: updates.criteria
+      ? JSON.stringify(updates.criteria)
+      : undefined,
+    actionsJson: updates.actions ? JSON.stringify(updates.actions) : undefined,
+    isEnabled: updates.isEnabled,
+  });
 }
 
 export async function deleteFilter(id: string): Promise<void> {
-  const db = await getDb();
-  await db.execute("DELETE FROM filter_rules WHERE id = $1", [id]);
+  await invoke("db_delete_filter", { id });
 }

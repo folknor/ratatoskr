@@ -1,4 +1,4 @@
-import { buildDynamicUpdate, getDb, selectFirstBy } from "./connection";
+import { invoke } from "@tauri-apps/api/core";
 
 export interface DbSmartFolder {
   id: string;
@@ -8,7 +8,7 @@ export interface DbSmartFolder {
   icon: string;
   color: string | null;
   sort_order: number;
-  is_default: number;
+  is_default: boolean;
   created_at: number;
 }
 
@@ -18,25 +18,15 @@ export interface DbSmartFolder {
 export async function getSmartFolders(
   accountId?: string,
 ): Promise<DbSmartFolder[]> {
-  const db = await getDb();
-  if (accountId) {
-    return db.select<DbSmartFolder[]>(
-      "SELECT * FROM smart_folders WHERE account_id IS NULL OR account_id = $1 ORDER BY sort_order, created_at",
-      [accountId],
-    );
-  }
-  return db.select<DbSmartFolder[]>(
-    "SELECT * FROM smart_folders WHERE account_id IS NULL ORDER BY sort_order, created_at",
-  );
+  return invoke<DbSmartFolder[]>("db_get_smart_folders", {
+    accountId: accountId ?? null,
+  });
 }
 
 export async function getSmartFolderById(
   id: string,
 ): Promise<DbSmartFolder | null> {
-  return selectFirstBy<DbSmartFolder>(
-    "SELECT * FROM smart_folders WHERE id = $1",
-    [id],
-  );
+  return invoke<DbSmartFolder | null>("db_get_smart_folder_by_id", { id });
 }
 
 export async function insertSmartFolder(folder: {
@@ -46,19 +36,15 @@ export async function insertSmartFolder(folder: {
   icon?: string | undefined;
   color?: string | undefined;
 }): Promise<string> {
-  const db = await getDb();
   const id = crypto.randomUUID();
-  await db.execute(
-    "INSERT INTO smart_folders (id, account_id, name, query, icon, color) VALUES ($1, $2, $3, $4, $5, $6)",
-    [
-      id,
-      folder.accountId ?? null,
-      folder.name,
-      folder.query,
-      folder.icon ?? "Search",
-      folder.color ?? null,
-    ],
-  );
+  await invoke("db_insert_smart_folder", {
+    id,
+    name: folder.name,
+    query: folder.query,
+    accountId: folder.accountId ?? null,
+    icon: folder.icon ?? null,
+    color: folder.color ?? null,
+  });
   return id;
 }
 
@@ -71,32 +57,17 @@ export async function updateSmartFolder(
     color?: string | undefined;
   },
 ): Promise<void> {
-  const fields: [string, unknown][] = [];
-  if (updates.name !== undefined) fields.push(["name", updates.name]);
-  if (updates.query !== undefined) fields.push(["query", updates.query]);
-  if (updates.icon !== undefined) fields.push(["icon", updates.icon]);
-  if (updates.color !== undefined) fields.push(["color", updates.color]);
-
-  const built = buildDynamicUpdate("smart_folders", "id", id, fields);
-  if (!built) return;
-
-  const db = await getDb();
-  await db.execute(built.sql, built.params);
+  await invoke("db_update_smart_folder", { id, ...updates });
 }
 
 export async function deleteSmartFolder(id: string): Promise<void> {
-  const db = await getDb();
-  await db.execute("DELETE FROM smart_folders WHERE id = $1", [id]);
+  await invoke("db_delete_smart_folder", { id });
 }
 
 export async function updateSmartFolderSortOrder(
   orders: { id: string; sortOrder: number }[],
 ): Promise<void> {
-  const db = await getDb();
-  for (const { id, sortOrder } of orders) {
-    await db.execute("UPDATE smart_folders SET sort_order = $1 WHERE id = $2", [
-      sortOrder,
-      id,
-    ]);
-  }
+  await invoke("db_update_smart_folder_sort_order", {
+    orders: orders.map((o) => ({ id: o.id, sort_order: o.sortOrder })),
+  });
 }

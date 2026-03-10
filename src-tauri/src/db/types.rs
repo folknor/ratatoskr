@@ -1,5 +1,44 @@
 use serde::{Deserialize, Serialize};
 
+// ── Account ─────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbAccount {
+    pub id: String,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
+    pub token_expires_at: Option<i64>,
+    pub history_id: Option<String>,
+    pub last_sync_at: Option<i64>,
+    pub is_active: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub provider: String,
+    pub imap_host: Option<String>,
+    pub imap_port: Option<i64>,
+    pub imap_security: Option<String>,
+    pub smtp_host: Option<String>,
+    pub smtp_port: Option<i64>,
+    pub smtp_security: Option<String>,
+    pub auth_method: String,
+    pub imap_password: Option<String>,
+    pub oauth_provider: Option<String>,
+    pub oauth_client_id: Option<String>,
+    pub oauth_client_secret: Option<String>,
+    pub imap_username: Option<String>,
+    pub caldav_url: Option<String>,
+    pub caldav_username: Option<String>,
+    pub caldav_password: Option<String>,
+    pub caldav_principal_url: Option<String>,
+    pub caldav_home_url: Option<String>,
+    pub calendar_provider: Option<String>,
+    pub accept_invalid_certs: i64,
+    pub jmap_url: Option<String>,
+}
+
 // ── Thread ───────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -253,6 +292,79 @@ pub struct BundleSummary {
     pub latest_sender: Option<String>,
 }
 
+// ── Bundle Summary (single category) ───────────────────────
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BundleSummarySingle {
+    pub count: i64,
+    pub latest_subject: Option<String>,
+    pub latest_sender: Option<String>,
+}
+
+// ── Thread category with manual flag ───────────────────────
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadCategoryWithManual {
+    pub category: String,
+    pub is_manual: bool,
+}
+
+// ── Thread info for categorization ─────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadInfoRow {
+    pub id: String,
+    pub subject: Option<String>,
+    pub snippet: Option<String>,
+    pub from_address: Option<String>,
+}
+
+// ── Calendar ────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbCalendar {
+    pub id: String,
+    pub account_id: String,
+    pub provider: String,
+    pub remote_id: String,
+    pub display_name: Option<String>,
+    pub color: Option<String>,
+    pub is_primary: i64,
+    pub is_visible: i64,
+    pub sync_token: Option<String>,
+    pub ctag: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+// ── Calendar Event ──────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbCalendarEvent {
+    pub id: String,
+    pub account_id: String,
+    pub google_event_id: String,
+    pub summary: Option<String>,
+    pub description: Option<String>,
+    pub location: Option<String>,
+    pub start_time: i64,
+    pub end_time: i64,
+    pub is_all_day: i64,
+    pub status: String,
+    pub organizer_email: Option<String>,
+    pub attendees_json: Option<String>,
+    pub html_link: Option<String>,
+    pub updated_at: i64,
+    pub calendar_id: Option<String>,
+    pub remote_event_id: Option<String>,
+    pub etag: Option<String>,
+    pub ical_data: Option<String>,
+    pub uid: Option<String>,
+}
+
 // ── Attachment ──────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -277,4 +389,274 @@ pub struct UncachedAttachment {
     pub size: i64,
     pub gmail_attachment_id: Option<String>,
     pub imap_part_id: Option<String>,
+}
+
+// ── Writing Style Profile ──────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbWritingStyleProfile {
+    pub id: String,
+    pub account_id: String,
+    pub profile_text: String,
+    pub sample_count: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+// ── Folder Sync State ──────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbFolderSyncState {
+    pub account_id: String,
+    pub folder_path: String,
+    pub uidvalidity: Option<i64>,
+    pub last_uid: i64,
+    pub modseq: Option<i64>,
+    pub last_sync_at: Option<i64>,
+}
+
+// ── Notification VIP ────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbNotificationVip {
+    pub id: String,
+    pub account_id: String,
+    pub email_address: String,
+    pub display_name: Option<String>,
+    pub created_at: i64,
+}
+
+// ── Image Allowlist ─────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbAllowlistEntry {
+    pub id: String,
+    pub account_id: String,
+    pub sender_address: String,
+    pub created_at: i64,
+}
+
+// ── Phishing Allowlist ──────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbPhishingAllowlistEntry {
+    pub id: String,
+    pub sender_address: String,
+    pub created_at: i64,
+}
+
+// ── Template ────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbTemplate {
+    pub id: String,
+    pub account_id: Option<String>,
+    pub name: String,
+    pub subject: Option<String>,
+    pub body_html: String,
+    pub shortcut: Option<String>,
+    pub sort_order: i64,
+    pub created_at: i64,
+}
+
+// ── Signature ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbSignature {
+    pub id: String,
+    pub account_id: String,
+    pub name: String,
+    pub body_html: String,
+    pub is_default: i64,
+    pub sort_order: i64,
+}
+
+// ── Send-As Alias ──────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbSendAsAlias {
+    pub id: String,
+    pub account_id: String,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub reply_to_address: Option<String>,
+    pub signature_id: Option<String>,
+    pub is_primary: i64,
+    pub is_default: i64,
+    pub treat_as_alias: i64,
+    pub verification_status: String,
+    pub created_at: i64,
+}
+
+// ── Local Draft ────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbLocalDraft {
+    pub id: String,
+    pub account_id: String,
+    pub to_addresses: Option<String>,
+    pub cc_addresses: Option<String>,
+    pub bcc_addresses: Option<String>,
+    pub subject: Option<String>,
+    pub body_html: Option<String>,
+    pub reply_to_message_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub from_email: Option<String>,
+    pub signature_id: Option<String>,
+    pub remote_draft_id: Option<String>,
+    pub attachments: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub sync_status: String,
+}
+
+// ── Scheduled Email ────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbScheduledEmail {
+    pub id: String,
+    pub account_id: String,
+    pub to_addresses: String,
+    pub cc_addresses: Option<String>,
+    pub bcc_addresses: Option<String>,
+    pub subject: Option<String>,
+    pub body_html: String,
+    pub reply_to_message_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub scheduled_at: i64,
+    pub signature_id: Option<String>,
+    pub attachment_paths: Option<String>,
+    pub status: String,
+    pub created_at: i64,
+}
+
+// ── Attachment with context (for library view) ─────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttachmentWithContext {
+    pub id: String,
+    pub message_id: String,
+    pub account_id: String,
+    pub filename: Option<String>,
+    pub mime_type: Option<String>,
+    pub size: Option<i64>,
+    pub gmail_attachment_id: Option<String>,
+    pub content_id: Option<String>,
+    pub is_inline: i64,
+    pub local_path: Option<String>,
+    pub from_address: Option<String>,
+    pub from_name: Option<String>,
+    pub date: Option<i64>,
+    pub subject: Option<String>,
+    pub thread_id: Option<String>,
+}
+
+// ── Attachment sender (grouped by sender) ──────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttachmentSender {
+    pub from_address: String,
+    pub from_name: Option<String>,
+    pub count: i64,
+}
+
+// ── Label sort order item ──────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LabelSortOrderItem {
+    pub id: String,
+    pub sort_order: i64,
+}
+
+// ── Task ────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbTask {
+    pub id: String,
+    pub account_id: Option<String>,
+    pub title: String,
+    pub description: Option<String>,
+    pub priority: String,
+    pub is_completed: i64,
+    pub completed_at: Option<i64>,
+    pub due_date: Option<i64>,
+    pub parent_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub thread_account_id: Option<String>,
+    pub sort_order: i64,
+    pub recurrence_rule: Option<String>,
+    pub next_recurrence_at: Option<i64>,
+    pub tags_json: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbTaskTag {
+    pub tag: String,
+    pub account_id: Option<String>,
+    pub color: Option<String>,
+    pub sort_order: i64,
+    pub created_at: i64,
+}
+
+// ── Snoozed thread ─────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnoozedThread {
+    pub id: String,
+    pub account_id: String,
+}
+
+// ── Subscription entry (unsubscribe manager) ───────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubscriptionEntry {
+    pub from_address: String,
+    pub from_name: Option<String>,
+    pub latest_unsubscribe_header: String,
+    pub latest_unsubscribe_post: Option<String>,
+    pub message_count: i64,
+    pub latest_date: i64,
+    pub status: Option<String>,
+}
+
+// ── IMAP message info ──────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImapMessageRow {
+    pub id: String,
+    pub imap_uid: Option<i64>,
+    pub imap_folder: Option<String>,
+}
+
+// ── Special folder lookup ──────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpecialFolderRow {
+    pub imap_folder_path: Option<String>,
+    pub name: String,
+}
+
+// ── Cached attachment info (for eviction) ──────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedAttachmentRow {
+    pub id: String,
+    pub local_path: String,
+    pub cache_size: i64,
+}
+
+// ── Backfill row (smart label backfill) ────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackfillRow {
+    pub thread_id: String,
+    pub subject: Option<String>,
+    pub snippet: Option<String>,
+    pub from_address: Option<String>,
+    pub from_name: Option<String>,
+    pub to_addresses: Option<String>,
+    pub has_attachments: i64,
+    pub id: String,
 }

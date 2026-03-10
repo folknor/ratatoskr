@@ -1,5 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
 import { decryptValue, encryptValue, isEncrypted } from "@/utils/crypto";
-import { getDb, selectFirstBy } from "./connection";
 
 export interface DbAccount {
   id: string;
@@ -82,28 +82,21 @@ async function decryptAccountTokens(account: DbAccount): Promise<DbAccount> {
 }
 
 export async function getAllAccounts(): Promise<DbAccount[]> {
-  const db = await getDb();
-  const accounts = await db.select<DbAccount[]>(
-    "SELECT * FROM accounts ORDER BY created_at ASC",
-  );
+  const accounts = await invoke<DbAccount[]>("db_get_all_accounts");
   return Promise.all(accounts.map(decryptAccountTokens));
 }
 
 export async function getAccount(id: string): Promise<DbAccount | null> {
-  const account = await selectFirstBy<DbAccount>(
-    "SELECT * FROM accounts WHERE id = $1",
-    [id],
-  );
+  const account = await invoke<DbAccount | null>("db_get_account", { id });
   return account ? decryptAccountTokens(account) : null;
 }
 
 export async function getAccountByEmail(
   email: string,
 ): Promise<DbAccount | null> {
-  const account = await selectFirstBy<DbAccount>(
-    "SELECT * FROM accounts WHERE email = $1",
-    [email],
-  );
+  const account = await invoke<DbAccount | null>("db_get_account_by_email", {
+    email,
+  });
   return account ? decryptAccountTokens(account) : null;
 }
 
@@ -116,22 +109,19 @@ export async function insertAccount(account: {
   refreshToken: string;
   tokenExpiresAt: number;
 }): Promise<void> {
-  const db = await getDb();
   const encAccessToken = await encryptValue(account.accessToken);
   const encRefreshToken = await encryptValue(account.refreshToken);
-  await db.execute(
-    `INSERT INTO accounts (id, email, display_name, avatar_url, access_token, refresh_token, token_expires_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [
-      account.id,
-      account.email,
-      account.displayName,
-      account.avatarUrl,
-      encAccessToken,
-      encRefreshToken,
-      account.tokenExpiresAt,
-    ],
-  );
+  return invoke("db_insert_account", {
+    id: account.id,
+    email: account.email,
+    displayName: account.displayName,
+    avatarUrl: account.avatarUrl,
+    accessToken: encAccessToken,
+    refreshToken: encRefreshToken,
+    tokenExpiresAt: account.tokenExpiresAt,
+    provider: "gmail_api",
+    authMethod: "oauth2",
+  });
 }
 
 export async function updateAccountTokens(
@@ -139,31 +129,23 @@ export async function updateAccountTokens(
   accessToken: string,
   tokenExpiresAt: number,
 ): Promise<void> {
-  const db = await getDb();
   const encAccessToken = await encryptValue(accessToken);
-  await db.execute(
-    "UPDATE accounts SET access_token = $1, token_expires_at = $2, updated_at = unixepoch() WHERE id = $3",
-    [encAccessToken, tokenExpiresAt, id],
-  );
+  return invoke("db_update_account_tokens", {
+    id,
+    accessToken: encAccessToken,
+    tokenExpiresAt,
+  });
 }
 
 export async function updateAccountSyncState(
   id: string,
   historyId: string,
 ): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    "UPDATE accounts SET history_id = $1, last_sync_at = unixepoch(), updated_at = unixepoch() WHERE id = $2",
-    [historyId, id],
-  );
+  return invoke("db_update_account_sync_state", { id, historyId });
 }
 
 export async function clearAccountHistoryId(id: string): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    "UPDATE accounts SET history_id = NULL, updated_at = unixepoch() WHERE id = $1",
-    [id],
-  );
+  return invoke("db_clear_account_history_id", { id });
 }
 
 export async function updateAccountAllTokens(
@@ -172,18 +154,18 @@ export async function updateAccountAllTokens(
   refreshToken: string,
   tokenExpiresAt: number,
 ): Promise<void> {
-  const db = await getDb();
   const encAccessToken = await encryptValue(accessToken);
   const encRefreshToken = await encryptValue(refreshToken);
-  await db.execute(
-    "UPDATE accounts SET access_token = $1, refresh_token = $2, token_expires_at = $3, updated_at = unixepoch() WHERE id = $4",
-    [encAccessToken, encRefreshToken, tokenExpiresAt, id],
-  );
+  return invoke("db_update_account_all_tokens", {
+    id,
+    accessToken: encAccessToken,
+    refreshToken: encRefreshToken,
+    tokenExpiresAt,
+  });
 }
 
 export async function deleteAccount(id: string): Promise<void> {
-  const db = await getDb();
-  await db.execute("DELETE FROM accounts WHERE id = $1", [id]);
+  return invoke("db_delete_account", { id });
 }
 
 export async function insertImapAccount(account: {
@@ -202,28 +184,24 @@ export async function insertImapAccount(account: {
   imapUsername?: string | null;
   acceptInvalidCerts?: boolean;
 }): Promise<void> {
-  const db = await getDb();
   const encPassword = await encryptValue(account.password);
-  await db.execute(
-    `INSERT INTO accounts (id, email, display_name, avatar_url, access_token, refresh_token, provider, imap_host, imap_port, imap_security, smtp_host, smtp_port, smtp_security, auth_method, imap_password, imap_username, accept_invalid_certs)
-     VALUES ($1, $2, $3, $4, NULL, NULL, 'imap', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-    [
-      account.id,
-      account.email,
-      account.displayName,
-      account.avatarUrl,
-      account.imapHost,
-      account.imapPort,
-      account.imapSecurity,
-      account.smtpHost,
-      account.smtpPort,
-      account.smtpSecurity,
-      account.authMethod,
-      encPassword,
-      account.imapUsername || null,
-      account.acceptInvalidCerts ? 1 : 0,
-    ],
-  );
+  return invoke("db_insert_account", {
+    id: account.id,
+    email: account.email,
+    displayName: account.displayName,
+    avatarUrl: account.avatarUrl,
+    provider: "imap",
+    authMethod: account.authMethod,
+    imapHost: account.imapHost,
+    imapPort: account.imapPort,
+    imapSecurity: account.imapSecurity,
+    smtpHost: account.smtpHost,
+    smtpPort: account.smtpPort,
+    smtpSecurity: account.smtpSecurity,
+    imapPassword: encPassword,
+    imapUsername: account.imapUsername || null,
+    acceptInvalidCerts: account.acceptInvalidCerts ? 1 : 0,
+  });
 }
 
 export async function insertCalDavAccount(account: {
@@ -236,22 +214,20 @@ export async function insertCalDavAccount(account: {
   caldavPrincipalUrl?: string | null;
   caldavHomeUrl?: string | null;
 }): Promise<void> {
-  const db = await getDb();
   const encPassword = await encryptValue(account.caldavPassword);
-  await db.execute(
-    `INSERT INTO accounts (id, email, display_name, avatar_url, access_token, refresh_token, provider, calendar_provider, caldav_url, caldav_username, caldav_password, caldav_principal_url, caldav_home_url)
-     VALUES ($1, $2, $3, NULL, NULL, NULL, 'caldav', 'caldav', $4, $5, $6, $7, $8)`,
-    [
-      account.id,
-      account.email,
-      account.displayName,
-      account.caldavUrl,
-      account.caldavUsername,
-      encPassword,
-      account.caldavPrincipalUrl ?? null,
-      account.caldavHomeUrl ?? null,
-    ],
-  );
+  return invoke("db_insert_account", {
+    id: account.id,
+    email: account.email,
+    displayName: account.displayName,
+    provider: "caldav",
+    authMethod: "password",
+    calendarProvider: "caldav",
+    caldavUrl: account.caldavUrl,
+    caldavUsername: account.caldavUsername,
+    caldavPassword: encPassword,
+    caldavPrincipalUrl: account.caldavPrincipalUrl ?? null,
+    caldavHomeUrl: account.caldavHomeUrl ?? null,
+  });
 }
 
 export async function insertJmapAccount(account: {
@@ -262,20 +238,17 @@ export async function insertJmapAccount(account: {
   password: string;
   username?: string | null;
 }): Promise<void> {
-  const db = await getDb();
   const encPassword = await encryptValue(account.password);
-  await db.execute(
-    `INSERT INTO accounts (id, email, display_name, provider, auth_method, jmap_url, imap_password, imap_username)
-     VALUES ($1, $2, $3, 'jmap', 'password', $4, $5, $6)`,
-    [
-      account.id,
-      account.email,
-      account.displayName,
-      account.jmapUrl,
-      encPassword,
-      account.username || null,
-    ],
-  );
+  return invoke("db_insert_account", {
+    id: account.id,
+    email: account.email,
+    displayName: account.displayName,
+    provider: "jmap",
+    authMethod: "password",
+    jmapUrl: account.jmapUrl,
+    imapPassword: encPassword,
+    imapUsername: account.username || null,
+  });
 }
 
 export async function insertGraphAccount(account: {
@@ -287,22 +260,19 @@ export async function insertGraphAccount(account: {
   refreshToken: string;
   tokenExpiresAt: number;
 }): Promise<void> {
-  const db = await getDb();
   const encAccessToken = await encryptValue(account.accessToken);
   const encRefreshToken = await encryptValue(account.refreshToken);
-  await db.execute(
-    `INSERT INTO accounts (id, email, display_name, avatar_url, provider, auth_method, access_token, refresh_token, token_expires_at)
-     VALUES ($1, $2, $3, $4, 'graph', 'oauth2', $5, $6, $7)`,
-    [
-      account.id,
-      account.email,
-      account.displayName,
-      account.avatarUrl ?? null,
-      encAccessToken,
-      encRefreshToken,
-      account.tokenExpiresAt,
-    ],
-  );
+  return invoke("db_insert_account", {
+    id: account.id,
+    email: account.email,
+    displayName: account.displayName,
+    avatarUrl: account.avatarUrl ?? null,
+    provider: "graph",
+    authMethod: "oauth2",
+    accessToken: encAccessToken,
+    refreshToken: encRefreshToken,
+    tokenExpiresAt: account.tokenExpiresAt,
+  });
 }
 
 export async function updateAccountCalDav(
@@ -316,22 +286,16 @@ export async function updateAccountCalDav(
     calendarProvider: string;
   },
 ): Promise<void> {
-  const db = await getDb();
   const encPassword = await encryptValue(fields.caldavPassword);
-  await db.execute(
-    `UPDATE accounts SET caldav_url = $1, caldav_username = $2, caldav_password = $3,
-       caldav_principal_url = $4, caldav_home_url = $5, calendar_provider = $6,
-       updated_at = unixepoch() WHERE id = $7`,
-    [
-      fields.caldavUrl,
-      fields.caldavUsername,
-      encPassword,
-      fields.caldavPrincipalUrl ?? null,
-      fields.caldavHomeUrl ?? null,
-      fields.calendarProvider,
-      accountId,
-    ],
-  );
+  return invoke("db_update_account_caldav", {
+    id: accountId,
+    caldavUrl: fields.caldavUrl,
+    caldavUsername: fields.caldavUsername,
+    caldavPassword: encPassword,
+    caldavPrincipalUrl: fields.caldavPrincipalUrl ?? null,
+    caldavHomeUrl: fields.caldavHomeUrl ?? null,
+    calendarProvider: fields.calendarProvider,
+  });
 }
 
 export async function insertOAuthImapAccount(account: {
@@ -354,34 +318,31 @@ export async function insertOAuthImapAccount(account: {
   imapUsername?: string | null;
   acceptInvalidCerts?: boolean;
 }): Promise<void> {
-  const db = await getDb();
   const encAccessToken = await encryptValue(account.accessToken);
   const encRefreshToken = await encryptValue(account.refreshToken);
   const encClientSecret = account.oauthClientSecret
     ? await encryptValue(account.oauthClientSecret)
     : null;
-  await db.execute(
-    `INSERT INTO accounts (id, email, display_name, avatar_url, access_token, refresh_token, token_expires_at, provider, imap_host, imap_port, imap_security, smtp_host, smtp_port, smtp_security, auth_method, imap_password, oauth_provider, oauth_client_id, oauth_client_secret, imap_username, accept_invalid_certs)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'imap', $8, $9, $10, $11, $12, $13, 'oauth2', NULL, $14, $15, $16, $17, $18)`,
-    [
-      account.id,
-      account.email,
-      account.displayName,
-      account.avatarUrl,
-      encAccessToken,
-      encRefreshToken,
-      account.tokenExpiresAt,
-      account.imapHost,
-      account.imapPort,
-      account.imapSecurity,
-      account.smtpHost,
-      account.smtpPort,
-      account.smtpSecurity,
-      account.oauthProvider,
-      account.oauthClientId,
-      encClientSecret,
-      account.imapUsername || null,
-      account.acceptInvalidCerts ? 1 : 0,
-    ],
-  );
+  return invoke("db_insert_account", {
+    id: account.id,
+    email: account.email,
+    displayName: account.displayName,
+    avatarUrl: account.avatarUrl,
+    accessToken: encAccessToken,
+    refreshToken: encRefreshToken,
+    tokenExpiresAt: account.tokenExpiresAt,
+    provider: "imap",
+    authMethod: "oauth2",
+    imapHost: account.imapHost,
+    imapPort: account.imapPort,
+    imapSecurity: account.imapSecurity,
+    smtpHost: account.smtpHost,
+    smtpPort: account.smtpPort,
+    smtpSecurity: account.smtpSecurity,
+    oauthProvider: account.oauthProvider,
+    oauthClientId: account.oauthClientId,
+    oauthClientSecret: encClientSecret,
+    imapUsername: account.imapUsername || null,
+    acceptInvalidCerts: account.acceptInvalidCerts ? 1 : 0,
+  });
 }

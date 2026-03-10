@@ -1,4 +1,4 @@
-import { buildDynamicUpdate, getDb } from "./connection";
+import { invoke } from "@tauri-apps/api/core";
 
 export interface DbTemplate {
   id: string;
@@ -17,11 +17,9 @@ export interface DbTemplate {
 export async function getTemplatesForAccount(
   accountId: string,
 ): Promise<DbTemplate[]> {
-  const db = await getDb();
-  return db.select<DbTemplate[]>(
-    "SELECT * FROM templates WHERE account_id = $1 OR account_id IS NULL ORDER BY sort_order, created_at",
-    [accountId],
-  );
+  return invoke<DbTemplate[]>("db_get_templates_for_account", {
+    accountId,
+  });
 }
 
 export async function insertTemplate(tmpl: {
@@ -31,13 +29,13 @@ export async function insertTemplate(tmpl: {
   bodyHtml: string;
   shortcut: string | null;
 }): Promise<string> {
-  const db = await getDb();
-  const id = crypto.randomUUID();
-  await db.execute(
-    "INSERT INTO templates (id, account_id, name, subject, body_html, shortcut) VALUES ($1, $2, $3, $4, $5, $6)",
-    [id, tmpl.accountId, tmpl.name, tmpl.subject, tmpl.bodyHtml, tmpl.shortcut],
-  );
-  return id;
+  return invoke<string>("db_insert_template", {
+    accountId: tmpl.accountId,
+    name: tmpl.name,
+    subject: tmpl.subject,
+    bodyHtml: tmpl.bodyHtml,
+    shortcut: tmpl.shortcut,
+  });
 }
 
 export async function updateTemplate(
@@ -49,22 +47,17 @@ export async function updateTemplate(
     shortcut?: string | null;
   },
 ): Promise<void> {
-  const db = await getDb();
-  const fields: [string, unknown][] = [];
-  if (updates.name !== undefined) fields.push(["name", updates.name]);
-  if (updates.subject !== undefined) fields.push(["subject", updates.subject]);
-  if (updates.bodyHtml !== undefined)
-    fields.push(["body_html", updates.bodyHtml]);
-  if (updates.shortcut !== undefined)
-    fields.push(["shortcut", updates.shortcut]);
-
-  const query = buildDynamicUpdate("templates", "id", id, fields);
-  if (query) {
-    await db.execute(query.sql, query.params);
-  }
+  await invoke("db_update_template", {
+    id,
+    name: updates.name ?? null,
+    subject: updates.subject ?? null,
+    subjectSet: updates.subject !== undefined,
+    bodyHtml: updates.bodyHtml ?? null,
+    shortcut: updates.shortcut ?? null,
+    shortcutSet: updates.shortcut !== undefined,
+  });
 }
 
 export async function deleteTemplate(id: string): Promise<void> {
-  const db = await getDb();
-  await db.execute("DELETE FROM templates WHERE id = $1", [id]);
+  await invoke("db_delete_template", { id });
 }

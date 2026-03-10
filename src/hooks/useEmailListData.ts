@@ -394,7 +394,7 @@ export function useEmailListData(): EmailListData {
             getBundleRules(activeAccountId)
               .then(async (rules) => {
                 if (cancelled) return;
-                const bundled = rules.filter((r) => r.is_bundled);
+                const bundled = rules.filter((r) => r.isBundled);
                 setBundleRules(bundled);
                 if (bundled.length > 0) {
                   const summaries = await getBundleSummaries(

@@ -109,7 +109,7 @@ export function SmartFolderEditor(): React.ReactNode {
           <div className="flex-1 min-w-0">
             <div className="text-sm font-medium text-text-primary flex items-center gap-2">
               {folder.name}
-              {folder.is_default === 1 && (
+              {folder.is_default && (
                 <span className="text-[0.625rem] bg-accent/15 text-accent px-1.5 py-0.5 rounded">
                   {t("smartFolderEditor.default")}
                 </span>
@@ -128,7 +128,7 @@ export function SmartFolderEditor(): React.ReactNode {
             >
               <Pencil size={13} />
             </button>
-            {folder.is_default !== 1 && (
+            {!folder.is_default && (
               <button
                 type="button"
                 onClick={(): void => void handleDelete(folder.id)}

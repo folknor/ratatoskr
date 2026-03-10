@@ -41,19 +41,19 @@ async function checkBundleDelivery(): Promise<void> {
     const rules = await getBundleRules(account.id);
 
     for (const rule of rules) {
-      if (!(rule.delivery_enabled && rule.delivery_schedule)) continue;
+      if (!(rule.deliveryEnabled && rule.deliverySchedule)) continue;
 
       let schedule: DeliverySchedule;
       try {
-        schedule = JSON.parse(rule.delivery_schedule) as DeliverySchedule;
+        schedule = JSON.parse(rule.deliverySchedule) as DeliverySchedule;
       } catch {
         continue;
       }
 
       if (isDeliveryTime(schedule)) {
-        // Avoid double-delivery: check last_delivered_at
+        // Avoid double-delivery: check lastDeliveredAt
         const now = getCurrentUnixTimestamp();
-        if (rule.last_delivered_at && now - rule.last_delivered_at < 120)
+        if (rule.lastDeliveredAt && now - rule.lastDeliveredAt < 120)
           continue;
 
         const released = await releaseHeldThreads(account.id, rule.category);

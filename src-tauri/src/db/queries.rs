@@ -33,7 +33,7 @@ fn row_to_thread(row: &Row<'_>) -> rusqlite::Result<DbThread> {
     })
 }
 
-fn row_to_message(row: &Row<'_>) -> rusqlite::Result<DbMessage> {
+pub(crate) fn row_to_message(row: &Row<'_>) -> rusqlite::Result<DbMessage> {
     Ok(DbMessage {
         id: row.get("id")?,
         account_id: row.get("account_id")?,

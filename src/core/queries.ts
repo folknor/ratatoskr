@@ -8,7 +8,7 @@
  * everything else still routes through the TS service layer.
  */
 
-import { getDb } from "@/services/db/connection";
+import { invoke } from "@tauri-apps/api/core";
 
 // ── Gravatar ────────────────────────────────────────────────
 export {
@@ -152,25 +152,29 @@ export {
 
 /**
  * Run a smart-folder SQL query and return the raw rows.
- * Wraps the direct getDb() + db.select() pattern.
+ * Routes through Rust's db_query_raw_select command.
  */
 export async function querySmartFolderThreads<T>(
   sql: string,
   params: unknown[],
 ): Promise<T[]> {
-  const db = await getDb();
-  return db.select<T[]>(sql, params);
+  return invoke("db_query_raw_select", { sql, params }) as Promise<T[]>;
 }
 
 /**
  * Run a smart-folder unread-count SQL query.
- * Wraps the direct getDb() + db.select() pattern used in smartFolderStore.
+ * Routes through Rust's db_query_raw_select command.
  */
 export async function querySmartFolderUnreadCount(
   sql: string,
   params: unknown[],
 ): Promise<number> {
-  const db = await getDb();
-  const rows = await db.select<{ count: number }[]>(sql, params);
-  return rows[0]?.count ?? 0;
+  const rows = await invoke<Record<string, unknown>[]>("db_query_raw_select", {
+    sql,
+    params,
+  });
+  const first = rows[0];
+  if (!first) return 0;
+  const count = first["count"] ?? first["COUNT(*)"] ?? 0;
+  return Number(count);
 }

@@ -1,5 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
 import { bodyStoreGetBatch } from "@/core/rustDb";
-import { getDb } from "@/services/db/connection";
 import { addThreadLabel } from "@/services/emailActions";
 import type { ParsedMessage } from "@/services/gmail/messageParser";
 import { matchSmartLabels } from "./smartLabelService";
@@ -23,25 +23,14 @@ export async function backfillSmartLabels(
   accountId: string,
   batchSize: number = 50,
 ): Promise<number> {
-  const db = await getDb();
   let totalLabeled = 0;
   let offset = 0;
 
   // biome-ignore lint/nursery/noUnnecessaryConditions: intentional infinite loop broken by empty batch check
   while (true) {
-    // Fetch inbox threads with their latest message data (bodies from body store)
-    const rows = await db.select<BackfillRow[]>(
-      `SELECT t.id AS thread_id, t.subject, t.snippet,
-              m.from_address, m.from_name,
-              m.to_addresses, t.has_attachments, m.id
-       FROM threads t
-       INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-       LEFT JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id
-         AND m.date = (SELECT MAX(m2.date) FROM messages m2 WHERE m2.account_id = t.account_id AND m2.thread_id = t.id)
-       WHERE t.account_id = $1 AND tl.label_id = 'INBOX'
-       ORDER BY t.last_message_at DESC
-       LIMIT $2 OFFSET $3`,
-      [accountId, batchSize, offset],
+    const rows = await invoke<BackfillRow[]>(
+      "db_get_inbox_threads_for_backfill",
+      { accountId, batchSize, offset },
     );
 
     if (rows.length === 0) break;

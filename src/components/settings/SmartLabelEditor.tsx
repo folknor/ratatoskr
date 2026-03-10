@@ -147,7 +147,7 @@ export function SmartLabelEditor(): React.ReactNode {
 
   const handleToggleEnabled = useCallback(
     async (rule: DbSmartLabelRule): Promise<void> => {
-      await updateSmartLabelRule(rule.id, { isEnabled: rule.is_enabled !== 1 });
+      await updateSmartLabelRule(rule.id, { isEnabled: !rule.is_enabled });
       await loadRules();
     },
     [loadRules],
@@ -203,7 +203,7 @@ export function SmartLabelEditor(): React.ReactNode {
           <div className="flex-1 min-w-0">
             <div className="text-sm font-medium text-text-primary flex items-center gap-2">
               {getLabelName(rule.label_id)}
-              {rule.is_enabled !== 1 && (
+              {!rule.is_enabled && (
                 <span className="text-[0.625rem] bg-bg-tertiary text-text-tertiary px-1.5 py-0.5 rounded">
                   {t("smartLabelEditor.disabled")}
                 </span>
@@ -218,17 +218,17 @@ export function SmartLabelEditor(): React.ReactNode {
               type="button"
               onClick={(): void => void handleToggleEnabled(rule)}
               className={`w-8 h-4 rounded-full transition-colors relative ${
-                rule.is_enabled === 1 ? "bg-accent" : "bg-bg-tertiary"
+                rule.is_enabled ? "bg-accent" : "bg-bg-tertiary"
               }`}
               title={
-                rule.is_enabled === 1
+                rule.is_enabled
                   ? t("smartLabelEditor.disable")
                   : t("smartLabelEditor.enable")
               }
             >
               <span
                 className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform shadow ${
-                  rule.is_enabled === 1 ? "translate-x-4" : ""
+                  rule.is_enabled ? "translate-x-4" : ""
                 }`}
               />
             </button>

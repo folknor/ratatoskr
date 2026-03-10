@@ -1,39 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/services/db/connection", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/services/db/connection")>();
-  return {
-    ...actual,
-    getDb: vi.fn(),
-  };
-});
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+}));
 
-import { getDb } from "@/services/db/connection";
-import { createMockDb } from "@/test/mocks";
+import { invoke } from "@tauri-apps/api/core";
 import { getAllowlistedSenders } from "./imageAllowlist";
-
-const mockDb = createMockDb();
 
 describe("imageAllowlist service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getDb).mockResolvedValue(
-      mockDb as unknown as Awaited<ReturnType<typeof getDb>>,
-    );
   });
 
   describe("getAllowlistedSenders", () => {
     it("returns empty set for empty senders array", async () => {
       const result = await getAllowlistedSenders("acc-1", []);
       expect(result.size).toBe(0);
-      expect(mockDb.select).not.toHaveBeenCalled();
+      expect(invoke).not.toHaveBeenCalled();
     });
 
     it("returns set of allowlisted senders from batch query", async () => {
-      mockDb.select.mockResolvedValueOnce([
-        { sender_address: "alice@example.com" },
-        { sender_address: "bob@example.com" },
+      vi.mocked(invoke).mockResolvedValueOnce([
+        "alice@example.com",
+        "bob@example.com",
       ]);
 
       const result = await getAllowlistedSenders("acc-1", [
@@ -48,15 +37,16 @@ describe("imageAllowlist service", () => {
       expect(result.has("carol@example.com")).toBe(false);
     });
 
-    it("uses a single query with IN clause", async () => {
-      mockDb.select.mockResolvedValueOnce([]);
+    it("calls Rust command with normalized addresses", async () => {
+      vi.mocked(invoke).mockResolvedValueOnce([]);
 
       await getAllowlistedSenders("acc-1", ["a@example.com", "b@example.com"]);
 
-      expect(mockDb.select).toHaveBeenCalledTimes(1);
-      const [sql, params] = mockDb.select.mock.calls[0] ?? [];
-      expect(sql).toContain("IN");
-      expect(params).toEqual(["acc-1", "a@example.com", "b@example.com"]);
+      expect(invoke).toHaveBeenCalledTimes(1);
+      expect(invoke).toHaveBeenCalledWith("db_get_allowlisted_senders", {
+        accountId: "acc-1",
+        senderAddresses: ["a@example.com", "b@example.com"],
+      });
     });
   });
 });

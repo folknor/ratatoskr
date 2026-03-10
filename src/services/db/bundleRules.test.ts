@@ -1,45 +1,40 @@
+import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/services/db/connection", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/services/db/connection")>();
-  return {
-    ...actual,
-    getDb: vi.fn(),
-  };
-});
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+}));
 
-import { getDb } from "@/services/db/connection";
-import { createMockDb } from "@/test/mocks";
 import { getBundleSummaries } from "./bundleRules";
 
-const mockDb = createMockDb();
+const mockInvoke = vi.mocked(invoke);
 
 describe("bundleRules service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getDb).mockResolvedValue(
-      mockDb as unknown as Awaited<ReturnType<typeof getDb>>,
-    );
   });
 
   describe("getBundleSummaries", () => {
     it("returns empty map for empty categories", async () => {
       const result = await getBundleSummaries("acc-1", []);
       expect(result.size).toBe(0);
-      expect(mockDb.select).not.toHaveBeenCalled();
+      expect(mockInvoke).not.toHaveBeenCalled();
     });
 
-    it("fetches summaries for multiple categories in 2 queries", async () => {
-      // First query: counts
-      mockDb.select.mockResolvedValueOnce([
-        { category: "Promotions", count: 5 },
-        { category: "Social", count: 3 },
-      ]);
-      // Second query: latest
-      mockDb.select.mockResolvedValueOnce([
-        { category: "Promotions", subject: "Big Sale", from_name: "Store" },
-        { category: "Social", subject: "New follower", from_name: "App" },
+    it("fetches summaries for multiple categories via single invoke", async () => {
+      mockInvoke.mockResolvedValueOnce([
+        {
+          category: "Promotions",
+          count: 5,
+          latestSubject: "Big Sale",
+          latestSender: "Store",
+        },
+        {
+          category: "Social",
+          count: 3,
+          latestSubject: "New follower",
+          latestSender: "App",
+        },
       ]);
 
       const result = await getBundleSummaries("acc-1", [
@@ -58,13 +53,15 @@ describe("bundleRules service", () => {
         latestSubject: "New follower",
         latestSender: "App",
       });
-      // Only 2 queries, not 2N
-      expect(mockDb.select).toHaveBeenCalledTimes(2);
+      expect(mockInvoke).toHaveBeenCalledOnce();
+      expect(mockInvoke).toHaveBeenCalledWith("db_get_bundle_summaries", {
+        accountId: "acc-1",
+        categories: ["Promotions", "Social"],
+      });
     });
 
     it("returns zero counts for categories with no threads", async () => {
-      mockDb.select.mockResolvedValueOnce([]);
-      mockDb.select.mockResolvedValueOnce([]);
+      mockInvoke.mockResolvedValueOnce([]);
 
       const result = await getBundleSummaries("acc-1", ["Empty"]);
 

@@ -1,4 +1,4 @@
-import { getDb } from "./connection";
+import { invoke } from "@tauri-apps/api/core";
 
 export interface DbWritingStyleProfile {
   id: string;
@@ -12,12 +12,10 @@ export interface DbWritingStyleProfile {
 export async function getWritingStyleProfile(
   accountId: string,
 ): Promise<DbWritingStyleProfile | null> {
-  const db = await getDb();
-  const rows = await db.select<DbWritingStyleProfile[]>(
-    "SELECT * FROM writing_style_profiles WHERE account_id = $1",
-    [accountId],
+  return invoke<DbWritingStyleProfile | null>(
+    "db_get_writing_style_profile",
+    { accountId },
   );
-  return rows[0] ?? null;
 }
 
 export async function upsertWritingStyleProfile(
@@ -25,22 +23,15 @@ export async function upsertWritingStyleProfile(
   profileText: string,
   sampleCount: number,
 ): Promise<void> {
-  const db = await getDb();
-  const id = crypto.randomUUID();
-  await db.execute(
-    `INSERT INTO writing_style_profiles (id, account_id, profile_text, sample_count)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT(account_id) DO UPDATE SET
-       profile_text = $3, sample_count = $4, updated_at = unixepoch()`,
-    [id, accountId, profileText, sampleCount],
-  );
+  await invoke("db_upsert_writing_style_profile", {
+    accountId,
+    profileText,
+    sampleCount,
+  });
 }
 
 export async function deleteWritingStyleProfile(
   accountId: string,
 ): Promise<void> {
-  const db = await getDb();
-  await db.execute("DELETE FROM writing_style_profiles WHERE account_id = $1", [
-    accountId,
-  ]);
+  await invoke("db_delete_writing_style_profile", { accountId });
 }

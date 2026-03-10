@@ -1,5 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
 import { normalizeEmail } from "@/utils/emailUtils";
-import { existsBy, getDb } from "./connection";
 
 export interface NotificationVip {
   id: string;
@@ -10,22 +10,18 @@ export interface NotificationVip {
 }
 
 export async function getVipSenders(accountId: string): Promise<Set<string>> {
-  const db = await getDb();
-  const rows = await db.select<{ email_address: string }[]>(
-    "SELECT email_address FROM notification_vips WHERE account_id = $1",
-    [accountId],
-  );
-  return new Set(rows.map((r) => normalizeEmail(r.email_address)));
+  const emails = await invoke<string[]>("db_get_vip_senders", {
+    accountId,
+  });
+  return new Set(emails.map((e) => normalizeEmail(e)));
 }
 
 export async function getAllVipSenders(
   accountId: string,
 ): Promise<NotificationVip[]> {
-  const db = await getDb();
-  return db.select<NotificationVip[]>(
-    "SELECT * FROM notification_vips WHERE account_id = $1 ORDER BY display_name, email_address",
-    [accountId],
-  );
+  return invoke<NotificationVip[]>("db_get_all_vip_senders", {
+    accountId,
+  });
 }
 
 export async function addVipSender(
@@ -33,31 +29,30 @@ export async function addVipSender(
   email: string,
   displayName?: string,
 ): Promise<void> {
-  const db = await getDb();
-  const id = crypto.randomUUID();
-  await db.execute(
-    "INSERT OR IGNORE INTO notification_vips (id, account_id, email_address, display_name) VALUES ($1, $2, $3, $4)",
-    [id, accountId, normalizeEmail(email), displayName ?? null],
-  );
+  await invoke("db_add_vip_sender", {
+    id: crypto.randomUUID(),
+    accountId,
+    email: normalizeEmail(email),
+    displayName: displayName ?? null,
+  });
 }
 
 export async function removeVipSender(
   accountId: string,
   email: string,
 ): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    "DELETE FROM notification_vips WHERE account_id = $1 AND email_address = $2",
-    [accountId, normalizeEmail(email)],
-  );
+  await invoke("db_remove_vip_sender", {
+    accountId,
+    email: normalizeEmail(email),
+  });
 }
 
 export async function isVipSender(
   accountId: string,
   email: string,
 ): Promise<boolean> {
-  return existsBy(
-    "SELECT COUNT(*) as count FROM notification_vips WHERE account_id = $1 AND email_address = $2",
-    [accountId, normalizeEmail(email)],
-  );
+  return invoke<boolean>("db_is_vip_sender", {
+    accountId,
+    email: normalizeEmail(email),
+  });
 }

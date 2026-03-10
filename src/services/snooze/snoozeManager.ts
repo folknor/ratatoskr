@@ -1,10 +1,10 @@
+import { invoke } from "@tauri-apps/api/core";
 import { emailActionUnsnoozeBatch } from "@/core/rustDb";
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
 import {
   type BackgroundChecker,
   createBackgroundChecker,
 } from "../backgroundCheckers";
-import { getDb } from "../db/connection";
 import { snoozeThread as snoozeThreadAction } from "../emailActions";
 
 /**
@@ -12,13 +12,11 @@ import { snoozeThread as snoozeThreadAction } from "../emailActions";
  * Moves them back to INBOX via Rust command.
  */
 async function checkSnoozedThreads(): Promise<void> {
-  const db = await getDb();
   const now = getCurrentUnixTimestamp();
 
-  // Find threads where snooze time has passed
-  const snoozed = await db.select<{ id: string; account_id: string }[]>(
-    "SELECT id, account_id FROM threads WHERE is_snoozed = 1 AND snooze_until <= $1",
-    [now],
+  const snoozed = await invoke<{ id: string; account_id: string }[]>(
+    "db_get_snoozed_threads_due",
+    { now },
   );
 
   if (snoozed.length > 0) {

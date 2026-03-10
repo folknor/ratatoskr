@@ -1,5 +1,10 @@
 import { vi } from "vitest";
-import { getDb } from "./connection";
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+}));
+
+import { invoke } from "@tauri-apps/api/core";
 import {
   completeTask,
   deleteTask,
@@ -17,75 +22,64 @@ import {
   upsertTaskTag,
 } from "./tasks";
 
-vi.mock("./connection", () => ({
-  getDb: vi.fn(),
-}));
-
-const mockDb = {
-  select: vi.fn(),
-  execute: vi.fn(),
-};
-
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(getDb).mockResolvedValue(mockDb as never);
 });
 
 describe("tasks DB service", () => {
   describe("getTasksForAccount", () => {
-    it("fetches incomplete tasks by default", async () => {
-      mockDb.select.mockResolvedValue([]);
+    it("invokes db_get_tasks_for_account without completed", async () => {
+      vi.mocked(invoke).mockResolvedValue([]);
       await getTasksForAccount("acc1");
-      expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringContaining("is_completed = 0"),
-        ["acc1"],
-      );
+      expect(invoke).toHaveBeenCalledWith("db_get_tasks_for_account", {
+        accountId: "acc1",
+        includeCompleted: false,
+      });
     });
 
     it("includes completed tasks when requested", async () => {
-      mockDb.select.mockResolvedValue([]);
+      vi.mocked(invoke).mockResolvedValue([]);
       await getTasksForAccount("acc1", true);
-      expect(mockDb.select).toHaveBeenCalledWith(
-        expect.not.stringContaining("is_completed = 0"),
-        ["acc1"],
-      );
+      expect(invoke).toHaveBeenCalledWith("db_get_tasks_for_account", {
+        accountId: "acc1",
+        includeCompleted: true,
+      });
     });
   });
 
   describe("getTaskById", () => {
     it("returns task when found", async () => {
       const task = { id: "t1", title: "Test" };
-      mockDb.select.mockResolvedValue([task]);
+      vi.mocked(invoke).mockResolvedValue(task);
       const result = await getTaskById("t1");
       expect(result).toEqual(task);
     });
 
     it("returns null when not found", async () => {
-      mockDb.select.mockResolvedValue([]);
+      vi.mocked(invoke).mockResolvedValue(null);
       const result = await getTaskById("nonexistent");
       expect(result).toBeNull();
     });
   });
 
   describe("getTasksForThread", () => {
-    it("queries by thread_account_id and thread_id", async () => {
-      mockDb.select.mockResolvedValue([]);
+    it("invokes db_get_tasks_for_thread", async () => {
+      vi.mocked(invoke).mockResolvedValue([]);
       await getTasksForThread("acc1", "thread1");
-      expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringContaining("thread_account_id = $1 AND thread_id = $2"),
-        ["acc1", "thread1"],
-      );
+      expect(invoke).toHaveBeenCalledWith("db_get_tasks_for_thread", {
+        accountId: "acc1",
+        threadId: "thread1",
+      });
     });
   });
 
   describe("getSubtasks", () => {
-    it("queries by parent_id", async () => {
-      mockDb.select.mockResolvedValue([]);
+    it("invokes db_get_subtasks", async () => {
+      vi.mocked(invoke).mockResolvedValue([]);
       await getSubtasks("parent1");
-      expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringContaining("parent_id = $1"),
-        ["parent1"],
-      );
+      expect(invoke).toHaveBeenCalledWith("db_get_subtasks", {
+        parentId: "parent1",
+      });
     });
   });
 
@@ -93,9 +87,12 @@ describe("tasks DB service", () => {
     it("inserts a task with defaults", async () => {
       const id = await insertTask({ accountId: "acc1", title: "Buy milk" });
       expect(id).toBeTruthy();
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("INSERT INTO tasks"),
-        expect.arrayContaining(["acc1", "Buy milk"]),
+      expect(invoke).toHaveBeenCalledWith(
+        "db_insert_task",
+        expect.objectContaining({
+          accountId: "acc1",
+          title: "Buy milk",
+        }),
       );
     });
 
@@ -112,9 +109,13 @@ describe("tasks DB service", () => {
   describe("updateTask", () => {
     it("updates specified fields", async () => {
       await updateTask("t1", { title: "Updated", priority: "high" });
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("UPDATE tasks SET"),
-        expect.arrayContaining(["Updated", "high", "t1"]),
+      expect(invoke).toHaveBeenCalledWith(
+        "db_update_task",
+        expect.objectContaining({
+          id: "t1",
+          title: "Updated",
+          priority: "high",
+        }),
       );
     });
   });
@@ -122,77 +123,66 @@ describe("tasks DB service", () => {
   describe("deleteTask", () => {
     it("deletes by id", async () => {
       await deleteTask("t1");
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        "DELETE FROM tasks WHERE id = $1",
-        ["t1"],
-      );
+      expect(invoke).toHaveBeenCalledWith("db_delete_task", { id: "t1" });
     });
   });
 
   describe("completeTask", () => {
-    it("sets is_completed and completed_at", async () => {
+    it("invokes db_complete_task", async () => {
       await completeTask("t1");
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("is_completed = 1"),
-        ["t1"],
-      );
+      expect(invoke).toHaveBeenCalledWith("db_complete_task", { id: "t1" });
     });
   });
 
   describe("uncompleteTask", () => {
-    it("clears is_completed and completed_at", async () => {
+    it("invokes db_uncomplete_task", async () => {
       await uncompleteTask("t1");
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("is_completed = 0"),
-        ["t1"],
-      );
+      expect(invoke).toHaveBeenCalledWith("db_uncomplete_task", { id: "t1" });
     });
   });
 
   describe("reorderTasks", () => {
-    it("updates sort_order for each task", async () => {
+    it("invokes db_reorder_tasks with all task IDs", async () => {
       await reorderTasks(["t1", "t2", "t3"]);
-      expect(mockDb.execute).toHaveBeenCalledTimes(3);
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("sort_order = $1"),
-        [0, "t1"],
-      );
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("sort_order = $1"),
-        [2, "t3"],
-      );
+      expect(invoke).toHaveBeenCalledTimes(1);
+      expect(invoke).toHaveBeenCalledWith("db_reorder_tasks", {
+        taskIds: ["t1", "t2", "t3"],
+      });
     });
   });
 
   describe("getIncompleteTaskCount", () => {
     it("returns count", async () => {
-      mockDb.select.mockResolvedValue([{ count: 5 }]);
+      vi.mocked(invoke).mockResolvedValue(5);
       const result = await getIncompleteTaskCount("acc1");
       expect(result).toBe(5);
     });
   });
 
   describe("task tags", () => {
-    it("getTaskTags queries correctly", async () => {
-      mockDb.select.mockResolvedValue([]);
+    it("getTaskTags invokes correctly", async () => {
+      vi.mocked(invoke).mockResolvedValue([]);
       await getTaskTags("acc1");
-      expect(mockDb.select).toHaveBeenCalled();
+      expect(invoke).toHaveBeenCalledWith("db_get_task_tags", {
+        accountId: "acc1",
+      });
     });
 
     it("upsertTaskTag inserts with color", async () => {
       await upsertTaskTag("urgent", "acc1", "#ff0000");
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("INSERT INTO task_tags"),
-        ["urgent", "acc1", "#ff0000"],
-      );
+      expect(invoke).toHaveBeenCalledWith("db_upsert_task_tag", {
+        tag: "urgent",
+        accountId: "acc1",
+        color: "#ff0000",
+      });
     });
 
     it("deleteTaskTag removes tag", async () => {
       await deleteTaskTag("urgent", "acc1");
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("DELETE FROM task_tags"),
-        ["urgent", "acc1"],
-      );
+      expect(invoke).toHaveBeenCalledWith("db_delete_task_tag", {
+        tag: "urgent",
+        accountId: "acc1",
+      });
     });
   });
 });

@@ -1,16 +1,14 @@
+import { invoke } from "@tauri-apps/api/core";
 import { normalizeEmail } from "@/utils/emailUtils";
-import { getDb } from "./connection";
 
 export async function isAllowlisted(
   accountId: string,
   senderAddress: string,
 ): Promise<boolean> {
-  const db = await getDb();
-  const rows = await db.select<{ id: string }[]>(
-    "SELECT id FROM image_allowlist WHERE account_id = $1 AND sender_address = $2 LIMIT 1",
-    [accountId, normalizeEmail(senderAddress)],
-  );
-  return rows.length > 0;
+  return invoke<boolean>("db_is_allowlisted", {
+    accountId,
+    senderAddress: normalizeEmail(senderAddress),
+  });
 }
 
 /**
@@ -21,37 +19,33 @@ export async function getAllowlistedSenders(
   senderAddresses: string[],
 ): Promise<Set<string>> {
   if (senderAddresses.length === 0) return new Set();
-  const db = await getDb();
   const normalized = senderAddresses.map(normalizeEmail);
-  const placeholders = normalized.map((_, i) => `$${i + 2}`).join(", ");
-  const rows = await db.select<{ sender_address: string }[]>(
-    `SELECT sender_address FROM image_allowlist WHERE account_id = $1 AND sender_address IN (${placeholders})`,
-    [accountId, ...normalized],
-  );
-  return new Set(rows.map((r) => r.sender_address));
+  const results = await invoke<string[]>("db_get_allowlisted_senders", {
+    accountId,
+    senderAddresses: normalized,
+  });
+  return new Set(results);
 }
 
 export async function addToAllowlist(
   accountId: string,
   senderAddress: string,
 ): Promise<void> {
-  const db = await getDb();
-  const id = crypto.randomUUID();
-  await db.execute(
-    "INSERT OR IGNORE INTO image_allowlist (id, account_id, sender_address) VALUES ($1, $2, $3)",
-    [id, accountId, normalizeEmail(senderAddress)],
-  );
+  await invoke("db_add_to_allowlist", {
+    id: crypto.randomUUID(),
+    accountId,
+    senderAddress: normalizeEmail(senderAddress),
+  });
 }
 
 export async function removeFromAllowlist(
   accountId: string,
   senderAddress: string,
 ): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    "DELETE FROM image_allowlist WHERE account_id = $1 AND sender_address = $2",
-    [accountId, normalizeEmail(senderAddress)],
-  );
+  await invoke("db_remove_from_allowlist", {
+    accountId,
+    senderAddress: normalizeEmail(senderAddress),
+  });
 }
 
 export interface AllowlistEntry {
@@ -64,9 +58,7 @@ export interface AllowlistEntry {
 export async function getAllowlistForAccount(
   accountId: string,
 ): Promise<AllowlistEntry[]> {
-  const db = await getDb();
-  return db.select<AllowlistEntry[]>(
-    "SELECT * FROM image_allowlist WHERE account_id = $1 ORDER BY sender_address",
-    [accountId],
-  );
+  return invoke<AllowlistEntry[]>("db_get_allowlist_for_account", {
+    accountId,
+  });
 }

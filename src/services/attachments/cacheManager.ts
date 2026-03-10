@@ -1,4 +1,4 @@
-import { getDb } from "@/services/db/connection";
+import { invoke } from "@tauri-apps/api/core";
 import { getSetting } from "@/services/db/settings";
 
 const CACHE_DIR = "attachment_cache";
@@ -40,12 +40,11 @@ export async function cacheAttachment(
     const relPath = await join(CACHE_DIR, hashFileName(attachmentId));
     await fsWriteFile(relPath, data, { baseDir });
 
-    // Update DB — store relative path under AppData
-    const db = await getDb();
-    await db.execute(
-      "UPDATE attachments SET local_path = $1, cached_at = unixepoch(), cache_size = $2 WHERE id = $3",
-      [relPath, data.length, attachmentId],
-    );
+    await invoke("db_update_attachment_cached", {
+      attachmentId,
+      localPath: relPath,
+      cacheSize: data.length,
+    });
 
     return relPath;
   } catch (err) {
@@ -66,11 +65,7 @@ export async function loadCachedAttachment(
 }
 
 export async function getCacheSize(): Promise<number> {
-  const db = await getDb();
-  const rows = await db.select<{ total: number }[]>(
-    "SELECT COALESCE(SUM(cache_size), 0) as total FROM attachments WHERE cached_at IS NOT NULL",
-  );
-  return rows[0]?.total ?? 0;
+  return invoke("db_get_attachment_cache_size");
 }
 
 export async function evictOldestCached(): Promise<void> {
@@ -80,16 +75,12 @@ export async function evictOldestCached(): Promise<void> {
 
   if (currentSize <= maxBytes) return;
 
-  const db = await getDb();
   const excess = currentSize - maxBytes;
   let freed = 0;
 
-  // Get oldest cached attachments
-  const rows = await db.select<
+  const rows = await invoke<
     { id: string; local_path: string; cache_size: number }[]
-  >(
-    "SELECT id, local_path, cache_size FROM attachments WHERE cached_at IS NOT NULL ORDER BY cached_at ASC LIMIT 100",
-  );
+  >("db_get_oldest_cached_attachments", { limit: 100 });
 
   for (const row of rows) {
     if (freed >= excess) break;
@@ -101,10 +92,9 @@ export async function evictOldestCached(): Promise<void> {
       // file may not exist
     }
 
-    await db.execute(
-      "UPDATE attachments SET local_path = NULL, cached_at = NULL, cache_size = NULL WHERE id = $1",
-      [row.id],
-    );
+    await invoke("db_clear_attachment_cache_entry", {
+      attachmentId: row.id,
+    });
 
     freed += row.cache_size;
   }
@@ -125,8 +115,5 @@ export async function clearAllCache(): Promise<void> {
     // ignore
   }
 
-  const db = await getDb();
-  await db.execute(
-    "UPDATE attachments SET local_path = NULL, cached_at = NULL, cache_size = NULL WHERE cached_at IS NOT NULL",
-  );
+  await invoke("db_clear_all_attachment_cache");
 }

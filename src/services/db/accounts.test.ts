@@ -1,5 +1,19 @@
 import { vi } from "vitest";
 import { createMockGmailAccount, createMockImapAccount } from "@/test/mocks";
+
+const mockInvoke = vi.fn();
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => mockInvoke(...args),
+}));
+
+vi.mock("@/utils/crypto", () => ({
+  encryptValue: vi.fn((val: string) => Promise.resolve(`enc:${val}`)),
+  decryptValue: vi.fn((val: string) =>
+    Promise.resolve(val.replace("enc:", "")),
+  ),
+  isEncrypted: vi.fn((val: string) => val.startsWith("enc:")),
+}));
+
 import {
   deleteAccount,
   getAccount,
@@ -11,29 +25,6 @@ import {
   updateAccountTokens,
 } from "./accounts";
 
-const mockExecute = vi.fn();
-const mockSelect = vi.fn();
-
-vi.mock("./connection", () => ({
-  getDb: vi.fn(() => ({
-    execute: (...args: unknown[]) => mockExecute(...args),
-    select: (...args: unknown[]) => mockSelect(...args),
-  })),
-  selectFirstBy: vi.fn(),
-}));
-
-vi.mock("@/utils/crypto", () => ({
-  encryptValue: vi.fn((val: string) => Promise.resolve(`enc:${val}`)),
-  decryptValue: vi.fn((val: string) =>
-    Promise.resolve(val.replace("enc:", "")),
-  ),
-  isEncrypted: vi.fn((val: string) => val.startsWith("enc:")),
-}));
-
-import { selectFirstBy } from "./connection";
-
-const mockSelectFirstBy = vi.mocked(selectFirstBy);
-
 describe("accounts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -41,15 +32,18 @@ describe("accounts", () => {
 
   describe("getAccount", () => {
     it("returns null for non-existent account", async () => {
-      mockSelectFirstBy.mockResolvedValue(null);
+      mockInvoke.mockResolvedValue(null);
 
       const result = await getAccount("nonexistent");
 
       expect(result).toBeNull();
+      expect(mockInvoke).toHaveBeenCalledWith("db_get_account", {
+        id: "nonexistent",
+      });
     });
 
     it("returns a Gmail account with decrypted tokens", async () => {
-      mockSelectFirstBy.mockResolvedValue(createMockGmailAccount());
+      mockInvoke.mockResolvedValue(createMockGmailAccount());
 
       const result = await getAccount("acc-gmail");
 
@@ -61,7 +55,7 @@ describe("accounts", () => {
     });
 
     it("returns an IMAP account with decrypted imap_password", async () => {
-      mockSelectFirstBy.mockResolvedValue(createMockImapAccount());
+      mockInvoke.mockResolvedValue(createMockImapAccount());
 
       const result = await getAccount("acc-imap");
 
@@ -78,7 +72,7 @@ describe("accounts", () => {
     });
 
     it("handles IMAP account with null imap_password gracefully", async () => {
-      mockSelectFirstBy.mockResolvedValue(
+      mockInvoke.mockResolvedValue(
         createMockImapAccount({ imap_password: null }),
       );
 
@@ -90,16 +84,19 @@ describe("accounts", () => {
 
   describe("getAccountByEmail", () => {
     it("returns account matching email", async () => {
-      mockSelectFirstBy.mockResolvedValue(createMockImapAccount());
+      mockInvoke.mockResolvedValue(createMockImapAccount());
 
       const result = await getAccountByEmail("user@example.com");
 
       expect(result).not.toBeNull();
       expect(result?.email).toBe("user@example.com");
+      expect(mockInvoke).toHaveBeenCalledWith("db_get_account_by_email", {
+        email: "user@example.com",
+      });
     });
 
     it("returns null when email not found", async () => {
-      mockSelectFirstBy.mockResolvedValue(null);
+      mockInvoke.mockResolvedValue(null);
 
       const result = await getAccountByEmail("unknown@example.com");
 
@@ -109,7 +106,7 @@ describe("accounts", () => {
 
   describe("getAllAccounts", () => {
     it("returns all accounts with decrypted tokens", async () => {
-      mockSelect.mockResolvedValue([
+      mockInvoke.mockResolvedValue([
         createMockGmailAccount(),
         createMockImapAccount(),
       ]);
@@ -124,7 +121,7 @@ describe("accounts", () => {
     });
 
     it("returns empty array when no accounts exist", async () => {
-      mockSelect.mockResolvedValue([]);
+      mockInvoke.mockResolvedValue([]);
 
       const result = await getAllAccounts();
 
@@ -132,7 +129,7 @@ describe("accounts", () => {
     });
 
     it("decrypts imap_password for IMAP accounts in the list", async () => {
-      mockSelect.mockResolvedValue([createMockImapAccount()]);
+      mockInvoke.mockResolvedValue([createMockImapAccount()]);
 
       const result = await getAllAccounts();
 
@@ -142,7 +139,7 @@ describe("accounts", () => {
 
   describe("insertImapAccount", () => {
     it("inserts IMAP account with encrypted password", async () => {
-      mockExecute.mockResolvedValue(undefined);
+      mockInvoke.mockResolvedValue(undefined);
 
       await insertImapAccount({
         id: "new-imap",
@@ -159,30 +156,27 @@ describe("accounts", () => {
         password: "my-app-password",
       });
 
-      expect(mockExecute).toHaveBeenCalledTimes(1);
-      const [sql, params] = mockExecute.mock.calls[0] as [string, unknown[]];
-      expect(sql).toContain("INSERT INTO accounts");
-      expect(sql).toContain("'imap'");
-      expect(params).toEqual([
-        "new-imap",
-        "user@fastmail.com",
-        "Fastmail User",
-        null,
-        "imap.fastmail.com",
-        993,
-        "ssl",
-        "smtp.fastmail.com",
-        465,
-        "ssl",
-        "password",
-        "enc:my-app-password", // encrypted
-        null, // imap_username
-        0, // accept_invalid_certs
-      ]);
+      expect(mockInvoke).toHaveBeenCalledWith("db_insert_account", {
+        id: "new-imap",
+        email: "user@fastmail.com",
+        displayName: "Fastmail User",
+        avatarUrl: null,
+        provider: "imap",
+        authMethod: "password",
+        imapHost: "imap.fastmail.com",
+        imapPort: 993,
+        imapSecurity: "ssl",
+        smtpHost: "smtp.fastmail.com",
+        smtpPort: 465,
+        smtpSecurity: "ssl",
+        imapPassword: "enc:my-app-password",
+        imapUsername: null,
+        acceptInvalidCerts: 0,
+      });
     });
 
     it("inserts IMAP account with custom username", async () => {
-      mockExecute.mockResolvedValue(undefined);
+      mockInvoke.mockResolvedValue(undefined);
 
       await insertImapAccount({
         id: "new-imap-2",
@@ -200,39 +194,18 @@ describe("accounts", () => {
         imapUsername: "custom-login-id",
       });
 
-      expect(mockExecute).toHaveBeenCalledTimes(1);
-      const [sql, params] = mockExecute.mock.calls[0] as [string, unknown[]];
-      expect(sql).toContain("imap_username");
-      expect(params).toContain("custom-login-id");
-    });
-
-    it("sets access_token and refresh_token to NULL for IMAP accounts", async () => {
-      mockExecute.mockResolvedValue(undefined);
-
-      await insertImapAccount({
-        id: "imap-1",
-        email: "test@test.com",
-        displayName: null,
-        avatarUrl: null,
-        imapHost: "imap.test.com",
-        imapPort: 993,
-        imapSecurity: "tls",
-        smtpHost: "smtp.test.com",
-        smtpPort: 587,
-        smtpSecurity: "starttls",
-        authMethod: "password",
-        password: "pass",
-      });
-
-      const [sql] = mockExecute.mock.calls[0] as [string, unknown[]];
-      expect(sql).toContain("NULL, NULL");
-      expect(sql).toContain("'imap'");
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_insert_account",
+        expect.objectContaining({
+          imapUsername: "custom-login-id",
+        }),
+      );
     });
   });
 
   describe("insertAccount (Gmail/OAuth)", () => {
     it("inserts OAuth account with encrypted tokens", async () => {
-      mockExecute.mockResolvedValue(undefined);
+      mockInvoke.mockResolvedValue(undefined);
 
       await insertAccount({
         id: "gmail-1",
@@ -244,48 +217,54 @@ describe("accounts", () => {
         tokenExpiresAt: 9999999999,
       });
 
-      expect(mockExecute).toHaveBeenCalledTimes(1);
-      const [sql, params] = mockExecute.mock.calls[0] as [string, unknown[]];
-      expect(sql).toContain("INSERT INTO accounts");
-      expect(params).toContain("enc:access-token-123");
-      expect(params).toContain("enc:refresh-token-456");
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_insert_account",
+        expect.objectContaining({
+          accessToken: "enc:access-token-123",
+          refreshToken: "enc:refresh-token-456",
+          provider: "gmail_api",
+          authMethod: "oauth2",
+        }),
+      );
     });
   });
 
   describe("deleteAccount", () => {
     it("deletes account by id", async () => {
-      mockExecute.mockResolvedValue(undefined);
+      mockInvoke.mockResolvedValue(undefined);
 
       await deleteAccount("acc-1");
 
-      const [sql, params] = mockExecute.mock.calls[0] as [string, unknown[]];
-      expect(sql).toContain("DELETE FROM accounts");
-      expect(params).toEqual(["acc-1"]);
+      expect(mockInvoke).toHaveBeenCalledWith("db_delete_account", {
+        id: "acc-1",
+      });
     });
   });
 
   describe("updateAccountTokens", () => {
     it("updates access_token with encryption", async () => {
-      mockExecute.mockResolvedValue(undefined);
+      mockInvoke.mockResolvedValue(undefined);
 
       await updateAccountTokens("acc-1", "new-token", 1234567890);
 
-      const [sql, params] = mockExecute.mock.calls[0] as [string, unknown[]];
-      expect(sql).toContain("UPDATE accounts SET access_token");
-      expect(params).toContain("enc:new-token");
-      expect(params).toContain(1234567890);
+      expect(mockInvoke).toHaveBeenCalledWith("db_update_account_tokens", {
+        id: "acc-1",
+        accessToken: "enc:new-token",
+        tokenExpiresAt: 1234567890,
+      });
     });
   });
 
   describe("updateAccountSyncState", () => {
     it("updates history_id and last_sync_at", async () => {
-      mockExecute.mockResolvedValue(undefined);
+      mockInvoke.mockResolvedValue(undefined);
 
       await updateAccountSyncState("acc-1", "history-999");
 
-      const [sql, params] = mockExecute.mock.calls[0] as [string, unknown[]];
-      expect(sql).toContain("UPDATE accounts SET history_id");
-      expect(params).toEqual(["history-999", "acc-1"]);
+      expect(mockInvoke).toHaveBeenCalledWith("db_update_account_sync_state", {
+        id: "acc-1",
+        historyId: "history-999",
+      });
     });
   });
 });

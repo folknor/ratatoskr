@@ -1,25 +1,15 @@
-import { getDb } from "./connection";
-
-interface AiCacheEntry {
-  id: string;
-  account_id: string;
-  thread_id: string;
-  type: string;
-  content: string;
-  created_at: number;
-}
+import { invoke } from "@tauri-apps/api/core";
 
 export async function getAiCache(
   accountId: string,
   threadId: string,
   type: string,
 ): Promise<string | null> {
-  const db = await getDb();
-  const rows = await db.select<AiCacheEntry[]>(
-    "SELECT content FROM ai_cache WHERE account_id = $1 AND thread_id = $2 AND type = $3",
-    [accountId, threadId, type],
-  );
-  return rows[0]?.content ?? null;
+  return invoke<string | null>("db_get_ai_cache", {
+    accountId,
+    threadId,
+    cacheType: type,
+  });
 }
 
 export async function setAiCache(
@@ -28,15 +18,12 @@ export async function setAiCache(
   type: string,
   content: string,
 ): Promise<void> {
-  const db = await getDb();
-  const id = crypto.randomUUID();
-  await db.execute(
-    `INSERT INTO ai_cache (id, account_id, thread_id, type, content)
-     VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT(account_id, thread_id, type) DO UPDATE SET
-       content = $5, created_at = unixepoch()`,
-    [id, accountId, threadId, type, content],
-  );
+  await invoke("db_set_ai_cache", {
+    accountId,
+    threadId,
+    cacheType: type,
+    content,
+  });
 }
 
 export async function deleteAiCache(
@@ -44,9 +31,9 @@ export async function deleteAiCache(
   threadId: string,
   type: string,
 ): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    "DELETE FROM ai_cache WHERE account_id = $1 AND thread_id = $2 AND type = $3",
-    [accountId, threadId, type],
-  );
+  await invoke("db_delete_ai_cache", {
+    accountId,
+    threadId,
+    cacheType: type,
+  });
 }

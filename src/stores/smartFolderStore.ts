@@ -29,7 +29,7 @@ function mapDbFolder(db: DbSmartFolder): SmartFolder {
     query: db.query,
     icon: db.icon,
     color: db.color,
-    isDefault: db.is_default === 1,
+    isDefault: db.is_default,
     sortOrder: db.sort_order,
   };
 }

@@ -3,7 +3,7 @@
  * UI code should import from here instead of reaching into @/services/ directly.
  */
 
-import { getDb } from "@/services/db/connection";
+import { invoke } from "@tauri-apps/api/core";
 
 // Draft auto-save
 export { startAutoSave, stopAutoSave } from "@/services/composer/draftAutoSave";
@@ -42,21 +42,13 @@ export {
 
 /**
  * Look up a scheduled email's attachment data and update it.
- * Wraps the direct getDb() + SQL call previously in Composer.tsx.
  */
 export async function updateScheduledEmailAttachments(
   accountId: string,
   attachmentData: string,
 ): Promise<void> {
-  const db = await getDb();
-  const rows = await db.select<{ id: string }[]>(
-    "SELECT id FROM scheduled_emails WHERE account_id = $1 ORDER BY created_at DESC LIMIT 1",
-    [accountId],
-  );
-  if (rows[0]) {
-    await db.execute(
-      "UPDATE scheduled_emails SET attachment_paths = $1 WHERE id = $2",
-      [attachmentData, rows[0].id],
-    );
-  }
+  await invoke("db_update_scheduled_email_attachments", {
+    accountId,
+    attachmentData,
+  });
 }

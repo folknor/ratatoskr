@@ -1,21 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockGetDb } = vi.hoisted(() => ({
-  mockGetDb: vi.fn(),
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
 }));
 
-vi.mock("@/services/db/connection", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/services/db/connection")>();
-  return {
-    ...actual,
-    getDb: mockGetDb,
-    buildDynamicUpdate: vi.fn(),
-  };
-});
-
-import { buildDynamicUpdate, getDb } from "@/services/db/connection";
-import { createMockDb } from "@/test/mocks";
+import { invoke } from "@tauri-apps/api/core";
 import {
   deleteSmartLabelRule,
   getEnabledSmartLabelRules,
@@ -24,18 +13,13 @@ import {
   updateSmartLabelRule,
 } from "./smartLabelRules";
 
-const mockDb = createMockDb();
-
 describe("smartLabelRules service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getDb).mockResolvedValue(
-      mockDb as unknown as Awaited<ReturnType<typeof getDb>>,
-    );
   });
 
   describe("getSmartLabelRulesForAccount", () => {
-    it("returns rules for the account ordered by sort_order", async () => {
+    it("returns rules for the account", async () => {
       const mockRules = [
         {
           id: "r1",
@@ -43,40 +27,59 @@ describe("smartLabelRules service", () => {
           label_id: "l1",
           ai_description: "Test",
           criteria_json: null,
-          is_enabled: 1,
+          is_enabled: true,
           sort_order: 0,
           created_at: 100,
         },
       ];
-      mockDb.select.mockResolvedValueOnce(mockRules);
+      vi.mocked(invoke).mockResolvedValueOnce(mockRules);
 
       const result = await getSmartLabelRulesForAccount("acc-1");
 
       expect(result).toEqual(mockRules);
-      expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringContaining("WHERE account_id = $1"),
-        ["acc-1"],
-      );
-      expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringContaining("ORDER BY sort_order"),
-        expect.anything(),
+      expect(invoke).toHaveBeenCalledWith(
+        "db_get_smart_label_rules_for_account",
+        { accountId: "acc-1" },
       );
     });
   });
 
   describe("getEnabledSmartLabelRules", () => {
     it("returns only enabled rules", async () => {
-      await getEnabledSmartLabelRules("acc-1");
+      vi.mocked(invoke).mockResolvedValueOnce([
+        {
+          id: "r1",
+          account_id: "acc-1",
+          label_id: "l1",
+          ai_description: "Enabled",
+          criteria_json: null,
+          is_enabled: true,
+          sort_order: 0,
+          created_at: 100,
+        },
+        {
+          id: "r2",
+          account_id: "acc-1",
+          label_id: "l2",
+          ai_description: "Disabled",
+          criteria_json: null,
+          is_enabled: false,
+          sort_order: 1,
+          created_at: 200,
+        },
+      ]);
 
-      expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringContaining("is_enabled = 1"),
-        ["acc-1"],
-      );
+      const result = await getEnabledSmartLabelRules("acc-1");
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.id).toBe("r1");
     });
   });
 
   describe("insertSmartLabelRule", () => {
     it("inserts with required fields", async () => {
+      vi.mocked(invoke).mockResolvedValueOnce(undefined);
+
       const id = await insertSmartLabelRule({
         accountId: "acc-1",
         labelId: "label-1",
@@ -84,19 +87,19 @@ describe("smartLabelRules service", () => {
       });
 
       expect(id).toBeTruthy();
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("INSERT INTO smart_label_rules"),
-        expect.arrayContaining([
-          "acc-1",
-          "label-1",
-          "Job applications",
-          null,
-          1,
-        ]),
-      );
+      expect(invoke).toHaveBeenCalledWith("db_insert_smart_label_rule", {
+        id: expect.any(String),
+        accountId: "acc-1",
+        labelId: "label-1",
+        aiDescription: "Job applications",
+        criteriaJson: null,
+        isEnabled: true,
+      });
     });
 
     it("inserts with optional criteria", async () => {
+      vi.mocked(invoke).mockResolvedValueOnce(undefined);
+
       await insertSmartLabelRule({
         accountId: "acc-1",
         labelId: "label-1",
@@ -104,15 +107,22 @@ describe("smartLabelRules service", () => {
         criteria: { from: "recruiter@", subject: "position" },
       });
 
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("INSERT INTO smart_label_rules"),
-        expect.arrayContaining([
-          JSON.stringify({ from: "recruiter@", subject: "position" }),
-        ]),
-      );
+      expect(invoke).toHaveBeenCalledWith("db_insert_smart_label_rule", {
+        id: expect.any(String),
+        accountId: "acc-1",
+        labelId: "label-1",
+        aiDescription: "Job apps",
+        criteriaJson: JSON.stringify({
+          from: "recruiter@",
+          subject: "position",
+        }),
+        isEnabled: true,
+      });
     });
 
     it("inserts as disabled when isEnabled is false", async () => {
+      vi.mocked(invoke).mockResolvedValueOnce(undefined);
+
       await insertSmartLabelRule({
         accountId: "acc-1",
         labelId: "label-1",
@@ -120,87 +130,61 @@ describe("smartLabelRules service", () => {
         isEnabled: false,
       });
 
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("INSERT INTO smart_label_rules"),
-        expect.arrayContaining([0]),
+      expect(invoke).toHaveBeenCalledWith(
+        "db_insert_smart_label_rule",
+        expect.objectContaining({ isEnabled: false }),
       );
     });
   });
 
   describe("updateSmartLabelRule", () => {
-    it("delegates to buildDynamicUpdate", async () => {
-      vi.mocked(buildDynamicUpdate).mockReturnValue({
-        sql: "UPDATE smart_label_rules SET ai_description = $1 WHERE id = $2",
-        params: ["Updated description", "r1"],
-      });
+    it("passes updates via invoke", async () => {
+      vi.mocked(invoke).mockResolvedValueOnce(undefined);
 
       await updateSmartLabelRule("r1", {
         aiDescription: "Updated description",
       });
 
-      expect(buildDynamicUpdate).toHaveBeenCalledWith(
-        "smart_label_rules",
-        "id",
-        "r1",
-        [["ai_description", "Updated description"]],
-      );
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        "UPDATE smart_label_rules SET ai_description = $1 WHERE id = $2",
-        ["Updated description", "r1"],
-      );
-    });
-
-    it("does nothing when no updates provided", async () => {
-      vi.mocked(buildDynamicUpdate).mockReturnValue(null);
-
-      await updateSmartLabelRule("r1", {});
-
-      expect(mockDb.execute).not.toHaveBeenCalled();
+      expect(invoke).toHaveBeenCalledWith("db_update_smart_label_rule", {
+        id: "r1",
+        aiDescription: "Updated description",
+      });
     });
 
     it("serializes criteria to JSON", async () => {
-      vi.mocked(buildDynamicUpdate).mockReturnValue({
-        sql: "UPDATE ...",
-        params: [],
-      });
+      vi.mocked(invoke).mockResolvedValueOnce(undefined);
 
       await updateSmartLabelRule("r1", {
         criteria: { from: "test@example.com" },
       });
 
-      expect(buildDynamicUpdate).toHaveBeenCalledWith(
-        "smart_label_rules",
-        "id",
-        "r1",
-        [["criteria_json", JSON.stringify({ from: "test@example.com" })]],
-      );
+      expect(invoke).toHaveBeenCalledWith("db_update_smart_label_rule", {
+        id: "r1",
+        criteriaJson: JSON.stringify({ from: "test@example.com" }),
+      });
     });
 
     it("clears criteria when set to null", async () => {
-      vi.mocked(buildDynamicUpdate).mockReturnValue({
-        sql: "UPDATE ...",
-        params: [],
-      });
+      vi.mocked(invoke).mockResolvedValueOnce(undefined);
 
       await updateSmartLabelRule("r1", { criteria: null });
 
-      expect(buildDynamicUpdate).toHaveBeenCalledWith(
-        "smart_label_rules",
-        "id",
-        "r1",
-        [["criteria_json", null]],
-      );
+      expect(invoke).toHaveBeenCalledWith("db_update_smart_label_rule", {
+        id: "r1",
+        criteriaJson: null,
+      });
     });
   });
 
   describe("deleteSmartLabelRule", () => {
     it("deletes by id", async () => {
+      vi.mocked(invoke).mockResolvedValueOnce(undefined);
+
       await deleteSmartLabelRule("r1");
 
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        "DELETE FROM smart_label_rules WHERE id = $1",
-        ["r1"],
-      );
+      expect(invoke).toHaveBeenCalledWith("db_delete_smart_label_rule", {
+        id: "r1",
+      });
     });
   });
 });

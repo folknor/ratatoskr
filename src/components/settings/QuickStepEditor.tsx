@@ -126,7 +126,7 @@ export function QuickStepEditor(): React.ReactNode {
     setDescription(qs.description ?? "");
     setShortcut(qs.shortcut ?? "");
     setIcon(qs.icon ?? "");
-    setContinueOnError(qs.continue_on_error === 1);
+    setContinueOnError(qs.continue_on_error);
 
     try {
       setActions(JSON.parse(qs.actions_json) as QuickStepAction[]);
@@ -148,7 +148,7 @@ export function QuickStepEditor(): React.ReactNode {
 
   const handleToggleEnabled = useCallback(
     async (qs: DbQuickStep): Promise<void> => {
-      await updateQuickStep(qs.id, { isEnabled: qs.is_enabled !== 1 });
+      await updateQuickStep(qs.id, { isEnabled: !qs.is_enabled });
       await loadQuickSteps();
     },
     [loadQuickSteps],
@@ -208,7 +208,7 @@ export function QuickStepEditor(): React.ReactNode {
                     {qs.shortcut}
                   </kbd>
                 )}
-                {qs.is_enabled !== 1 && (
+                {!qs.is_enabled && (
                   <span className="text-[0.625rem] bg-bg-tertiary text-text-tertiary px-1.5 py-0.5 rounded">
                     {t("quickStepEditor.disabled")}
                   </span>
@@ -227,17 +227,17 @@ export function QuickStepEditor(): React.ReactNode {
               type="button"
               onClick={(): void => void handleToggleEnabled(qs)}
               className={`w-8 h-4 rounded-full transition-colors relative ${
-                qs.is_enabled === 1 ? "bg-accent" : "bg-bg-tertiary"
+                qs.is_enabled ? "bg-accent" : "bg-bg-tertiary"
               }`}
               title={
-                qs.is_enabled === 1
+                qs.is_enabled
                   ? t("quickStepEditor.disable")
                   : t("quickStepEditor.enable")
               }
             >
               <span
                 className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform shadow ${
-                  qs.is_enabled === 1 ? "translate-x-4" : ""
+                  qs.is_enabled ? "translate-x-4" : ""
                 }`}
               />
             </button>

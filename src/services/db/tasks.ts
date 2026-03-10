@@ -1,4 +1,4 @@
-import { getDb } from "./connection";
+import { invoke } from "@tauri-apps/api/core";
 
 export type TaskPriority = "none" | "low" | "medium" | "high" | "urgent";
 
@@ -34,47 +34,28 @@ export async function getTasksForAccount(
   accountId: string | null,
   includeCompleted: boolean = false,
 ): Promise<DbTask[]> {
-  const db = await getDb();
-  if (includeCompleted) {
-    return db.select<DbTask[]>(
-      `SELECT * FROM tasks WHERE (account_id = $1 OR account_id IS NULL) AND parent_id IS NULL
-       ORDER BY is_completed ASC, sort_order ASC, created_at DESC`,
-      [accountId],
-    );
-  }
-  return db.select<DbTask[]>(
-    `SELECT * FROM tasks WHERE (account_id = $1 OR account_id IS NULL) AND parent_id IS NULL AND is_completed = 0
-     ORDER BY sort_order ASC, created_at DESC`,
-    [accountId],
-  );
+  return invoke<DbTask[]>("db_get_tasks_for_account", {
+    accountId,
+    includeCompleted,
+  });
 }
 
 export async function getTaskById(id: string): Promise<DbTask | null> {
-  const db = await getDb();
-  const rows = await db.select<DbTask[]>("SELECT * FROM tasks WHERE id = $1", [
-    id,
-  ]);
-  return rows[0] ?? null;
+  return invoke<DbTask | null>("db_get_task_by_id", { id });
 }
 
 export async function getTasksForThread(
   accountId: string,
   threadId: string,
 ): Promise<DbTask[]> {
-  const db = await getDb();
-  return db.select<DbTask[]>(
-    `SELECT * FROM tasks WHERE thread_account_id = $1 AND thread_id = $2
-     ORDER BY is_completed ASC, sort_order ASC, created_at DESC`,
-    [accountId, threadId],
-  );
+  return invoke<DbTask[]>("db_get_tasks_for_thread", {
+    accountId,
+    threadId,
+  });
 }
 
 export async function getSubtasks(parentId: string): Promise<DbTask[]> {
-  const db = await getDb();
-  return db.select<DbTask[]>(
-    "SELECT * FROM tasks WHERE parent_id = $1 ORDER BY sort_order ASC, created_at ASC",
-    [parentId],
-  );
+  return invoke<DbTask[]>("db_get_subtasks", { parentId });
 }
 
 export async function insertTask(task: {
@@ -91,26 +72,21 @@ export async function insertTask(task: {
   recurrenceRule?: string | null;
   tagsJson?: string;
 }): Promise<string> {
-  const db = await getDb();
   const id = task.id ?? crypto.randomUUID();
-  await db.execute(
-    `INSERT INTO tasks (id, account_id, title, description, priority, due_date, parent_id, thread_id, thread_account_id, sort_order, recurrence_rule, tags_json)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-    [
-      id,
-      task.accountId,
-      task.title,
-      task.description ?? null,
-      task.priority ?? "none",
-      task.dueDate ?? null,
-      task.parentId ?? null,
-      task.threadId ?? null,
-      task.threadAccountId ?? null,
-      task.sortOrder ?? 0,
-      task.recurrenceRule ?? null,
-      task.tagsJson ?? "[]",
-    ],
-  );
+  await invoke<void>("db_insert_task", {
+    id,
+    accountId: task.accountId,
+    title: task.title,
+    description: task.description ?? null,
+    priority: task.priority ?? "none",
+    dueDate: task.dueDate ?? null,
+    parentId: task.parentId ?? null,
+    threadId: task.threadId ?? null,
+    threadAccountId: task.threadAccountId ?? null,
+    sortOrder: task.sortOrder ?? 0,
+    recurrenceRule: task.recurrenceRule ?? null,
+    tagsJson: task.tagsJson ?? "[]",
+  });
   return id;
 }
 
@@ -127,101 +103,67 @@ export async function updateTask(
     tagsJson?: string;
   },
 ): Promise<void> {
-  const db = await getDb();
-  const sets: string[] = ["updated_at = unixepoch()"];
-  const params: unknown[] = [];
-  let idx = 1;
-
-  if (updates.title !== undefined) {
-    sets.push(`title = $${idx++}`);
-    params.push(updates.title);
-  }
-  if (updates.description !== undefined) {
-    sets.push(`description = $${idx++}`);
-    params.push(updates.description);
-  }
-  if (updates.priority !== undefined) {
-    sets.push(`priority = $${idx++}`);
-    params.push(updates.priority);
-  }
-  if (updates.dueDate !== undefined) {
-    sets.push(`due_date = $${idx++}`);
-    params.push(updates.dueDate);
-  }
-  if (updates.sortOrder !== undefined) {
-    sets.push(`sort_order = $${idx++}`);
-    params.push(updates.sortOrder);
-  }
-  if (updates.recurrenceRule !== undefined) {
-    sets.push(`recurrence_rule = $${idx++}`);
-    params.push(updates.recurrenceRule);
-  }
-  if (updates.nextRecurrenceAt !== undefined) {
-    sets.push(`next_recurrence_at = $${idx++}`);
-    params.push(updates.nextRecurrenceAt);
-  }
-  if (updates.tagsJson !== undefined) {
-    sets.push(`tags_json = $${idx++}`);
-    params.push(updates.tagsJson);
-  }
-
-  params.push(id);
-  await db.execute(
-    `UPDATE tasks SET ${sets.join(", ")} WHERE id = $${idx}`,
-    params,
-  );
+  return invoke<void>("db_update_task", {
+    id,
+    title: updates.title,
+    description:
+      updates.description !== undefined && updates.description !== null
+        ? updates.description
+        : undefined,
+    priority: updates.priority,
+    dueDate:
+      updates.dueDate !== undefined && updates.dueDate !== null
+        ? updates.dueDate
+        : undefined,
+    sortOrder: updates.sortOrder,
+    recurrenceRule:
+      updates.recurrenceRule !== undefined && updates.recurrenceRule !== null
+        ? updates.recurrenceRule
+        : undefined,
+    nextRecurrenceAt:
+      updates.nextRecurrenceAt !== undefined &&
+      updates.nextRecurrenceAt !== null
+        ? updates.nextRecurrenceAt
+        : undefined,
+    tagsJson: updates.tagsJson,
+    // Sentinel flags: set to true when the caller explicitly passes null
+    clearDescription:
+      updates.description === null && updates.description !== undefined,
+    clearDueDate: updates.dueDate === null && updates.dueDate !== undefined,
+    clearRecurrenceRule:
+      updates.recurrenceRule === null && updates.recurrenceRule !== undefined,
+    clearNextRecurrenceAt:
+      updates.nextRecurrenceAt === null &&
+      updates.nextRecurrenceAt !== undefined,
+  });
 }
 
 export async function deleteTask(id: string): Promise<void> {
-  const db = await getDb();
-  await db.execute("DELETE FROM tasks WHERE id = $1", [id]);
+  return invoke<void>("db_delete_task", { id });
 }
 
 export async function completeTask(id: string): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    "UPDATE tasks SET is_completed = 1, completed_at = unixepoch(), updated_at = unixepoch() WHERE id = $1",
-    [id],
-  );
+  return invoke<void>("db_complete_task", { id });
 }
 
 export async function uncompleteTask(id: string): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    "UPDATE tasks SET is_completed = 0, completed_at = NULL, updated_at = unixepoch() WHERE id = $1",
-    [id],
-  );
+  return invoke<void>("db_uncomplete_task", { id });
 }
 
 export async function reorderTasks(taskIds: string[]): Promise<void> {
-  const db = await getDb();
-  for (let i = 0; i < taskIds.length; i++) {
-    await db.execute(
-      "UPDATE tasks SET sort_order = $1, updated_at = unixepoch() WHERE id = $2",
-      [i, taskIds[i]],
-    );
-  }
+  return invoke<void>("db_reorder_tasks", { taskIds });
 }
 
 export async function getIncompleteTaskCount(
   accountId: string | null,
 ): Promise<number> {
-  const db = await getDb();
-  const rows = await db.select<{ count: number }[]>(
-    "SELECT COUNT(*) as count FROM tasks WHERE (account_id = $1 OR account_id IS NULL) AND is_completed = 0",
-    [accountId],
-  );
-  return rows[0]?.count ?? 0;
+  return invoke<number>("db_get_incomplete_task_count", { accountId });
 }
 
 export async function getTaskTags(
   accountId: string | null,
 ): Promise<DbTaskTag[]> {
-  const db = await getDb();
-  return db.select<DbTaskTag[]>(
-    "SELECT * FROM task_tags WHERE account_id = $1 OR account_id IS NULL ORDER BY sort_order ASC",
-    [accountId],
-  );
+  return invoke<DbTaskTag[]>("db_get_task_tags", { accountId });
 }
 
 export async function upsertTaskTag(
@@ -229,22 +171,16 @@ export async function upsertTaskTag(
   accountId: string | null,
   color?: string | null,
 ): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    `INSERT INTO task_tags (tag, account_id, color)
-     VALUES ($1, $2, $3)
-     ON CONFLICT(tag, account_id) DO UPDATE SET color = $3`,
-    [tag, accountId, color ?? null],
-  );
+  return invoke<void>("db_upsert_task_tag", {
+    tag,
+    accountId,
+    color: color ?? null,
+  });
 }
 
 export async function deleteTaskTag(
   tag: string,
   accountId: string | null,
 ): Promise<void> {
-  const db = await getDb();
-  await db.execute("DELETE FROM task_tags WHERE tag = $1 AND account_id = $2", [
-    tag,
-    accountId,
-  ]);
+  return invoke<void>("db_delete_task_tag", { tag, accountId });
 }

@@ -1,17 +1,10 @@
+import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/services/db/connection", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/services/db/connection")>();
-  return {
-    ...actual,
-    getDb: vi.fn(),
-    selectFirstBy: vi.fn(),
-  };
-});
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+}));
 
-import { getDb, selectFirstBy } from "@/services/db/connection";
-import { createMockDb } from "@/test/mocks";
 import {
   type DbCalendarEvent,
   deleteCalendarEvent,
@@ -23,7 +16,7 @@ import {
   upsertCalendarEvent,
 } from "./calendarEvents";
 
-const mockDb = createMockDb();
+const mockInvoke = vi.mocked(invoke);
 
 const makeEvent = (
   overrides: Partial<DbCalendarEvent> = {},
@@ -53,13 +46,10 @@ const makeEvent = (
 describe("calendarEvents service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getDb).mockResolvedValue(
-      mockDb as unknown as Awaited<ReturnType<typeof getDb>>,
-    );
   });
 
   describe("upsertCalendarEvent", () => {
-    it("inserts event with all fields including CalDAV fields", async () => {
+    it("invokes Rust command with all fields including CalDAV fields", async () => {
       await upsertCalendarEvent({
         accountId: "acc-1",
         googleEventId: "gev-1",
@@ -80,50 +70,25 @@ describe("calendarEvents service", () => {
         uid: "uid-123@example.com",
       });
 
-      expect(mockDb.execute).toHaveBeenCalledTimes(1);
-      const [sql, params] = mockDb.execute.mock.calls[0] as [string, unknown[]];
-      expect(sql).toContain("INSERT INTO calendar_events");
-      expect(sql).toContain(
-        "ON CONFLICT(account_id, google_event_id) DO UPDATE",
-      );
-      // params[0] is the generated UUID id, skip it
-      expect(params[1]).toBe("acc-1");
-      expect(params[2]).toBe("gev-1");
-      expect(params[3]).toBe("Team standup");
-      expect(params[4]).toBe("Daily sync");
-      expect(params[5]).toBe("Room A");
-      expect(params[6]).toBe(1000);
-      expect(params[7]).toBe(2000);
-      expect(params[8]).toBe(0); // isAllDay false -> 0
-      expect(params[9]).toBe("confirmed");
-      expect(params[10]).toBe("org@example.com");
-      expect(params[11]).toBe('[{"email":"a@b.com"}]');
-      expect(params[12]).toBe("https://calendar.google.com/event/1");
-      expect(params[13]).toBe("cal-1");
-      expect(params[14]).toBe("remote-1");
-      expect(params[15]).toBe('"etag-abc"');
-      expect(params[16]).toBe("BEGIN:VEVENT\nEND:VEVENT");
-      expect(params[17]).toBe("uid-123@example.com");
-    });
-
-    it("converts isAllDay true to 1", async () => {
-      await upsertCalendarEvent({
+      expect(mockInvoke).toHaveBeenCalledWith("db_upsert_calendar_event", {
         accountId: "acc-1",
-        googleEventId: "gev-2",
-        summary: null,
-        description: null,
-        location: null,
+        googleEventId: "gev-1",
+        summary: "Team standup",
+        description: "Daily sync",
+        location: "Room A",
         startTime: 1000,
         endTime: 2000,
-        isAllDay: true,
+        isAllDay: false,
         status: "confirmed",
-        organizerEmail: null,
-        attendeesJson: null,
-        htmlLink: null,
+        organizerEmail: "org@example.com",
+        attendeesJson: '[{"email":"a@b.com"}]',
+        htmlLink: "https://calendar.google.com/event/1",
+        calendarId: "cal-1",
+        remoteEventId: "remote-1",
+        etag: '"etag-abc"',
+        icalData: "BEGIN:VEVENT\nEND:VEVENT",
+        uid: "uid-123@example.com",
       });
-
-      const [, params] = mockDb.execute.mock.calls[0] as [string, unknown[]];
-      expect(params[8]).toBe(1);
     });
 
     it("defaults optional CalDAV fields to null", async () => {
@@ -142,49 +107,25 @@ describe("calendarEvents service", () => {
         htmlLink: null,
       });
 
-      const [, params] = mockDb.execute.mock.calls[0] as [string, unknown[]];
-      expect(params[13]).toBeNull(); // calendarId
-      expect(params[14]).toBeNull(); // remoteEventId
-      expect(params[15]).toBeNull(); // etag
-      expect(params[16]).toBeNull(); // icalData
-      expect(params[17]).toBeNull(); // uid
-    });
-
-    it("updates existing event on conflict (same account_id + google_event_id)", async () => {
-      await upsertCalendarEvent({
+      expect(mockInvoke).toHaveBeenCalledWith("db_upsert_calendar_event", {
         accountId: "acc-1",
-        googleEventId: "gev-1",
-        summary: "Updated standup",
+        googleEventId: "gev-3",
+        summary: null,
         description: null,
         location: null,
-        startTime: 3000,
-        endTime: 4000,
+        startTime: 1000,
+        endTime: 2000,
         isAllDay: false,
-        status: "tentative",
+        status: "confirmed",
         organizerEmail: null,
         attendeesJson: null,
         htmlLink: null,
-        calendarId: "cal-2",
-        remoteEventId: "remote-2",
-        etag: '"etag-new"',
-        icalData: "BEGIN:VEVENT\nUPDATED\nEND:VEVENT",
-        uid: "uid-456@example.com",
+        calendarId: null,
+        remoteEventId: null,
+        etag: null,
+        icalData: null,
+        uid: null,
       });
-
-      const [sql, params] = mockDb.execute.mock.calls[0] as [string, unknown[]];
-      expect(sql).toContain(
-        "ON CONFLICT(account_id, google_event_id) DO UPDATE SET",
-      );
-      expect(sql).toContain("calendar_id = $14");
-      expect(sql).toContain("remote_event_id = $15");
-      expect(sql).toContain("etag = $16");
-      expect(sql).toContain("ical_data = $17");
-      expect(sql).toContain("uid = $18");
-      expect(sql).toContain("updated_at = unixepoch()");
-      expect(params[3]).toBe("Updated standup");
-      expect(params[6]).toBe(3000);
-      expect(params[7]).toBe(4000);
-      expect(params[9]).toBe("tentative");
     });
   });
 
@@ -194,22 +135,19 @@ describe("calendarEvents service", () => {
         makeEvent(),
         makeEvent({ id: "evt-2", start_time: 1500 }),
       ];
-      mockDb.select.mockResolvedValueOnce(events);
+      mockInvoke.mockResolvedValueOnce(events);
 
       const result = await getCalendarEventsInRange("acc-1", 500, 2500);
 
       expect(result).toEqual(events);
-      expect(mockDb.select).toHaveBeenCalledTimes(1);
-      const [sql, params] = mockDb.select.mock.calls[0] as [string, unknown[]];
-      expect(sql).toContain(
-        "WHERE account_id = $1 AND start_time < $3 AND end_time > $2",
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_get_calendar_events_in_range",
+        { accountId: "acc-1", startTime: 500, endTime: 2500 },
       );
-      expect(sql).toContain("ORDER BY start_time ASC");
-      expect(params).toEqual(["acc-1", 500, 2500]);
     });
 
     it("returns empty array when no events match", async () => {
-      mockDb.select.mockResolvedValueOnce([]);
+      mockInvoke.mockResolvedValueOnce([]);
 
       const result = await getCalendarEventsInRange("acc-1", 5000, 6000);
 
@@ -218,12 +156,12 @@ describe("calendarEvents service", () => {
   });
 
   describe("getCalendarEventsInRangeMulti", () => {
-    it("filters by calendar IDs and includes null calendar_id events", async () => {
+    it("filters by calendar IDs via Rust command", async () => {
       const events = [
         makeEvent({ calendar_id: "cal-1" }),
         makeEvent({ id: "evt-2", calendar_id: null }),
       ];
-      mockDb.select.mockResolvedValueOnce(events);
+      mockInvoke.mockResolvedValueOnce(events);
 
       const result = await getCalendarEventsInRangeMulti(
         "acc-1",
@@ -233,16 +171,20 @@ describe("calendarEvents service", () => {
       );
 
       expect(result).toEqual(events);
-      expect(mockDb.select).toHaveBeenCalledTimes(1);
-      const [sql, params] = mockDb.select.mock.calls[0] as [string, unknown[]];
-      expect(sql).toContain("calendar_id IN ($4, $5)");
-      expect(sql).toContain("OR calendar_id IS NULL");
-      expect(params).toEqual(["acc-1", 500, 2500, "cal-1", "cal-2"]);
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_get_calendar_events_in_range_multi",
+        {
+          accountId: "acc-1",
+          calendarIds: ["cal-1", "cal-2"],
+          startTime: 500,
+          endTime: 2500,
+        },
+      );
     });
 
     it("falls back to getCalendarEventsInRange when calendarIds is empty", async () => {
       const events = [makeEvent()];
-      mockDb.select.mockResolvedValueOnce(events);
+      mockInvoke.mockResolvedValueOnce(events);
 
       const result = await getCalendarEventsInRangeMulti(
         "acc-1",
@@ -252,14 +194,11 @@ describe("calendarEvents service", () => {
       );
 
       expect(result).toEqual(events);
-      expect(mockDb.select).toHaveBeenCalledTimes(1);
-      const [sql, params] = mockDb.select.mock.calls[0] as [string, unknown[]];
-      // Should use the simple range query (no calendar_id filter)
-      expect(sql).not.toContain("calendar_id IN");
-      expect(sql).toContain(
-        "WHERE account_id = $1 AND start_time < $3 AND end_time > $2",
+      // Should call the simple range query
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_get_calendar_events_in_range",
+        { accountId: "acc-1", startTime: 500, endTime: 2500 },
       );
-      expect(params).toEqual(["acc-1", 500, 2500]);
     });
   });
 
@@ -267,10 +206,10 @@ describe("calendarEvents service", () => {
     it("removes all events for a given calendar_id", async () => {
       await deleteEventsForCalendar("cal-1");
 
-      expect(mockDb.execute).toHaveBeenCalledTimes(1);
-      const [sql, params] = mockDb.execute.mock.calls[0] as [string, unknown[]];
-      expect(sql).toBe("DELETE FROM calendar_events WHERE calendar_id = $1");
-      expect(params).toEqual(["cal-1"]);
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_delete_events_for_calendar",
+        { calendarId: "cal-1" },
+      );
     });
   });
 
@@ -280,22 +219,19 @@ describe("calendarEvents service", () => {
         calendar_id: "cal-1",
         remote_event_id: "remote-1",
       });
-      vi.mocked(selectFirstBy).mockResolvedValueOnce(event);
+      mockInvoke.mockResolvedValueOnce(event);
 
       const result = await getEventByRemoteId("cal-1", "remote-1");
 
       expect(result).toEqual(event);
-      expect(selectFirstBy).toHaveBeenCalledTimes(1);
-      const [sql, params] = vi.mocked(selectFirstBy).mock.calls[0] as [
-        string,
-        unknown[],
-      ];
-      expect(sql).toContain("WHERE calendar_id = $1 AND remote_event_id = $2");
-      expect(params).toEqual(["cal-1", "remote-1"]);
+      expect(mockInvoke).toHaveBeenCalledWith("db_get_event_by_remote_id", {
+        calendarId: "cal-1",
+        remoteEventId: "remote-1",
+      });
     });
 
     it("returns null when no event matches", async () => {
-      vi.mocked(selectFirstBy).mockResolvedValueOnce(null);
+      mockInvoke.mockResolvedValueOnce(null);
 
       const result = await getEventByRemoteId("cal-1", "nonexistent");
 
@@ -307,12 +243,10 @@ describe("calendarEvents service", () => {
     it("removes event matching calendar_id and remote_event_id", async () => {
       await deleteEventByRemoteId("cal-1", "remote-1");
 
-      expect(mockDb.execute).toHaveBeenCalledTimes(1);
-      const [sql, params] = mockDb.execute.mock.calls[0] as [string, unknown[]];
-      expect(sql).toBe(
-        "DELETE FROM calendar_events WHERE calendar_id = $1 AND remote_event_id = $2",
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_delete_event_by_remote_id",
+        { calendarId: "cal-1", remoteEventId: "remote-1" },
       );
-      expect(params).toEqual(["cal-1", "remote-1"]);
     });
   });
 
@@ -320,10 +254,9 @@ describe("calendarEvents service", () => {
     it("removes event by id", async () => {
       await deleteCalendarEvent("evt-1");
 
-      expect(mockDb.execute).toHaveBeenCalledTimes(1);
-      const [sql, params] = mockDb.execute.mock.calls[0] as [string, unknown[]];
-      expect(sql).toBe("DELETE FROM calendar_events WHERE id = $1");
-      expect(params).toEqual(["evt-1"]);
+      expect(mockInvoke).toHaveBeenCalledWith("db_delete_calendar_event", {
+        eventId: "evt-1",
+      });
     });
   });
 });

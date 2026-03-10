@@ -442,8 +442,8 @@ export function ThreadContextMenu({
                     shortcut: qs.shortcut,
                     actions: parsedActions,
                     icon: qs.icon,
-                    isEnabled: qs.is_enabled === 1,
-                    continueOnError: qs.continue_on_error === 1,
+                    isEnabled: qs.is_enabled,
+                    continueOnError: qs.continue_on_error,
                     sortOrder: qs.sort_order,
                     createdAt: qs.created_at,
                   };

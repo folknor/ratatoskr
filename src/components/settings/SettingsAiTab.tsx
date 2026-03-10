@@ -565,13 +565,13 @@ function BundleSettings(): React.ReactNode {
         for (const r of dbRules) {
           let schedule = { days: [6], hour: 9, minute: 0 };
           try {
-            if (r.delivery_schedule) schedule = JSON.parse(r.delivery_schedule);
+            if (r.deliverySchedule) schedule = JSON.parse(r.deliverySchedule);
           } catch {
             /* use defaults */
           }
           map[r.category] = {
-            bundled: r.is_bundled === 1,
-            delivery: r.delivery_enabled === 1,
+            bundled: r.isBundled === 1,
+            delivery: r.deliveryEnabled === 1,
             days: schedule.days,
             hour: schedule.hour,
             minute: schedule.minute,

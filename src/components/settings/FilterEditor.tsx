@@ -163,7 +163,7 @@ export function FilterEditor(): React.ReactNode {
 
   const handleToggleEnabled = useCallback(
     async (filter: DbFilterRule): Promise<void> => {
-      await updateFilter(filter.id, { isEnabled: filter.is_enabled !== 1 });
+      await updateFilter(filter.id, { isEnabled: !filter.is_enabled });
       await loadFilters();
     },
     [loadFilters],
@@ -198,7 +198,7 @@ export function FilterEditor(): React.ReactNode {
           <div className="flex-1 min-w-0">
             <div className="text-sm font-medium text-text-primary flex items-center gap-2">
               {filter.name}
-              {filter.is_enabled !== 1 && (
+              {!filter.is_enabled && (
                 <span className="text-[0.625rem] bg-bg-tertiary text-text-tertiary px-1.5 py-0.5 rounded">
                   {t("filterEditor.disabled")}
                 </span>
@@ -214,17 +214,17 @@ export function FilterEditor(): React.ReactNode {
               type="button"
               onClick={(): void => void handleToggleEnabled(filter)}
               className={`w-8 h-4 rounded-full transition-colors relative ${
-                filter.is_enabled === 1 ? "bg-accent" : "bg-bg-tertiary"
+                filter.is_enabled ? "bg-accent" : "bg-bg-tertiary"
               }`}
               title={
-                filter.is_enabled === 1
+                filter.is_enabled
                   ? t("filterEditor.disable")
                   : t("filterEditor.enable")
               }
             >
               <span
                 className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform shadow ${
-                  filter.is_enabled === 1 ? "translate-x-4" : ""
+                  filter.is_enabled ? "translate-x-4" : ""
                 }`}
               />
             </button>

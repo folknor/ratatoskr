@@ -1,23 +1,18 @@
 import { vi } from "vitest";
-import { getDb } from "./connection";
 import {
   deleteWritingStyleProfile,
   getWritingStyleProfile,
   upsertWritingStyleProfile,
 } from "./writingStyleProfiles";
 
-vi.mock("./connection", () => ({
-  getDb: vi.fn(),
-}));
+const mockInvoke = vi.fn();
 
-const mockDb = {
-  select: vi.fn(),
-  execute: vi.fn(),
-};
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => mockInvoke(...args),
+}));
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(getDb).mockResolvedValue(mockDb as never);
 });
 
 describe("writingStyleProfiles", () => {
@@ -31,18 +26,18 @@ describe("writingStyleProfiles", () => {
         created_at: 1000,
         updated_at: 1000,
       };
-      mockDb.select.mockResolvedValue([profile]);
+      mockInvoke.mockResolvedValue(profile);
 
       const result = await getWritingStyleProfile("acc1");
       expect(result).toEqual(profile);
-      expect(mockDb.select).toHaveBeenCalledWith(
-        "SELECT * FROM writing_style_profiles WHERE account_id = $1",
-        ["acc1"],
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_get_writing_style_profile",
+        { accountId: "acc1" },
       );
     });
 
     it("returns null when not found", async () => {
-      mockDb.select.mockResolvedValue([]);
+      mockInvoke.mockResolvedValue(null);
       const result = await getWritingStyleProfile("acc1");
       expect(result).toBeNull();
     });
@@ -50,20 +45,26 @@ describe("writingStyleProfiles", () => {
 
   describe("upsertWritingStyleProfile", () => {
     it("inserts or updates a profile", async () => {
+      mockInvoke.mockResolvedValue(undefined);
       await upsertWritingStyleProfile("acc1", "Casual tone", 15);
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("INSERT INTO writing_style_profiles"),
-        expect.arrayContaining(["acc1", "Casual tone", 15]),
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_upsert_writing_style_profile",
+        {
+          accountId: "acc1",
+          profileText: "Casual tone",
+          sampleCount: 15,
+        },
       );
     });
   });
 
   describe("deleteWritingStyleProfile", () => {
     it("deletes profile for account", async () => {
+      mockInvoke.mockResolvedValue(undefined);
       await deleteWritingStyleProfile("acc1");
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        "DELETE FROM writing_style_profiles WHERE account_id = $1",
-        ["acc1"],
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_delete_writing_style_profile",
+        { accountId: "acc1" },
       );
     });
   });

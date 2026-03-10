@@ -1,4 +1,4 @@
-import { boolToInt, getDb, selectFirstBy } from "./connection";
+import { invoke } from "@tauri-apps/api/core";
 
 export interface DbSendAsAlias {
   id: string;
@@ -45,11 +45,9 @@ export function mapDbAlias(db: DbSendAsAlias): SendAsAlias {
 export async function getAliasesForAccount(
   accountId: string,
 ): Promise<DbSendAsAlias[]> {
-  const db = await getDb();
-  return db.select<DbSendAsAlias[]>(
-    "SELECT * FROM send_as_aliases WHERE account_id = $1 ORDER BY is_primary DESC, email",
-    [accountId],
-  );
+  return invoke<DbSendAsAlias[]>("db_get_aliases_for_account", {
+    accountId,
+  });
 }
 
 export async function upsertAlias(alias: {
@@ -63,71 +61,34 @@ export async function upsertAlias(alias: {
   treatAsAlias?: boolean;
   verificationStatus?: string;
 }): Promise<string> {
-  const db = await getDb();
-  const id = crypto.randomUUID();
-
-  await db.execute(
-    `INSERT INTO send_as_aliases (id, account_id, email, display_name, reply_to_address, signature_id, is_primary, is_default, treat_as_alias, verification_status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-     ON CONFLICT(account_id, email) DO UPDATE SET
-       display_name = excluded.display_name,
-       reply_to_address = excluded.reply_to_address,
-       signature_id = excluded.signature_id,
-       is_primary = excluded.is_primary,
-       treat_as_alias = excluded.treat_as_alias,
-       verification_status = excluded.verification_status`,
-    [
-      id,
-      alias.accountId,
-      alias.email,
-      alias.displayName ?? null,
-      alias.replyToAddress ?? null,
-      alias.signatureId ?? null,
-      boolToInt(alias.isPrimary),
-      boolToInt(alias.isDefault),
-      boolToInt(alias.treatAsAlias !== false),
-      alias.verificationStatus ?? "accepted",
-    ],
-  );
-
-  return id;
+  return invoke<string>("db_upsert_alias", {
+    accountId: alias.accountId,
+    email: alias.email,
+    displayName: alias.displayName ?? null,
+    replyToAddress: alias.replyToAddress ?? null,
+    signatureId: alias.signatureId ?? null,
+    isPrimary: alias.isPrimary ?? false,
+    isDefault: alias.isDefault ?? false,
+    treatAsAlias: alias.treatAsAlias !== false,
+    verificationStatus: alias.verificationStatus ?? "accepted",
+  });
 }
 
 export async function getDefaultAlias(
   accountId: string,
 ): Promise<DbSendAsAlias | null> {
-  // Try to get the explicitly set default
-  const defaultAlias = await selectFirstBy<DbSendAsAlias>(
-    "SELECT * FROM send_as_aliases WHERE account_id = $1 AND is_default = 1 LIMIT 1",
-    [accountId],
-  );
-  if (defaultAlias) return defaultAlias;
-
-  // Fall back to the primary alias
-  return selectFirstBy<DbSendAsAlias>(
-    "SELECT * FROM send_as_aliases WHERE account_id = $1 AND is_primary = 1 LIMIT 1",
-    [accountId],
-  );
+  return invoke<DbSendAsAlias | null>("db_get_default_alias", {
+    accountId,
+  });
 }
 
 export async function setDefaultAlias(
   accountId: string,
   aliasId: string,
 ): Promise<void> {
-  const db = await getDb();
-  // Clear all defaults for this account
-  await db.execute(
-    "UPDATE send_as_aliases SET is_default = 0 WHERE account_id = $1",
-    [accountId],
-  );
-  // Set the specified alias as default
-  await db.execute(
-    "UPDATE send_as_aliases SET is_default = 1 WHERE id = $1 AND account_id = $2",
-    [aliasId, accountId],
-  );
+  return invoke<void>("db_set_default_alias", { accountId, aliasId });
 }
 
 export async function deleteAlias(id: string): Promise<void> {
-  const db = await getDb();
-  await db.execute("DELETE FROM send_as_aliases WHERE id = $1", [id]);
+  return invoke<void>("db_delete_alias", { id });
 }

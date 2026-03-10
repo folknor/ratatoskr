@@ -1,26 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockGetDb } = vi.hoisted(() => ({
-  mockGetDb: vi.fn(),
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
 }));
 
-vi.mock("@/services/db/connection", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/services/db/connection")>();
-  return {
-    ...actual,
-    getDb: mockGetDb,
-    buildDynamicUpdate: vi.fn(),
-    selectFirstBy: async (query: string, params: unknown[] = []) => {
-      const db = await mockGetDb();
-      const rows = await db.select(query, params);
-      return rows[0] ?? null;
-    },
-  };
-});
-
-import { buildDynamicUpdate, getDb } from "@/services/db/connection";
-import { createMockDb } from "@/test/mocks";
+import { invoke } from "@tauri-apps/api/core";
 import {
   deleteSmartFolder,
   getSmartFolderById,
@@ -30,41 +14,30 @@ import {
   updateSmartFolderSortOrder,
 } from "./smartFolders";
 
-const mockDb = createMockDb();
-
 describe("smartFolders service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getDb).mockResolvedValue(
-      mockDb as unknown as Awaited<ReturnType<typeof getDb>>,
-    );
   });
 
   describe("getSmartFolders", () => {
     it("returns global folders when no accountId", async () => {
+      vi.mocked(invoke).mockResolvedValueOnce([]);
+
       await getSmartFolders();
 
-      expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringContaining("WHERE account_id IS NULL"),
-      );
+      expect(invoke).toHaveBeenCalledWith("db_get_smart_folders", {
+        accountId: null,
+      });
     });
 
     it("returns global + account folders when accountId provided", async () => {
+      vi.mocked(invoke).mockResolvedValueOnce([]);
+
       await getSmartFolders("acc-1");
 
-      expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringContaining("account_id IS NULL OR account_id = $1"),
-        ["acc-1"],
-      );
-    });
-
-    it("orders by sort_order", async () => {
-      await getSmartFolders("acc-1");
-
-      expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringContaining("ORDER BY sort_order"),
-        expect.anything(),
-      );
+      expect(invoke).toHaveBeenCalledWith("db_get_smart_folders", {
+        accountId: "acc-1",
+      });
     });
   });
 
@@ -78,22 +51,21 @@ describe("smartFolders service", () => {
         icon: "MailOpen",
         color: null,
         sort_order: 0,
-        is_default: 1,
+        is_default: true,
         created_at: 1234567890,
       };
-      mockDb.select.mockResolvedValueOnce([mockFolder]);
+      vi.mocked(invoke).mockResolvedValueOnce(mockFolder);
 
       const result = await getSmartFolderById("sf-1");
 
       expect(result).toEqual(mockFolder);
-      expect(mockDb.select).toHaveBeenCalledWith(
-        "SELECT * FROM smart_folders WHERE id = $1",
-        ["sf-1"],
-      );
+      expect(invoke).toHaveBeenCalledWith("db_get_smart_folder_by_id", {
+        id: "sf-1",
+      });
     });
 
     it("returns null when not found", async () => {
-      mockDb.select.mockResolvedValueOnce([]);
+      vi.mocked(invoke).mockResolvedValueOnce(null);
 
       const result = await getSmartFolderById("nonexistent");
 
@@ -103,6 +75,8 @@ describe("smartFolders service", () => {
 
   describe("insertSmartFolder", () => {
     it("inserts with all fields", async () => {
+      vi.mocked(invoke).mockResolvedValueOnce(undefined);
+
       const id = await insertSmartFolder({
         name: "Test Folder",
         query: "is:unread",
@@ -112,87 +86,87 @@ describe("smartFolders service", () => {
       });
 
       expect(id).toBeTruthy();
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("INSERT INTO smart_folders"),
-        expect.arrayContaining([
-          "Test Folder",
-          "is:unread",
-          "acc-1",
-          "Star",
-          "#ff0000",
-        ]),
-      );
+      expect(invoke).toHaveBeenCalledWith("db_insert_smart_folder", {
+        id: expect.any(String),
+        name: "Test Folder",
+        query: "is:unread",
+        accountId: "acc-1",
+        icon: "Star",
+        color: "#ff0000",
+      });
     });
 
     it("inserts with defaults for optional fields", async () => {
+      vi.mocked(invoke).mockResolvedValueOnce(undefined);
+
       await insertSmartFolder({
         name: "Test",
         query: "from:boss",
       });
 
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("INSERT INTO smart_folders"),
-        expect.arrayContaining(["Test", "from:boss", null, "Search", null]),
-      );
+      expect(invoke).toHaveBeenCalledWith("db_insert_smart_folder", {
+        id: expect.any(String),
+        name: "Test",
+        query: "from:boss",
+        accountId: null,
+        icon: null,
+        color: null,
+      });
     });
   });
 
   describe("updateSmartFolder", () => {
-    it("delegates to buildDynamicUpdate", async () => {
-      vi.mocked(buildDynamicUpdate).mockReturnValue({
-        sql: "UPDATE smart_folders SET name = $1 WHERE id = $2",
-        params: ["New Name", "sf-1"],
-      });
+    it("passes updates via invoke", async () => {
+      vi.mocked(invoke).mockResolvedValueOnce(undefined);
 
       await updateSmartFolder("sf-1", { name: "New Name" });
 
-      expect(buildDynamicUpdate).toHaveBeenCalledWith(
-        "smart_folders",
-        "id",
-        "sf-1",
-        [["name", "New Name"]],
-      );
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        "UPDATE smart_folders SET name = $1 WHERE id = $2",
-        ["New Name", "sf-1"],
-      );
+      expect(invoke).toHaveBeenCalledWith("db_update_smart_folder", {
+        id: "sf-1",
+        name: "New Name",
+      });
     });
 
-    it("does nothing when no updates provided", async () => {
-      vi.mocked(buildDynamicUpdate).mockReturnValue(null);
+    it("sends only provided fields", async () => {
+      vi.mocked(invoke).mockResolvedValueOnce(undefined);
 
       await updateSmartFolder("sf-1", {});
 
-      expect(mockDb.execute).not.toHaveBeenCalled();
+      expect(invoke).toHaveBeenCalledWith("db_update_smart_folder", {
+        id: "sf-1",
+      });
     });
   });
 
   describe("deleteSmartFolder", () => {
     it("deletes by id", async () => {
+      vi.mocked(invoke).mockResolvedValueOnce(undefined);
+
       await deleteSmartFolder("sf-1");
 
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        "DELETE FROM smart_folders WHERE id = $1",
-        ["sf-1"],
-      );
+      expect(invoke).toHaveBeenCalledWith("db_delete_smart_folder", {
+        id: "sf-1",
+      });
     });
   });
 
   describe("updateSmartFolderSortOrder", () => {
     it("updates sort_order for each item", async () => {
+      vi.mocked(invoke).mockResolvedValueOnce(undefined);
+
       await updateSmartFolderSortOrder([
         { id: "sf-1", sortOrder: 2 },
         { id: "sf-2", sortOrder: 0 },
       ]);
 
-      expect(mockDb.execute).toHaveBeenCalledTimes(2);
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        "UPDATE smart_folders SET sort_order = $1 WHERE id = $2",
-        [2, "sf-1"],
-      );
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        "UPDATE smart_folders SET sort_order = $1 WHERE id = $2",
-        [0, "sf-2"],
+      expect(invoke).toHaveBeenCalledWith(
+        "db_update_smart_folder_sort_order",
+        {
+          orders: [
+            { id: "sf-1", sort_order: 2 },
+            { id: "sf-2", sort_order: 0 },
+          ],
+        },
       );
     });
   });

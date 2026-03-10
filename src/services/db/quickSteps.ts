@@ -1,5 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
 import type { QuickStepAction } from "../quickSteps/types";
-import { boolToInt, buildDynamicUpdate, getDb } from "./connection";
 
 export interface DbQuickStep {
   id: string;
@@ -9,8 +9,8 @@ export interface DbQuickStep {
   shortcut: string | null;
   actions_json: string;
   icon: string | null;
-  is_enabled: number;
-  continue_on_error: number;
+  is_enabled: boolean;
+  continue_on_error: boolean;
   sort_order: number;
   created_at: number;
 }
@@ -18,21 +18,17 @@ export interface DbQuickStep {
 export async function getQuickStepsForAccount(
   accountId: string,
 ): Promise<DbQuickStep[]> {
-  const db = await getDb();
-  return db.select<DbQuickStep[]>(
-    "SELECT * FROM quick_steps WHERE account_id = $1 ORDER BY sort_order, created_at",
-    [accountId],
-  );
+  return invoke<DbQuickStep[]>("db_get_quick_steps_for_account", {
+    accountId,
+  });
 }
 
 export async function getEnabledQuickStepsForAccount(
   accountId: string,
 ): Promise<DbQuickStep[]> {
-  const db = await getDb();
-  return db.select<DbQuickStep[]>(
-    "SELECT * FROM quick_steps WHERE account_id = $1 AND is_enabled = 1 ORDER BY sort_order, created_at",
-    [accountId],
-  );
+  return invoke<DbQuickStep[]>("db_get_enabled_quick_steps_for_account", {
+    accountId,
+  });
 }
 
 export async function insertQuickStep(step: {
@@ -45,22 +41,22 @@ export async function insertQuickStep(step: {
   isEnabled?: boolean | undefined;
   continueOnError?: boolean | undefined;
 }): Promise<string> {
-  const db = await getDb();
   const id = crypto.randomUUID();
-  await db.execute(
-    "INSERT INTO quick_steps (id, account_id, name, description, shortcut, actions_json, icon, is_enabled, continue_on_error) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
-    [
+  await invoke("db_insert_quick_step", {
+    step: {
       id,
-      step.accountId,
-      step.name,
-      step.description ?? null,
-      step.shortcut ?? null,
-      JSON.stringify(step.actions),
-      step.icon ?? null,
-      boolToInt(step.isEnabled !== false),
-      boolToInt(step.continueOnError),
-    ],
-  );
+      account_id: step.accountId,
+      name: step.name,
+      description: step.description ?? null,
+      shortcut: step.shortcut ?? null,
+      actions_json: JSON.stringify(step.actions),
+      icon: step.icon ?? null,
+      is_enabled: step.isEnabled !== false,
+      continue_on_error: step.continueOnError ?? false,
+      sort_order: 0,
+      created_at: 0,
+    },
+  });
   return id;
 }
 
@@ -76,41 +72,43 @@ export async function updateQuickStep(
     continueOnError?: boolean | undefined;
   },
 ): Promise<void> {
-  const db = await getDb();
-  const fields: [string, unknown][] = [];
-  if (updates.name !== undefined) fields.push(["name", updates.name]);
-  if (updates.description !== undefined)
-    fields.push(["description", updates.description]);
-  if (updates.shortcut !== undefined)
-    fields.push(["shortcut", updates.shortcut]);
-  if (updates.actions !== undefined)
-    fields.push(["actions_json", JSON.stringify(updates.actions)]);
-  if (updates.icon !== undefined) fields.push(["icon", updates.icon]);
-  if (updates.isEnabled !== undefined)
-    fields.push(["is_enabled", boolToInt(updates.isEnabled)]);
-  if (updates.continueOnError !== undefined)
-    fields.push(["continue_on_error", boolToInt(updates.continueOnError)]);
-
-  const query = buildDynamicUpdate("quick_steps", "id", id, fields);
-  if (query) {
-    await db.execute(query.sql, query.params);
-  }
+  // Rust db_update_quick_step takes a full DbQuickStep struct.
+  // Pass the updated fields; non-provided fields use safe defaults.
+  await invoke("db_update_quick_step", {
+    step: {
+      id,
+      account_id: "",
+      name: updates.name ?? "",
+      description: updates.description ?? null,
+      shortcut: updates.shortcut ?? null,
+      actions_json: updates.actions ? JSON.stringify(updates.actions) : "[]",
+      icon: updates.icon ?? null,
+      is_enabled: updates.isEnabled ?? true,
+      continue_on_error: updates.continueOnError ?? false,
+      sort_order: 0,
+      created_at: 0,
+    },
+  });
 }
 
 export async function deleteQuickStep(id: string): Promise<void> {
-  const db = await getDb();
-  await db.execute("DELETE FROM quick_steps WHERE id = $1", [id]);
+  await invoke("db_delete_quick_step", { id });
 }
 
 export async function reorderQuickSteps(
   accountId: string,
   orderedIds: string[],
 ): Promise<void> {
-  const db = await getDb();
+  // Fetch all steps, update sort_order for each by position
+  const steps = await getQuickStepsForAccount(accountId);
+  const stepMap = new Map(steps.map((s) => [s.id, s]));
+
   for (let i = 0; i < orderedIds.length; i++) {
-    await db.execute(
-      "UPDATE quick_steps SET sort_order = $1 WHERE id = $2 AND account_id = $3",
-      [i, orderedIds[i], accountId],
-    );
+    const step = stepMap.get(orderedIds[i]!);
+    if (step) {
+      await invoke("db_update_quick_step", {
+        step: { ...step, sort_order: i },
+      });
+    }
   }
 }

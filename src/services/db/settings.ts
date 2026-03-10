@@ -1,28 +1,21 @@
+import { invoke } from "@tauri-apps/api/core";
 import { decryptValue, encryptValue, isEncrypted } from "@/utils/crypto";
-import { getDb } from "./connection";
+
+interface SettingRow {
+  key: string;
+  value: string;
+}
 
 export async function getSetting(key: string): Promise<string | null> {
-  const db = await getDb();
-  const rows = await db.select<{ value: string }[]>(
-    "SELECT value FROM settings WHERE key = $1",
-    [key],
-  );
-  return rows[0]?.value ?? null;
+  return invoke<string | null>("db_get_setting", { key });
 }
 
 export async function setSetting(key: string, value: string): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    "INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT(key) DO UPDATE SET value = $2",
-    [key, value],
-  );
+  await invoke("db_set_setting", { key, value });
 }
 
 export async function getAllSettings(): Promise<Record<string, string>> {
-  const db = await getDb();
-  const rows = await db.select<{ key: string; value: string }[]>(
-    "SELECT key, value FROM settings",
-  );
+  const rows = await invoke<SettingRow[]>("db_get_all_settings");
   return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }
 

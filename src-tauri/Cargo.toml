@@ -85,6 +85,7 @@ zstd = "0.13"
 aes-gcm = "0.10"
 getrandom = { version = "0.2", features = ["std"] }
 urlencoding = "2"
+uuid = { version = "1", features = ["v4"] }
 jmap-client = { version = "0.4", default-features = false, features = ["async"] }
 async-trait = "0.1"
 

@@ -1,25 +1,10 @@
+import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockGetDb } = vi.hoisted(() => ({
-  mockGetDb: vi.fn(),
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
 }));
 
-vi.mock("@/services/db/connection", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/services/db/connection")>();
-  return {
-    ...actual,
-    getDb: mockGetDb,
-    selectFirstBy: async (query: string, params: unknown[] = []) => {
-      const db = await mockGetDb();
-      const rows = await db.select(query, params);
-      return rows[0] ?? null;
-    },
-  };
-});
-
-import { getDb } from "@/services/db/connection";
-import { createMockDb } from "@/test/mocks";
 import type { DbCalendar } from "./calendars";
 import {
   deleteCalendarsForAccount,
@@ -31,25 +16,16 @@ import {
   upsertCalendar,
 } from "./calendars";
 
-const mockDb = createMockDb();
-
-const MOCK_UUID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+const mockInvoke = vi.mocked(invoke);
 
 describe("calendars service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getDb).mockResolvedValue(
-      mockDb as unknown as Awaited<ReturnType<typeof getDb>>,
-    );
-    vi.stubGlobal("crypto", {
-      randomUUID: () => MOCK_UUID,
-    });
   });
 
   describe("upsertCalendar", () => {
-    it("inserts a new calendar and returns the id", async () => {
-      // selectFirstBy query returns the newly inserted row
-      mockDb.select.mockResolvedValueOnce([{ id: MOCK_UUID }]);
+    it("invokes the Rust command and returns the id", async () => {
+      mockInvoke.mockResolvedValueOnce("cal-returned-id");
 
       const id = await upsertCalendar({
         accountId: "acc-1",
@@ -60,64 +36,15 @@ describe("calendars service", () => {
         isPrimary: true,
       });
 
-      expect(id).toBe(MOCK_UUID);
-      expect(mockDb.execute).toHaveBeenCalledOnce();
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("INSERT INTO calendars"),
-        [
-          MOCK_UUID,
-          "acc-1",
-          "google",
-          "remote-cal-1",
-          "My Calendar",
-          "#4285f4",
-          1,
-        ],
-      );
-    });
-
-    it("updates on conflict and returns existing id", async () => {
-      const existingId = "existing-id-123";
-      // selectFirstBy returns the existing row id (conflict path)
-      mockDb.select.mockResolvedValueOnce([{ id: existingId }]);
-
-      const id = await upsertCalendar({
+      expect(id).toBe("cal-returned-id");
+      expect(mockInvoke).toHaveBeenCalledWith("db_upsert_calendar", {
         accountId: "acc-1",
         provider: "google",
         remoteId: "remote-cal-1",
-        displayName: "Updated Name",
-        color: "#0b8043",
-        isPrimary: false,
+        displayName: "My Calendar",
+        color: "#4285f4",
+        isPrimary: true,
       });
-
-      expect(id).toBe(existingId);
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("ON CONFLICT(account_id, remote_id) DO UPDATE"),
-        [
-          MOCK_UUID,
-          "acc-1",
-          "google",
-          "remote-cal-1",
-          "Updated Name",
-          "#0b8043",
-          0,
-        ],
-      );
-    });
-
-    it("returns generated id when selectFirstBy finds no row", async () => {
-      mockDb.select.mockResolvedValueOnce([]);
-
-      const id = await upsertCalendar({
-        accountId: "acc-1",
-        provider: "google",
-        remoteId: "remote-cal-1",
-        displayName: null,
-        color: null,
-        isPrimary: false,
-      });
-
-      expect(id).toBe(MOCK_UUID);
     });
   });
 
@@ -137,19 +64,19 @@ describe("calendars service", () => {
           display_name: "Work",
         }),
       ];
-      mockDb.select.mockResolvedValueOnce(calendars);
+      mockInvoke.mockResolvedValueOnce(calendars);
 
       const result = await getCalendarsForAccount("acc-1");
 
       expect(result).toEqual(calendars);
-      expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringContaining("WHERE account_id = $1"),
-        ["acc-1"],
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_get_calendars_for_account",
+        { accountId: "acc-1" },
       );
     });
 
     it("returns empty array when no calendars exist", async () => {
-      mockDb.select.mockResolvedValueOnce([]);
+      mockInvoke.mockResolvedValueOnce([]);
 
       const result = await getCalendarsForAccount("acc-none");
 
@@ -160,15 +87,14 @@ describe("calendars service", () => {
   describe("getVisibleCalendars", () => {
     it("only returns visible calendars", async () => {
       const visible = [makeCal({ id: "cal-1", is_visible: 1 })];
-      mockDb.select.mockResolvedValueOnce(visible);
+      mockInvoke.mockResolvedValueOnce(visible);
 
       const result = await getVisibleCalendars("acc-1");
 
       expect(result).toEqual(visible);
-      expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringContaining("AND is_visible = 1"),
-        ["acc-1"],
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_get_visible_calendars", {
+        accountId: "acc-1",
+      });
     });
   });
 
@@ -176,19 +102,19 @@ describe("calendars service", () => {
     it("sets visibility to true", async () => {
       await setCalendarVisibility("cal-1", true);
 
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("UPDATE calendars SET is_visible = $1"),
-        [1, "cal-1"],
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_set_calendar_visibility", {
+        calendarId: "cal-1",
+        visible: true,
+      });
     });
 
     it("sets visibility to false", async () => {
       await setCalendarVisibility("cal-1", false);
 
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("UPDATE calendars SET is_visible = $1"),
-        [0, "cal-1"],
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_set_calendar_visibility", {
+        calendarId: "cal-1",
+        visible: false,
+      });
     });
   });
 
@@ -196,31 +122,27 @@ describe("calendars service", () => {
     it("updates sync_token and ctag", async () => {
       await updateCalendarSyncToken("cal-1", "sync-abc", "ctag-xyz");
 
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining(
-          "UPDATE calendars SET sync_token = $1, ctag = $2",
-        ),
-        ["sync-abc", "ctag-xyz", "cal-1"],
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_update_calendar_sync_token",
+        { calendarId: "cal-1", syncToken: "sync-abc", ctag: "ctag-xyz" },
       );
     });
 
     it("sets ctag to null when not provided", async () => {
       await updateCalendarSyncToken("cal-1", "sync-abc");
 
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining(
-          "UPDATE calendars SET sync_token = $1, ctag = $2",
-        ),
-        ["sync-abc", null, "cal-1"],
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_update_calendar_sync_token",
+        { calendarId: "cal-1", syncToken: "sync-abc", ctag: null },
       );
     });
 
     it("allows null sync_token", async () => {
       await updateCalendarSyncToken("cal-1", null, "ctag-xyz");
 
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("SET sync_token = $1"),
-        [null, "ctag-xyz", "cal-1"],
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_update_calendar_sync_token",
+        { calendarId: "cal-1", syncToken: null, ctag: "ctag-xyz" },
       );
     });
   });
@@ -229,9 +151,9 @@ describe("calendars service", () => {
     it("deletes all calendars for the given account", async () => {
       await deleteCalendarsForAccount("acc-1");
 
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("DELETE FROM calendars WHERE account_id = $1"),
-        ["acc-1"],
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_delete_calendars_for_account",
+        { accountId: "acc-1" },
       );
     });
   });
@@ -239,19 +161,18 @@ describe("calendars service", () => {
   describe("getCalendarById", () => {
     it("returns the calendar when found", async () => {
       const cal = makeCal({ id: "cal-1" });
-      mockDb.select.mockResolvedValueOnce([cal]);
+      mockInvoke.mockResolvedValueOnce(cal);
 
       const result = await getCalendarById("cal-1");
 
       expect(result).toEqual(cal);
-      expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringContaining("WHERE id = $1"),
-        ["cal-1"],
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_get_calendar_by_id", {
+        calendarId: "cal-1",
+      });
     });
 
     it("returns null when calendar not found", async () => {
-      mockDb.select.mockResolvedValueOnce([]);
+      mockInvoke.mockResolvedValueOnce(null);
 
       const result = await getCalendarById("nonexistent");
 

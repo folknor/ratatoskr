@@ -1,16 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/services/db/connection", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/services/db/connection")>();
-  return {
-    ...actual,
-    getDb: vi.fn(),
-  };
-});
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+}));
 
-import { getDb } from "@/services/db/connection";
-import { createMockDb } from "@/test/mocks";
+import { invoke } from "@tauri-apps/api/core";
 import {
   deleteAllThreadsForAccount,
   getMutedThreadIds,
@@ -18,69 +12,58 @@ import {
   unmuteThread,
 } from "./threads";
 
-const mockDb = createMockDb();
-
 describe("threads service - deleteAllThreadsForAccount", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getDb).mockResolvedValue(
-      mockDb as unknown as Awaited<ReturnType<typeof getDb>>,
-    );
   });
 
-  it("deletes all threads for the given account", async () => {
+  it("invokes db_delete_all_threads_for_account", async () => {
     await deleteAllThreadsForAccount("acc-1");
 
-    expect(mockDb.execute).toHaveBeenCalledWith(
-      "DELETE FROM threads WHERE account_id = $1",
-      ["acc-1"],
-    );
+    expect(invoke).toHaveBeenCalledWith("db_delete_all_threads_for_account", {
+      accountId: "acc-1",
+    });
   });
 });
 
 describe("threads service - mute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getDb).mockResolvedValue(
-      mockDb as unknown as Awaited<ReturnType<typeof getDb>>,
-    );
   });
 
   describe("muteThread", () => {
-    it("calls db.execute with correct SQL to set is_muted = 1", async () => {
+    it("invokes db_set_thread_muted with isMuted true", async () => {
       await muteThread("acc-1", "thread-1");
 
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        "UPDATE threads SET is_muted = 1 WHERE account_id = $1 AND id = $2",
-        ["acc-1", "thread-1"],
-      );
+      expect(invoke).toHaveBeenCalledWith("db_set_thread_muted", {
+        accountId: "acc-1",
+        threadId: "thread-1",
+        isMuted: true,
+      });
     });
   });
 
   describe("unmuteThread", () => {
-    it("calls db.execute with correct SQL to set is_muted = 0", async () => {
+    it("invokes db_set_thread_muted with isMuted false", async () => {
       await unmuteThread("acc-1", "thread-1");
 
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        "UPDATE threads SET is_muted = 0 WHERE account_id = $1 AND id = $2",
-        ["acc-1", "thread-1"],
-      );
+      expect(invoke).toHaveBeenCalledWith("db_set_thread_muted", {
+        accountId: "acc-1",
+        threadId: "thread-1",
+        isMuted: false,
+      });
     });
   });
 
   describe("getMutedThreadIds", () => {
     it("returns a Set of muted thread IDs", async () => {
-      mockDb.select.mockResolvedValueOnce([
-        { id: "thread-1" },
-        { id: "thread-3" },
-      ]);
+      vi.mocked(invoke).mockResolvedValueOnce(["thread-1", "thread-3"]);
 
       const result = await getMutedThreadIds("acc-1");
 
-      expect(mockDb.select).toHaveBeenCalledWith(
-        "SELECT id FROM threads WHERE account_id = $1 AND is_muted = 1",
-        ["acc-1"],
-      );
+      expect(invoke).toHaveBeenCalledWith("db_get_muted_thread_ids", {
+        accountId: "acc-1",
+      });
       expect(result).toBeInstanceOf(Set);
       expect(result.size).toBe(2);
       expect(result.has("thread-1")).toBe(true);
@@ -88,7 +71,7 @@ describe("threads service - mute", () => {
     });
 
     it("returns an empty Set when no threads are muted", async () => {
-      mockDb.select.mockResolvedValueOnce([]);
+      vi.mocked(invoke).mockResolvedValueOnce([]);
 
       const result = await getMutedThreadIds("acc-1");
 

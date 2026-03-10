@@ -1,5 +1,5 @@
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
-import { getDb } from "./connection";
+import { invoke } from "@tauri-apps/api/core";
 
 export interface DbScheduledEmail {
   id: string;
@@ -19,21 +19,18 @@ export interface DbScheduledEmail {
 }
 
 export async function getPendingScheduledEmails(): Promise<DbScheduledEmail[]> {
-  const db = await getDb();
   const now = getCurrentUnixTimestamp();
-  return db.select<DbScheduledEmail[]>(
-    "SELECT * FROM scheduled_emails WHERE status = 'pending' AND scheduled_at <= $1 ORDER BY scheduled_at ASC",
-    [now],
-  );
+  return invoke<DbScheduledEmail[]>("db_get_pending_scheduled_emails", {
+    now,
+  });
 }
 
 export async function getScheduledEmailsForAccount(
   accountId: string,
 ): Promise<DbScheduledEmail[]> {
-  const db = await getDb();
-  return db.select<DbScheduledEmail[]>(
-    "SELECT * FROM scheduled_emails WHERE account_id = $1 AND status = 'pending' ORDER BY scheduled_at ASC",
-    [accountId],
+  return invoke<DbScheduledEmail[]>(
+    "db_get_scheduled_emails_for_account",
+    { accountId },
   );
 }
 
@@ -49,40 +46,27 @@ export async function insertScheduledEmail(email: {
   scheduledAt: number;
   signatureId: string | null;
 }): Promise<string> {
-  const db = await getDb();
-  const id = crypto.randomUUID();
-  await db.execute(
-    `INSERT INTO scheduled_emails (id, account_id, to_addresses, cc_addresses, bcc_addresses, subject, body_html, reply_to_message_id, thread_id, scheduled_at, signature_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-    [
-      id,
-      email.accountId,
-      email.toAddresses,
-      email.ccAddresses,
-      email.bccAddresses,
-      email.subject,
-      email.bodyHtml,
-      email.replyToMessageId,
-      email.threadId,
-      email.scheduledAt,
-      email.signatureId,
-    ],
-  );
-  return id;
+  return invoke<string>("db_insert_scheduled_email", {
+    accountId: email.accountId,
+    toAddresses: email.toAddresses,
+    ccAddresses: email.ccAddresses,
+    bccAddresses: email.bccAddresses,
+    subject: email.subject,
+    bodyHtml: email.bodyHtml,
+    replyToMessageId: email.replyToMessageId,
+    threadId: email.threadId,
+    scheduledAt: email.scheduledAt,
+    signatureId: email.signatureId,
+  });
 }
 
 export async function updateScheduledEmailStatus(
   id: string,
   status: "pending" | "sending" | "sent" | "failed" | "cancelled",
 ): Promise<void> {
-  const db = await getDb();
-  await db.execute("UPDATE scheduled_emails SET status = $1 WHERE id = $2", [
-    status,
-    id,
-  ]);
+  return invoke<void>("db_update_scheduled_email_status", { id, status });
 }
 
 export async function deleteScheduledEmail(id: string): Promise<void> {
-  const db = await getDb();
-  await db.execute("DELETE FROM scheduled_emails WHERE id = $1", [id]);
+  return invoke<void>("db_delete_scheduled_email", { id });
 }
