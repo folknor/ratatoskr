@@ -750,7 +750,7 @@ Smaller than Gmail migration (~2,700-3,500 Rust lines) because:
 ## What We Defer
 
 1. **Bearer/OAuth JMAP support** — requires per-provider OAuth endpoint configuration (Fastmail has its own OAuth URLs and scopes), an OAuth acquisition UI flow, and a client rebuild-on-refresh strategy (since `jmap-client` binds credentials at construction). Add when a concrete hosted JMAP provider is needed. Design considerations: either rebuild the `JmapClientInner` on each token refresh, or patch `jmap-client` to accept a credential callback.
-2. **Shared Rust `EmailProvider` trait** — after JMAP Phase 1 is complete, both Gmail and JMAP exist in Rust. This is the trigger point to extract the trait. See the strategic plan in `docs/rust-provider-crate-research.md`.
+2. **Shared Rust `EmailProvider` trait** — after JMAP is fully complete (both phases — Rust provider AND TS integration validated in the real app), extract the trait from real code. Both Gmail and JMAP must be validated end-to-end before the abstraction is stable enough for Graph to build against. See the strategic plan in `docs/rust-provider-crate-research.md`.
 3. **Provider-agnostic Tauri commands** — depends on the trait extraction above.
 4. **JMAP push notifications** — `jmap-client` supports WebSocket push (`EventSource`). Could replace polling for real-time sync. Defer until basic sync is solid.
 5. **JMAP Sieve filter management** — `jmap-client` supports full Sieve CRUD. Could expose server-side filter management to UI. Not in initial scope.
@@ -760,7 +760,7 @@ Smaller than Gmail migration (~2,700-3,500 Rust lines) because:
 
 ### Trait extraction trigger
 
-When JMAP Phase 1 is done, both Gmail and JMAP exist as Rust providers with:
+When JMAP is fully complete (both Phase 1 and Phase 2 validated), both Gmail and JMAP exist as Rust providers with:
 - Client lifecycle (`init`/`remove`)
 - Sync (initial + delta)
 - Email actions (archive, trash, star, read, labels, move, delete)

@@ -4,7 +4,7 @@
 **Status**: Deferred (blocked on JMAP completion + trait extraction)
 **Goal**: Implement Microsoft Graph Mail API as a Rust-native email provider. This is step 3 in the execution order from `docs/rust-provider-crate-research.md`.
 
-Unlike Gmail (migrating existing TS → Rust) and JMAP (new provider, no production TS code), Graph is the first provider built **against an existing shared Rust trait**. The `EmailProvider` trait will be extracted from Gmail + JMAP after JMAP Phase 1 completes. Graph's implementation should validate that trait — if Graph can implement it cleanly, the abstraction is correct. If not, it exposes leaks that need fixing before a fourth provider.
+Unlike Gmail (migrating existing TS → Rust) and JMAP (new provider, no production TS code), Graph is the first provider built **against an existing shared Rust trait**. The `EmailProvider` trait will be extracted from Gmail + JMAP after JMAP is fully complete (both phases — Rust provider AND TS integration validated in the real app). Graph's implementation should validate that trait — if Graph can implement it cleanly, the abstraction is correct. If not, it exposes leaks that need fixing before a fourth provider.
 
 ---
 
@@ -51,28 +51,50 @@ All Gmail API logic lives in Rust. Patterns established:
 - Sync progress events — `app_handle.emit("*-sync-progress", ...)`
 - Pending-ops conflict check in delta sync
 
-### 2. JMAP Rust migration (complete)
+### 2. JMAP Rust migration (both phases complete)
 
-JMAP provider exists in Rust. Patterns established:
+JMAP provider exists in Rust AND has been validated through TS integration (Phase 2). Patterns established:
 - Mailbox/folder → label mapping in Rust (`jmap/mailbox_mapper.rs`)
 - Thread-level action semantics — enumerate emails, batch-mutate (JMAP has no thread-level mutations, same as Graph)
 - `JmapState` — same `RwLock<HashMap>` pattern
 - Basic auth client lifecycle (Graph uses OAuth, not Basic, but the state management pattern transfers)
 
+The trait MUST be extracted from code that has been validated end-to-end (both Rust compilation AND TS integration running in the real app), not just code that compiles. Extracting from Phase 1 output risks basing Graph on an abstraction that shifts materially during JMAP Phase 2 integration.
+
 ### 3. Shared `EmailProvider` trait extracted
 
-The trait exists, extracted from real Gmail + JMAP code. Graph is the first provider built against it. The trait should cover:
+The trait exists, extracted from real Gmail + JMAP code after both are validated in production. Graph is the first provider built against it. The trait should cover:
 - Client lifecycle (`init`/`remove`)
 - Sync (initial + delta)
-- Email actions (archive, trash, star, read, labels, move, delete)
+- Email actions (archive, trash, star, read, move, delete)
 - Send + drafts
 - Attachment download
+
+**Critical caveat on label/folder semantics**: The trait extracted from Gmail + JMAP will have `add_label`/`remove_label` methods that work naturally for both providers (Gmail labels are multi-label, JMAP mailboxes are multi-mailbox). Graph's folder-centric model breaks this: a message is in exactly one folder, and "add label" may mean either "add category" or "move to folder" depending on the label type. This means:
+
+- The trait as extracted from Gmail + JMAP may not be the right abstraction for Graph's label/folder operations.
+- Graph may be the provider that forces the trait to split `add_label`/`remove_label` into more granular operations (e.g., `move_to_folder` + `add_category`), or to accept provider-specific interpretation of label semantics.
+- This is expected. Graph being the first consumer of the trait is precisely what validates whether the abstraction is correct. If the trait needs to change, better to discover it now than after a fourth provider.
+
+See [Folder-to-Label Mapping: What this means for the trait](#what-this-means-for-the-trait) for the full analysis.
 
 If the trait is NOT ready when Graph work begins, Graph becomes another one-off `graph_*`-prefixed provider, and we'll have three providers to reconcile later. This is explicitly the scenario we're trying to avoid.
 
 ### 4. OAuth generalized for multi-provider
 
 `oauth.rs` must support at least Google and Microsoft endpoints. The flow is identical (PKCE + localhost redirect), only endpoints, scopes, and token endpoint URLs differ. This should already be done — verify before starting Graph.
+
+### 5. `auth_method` column normalization
+
+**Pre-existing codebase inconsistency that must be resolved before Graph.** The migration at `migrations.ts:536` defaults `auth_method` to `"oauth"`. But runtime code checks `"oauth2"` in multiple places: `syncManager.ts:227` (`account.auth_method === "oauth2"`), `imapSmtpProvider.ts:136` (`account.auth_method === "oauth2"`), `oauthTokenManager.ts:18`. This means the migration default and the runtime branches don't match.
+
+If Graph accounts are saved with `auth_method = "oauth"` (the migration default), they'll fall into the wrong branch in `syncManager.ts` and `imapSmtpProvider.ts`. If saved with `"oauth2"`, they'll be inconsistent with the migration default.
+
+This must be normalized to a single value before Graph lands. Either:
+- Change all runtime checks to `"oauth"` (matching the migration default), OR
+- Change the migration default to `"oauth2"` (matching the runtime checks)
+
+This is not a Graph-specific task — it's a pre-existing bug that Graph would expose. Fix it as part of general codebase cleanup, before Graph work starts.
 
 ---
 
@@ -117,17 +139,11 @@ Graph's OAuth2 token refresh is functionally identical to Gmail's — same PKCE 
 
 The key difference from JMAP: JMAP Phase 1 uses Basic auth (static, no refresh). Graph ALWAYS uses OAuth2 (dynamic tokens, refresh cycle). Graph's client lifecycle is closer to Gmail's — `Arc<RwLock<TokenState>>` with concurrent refresh coalescing — not JMAP's immutable client.
 
-### 8. No `mail-builder` for send — Graph takes JSON
-
-Graph's `/me/sendMail` accepts a JSON `Message` object, not raw RFC 822. This means `provider/message.rs` (`mail-builder`) is NOT used for sending via Graph. Instead, Graph needs its own message-to-JSON serializer.
-
-`mail-builder` may still be useful if we discover that sending raw MIME via Graph works reliably (the `Content-Type: text/plain` raw MIME path is undocumented). But the default path is JSON send. See [Open Question 6](#6-send-format).
-
 ---
 
 ## Open Questions
 
-These must be resolved before writing final implementation code:
+These must be resolved before the command surface, sync contracts, or trait assumptions are treated as stable. The Phase 1/2 designs in this document are provisional sketches — they assume specific resolutions to these questions and will need to be updated once decisions are made.
 
 ### 1. App registration model
 
@@ -140,14 +156,20 @@ Gmail uses user-provided Client IDs (configured in Settings). Microsoft Graph re
 
 Graph messages live in exactly one folder. Our UI is label-centric (threads can have multiple labels). See [Folder-to-Label Mapping](#folder-to-label-mapping) for detailed analysis. This is a product decision, not just an adapter detail.
 
-### 3. Thread model
+### 3. Thread identity model
 
 Graph has a `conversationId` field that groups related messages, but it's not as reliable as Gmail's threading. Graph also has `conversationIndex` (binary threading data from Exchange). Options:
 - Use `conversationId` as `threadId` (simplest, may produce different groupings than users expect).
-- Use our JWZ threading algorithm on `Message-ID`/`References`/`In-Reply-To` headers (more accurate, more work — reusing `src/services/threading/threadBuilder.ts` logic).
+- Use our JWZ threading algorithm on `Message-ID`/`References`/`In-Reply-To` headers (more accurate, more work — reusing `src/services/threading/threadBuilder.ts` logic ported to Rust).
 - Use `conversationId` as primary, fall back to JWZ for edge cases.
 
-Investigate `conversationId` reliability across real Outlook.com and Exchange Online accounts before deciding.
+**This decision has cascading effects throughout the plan.** The command surface (thread-level actions accept `thread_id`), the sync engine (delta sync resolves messages to thread IDs for pending-ops checks), and the queue coordination (pending_operations uses `thread_id` as `resource_id`) all depend on what "thread ID" means for Graph. The command signatures themselves are stable — they take `thread_id` regardless. But the internal implementation of `query_thread_message_ids()`, the sync conflict check, and the thread-to-message enumeration all change depending on this choice:
+
+- **If conversationId**: enumeration is `$filter=conversationId eq '{id}'` on the Graph API, or `WHERE thread_id = ?` locally. Simple.
+- **If JWZ**: thread IDs are locally computed. There is no Graph API filter for "messages in this JWZ thread." Enumeration MUST be local DB. Thread IDs must be computed during sync parse and stored in the `messages` table.
+- **If hybrid**: need fallback logic and a way to know which mode a given thread uses.
+
+Investigate `conversationId` reliability across real Outlook.com and Exchange Online accounts before deciding. This is a blocking decision for implementation.
 
 ### 4. Rate limit handling
 
@@ -165,16 +187,36 @@ Additionally: 10,000 API requests per 10 minutes per app per mailbox. This is ge
 
 By the time Graph starts, will the `EmailProvider` trait be extracted from Gmail + JMAP? If yes, Graph is the first provider built against it. If no, Graph is another one-off and we have three providers to reconcile later.
 
-### 6. Send format
+### 6. Send and draft contract
 
-Graph's `/me/sendMail` accepts a JSON message body, NOT raw RFC 822. Two paths:
+This is a trait-level decision, not just a Graph adapter detail.
 
-- **JSON send** (documented): Build the message as a Graph `Message` JSON object. Fields: `subject`, `body { contentType, content }`, `toRecipients`, `ccRecipients`, `bccRecipients`, `attachments`. No MIME construction needed. But: handling inline images, Content-ID references, and multipart/alternative becomes our problem (the JSON API flattens this).
-- **MIME send** (undocumented but works): POST to `/me/sendMail` with `Content-Type: text/plain` and raw MIME bytes. Would allow reusing `mail-builder`. But: undocumented API surface is risky.
+**The current provider contract**: `sendMessage(rawBase64Url: string, threadId?: string) → { id: string }` (see `types.ts:71`). All providers accept raw MIME and return a sent message ID. `emailActions.ts:418` dispatches through this interface.
 
-There's also a third option: **create draft + send draft**. `POST /me/messages` creates a draft (JSON), then `POST /me/messages/{id}/send` sends it. This is two API calls but gives us an ID for the sent message (useful for tracking).
+**Graph breaks this contract in two ways:**
+1. **Input format**: Graph's `/me/sendMail` accepts a JSON `Message` object, not raw RFC 822 MIME. The JSON API flattens MIME structure — inline images, Content-ID references, and multipart/alternative become the caller's responsibility.
+2. **Return value**: `/me/sendMail` typically does not return the sent message ID. The sent message appears in the Sent Items folder but the API doesn't give you its ID synchronously.
 
-Test all three paths before deciding.
+**Options:**
+
+- **A. Graph adapts internally to the raw MIME contract**: Accept `rawBase64Url` like other providers. Internally, use the **create-draft-then-send** path: `POST /me/messages` (create draft from parsed MIME data) → `POST /me/messages/{id}/send` (send draft, we have the ID from creation). This preserves the trait contract at the cost of two API calls per send and a MIME→JSON conversion step in Rust.
+- **B. Split the trait's send interface**: The trait accepts structured message data (recipients, subject, body, attachments) instead of raw MIME. Each provider serializes to its native format internally. Gmail and JMAP build MIME via `mail-builder`; Graph builds JSON. This is a cleaner abstraction but requires changing the existing send contract for all providers.
+- **C. Raw MIME send via undocumented Graph endpoint**: POST to `/me/sendMail` with `Content-Type: text/plain` and raw MIME bytes (undocumented but reportedly works). Preserves the raw MIME contract. But: undocumented API surface is risky for production.
+
+Until this is decided, the command signatures for `graph_send_email` and `graph_create_draft` in this document are provisional. The Phase 1 code samples assume Option A (create-draft-then-send) as the most conservative choice, but this may change.
+
+### 7. Thread action scope: local vs remote enumeration
+
+When a user archives/trashes/stars a thread, should the action affect only locally-synced messages, or all messages in the conversation on the server?
+
+**The problem is specific to Graph.** Initial sync is windowed by `days_back`. Folder sync is prioritized (some folders only synced every 20th cycle). The 4-concurrent limit makes syncing slower. This means a Graph account will routinely have threads where some messages exist locally and others don't. For Gmail and JMAP, this is a minor edge case. For Graph, it's the normal state.
+
+**Options:**
+
+- **A. Remote enumeration (whole-conversation mutation)**: Thread-level actions query the Graph API to enumerate all messages in the conversation: `GET /me/messages?$filter=conversationId eq '{id}'&$select=id`. This guarantees the action applies to every message on the server, including ones we haven't synced. Costs an extra API call per action (counted against the 4-concurrent limit). If `conversationId` filter isn't supported on all endpoints, falls back to local DB.
+- **B. Local enumeration (mutate only synced messages)**: Query the local DB: `SELECT id FROM messages WHERE thread_id = ? AND account_id = ?`. Faster, no API call. But older or unsynced messages remain untouched on the server. A user who archives a thread may find unarchived messages in the same conversation next time they check Outlook. This is a behavioral regression from what users expect — "archive" should mean "the whole conversation is archived."
+
+This is a product decision. JMAP uses local enumeration (Option B) but JMAP's sync model is global (all emails, not per-folder), so the partial-sync problem is less severe.
 
 ---
 
@@ -195,12 +237,13 @@ Test all three paths before deciding.
 
 ### Graph-specific concerns
 
-- **Send format**: Graph's `/me/sendMail` accepts a JSON message object, NOT raw RFC 822. We can't reuse `mail-builder` output directly for sending. See [Open Question 6](#6-send-format).
+- **Send format**: Graph's `/me/sendMail` accepts a JSON message object, NOT raw RFC 822. This breaks the current provider send contract — see [Open Question 6](#6-send-and-draft-contract).
 - **Large attachments**: Files >3MB require upload sessions (`/me/messages/{id}/attachments/createUploadSession`). This is a multi-step process unlike Gmail/JMAP where attachments are part of the message payload.
 - **OData pagination**: All list endpoints use `@odata.nextLink` / `@odata.deltaLink`. Need a generic `ODataCollection<T>` wrapper struct with `#[serde(rename = "@odata.nextLink")]`.
 - **Focused Inbox**: Graph exposes `inferenceClassification` (Focused/Other). Could map to our category system. Optional enrichment.
 - **`$select` efficiency**: Graph supports `$select` to request only specific fields. This is critical for performance — a full `Message` object is large. Always use `$select` to request only the fields we need (id, subject, from, toRecipients, receivedDateTime, body, conversationId, flag, categories, parentFolderId, isRead, isDraft, hasAttachments, internetMessageHeaders).
 - **`internetMessageHeaders`**: Not included in default responses — must be explicitly requested via `$select`. These contain `Message-ID`, `References`, `In-Reply-To`, `Authentication-Results`, `List-Unsubscribe`. Essential for threading, auth display, and unsubscribe.
+- **No `mail-builder` for send**: Unlike Gmail and JMAP, `provider/message.rs` (`mail-builder`) is NOT used for sending via Graph. Graph needs its own message-to-JSON serializer — or the create-draft-then-send path. See [Open Question 6](#6-send-and-draft-contract).
 
 ---
 
@@ -216,7 +259,7 @@ Like JMAP, there is no existing production TypeScript Graph implementation. The 
 -- New table: per-folder delta tokens
 CREATE TABLE graph_folder_delta_tokens (
     account_id TEXT NOT NULL,
-    folder_id TEXT NOT NULL,           -- Graph folder ID
+    folder_id TEXT NOT NULL,           -- Opaque Graph folder ID (e.g., AAMkAGI2TG93AAA=)
     delta_link TEXT NOT NULL,          -- @odata.deltaLink URL
     updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
     PRIMARY KEY (account_id, folder_id),
@@ -226,7 +269,7 @@ CREATE TABLE graph_folder_delta_tokens (
 
 Also:
 - `accounts` table may need a `graph_user_id` column (Graph uses a user principal name, not just email)
-- Accounts with `provider = "graph"` use the existing `auth_method = "oauth"` column
+- Accounts with `provider = "graph"` use `auth_method` (must be normalized first — see [Prerequisite 5](#5-auth_method-column-normalization))
 - OAuth tokens stored encrypted in the same columns as Gmail tokens
 
 ### Integration points to wire up (Phase 2)
@@ -255,7 +298,7 @@ src-tauri/src/graph/
 ├── client.rs           # GraphClient — Arc<RwLock<TokenState>>, reqwest, &self methods
 ├── api.rs              # Graph REST endpoint methods (~18 calls)
 ├── parse.rs            # Graph Message → internal message types (for DB persistence)
-├── folder_mapper.rs    # Graph folder → Gmail-style label mapping (well-known folder IDs + categories)
+├── folder_mapper.rs    # Graph folder → Gmail-style label mapping (opaque IDs + well-known resolution)
 ├── sync.rs             # Per-folder delta sync + initial sync
 └── commands.rs         # Tauri commands (graph_* or provider-agnostic)
 ```
@@ -266,12 +309,14 @@ src-tauri/src/graph/
 |--------|---------------|
 | `provider/token.rs` | `TokenState`, `refresh_oauth_token()` — with Microsoft token endpoint |
 | `provider/http.rs` | `build_api_client()` — reqwest-middleware with retry (respects 429 + `Retry-After`) |
-| `provider/message.rs` | NOT used for send (Graph takes JSON). May be used for draft import if MIME path works. |
+| `provider/message.rs` | See [Open Question 6](#6-send-and-draft-contract). May be used if create-draft-then-send requires MIME parsing. NOT used for direct send. |
 | `db/` | All DB write commands — `upsert_thread()`, `set_thread_labels()`, `upsert_message()`, etc. |
 | `body_store/` | `body_store_put()`, `body_store_get()` — same compressed body storage |
 | `search/` | `index_message()` — same Tantivy indexing |
 
-### Tauri command surface
+### Tauri command surface (provisional)
+
+**These signatures depend on the resolution of Open Questions 3, 6, and 7. They will change once those decisions are made.**
 
 If provider-agnostic commands exist (trait-based routing), Graph may not need its own command surface. But if `graph_*` prefixed:
 
@@ -292,6 +337,7 @@ graph_rename_folder(account_id, folder_id, new_name)
 graph_delete_folder(account_id, folder_id)
 
 // Email actions (thread-level — internally enumerates messages)
+// thread_id meaning depends on Open Question 3 (conversationId vs JWZ)
 graph_archive(account_id, thread_id)
 graph_trash(account_id, thread_id)
 graph_permanent_delete(account_id, message_ids)
@@ -302,10 +348,13 @@ graph_move_to_folder(account_id, thread_id, folder_id)
 graph_add_category(account_id, thread_id, category)
 graph_remove_category(account_id, thread_id, category)
 
-// Send + drafts
-graph_send_email(account_id, message_json)        // JSON message, not raw RFC 822
-graph_create_draft(account_id, message_json)
-graph_update_draft(account_id, draft_id, message_json)
+// Send + drafts — signature depends on Open Question 6
+// Option A (create-draft-then-send): takes structured message data
+// Option B (split trait): takes structured message data
+// Option C (raw MIME): takes raw_base64url like Gmail/JMAP
+graph_send_email(account_id, ???)
+graph_create_draft(account_id, ???)
+graph_update_draft(account_id, draft_id, ???)
 graph_delete_draft(account_id, draft_id)
 
 // Attachments
@@ -315,7 +364,7 @@ graph_fetch_attachment(account_id, message_id, attachment_id)
 graph_get_profile(account_id)
 ```
 
-~22 commands. Note the key difference from Gmail/JMAP: `graph_send_email` takes a JSON message object, not `raw_base64url`. The TS composer will need a code path that builds Graph's JSON message format instead of raw RFC 822.
+~22 commands. The send/draft input format is unresolved.
 
 ### Graph client design
 
@@ -374,6 +423,8 @@ impl GraphClient {
 
 **Prerequisite**: Gmail and JMAP migrations are complete. Shared `EmailProvider` trait is extracted (or at minimum, the patterns are clear enough to build Graph consistently).
 
+**Note**: The code samples in this section are provisional sketches. They assume specific resolutions to the open questions (conversationId for threading, create-draft-then-send for sending, remote enumeration for thread actions). These will need to be updated once the open questions are resolved.
+
 ### 1a. DB migration
 
 Add to `src/services/db/migrations.ts`:
@@ -390,7 +441,7 @@ CREATE TABLE graph_folder_delta_tokens (
 );
 ```
 
-No new account columns needed — Graph accounts use `provider = "graph"`, `auth_method = "oauth"`, and existing encrypted token columns.
+No new account columns needed — Graph accounts use `provider = "graph"` and existing encrypted token columns. `auth_method` value depends on normalization (see [Prerequisite 5](#5-auth_method-column-normalization)).
 
 ### 1b. Graph API types (`graph/types.rs`)
 
@@ -491,60 +542,22 @@ pub struct GraphAttachment {
     pub content_id: Option<String>,
     pub content_bytes: Option<String>,   // base64 encoded, only for small attachments
 }
-
-// Send types (JSON message body)
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GraphSendMessage {
-    pub subject: String,
-    pub body: GraphSendBody,
-    pub to_recipients: Vec<GraphSendRecipient>,
-    pub cc_recipients: Option<Vec<GraphSendRecipient>>,
-    pub bcc_recipients: Option<Vec<GraphSendRecipient>>,
-    pub attachments: Option<Vec<GraphSendAttachment>>,
-    pub internet_message_headers: Option<Vec<GraphInternetHeader>>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GraphSendBody {
-    pub content_type: String,  // "HTML" or "Text"
-    pub content: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GraphSendRecipient {
-    pub email_address: GraphSendEmailAddress,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GraphSendEmailAddress {
-    pub name: Option<String>,
-    pub address: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GraphSendAttachment {
-    #[serde(rename = "@odata.type")]
-    pub odata_type: String,  // "#microsoft.graph.fileAttachment"
-    pub name: String,
-    pub content_type: String,
-    pub content_bytes: String,  // base64
-}
 ```
 
 ### 1c. Folder mapper (`graph/folder_mapper.rs`)
 
-Maps Graph well-known folder IDs and display names to Gmail-style label IDs. Analogous to JMAP's `mailbox_mapper.rs` and IMAP's `folderMapper.ts`.
+Maps Graph folders to Gmail-style label IDs. Analogous to JMAP's `mailbox_mapper.rs` and IMAP's `folderMapper.ts`.
+
+**Key design point**: Graph folders have opaque IDs (e.g., `AAMkAGI2TG93AAA=`), NOT human-readable names. The Graph API accepts well-known name aliases in URL paths (e.g., `GET /me/mailFolders/inbox`), but the actual folder objects returned have opaque `id` fields, and `parentFolderId` on messages uses the opaque ID. The mapper must work with opaque IDs at runtime and resolve well-known names during folder sync.
+
+**Well-known folder resolution must NOT rely on display name matching.** Display names can be localized (e.g., "Éléments envoyés" for Sent Items in French), user-renamed, or duplicated. Instead, resolve each well-known alias by calling `GET /me/mailFolders/{alias}` directly — this returns the canonical folder object with its opaque ID. Then match those opaque IDs against the general folder list to tag system folders.
 
 ```rust
-/// Graph well-known folder IDs.
-/// These are constant strings returned by the Graph API.
-const WELL_KNOWN_FOLDERS: &[(&str, &str, &str)] = &[
-    // (well_known_name,   label_id,    label_name)
+/// Well-known folder aliases that Graph accepts as URL path segments.
+/// These are NOT folder IDs and NOT display names — they are API-level
+/// aliases that resolve to the canonical system folder regardless of locale.
+const WELL_KNOWN_ALIASES: &[(&str, &str, &str)] = &[
+    // (graph_alias,     label_id,    label_name)
     ("inbox",           "INBOX",     "Inbox"),
     ("drafts",          "DRAFT",     "Drafts"),
     ("sentitems",       "SENT",      "Sent"),
@@ -553,35 +566,71 @@ const WELL_KNOWN_FOLDERS: &[(&str, &str, &str)] = &[
     ("archive",         "archive",   "Archive"),
 ];
 
-pub struct FolderLabelMapping {
-    pub label_id: String,
-    pub label_name: String,
-    pub label_type: &'static str,  // "system" or "user"
+/// Built during folder sync. Maps opaque folder IDs to label info.
+/// This is the runtime lookup table — all message processing uses this.
+pub struct FolderMap {
+    /// opaque_folder_id → FolderLabelMapping
+    by_id: HashMap<String, FolderLabelMapping>,
+    /// label_id → opaque_folder_id (reverse lookup for actions)
+    by_label: HashMap<String, String>,
 }
 
-/// Map a Graph folder to a Gmail-style label.
-pub fn map_folder_to_label(
-    folder: &GraphMailFolder,
-    well_known_name: Option<&str>,
-) -> FolderLabelMapping;
+pub struct FolderLabelMapping {
+    pub folder_id: String,       // opaque Graph ID
+    pub label_id: String,        // Gmail-style label ID
+    pub label_name: String,
+    pub label_type: &'static str,  // "system" or "user"
+    pub well_known_alias: Option<String>,  // "inbox", "sentitems", etc. if this is a system folder
+}
 
-/// Derive label IDs from a message's folder + categories.
-/// For Graph, a message has exactly one folder (primary label)
-/// and zero or more categories (supplementary labels).
-pub fn get_labels_for_message(
-    parent_folder_id: &str,
-    categories: &[String],
-    is_read: bool,
-    flag_status: &str,
-    folder_map: &HashMap<String, FolderLabelMapping>,
-) -> Vec<String>;
+impl FolderMap {
+    /// Build the folder map from the full folder tree.
+    ///
+    /// Resolution strategy (two phases):
+    ///
+    /// Phase 1 — Resolve well-known aliases to opaque IDs:
+    ///   For each alias in WELL_KNOWN_ALIASES, call
+    ///   GET /me/mailFolders/{alias} (e.g., /me/mailFolders/inbox).
+    ///   This returns the canonical folder object with its opaque ID.
+    ///   Collect into a HashMap<opaque_id, (alias, label_id, label_name)>.
+    ///   If a request 404s (e.g., "archive" doesn't exist on all accounts),
+    ///   skip — that system folder doesn't exist for this mailbox.
+    ///
+    /// Phase 2 — Merge with the full folder tree:
+    ///   Walk the complete folder list (including recursively fetched children).
+    ///   For each folder, check if its opaque ID was resolved in Phase 1.
+    ///   If yes: system folder — use the label_id from WELL_KNOWN_ALIASES.
+    ///   If no: user folder — use "graph-{folderId}" as label_id,
+    ///          displayName as label_name.
+    ///
+    /// This never matches on displayName. Localized, renamed, or
+    /// duplicated folder names cannot cause misclassification.
+    pub async fn build(
+        client: &GraphClient,
+        all_folders: &[GraphMailFolder],
+        db: &DbState,
+    ) -> Result<Self, String>;
 
-/// Reverse lookup: Gmail-style label ID → Graph folder ID.
-pub fn label_id_to_folder_id(
-    label_id: &str,
-    folders: &[(String, Option<String>, String)],  // (id, well_known_name, display_name)
-) -> Option<String>;
+    /// Look up a folder's label info by its opaque ID.
+    /// Used during message parsing (parentFolderId → label).
+    pub fn get_by_folder_id(&self, folder_id: &str) -> Option<&FolderLabelMapping>;
+
+    /// Resolve a Gmail-style label ID to an opaque folder ID.
+    /// Used by action commands (e.g., "archive" → resolve archive folder ID).
+    pub fn resolve_folder_id(&self, label_id: &str) -> Option<&str>;
+
+    /// Derive label IDs from a message's folder + categories + flags.
+    pub fn get_labels_for_message(
+        &self,
+        parent_folder_id: &str,
+        categories: &[String],
+        is_read: bool,
+        flag_status: &str,
+    ) -> Vec<String>;
+}
 ```
+
+The `FolderMap` is built once during initial sync (folder fetch phase, after the full tree is traversed) and cached in `GraphClient` or `GraphState`. It's rebuilt when `graph_list_folders` detects changes. All runtime lookups use opaque IDs — well-known aliases are only used during the Phase 1 resolution step of `build()`.
 
 ### 1d. Message parsing (`graph/parse.rs`)
 
@@ -590,7 +639,7 @@ Converts Graph `Message` response to our internal DB-ready struct:
 ```rust
 pub fn parse_graph_message(
     msg: &GraphMessage,
-    folder_map: &HashMap<String, FolderLabelMapping>,
+    folder_map: &FolderMap,
 ) -> Result<ParsedGraphMessage, String>;
 ```
 
@@ -598,11 +647,11 @@ pub fn parse_graph_message(
 - Body comes as a string (HTML or text) in `body.content`. No base64 decoding, no MIME part walking.
 - `uniqueBody` provides the deduped body (excludes quoted replies). Could use for body store if reliable.
 - `internetMessageHeaders` must be explicitly requested via `$select`. Contains `Message-ID`, `References`, `In-Reply-To`, `Authentication-Results`, `List-Unsubscribe`.
-- `conversationId` as thread ID (unless we implement JWZ — see Open Question 3).
+- Thread ID derivation depends on [Open Question 3](#3-thread-identity-model). Provisionally uses `conversationId`.
 - `categories` are supplementary labels (not mailbox membership like JMAP).
 - `flag.flagStatus` maps to STARRED pseudo-label (`"flagged"` → STARRED, `"notFlagged"` → no STARRED).
 - `isRead` directly maps to UNREAD pseudo-label (inverted: `!isRead` → UNREAD).
-- `parentFolderId` determines the primary folder label.
+- `parentFolderId` determines the primary folder label — resolved via `FolderMap.get_by_folder_id()` using the opaque ID.
 - Auth results parsed from `internetMessageHeaders` → `Authentication-Results` (same `auth_parser.rs` logic as Gmail, but header must be explicitly requested).
 
 ### 1e. Sync engine (`graph/sync.rs`)
@@ -637,7 +686,7 @@ pub struct GraphDeltaSyncResult {
 }
 ```
 
-### 1f. Email action commands
+### 1f. Email action commands (provisional)
 
 Each action maps to Graph REST calls. Thread-level actions enumerate messages first (see [Thread-Level Action Semantics](#thread-level-action-semantics)).
 
@@ -649,29 +698,22 @@ pub async fn graph_archive(
     db: State<'_, DbState>, graph: State<'_, GraphState>,
 ) -> Result<(), String> {
     let client = graph.get(&account_id).await?;
+    let folder_map = client.folder_map();
 
-    // 1. Resolve archive folder ID
-    let archive_id = resolve_folder_id(&client, "archive", &db).await?;
+    // 1. Resolve archive folder's opaque ID
+    let archive_id = folder_map.resolve_folder_id("archive")
+        .ok_or("No archive folder found")?;
 
-    // 2. Enumerate messages in thread that are in inbox
+    // 2. Enumerate messages in thread (method depends on Open Question 7)
     let message_ids = query_thread_message_ids(&client, &thread_id, &db).await?;
 
-    // 3. Move each message to archive (POST /me/messages/{id}/move)
-    // Graph's move is per-message, no batch endpoint
-    for msg_id in &message_ids {
-        client.post::<GraphMessage>(
-            &format!("me/messages/{}/move", msg_id),
-            &serde_json::json!({ "destinationId": archive_id }),
-            &db,
-        ).await?;
-    }
+    // 3. Batch move via /$batch (up to 20 per batch request)
+    batch_move_messages(&client, &message_ids, archive_id, &db).await?;
     Ok(())
 }
 ```
 
-**Key difference from JMAP**: JMAP can batch-mutate in a single request (`Email/set` on multiple IDs). Graph has no batch mutation for mail — each move/update is a separate request. With the 4-concurrent limit, thread-level actions on large threads will be slower.
-
-**Mitigation**: Graph supports [JSON batching](https://learn.microsoft.com/en-us/graph/json-batching) — up to 20 requests in a single POST to `/$batch`. Use this for thread-level actions:
+**JSON batching for thread-level actions**: Graph has no batch mutation endpoint for mail, but supports [JSON batching](https://learn.microsoft.com/en-us/graph/json-batching) — up to 20 requests in a single POST to `/$batch`:
 
 ```rust
 async fn batch_move_messages(
@@ -703,6 +745,12 @@ async fn batch_move_messages(
 
 ### 1g. Attachment download
 
+Graph returns attachment content in two ways depending on size:
+- **Small attachments** (<3MB typically): `contentBytes` field is populated with base64-encoded data in the JSON response.
+- **Large attachments** (≥3MB): `contentBytes` is `null`/absent. The raw bytes must be fetched separately via `GET /me/messages/{id}/attachments/{id}/$value`.
+
+The download command must branch on the response shape:
+
 ```rust
 #[tauri::command]
 pub async fn graph_fetch_attachment(
@@ -714,9 +762,26 @@ pub async fn graph_fetch_attachment(
         &format!("me/messages/{}/attachments/{}", message_id, attachment_id),
         &db,
     ).await?;
-    // content_bytes is base64 encoded by Graph
-    let data = BASE64_STANDARD.decode(&attachment.content_bytes.unwrap_or_default())
-        .map_err(|e| e.to_string())?;
+
+    let data = if let Some(ref content_bytes) = attachment.content_bytes {
+        // Small attachment: contentBytes is base64-encoded inline
+        BASE64_STANDARD.decode(content_bytes)
+            .map_err(|e| format!("Failed to decode attachment content: {}", e))?
+    } else {
+        // Large attachment: fetch raw bytes via /$value endpoint
+        let raw = client.get_bytes(
+            &format!("me/messages/{}/attachments/{}/$value", message_id, attachment_id),
+            &db,
+        ).await?;
+        if raw.is_empty() {
+            return Err(format!(
+                "Attachment {} has no contentBytes and /$value returned empty",
+                attachment_id
+            ));
+        }
+        raw
+    };
+
     Ok(AttachmentData {
         data: BASE64_STANDARD.encode(&data),
         size: data.len(),
@@ -724,7 +789,7 @@ pub async fn graph_fetch_attachment(
 }
 ```
 
-**Note**: For attachments >3MB, Graph may not include `contentBytes` inline. Use `GET /me/messages/{id}/attachments/{id}/$value` to stream the raw bytes. Large attachment upload uses session-based upload (deferred to post-MVP).
+This requires a `get_bytes()` method on `GraphClient` that returns raw `Vec<u8>` instead of deserializing JSON. Large attachment upload uses session-based upload (deferred to post-MVP).
 
 ### 1h. Tauri state registration
 
@@ -749,7 +814,7 @@ The complete Graph provider exists in Rust: client with OAuth2 token management,
 
 **`AddGraphAccount.tsx`** — new component, 2-step flow:
 
-1. **OAuth sign-in**: User clicks "Sign in with Microsoft" → launch OAuth2 flow (same as Gmail: open browser → localhost redirect → token exchange). On success, save account to DB with `provider = "graph"`, `auth_method = "oauth"`, encrypted tokens.
+1. **OAuth sign-in**: User clicks "Sign in with Microsoft" → launch OAuth2 flow (same as Gmail: open browser → localhost redirect → token exchange). On success, save account to DB with `provider = "graph"`, encrypted tokens. `auth_method` value must match whatever normalization was applied in [Prerequisite 5](#5-auth_method-column-normalization).
 2. **Test connection**: Call `graph_test_connection`. On success, trigger initial sync.
 
 Simpler than JMAP (no manual URL entry) and Gmail (no client ID setup — if we ship a default app registration). The OAuth flow handles everything.
@@ -783,13 +848,16 @@ async function syncGraphAccount(accountId: string) {
 
 ### 2d. Composer changes
 
-The composer currently builds raw RFC 822 messages (via TS) and passes `raw_base64url` to Gmail/JMAP send commands. Graph takes a JSON message body instead.
+**This depends on the resolution of [Open Question 6](#6-send-and-draft-contract).**
 
-Two options:
-- **Build Graph JSON in TS**: The composer already has structured message data (recipients, subject, body HTML, attachments). Serialize to Graph's JSON format before invoking `graph_send_email`.
-- **Build Graph JSON in Rust**: Pass the same structured data to Rust, let Rust serialize to Graph format.
+The current provider contract is: composer builds raw RFC 822 MIME via TS, passes `rawBase64Url` to the provider's `sendMessage()`. Gmail and JMAP both accept this format.
 
-The first option is simpler and keeps the existing composer→send contract per-provider. The TS `emailActions.ts` already dispatches per-provider — adding a Graph-specific JSON serializer is straightforward.
+Graph's `/me/sendMail` does NOT accept raw MIME. The composer→send path must change for Graph, and this affects the trait:
+
+- **If Option A (create-draft-then-send)**: Rust accepts raw MIME, parses it, creates a Graph draft (JSON) from the parsed data, then sends the draft. The TS composer doesn't change — the adaptation happens in Rust. But the MIME→JSON conversion is non-trivial (inline images, multipart/alternative).
+- **If Option B (structured message data)**: The trait's send interface changes from `rawBase64Url` to a structured message type. All providers adapt. The composer serializes to the new format. This is a broader change affecting Gmail and JMAP too.
+
+Until this is decided, the composer change scope is unknown.
 
 ### 2e. App startup
 
@@ -799,7 +867,7 @@ In `App.tsx` startup sequence:
 
 ### Phase 2 deliverable
 
-Graph accounts can be added via OAuth, synced, and acted on through the full UI. The sync timer includes Graph accounts. Email actions work through the offline queue. Composer handles Graph's JSON send format.
+Graph accounts can be added via OAuth, synced, and acted on through the full UI. The sync timer includes Graph accounts. Email actions work through the offline queue.
 
 ---
 
@@ -809,34 +877,53 @@ Same fundamental problem as JMAP — see `docs/jmap-rust-migration.md` for the f
 
 ### The problem
 
-Our app's action model is thread-centric (archive a thread, star a thread, trash a thread). Graph has no thread-level mutations. All operations are per-message. Additionally, Graph's `conversationId` may group messages differently than our UI's thread view.
+Our app's action model is thread-centric (archive a thread, star a thread, trash a thread). Graph has no thread-level mutations. All operations are per-message.
 
-### The design
+Two additional complications compared to JMAP:
+1. **Thread identity is unsettled** — see [Open Question 3](#3-thread-identity-model). The enumeration strategy depends on whether thread IDs are `conversationId` values or JWZ-computed.
+2. **Partial sync is the norm** — see [Open Question 7](#7-thread-action-scope-local-vs-remote-enumeration). Graph's windowed, per-folder sync means many threads will have messages not yet in the local DB.
+
+### The design (provisional)
 
 Thread-level Graph actions enumerate messages in the thread and mutate each one:
 
 ```rust
-/// Shared helper: get all message IDs in a thread.
+/// Get all message IDs in a thread.
+/// The implementation of this function depends on Open Questions 3 and 7.
+///
+/// If using remote enumeration (Open Question 7, Option A):
+///   GET /me/messages?$filter=conversationId eq '{thread_id}'&$select=id
+///   This requires conversationId as the thread model (Open Question 3).
+///
+/// If using local enumeration (Option B):
+///   SELECT id FROM messages WHERE thread_id = ? AND account_id = ?
+///   Works with any thread model, but only affects synced messages.
+///
+/// If using JWZ threading (Open Question 3):
+///   Remote enumeration is NOT possible (no Graph API for JWZ thread queries).
+///   Must use local enumeration. This means JWZ + remote enumeration is
+///   an incompatible combination — the thread model choice constrains
+///   the enumeration strategy.
 async fn query_thread_message_ids(
     client: &GraphClient,
-    thread_id: &str,  // conversationId
+    thread_id: &str,
     db: &DbState,
-) -> Result<Vec<String>, String> {
-    // Option A: Query Graph API
-    // GET /me/messages?$filter=conversationId eq '{thread_id}'&$select=id
-    // Note: conversationId filter may not be supported on all endpoints.
-    //
-    // Option B: Query local DB
-    // SELECT id FROM messages WHERE thread_id = ? AND account_id = ?
-    // Faster, no API call, but may miss messages not yet synced.
-    //
-    // Use Option B (local DB) — consistent with JMAP's approach.
-    // If a message isn't in our DB, it hasn't been synced yet and
-    // shouldn't be affected by the action.
-}
+) -> Result<Vec<String>, String>;
 ```
 
 Every thread-level action (`graph_archive`, `graph_trash`, `graph_star`, `graph_mark_read`, `graph_spam`, `graph_move_to_folder`, `graph_add_category`, `graph_remove_category`) calls this helper first, then applies the operation to all returned message IDs using JSON batching (up to 20 per batch request).
+
+### Interaction between Open Questions 3 and 7
+
+| Thread model (OQ 3) | Enumeration scope (OQ 7) | Viable? | Notes |
+|---------------------|--------------------------|---------|-------|
+| conversationId | Remote (Graph API) | **Yes** | `$filter=conversationId eq '{id}'` — whole-conversation mutation |
+| conversationId | Local (DB only) | Yes | Fast, but partial for windowed sync |
+| JWZ | Remote (Graph API) | **No** | No Graph API for "messages in this JWZ thread" |
+| JWZ | Local (DB only) | Yes | Only option for JWZ, but always partial |
+| Hybrid | Remote + local fallback | Partial | Remote for conversationId-based, local for JWZ-computed |
+
+This table shows that **choosing JWZ threading forces local-only enumeration**, which means accepting the partial-mutation behavior described in [Open Question 7](#7-thread-action-scope-local-vs-remote-enumeration). This is a constraint on the thread model decision.
 
 ### Differences from JMAP thread actions
 
@@ -858,9 +945,18 @@ This is a product design section, not just an adapter detail. The mapping strate
 
 Gmail: a message can have multiple labels. JMAP: a message can be in multiple mailboxes. Graph: a message lives in **exactly one folder**. But Graph messages can also have **categories** (color-coded tags, up to 25 per message).
 
+### The folder ID model
+
+Graph folders have two identifier systems:
+
+1. **Opaque IDs** (e.g., `AAMkAGI2TG93AAA=`) — the actual `id` field on folder objects, used in `parentFolderId` on messages, stored in `graph_folder_delta_tokens`. These are the runtime identifiers.
+2. **Well-known aliases** (e.g., `inbox`, `sentitems`, `deleteditems`) — API-level shorthand that can be used in URL paths (`GET /me/mailFolders/inbox`). NOT the same as the opaque ID. NOT the same as the `displayName` (which is localizable and user-renamable). Used only during the `FolderMap.build()` resolution step (see [1c](#1c-folder-mapper-graphfolder_mapperrs)) by calling `GET /me/mailFolders/{alias}` directly and collecting the returned opaque ID.
+
+All runtime operations — message parsing, label derivation, action dispatch, delta token tracking — use opaque IDs. Well-known aliases are resolved to opaque IDs once during folder sync via direct API calls and cached in the `FolderMap`. Display names are never used for system folder identification.
+
 ### Recommended approach: Hybrid (folder + categories)
 
-1. **Folder → primary location label**: Each folder maps to a label. Well-known folders get system label IDs (`INBOX`, `SENT`, `TRASH`, `SPAM`, `DRAFT`, `archive`). User folders get `graph-{folderId}` label IDs. A message's `parentFolderId` determines its one folder label.
+1. **Folder → primary location label**: Each folder maps to a label. Well-known folders (identified by resolving aliases to opaque IDs) get system label IDs (`INBOX`, `SENT`, `TRASH`, `SPAM`, `DRAFT`, `archive`). User folders get `graph-{folderId}` label IDs. A message's `parentFolderId` (opaque ID) is resolved via the `FolderMap` to determine its one folder label.
 
 2. **Categories → supplementary labels**: Graph categories map to user labels with a `graph-cat-{name}` label ID prefix. Categories are additive — a message in the Inbox folder with categories "Project X" and "Urgent" would have labels: `INBOX`, `graph-cat-Project X`, `graph-cat-Urgent`.
 
@@ -897,17 +993,28 @@ This is the most significant architectural difference from Gmail and JMAP sync.
 
 Gmail delta sync: one `history.list()` call returns all changes globally. JMAP delta sync: one `Email/changes()` call returns all changed email IDs globally. Both are O(1) API calls to discover what changed.
 
-Graph delta sync: must query each folder separately. `GET /me/mailFolders/{id}/messages/delta` for each folder. For a typical account with 10-15 folders, that's 10-15 API calls per sync cycle. With the 4-concurrent limit, these must be serialized or lightly parallelized.
+Graph delta sync: must query each folder separately. `GET /me/mailFolders/{id}/messages/delta` for each folder. A typical account has 10-15 top-level folders, but nested subfolders can push the total to 20-50+. That's 20-50 API calls per full sync cycle if every folder is checked. With the 4-concurrent limit, these must be serialized or lightly parallelized. Folder sync ordering (see below) mitigates this by prioritizing high-traffic folders.
 
 ### Initial sync
 
-1. **Folders**: `GET /me/mailFolders?$top=100` → persist as labels via folder mapper → cache folder IDs
-2. **Messages per folder**: For each folder (prioritize Inbox, Sent, Drafts):
-   - `GET /me/mailFolders/{id}/messages?$filter=receivedDateTime ge {sinceDate}&$select={fields}&$top=50&$orderby=receivedDateTime desc`
+1. **Folders** (full tree traversal):
+   - `GET /me/mailFolders?$top=100` returns only top-level folders. Graph mailboxes can have arbitrary nesting — subfolders are NOT included in the top-level response.
+   - For each folder with `childFolderCount > 0`, recursively fetch children: `GET /me/mailFolders/{id}/childFolders?$top=100`
+   - Continue recursively until all levels are traversed.
+   - Resolve well-known system folders by fetching each alias directly (see [1c](#1c-folder-mapper-graphfolder_mapperrs)).
+   - Build `FolderMap` from the complete tree. Persist all folders as labels (nested user folders get `graph-{folderId}` label IDs regardless of depth).
+   - The full folder tree is required because: delta tokens are per-folder (every folder needs one), `parentFolderId` on messages can reference any folder at any depth, sidebar rendering needs the tree, and move-target resolution must include subfolders.
+2. **Messages per folder**: For each folder in the tree (prioritize Inbox, Sent, Drafts; see folder sync ordering below):
+   - `GET /me/mailFolders/{opaque_id}/messages?$filter=receivedDateTime ge {sinceDate}&$select={fields}&$top=50&$orderby=receivedDateTime desc`
    - Paginate via `@odata.nextLink`
    - For each message: `parse_graph_message()` → DB writes (same pipeline as Gmail/JMAP)
    - Must request `internetMessageHeaders` for each message to get threading headers, auth results, unsubscribe headers
-3. **Store initial delta links**: After fetching all messages for a folder, request `GET /me/mailFolders/{id}/messages/delta?$select={fields}` and store the returned `@odata.deltaLink` in `graph_folder_delta_tokens`
+3. **Bootstrap delta tokens** (per-folder, must page to completion):
+   - After the initial message fetch for a folder, establish a delta baseline: `GET /me/mailFolders/{opaque_id}/messages/delta?$select={fields}`
+   - **This is NOT a single request.** The delta endpoint returns the full current state on first call. You MUST page through all `@odata.nextLink` responses until the server issues a final `@odata.deltaLink` (no more `nextLink`). Only the final `deltaLink` is valid for subsequent incremental sync.
+   - Store the final `@odata.deltaLink` in `graph_folder_delta_tokens` keyed by the opaque folder ID.
+   - For folders with many messages, this bootstrap pass may return thousands of entries. The messages themselves were already persisted in step 2 — the purpose of this pass is solely to obtain the delta token. An optimization: use `$select=id` to minimize payload since we don't need the message bodies again.
+   - This must be done for every folder in the tree that we intend to delta-sync.
 
 ### Delta sync
 
@@ -915,22 +1022,23 @@ Graph delta sync: must query each folder separately. `GET /me/mailFolders/{id}/m
    - `GET {deltaLink}` (the stored `@odata.deltaLink` URL)
    - Paginate via `@odata.nextLink` if results span multiple pages
    - Returns created/updated messages (full objects) and deleted message IDs (with `@removed` annotation)
-   - For each message, resolve `conversationId` → thread_id, check `pending_operations` for that thread
+   - For each message, resolve thread ID (method depends on [Open Question 3](#3-thread-identity-model)), check `pending_operations` for that thread (see [Sync vs Queue: Write Ordering](#sync-vs-queue-write-ordering))
    - Parse and persist (same path as initial sync)
    - Delete removed messages from local DB
    - Store new `@odata.deltaLink` for next sync
-2. **New folders**: If a new folder appears (not in `graph_folder_delta_tokens`), do an initial fetch for that folder
-3. **Folder changes**: Periodically re-fetch folder list to detect renames/deletes/new folders
+2. **New folders**: Periodically re-traverse the full folder tree (same recursive strategy as initial sync) to detect new folders (including new subfolders at any depth). Any folder not yet in `graph_folder_delta_tokens` needs an initial message fetch + delta token bootstrap.
+3. **Folder changes**: The re-traversal also detects renames and deletes. Rebuild `FolderMap` when changes detected. Remove delta tokens for deleted folders.
 
 ### Folder sync ordering
 
-Not all folders need to be synced equally often:
+Not all folders need to be synced equally often. With nested folders, a typical mailbox may have 20-50+ folders — syncing all of them every 60s is not feasible under the 4-concurrent limit.
 
 - **High priority** (every sync cycle): Inbox, Sent, Drafts
 - **Medium priority** (every 5th sync cycle): Archive, Trash, Spam
-- **Low priority** (every 20th sync cycle): Other user folders
+- **Low priority** (every 20th sync cycle): Other user folders (including nested subfolders)
+- **Folder tree re-traversal**: Every 10th sync cycle (discover new/renamed/deleted folders)
 
-This reduces the per-cycle API call count from 10-15 to 3-5 for most sync cycles.
+This reduces the per-cycle API call count to 3-5 for most sync cycles. The folder tree re-traversal adds O(depth) calls when it runs.
 
 ### Progress reporting
 
@@ -953,19 +1061,25 @@ Same principle as Gmail and JMAP — see `docs/gmail-rust-migration.md` for the 
 
 ### The rule
 
-**Before overwriting a message's state during delta sync, resolve its `conversationId` (thread ID) and check `pending_operations` for that thread. If any pending ops exist for the thread, skip all messages in that thread — the queue processor will reconcile when the op flushes.**
+**Before overwriting a message's state during delta sync, resolve its thread ID and check `pending_operations` for that thread. If any pending ops exist for the thread, skip all messages in that thread — the queue processor will reconcile when the op flushes.**
 
-### Graph-specific nuance
+### How thread ID resolution works
 
-Graph delta sync returns full message objects (not just IDs like JMAP's `Email/changes`). The `conversationId` is included in the response, so there's no extra lookup needed — the thread ID resolution is free.
+The thread ID resolution method depends on [Open Question 3](#3-thread-identity-model):
 
-The flow:
-1. Delta response includes messages with `conversationId`
-2. For each message, check `pending_operations WHERE resource_id = message.conversationId`
-3. If pending ops exist for the thread, skip all messages with that `conversationId`
-4. Otherwise, persist normally
+- **If conversationId**: `conversationId` is included in the Graph delta response — no extra lookup needed. Check `pending_operations WHERE resource_id = message.conversationId`.
+- **If JWZ**: thread ID must be computed from message headers during parsing. The JWZ-computed `thread_id` is what gets stored in `messages.thread_id` and what `pending_operations.resource_id` references. Requires parsing `internetMessageHeaders` before the conflict check.
+- **If hybrid**: use `conversationId` as the primary thread key for delta sync conflict checks. JWZ is only a fallback for edge cases where `conversationId` is missing.
 
-This is a read from the same `ratatoskr.db` that both Rust and TS write to, consistent via SQLite's `Mutex<Connection>` serialization.
+In all cases, the check is a read from the same `ratatoskr.db` that both Rust and TS write to, consistent via SQLite's `Mutex<Connection>` serialization.
+
+### The flow
+
+1. Delta response includes messages (with `conversationId` and optionally `internetMessageHeaders`)
+2. Resolve thread ID using the chosen thread model
+3. For each message, check `pending_operations WHERE resource_id = {thread_id}`
+4. If pending ops exist for the thread, skip all messages with that thread ID
+5. Otherwise, persist normally
 
 ---
 
@@ -985,8 +1099,8 @@ Same as JMAP — there is no TS Graph fallback because there was never a TS Grap
 
 ### Testing strategy
 
-- **Unit tests**: Rust tests for `folder_mapper.rs`, `parse.rs`, `types.rs` (mock JSON from real Graph API responses)
-- **Integration tests**: Tauri command tests with mock HTTP server serving Graph API responses (`wiremock-rs`). OData pagination, delta responses with `@odata.nextLink`/`@odata.deltaLink`, `@removed` annotations, JSON batching responses.
+- **Unit tests**: Rust tests for `folder_mapper.rs`, `parse.rs`, `types.rs` (mock JSON from real Graph API responses). Test `FolderMap` resolution with real opaque IDs, not well-known aliases.
+- **Integration tests**: Tauri command tests with mock HTTP server serving Graph API responses (`wiremock-rs`). OData pagination, delta responses with `@odata.nextLink`/`@odata.deltaLink`, `@removed` annotations, JSON batching responses, well-known folder alias resolution.
 - **Real account testing**: Test against a personal Outlook.com account (free) and an Exchange Online account (if available). Delta sync round-trip, thread-level actions, attachment download, send.
 - **Rate limit testing**: Verify Semaphore enforcement at concurrency=3. Simulate 429 responses with `Retry-After`.
 - **Manual testing**: Graph account setup → OAuth → initial sync → delta sync → archive/trash/star/send → verify round-trip
@@ -996,7 +1110,7 @@ Same as JMAP — there is no TS Graph fallback because there was never a TS Grap
 | Phase | New Rust lines (est.) | New TS lines | Difficulty |
 |-------|----------------------|-------------|------------|
 | Phase 1: Full Rust provider | ~1,600-2,200 | ~0 | Moderate-High — hand-rolled REST (like Gmail), but per-folder delta sync and JSON batching add complexity |
-| Phase 2: TS integration + UI | ~0 | ~600 (UI + thin adapters + composer JSON path + sync wiring) | Low-Moderate — thin glue, but composer needs a Graph-specific message serializer |
+| Phase 2: TS integration + UI | ~0 | ~600 (UI + thin adapters + sync wiring) | Low-Moderate — thin glue, but composer change scope depends on send contract decision |
 | **Total** | **~1,600-2,200** | **~600** | |
 
 Larger than JMAP (~1,400-1,800 Rust lines) because:
@@ -1019,7 +1133,7 @@ Smaller than Gmail (~2,700-3,500 Rust lines) because:
 
 ### Prerequisites from earlier migrations
 
-1. **Shared `EmailProvider` trait** — extract from Gmail + JMAP after JMAP Phase 1 is complete. This is the prerequisite for Graph.
+1. **Shared `EmailProvider` trait** — extract from Gmail + JMAP after JMAP is fully complete (both phases validated). This is the prerequisite for Graph. See the trigger definition in `docs/jmap-rust-migration.md`.
 2. **Provider-agnostic Tauri commands** — depends on the trait. Graph may be the first consumer.
 
 ### Graph-specific
@@ -1027,20 +1141,22 @@ Smaller than Gmail (~2,700-3,500 Rust lines) because:
 3. **Microsoft OAuth2 in `oauth.rs`** — extend the existing OAuth server to handle Microsoft endpoints and scopes. The flow is identical (PKCE + localhost redirect), only endpoints and scopes differ. May happen during Gmail Rust migration if `oauth.rs` is generalized.
 4. **Per-folder delta token storage** — `graph_folder_delta_tokens` table. Schema defined above.
 5. **Graph-to-label mapping strategy** — product decision on folders + categories → labels. Preliminary design in [Folder-to-Label Mapping](#folder-to-label-mapping), needs validation with real accounts.
-6. **Thread ID strategy** — `conversationId` vs JWZ threading. Needs investigation of `conversationId` reliability across real accounts.
-7. **Send format investigation** — JSON message body vs raw MIME vs create-draft-then-send. Test all three paths, pick the one that handles attachments and encoding correctly.
-8. **Large attachment upload sessions** — multi-step upload for >3MB files. Not critical for initial implementation (can limit to inline/small attachments), but needed for full parity.
-9. **Webhook subscriptions** — Graph supports push notifications via webhooks for real-time sync. Requires a reachable endpoint (problem for desktop apps). Polling via delta sync is the initial approach. Investigate if Tauri can expose a local webhook receiver via the existing localhost server.
-10. **Azure AD app registration** — create and configure the app registration. Publisher verification for organizational access. Decide on default-shipped vs user-provided model.
-11. **Focused Inbox integration** — map Graph's `inferenceClassification` to our category tabs (Primary/Other mapping). Optional enrichment after basic sync works.
-12. **Exchange on-premises via EWS** — only if significant demand. `ews-rs` from Thunderbird provides types, but no client. SOAP/XML complexity is high. On-prem users can use IMAP.
-13. **JSON batching optimization** — the `/$batch` endpoint supports up to 20 requests per batch. Investigate using it for initial sync (batch message fetches) in addition to thread-level actions.
-14. **`$expand` for attachments** — `GET /me/messages/{id}?$expand=attachments` can inline attachment metadata in message responses. May eliminate separate attachment list calls during sync.
-15. **`uniqueBody` usage** — Graph's `uniqueBody` field returns the message body without quoted replies. Could improve body store efficiency and thread display. Investigate reliability.
+6. **Thread ID strategy** — `conversationId` vs JWZ threading. Needs investigation of `conversationId` reliability across real accounts. Blocks command surface finalization. See [Open Question 3](#3-thread-identity-model).
+7. **Send format decision** — JSON send vs raw MIME vs create-draft-then-send. Affects the shared trait's send interface. Must be decided before Graph send/draft commands are finalized. See [Open Question 6](#6-send-and-draft-contract).
+8. **Thread action scope decision** — remote vs local enumeration. Affects product semantics for partially-synced mailboxes. See [Open Question 7](#7-thread-action-scope-local-vs-remote-enumeration).
+9. **Large attachment upload sessions** — multi-step upload for >3MB files. Not critical for initial implementation (can limit to inline/small attachments), but needed for full parity.
+10. **Webhook subscriptions** — Graph supports push notifications via webhooks for real-time sync. Requires a reachable endpoint (problem for desktop apps). Polling via delta sync is the initial approach. Investigate if Tauri can expose a local webhook receiver via the existing localhost server.
+11. **Azure AD app registration** — create and configure the app registration. Publisher verification for organizational access. Decide on default-shipped vs user-provided model.
+12. **Focused Inbox integration** — map Graph's `inferenceClassification` to our category tabs (Primary/Other mapping). Optional enrichment after basic sync works.
+13. **Exchange on-premises via EWS** — only if significant demand. `ews-rs` from Thunderbird provides types, but no client. SOAP/XML complexity is high. On-prem users can use IMAP.
+14. **JSON batching optimization** — the `/$batch` endpoint supports up to 20 requests per batch. Investigate using it for initial sync (batch message fetches) in addition to thread-level actions.
+15. **`$expand` for attachments** — `GET /me/messages/{id}?$expand=attachments` can inline attachment metadata in message responses. May eliminate separate attachment list calls during sync.
+16. **`uniqueBody` usage** — Graph's `uniqueBody` field returns the message body without quoted replies. Could improve body store efficiency and thread display. Investigate reliability.
+17. **`auth_method` normalization** — resolve the existing `"oauth"` vs `"oauth2"` inconsistency across migration defaults and runtime checks before Graph accounts are created.
 
 ### Quick win (can happen before full Graph)
 
-16. **IMAP + OAuth2 for Outlook.com** — add Microsoft OAuth2 flow, use XOAUTH2 SASL with our existing IMAP provider. Gives Outlook users immediate access without building the full Graph provider. Requires only: OAuth2 endpoint configuration in `oauth.rs`, Azure AD app registration, IMAP AUTHENTICATE with OAuth token (already supported in `connection.rs`). This is independent of the Graph migration and could ship at any time.
+18. **IMAP + OAuth2 for Outlook.com** — add Microsoft OAuth2 flow, use XOAUTH2 SASL with our existing IMAP provider. Gives Outlook users immediate access without building the full Graph provider. Requires only: OAuth2 endpoint configuration in `oauth.rs`, Azure AD app registration, IMAP AUTHENTICATE with OAuth token (already supported in `connection.rs`). This is independent of the Graph migration and could ship at any time.
 
 ---
 
