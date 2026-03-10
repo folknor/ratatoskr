@@ -16,10 +16,12 @@ import {
 } from "@/core/rustDb";
 import { getSelectedThreadId, navigateToThread } from "@/router/navigate";
 import { getEmailProvider } from "@/services/email/providerFactory";
+import { getAccount } from "@/services/db/accounts";
 import { enqueuePendingOperation } from "@/services/db/pendingOperations";
 import { useThreadStore } from "@/stores/threadStore";
 import { useSyncStateStore } from "@/stores/syncStateStore";
 import { classifyError } from "@/utils/networkErrors";
+import { invoke } from "@tauri-apps/api/core";
 
 // ---------------------------------------------------------------------------
 // Action types
@@ -270,7 +272,122 @@ function actionToParams(action: EmailAction): Record<string, unknown> {
   return rest;
 }
 
-async function executeViaProvider(
+// ---------------------------------------------------------------------------
+// Gmail execution via Rust Tauri commands
+// ---------------------------------------------------------------------------
+
+async function executeViaGmailRust(
+  accountId: string,
+  action: EmailAction,
+): Promise<unknown> {
+  switch (action.type) {
+    case "archive":
+      return invoke("gmail_modify_thread", {
+        accountId,
+        threadId: action.threadId,
+        addLabels: [],
+        removeLabels: ["INBOX"],
+      });
+    case "trash":
+      return invoke("gmail_modify_thread", {
+        accountId,
+        threadId: action.threadId,
+        addLabels: ["TRASH"],
+        removeLabels: ["INBOX"],
+      });
+    case "permanentDelete":
+      return invoke("gmail_delete_thread", {
+        accountId,
+        threadId: action.threadId,
+      });
+    case "markRead":
+      return invoke("gmail_modify_thread", {
+        accountId,
+        threadId: action.threadId,
+        addLabels: action.read ? [] : ["UNREAD"],
+        removeLabels: action.read ? ["UNREAD"] : [],
+      });
+    case "star":
+      return invoke("gmail_modify_thread", {
+        accountId,
+        threadId: action.threadId,
+        addLabels: action.starred ? ["STARRED"] : [],
+        removeLabels: action.starred ? [] : ["STARRED"],
+      });
+    case "spam":
+      return invoke("gmail_modify_thread", {
+        accountId,
+        threadId: action.threadId,
+        addLabels: action.isSpam ? ["SPAM"] : ["INBOX"],
+        removeLabels: action.isSpam ? ["INBOX"] : ["SPAM"],
+      });
+    case "moveToFolder":
+      return invoke("gmail_modify_thread", {
+        accountId,
+        threadId: action.threadId,
+        addLabels: [action.folderPath],
+        removeLabels: [],
+      });
+    case "addLabel":
+      return invoke("gmail_modify_thread", {
+        accountId,
+        threadId: action.threadId,
+        addLabels: [action.labelId],
+        removeLabels: [],
+      });
+    case "removeLabel":
+      return invoke("gmail_modify_thread", {
+        accountId,
+        threadId: action.threadId,
+        addLabels: [],
+        removeLabels: [action.labelId],
+      });
+    case "sendMessage":
+      return invoke("gmail_send_email", {
+        accountId,
+        raw: action.rawBase64Url,
+        threadId: action.threadId ?? null,
+      });
+    case "createDraft":
+      return invoke("gmail_create_draft", {
+        accountId,
+        raw: action.rawBase64Url,
+        threadId: action.threadId ?? null,
+      });
+    case "updateDraft":
+      return invoke("gmail_update_draft", {
+        accountId,
+        draftId: action.draftId,
+        raw: action.rawBase64Url,
+        threadId: action.threadId ?? null,
+      });
+    case "deleteDraft":
+      return invoke("gmail_delete_draft", {
+        accountId,
+        draftId: action.draftId,
+      });
+    case "snooze":
+    case "mute":
+      // Snooze/mute are local state; on the provider side we just archive
+      return invoke("gmail_modify_thread", {
+        accountId,
+        threadId: action.threadId,
+        addLabels: [],
+        removeLabels: ["INBOX"],
+      });
+    case "pin":
+    case "unpin":
+    case "unmute":
+      // Local-only operations — no Gmail concept of pin or unmute
+      return;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// IMAP execution via EmailProvider
+// ---------------------------------------------------------------------------
+
+async function executeViaImapProvider(
   accountId: string,
   action: EmailAction,
 ): Promise<unknown> {
@@ -316,12 +433,30 @@ async function executeViaProvider(
     case "pin":
     case "unpin":
     case "unmute":
-      // Local-only operations — no IMAP/Gmail concept of pin or unmute
+      // Local-only operations — no IMAP concept of pin or unmute
       return;
     case "mute":
       // Mute auto-archives; on the provider side we archive
       return provider.archive(action.threadId, action.messageIds);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Unified execution dispatcher
+// ---------------------------------------------------------------------------
+
+async function executeViaProvider(
+  accountId: string,
+  action: EmailAction,
+): Promise<unknown> {
+  const account = await getAccount(accountId);
+  if (!account) throw new Error(`Account ${accountId} not found`);
+
+  if (account.provider === "gmail_api" || account.provider !== "imap") {
+    return executeViaGmailRust(accountId, action);
+  }
+
+  return executeViaImapProvider(accountId, action);
 }
 
 export async function executeEmailAction(

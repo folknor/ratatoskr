@@ -1,6 +1,5 @@
 import { vi } from "vitest";
 import { getAccount } from "../db/accounts";
-import { getGmailClient } from "../gmail/tokenManager";
 import { GmailApiProvider } from "./gmailProvider";
 import { ImapSmtpProvider } from "./imapSmtpProvider";
 import {
@@ -12,10 +11,6 @@ import {
 
 vi.mock("../db/accounts", () => ({
   getAccount: vi.fn(),
-}));
-
-vi.mock("../gmail/tokenManager", () => ({
-  getGmailClient: vi.fn(),
 }));
 
 describe("providerFactory", () => {
@@ -51,12 +46,6 @@ describe("providerFactory", () => {
       oauth_client_id: null,
       oauth_client_secret: null,
     });
-    vi.mocked(getGmailClient).mockResolvedValue(
-      {} as ReturnType<typeof getGmailClient> extends Promise<infer T>
-        ? T
-        : never,
-    );
-
     const provider = await getEmailProvider("acc-1");
 
     expect(provider).toBeInstanceOf(GmailApiProvider);
@@ -286,12 +275,6 @@ describe("providerFactory", () => {
       oauth_client_id: null,
       oauth_client_secret: null,
     });
-    vi.mocked(getGmailClient).mockResolvedValue(
-      {} as ReturnType<typeof getGmailClient> extends Promise<infer T>
-        ? T
-        : never,
-    );
-
     await getEmailProvider("acc-7");
 
     // Should not throw — Gmail providers don't have clearConfigCache

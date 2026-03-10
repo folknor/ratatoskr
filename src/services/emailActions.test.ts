@@ -20,6 +20,14 @@ vi.mock("@/services/email/providerFactory", () => ({
   getEmailProvider: vi.fn(),
 }));
 
+vi.mock("@/services/db/accounts", () => ({
+  getAccount: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(() => Promise.resolve()),
+}));
+
 vi.mock("@/core/rustDb", () => ({
   emailActionArchive: vi.fn(() => Promise.resolve()),
   emailActionTrash: vi.fn(() => Promise.resolve()),
@@ -46,13 +54,17 @@ vi.mock("@/router/navigate", () => ({
   getSelectedThreadId: vi.fn(() => null),
 }));
 
+import { invoke } from "@tauri-apps/api/core";
 import { enqueuePendingOperation } from "@/services/db/pendingOperations";
 import { getSelectedThreadId, navigateToThread } from "@/router/navigate";
 import { getEmailProvider } from "@/services/email/providerFactory";
+import { getAccount } from "@/services/db/accounts";
 import { useThreadStore } from "@/stores/threadStore";
 import { useSyncStateStore } from "@/stores/syncStateStore";
 import {
   createMockEmailProvider,
+  createMockImapAccount,
+  createMockGmailAccount,
   createMockThreadStoreState,
   createMockUIStoreState,
 } from "@/test/mocks";
@@ -76,6 +88,9 @@ describe("emailActions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getEmailProvider).mockResolvedValue(mockProvider as never);
+    vi.mocked(getAccount).mockResolvedValue(
+      createMockImapAccount() as never,
+    );
     vi.mocked(useSyncStateStore.getState).mockReturnValue(
       createMockUIStoreState() as never,
     );
@@ -87,7 +102,7 @@ describe("emailActions", () => {
     );
   });
 
-  describe("online execution", () => {
+  describe("IMAP online execution (via provider)", () => {
     it("archives a thread via provider", async () => {
       const result = await archiveThread("acct-1", "t1", ["m1"]);
       expect(result.success).toBe(true);
@@ -124,6 +139,167 @@ describe("emailActions", () => {
     });
   });
 
+  describe("Gmail online execution (via Rust invoke)", () => {
+    beforeEach(() => {
+      vi.mocked(getAccount).mockResolvedValue(
+        createMockGmailAccount() as never,
+      );
+    });
+
+    it("archives a thread via gmail_modify_thread", async () => {
+      const result = await archiveThread("acct-1", "t1", ["m1"]);
+      expect(result.success).toBe(true);
+      expect(invoke).toHaveBeenCalledWith("gmail_modify_thread", {
+        accountId: "acct-1",
+        threadId: "t1",
+        addLabels: [],
+        removeLabels: ["INBOX"],
+      });
+      expect(mockProvider.archive).not.toHaveBeenCalled();
+    });
+
+    it("trashes a thread via gmail_modify_thread", async () => {
+      const result = await trashThread("acct-1", "t1", ["m1"]);
+      expect(result.success).toBe(true);
+      expect(invoke).toHaveBeenCalledWith("gmail_modify_thread", {
+        accountId: "acct-1",
+        threadId: "t1",
+        addLabels: ["TRASH"],
+        removeLabels: ["INBOX"],
+      });
+    });
+
+    it("permanently deletes a thread via gmail_delete_thread", async () => {
+      const result = await permanentDeleteThread("acct-1", "t1", ["m1"]);
+      expect(result.success).toBe(true);
+      expect(invoke).toHaveBeenCalledWith("gmail_delete_thread", {
+        accountId: "acct-1",
+        threadId: "t1",
+      });
+    });
+
+    it("marks thread read via gmail_modify_thread", async () => {
+      const result = await markThreadRead("acct-1", "t1", ["m1"], true);
+      expect(result.success).toBe(true);
+      expect(invoke).toHaveBeenCalledWith("gmail_modify_thread", {
+        accountId: "acct-1",
+        threadId: "t1",
+        addLabels: [],
+        removeLabels: ["UNREAD"],
+      });
+    });
+
+    it("marks thread unread via gmail_modify_thread", async () => {
+      const result = await markThreadRead("acct-1", "t1", ["m1"], false);
+      expect(result.success).toBe(true);
+      expect(invoke).toHaveBeenCalledWith("gmail_modify_thread", {
+        accountId: "acct-1",
+        threadId: "t1",
+        addLabels: ["UNREAD"],
+        removeLabels: [],
+      });
+    });
+
+    it("stars a thread via gmail_modify_thread", async () => {
+      const result = await starThread("acct-1", "t1", ["m1"], true);
+      expect(result.success).toBe(true);
+      expect(invoke).toHaveBeenCalledWith("gmail_modify_thread", {
+        accountId: "acct-1",
+        threadId: "t1",
+        addLabels: ["STARRED"],
+        removeLabels: [],
+      });
+    });
+
+    it("unstars a thread via gmail_modify_thread", async () => {
+      const result = await starThread("acct-1", "t1", ["m1"], false);
+      expect(result.success).toBe(true);
+      expect(invoke).toHaveBeenCalledWith("gmail_modify_thread", {
+        accountId: "acct-1",
+        threadId: "t1",
+        addLabels: [],
+        removeLabels: ["STARRED"],
+      });
+    });
+
+    it("reports spam via gmail_modify_thread", async () => {
+      const result = await spamThread("acct-1", "t1", ["m1"], true);
+      expect(result.success).toBe(true);
+      expect(invoke).toHaveBeenCalledWith("gmail_modify_thread", {
+        accountId: "acct-1",
+        threadId: "t1",
+        addLabels: ["SPAM"],
+        removeLabels: ["INBOX"],
+      });
+    });
+
+    it("sends a message via gmail_send_email", async () => {
+      const result = await executeEmailAction("acct-1", {
+        type: "sendMessage",
+        rawBase64Url: "base64data",
+        threadId: "t1",
+      });
+      expect(result.success).toBe(true);
+      expect(invoke).toHaveBeenCalledWith("gmail_send_email", {
+        accountId: "acct-1",
+        raw: "base64data",
+        threadId: "t1",
+      });
+    });
+
+    it("creates a draft via gmail_create_draft", async () => {
+      const result = await executeEmailAction("acct-1", {
+        type: "createDraft",
+        rawBase64Url: "base64data",
+      });
+      expect(result.success).toBe(true);
+      expect(invoke).toHaveBeenCalledWith("gmail_create_draft", {
+        accountId: "acct-1",
+        raw: "base64data",
+        threadId: null,
+      });
+    });
+
+    it("updates a draft via gmail_update_draft", async () => {
+      const result = await executeEmailAction("acct-1", {
+        type: "updateDraft",
+        draftId: "d1",
+        rawBase64Url: "base64data",
+        threadId: "t1",
+      });
+      expect(result.success).toBe(true);
+      expect(invoke).toHaveBeenCalledWith("gmail_update_draft", {
+        accountId: "acct-1",
+        draftId: "d1",
+        raw: "base64data",
+        threadId: "t1",
+      });
+    });
+
+    it("deletes a draft via gmail_delete_draft", async () => {
+      const result = await executeEmailAction("acct-1", {
+        type: "deleteDraft",
+        draftId: "d1",
+      });
+      expect(result.success).toBe(true);
+      expect(invoke).toHaveBeenCalledWith("gmail_delete_draft", {
+        accountId: "acct-1",
+        draftId: "d1",
+      });
+    });
+
+    it("moves to folder via gmail_modify_thread", async () => {
+      const result = await moveThread("acct-1", "t1", ["m1"], "Label_123");
+      expect(result.success).toBe(true);
+      expect(invoke).toHaveBeenCalledWith("gmail_modify_thread", {
+        accountId: "acct-1",
+        threadId: "t1",
+        addLabels: ["Label_123"],
+        removeLabels: [],
+      });
+    });
+  });
+
   describe("offline queueing", () => {
     beforeEach(() => {
       vi.mocked(useSyncStateStore.getState).mockReturnValue({
@@ -136,6 +312,7 @@ describe("emailActions", () => {
       expect(result.success).toBe(true);
       expect(result.queued).toBe(true);
       expect(mockProvider.archive).not.toHaveBeenCalled();
+      expect(invoke).not.toHaveBeenCalled();
       expect(enqueuePendingOperation).toHaveBeenCalledWith(
         "acct-1",
         "archive",
@@ -151,7 +328,7 @@ describe("emailActions", () => {
   });
 
   describe("network error → queue fallback", () => {
-    it("queues on retryable network error", async () => {
+    it("queues on retryable network error (IMAP)", async () => {
       vi.mocked(useSyncStateStore.getState).mockReturnValue({
         isOnline: true,
       } as never);
@@ -162,10 +339,25 @@ describe("emailActions", () => {
       expect(result.queued).toBe(true);
       expect(enqueuePendingOperation).toHaveBeenCalled();
     });
+
+    it("queues on retryable network error (Gmail)", async () => {
+      vi.mocked(getAccount).mockResolvedValue(
+        createMockGmailAccount() as never,
+      );
+      vi.mocked(useSyncStateStore.getState).mockReturnValue({
+        isOnline: true,
+      } as never);
+      vi.mocked(invoke).mockRejectedValueOnce(new Error("Failed to fetch"));
+
+      const result = await archiveThread("acct-1", "t1", ["m1"]);
+      expect(result.success).toBe(true);
+      expect(result.queued).toBe(true);
+      expect(enqueuePendingOperation).toHaveBeenCalled();
+    });
   });
 
   describe("permanent error → revert", () => {
-    it("reverts star on permanent error", async () => {
+    it("reverts star on permanent error (IMAP)", async () => {
       vi.mocked(useSyncStateStore.getState).mockReturnValue({
         isOnline: true,
       } as never);
@@ -178,7 +370,7 @@ describe("emailActions", () => {
       expect(mockUpdateThread).toHaveBeenCalledWith("t1", { isStarred: false });
     });
 
-    it("reverts markRead on permanent error", async () => {
+    it("reverts markRead on permanent error (IMAP)", async () => {
       vi.mocked(useSyncStateStore.getState).mockReturnValue({
         isOnline: true,
       } as never);
@@ -188,6 +380,21 @@ describe("emailActions", () => {
       expect(result.success).toBe(false);
       // Revert: set read to false
       expect(mockUpdateThread).toHaveBeenCalledWith("t1", { isRead: false });
+    });
+
+    it("reverts star on permanent error (Gmail)", async () => {
+      vi.mocked(getAccount).mockResolvedValue(
+        createMockGmailAccount() as never,
+      );
+      vi.mocked(useSyncStateStore.getState).mockReturnValue({
+        isOnline: true,
+      } as never);
+      vi.mocked(invoke).mockRejectedValueOnce(new Error("Invalid request"));
+
+      const result = await starThread("acct-1", "t1", ["m1"], true);
+      expect(result.success).toBe(false);
+      expect(result.error).toBeTruthy();
+      expect(mockUpdateThread).toHaveBeenCalledWith("t1", { isStarred: false });
     });
   });
 
@@ -307,7 +514,7 @@ describe("emailActions", () => {
     });
   });
 
-  describe("executeEmailAction with draft actions", () => {
+  describe("executeEmailAction with draft actions (IMAP)", () => {
     it("sends a message via provider", async () => {
       const result = await executeEmailAction("acct-1", {
         type: "sendMessage",

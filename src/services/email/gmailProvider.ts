@@ -1,5 +1,5 @@
-import type { GmailClient } from "../gmail/client";
-import { type ParsedMessage, parseGmailMessage } from "../gmail/messageParser";
+import { invoke } from "@tauri-apps/api/core";
+import type { ParsedMessage } from "../gmail/messageParser";
 import type { EmailFolder, EmailProvider, SyncResult } from "./types";
 
 /** Map Gmail system label IDs to IMAP special-use flags */
@@ -20,29 +20,88 @@ const GMAIL_SPECIAL_USE: Record<string, string | null> = {
   CHAT: null,
 };
 
+/** Shape returned by the Rust gmail_list_labels command */
+interface RustGmailLabel {
+  id: string;
+  name: string;
+  labelType: string | null;
+  messagesTotal: number | null;
+  messagesUnread: number | null;
+}
+
+/** Shape returned by the Rust gmail_test_connection command */
+interface RustGmailProfile {
+  emailAddress: string;
+  messagesTotal: number | null;
+  threadsTotal: number | null;
+  historyId: string;
+}
+
+/** Shape returned by the Rust gmail_get_history command */
+interface RustGmailHistoryResponse {
+  history: RustGmailHistoryItem[];
+  historyId: string;
+  nextPageToken: string | null;
+}
+
+interface RustGmailHistoryItem {
+  id: string;
+  messagesAdded: { message: { id: string } }[];
+  messagesDeleted: { message: { id: string } }[];
+  labelsAdded: { message: { id: string }; labelIds: string[] }[];
+  labelsRemoved: { message: { id: string }; labelIds: string[] }[];
+}
+
+/** Shape returned by the Rust gmail_get_message with format=raw */
+interface RustGmailMessage {
+  id: string;
+  threadId: string;
+  raw?: string;
+}
+
+/** Shape returned by the Rust gmail_fetch_attachment command */
+interface RustGmailAttachmentData {
+  attachmentId: string | null;
+  size: number | null;
+  data: string;
+}
+
+/** Shape returned by the Rust gmail_send_email command */
+interface RustGmailSendResult {
+  id: string;
+}
+
+/** Shape returned by the Rust gmail_create_draft / gmail_update_draft commands */
+interface RustGmailDraft {
+  id: string;
+  message: { id: string; threadId: string };
+}
+
 /**
- * EmailProvider adapter that wraps the existing GmailClient.
- * All operations delegate directly to the GmailClient methods.
+ * EmailProvider adapter that delegates to Rust Gmail Tauri commands.
+ * All operations invoke the corresponding `gmail_*` Tauri command.
  */
 export class GmailApiProvider implements EmailProvider {
   readonly accountId: string;
   readonly type = "gmail_api" as const;
-  private client: GmailClient;
 
-  constructor(accountId: string, client: GmailClient) {
+  constructor(accountId: string) {
     this.accountId = accountId;
-    this.client = client;
   }
 
   async listFolders(): Promise<EmailFolder[]> {
-    const resp = await this.client.listLabels();
-    return resp.labels.map((label) => ({
+    const labels = await invoke<RustGmailLabel[]>("gmail_list_labels", {
+      accountId: this.accountId,
+    });
+    return labels.map((label) => ({
       id: label.id,
       name: label.name,
       path: label.name,
-      type: label.type === "system" ? "system" : "user",
+      type: label.labelType === "system" ? ("system" as const) : ("user" as const),
       specialUse:
-        label.type === "system" ? (GMAIL_SPECIAL_USE[label.id] ?? null) : null,
+        label.labelType === "system"
+          ? (GMAIL_SPECIAL_USE[label.id] ?? null)
+          : null,
       delimiter: "/",
       messageCount: label.messagesTotal ?? 0,
       unreadCount: label.messagesUnread ?? 0,
@@ -51,7 +110,10 @@ export class GmailApiProvider implements EmailProvider {
 
   async createFolder(name: string, _parentPath?: string): Promise<EmailFolder> {
     const fullName = _parentPath ? `${_parentPath}/${name}` : name;
-    const label = await this.client.createLabel(fullName);
+    const label = await invoke<RustGmailLabel>("gmail_create_label", {
+      accountId: this.accountId,
+      name: fullName,
+    });
     return {
       id: label.id,
       name: label.name,
@@ -66,11 +128,18 @@ export class GmailApiProvider implements EmailProvider {
 
   async deleteFolder(path: string): Promise<void> {
     // In Gmail, path is the label ID for deletion
-    await this.client.deleteLabel(path);
+    await invoke<void>("gmail_delete_label", {
+      accountId: this.accountId,
+      labelId: path,
+    });
   }
 
   async renameFolder(path: string, newName: string): Promise<void> {
-    await this.client.updateLabel(path, { name: newName });
+    await invoke<RustGmailLabel>("gmail_update_label", {
+      accountId: this.accountId,
+      labelId: path,
+      name: newName,
+    });
   }
 
   async initialSync(
@@ -80,7 +149,9 @@ export class GmailApiProvider implements EmailProvider {
     // Initial sync is handled by the existing sync.ts module.
     // This is a thin wrapper that returns the interface-compatible result.
     // Full integration will wire this up to the existing initialSync function.
-    const profile = await this.client.getProfile();
+    const profile = await invoke<RustGmailProfile>("gmail_test_connection", {
+      accountId: this.accountId,
+    });
     return {
       messages: [],
       latestSyncToken: profile.historyId,
@@ -95,25 +166,31 @@ export class GmailApiProvider implements EmailProvider {
     let latestHistoryId = syncToken;
 
     do {
-      const resp = await this.client.getHistory(
-        syncToken,
-        ["messageAdded", "messageDeleted", "labelAdded", "labelRemoved"],
-        pageToken,
-      );
+      const resp = await invoke<RustGmailHistoryResponse>("gmail_get_history", {
+        accountId: this.accountId,
+        startHistoryId: syncToken,
+        pageToken: pageToken ?? null,
+      });
       latestHistoryId = resp.historyId;
 
       if (resp.history) {
         for (const item of resp.history) {
           if (item.messagesAdded) {
             for (const added of item.messagesAdded) {
-              const full = await this.client.getMessage(added.message.id);
-              allMessages.push(parseGmailMessage(full));
+              const full = await invoke<ParsedMessage>(
+                "gmail_get_parsed_message",
+                {
+                  accountId: this.accountId,
+                  messageId: added.message.id,
+                },
+              );
+              allMessages.push(full);
             }
           }
         }
       }
 
-      pageToken = resp.nextPageToken;
+      pageToken = resp.nextPageToken ?? undefined;
     } while (pageToken);
 
     return {
@@ -123,38 +200,65 @@ export class GmailApiProvider implements EmailProvider {
   }
 
   async fetchMessage(messageId: string): Promise<ParsedMessage> {
-    const msg = await this.client.getMessage(messageId);
-    return parseGmailMessage(msg);
+    return invoke<ParsedMessage>("gmail_get_parsed_message", {
+      accountId: this.accountId,
+      messageId,
+    });
   }
 
   async fetchAttachment(
     messageId: string,
     attachmentId: string,
   ): Promise<{ data: string; size: number }> {
-    const resp = await this.client.getAttachment(messageId, attachmentId);
-    return { data: resp.data, size: resp.size };
+    const resp = await invoke<RustGmailAttachmentData>(
+      "gmail_fetch_attachment",
+      {
+        accountId: this.accountId,
+        messageId,
+        attachmentId,
+      },
+    );
+    return { data: resp.data, size: resp.size ?? 0 };
   }
 
   async fetchRawMessage(messageId: string): Promise<string> {
     // Gmail API with format=raw returns a { raw: string } field (base64url-encoded RFC822)
-    const resp = await this.client.getMessage(messageId, "raw");
-    const base64 = resp.raw.replace(/-/g, "+").replace(/_/g, "/");
+    const resp = await invoke<RustGmailMessage>("gmail_get_message", {
+      accountId: this.accountId,
+      messageId,
+      format: "raw",
+    });
+    const raw = resp.raw ?? "";
+    const base64 = raw.replace(/-/g, "+").replace(/_/g, "/");
     return atob(base64);
   }
 
   async archive(threadId: string, _messageIds: string[]): Promise<void> {
-    await this.client.modifyThread(threadId, undefined, ["INBOX"]);
+    await invoke<unknown>("gmail_modify_thread", {
+      accountId: this.accountId,
+      threadId,
+      addLabels: [],
+      removeLabels: ["INBOX"],
+    });
   }
 
   async trash(threadId: string, _messageIds: string[]): Promise<void> {
-    await this.client.modifyThread(threadId, ["TRASH"], ["INBOX"]);
+    await invoke<unknown>("gmail_modify_thread", {
+      accountId: this.accountId,
+      threadId,
+      addLabels: ["TRASH"],
+      removeLabels: ["INBOX"],
+    });
   }
 
   async permanentDelete(
     threadId: string,
     _messageIds: string[],
   ): Promise<void> {
-    await this.client.deleteThread(threadId);
+    await invoke<void>("gmail_delete_thread", {
+      accountId: this.accountId,
+      threadId,
+    });
   }
 
   async markRead(
@@ -162,11 +266,12 @@ export class GmailApiProvider implements EmailProvider {
     _messageIds: string[],
     read: boolean,
   ): Promise<void> {
-    await this.client.modifyThread(
+    await invoke<unknown>("gmail_modify_thread", {
+      accountId: this.accountId,
       threadId,
-      read ? undefined : ["UNREAD"],
-      read ? ["UNREAD"] : undefined,
-    );
+      addLabels: read ? [] : ["UNREAD"],
+      removeLabels: read ? ["UNREAD"] : [],
+    });
   }
 
   async star(
@@ -174,11 +279,12 @@ export class GmailApiProvider implements EmailProvider {
     _messageIds: string[],
     starred: boolean,
   ): Promise<void> {
-    await this.client.modifyThread(
+    await invoke<unknown>("gmail_modify_thread", {
+      accountId: this.accountId,
       threadId,
-      starred ? ["STARRED"] : undefined,
-      starred ? undefined : ["STARRED"],
-    );
+      addLabels: starred ? ["STARRED"] : [],
+      removeLabels: starred ? [] : ["STARRED"],
+    });
   }
 
   async spam(
@@ -186,11 +292,12 @@ export class GmailApiProvider implements EmailProvider {
     _messageIds: string[],
     isSpam: boolean,
   ): Promise<void> {
-    await this.client.modifyThread(
+    await invoke<unknown>("gmail_modify_thread", {
+      accountId: this.accountId,
       threadId,
-      isSpam ? ["SPAM"] : ["INBOX"],
-      isSpam ? ["INBOX"] : ["SPAM"],
-    );
+      addLabels: isSpam ? ["SPAM"] : ["INBOX"],
+      removeLabels: isSpam ? ["INBOX"] : ["SPAM"],
+    });
   }
 
   async moveToFolder(
@@ -198,22 +305,41 @@ export class GmailApiProvider implements EmailProvider {
     _messageIds: string[],
     folderPath: string,
   ): Promise<void> {
-    await this.client.modifyThread(threadId, [folderPath], undefined);
+    await invoke<unknown>("gmail_modify_thread", {
+      accountId: this.accountId,
+      threadId,
+      addLabels: [folderPath],
+      removeLabels: [],
+    });
   }
 
   async addLabel(threadId: string, labelId: string): Promise<void> {
-    await this.client.modifyThread(threadId, [labelId], undefined);
+    await invoke<unknown>("gmail_modify_thread", {
+      accountId: this.accountId,
+      threadId,
+      addLabels: [labelId],
+      removeLabels: [],
+    });
   }
 
   async removeLabel(threadId: string, labelId: string): Promise<void> {
-    await this.client.modifyThread(threadId, undefined, [labelId]);
+    await invoke<unknown>("gmail_modify_thread", {
+      accountId: this.accountId,
+      threadId,
+      addLabels: [],
+      removeLabels: [labelId],
+    });
   }
 
   async sendMessage(
     rawBase64Url: string,
     threadId?: string,
   ): Promise<{ id: string }> {
-    const resp = await this.client.sendMessage(rawBase64Url, threadId);
+    const resp = await invoke<RustGmailSendResult>("gmail_send_email", {
+      accountId: this.accountId,
+      raw: rawBase64Url,
+      threadId: threadId ?? null,
+    });
     return { id: resp.id };
   }
 
@@ -221,7 +347,11 @@ export class GmailApiProvider implements EmailProvider {
     rawBase64Url: string,
     threadId?: string,
   ): Promise<{ draftId: string }> {
-    const resp = await this.client.createDraft(rawBase64Url, threadId);
+    const resp = await invoke<RustGmailDraft>("gmail_create_draft", {
+      accountId: this.accountId,
+      raw: rawBase64Url,
+      threadId: threadId ?? null,
+    });
     return { draftId: resp.id };
   }
 
@@ -230,17 +360,27 @@ export class GmailApiProvider implements EmailProvider {
     rawBase64Url: string,
     threadId?: string,
   ): Promise<{ draftId: string }> {
-    const resp = await this.client.updateDraft(draftId, rawBase64Url, threadId);
+    const resp = await invoke<RustGmailDraft>("gmail_update_draft", {
+      accountId: this.accountId,
+      draftId,
+      raw: rawBase64Url,
+      threadId: threadId ?? null,
+    });
     return { draftId: resp.id };
   }
 
   async deleteDraft(draftId: string): Promise<void> {
-    await this.client.deleteDraft(draftId);
+    await invoke<void>("gmail_delete_draft", {
+      accountId: this.accountId,
+      draftId,
+    });
   }
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
     try {
-      const profile = await this.client.getProfile();
+      const profile = await invoke<RustGmailProfile>("gmail_test_connection", {
+        accountId: this.accountId,
+      });
       return {
         success: true,
         message: `Connected as ${profile.emailAddress}`,
@@ -249,13 +389,15 @@ export class GmailApiProvider implements EmailProvider {
       return {
         success: false,
         message:
-          err instanceof Error ? err.message : "Unknown connection error",
+          err instanceof Error ? err.message : String(err),
       };
     }
   }
 
   async getProfile(): Promise<{ email: string; name?: string | undefined }> {
-    const profile = await this.client.getProfile();
+    const profile = await invoke<RustGmailProfile>("gmail_test_connection", {
+      accountId: this.accountId,
+    });
     return { email: profile.emailAddress };
   }
 }

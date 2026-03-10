@@ -1202,3 +1202,33 @@ export function syncImapDelta(
 ): Promise<ImapSyncResult> {
   return invoke<ImapSyncResult>("sync_imap_delta", { accountId, daysBack });
 }
+
+// ── Gmail Sync Engine ───────────────────────────────────────────────
+
+/** Result returned by Rust Gmail delta sync command. */
+export interface GmailSyncResult {
+  newInboxMessageIds: string[];
+  affectedThreadIds: string[];
+}
+
+/**
+ * Run initial Gmail sync entirely in Rust.
+ * Pipeline: Gmail API → parse → DB write → body store → tantivy index.
+ * Syncs labels, fetches threads from the last `daysBack` days, stores everything.
+ */
+export function syncGmailInitial(
+  accountId: string,
+  daysBack: number,
+): Promise<void> {
+  return invoke<void>("gmail_sync_initial", { accountId, daysBack });
+}
+
+/**
+ * Run delta Gmail sync entirely in Rust via History API.
+ * Returns new inbox message IDs and affected thread IDs for TS post-sync hooks.
+ */
+export function syncGmailDelta(
+  accountId: string,
+): Promise<GmailSyncResult> {
+  return invoke<GmailSyncResult>("gmail_sync_delta", { accountId });
+}

@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { normalizeEmail } from "@/utils/emailUtils";
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
 import {
@@ -9,11 +10,17 @@ import { getSecureSetting, getSetting } from "../db/settings";
 import { startOAuthFlow } from "./auth";
 import { GmailClient } from "./client";
 
-// In-memory cache of active GmailClient instances per account
+// In-memory cache of active GmailClient instances per account.
+// @deprecated — kept only for callers that still use `getGmailClient()`.
+// New code should use Tauri `gmail_*` commands or the EmailProvider abstraction.
 const clients: Map<string, GmailClient> = new Map<string, GmailClient>();
 
 /**
  * Get or create a GmailClient for the given account.
+ *
+ * @deprecated Use the Rust Gmail client via Tauri `gmail_*` commands instead.
+ * This function is retained only for callers that have not yet been migrated
+ * (e.g. sync.ts, calendar). It will be removed in a future phase.
  */
 export async function getGmailClient(accountId: string): Promise<GmailClient> {
   const existing = clients.get(accountId);
@@ -46,9 +53,15 @@ export async function getGmailClient(accountId: string): Promise<GmailClient> {
 
 /**
  * Remove a client from cache (e.g., on account removal or re-auth).
+ * Also evicts the Rust-side Gmail client.
  */
-export function removeClient(accountId: string): void {
+export async function removeClient(accountId: string): Promise<void> {
   clients.delete(accountId);
+  try {
+    await invoke<void>("gmail_remove_client", { accountId });
+  } catch {
+    // Rust client may not have been initialized — safe to ignore
+  }
 }
 
 /**
@@ -74,6 +87,8 @@ export async function getClientSecret(): Promise<string | undefined> {
 
 /**
  * Initialize clients for all active accounts on app startup.
+ * For Gmail API accounts, initializes the Rust-side Gmail client via Tauri command.
+ * Also creates legacy TS GmailClient instances for callers not yet migrated.
  */
 export async function initializeClients(): Promise<void> {
   const accounts = await getAllAccounts();
@@ -84,6 +99,19 @@ export async function initializeClients(): Promise<void> {
 
   for (const account of accounts) {
     if (account.is_active && account.access_token && account.refresh_token) {
+      // Initialize Rust-side Gmail client (canonical path)
+      if (account.provider !== "imap") {
+        try {
+          await invoke<void>("gmail_init_client", { accountId: account.id });
+        } catch (err) {
+          console.error(
+            `Failed to init Rust Gmail client for ${account.id}:`,
+            err,
+          );
+        }
+      }
+
+      // Create legacy TS GmailClient for callers not yet migrated
       const client = new GmailClient(
         account.id,
         clientId,
@@ -135,8 +163,22 @@ export async function reauthorizeAccount(
     expiresAt,
   );
 
-  // Evict stale client and create a fresh one
+  // Evict stale clients and re-initialize
   clients.delete(accountId);
+
+  // Re-init Rust-side client (reads fresh tokens from DB)
+  try {
+    await invoke<void>("gmail_remove_client", { accountId });
+  } catch {
+    // May not have been initialized yet
+  }
+  try {
+    await invoke<void>("gmail_init_client", { accountId });
+  } catch (err) {
+    console.error(`Failed to re-init Rust Gmail client for ${accountId}:`, err);
+  }
+
+  // Create legacy TS client for callers not yet migrated
   const client = new GmailClient(
     accountId,
     clientId,

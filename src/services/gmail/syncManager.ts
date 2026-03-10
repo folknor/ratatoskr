@@ -21,11 +21,12 @@ import {
 } from "../db/threads";
 import { imapDeltaSync, imapInitialSync } from "../imap/imapSync";
 import { ensureFreshToken } from "../oauth/oauthTokenManager";
-import { deltaSync, initialSync, type SyncProgress } from "./sync";
-import { getGmailClient } from "./tokenManager";
+import { type SyncProgress } from "./sync";
 import {
   syncImapInitial,
   syncImapDelta,
+  syncGmailInitial,
+  syncGmailDelta,
   type ImapSyncResult,
 } from "@/core/rustDb";
 import { applyFiltersToNewMessageIds } from "@/services/filters/filterEngine";
@@ -76,11 +77,13 @@ export function onSyncStatus(cb: SyncStatusCallback): () => void {
 
 /**
  * Run a sync for a single Gmail API account (initial or delta).
+ *
+ * The entire sync pipeline runs in Rust: Gmail API calls → message parsing →
+ * DB writes → body store → tantivy indexing → label sync.
+ * TS only calls the Rust command and runs post-sync hooks on the result.
  */
 async function syncGmailAccount(accountId: string): Promise<void> {
-  const client = await getGmailClient(accountId);
   const account = await getAccount(accountId);
-
   if (!account) {
     throw new Error("Account not found");
   }
@@ -88,26 +91,119 @@ async function syncGmailAccount(accountId: string): Promise<void> {
   const syncPeriodStr = await getSetting("sync_period_days");
   const syncDays = parseInt(syncPeriodStr ?? "365", 10) || 365;
 
-  if (account.history_id) {
-    // Delta sync
-    try {
-      await deltaSync(client, accountId, account.history_id);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err ?? "");
-      if (message === "HISTORY_EXPIRED") {
-        // Fallback to full sync
-        await initialSync(client, accountId, syncDays, (progress) => {
-          statusCallback?.(accountId, "syncing", progress);
-        });
-      } else {
-        throw err;
-      }
-    }
-  } else {
-    // First time — full initial sync
-    await initialSync(client, accountId, syncDays, (progress) => {
-      statusCallback?.(accountId, "syncing", progress);
+  // Listen for progress events from Rust
+  let unlisten: UnlistenFn | null = null;
+  try {
+    unlisten = await listen<{
+      accountId: string;
+      phase: string;
+      current: number;
+      total: number;
+    }>("gmail-sync-progress", (event) => {
+      if (event.payload.accountId !== accountId) return;
+      statusCallback?.(accountId, "syncing", {
+        phase: mapImapPhase(event.payload.phase),
+        current: event.payload.current,
+        total: event.payload.total,
+      });
     });
+  } catch {
+    // Listen failure is non-fatal — sync will work without progress events
+  }
+
+  try {
+    if (account.history_id) {
+      // Delta sync
+      try {
+        const result = await syncGmailDelta(accountId);
+
+        // Post-sync hooks: apply filters and smart labels to new inbox messages
+        if (result.newInboxMessageIds.length > 0) {
+          try {
+            await applyFiltersToNewMessageIds(
+              accountId,
+              result.newInboxMessageIds,
+            );
+          } catch (err) {
+            console.error("[syncManager] Filter application failed:", err);
+          }
+
+          // Smart labels (fire-and-forget)
+          applySmartLabelsToNewMessageIds(
+            accountId,
+            result.newInboxMessageIds,
+          ).catch((err) =>
+            console.error("[syncManager] Smart label error:", err),
+          );
+
+          // Notifications for new inbox messages
+          try {
+            const smartNotifSetting = await getSetting("smart_notifications");
+            const smartEnabled = smartNotifSetting === "true";
+            const notifCatSetting =
+              (await getSetting("notify_categories")) ?? "Primary";
+            const allowedCategories = new Set(
+              notifCatSetting.split(",").map((s) => s.trim()),
+            );
+            const vipSenders = smartEnabled
+              ? await getVipSenders(accountId)
+              : new Set<string>();
+            const mutedThreadIds = await getMutedThreadIds(accountId);
+
+            const newMsgs = await getMessagesByIds(
+              accountId,
+              result.newInboxMessageIds,
+            );
+            for (const msg of newMsgs) {
+              if (mutedThreadIds.has(msg.thread_id)) continue;
+              const category = await getThreadCategory(
+                accountId,
+                msg.thread_id,
+              );
+              if (
+                shouldNotifyForMessage(
+                  smartEnabled,
+                  allowedCategories,
+                  vipSenders,
+                  category,
+                  msg.from_address ?? undefined,
+                )
+              ) {
+                queueNewEmailNotification(
+                  msg.from_name ?? msg.from_address ?? "Unknown",
+                  msg.subject ?? "",
+                  msg.thread_id,
+                  accountId,
+                  msg.from_address ?? undefined,
+                );
+              }
+            }
+          } catch (err) {
+            console.error("[syncManager] Notification dispatch failed:", err);
+          }
+        }
+
+        // AI categorization (fire-and-forget)
+        if (result.affectedThreadIds.length > 0) {
+          categorizeNewThreads(accountId).catch((err) =>
+            console.error("[syncManager] Categorization error:", err),
+          );
+        }
+      } catch (err) {
+        const message = String(err ?? "");
+        if (message === "HISTORY_EXPIRED" || message.includes("HISTORY_EXPIRED")) {
+          // Fallback to full sync
+          await syncGmailInitial(accountId, syncDays);
+        } else {
+          throw err;
+        }
+      }
+    } else {
+      // First time — full initial sync
+      await syncGmailInitial(accountId, syncDays);
+    }
+  } finally {
+    unlisten?.();
   }
 }
 

@@ -1,15 +1,19 @@
 import { vi } from "vitest";
-import { createMockGmailClient } from "@/test/mocks";
-import type { GmailClient } from "../gmail/client";
+import { invoke } from "@tauri-apps/api/core";
 import { GmailApiProvider } from "./gmailProvider";
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+}));
+
+const mockInvoke = vi.mocked(invoke);
 
 describe("GmailApiProvider", () => {
   let provider: GmailApiProvider;
-  let mockClient: GmailClient;
 
   beforeEach(() => {
-    mockClient = createMockGmailClient();
-    provider = new GmailApiProvider("account-1", mockClient);
+    vi.clearAllMocks();
+    provider = new GmailApiProvider("account-1");
   });
 
   it("has correct accountId and type", () => {
@@ -19,34 +23,35 @@ describe("GmailApiProvider", () => {
 
   describe("listFolders", () => {
     it("maps Gmail labels to EmailFolder format", async () => {
-      vi.mocked(mockClient.listLabels).mockResolvedValue({
-        labels: [
-          {
-            id: "INBOX",
-            name: "INBOX",
-            type: "system",
-            messagesTotal: 100,
-            messagesUnread: 5,
-          },
-          {
-            id: "SENT",
-            name: "SENT",
-            type: "system",
-            messagesTotal: 50,
-            messagesUnread: 0,
-          },
-          {
-            id: "Label_1",
-            name: "My Label",
-            type: "user",
-            messagesTotal: 10,
-            messagesUnread: 2,
-          },
-        ],
-      });
+      mockInvoke.mockResolvedValue([
+        {
+          id: "INBOX",
+          name: "INBOX",
+          labelType: "system",
+          messagesTotal: 100,
+          messagesUnread: 5,
+        },
+        {
+          id: "SENT",
+          name: "SENT",
+          labelType: "system",
+          messagesTotal: 50,
+          messagesUnread: 0,
+        },
+        {
+          id: "Label_1",
+          name: "My Label",
+          labelType: "user",
+          messagesTotal: 10,
+          messagesUnread: 2,
+        },
+      ]);
 
       const folders = await provider.listFolders();
 
+      expect(mockInvoke).toHaveBeenCalledWith("gmail_list_labels", {
+        accountId: "account-1",
+      });
       expect(folders).toHaveLength(3);
       expect(folders[0]).toEqual({
         id: "INBOX",
@@ -81,13 +86,11 @@ describe("GmailApiProvider", () => {
     });
 
     it("maps special-use flags for system labels", async () => {
-      vi.mocked(mockClient.listLabels).mockResolvedValue({
-        labels: [
-          { id: "TRASH", name: "TRASH", type: "system" },
-          { id: "DRAFT", name: "DRAFT", type: "system" },
-          { id: "SPAM", name: "SPAM", type: "system" },
-        ],
-      });
+      mockInvoke.mockResolvedValue([
+        { id: "TRASH", name: "TRASH", labelType: "system", messagesTotal: null, messagesUnread: null },
+        { id: "DRAFT", name: "DRAFT", labelType: "system", messagesTotal: null, messagesUnread: null },
+        { id: "SPAM", name: "SPAM", labelType: "system", messagesTotal: null, messagesUnread: null },
+      ]);
 
       const folders = await provider.listFolders();
 
@@ -99,262 +102,204 @@ describe("GmailApiProvider", () => {
 
   describe("createFolder", () => {
     it("creates a label and returns EmailFolder", async () => {
-      vi.mocked(mockClient.createLabel).mockResolvedValue({
+      mockInvoke.mockResolvedValue({
         id: "Label_new",
         name: "New Folder",
-        type: "user",
+        labelType: "user",
       });
 
       const folder = await provider.createFolder("New Folder");
 
-      expect(mockClient.createLabel).toHaveBeenCalledWith("New Folder");
+      expect(mockInvoke).toHaveBeenCalledWith("gmail_create_label", {
+        accountId: "account-1",
+        name: "New Folder",
+      });
       expect(folder.id).toBe("Label_new");
       expect(folder.name).toBe("New Folder");
       expect(folder.type).toBe("user");
     });
 
     it("prepends parent path when provided", async () => {
-      vi.mocked(mockClient.createLabel).mockResolvedValue({
+      mockInvoke.mockResolvedValue({
         id: "Label_nested",
         name: "Parent/Child",
-        type: "user",
+        labelType: "user",
       });
 
       await provider.createFolder("Child", "Parent");
 
-      expect(mockClient.createLabel).toHaveBeenCalledWith("Parent/Child");
+      expect(mockInvoke).toHaveBeenCalledWith("gmail_create_label", {
+        accountId: "account-1",
+        name: "Parent/Child",
+      });
     });
   });
 
   describe("archive", () => {
     it("calls modifyThread removing INBOX label", async () => {
-      vi.mocked(mockClient.modifyThread).mockResolvedValue({
-        id: "thread-1",
-        historyId: "123",
-        messages: [],
-      });
+      mockInvoke.mockResolvedValue({});
 
       await provider.archive("thread-1", ["msg-1"]);
 
-      expect(mockClient.modifyThread).toHaveBeenCalledWith(
-        "thread-1",
-        undefined,
-        ["INBOX"],
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("gmail_modify_thread", {
+        accountId: "account-1",
+        threadId: "thread-1",
+        addLabels: [],
+        removeLabels: ["INBOX"],
+      });
     });
   });
 
   describe("trash", () => {
     it("calls modifyThread adding TRASH and removing INBOX", async () => {
-      vi.mocked(mockClient.modifyThread).mockResolvedValue({
-        id: "thread-1",
-        historyId: "123",
-        messages: [],
-      });
+      mockInvoke.mockResolvedValue({});
 
       await provider.trash("thread-1", ["msg-1"]);
 
-      expect(mockClient.modifyThread).toHaveBeenCalledWith(
-        "thread-1",
-        ["TRASH"],
-        ["INBOX"],
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("gmail_modify_thread", {
+        accountId: "account-1",
+        threadId: "thread-1",
+        addLabels: ["TRASH"],
+        removeLabels: ["INBOX"],
+      });
     });
   });
 
   describe("permanentDelete", () => {
     it("calls deleteThread", async () => {
-      vi.mocked(mockClient.deleteThread).mockResolvedValue(undefined);
+      mockInvoke.mockResolvedValue(undefined);
 
       await provider.permanentDelete("thread-1", ["msg-1"]);
 
-      expect(mockClient.deleteThread).toHaveBeenCalledWith("thread-1");
+      expect(mockInvoke).toHaveBeenCalledWith("gmail_delete_thread", {
+        accountId: "account-1",
+        threadId: "thread-1",
+      });
     });
   });
 
   describe("markRead", () => {
     it("removes UNREAD label when marking as read", async () => {
-      vi.mocked(mockClient.modifyThread).mockResolvedValue({
-        id: "thread-1",
-        historyId: "123",
-        messages: [],
-      });
+      mockInvoke.mockResolvedValue({});
 
       await provider.markRead("thread-1", ["msg-1"], true);
 
-      expect(mockClient.modifyThread).toHaveBeenCalledWith(
-        "thread-1",
-        undefined,
-        ["UNREAD"],
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("gmail_modify_thread", {
+        accountId: "account-1",
+        threadId: "thread-1",
+        addLabels: [],
+        removeLabels: ["UNREAD"],
+      });
     });
 
     it("adds UNREAD label when marking as unread", async () => {
-      vi.mocked(mockClient.modifyThread).mockResolvedValue({
-        id: "thread-1",
-        historyId: "123",
-        messages: [],
-      });
+      mockInvoke.mockResolvedValue({});
 
       await provider.markRead("thread-1", ["msg-1"], false);
 
-      expect(mockClient.modifyThread).toHaveBeenCalledWith(
-        "thread-1",
-        ["UNREAD"],
-        undefined,
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("gmail_modify_thread", {
+        accountId: "account-1",
+        threadId: "thread-1",
+        addLabels: ["UNREAD"],
+        removeLabels: [],
+      });
     });
   });
 
   describe("star", () => {
     it("adds STARRED label when starring", async () => {
-      vi.mocked(mockClient.modifyThread).mockResolvedValue({
-        id: "thread-1",
-        historyId: "123",
-        messages: [],
-      });
+      mockInvoke.mockResolvedValue({});
 
       await provider.star("thread-1", ["msg-1"], true);
 
-      expect(mockClient.modifyThread).toHaveBeenCalledWith(
-        "thread-1",
-        ["STARRED"],
-        undefined,
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("gmail_modify_thread", {
+        accountId: "account-1",
+        threadId: "thread-1",
+        addLabels: ["STARRED"],
+        removeLabels: [],
+      });
     });
 
     it("removes STARRED label when unstarring", async () => {
-      vi.mocked(mockClient.modifyThread).mockResolvedValue({
-        id: "thread-1",
-        historyId: "123",
-        messages: [],
-      });
+      mockInvoke.mockResolvedValue({});
 
       await provider.star("thread-1", ["msg-1"], false);
 
-      expect(mockClient.modifyThread).toHaveBeenCalledWith(
-        "thread-1",
-        undefined,
-        ["STARRED"],
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("gmail_modify_thread", {
+        accountId: "account-1",
+        threadId: "thread-1",
+        addLabels: [],
+        removeLabels: ["STARRED"],
+      });
     });
   });
 
   describe("spam", () => {
     it("adds SPAM and removes INBOX when marking as spam", async () => {
-      vi.mocked(mockClient.modifyThread).mockResolvedValue({
-        id: "thread-1",
-        historyId: "123",
-        messages: [],
-      });
+      mockInvoke.mockResolvedValue({});
 
       await provider.spam("thread-1", ["msg-1"], true);
 
-      expect(mockClient.modifyThread).toHaveBeenCalledWith(
-        "thread-1",
-        ["SPAM"],
-        ["INBOX"],
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("gmail_modify_thread", {
+        accountId: "account-1",
+        threadId: "thread-1",
+        addLabels: ["SPAM"],
+        removeLabels: ["INBOX"],
+      });
     });
 
     it("adds INBOX and removes SPAM when marking as not spam", async () => {
-      vi.mocked(mockClient.modifyThread).mockResolvedValue({
-        id: "thread-1",
-        historyId: "123",
-        messages: [],
-      });
+      mockInvoke.mockResolvedValue({});
 
       await provider.spam("thread-1", ["msg-1"], false);
 
-      expect(mockClient.modifyThread).toHaveBeenCalledWith(
-        "thread-1",
-        ["INBOX"],
-        ["SPAM"],
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("gmail_modify_thread", {
+        accountId: "account-1",
+        threadId: "thread-1",
+        addLabels: ["INBOX"],
+        removeLabels: ["SPAM"],
+      });
     });
   });
 
   describe("sendMessage", () => {
-    it("delegates to client.sendMessage and returns id", async () => {
-      vi.mocked(mockClient.sendMessage).mockResolvedValue({
-        id: "sent-msg-1",
-        threadId: "thread-1",
-        labelIds: ["SENT"],
-        snippet: "",
-        historyId: "456",
-        internalDate: "1700000000000",
-        payload: {
-          partId: "",
-          mimeType: "text/plain",
-          filename: "",
-          headers: [],
-          body: { size: 0 },
-        },
-        sizeEstimate: 100,
-      });
+    it("delegates to gmail_send_email and returns id", async () => {
+      mockInvoke.mockResolvedValue({ id: "sent-msg-1" });
 
       const result = await provider.sendMessage("base64data", "thread-1");
 
-      expect(mockClient.sendMessage).toHaveBeenCalledWith(
-        "base64data",
-        "thread-1",
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("gmail_send_email", {
+        accountId: "account-1",
+        raw: "base64data",
+        threadId: "thread-1",
+      });
       expect(result).toEqual({ id: "sent-msg-1" });
     });
   });
 
   describe("createDraft", () => {
-    it("delegates to client.createDraft and returns draftId", async () => {
-      vi.mocked(mockClient.createDraft).mockResolvedValue({
+    it("delegates to gmail_create_draft and returns draftId", async () => {
+      mockInvoke.mockResolvedValue({
         id: "draft-1",
-        message: {
-          id: "msg-1",
-          threadId: "thread-1",
-          labelIds: ["DRAFT"],
-          snippet: "",
-          historyId: "789",
-          internalDate: "1700000000000",
-          payload: {
-            partId: "",
-            mimeType: "text/plain",
-            filename: "",
-            headers: [],
-            body: { size: 0 },
-          },
-          sizeEstimate: 100,
-        },
+        message: { id: "msg-1", threadId: "thread-1" },
       });
 
       const result = await provider.createDraft("base64data", "thread-1");
 
-      expect(mockClient.createDraft).toHaveBeenCalledWith(
-        "base64data",
-        "thread-1",
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("gmail_create_draft", {
+        accountId: "account-1",
+        raw: "base64data",
+        threadId: "thread-1",
+      });
       expect(result).toEqual({ draftId: "draft-1" });
     });
   });
 
   describe("updateDraft", () => {
-    it("delegates to client.updateDraft and returns draftId", async () => {
-      vi.mocked(mockClient.updateDraft).mockResolvedValue({
+    it("delegates to gmail_update_draft and returns draftId", async () => {
+      mockInvoke.mockResolvedValue({
         id: "draft-1",
-        message: {
-          id: "msg-1",
-          threadId: "thread-1",
-          labelIds: ["DRAFT"],
-          snippet: "",
-          historyId: "789",
-          internalDate: "1700000000000",
-          payload: {
-            partId: "",
-            mimeType: "text/plain",
-            filename: "",
-            headers: [],
-            body: { size: 0 },
-          },
-          sizeEstimate: 100,
-        },
+        message: { id: "msg-1", threadId: "thread-1" },
       });
 
       const result = await provider.updateDraft(
@@ -363,28 +308,32 @@ describe("GmailApiProvider", () => {
         "thread-1",
       );
 
-      expect(mockClient.updateDraft).toHaveBeenCalledWith(
-        "draft-1",
-        "base64data",
-        "thread-1",
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("gmail_update_draft", {
+        accountId: "account-1",
+        draftId: "draft-1",
+        raw: "base64data",
+        threadId: "thread-1",
+      });
       expect(result).toEqual({ draftId: "draft-1" });
     });
   });
 
   describe("deleteDraft", () => {
-    it("delegates to client.deleteDraft", async () => {
-      vi.mocked(mockClient.deleteDraft).mockResolvedValue(undefined);
+    it("delegates to gmail_delete_draft", async () => {
+      mockInvoke.mockResolvedValue(undefined);
 
       await provider.deleteDraft("draft-1");
 
-      expect(mockClient.deleteDraft).toHaveBeenCalledWith("draft-1");
+      expect(mockInvoke).toHaveBeenCalledWith("gmail_delete_draft", {
+        accountId: "account-1",
+        draftId: "draft-1",
+      });
     });
   });
 
   describe("testConnection", () => {
     it("returns success when getProfile succeeds", async () => {
-      vi.mocked(mockClient.getProfile).mockResolvedValue({
+      mockInvoke.mockResolvedValue({
         emailAddress: "user@gmail.com",
         messagesTotal: 1000,
         threadsTotal: 500,
@@ -400,9 +349,7 @@ describe("GmailApiProvider", () => {
     });
 
     it("returns failure when getProfile throws", async () => {
-      vi.mocked(mockClient.getProfile).mockRejectedValue(
-        new Error("Token expired"),
-      );
+      mockInvoke.mockRejectedValue(new Error("Token expired"));
 
       const result = await provider.testConnection();
 
@@ -415,7 +362,7 @@ describe("GmailApiProvider", () => {
 
   describe("getProfile", () => {
     it("returns email from Gmail profile", async () => {
-      vi.mocked(mockClient.getProfile).mockResolvedValue({
+      mockInvoke.mockResolvedValue({
         emailAddress: "user@gmail.com",
         messagesTotal: 1000,
         threadsTotal: 500,
@@ -430,27 +377,31 @@ describe("GmailApiProvider", () => {
 
   describe("fetchRawMessage", () => {
     it("fetches raw format and decodes base64url to string", async () => {
-      // "Hello World" in base64url
-      const base64url = btoa(
-        "From: test@example.com\r\nSubject: Hi\r\n\r\nHello",
-      )
+      const rawContent = "From: test@example.com\r\nSubject: Hi\r\n\r\nHello";
+      const base64url = btoa(rawContent)
         .replace(/\+/g, "-")
         .replace(/\//g, "_")
         .replace(/=+$/, "");
-      vi.mocked(mockClient.getMessage).mockResolvedValue({
+      mockInvoke.mockResolvedValue({
+        id: "msg-1",
+        threadId: "thread-1",
         raw: base64url,
-      } as never);
+      });
 
       const result = await provider.fetchRawMessage("msg-1");
 
-      expect(mockClient.getMessage).toHaveBeenCalledWith("msg-1", "raw");
-      expect(result).toBe("From: test@example.com\r\nSubject: Hi\r\n\r\nHello");
+      expect(mockInvoke).toHaveBeenCalledWith("gmail_get_message", {
+        accountId: "account-1",
+        messageId: "msg-1",
+        format: "raw",
+      });
+      expect(result).toBe(rawContent);
     });
   });
 
   describe("fetchAttachment", () => {
-    it("delegates to client.getAttachment", async () => {
-      vi.mocked(mockClient.getAttachment).mockResolvedValue({
+    it("delegates to gmail_fetch_attachment", async () => {
+      mockInvoke.mockResolvedValue({
         attachmentId: "att-1",
         size: 1024,
         data: "base64data",
@@ -458,42 +409,40 @@ describe("GmailApiProvider", () => {
 
       const result = await provider.fetchAttachment("msg-1", "att-1");
 
-      expect(mockClient.getAttachment).toHaveBeenCalledWith("msg-1", "att-1");
+      expect(mockInvoke).toHaveBeenCalledWith("gmail_fetch_attachment", {
+        accountId: "account-1",
+        messageId: "msg-1",
+        attachmentId: "att-1",
+      });
       expect(result).toEqual({ data: "base64data", size: 1024 });
     });
   });
 
   describe("addLabel / removeLabel", () => {
     it("addLabel calls modifyThread with add", async () => {
-      vi.mocked(mockClient.modifyThread).mockResolvedValue({
-        id: "thread-1",
-        historyId: "123",
-        messages: [],
-      });
+      mockInvoke.mockResolvedValue({});
 
       await provider.addLabel("thread-1", "Label_1");
 
-      expect(mockClient.modifyThread).toHaveBeenCalledWith(
-        "thread-1",
-        ["Label_1"],
-        undefined,
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("gmail_modify_thread", {
+        accountId: "account-1",
+        threadId: "thread-1",
+        addLabels: ["Label_1"],
+        removeLabels: [],
+      });
     });
 
     it("removeLabel calls modifyThread with remove", async () => {
-      vi.mocked(mockClient.modifyThread).mockResolvedValue({
-        id: "thread-1",
-        historyId: "123",
-        messages: [],
-      });
+      mockInvoke.mockResolvedValue({});
 
       await provider.removeLabel("thread-1", "Label_1");
 
-      expect(mockClient.modifyThread).toHaveBeenCalledWith(
-        "thread-1",
-        undefined,
-        ["Label_1"],
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("gmail_modify_thread", {
+        accountId: "account-1",
+        threadId: "thread-1",
+        addLabels: [],
+        removeLabels: ["Label_1"],
+      });
     });
   });
 });
