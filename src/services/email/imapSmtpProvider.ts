@@ -2,12 +2,7 @@ import { type DbAccount, getAccount } from "../db/accounts";
 import type { ParsedMessage } from "../gmail/messageParser";
 import { getSyncableFolders, mapFolderToLabel } from "../imap/folderMapper";
 import { buildImapConfig, buildSmtpConfig } from "../imap/imapConfigBuilder";
-import {
-  type ImapSyncProgress,
-  imapDeltaSync,
-  imapInitialSync,
-  imapMessageToParsedMessage,
-} from "../imap/imapSync";
+import { imapMessageToParsedMessage } from "../imap/imapSyncConvert";
 import { findSpecialFolder } from "../imap/messageHelper";
 import {
   type ImapConfig,
@@ -132,22 +127,20 @@ export class ImapSmtpProvider implements EmailProvider {
   // ---- Sync operations ----
 
   async initialSync(
-    daysBack: number,
-    onProgress?: (phase: string, current: number, total: number) => void,
+    _daysBack: number,
+    _onProgress?: (phase: string, current: number, total: number) => void,
   ): Promise<SyncResult> {
-    return imapInitialSync(
-      this.accountId,
-      daysBack,
-      onProgress
-        ? (p: ImapSyncProgress): void => {
-            onProgress(p.phase, p.current, p.total);
-          }
-        : undefined,
+    throw new Error(
+      "IMAP sync is handled by the Rust sync engine via syncManager. " +
+        "Do not call initialSync() on ImapSmtpProvider directly.",
     );
   }
 
   async deltaSync(_syncToken: string): Promise<SyncResult> {
-    return imapDeltaSync(this.accountId);
+    throw new Error(
+      "IMAP sync is handled by the Rust sync engine via syncManager. " +
+        "Do not call deltaSync() on ImapSmtpProvider directly.",
+    );
   }
 
   // ---- Message operations ----

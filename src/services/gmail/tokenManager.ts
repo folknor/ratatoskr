@@ -8,55 +8,12 @@ import {
 } from "../db/accounts";
 import { getSecureSetting, getSetting } from "../db/settings";
 import { startOAuthFlow } from "./auth";
-import { GmailClient } from "./client";
-
-// In-memory cache of active GmailClient instances per account.
-// @deprecated — kept only for callers that still use `getGmailClient()`.
-// New code should use Tauri `gmail_*` commands or the EmailProvider abstraction.
-const clients: Map<string, GmailClient> = new Map<string, GmailClient>();
-
-/**
- * Get or create a GmailClient for the given account.
- *
- * @deprecated Use the Rust Gmail client via Tauri `gmail_*` commands instead.
- * This function is retained only for callers that have not yet been migrated
- * (e.g. sync.ts, calendar). It will be removed in a future phase.
- */
-export async function getGmailClient(accountId: string): Promise<GmailClient> {
-  const existing = clients.get(accountId);
-  if (existing) return existing;
-
-  const clientId = await getClientId();
-  const clientSecret = await getClientSecret();
-  const accounts = await getAllAccounts();
-  const account = accounts.find((a) => a.id === accountId);
-
-  if (!account) throw new Error(`Account ${accountId} not found`);
-  if (!(account.access_token && account.refresh_token)) {
-    throw new Error(`Account ${accountId} has no tokens`);
-  }
-
-  const client = new GmailClient(
-    accountId,
-    clientId,
-    {
-      accessToken: account.access_token,
-      refreshToken: account.refresh_token,
-      expiresAt: account.token_expires_at ?? 0,
-    },
-    clientSecret,
-  );
-
-  clients.set(accountId, client);
-  return client;
-}
 
 /**
  * Remove a client from cache (e.g., on account removal or re-auth).
- * Also evicts the Rust-side Gmail client.
+ * Evicts the Rust-side Gmail client.
  */
 export async function removeClient(accountId: string): Promise<void> {
-  clients.delete(accountId);
   try {
     await invoke<void>("gmail_remove_client", { accountId });
   } catch {
@@ -86,20 +43,15 @@ export async function getClientSecret(): Promise<string | undefined> {
 }
 
 /**
- * Initialize clients for all active accounts on app startup.
- * For Gmail API accounts, initializes the Rust-side Gmail client via Tauri command.
- * Also creates legacy TS GmailClient instances for callers not yet migrated.
+ * Initialize Rust-side Gmail clients for all active Gmail API accounts on app startup.
  */
 export async function initializeClients(): Promise<void> {
   const accounts = await getAllAccounts();
   const clientId = await getSetting("google_client_id");
   if (!clientId) return;
-  const clientSecret =
-    (await getSecureSetting("google_client_secret")) ?? undefined;
 
   for (const account of accounts) {
     if (account.is_active && account.access_token && account.refresh_token) {
-      // Initialize Rust-side Gmail client (canonical path)
       if (account.provider === "gmail_api") {
         try {
           await invoke<void>("gmail_init_client", { accountId: account.id });
@@ -110,19 +62,6 @@ export async function initializeClients(): Promise<void> {
           );
         }
       }
-
-      // Create legacy TS GmailClient for callers not yet migrated
-      const client = new GmailClient(
-        account.id,
-        clientId,
-        {
-          accessToken: account.access_token,
-          refreshToken: account.refresh_token,
-          expiresAt: account.token_expires_at ?? 0,
-        },
-        clientSecret,
-      );
-      clients.set(account.id, client);
     }
   }
 }
@@ -163,9 +102,6 @@ export async function reauthorizeAccount(
     expiresAt,
   );
 
-  // Evict stale clients and re-initialize
-  clients.delete(accountId);
-
   // Re-init Rust-side client (reads fresh tokens from DB)
   try {
     await invoke<void>("gmail_remove_client", { accountId });
@@ -177,17 +113,4 @@ export async function reauthorizeAccount(
   } catch (err) {
     console.error(`Failed to re-init Rust Gmail client for ${accountId}:`, err);
   }
-
-  // Create legacy TS client for callers not yet migrated
-  const client = new GmailClient(
-    accountId,
-    clientId,
-    {
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      expiresAt,
-    },
-    clientSecret,
-  );
-  clients.set(accountId, client);
 }

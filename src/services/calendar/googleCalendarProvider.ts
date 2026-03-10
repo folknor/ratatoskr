@@ -1,5 +1,4 @@
-import type { GmailClient } from "@/services/gmail/client";
-import { getGmailClient } from "@/services/gmail/tokenManager";
+import { invoke } from "@tauri-apps/api/core";
 import type {
   CalendarEventData,
   CalendarInfo,
@@ -11,6 +10,8 @@ import type {
 } from "./types";
 
 const CALENDAR_API_BASE = "https://www.googleapis.com/calendar/v3";
+const MAX_RETRY_ATTEMPTS = 3;
+const INITIAL_BACKOFF_MS = 1000;
 
 interface GoogleCalendarListItem {
   id: string;
@@ -49,6 +50,71 @@ interface GoogleEventListResponse {
   nextSyncToken?: string;
 }
 
+/**
+ * Make an authenticated request to the Google Calendar API.
+ * Handles 401 (token refresh + retry) and 429 (rate limit with exponential backoff).
+ */
+async function calendarRequest<T>(
+  accountId: string,
+  url: string,
+  options: RequestInit = {},
+): Promise<T> {
+  let token = await invoke<string>("gmail_get_access_token", { accountId });
+
+  const doFetch = async (accessToken: string): Promise<Response> => {
+    let lastResponse: Response | undefined;
+    for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt++) {
+      const response = await fetch(url, {
+        ...options,
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          ...options.headers,
+        },
+      });
+      if (response.status !== 429) return response;
+
+      lastResponse = response;
+      if (attempt === MAX_RETRY_ATTEMPTS - 1) break;
+
+      const backoffMs = INITIAL_BACKOFF_MS * 2 ** attempt;
+      const retryAfter = response.headers.get("Retry-After");
+      let delayMs = backoffMs;
+      if (retryAfter) {
+        const seconds = parseInt(retryAfter, 10);
+        delayMs = !isNaN(seconds) ? seconds * 1000 : backoffMs;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    // biome-ignore lint/style/noNonNullAssertion: lastResponse is always assigned after at least one loop iteration
+    return lastResponse!;
+  };
+
+  const response = await doFetch(token);
+
+  if (response.status === 401) {
+    // Token was rejected — force-refresh via Rust and retry once
+    token = await invoke<string>("gmail_force_refresh_token", { accountId });
+    const retry = await doFetch(token);
+    if (!retry.ok) {
+      throw new Error(
+        `Calendar API error: ${retry.status} ${await retry.text()}`,
+      );
+    }
+    if (retry.status === 204) return undefined as T;
+    return retry.json();
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `Calendar API error: ${response.status} ${await response.text()}`,
+    );
+  }
+
+  if (response.status === 204) return undefined as T;
+  return response.json();
+}
+
 export class GoogleCalendarProvider implements CalendarProvider {
   readonly type: CalendarProviderType = "google_api";
   readonly accountId: string;
@@ -57,13 +123,9 @@ export class GoogleCalendarProvider implements CalendarProvider {
     this.accountId = accountId;
   }
 
-  private async getClient(): Promise<GmailClient> {
-    return getGmailClient(this.accountId);
-  }
-
   async listCalendars(): Promise<CalendarInfo[]> {
-    const client = await this.getClient();
-    const response = await client.request<GoogleCalendarListResponse>(
+    const response = await calendarRequest<GoogleCalendarListResponse>(
+      this.accountId,
       `${CALENDAR_API_BASE}/users/me/calendarList`,
     );
     return (response.items ?? []).map((cal) => ({
@@ -79,7 +141,6 @@ export class GoogleCalendarProvider implements CalendarProvider {
     timeMin: string,
     timeMax: string,
   ): Promise<CalendarEventData[]> {
-    const client = await this.getClient();
     const params = new URLSearchParams({
       timeMin,
       timeMax,
@@ -90,7 +151,10 @@ export class GoogleCalendarProvider implements CalendarProvider {
 
     const encodedId = encodeURIComponent(calendarRemoteId);
     const url = `${CALENDAR_API_BASE}/calendars/${encodedId}/events?${params}`;
-    const response = await client.request<GoogleEventListResponse>(url);
+    const response = await calendarRequest<GoogleEventListResponse>(
+      this.accountId,
+      url,
+    );
     return (response.items ?? []).map(mapGoogleEvent);
   }
 
@@ -98,7 +162,6 @@ export class GoogleCalendarProvider implements CalendarProvider {
     calendarRemoteId: string,
     event: CreateEventInput,
   ): Promise<CalendarEventData> {
-    const client = await this.getClient();
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const encodedId = encodeURIComponent(calendarRemoteId);
     const url = `${CALENDAR_API_BASE}/calendars/${encodedId}/events`;
@@ -127,10 +190,14 @@ export class GoogleCalendarProvider implements CalendarProvider {
       body.attendees = event.attendees;
     }
 
-    const created = await client.request<GoogleCalendarEvent>(url, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    const created = await calendarRequest<GoogleCalendarEvent>(
+      this.accountId,
+      url,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
     return mapGoogleEvent(created);
   }
 
@@ -139,7 +206,6 @@ export class GoogleCalendarProvider implements CalendarProvider {
     remoteEventId: string,
     event: UpdateEventInput,
   ): Promise<CalendarEventData> {
-    const client = await this.getClient();
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const encodedCalId = encodeURIComponent(calendarRemoteId);
     const encodedEventId = encodeURIComponent(remoteEventId);
@@ -166,10 +232,14 @@ export class GoogleCalendarProvider implements CalendarProvider {
       }
     }
 
-    const updated = await client.request<GoogleCalendarEvent>(url, {
-      method: "PATCH",
-      body: JSON.stringify(body),
-    });
+    const updated = await calendarRequest<GoogleCalendarEvent>(
+      this.accountId,
+      url,
+      {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      },
+    );
     return mapGoogleEvent(updated);
   }
 
@@ -177,18 +247,16 @@ export class GoogleCalendarProvider implements CalendarProvider {
     calendarRemoteId: string,
     remoteEventId: string,
   ): Promise<void> {
-    const client = await this.getClient();
     const encodedCalId = encodeURIComponent(calendarRemoteId);
     const encodedEventId = encodeURIComponent(remoteEventId);
     const url = `${CALENDAR_API_BASE}/calendars/${encodedCalId}/events/${encodedEventId}`;
-    await client.request(url, { method: "DELETE" });
+    await calendarRequest(this.accountId, url, { method: "DELETE" });
   }
 
   async syncEvents(
     calendarRemoteId: string,
     syncToken?: string,
   ): Promise<CalendarSyncResult> {
-    const client = await this.getClient();
     const encodedId = encodeURIComponent(calendarRemoteId);
     const created: CalendarEventData[] = [];
     const updated: CalendarEventData[] = [];
@@ -217,7 +285,10 @@ export class GoogleCalendarProvider implements CalendarProvider {
 
       let response: GoogleEventListResponse;
       try {
-        response = await client.request<GoogleEventListResponse>(url);
+        response = await calendarRequest<GoogleEventListResponse>(
+          this.accountId,
+          url,
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : "";
         if (message.includes("410") || message.includes("sync token")) {

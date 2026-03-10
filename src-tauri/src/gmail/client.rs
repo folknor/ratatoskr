@@ -114,6 +114,18 @@ impl GmailClient {
         &self.inner.account_id
     }
 
+    /// Return a valid access token, refreshing if needed.
+    /// Used by the TS calendar provider via `gmail_get_access_token` command.
+    pub async fn get_access_token(&self, db: &DbState) -> Result<String, String> {
+        self.ensure_valid_token(db).await
+    }
+
+    /// Force-refresh the access token and return the new one.
+    /// Used by the TS calendar provider after a 401 response.
+    pub async fn force_refresh_token(&self, db: &DbState) -> Result<String, String> {
+        self.force_refresh(db).await
+    }
+
     /// Make an authenticated GET request to the Gmail API.
     pub async fn get<T: DeserializeOwned>(
         &self,

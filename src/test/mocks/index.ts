@@ -3,7 +3,6 @@ export { createMockDb } from "./db.mock";
 export {
   createMockDbAccount,
   createMockGmailAccount,
-  createMockGmailMessage,
   createMockImapAccount,
   createMockImapConfig,
   createMockImapFetchResult,
@@ -19,7 +18,6 @@ export {
   createMockAiProvider,
   createMockEmailProvider,
   createMockFetchResponse,
-  createMockGmailClient,
 } from "./services.mock";
 export {
   createMockAccountStoreState,

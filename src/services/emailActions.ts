@@ -15,8 +15,6 @@ import {
   emailActionUnpin,
 } from "@/core/rustDb";
 import { getSelectedThreadId, navigateToThread } from "@/router/navigate";
-import { getEmailProvider } from "@/services/email/providerFactory";
-import { getAccount } from "@/services/db/accounts";
 import { enqueuePendingOperation } from "@/services/db/pendingOperations";
 import { useThreadStore } from "@/stores/threadStore";
 import { useSyncStateStore } from "@/stores/syncStateStore";
@@ -374,62 +372,6 @@ async function executeViaProviderRust(
 }
 
 // ---------------------------------------------------------------------------
-// IMAP execution via TS EmailProvider (not yet ported to Rust)
-// ---------------------------------------------------------------------------
-
-async function executeViaImapProvider(
-  accountId: string,
-  action: EmailAction,
-): Promise<unknown> {
-  const provider = await getEmailProvider(accountId);
-  switch (action.type) {
-    case "archive":
-      return provider.archive?.(action.threadId, action.messageIds);
-    case "trash":
-      return provider.trash?.(action.threadId, action.messageIds);
-    case "permanentDelete":
-      return provider.permanentDelete?.(action.threadId, action.messageIds);
-    case "markRead":
-      return provider.markRead?.(action.threadId, action.messageIds, action.read);
-    case "star":
-      return provider.star?.(action.threadId, action.messageIds, action.starred);
-    case "spam":
-      return provider.spam?.(action.threadId, action.messageIds, action.isSpam);
-    case "moveToFolder":
-      return provider.moveToFolder?.(
-        action.threadId,
-        action.messageIds,
-        action.folderPath,
-      );
-    case "addLabel":
-      return provider.addLabel?.(action.threadId, action.labelId);
-    case "removeLabel":
-      return provider.removeLabel?.(action.threadId, action.labelId);
-    case "sendMessage":
-      return provider.sendMessage?.(action.rawBase64Url, action.threadId);
-    case "createDraft":
-      return provider.createDraft?.(action.rawBase64Url, action.threadId);
-    case "updateDraft":
-      return provider.updateDraft?.(
-        action.draftId,
-        action.rawBase64Url,
-        action.threadId,
-      );
-    case "deleteDraft":
-      return provider.deleteDraft?.(action.draftId);
-    case "snooze":
-    case "mute":
-      // Snooze/mute are local state; on the provider side we just archive
-      return provider.archive?.(action.threadId, action.messageIds);
-    case "pin":
-    case "unpin":
-    case "unmute":
-      // Local-only operations
-      return;
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Unified execution dispatcher
 // ---------------------------------------------------------------------------
 
@@ -437,15 +379,7 @@ async function executeViaProvider(
   accountId: string,
   action: EmailAction,
 ): Promise<unknown> {
-  const account = await getAccount(accountId);
-  if (!account) throw new Error(`Account ${accountId} not found`);
-
-  // IMAP still uses TS provider path until ported to Rust
-  if (account.provider === "imap") {
-    return executeViaImapProvider(accountId, action);
-  }
-
-  // Gmail, JMAP, and future Graph all use provider_* Rust commands
+  // All providers (Gmail, JMAP, Graph, IMAP) route through provider_* Rust commands
   return executeViaProviderRust(accountId, action);
 }
 

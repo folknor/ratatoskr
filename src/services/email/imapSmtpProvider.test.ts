@@ -11,9 +11,7 @@ vi.mock("../imap/imapConfigBuilder", () => ({
   buildSmtpConfig: vi.fn(),
 }));
 
-vi.mock("../imap/imapSync", () => ({
-  imapInitialSync: vi.fn(),
-  imapDeltaSync: vi.fn(),
+vi.mock("../imap/imapSyncConvert", () => ({
   imapMessageToParsedMessage: vi.fn(),
 }));
 

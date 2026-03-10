@@ -26,7 +26,7 @@ pub async fn provider_sync_initial(
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph, *gmail.encryption_key()).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -50,7 +50,7 @@ pub async fn provider_sync_delta(
     app_handle: AppHandle,
 ) -> Result<SyncResult, String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph, *gmail.encryption_key()).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -77,7 +77,7 @@ pub async fn provider_archive(
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph, *gmail.encryption_key()).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -102,7 +102,7 @@ pub async fn provider_trash(
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph, *gmail.encryption_key()).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -127,7 +127,7 @@ pub async fn provider_permanent_delete(
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph, *gmail.encryption_key()).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -153,7 +153,7 @@ pub async fn provider_mark_read(
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph, *gmail.encryption_key()).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -179,7 +179,7 @@ pub async fn provider_star(
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph, *gmail.encryption_key()).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -205,7 +205,7 @@ pub async fn provider_spam(
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph, *gmail.encryption_key()).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -231,7 +231,7 @@ pub async fn provider_move_to_folder(
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph, *gmail.encryption_key()).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -257,7 +257,7 @@ pub async fn provider_add_tag(
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph, *gmail.encryption_key()).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -283,7 +283,7 @@ pub async fn provider_remove_tag(
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph, *gmail.encryption_key()).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -311,7 +311,7 @@ pub async fn provider_send_email(
     app_handle: AppHandle,
 ) -> Result<String, String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph, *gmail.encryption_key()).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -338,7 +338,7 @@ pub async fn provider_create_draft(
     app_handle: AppHandle,
 ) -> Result<String, String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph, *gmail.encryption_key()).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -366,7 +366,7 @@ pub async fn provider_update_draft(
     app_handle: AppHandle,
 ) -> Result<String, String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph, *gmail.encryption_key()).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -392,7 +392,7 @@ pub async fn provider_delete_draft(
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph, *gmail.encryption_key()).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -420,7 +420,7 @@ pub async fn provider_fetch_attachment(
     app_handle: AppHandle,
 ) -> Result<AttachmentData, String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph, *gmail.encryption_key()).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -447,7 +447,7 @@ pub async fn provider_list_folders(
     app_handle: AppHandle,
 ) -> Result<Vec<ProviderFolder>, String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph, *gmail.encryption_key()).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,

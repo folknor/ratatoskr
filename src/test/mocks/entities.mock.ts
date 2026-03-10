@@ -1,6 +1,5 @@
 import type { DbAccount } from "@/services/db/accounts";
 import type { SendAsAlias } from "@/services/db/sendAsAliases";
-import type { GmailMessage } from "@/services/gmail/client";
 import type { ParsedMessage } from "@/services/gmail/messageParser";
 import type {
   ImapConfig,
@@ -39,52 +38,6 @@ export function createMockParsedMessage(
     listUnsubscribe: null,
     listUnsubscribePost: null,
     authResults: null,
-    ...overrides,
-  };
-}
-
-export function createMockGmailMessage(
-  overrides: Partial<GmailMessage> = {},
-): GmailMessage {
-  return {
-    id: "msg-1",
-    threadId: "thread-1",
-    labelIds: ["INBOX", "UNREAD"],
-    snippet: "Hello this is a test",
-    historyId: "12345",
-    internalDate: "1700000000000",
-    sizeEstimate: 1024,
-    payload: {
-      partId: "",
-      mimeType: "multipart/alternative",
-      filename: "",
-      headers: [
-        { name: "From", value: "John Doe <john@example.com>" },
-        { name: "To", value: "me@example.com" },
-        { name: "Subject", value: "Test Subject" },
-        { name: "Cc", value: "" },
-      ],
-      body: { size: 0 },
-      parts: [
-        {
-          partId: "0",
-          mimeType: "text/plain",
-          filename: "",
-          headers: [],
-          body: { size: 11, data: "SGVsbG8gV29ybGQ" },
-        },
-        {
-          partId: "1",
-          mimeType: "text/html",
-          filename: "",
-          headers: [],
-          body: {
-            size: 28,
-            data: "PGI-SGVsbG8gV29ybGQ8L2I-",
-          },
-        },
-      ],
-    },
     ...overrides,
   };
 }

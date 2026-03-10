@@ -12,7 +12,7 @@ const REFRESH_BUFFER_MS: number = 5 * 60 * 1000;
  * Returns the current (or refreshed) access token.
  *
  * Only applies to IMAP accounts with auth_method "oauth2".
- * For Gmail API accounts, token refresh is handled by GmailClient.
+ * For Gmail API accounts, token refresh is handled by the Rust Gmail client.
  */
 export async function ensureFreshToken(account: DbAccount): Promise<string> {
   if (account.auth_method !== "oauth2" || !account.oauth_provider) {

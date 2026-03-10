@@ -15,11 +15,7 @@ import {
 import { clearAllFolderSyncStates } from "../db/folderSyncState";
 import { deleteAllMessagesForAccount } from "../db/messages";
 import { getSetting } from "../db/settings";
-import {
-  deleteAllThreadsForAccount,
-  getThreadCountForAccount,
-} from "../db/threads";
-import { imapDeltaSync, imapInitialSync } from "../imap/imapSync";
+import { deleteAllThreadsForAccount } from "../db/threads";
 import { ensureFreshToken } from "../oauth/oauthTokenManager";
 export interface SyncProgress {
   phase: "labels" | "threads" | "messages" | "done";
@@ -359,65 +355,10 @@ async function syncImapAccountRust(accountId: string): Promise<void> {
 
 /**
  * Run a sync for a single IMAP account (initial or delta).
- * Uses the Rust sync engine by default, falls back to TS if disabled.
+ * Delegates entirely to the Rust sync engine.
  */
 async function syncImapAccount(accountId: string): Promise<void> {
-  // Feature flag: use Rust sync engine (default: true for IMAP accounts)
-  const useRustSync = (await getSetting("use_rust_sync")) !== "false";
-
-  if (useRustSync) {
-    return syncImapAccountRust(accountId);
-  }
-
-  // Fallback: TS sync path
-  const account = await getAccount(accountId);
-
-  if (!account) {
-    throw new Error("Account not found");
-  }
-
-  // Refresh OAuth2 token before syncing (if applicable)
-  if (account.auth_method === "oauth2") {
-    await ensureFreshToken(account);
-  }
-
-  const syncPeriodStr = await getSetting("sync_period_days");
-  const syncDays = parseInt(syncPeriodStr ?? "365", 10) || 365;
-
-  if (account.history_id) {
-    // Delta sync — IMAP uses folder-level UID tracking
-    const result = await imapDeltaSync(accountId, syncDays);
-
-    // Recovery: if delta sync found nothing new but the DB has no threads,
-    // the previous initial sync likely failed or stored data incorrectly.
-    // Force a full re-sync to recover.
-    if (result.messages.length === 0) {
-      const threadCount = await getThreadCountForAccount(accountId);
-      if (threadCount === 0) {
-        console.warn(
-          `[syncManager] IMAP delta sync returned 0 new messages and DB has 0 threads for ${accountId} — forcing full re-sync`,
-        );
-        await clearAccountHistoryId(accountId);
-        await clearAllFolderSyncStates(accountId);
-        await imapInitialSync(accountId, syncDays, (progress) => {
-          statusCallback?.(accountId, "syncing", {
-            phase: mapImapPhase(progress.phase),
-            current: progress.current,
-            total: progress.total,
-          });
-        });
-      }
-    }
-  } else {
-    // First time — full initial sync
-    await imapInitialSync(accountId, syncDays, (progress) => {
-      statusCallback?.(accountId, "syncing", {
-        phase: mapImapPhase(progress.phase),
-        current: progress.current,
-        total: progress.total,
-      });
-    });
-  }
+  return syncImapAccountRust(accountId);
 }
 
 /**

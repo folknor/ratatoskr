@@ -29,6 +29,29 @@ pub async fn gmail_init_client(
     Ok(())
 }
 
+/// Return a fresh access token for the given account, refreshing if needed.
+/// Used by the TS calendar provider for direct Google Calendar API calls.
+#[tauri::command]
+pub async fn gmail_get_access_token(
+    account_id: String,
+    db: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
+) -> Result<String, String> {
+    let client = gmail.get(&account_id).await?;
+    client.get_access_token(&db).await
+}
+
+/// Force-refresh the access token for the given account (e.g. after a 401).
+#[tauri::command]
+pub async fn gmail_force_refresh_token(
+    account_id: String,
+    db: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
+) -> Result<String, String> {
+    let client = gmail.get(&account_id).await?;
+    client.force_refresh_token(&db).await
+}
+
 /// Remove the Gmail client for the given account (on deletion or re-auth).
 #[tauri::command]
 pub async fn gmail_remove_client(

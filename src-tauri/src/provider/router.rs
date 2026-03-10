@@ -3,6 +3,7 @@ use crate::gmail::client::GmailState;
 use crate::gmail::ops::GmailOps;
 use crate::graph::client::GraphState;
 use crate::graph::ops::GraphOps;
+use crate::imap::ops::ImapOps;
 use crate::jmap::client::JmapState;
 use crate::jmap::ops::JmapOps;
 
@@ -29,6 +30,7 @@ pub async fn get_ops(
     gmail: &GmailState,
     jmap: &JmapState,
     graph: &GraphState,
+    encryption_key: [u8; 32],
 ) -> Result<Box<dyn ProviderOps>, String> {
     match provider {
         "gmail_api" => {
@@ -43,7 +45,7 @@ pub async fn get_ops(
             let client = graph.get(account_id).await?;
             Ok(Box::new(GraphOps { client }))
         }
-        "imap" => Err("IMAP uses TS provider path".into()),
+        "imap" => Ok(Box::new(ImapOps { encryption_key })),
         other => Err(format!("Unknown provider: {other}")),
     }
 }

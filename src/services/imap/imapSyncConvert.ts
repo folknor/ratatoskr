@@ -3,22 +3,6 @@ import type { ThreadableMessage } from "../threading/threadBuilder";
 import { getLabelsForMessage } from "./folderMapper";
 import type { ImapMessage } from "./tauriCommands";
 
-// Re-export date helpers from shared utility so existing imports continue to work
-export { computeSinceDate, formatImapDate } from "@/utils/date";
-
-// ---------------------------------------------------------------------------
-// Progress reporting
-// ---------------------------------------------------------------------------
-
-export interface ImapSyncProgress {
-  phase: "folders" | "messages" | "threading" | "storing_threads" | "done";
-  current: number;
-  total: number;
-  folder?: string;
-}
-
-export type ImapSyncProgressCallback = (progress: ImapSyncProgress) => void;
-
 // ---------------------------------------------------------------------------
 // Message conversion
 // ---------------------------------------------------------------------------

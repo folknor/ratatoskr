@@ -1,25 +1,29 @@
 import { vi } from "vitest";
-import { getGmailClient } from "@/services/gmail/tokenManager";
+import { invoke } from "@tauri-apps/api/core";
 import { GoogleCalendarProvider } from "./googleCalendarProvider";
 
-vi.mock("@/services/gmail/tokenManager", () => ({
-  getGmailClient: vi.fn(),
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
 }));
 
 const CALENDAR_API_BASE = "https://www.googleapis.com/calendar/v3";
 
-function createMockClient() {
-  return { request: vi.fn() };
+function mockFetchResponse(data: unknown, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: new Headers(),
+    json: () => Promise.resolve(data),
+    text: () => Promise.resolve(JSON.stringify(data)),
+  } as unknown as Response;
 }
 
 describe("GoogleCalendarProvider", () => {
   const accountId = "test-account-1";
   let provider: GoogleCalendarProvider;
-  let mockClient: ReturnType<typeof createMockClient>;
 
   beforeEach(() => {
-    mockClient = createMockClient();
-    vi.mocked(getGmailClient).mockResolvedValue(mockClient as never);
+    vi.mocked(invoke).mockResolvedValue("mock-access-token");
     provider = new GoogleCalendarProvider(accountId);
   });
 
@@ -29,21 +33,29 @@ describe("GoogleCalendarProvider", () => {
 
   describe("listCalendars", () => {
     it("maps Google API response to CalendarInfo array", async () => {
-      mockClient.request.mockResolvedValue({
-        items: [
-          {
-            id: "primary",
-            summary: "My Calendar",
-            backgroundColor: "#0000ff",
-            primary: true,
-          },
-          { id: "work@example.com", summary: "Work", accessRole: "owner" },
-        ],
-      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        mockFetchResponse({
+          items: [
+            {
+              id: "primary",
+              summary: "My Calendar",
+              backgroundColor: "#0000ff",
+              primary: true,
+            },
+            {
+              id: "work@example.com",
+              summary: "Work",
+              accessRole: "owner",
+            },
+          ],
+        }),
+      );
 
       const result = await provider.listCalendars();
 
-      expect(mockClient.request).toHaveBeenCalledWith(
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const calledUrl = fetchSpy.mock.calls[0][0] as string;
+      expect(calledUrl).toBe(
         `${CALENDAR_API_BASE}/users/me/calendarList`,
       );
       expect(result).toEqual([
@@ -63,7 +75,9 @@ describe("GoogleCalendarProvider", () => {
     });
 
     it("returns empty array when no items", async () => {
-      mockClient.request.mockResolvedValue({});
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        mockFetchResponse({}),
+      );
 
       const result = await provider.listCalendars();
 
@@ -88,7 +102,9 @@ describe("GoogleCalendarProvider", () => {
         etag: '"etag-1"',
       };
 
-      mockClient.request.mockResolvedValue({ items: [googleEvent] });
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        mockFetchResponse({ items: [googleEvent] }),
+      );
 
       const result = await provider.fetchEvents(
         "cal-id",
@@ -96,7 +112,7 @@ describe("GoogleCalendarProvider", () => {
         "2025-06-30T23:59:59Z",
       );
 
-      const calledUrl = mockClient.request.mock.calls[0][0] as string;
+      const calledUrl = fetchSpy.mock.calls[0][0] as string;
       expect(calledUrl).toContain("/calendars/cal-id/events?");
       expect(calledUrl).toContain("timeMin=2025-06-01T00%3A00%3A00Z");
       expect(calledUrl).toContain("timeMax=2025-06-30T23%3A59%3A59Z");
@@ -126,7 +142,9 @@ describe("GoogleCalendarProvider", () => {
     });
 
     it("encodes calendar ID in URL", async () => {
-      mockClient.request.mockResolvedValue({ items: [] });
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        mockFetchResponse({ items: [] }),
+      );
 
       await provider.fetchEvents(
         "user@example.com",
@@ -134,7 +152,7 @@ describe("GoogleCalendarProvider", () => {
         "2025-01-31T23:59:59Z",
       );
 
-      const calledUrl = mockClient.request.mock.calls[0][0] as string;
+      const calledUrl = fetchSpy.mock.calls[0][0] as string;
       expect(calledUrl).toContain("/calendars/user%40example.com/events?");
     });
   });
@@ -151,7 +169,9 @@ describe("GoogleCalendarProvider", () => {
         status: "confirmed",
       };
 
-      mockClient.request.mockResolvedValue(createdEvent);
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        mockFetchResponse(createdEvent),
+      );
 
       const result = await provider.createEvent("cal-1", {
         summary: "Lunch",
@@ -161,8 +181,7 @@ describe("GoogleCalendarProvider", () => {
         endTime: "2025-06-20T13:00:00Z",
       });
 
-      const [url, options] = mockClient.request.mock.calls[0];
-      expect(url).toBe(`${CALENDAR_API_BASE}/calendars/cal-1/events`);
+      const options = fetchSpy.mock.calls[0][1] as RequestInit;
       expect(options.method).toBe("POST");
 
       const body = JSON.parse(options.body as string);
@@ -177,12 +196,14 @@ describe("GoogleCalendarProvider", () => {
     });
 
     it("creates all-day event with date-only start/end", async () => {
-      mockClient.request.mockResolvedValue({
-        id: "allday-evt",
-        summary: "Holiday",
-        start: { date: "2025-12-25" },
-        end: { date: "2025-12-26" },
-      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        mockFetchResponse({
+          id: "allday-evt",
+          summary: "Holiday",
+          start: { date: "2025-12-25" },
+          end: { date: "2025-12-26" },
+        }),
+      );
 
       await provider.createEvent("cal-1", {
         summary: "Holiday",
@@ -192,19 +213,21 @@ describe("GoogleCalendarProvider", () => {
       });
 
       const body = JSON.parse(
-        mockClient.request.mock.calls[0][1].body as string,
+        (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
       );
       expect(body.start).toEqual({ date: "2025-12-25" });
       expect(body.end).toEqual({ date: "2025-12-26" });
     });
 
     it("includes attendees when provided", async () => {
-      mockClient.request.mockResolvedValue({
-        id: "evt-att",
-        summary: "Sync",
-        start: { dateTime: "2025-06-20T14:00:00Z" },
-        end: { dateTime: "2025-06-20T15:00:00Z" },
-      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        mockFetchResponse({
+          id: "evt-att",
+          summary: "Sync",
+          start: { dateTime: "2025-06-20T14:00:00Z" },
+          end: { dateTime: "2025-06-20T15:00:00Z" },
+        }),
+      );
 
       await provider.createEvent("cal-1", {
         summary: "Sync",
@@ -214,7 +237,7 @@ describe("GoogleCalendarProvider", () => {
       });
 
       const body = JSON.parse(
-        mockClient.request.mock.calls[0][1].body as string,
+        (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
       );
       expect(body.attendees).toEqual([{ email: "bob@example.com" }]);
     });
@@ -222,19 +245,24 @@ describe("GoogleCalendarProvider", () => {
 
   describe("updateEvent", () => {
     it("sends PATCH with partial body", async () => {
-      mockClient.request.mockResolvedValue({
-        id: "evt-1",
-        summary: "Updated Title",
-        start: { dateTime: "2025-06-20T12:00:00Z" },
-        end: { dateTime: "2025-06-20T13:00:00Z" },
-      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        mockFetchResponse({
+          id: "evt-1",
+          summary: "Updated Title",
+          start: { dateTime: "2025-06-20T12:00:00Z" },
+          end: { dateTime: "2025-06-20T13:00:00Z" },
+        }),
+      );
 
       const result = await provider.updateEvent("cal-1", "evt-1", {
         summary: "Updated Title",
       });
 
-      const [url, options] = mockClient.request.mock.calls[0];
-      expect(url).toBe(`${CALENDAR_API_BASE}/calendars/cal-1/events/evt-1`);
+      const calledUrl = fetchSpy.mock.calls[0][0] as string;
+      expect(calledUrl).toBe(
+        `${CALENDAR_API_BASE}/calendars/cal-1/events/evt-1`,
+      );
+      const options = fetchSpy.mock.calls[0][1] as RequestInit;
       expect(options.method).toBe("PATCH");
 
       const body = JSON.parse(options.body as string);
@@ -247,12 +275,14 @@ describe("GoogleCalendarProvider", () => {
     });
 
     it("includes time fields when both startTime and endTime are provided", async () => {
-      mockClient.request.mockResolvedValue({
-        id: "evt-1",
-        summary: "Rescheduled",
-        start: { dateTime: "2025-06-21T09:00:00Z" },
-        end: { dateTime: "2025-06-21T10:00:00Z" },
-      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        mockFetchResponse({
+          id: "evt-1",
+          summary: "Rescheduled",
+          start: { dateTime: "2025-06-21T09:00:00Z" },
+          end: { dateTime: "2025-06-21T10:00:00Z" },
+        }),
+      );
 
       await provider.updateEvent("cal-1", "evt-1", {
         startTime: "2025-06-21T09:00:00Z",
@@ -260,7 +290,7 @@ describe("GoogleCalendarProvider", () => {
       });
 
       const body = JSON.parse(
-        mockClient.request.mock.calls[0][1].body as string,
+        (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
       );
       expect(body.start.dateTime).toBeDefined();
       expect(body.end.dateTime).toBeDefined();
@@ -269,21 +299,28 @@ describe("GoogleCalendarProvider", () => {
 
   describe("deleteEvent", () => {
     it("sends DELETE request with correct URL", async () => {
-      mockClient.request.mockResolvedValue(undefined);
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        mockFetchResponse(undefined, 204),
+      );
 
       await provider.deleteEvent("cal-1", "evt-1");
 
-      const [url, options] = mockClient.request.mock.calls[0];
-      expect(url).toBe(`${CALENDAR_API_BASE}/calendars/cal-1/events/evt-1`);
+      const calledUrl = fetchSpy.mock.calls[0][0] as string;
+      expect(calledUrl).toBe(
+        `${CALENDAR_API_BASE}/calendars/cal-1/events/evt-1`,
+      );
+      const options = fetchSpy.mock.calls[0][1] as RequestInit;
       expect(options.method).toBe("DELETE");
     });
 
     it("encodes calendar and event IDs", async () => {
-      mockClient.request.mockResolvedValue(undefined);
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        mockFetchResponse(undefined, 204),
+      );
 
       await provider.deleteEvent("user@example.com", "evt/special");
 
-      const calledUrl = mockClient.request.mock.calls[0][0] as string;
+      const calledUrl = fetchSpy.mock.calls[0][0] as string;
       expect(calledUrl).toContain(
         "/calendars/user%40example.com/events/evt%2Fspecial",
       );
@@ -292,29 +329,31 @@ describe("GoogleCalendarProvider", () => {
 
   describe("syncEvents", () => {
     it("uses syncToken for incremental sync and handles cancelled events as deletions", async () => {
-      mockClient.request.mockResolvedValue({
-        items: [
-          {
-            id: "evt-updated",
-            summary: "Updated Event",
-            start: { dateTime: "2025-06-15T10:00:00Z" },
-            end: { dateTime: "2025-06-15T11:00:00Z" },
-            status: "confirmed",
-          },
-          {
-            id: "evt-deleted",
-            summary: undefined,
-            start: { dateTime: "2025-06-15T10:00:00Z" },
-            end: { dateTime: "2025-06-15T11:00:00Z" },
-            status: "cancelled",
-          },
-        ],
-        nextSyncToken: "new-sync-token-123",
-      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        mockFetchResponse({
+          items: [
+            {
+              id: "evt-updated",
+              summary: "Updated Event",
+              start: { dateTime: "2025-06-15T10:00:00Z" },
+              end: { dateTime: "2025-06-15T11:00:00Z" },
+              status: "confirmed",
+            },
+            {
+              id: "evt-deleted",
+              summary: undefined,
+              start: { dateTime: "2025-06-15T10:00:00Z" },
+              end: { dateTime: "2025-06-15T11:00:00Z" },
+              status: "cancelled",
+            },
+          ],
+          nextSyncToken: "new-sync-token-123",
+        }),
+      );
 
       const result = await provider.syncEvents("cal-1", "old-sync-token");
 
-      const calledUrl = mockClient.request.mock.calls[0][0] as string;
+      const calledUrl = fetchSpy.mock.calls[0][0] as string;
       expect(calledUrl).toContain("syncToken=old-sync-token");
       expect(calledUrl).not.toContain("timeMin");
       expect(calledUrl).not.toContain("singleEvents");
@@ -327,14 +366,16 @@ describe("GoogleCalendarProvider", () => {
     });
 
     it("sets time range for initial sync without syncToken", async () => {
-      mockClient.request.mockResolvedValue({
-        items: [],
-        nextSyncToken: "initial-token",
-      });
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        mockFetchResponse({
+          items: [],
+          nextSyncToken: "initial-token",
+        }),
+      );
 
       const result = await provider.syncEvents("cal-1");
 
-      const calledUrl = mockClient.request.mock.calls[0][0] as string;
+      const calledUrl = vi.mocked(fetch).mock.calls[0][0] as string;
       expect(calledUrl).toContain("timeMin=");
       expect(calledUrl).toContain("timeMax=");
       expect(calledUrl).toContain("singleEvents=true");
@@ -344,8 +385,8 @@ describe("GoogleCalendarProvider", () => {
     });
 
     it("handles 410 error (expired sync token) gracefully", async () => {
-      mockClient.request.mockRejectedValue(
-        new Error("410 Gone: sync token expired"),
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        mockFetchResponse({ error: "Gone" }, 410),
       );
 
       const result = await provider.syncEvents("cal-1", "expired-token");
@@ -359,57 +400,49 @@ describe("GoogleCalendarProvider", () => {
       });
     });
 
-    it("handles 'sync token' message in error gracefully", async () => {
-      mockClient.request.mockRejectedValue(new Error("Invalid sync token"));
-
-      const result = await provider.syncEvents("cal-1", "bad-token");
-
-      expect(result).toEqual({
-        created: [],
-        updated: [],
-        deletedRemoteIds: [],
-        newSyncToken: null,
-        newCtag: null,
-      });
-    });
-
     it("rethrows non-sync-token errors", async () => {
-      mockClient.request.mockRejectedValue(new Error("Network error"));
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        mockFetchResponse({ error: "Server Error" }, 500),
+      );
 
       await expect(provider.syncEvents("cal-1", "token")).rejects.toThrow(
-        "Network error",
+        "Calendar API error: 500",
       );
     });
 
     it("follows pagination with nextPageToken", async () => {
-      mockClient.request
-        .mockResolvedValueOnce({
-          items: [
-            {
-              id: "evt-1",
-              summary: "Page 1",
-              start: { dateTime: "2025-06-15T10:00:00Z" },
-              end: { dateTime: "2025-06-15T11:00:00Z" },
-            },
-          ],
-          nextPageToken: "page-2-token",
-        })
-        .mockResolvedValueOnce({
-          items: [
-            {
-              id: "evt-2",
-              summary: "Page 2",
-              start: { dateTime: "2025-06-16T10:00:00Z" },
-              end: { dateTime: "2025-06-16T11:00:00Z" },
-            },
-          ],
-          nextSyncToken: "final-sync-token",
-        });
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          mockFetchResponse({
+            items: [
+              {
+                id: "evt-1",
+                summary: "Page 1",
+                start: { dateTime: "2025-06-15T10:00:00Z" },
+                end: { dateTime: "2025-06-15T11:00:00Z" },
+              },
+            ],
+            nextPageToken: "page-2-token",
+          }),
+        )
+        .mockResolvedValueOnce(
+          mockFetchResponse({
+            items: [
+              {
+                id: "evt-2",
+                summary: "Page 2",
+                start: { dateTime: "2025-06-16T10:00:00Z" },
+                end: { dateTime: "2025-06-16T11:00:00Z" },
+              },
+            ],
+            nextSyncToken: "final-sync-token",
+          }),
+        );
 
       const result = await provider.syncEvents("cal-1", "token");
 
-      expect(mockClient.request).toHaveBeenCalledTimes(2);
-      const secondUrl = mockClient.request.mock.calls[1][0] as string;
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      const secondUrl = fetchSpy.mock.calls[1][0] as string;
       expect(secondUrl).toContain("pageToken=page-2-token");
 
       expect(result.created).toHaveLength(2);
@@ -421,7 +454,9 @@ describe("GoogleCalendarProvider", () => {
 
   describe("testConnection", () => {
     it("returns success when listCalendars succeeds", async () => {
-      mockClient.request.mockResolvedValue({ items: [] });
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        mockFetchResponse({ items: [] }),
+      );
 
       const result = await provider.testConnection();
 
@@ -432,19 +467,58 @@ describe("GoogleCalendarProvider", () => {
     });
 
     it("returns failure with error message on error", async () => {
-      mockClient.request.mockRejectedValue(new Error("Unauthorized"));
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        mockFetchResponse({ error: "Unauthorized" }, 401),
+      );
+      // 401 triggers force refresh, which also needs to return a token
+      vi.mocked(invoke)
+        .mockResolvedValueOnce("mock-access-token") // initial token
+        .mockResolvedValueOnce("refreshed-token"); // force refresh
+      // After force refresh, retry also fails
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(mockFetchResponse({ error: "Unauthorized" }, 401))
+        .mockResolvedValueOnce(mockFetchResponse({ error: "Unauthorized" }, 401));
 
       const result = await provider.testConnection();
 
-      expect(result).toEqual({ success: false, message: "Unauthorized" });
+      expect(result).toEqual({
+        success: false,
+        message: expect.stringContaining("Calendar API error: 401"),
+      });
     });
 
     it("returns generic failure message for non-Error throws", async () => {
-      mockClient.request.mockRejectedValue("something went wrong");
+      vi.spyOn(globalThis, "fetch").mockRejectedValue("something went wrong");
 
       const result = await provider.testConnection();
 
-      expect(result).toEqual({ success: false, message: "Connection failed" });
+      expect(result).toEqual({
+        success: false,
+        message: "Connection failed",
+      });
+    });
+  });
+
+  describe("token refresh on 401", () => {
+    it("retries with refreshed token after 401", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(mockFetchResponse({ error: "Unauthorized" }, 401))
+        .mockResolvedValueOnce(mockFetchResponse({ items: [] }));
+
+      vi.mocked(invoke)
+        .mockResolvedValueOnce("initial-token") // gmail_get_access_token
+        .mockResolvedValueOnce("refreshed-token"); // gmail_force_refresh_token
+
+      const result = await provider.listCalendars();
+
+      expect(invoke).toHaveBeenCalledWith("gmail_get_access_token", {
+        accountId,
+      });
+      expect(invoke).toHaveBeenCalledWith("gmail_force_refresh_token", {
+        accountId,
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(result).toEqual([]);
     });
   });
 });

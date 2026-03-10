@@ -1,11 +1,11 @@
 pub mod commands;
-mod config;
+pub(crate) mod config;
 mod convert;
 mod folder_mapper;
-mod imap_delta;
-mod imap_initial;
+pub(crate) mod imap_delta;
+pub(crate) mod imap_initial;
 mod pipeline;
-mod types;
+pub(crate) mod types;
 
 use std::collections::HashSet;
 use std::sync::Mutex;

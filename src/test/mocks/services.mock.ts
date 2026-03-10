@@ -1,31 +1,4 @@
 import { vi } from "vitest";
-import type { GmailClient } from "@/services/gmail/client";
-
-export function createMockGmailClient(
-  overrides: Record<string, unknown> = {},
-): GmailClient {
-  return {
-    listLabels: vi.fn(),
-    createLabel: vi.fn(),
-    deleteLabel: vi.fn(),
-    updateLabel: vi.fn(),
-    modifyThread: vi.fn(),
-    deleteThread: vi.fn(),
-    getMessage: vi.fn(),
-    getAttachment: vi.fn(),
-    sendMessage: vi.fn(),
-    createDraft: vi.fn(),
-    updateDraft: vi.fn(),
-    deleteDraft: vi.fn(),
-    getProfile: vi.fn(),
-    getHistory: vi.fn(),
-    getThread: vi.fn(),
-    listThreads: vi.fn(),
-    listDrafts: vi.fn(),
-    request: vi.fn(),
-    ...overrides,
-  } as unknown as GmailClient;
-}
 
 export function createMockEmailProvider(
   overrides: Record<string, unknown> = {},

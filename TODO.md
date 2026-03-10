@@ -42,43 +42,13 @@
 
 ---
 
-## Consolidation — Dead Code & Duplication
-
-- [ ] **`GmailClient` TS class (461 lines) + legacy `tokenManager.ts` kept for one caller** — `src/services/gmail/client.ts`, `tokenManager.ts`
-
-  `GmailClient` is `@deprecated`. Only `googleCalendarProvider.ts` uses it. `tokenManager.ts` creates legacy TS clients for every Gmail account on startup solely for this.
-
-  Fix: Migrate calendar provider to use Rust HTTP or direct `fetch` with token from DB. Removes ~600 lines. **Risk: MEDIUM.**
-
-- [ ] **Duplicate email action dispatchers** — `src/services/emailActions.ts:278-428`
-
-  `executeViaProviderRust` and `executeViaImapProvider` are nearly identical switch statements. When IMAP actions go through Rust `provider_*` commands, `executeViaImapProvider` becomes dead code.
-
-  Fix: Remove ~50 lines once IMAP is fully ported. **Risk: MEDIUM.**
-
-- [ ] **TS IMAP sync fallback path (1,259 lines)** — `imapSync.ts`, `imapSyncConvert.ts`, `imapSyncFetch.ts`, `imapSyncStore.ts`
-
-  Only used when `use_rust_sync` setting is `"false"`. Default is `true` (Rust sync). Legacy fallback for the old TS IMAP sync pipeline.
-
-  Fix: Remove once Rust IMAP sync is proven stable. **Risk: HIGH** — gate on release milestone.
-
----
-
-## Gmail→Rust Migration Follow-ups
-
-- [ ] **`getGmailClient()` retained for Calendar only** — `src/services/calendar/googleCalendarProvider.ts`
-
-  The TS `GmailClient` class and `tokenManager.ts` client cache are kept solely because `googleCalendarProvider.ts` uses `GmailClient` for Google Calendar API calls (same OAuth token, different endpoint). Once a Rust Calendar client exists, `getGmailClient()`, `client.ts`, and the legacy client cache in `tokenManager.ts` can be deleted entirely.
-
----
-
 ## Phase 4 (Rust Sync Engine) Follow-ups
 
 ### LOW
 
 - [ ] **Gmail sync still fully in TS** — `src/services/gmail/syncManager.ts:80-112`
 
-  `syncGmailAccount()` uses the Gmail REST API via `GmailClient` (HTTP, not IMAP), so it doesn't benefit from the Rust IMAP sync engine at all. Porting is a large effort with minimal benefit since HTTP overhead dominates.
+  `syncGmailAccount()` uses the Gmail REST API via TS HTTP calls, not the Rust sync engine. Porting is a large effort with minimal benefit since HTTP overhead dominates.
 
 - [ ] **No per-operation timeout on Rust IMAP fetches** — `src-tauri/src/sync/imap_initial.rs`
 

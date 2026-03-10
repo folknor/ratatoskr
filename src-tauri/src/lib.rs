@@ -258,6 +258,8 @@ pub fn run() {
             sync::commands::sync_imap_delta,
             // Gmail API provider (Rust)
             gmail::commands::gmail_init_client,
+            gmail::commands::gmail_get_access_token,
+            gmail::commands::gmail_force_refresh_token,
             gmail::commands::gmail_remove_client,
             gmail::commands::gmail_test_connection,
             gmail::commands::gmail_list_labels,
