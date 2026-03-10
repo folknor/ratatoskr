@@ -34,7 +34,7 @@ export function ConfirmDialog({
       const id = setTimeout(() => confirmRef.current?.focus(), 50);
       return () => clearTimeout(id);
     }
-    return undefined;
+    return;
   }, [isOpen]);
 
   const handleKeyDown = (e: React.KeyboardEvent): void => {

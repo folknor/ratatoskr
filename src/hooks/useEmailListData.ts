@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useActiveCategory, useActiveLabel } from "@/hooks/useRouteNavigation";
-import { navigateToLabel } from "@/router/navigate";
 import {
   type DbBundleRule,
+  getActiveFollowUpThreadIds,
   getBundleRules,
   getBundleSummaries,
-  getActiveFollowUpThreadIds,
   getCategoriesForThreads,
   getCategoryUnreadCounts,
   getHeldThreadIds,
@@ -17,6 +15,8 @@ import {
   querySmartFolderThreads,
   type SmartFolderRow,
 } from "@/core/queries";
+import { useActiveCategory, useActiveLabel } from "@/hooks/useRouteNavigation";
+import { navigateToLabel } from "@/router/navigate";
 import { useAccountStore } from "@/stores/accountStore";
 import { useSmartFolderStore } from "@/stores/smartFolderStore";
 import { type Thread, useThreadStore } from "@/stores/threadStore";

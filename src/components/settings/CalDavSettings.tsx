@@ -4,12 +4,12 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
+import { type DbAccount, updateAccountCalDav } from "@/core/accounts";
 import {
   discoverCalDavSettings,
-  testCalDavConnection,
   removeCalendarProvider,
+  testCalDavConnection,
 } from "@/core/calendar";
-import { type DbAccount, updateAccountCalDav } from "@/core/accounts";
 
 interface CalDavSettingsProps {
   account: DbAccount;

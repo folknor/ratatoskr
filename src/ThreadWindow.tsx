@@ -133,10 +133,10 @@ export default function ThreadWindow(): React.ReactNode {
     const root = document.documentElement;
     if (theme === "dark") {
       root.classList.add("dark");
-      return undefined;
+      return;
     } else if (theme === "light") {
       root.classList.remove("dark");
-      return undefined;
+      return;
     } else {
       const mq = window.matchMedia("(prefers-color-scheme: dark)");
       const apply = (): void => {
@@ -199,7 +199,7 @@ export default function ThreadWindow(): React.ReactNode {
       mq.addEventListener("change", apply);
       return (): void => mq.removeEventListener("change", apply);
     }
-    return undefined;
+    return;
   }, [colorTheme, theme]);
 
   if (loading) {

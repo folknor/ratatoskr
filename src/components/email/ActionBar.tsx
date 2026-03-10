@@ -25,12 +25,11 @@ import type React from "react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/Button";
-import { useActiveLabel } from "@/hooks/useRouteNavigation";
 import {
   archiveThread,
   cancelFollowUpForThread,
-  deleteThread as deleteThreadFromDb,
   deleteDraftsForThread,
+  deleteThread as deleteThreadFromDb,
   insertFollowUpReminder,
   markThreadRead,
   muteThread,
@@ -44,6 +43,7 @@ import {
   unpinThread,
 } from "@/core/mutations";
 import { type DbMessage, getFollowUpForThread } from "@/core/queries";
+import { useActiveLabel } from "@/hooks/useRouteNavigation";
 import { useAccountStore } from "@/stores/accountStore";
 import type { Thread } from "@/stores/threadStore";
 import { useThreadStore } from "@/stores/threadStore";

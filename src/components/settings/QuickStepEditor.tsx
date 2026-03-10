@@ -9,14 +9,12 @@ import {
   updateQuickStep,
 } from "@/core/mutations";
 import {
+  ACTION_TYPE_METADATA,
   ALL_CATEGORIES,
   type DbLabel,
   type DbQuickStep,
   getLabelsForAccount,
   getQuickStepsForAccount,
-} from "@/core/queries";
-import {
-  ACTION_TYPE_METADATA,
   type QuickStepAction,
   type QuickStepActionType,
 } from "@/core/queries";

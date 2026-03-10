@@ -16,14 +16,12 @@ import {
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { navigateToThread } from "@/router/navigate";
-import { fetchAndCacheGravatarUrl } from "@/core/queries";
 import {
+  addVipSender,
   type ContactAttachment,
   type ContactStats,
   type DbContact,
-  type SameDomainContact,
-  addVipSender,
+  fetchAndCacheGravatarUrl,
   getAttachmentsFromContact,
   getContactByEmail,
   getContactStats,
@@ -34,10 +32,12 @@ import {
   getThreadLabelIds,
   isVipSender,
   removeVipSender,
+  type SameDomainContact,
   updateContact,
   updateContactNotes,
   upsertContact,
 } from "@/core/queries";
+import { navigateToThread } from "@/router/navigate";
 import { useComposerStore } from "@/stores/composerStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { formatRelativeDate } from "@/utils/date";

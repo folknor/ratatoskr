@@ -19,12 +19,11 @@ import {
 } from "lucide-react";
 import type React from "react";
 import { useEffect, useState } from "react";
-import { getActiveLabel } from "@/router/navigate";
 import {
   addThreadLabel,
   archiveThread,
-  deleteThread as deleteThreadFromDb,
   deleteDraftsForThread,
+  deleteThread as deleteThreadFromDb,
   executeQuickStep,
   markThreadRead,
   muteThread,
@@ -39,18 +38,19 @@ import {
   unpinThread,
 } from "@/core/mutations";
 import {
-  getMessagesForThread,
+  ALL_CATEGORIES,
   type DbQuickStep,
   getEnabledQuickStepsForAccount,
-  ALL_CATEGORIES,
+  getMessagesForThread,
   type QuickStep,
   type QuickStepAction,
 } from "@/core/queries";
+import { getActiveLabel } from "@/router/navigate";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useLabelStore } from "@/stores/labelStore";
 import { useThreadStore } from "@/stores/threadStore";
-import { buildQuote, buildForwardQuote } from "@/utils/emailQuoteBuilders";
+import { buildForwardQuote, buildQuote } from "@/utils/emailQuoteBuilders";
 import { resolveContextMenuTargets } from "@/utils/multiSelectTargets";
 import { ContextMenu, type ContextMenuItem } from "../ContextMenu";
 import type { ThreadMenuProps } from "./types";

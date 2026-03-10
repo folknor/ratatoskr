@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AttachmentPreview } from "@/components/email/AttachmentList";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { navigateToLabel } from "@/router/navigate";
 import {
   type AttachmentSender,
   type AttachmentWithContext,
@@ -14,6 +13,7 @@ import {
   getAttachmentsForAccount,
   getEmailProvider,
 } from "@/core/attachments";
+import { navigateToLabel } from "@/router/navigate";
 import { useAccountStore } from "@/stores/accountStore";
 import {
   isArchive,

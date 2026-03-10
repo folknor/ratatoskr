@@ -16,7 +16,12 @@ export {
   insertOAuthImapAccount,
   updateAccountCalDav,
 } from "@/services/db/accounts";
-
+// Gmail OAuth
+export { startOAuthFlow } from "@/services/gmail/auth";
+export {
+  getClientId,
+  getClientSecret,
+} from "@/services/gmail/tokenManager";
 // IMAP auto-discovery
 export {
   type AuthMethod,
@@ -30,7 +35,6 @@ export {
   type ServerSettings,
   type WellKnownProviderResult,
 } from "@/services/imap/autoDiscovery";
-
 // OAuth (generic provider flow for IMAP accounts)
 export {
   type ProviderUserInfo,
@@ -38,17 +42,8 @@ export {
   startProviderOAuthFlow,
   type TokenResponse as OAuthTokenResponse,
 } from "@/services/oauth/oauthFlow";
-
 export {
   getAllOAuthProviders,
   getOAuthProvider,
   type OAuthProviderConfig,
 } from "@/services/oauth/providers";
-
-// Gmail OAuth
-export { startOAuthFlow } from "@/services/gmail/auth";
-
-export {
-  getClientId,
-  getClientSecret,
-} from "@/services/gmail/tokenManager";

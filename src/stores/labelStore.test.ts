@@ -12,13 +12,13 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }));
 
+import { invoke } from "@tauri-apps/api/core";
 import {
   deleteLabel as dbDeleteLabel,
   getLabelsForAccount,
   updateLabelSortOrder,
   upsertLabel,
 } from "@/services/db/labels";
-import { invoke } from "@tauri-apps/api/core";
 
 const mockGetLabels = vi.mocked(getLabelsForAccount);
 const mockDbDeleteLabel = vi.mocked(dbDeleteLabel);

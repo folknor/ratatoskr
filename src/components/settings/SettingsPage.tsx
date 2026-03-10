@@ -15,8 +15,6 @@ import {
 import type React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { getPersistedLanguage, getSystemLanguageName } from "@/i18n";
-import { navigateToLabel, navigateToSettings } from "@/router/navigate";
 import { deleteAccount } from "@/core/accounts";
 import {
   getSecureSetting,
@@ -31,6 +29,8 @@ import {
   resyncAccount,
   triggerSync,
 } from "@/core/sync";
+import { getPersistedLanguage, getSystemLanguageName } from "@/i18n";
+import { navigateToLabel, navigateToSettings } from "@/router/navigate";
 import { useAccountStore } from "@/stores/accountStore";
 import { SettingsAboutTab } from "./SettingsAboutTab";
 import { SettingsAccountsTab } from "./SettingsAccountsTab";

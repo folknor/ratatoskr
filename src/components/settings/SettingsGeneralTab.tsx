@@ -4,13 +4,13 @@ import { useTranslation } from "react-i18next";
 import { ALL_NAV_ITEMS } from "@/components/layout/Sidebar";
 import { Button } from "@/components/ui/Button";
 import { COLOR_THEMES } from "@/constants/themes";
+import { setSetting } from "@/core/settings";
 import {
   resetToSystemLanguage,
   SUPPORTED_LANGUAGES,
-  setAppLanguage,
   type SupportedLanguage,
+  setAppLanguage,
 } from "@/i18n";
-import { setSetting } from "@/core/settings";
 import type { SidebarNavItem } from "@/stores/uiLayoutStore";
 import { useUILayoutStore } from "@/stores/uiLayoutStore";
 import { useUIPreferencesStore } from "@/stores/uiPreferencesStore";

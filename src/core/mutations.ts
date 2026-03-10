@@ -24,8 +24,24 @@ export {
   unpinThread,
   updateDraft,
 } from "@/services/emailActions";
-
+// Sync triggers & draft cleanup
+export { deleteDraftsForThread } from "@/services/gmail/draftDeletion";
+export { triggerSync } from "@/services/gmail/syncManager";
+export { seedDefaultQuickSteps } from "@/services/quickSteps/defaults";
+// Quick step execution & defaults
+export { executeQuickStep } from "@/services/quickSteps/executor";
+// Smart label backfill
+export { backfillSmartLabels } from "@/services/smartLabels/backfillService";
+// Unsubscribe
+export {
+  executeUnsubscribe,
+  getSubscriptions,
+  type ParsedUnsubscribe,
+  parseUnsubscribeHeaders,
+  type SubscriptionEntry,
+} from "@/services/unsubscribe/unsubscribeManager";
 // DB writes — routed through Rust invoke() via rustDb
+// Thread category writes (Rust-backed)
 export {
   addToAllowlist,
   cancelFollowUpForThread,
@@ -35,30 +51,8 @@ export {
   insertFollowUpReminder,
   insertQuickStep,
   insertSmartLabelRule,
+  setThreadCategory,
   updateQuickStep,
   updateSmartLabelRule,
   upsertContact,
 } from "./rustDb";
-
-// Thread category writes (Rust-backed)
-export { setThreadCategory } from "./rustDb";
-
-// Sync triggers & draft cleanup
-export { deleteDraftsForThread } from "@/services/gmail/draftDeletion";
-export { triggerSync } from "@/services/gmail/syncManager";
-
-// Quick step execution & defaults
-export { executeQuickStep } from "@/services/quickSteps/executor";
-export { seedDefaultQuickSteps } from "@/services/quickSteps/defaults";
-
-// Smart label backfill
-export { backfillSmartLabels } from "@/services/smartLabels/backfillService";
-
-// Unsubscribe
-export {
-  executeUnsubscribe,
-  getSubscriptions,
-  parseUnsubscribeHeaders,
-  type ParsedUnsubscribe,
-  type SubscriptionEntry,
-} from "@/services/unsubscribe/unsubscribeManager";

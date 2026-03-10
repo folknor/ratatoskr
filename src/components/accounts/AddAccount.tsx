@@ -3,8 +3,12 @@ import type React from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "@/components/ui/Modal";
-import { insertAccount } from "@/core/accounts";
-import { startOAuthFlow, getClientId, getClientSecret } from "@/core/accounts";
+import {
+  getClientId,
+  getClientSecret,
+  insertAccount,
+  startOAuthFlow,
+} from "@/core/accounts";
 import { useAccountStore } from "@/stores/accountStore";
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
 import { AddCalDavAccount } from "./AddCalDavAccount";

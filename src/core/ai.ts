@@ -9,25 +9,21 @@ export {
   generateReply,
   generateSmartReplies,
   summarizeThread,
-  testConnection,
   type TransformType,
+  testConnection,
   transformText,
 } from "@/services/ai/aiService";
-
+// Ask inbox
+export { type AskInboxResult, askMyInbox } from "@/services/ai/askInbox";
 // Provider management
 export {
   clearProviderClients,
   isAiAvailable,
 } from "@/services/ai/providerManager";
-
-// AI types
-export { PROVIDER_MODELS } from "@/services/ai/types";
-
-// Ask inbox
-export { type AskInboxResult, askMyInbox } from "@/services/ai/askInbox";
-
 // Task extraction
 export { extractTask } from "@/services/ai/taskExtraction";
+// AI types
+export { PROVIDER_MODELS } from "@/services/ai/types";
 
 // Writing style
 export {

@@ -3,6 +3,12 @@
  * UI code should import from here instead of reaching into @/services/ directly.
  */
 
+// CalDAV auto-discovery
+export {
+  type CalDavDiscoveryResult,
+  discoverCalDavSettings,
+  testCalDavConnection,
+} from "@/services/calendar/autoDiscovery";
 // Calendar provider
 export {
   clearAllCalendarProviders,
@@ -10,13 +16,6 @@ export {
   hasCalendarSupport,
   removeCalendarProvider,
 } from "@/services/calendar/providerFactory";
-
-// CalDAV auto-discovery
-export {
-  type CalDavDiscoveryResult,
-  discoverCalDavSettings,
-  testCalDavConnection,
-} from "@/services/calendar/autoDiscovery";
 
 // Calendar types
 export type {

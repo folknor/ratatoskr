@@ -1,15 +1,8 @@
 import { useEffect, useRef } from "react";
 import {
-  getActiveLabel,
-  getSelectedThreadId,
-  navigateBack,
-  navigateToLabel,
-  navigateToThread,
-} from "@/router/navigate";
-import {
   archiveThread,
-  deleteThread as deleteThreadFromDb,
   deleteDraftsForThread,
+  deleteThread as deleteThreadFromDb,
   muteThread,
   permanentDeleteThread,
   pinThread,
@@ -21,14 +14,21 @@ import {
   unpinThread,
 } from "@/core/mutations";
 import { getMessagesForThread } from "@/core/queries";
+import {
+  getActiveLabel,
+  getSelectedThreadId,
+  navigateBack,
+  navigateToLabel,
+  navigateToThread,
+} from "@/router/navigate";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useContextMenuStore } from "@/stores/contextMenuStore";
 import { useShortcutStore } from "@/stores/shortcutStore";
+import { useSyncStateStore } from "@/stores/syncStateStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { useUILayoutStore } from "@/stores/uiLayoutStore";
 import { useUIPreferencesStore } from "@/stores/uiPreferencesStore";
-import { useSyncStateStore } from "@/stores/syncStateStore";
 import { resolveKeyboardTargets } from "@/utils/multiSelectTargets";
 
 /**

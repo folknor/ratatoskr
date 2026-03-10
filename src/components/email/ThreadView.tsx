@@ -6,13 +6,13 @@ import { AiTaskExtractDialog } from "@/components/tasks/AiTaskExtractDialog";
 import { TaskSidebar } from "@/components/tasks/TaskSidebar";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { MessageSkeleton } from "@/components/ui/Skeleton";
+import { markThreadRead } from "@/core/mutations";
 import {
   type DbMessage,
   getAllowlistedSenders,
   getMessagesForThread,
   getSetting,
 } from "@/core/queries";
-import { markThreadRead } from "@/core/mutations";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useContextMenuStore } from "@/stores/contextMenuStore";
@@ -153,7 +153,7 @@ export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
 
     // instant
     markRead();
-    return undefined;
+    return;
   }, [activeAccountId, thread.id, thread.isRead, markAsReadBehavior]);
 
   const openComposer = useComposerStore((s) => s.openComposer);

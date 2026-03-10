@@ -43,7 +43,7 @@ export function InputDialog({
       const id = setTimeout(() => firstInputRef.current?.focus(), 50);
       return () => clearTimeout(id);
     }
-    return undefined;
+    return;
   }, [isOpen, buildInitial]);
 
   const isValid = fields.every((f) => {

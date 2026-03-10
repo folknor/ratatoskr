@@ -1,7 +1,7 @@
 import { Code, Copy, Forward, Reply, ReplyAll } from "lucide-react";
 import type React from "react";
 import { useComposerStore } from "@/stores/composerStore";
-import { buildQuote, buildForwardQuote } from "@/utils/emailQuoteBuilders";
+import { buildForwardQuote, buildQuote } from "@/utils/emailQuoteBuilders";
 import { ContextMenu, type ContextMenuItem } from "../ContextMenu";
 import type { MenuComponentProps } from "./types";
 

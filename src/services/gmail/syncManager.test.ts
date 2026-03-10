@@ -44,22 +44,18 @@ vi.mock("../db/calendarEvents", () => ({
   deleteEventByRemoteId: vi.fn(),
 }));
 vi.mock("@/core/rustDb", () => ({
-  syncImapInitial: vi
-    .fn()
-    .mockResolvedValue({
-      storedCount: 0,
-      threadCount: 0,
-      newInboxMessageIds: [],
-      affectedThreadIds: [],
-    }),
-  syncImapDelta: vi
-    .fn()
-    .mockResolvedValue({
-      storedCount: 0,
-      threadCount: 0,
-      newInboxMessageIds: [],
-      affectedThreadIds: [],
-    }),
+  syncImapInitial: vi.fn().mockResolvedValue({
+    storedCount: 0,
+    threadCount: 0,
+    newInboxMessageIds: [],
+    affectedThreadIds: [],
+  }),
+  syncImapDelta: vi.fn().mockResolvedValue({
+    storedCount: 0,
+    threadCount: 0,
+    newInboxMessageIds: [],
+    affectedThreadIds: [],
+  }),
   syncGmailInitial: vi.fn().mockResolvedValue(undefined),
   syncGmailDelta: vi
     .fn()
@@ -88,8 +84,8 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(vi.fn()),
 }));
 
+import { syncGmailDelta, syncGmailInitial } from "@/core/rustDb";
 import { getAccount } from "../db/accounts";
-import { syncGmailInitial, syncGmailDelta } from "@/core/rustDb";
 // Import after mocks
 import {
   onSyncStatus,

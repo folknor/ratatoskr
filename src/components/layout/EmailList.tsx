@@ -1,11 +1,11 @@
+import { invoke } from "@tauri-apps/api/core";
 import type React from "react";
 import { useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { useSelectedThreadId } from "@/hooks/useRouteNavigation";
-import { useEmailListData, PAGE_SIZE } from "@/hooks/useEmailListData";
-import { navigateToThread } from "@/router/navigate";
-import { invoke } from "@tauri-apps/api/core";
 import { getMessagesForThread } from "@/core/queries";
+import { PAGE_SIZE, useEmailListData } from "@/hooks/useEmailListData";
+import { useSelectedThreadId } from "@/hooks/useRouteNavigation";
+import { navigateToThread } from "@/router/navigate";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useContextMenuStore } from "@/stores/contextMenuStore";

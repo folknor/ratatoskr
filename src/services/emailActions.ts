@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import {
   emailActionAddLabel,
   emailActionArchive,
@@ -16,10 +17,9 @@ import {
 } from "@/core/rustDb";
 import { getSelectedThreadId, navigateToThread } from "@/router/navigate";
 import { enqueuePendingOperation } from "@/services/db/pendingOperations";
-import { useThreadStore } from "@/stores/threadStore";
 import { useSyncStateStore } from "@/stores/syncStateStore";
+import { useThreadStore } from "@/stores/threadStore";
 import { classifyError } from "@/utils/networkErrors";
-import { invoke } from "@tauri-apps/api/core";
 
 // ---------------------------------------------------------------------------
 // Action types

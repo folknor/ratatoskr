@@ -47,10 +47,10 @@ vi.mock("@/router/navigate", () => ({
 }));
 
 import { invoke } from "@tauri-apps/api/core";
-import { enqueuePendingOperation } from "@/services/db/pendingOperations";
 import { getSelectedThreadId, navigateToThread } from "@/router/navigate";
-import { useThreadStore } from "@/stores/threadStore";
+import { enqueuePendingOperation } from "@/services/db/pendingOperations";
 import { useSyncStateStore } from "@/stores/syncStateStore";
+import { useThreadStore } from "@/stores/threadStore";
 import {
   createMockThreadStoreState,
   createMockUIStoreState,

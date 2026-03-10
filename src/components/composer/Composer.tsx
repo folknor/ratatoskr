@@ -32,8 +32,6 @@ import { readFileAsBase64 } from "@/utils/fileUtils";
 import { resolveFromAddress } from "@/utils/resolveFromAddress";
 import { sanitizeHtml } from "@/utils/sanitize";
 import { AddressInput } from "./AddressInput";
-import { useEditorSetup } from "./useEditorSetup";
-import { useTemplateShortcuts } from "./useTemplateShortcuts";
 import { AiAssistPanel } from "./AiAssistPanel";
 import { AttachmentPicker } from "./AttachmentPicker";
 import { EditorToolbar } from "./EditorToolbar";
@@ -41,6 +39,8 @@ import { FromSelector } from "./FromSelector";
 import { ScheduleSendDialog } from "./ScheduleSendDialog";
 import { SignatureSelector } from "./SignatureSelector";
 import { TemplatePicker } from "./TemplatePicker";
+import { useEditorSetup } from "./useEditorSetup";
+import { useTemplateShortcuts } from "./useTemplateShortcuts";
 
 export function Composer(): React.ReactNode {
   const { t } = useTranslation("composer");

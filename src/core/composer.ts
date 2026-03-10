@@ -7,10 +7,21 @@ import { getDb } from "@/services/db/connection";
 
 // Draft auto-save
 export { startAutoSave, stopAutoSave } from "@/services/composer/draftAutoSave";
-
+// Re-export LocalDraft type for consumers
+export type { LocalDraft } from "@/services/db/localDrafts";
 // Scheduled emails
 export { insertScheduledEmail } from "@/services/db/scheduledEmails";
-
+// Send-as aliases
+export {
+  type DbSendAsAlias,
+  deleteAlias,
+  getAliasesForAccount,
+  getDefaultAlias,
+  mapDbAlias,
+  type SendAsAlias,
+  setDefaultAlias,
+  upsertAlias,
+} from "@/services/db/sendAsAliases";
 // Signatures
 export {
   type DbSignature,
@@ -20,7 +31,6 @@ export {
   insertSignature,
   updateSignature,
 } from "@/services/db/signatures";
-
 // Templates
 export {
   type DbTemplate,
@@ -29,21 +39,6 @@ export {
   insertTemplate,
   updateTemplate,
 } from "@/services/db/templates";
-
-// Send-as aliases
-export {
-  deleteAlias,
-  type DbSendAsAlias,
-  getAliasesForAccount,
-  getDefaultAlias,
-  mapDbAlias,
-  type SendAsAlias,
-  setDefaultAlias,
-  upsertAlias,
-} from "@/services/db/sendAsAliases";
-
-// Re-export LocalDraft type for consumers
-export type { LocalDraft } from "@/services/db/localDrafts";
 
 /**
  * Look up a scheduled email's attachment data and update it.

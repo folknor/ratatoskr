@@ -23,26 +23,26 @@ export interface SyncProgress {
   total: number;
 }
 
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
-  syncImapInitial,
-  syncImapDelta,
-  syncGmailInitial,
-  syncGmailDelta,
   type ImapSyncResult,
+  syncGmailDelta,
+  syncGmailInitial,
+  syncImapDelta,
+  syncImapInitial,
 } from "@/core/rustDb";
-import { applyFiltersToNewMessageIds } from "@/services/filters/filterEngine";
-import { applySmartLabelsToNewMessageIds } from "@/services/smartLabels/smartLabelManager";
 import { categorizeNewThreads } from "@/services/ai/categorizationManager";
 import { getMessagesByIds } from "@/services/db/messages";
-import { getMutedThreadIds } from "@/services/db/threads";
-import { getThreadCategory } from "@/services/db/threadCategories";
 import { getVipSenders } from "@/services/db/notificationVips";
+import { getThreadCategory } from "@/services/db/threadCategories";
+import { getMutedThreadIds } from "@/services/db/threads";
+import { applyFiltersToNewMessageIds } from "@/services/filters/filterEngine";
 import {
   queueNewEmailNotification,
   shouldNotifyForMessage,
 } from "@/services/notifications/notificationManager";
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { applySmartLabelsToNewMessageIds } from "@/services/smartLabels/smartLabelManager";
 
 const SYNC_INTERVAL_MS = 60_000; // 60 seconds — delta syncs are lightweight (single API call when idle)
 

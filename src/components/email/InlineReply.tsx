@@ -14,7 +14,6 @@ import {
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { archiveThread, sendEmail, upsertContact } from "@/core/mutations";
 import {
   type AutoDraftMode,
   generateAutoDraft,
@@ -22,8 +21,9 @@ import {
   regenerateAutoDraft,
 } from "@/core/ai";
 import { getDefaultSignature } from "@/core/composer";
-import { getSetting } from "@/core/settings";
+import { archiveThread, sendEmail, upsertContact } from "@/core/mutations";
 import type { DbMessage } from "@/core/queries";
+import { getSetting } from "@/core/settings";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import type { Thread } from "@/stores/threadStore";

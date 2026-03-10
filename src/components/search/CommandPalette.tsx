@@ -2,14 +2,14 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CSSTransition } from "react-transition-group";
+import { type DbTemplate, getTemplatesForAccount } from "@/core/composer";
+import { spamThread } from "@/core/mutations";
 import { useActiveLabel } from "@/hooks/useRouteNavigation";
 import {
   getSelectedThreadId,
   navigateBack,
   navigateToLabel,
 } from "@/router/navigate";
-import { type DbTemplate, getTemplatesForAccount } from "@/core/composer";
-import { spamThread } from "@/core/mutations";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useThreadStore } from "@/stores/threadStore";

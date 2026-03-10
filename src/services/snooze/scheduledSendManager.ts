@@ -1,5 +1,5 @@
-import { buildRawEmail, type EmailAttachment } from "@/utils/emailBuilder";
 import { sendEmail } from "@/services/emailActions";
+import { buildRawEmail, type EmailAttachment } from "@/utils/emailBuilder";
 import {
   type BackgroundChecker,
   createBackgroundChecker,

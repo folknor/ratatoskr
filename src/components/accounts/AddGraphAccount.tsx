@@ -1,16 +1,16 @@
+import { invoke } from "@tauri-apps/api/core";
 import type React from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import { Modal } from "@/components/ui/Modal";
-import { useAccountStore } from "@/stores/accountStore";
-import { getCurrentUnixTimestamp } from "@/utils/timestamp";
 import {
   getOAuthProvider,
   insertGraphAccount,
   startProviderOAuthFlow,
 } from "@/core/accounts";
 import { getSetting } from "@/services/db/settings";
+import { useAccountStore } from "@/stores/accountStore";
+import { getCurrentUnixTimestamp } from "@/utils/timestamp";
 
 interface AddGraphAccountProps {
   onClose: () => void;

@@ -1,5 +1,5 @@
-import { vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
+import { vi } from "vitest";
 import { GoogleCalendarProvider } from "./googleCalendarProvider";
 
 vi.mock("@tauri-apps/api/core", () => ({

@@ -1,7 +1,6 @@
 import { ExternalLink, X } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useState } from "react";
-import { navigateToLabel } from "@/router/navigate";
 import {
   completeTask,
   type DbTask,
@@ -12,6 +11,7 @@ import {
   insertTask,
   uncompleteTask,
 } from "@/core/tasks";
+import { navigateToLabel } from "@/router/navigate";
 import { useTaskStore } from "@/stores/taskStore";
 import { useUILayoutStore } from "@/stores/uiLayoutStore";
 import { TaskItem } from "./TaskItem";

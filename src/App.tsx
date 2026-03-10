@@ -73,10 +73,10 @@ import {
 } from "./services/updateManager";
 import { useAccountStore } from "./stores/accountStore";
 import { useShortcutStore } from "./stores/shortcutStore";
+import { useSyncStateStore } from "./stores/syncStateStore";
 import { useTaskStore } from "./stores/taskStore";
 import { useUILayoutStore } from "./stores/uiLayoutStore";
 import { useUIPreferencesStore } from "./stores/uiPreferencesStore";
-import { useSyncStateStore } from "./stores/syncStateStore";
 import { formatSyncError } from "./utils/networkErrors";
 
 /**
@@ -549,10 +549,10 @@ export default function App(): React.ReactNode {
     const root = document.documentElement;
     if (theme === "dark") {
       root.classList.add("dark");
-      return undefined;
+      return;
     } else if (theme === "light") {
       root.classList.remove("dark");
-      return undefined;
+      return;
     } else {
       const mq = window.matchMedia("(prefers-color-scheme: dark)");
       const apply = (): void => {
@@ -623,7 +623,7 @@ export default function App(): React.ReactNode {
       mq.addEventListener("change", apply);
       return (): void => mq.removeEventListener("change", apply);
     }
-    return undefined;
+    return;
   }, [colorTheme, theme]);
 
   const handleAddAccountSuccess = useCallback(async () => {

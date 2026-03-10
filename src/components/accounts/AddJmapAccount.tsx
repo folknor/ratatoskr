@@ -12,9 +12,9 @@ import {
 import type React from "react";
 import { useCallback, useRef, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
-import { StepIndicator, type StepDef } from "./StepIndicator";
 import { deleteAccount, insertJmapAccount } from "@/services/db/accounts";
 import { useAccountStore } from "@/stores/accountStore";
+import { type StepDef, StepIndicator } from "./StepIndicator";
 
 type Step = "credentials" | "discovery" | "test";
 

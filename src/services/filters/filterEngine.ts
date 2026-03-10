@@ -1,7 +1,7 @@
 import { bodyStoreGetBatch } from "@/core/rustDb";
 import type { FilterActions, FilterCriteria } from "../db/filters";
 import { getEnabledFiltersForAccount } from "../db/filters";
-import { getMessagesByIds, type DbMessage } from "../db/messages";
+import { type DbMessage, getMessagesByIds } from "../db/messages";
 import {
   addThreadLabel,
   markThreadRead,

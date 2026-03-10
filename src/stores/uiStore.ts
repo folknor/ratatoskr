@@ -14,24 +14,24 @@
 import type { StoreApi, UseBoundStore } from "zustand";
 import { create } from "zustand";
 import type { ColorThemeId } from "@/constants/themes";
+import { useSyncStateStore } from "./syncStateStore";
 import { useUILayoutStore } from "./uiLayoutStore";
 import { useUIPreferencesStore } from "./uiPreferencesStore";
-import { useSyncStateStore } from "./syncStateStore";
 
+export { useSyncStateStore } from "./syncStateStore";
 // Re-export types from the new stores
 export type { SidebarNavItem } from "./uiLayoutStore";
-export type {
-  EmailDensity,
-  DefaultReplyMode,
-  MarkAsReadBehavior,
-  FontScale,
-  InboxViewMode,
-} from "./uiPreferencesStore";
 
 // Re-export the individual stores for direct access
 export { useUILayoutStore } from "./uiLayoutStore";
+export type {
+  DefaultReplyMode,
+  EmailDensity,
+  FontScale,
+  InboxViewMode,
+  MarkAsReadBehavior,
+} from "./uiPreferencesStore";
 export { useUIPreferencesStore } from "./uiPreferencesStore";
-export { useSyncStateStore } from "./syncStateStore";
 
 type Theme = "light" | "dark" | "system";
 type ReadingPanePosition = "right" | "bottom" | "hidden";

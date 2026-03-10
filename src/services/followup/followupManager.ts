@@ -1,8 +1,8 @@
+import { checkFollowUpReminders } from "@/core/rustDb";
 import {
   type BackgroundChecker,
   createBackgroundChecker,
 } from "../backgroundCheckers";
-import { checkFollowUpReminders } from "@/core/rustDb";
 import { notifyFollowUpDue } from "../notifications/notificationManager";
 
 /**

@@ -11,16 +11,15 @@ import type React from "react";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "@/components/ui/Modal";
-import { StepIndicator, type StepDef } from "./StepIndicator";
 import {
-  insertImapAccount,
-  insertOAuthImapAccount,
   discoverSettings,
   getDefaultImapPort,
   getDefaultSmtpPort,
+  getOAuthProvider,
+  insertImapAccount,
+  insertOAuthImapAccount,
   type SecurityType,
   startProviderOAuthFlow,
-  getOAuthProvider,
 } from "@/core/accounts";
 import { useAccountStore } from "@/stores/accountStore";
 import { AddImapAccountBasicStep } from "./AddImapAccountBasicStep";
@@ -34,6 +33,7 @@ import type {
   TestStatus,
 } from "./addImapAccountTypes";
 import { initialFormState } from "./addImapAccountTypes";
+import { type StepDef, StepIndicator } from "./StepIndicator";
 
 interface AddImapAccountProps {
   onClose: () => void;

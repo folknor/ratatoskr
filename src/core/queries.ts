@@ -10,76 +10,15 @@
 
 import { getDb } from "@/services/db/connection";
 
-// ── Rust-backed queries (invoke → Rust commands) ────────────
+// ── Gravatar ────────────────────────────────────────────────
 export {
-  // Threads / Messages / Labels / Settings (Phase 1)
-  deleteThread,
-  getAllSettings,
-  getContactByEmail,
-  getLabelsForAccount,
-  getMessagesForThread,
-  getSetting,
-  getThreadById,
-  getThreadCount,
-  getThreadLabelIds,
-  getThreadsForAccount,
-  getThreadsForCategory,
-  getUnreadCount,
-  searchContacts,
-  setSetting,
-  // Categories
-  getCategoriesForThreads,
-  getCategoryUnreadCounts,
-  // Contacts (Phase 1.5)
-  deleteContact,
-  getAllContacts,
-  getAttachmentsFromContact,
-  getContactStats,
-  getContactsFromSameDomain,
-  getLatestAuthResult,
-  getRecentThreadsWithContact,
-  updateContact,
-  updateContactNotes,
-  upsertContact,
-  // Filters
-  deleteFilter,
-  getFiltersForAccount,
-  insertFilter,
-  updateFilter,
-  // Smart Folders
-  deleteSmartFolder,
-  getSmartFolderById,
-  getSmartFolders,
-  insertSmartFolder,
-  updateSmartFolder,
-  updateSmartFolderSortOrder,
-  // Smart Label Rules
-  deleteSmartLabelRule,
-  getSmartLabelRulesForAccount,
-  insertSmartLabelRule,
-  updateSmartLabelRule,
-  // Follow-Up Reminders
-  cancelFollowUpForThread,
-  getActiveFollowUpThreadIds,
-  getFollowUpForThread,
-  insertFollowUpReminder,
-  // Quick Steps
-  deleteQuickStep,
-  getEnabledQuickStepsForAccount,
-  getQuickStepsForAccount,
-  insertQuickStep,
-  updateQuickStep,
-  // Image Allowlist
-  addToAllowlist,
-  getAllowlistedSenders,
-  // Notification VIPs
-  addVipSender,
-  isVipSender,
-  removeVipSender,
-} from "./rustDb";
+  fetchAndCacheGravatarUrl,
+  getGravatarUrl,
+} from "@/services/contacts/gravatar";
 
 // ── Types (canonical TS definitions, still from service files) ──
 export type { DbAttachment } from "@/services/db/attachments";
+export type { DbBundleRule } from "@/services/db/bundleRules";
 export type {
   ContactAttachment,
   ContactStats,
@@ -96,11 +35,14 @@ export type { DbMessage } from "@/services/db/messages";
 export type { DbQuickStep } from "@/services/db/quickSteps";
 export type { DbSmartFolder } from "@/services/db/smartFolders";
 export type { DbSmartLabelRule } from "@/services/db/smartLabelRules";
-
-// ── Bundle Rules (Rust-backed) ───────────────────────────────
-export { getBundleRules, getBundleSummaries, getHeldThreadIds } from "./rustDb";
-export type { DbBundleRule } from "@/services/db/bundleRules";
-
+// ── Thread Categories (constant) ────────────────────────────
+export { ALL_CATEGORIES } from "@/services/db/threadCategories";
+// ── Auth Results (email authentication) ─────────────────────
+export {
+  type AuthResult,
+  type AuthVerdict,
+  parseAuthenticationResults,
+} from "@/services/gmail/authParser";
 // ── Quick Step Types ────────────────────────────────────────
 export {
   ACTION_TYPE_METADATA,
@@ -109,47 +51,6 @@ export {
   type QuickStepActionType,
   type QuickStepExecutionResult,
 } from "@/services/quickSteps/types";
-
-// ── Body Store (Phase 2 — compressed body storage) ───────────
-export {
-  bodyStoreGet,
-  bodyStoreGetBatch,
-  bodyStorePut,
-  bodyStorePutBatch,
-  bodyStoreStats,
-  bodyStoreMigrate,
-  bodyStoreDelete,
-  type BodyStoreStats,
-  type MessageBody,
-} from "./rustDb";
-
-// ── Search (tantivy full-text search — Phase 3) ─────────────
-export {
-  type SearchResult,
-  searchMessages,
-  indexMessage,
-  indexMessagesBatch,
-  deleteSearchDocument,
-  rebuildSearchIndex,
-  type SearchDocument,
-} from "./rustDb";
-
-// ── Thread Categories (constant) ────────────────────────────
-export { ALL_CATEGORIES } from "@/services/db/threadCategories";
-
-// ── Auth Results (email authentication) ─────────────────────
-export {
-  type AuthResult,
-  type AuthVerdict,
-  parseAuthenticationResults,
-} from "@/services/gmail/authParser";
-
-// ── Gravatar ────────────────────────────────────────────────
-export {
-  fetchAndCacheGravatarUrl,
-  getGravatarUrl,
-} from "@/services/contacts/gravatar";
-
 // ── Smart Folder Query helpers (from search/) ────────────────
 export {
   getSmartFolderSearchQuery,
@@ -157,6 +58,95 @@ export {
   mapSmartFolderRows,
   type SmartFolderRow,
 } from "@/services/search/smartFolderQuery";
+// ── Rust-backed queries (invoke → Rust commands) ────────────
+// ── Bundle Rules (Rust-backed) ───────────────────────────────
+// ── Body Store (Phase 2 — compressed body storage) ───────────
+// ── Search (tantivy full-text search — Phase 3) ─────────────
+export {
+  // Image Allowlist
+  addToAllowlist,
+  // Notification VIPs
+  addVipSender,
+  type BodyStoreStats,
+  bodyStoreDelete,
+  bodyStoreGet,
+  bodyStoreGetBatch,
+  bodyStoreMigrate,
+  bodyStorePut,
+  bodyStorePutBatch,
+  bodyStoreStats,
+  // Follow-Up Reminders
+  cancelFollowUpForThread,
+  // Contacts (Phase 1.5)
+  deleteContact,
+  // Filters
+  deleteFilter,
+  // Quick Steps
+  deleteQuickStep,
+  deleteSearchDocument,
+  // Smart Folders
+  deleteSmartFolder,
+  // Smart Label Rules
+  deleteSmartLabelRule,
+  // Threads / Messages / Labels / Settings (Phase 1)
+  deleteThread,
+  getActiveFollowUpThreadIds,
+  getAllContacts,
+  getAllowlistedSenders,
+  getAllSettings,
+  getAttachmentsFromContact,
+  getBundleRules,
+  getBundleSummaries,
+  // Categories
+  getCategoriesForThreads,
+  getCategoryUnreadCounts,
+  getContactByEmail,
+  getContactStats,
+  getContactsFromSameDomain,
+  getEnabledQuickStepsForAccount,
+  getFiltersForAccount,
+  getFollowUpForThread,
+  getHeldThreadIds,
+  getLabelsForAccount,
+  getLatestAuthResult,
+  getMessagesForThread,
+  getQuickStepsForAccount,
+  getRecentThreadsWithContact,
+  getSetting,
+  getSmartFolderById,
+  getSmartFolders,
+  getSmartLabelRulesForAccount,
+  getThreadById,
+  getThreadCount,
+  getThreadLabelIds,
+  getThreadsForAccount,
+  getThreadsForCategory,
+  getUnreadCount,
+  indexMessage,
+  indexMessagesBatch,
+  insertFilter,
+  insertFollowUpReminder,
+  insertQuickStep,
+  insertSmartFolder,
+  insertSmartLabelRule,
+  isVipSender,
+  type MessageBody,
+  rebuildSearchIndex,
+  removeVipSender,
+  type SearchDocument,
+  type SearchResult,
+  searchContacts,
+  searchMessages,
+  setSetting,
+  updateContact,
+  updateContactNotes,
+  updateFilter,
+  updateQuickStep,
+  updateSmartFolder,
+  updateSmartFolderSortOrder,
+  updateSmartLabelRule,
+  upsertContact,
+} from "./rustDb";
 
 // ── Raw DB wrappers (for code that previously called getDb() directly) ──
 
