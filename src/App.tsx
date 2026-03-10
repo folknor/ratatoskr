@@ -214,6 +214,24 @@ export default function App(): React.ReactNode {
           ),
         );
 
+        // Bootstrap tantivy search index on first run (Phase 3).
+        // Uses a version key so the index is rebuilt when the schema changes.
+        {
+          const SEARCH_INDEX_VERSION = "1";
+          const indexVersion = await getSetting("search_index_version");
+          if (indexVersion !== SEARCH_INDEX_VERSION) {
+            import("@/core/rustDb").then(async (rustDb) => {
+              try {
+                const count = await rustDb.rebuildSearchIndex();
+                await rustDb.setSetting("search_index_version", SEARCH_INDEX_VERSION);
+                console.log(`Search index built: ${String(count)} documents`);
+              } catch (e) {
+                console.warn("Search index rebuild failed:", e);
+              }
+            });
+          }
+        }
+
         // Load persisted language (must be after migrations, before UI renders)
         const { loadPersistedLanguage } = await import("./i18n");
         await loadPersistedLanguage();

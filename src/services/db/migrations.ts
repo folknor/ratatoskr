@@ -777,6 +777,15 @@ const MIGRATIONS: { version: number; description: string; sql: string }[] = [
     description: "Accept self-signed certificates for IMAP/SMTP",
     sql: `ALTER TABLE accounts ADD COLUMN accept_invalid_certs INTEGER DEFAULT 0;`,
   },
+  {
+    version: 24,
+    description: "Drop FTS5 triggers (bodies moved to body store, tantivy handles search)",
+    sql: `
+      DROP TRIGGER IF EXISTS messages_ai;
+      DROP TRIGGER IF EXISTS messages_ad;
+      DROP TRIGGER IF EXISTS messages_au;
+    `,
+  },
 ];
 
 /**
