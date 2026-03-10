@@ -16,6 +16,7 @@ mod imap;
 mod oauth;
 mod search;
 mod smtp;
+mod sync;
 mod threading;
 
 #[allow(clippy::needless_pass_by_value)]
@@ -233,6 +234,9 @@ pub fn run() {
             // Categorization rule engine (Phase 6)
             categorization::commands::categorize_thread_by_rules,
             categorization::commands::categorize_threads_by_rules,
+            // IMAP sync engine (Phase 4)
+            sync::commands::sync_imap_initial,
+            sync::commands::sync_imap_delta,
         ])
         .setup(|app| {
             {
@@ -270,6 +274,8 @@ pub fn run() {
                     Box::new(std::io::Error::other(format!("search init: {e}")))
                 })?;
                 app.manage(search_state);
+
+                app.manage(sync::SyncState::new());
             }
 
             #[cfg(not(target_os = "linux"))]

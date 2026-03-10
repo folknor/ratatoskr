@@ -1,5 +1,6 @@
 import type { FilterActions, FilterCriteria } from "../db/filters";
 import { getEnabledFiltersForAccount } from "../db/filters";
+import { getMessagesByIds, type DbMessage } from "../db/messages";
 import {
   addThreadLabel,
   markThreadRead,
@@ -163,4 +164,47 @@ export async function applyFiltersToMessages(
       }
     }),
   );
+}
+
+/** Convert a DB message row to a lightweight ParsedMessage for filter matching. */
+export function dbMessageToParsedMessage(row: DbMessage): ParsedMessage {
+  return {
+    id: row.id,
+    threadId: row.thread_id,
+    fromAddress: row.from_address,
+    fromName: row.from_name,
+    toAddresses: row.to_addresses,
+    ccAddresses: row.cc_addresses,
+    bccAddresses: row.bcc_addresses,
+    replyTo: row.reply_to,
+    subject: row.subject,
+    snippet: row.snippet ?? "",
+    date: row.date,
+    isRead: row.is_read === 1,
+    isStarred: row.is_starred === 1,
+    bodyHtml: row.body_html,
+    bodyText: row.body_text,
+    rawSize: row.raw_size ?? 0,
+    internalDate: row.internal_date ?? row.date,
+    labelIds: [],
+    hasAttachments: false, // not critical for filter matching
+    attachments: [],
+    listUnsubscribe: row.list_unsubscribe,
+    listUnsubscribePost: row.list_unsubscribe_post,
+    authResults: row.auth_results,
+  };
+}
+
+/**
+ * Load messages by IDs from DB, apply filters. Used by Rust sync post-sync hooks.
+ */
+export async function applyFiltersToNewMessageIds(
+  accountId: string,
+  messageIds: string[],
+): Promise<void> {
+  if (messageIds.length === 0) return;
+  const rows = await getMessagesByIds(accountId, messageIds);
+  if (rows.length === 0) return;
+  const messages = rows.map(dbMessageToParsedMessage);
+  await applyFiltersToMessages(accountId, messages);
 }

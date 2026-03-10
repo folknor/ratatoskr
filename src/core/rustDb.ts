@@ -1166,3 +1166,36 @@ export async function categorizeThreadsByRules(
   if (inputs.length === 0) return [];
   return invoke<ThreadCategory[]>("categorize_threads_by_rules", { inputs });
 }
+
+// ── IMAP Sync Engine (Phase 4) ──────────────────────────────────────
+
+/** Result returned by Rust IMAP sync commands. */
+export interface ImapSyncResult {
+  storedCount: number;
+  threadCount: number;
+  newInboxMessageIds: string[];
+  affectedThreadIds: string[];
+}
+
+/**
+ * Run initial IMAP sync entirely in Rust.
+ * Pipeline: IMAP fetch → parse → DB write → body store → tantivy index → thread.
+ * Zero IPC during the sync pipeline — only one invoke() to start it.
+ */
+export function syncImapInitial(
+  accountId: string,
+  daysBack?: number,
+): Promise<ImapSyncResult> {
+  return invoke<ImapSyncResult>("sync_imap_initial", { accountId, daysBack });
+}
+
+/**
+ * Run delta IMAP sync entirely in Rust.
+ * Checks for new UIDs since last sync, fetches and processes only new messages.
+ */
+export function syncImapDelta(
+  accountId: string,
+  daysBack?: number,
+): Promise<ImapSyncResult> {
+  return invoke<ImapSyncResult>("sync_imap_delta", { accountId, daysBack });
+}

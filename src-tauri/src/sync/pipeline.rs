@@ -1,0 +1,355 @@
+use std::collections::{HashMap, HashSet};
+
+use rusqlite::Connection;
+
+use crate::body_store::BodyStoreState;
+use crate::search::{SearchDocument, SearchState};
+use crate::threading::ThreadGroup;
+
+use super::convert::ConvertedMessage;
+use super::types::MessageMeta;
+
+// ---------------------------------------------------------------------------
+// Constants (matching TS imapSyncFetch.ts)
+// ---------------------------------------------------------------------------
+
+/// Number of thread groups to process per transaction.
+pub const THREAD_BATCH_SIZE: usize = 100;
+
+// ---------------------------------------------------------------------------
+// Body store + search index helpers
+// ---------------------------------------------------------------------------
+
+/// Store bodies in the body store (compressed, separate DB).
+/// Fire-and-forget pattern — errors are logged but don't fail the sync.
+pub async fn store_bodies(body_store: &BodyStoreState, messages: &[ConvertedMessage]) {
+    let bodies: Vec<crate::body_store::MessageBody> = messages
+        .iter()
+        .filter(|m| m.imap_msg.body_html.is_some() || m.imap_msg.body_text.is_some())
+        .map(|m| crate::body_store::MessageBody {
+            message_id: m.id.clone(),
+            body_html: m.imap_msg.body_html.clone(),
+            body_text: m.imap_msg.body_text.clone(),
+        })
+        .collect();
+
+    if bodies.is_empty() {
+        return;
+    }
+
+    if let Err(e) = body_store.put_batch(bodies).await {
+        log::warn!("Failed to store bodies in body store: {e}");
+    }
+}
+
+/// Index messages in tantivy search. Fire-and-forget.
+pub async fn index_messages(search: &SearchState, messages: &[ConvertedMessage], account_id: &str) {
+    let docs: Vec<SearchDocument> = messages
+        .iter()
+        .map(|m| SearchDocument {
+            message_id: m.id.clone(),
+            account_id: account_id.to_string(),
+            thread_id: m.id.clone(), // placeholder, updated after threading
+            subject: m.imap_msg.subject.clone(),
+            from_name: m.imap_msg.from_name.clone(),
+            from_address: m.imap_msg.from_address.clone(),
+            to_addresses: m.imap_msg.to_addresses.clone(),
+            body_text: m.imap_msg.body_text.clone(),
+            snippet: Some(m.meta.snippet.clone()),
+            date: m.meta.date / 1000, // tantivy expects seconds
+            is_read: m.meta.is_read,
+            is_starred: m.meta.is_starred,
+            has_attachment: m.meta.has_attachments,
+        })
+        .collect();
+
+    if let Err(e) = search.index_messages_batch(&docs).await {
+        log::warn!("Failed to index messages in tantivy: {e}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Store threads after JWZ threading pass
+// ---------------------------------------------------------------------------
+
+/// Store thread groups and update message thread IDs.
+///
+/// This is the equivalent of the TS `storeThreadsAndMessages` for initial sync,
+/// and the Phase 4 thread storage loop.
+pub fn store_threads(
+    conn: &Connection,
+    account_id: &str,
+    thread_groups: &[ThreadGroup],
+    all_meta: &HashMap<String, MessageMeta>,
+    labels_by_rfc_id: &HashMap<String, HashSet<String>>,
+    skipped_thread_ids: &HashSet<String>,
+) -> Result<Vec<String>, String> {
+    let mut affected_thread_ids = Vec::new();
+
+    for batch in thread_groups.chunks(THREAD_BATCH_SIZE) {
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| format!("begin thread tx: {e}"))?;
+
+        for group in batch {
+            if skipped_thread_ids.contains(&group.thread_id) {
+                continue;
+            }
+
+            let mut messages: Vec<&MessageMeta> = group
+                .message_ids
+                .iter()
+                .filter_map(|id| all_meta.get(id))
+                .collect();
+
+            if messages.is_empty() {
+                continue;
+            }
+
+            // Sort by date ascending
+            messages.sort_by_key(|m| m.date);
+
+            let first = messages[0];
+            let last = messages[messages.len() - 1];
+
+            // Collect all label IDs including cross-folder copies
+            let mut all_label_ids = HashSet::new();
+            for msg in &messages {
+                for lid in &msg.label_ids {
+                    all_label_ids.insert(lid.clone());
+                }
+                if let Some(extra) = labels_by_rfc_id.get(&msg.rfc_message_id) {
+                    for lid in extra {
+                        all_label_ids.insert(lid.clone());
+                    }
+                }
+            }
+
+            let is_read = messages.iter().all(|m| m.is_read);
+            let is_starred = messages.iter().any(|m| m.is_starred);
+            let has_attachments = messages.iter().any(|m| m.has_attachments);
+
+            // Upsert the real thread
+            tx.execute(
+                "INSERT OR REPLACE INTO threads \
+                 (id, account_id, subject, snippet, last_message_at, message_count, \
+                  is_read, is_starred, is_important, has_attachments) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?9)",
+                rusqlite::params![
+                    group.thread_id,
+                    account_id,
+                    first.subject,
+                    last.snippet,
+                    last.date,
+                    messages.len() as i64,
+                    is_read,
+                    is_starred,
+                    has_attachments,
+                ],
+            )
+            .map_err(|e| format!("upsert thread: {e}"))?;
+
+            // Set thread labels (delete old, insert new)
+            tx.execute(
+                "DELETE FROM thread_labels WHERE account_id = ?1 AND thread_id = ?2",
+                rusqlite::params![account_id, group.thread_id],
+            )
+            .map_err(|e| format!("delete thread labels: {e}"))?;
+
+            for label_id in &all_label_ids {
+                tx.execute(
+                    "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
+                     VALUES (?1, ?2, ?3)",
+                    rusqlite::params![account_id, group.thread_id, label_id],
+                )
+                .map_err(|e| format!("insert thread label: {e}"))?;
+            }
+
+            // Batch-update message thread IDs
+            let message_ids: Vec<&str> = messages.iter().map(|m| m.id.as_str()).collect();
+            for chunk in message_ids.chunks(100) {
+                let placeholders: String = chunk
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| format!("?{}", i + 3))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                let sql = format!(
+                    "UPDATE messages SET thread_id = ?1 \
+                     WHERE account_id = ?2 AND id IN ({placeholders})"
+                );
+
+                let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+                params.push(Box::new(group.thread_id.clone()));
+                params.push(Box::new(account_id.to_string()));
+                for id in chunk {
+                    params.push(Box::new(id.to_string()));
+                }
+                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                    params.iter().map(AsRef::as_ref).collect();
+
+                tx.execute(&sql, param_refs.as_slice())
+                    .map_err(|e| format!("update message thread_ids: {e}"))?;
+            }
+
+            affected_thread_ids.push(group.thread_id.clone());
+        }
+
+        tx.commit().map_err(|e| format!("commit threads: {e}"))?;
+    }
+
+    Ok(affected_thread_ids)
+}
+
+/// Delete orphaned placeholder threads that are no longer referenced by any final thread group.
+pub fn cleanup_orphan_threads(
+    conn: &Connection,
+    account_id: &str,
+    all_message_ids: &HashSet<String>,
+    final_thread_ids: &HashSet<String>,
+) -> Result<u64, String> {
+    let mut count: u64 = 0;
+    for msg_id in all_message_ids {
+        if !final_thread_ids.contains(msg_id) {
+            let deleted = conn
+                .execute(
+                    "DELETE FROM threads WHERE id = ?1 AND account_id = ?2",
+                    rusqlite::params![msg_id, account_id],
+                )
+                .map_err(|e| format!("delete orphan thread: {e}"))?;
+            count += deleted as u64;
+        }
+    }
+    Ok(count)
+}
+
+/// Check which thread IDs have pending local operations (should be skipped during sync).
+pub fn get_skipped_thread_ids(
+    conn: &Connection,
+    account_id: &str,
+    thread_ids: &[String],
+) -> Result<HashSet<String>, String> {
+    let mut skipped = HashSet::new();
+    for tid in thread_ids {
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pending_operations \
+                 WHERE account_id = ?1 AND resource_id = ?2 AND status != 'failed'",
+                rusqlite::params![account_id, tid],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("check pending ops: {e}"))?;
+        if count > 0 {
+            log::info!("Skipping thread {tid}: has {count} pending local ops");
+            skipped.insert(tid.clone());
+        }
+    }
+    Ok(skipped)
+}
+
+/// Update folder sync state in DB.
+pub fn upsert_folder_sync_state(
+    conn: &Connection,
+    account_id: &str,
+    folder_path: &str,
+    uidvalidity: u32,
+    last_uid: u32,
+    last_sync_at: i64,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR REPLACE INTO folder_sync_state \
+         (account_id, folder_path, uidvalidity, last_uid, modseq, last_sync_at) \
+         VALUES (?1, ?2, ?3, ?4, NULL, ?5)",
+        rusqlite::params![account_id, folder_path, uidvalidity, last_uid, last_sync_at],
+    )
+    .map_err(|e| format!("upsert folder sync state: {e}"))?;
+    Ok(())
+}
+
+/// Update account sync state (history_id column).
+pub fn update_account_sync_state(
+    conn: &Connection,
+    account_id: &str,
+    history_id: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE accounts SET history_id = ?1 WHERE id = ?2",
+        rusqlite::params![history_id, account_id],
+    )
+    .map_err(|e| format!("update account sync state: {e}"))?;
+    Ok(())
+}
+
+/// Sync IMAP folders to the labels table.
+pub fn sync_folders_to_labels(
+    conn: &Connection,
+    account_id: &str,
+    folders: &[&crate::imap::types::ImapFolder],
+) -> Result<(), String> {
+    for folder in folders {
+        let mapping = super::folder_mapper::map_folder_to_label(folder);
+        conn.execute(
+            "INSERT OR REPLACE INTO labels \
+             (id, account_id, name, type, imap_folder_path, imap_special_use) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                mapping.label_id,
+                account_id,
+                mapping.label_name,
+                mapping.label_type,
+                folder.raw_path,
+                folder.special_use,
+            ],
+        )
+        .map_err(|e| format!("upsert label: {e}"))?;
+    }
+
+    // Ensure UNREAD pseudo-label exists
+    conn.execute(
+        "INSERT OR IGNORE INTO labels (id, account_id, name, type) VALUES (?1, ?2, 'Unread', 'system')",
+        rusqlite::params!["UNREAD", account_id],
+    )
+    .map_err(|e| format!("upsert UNREAD label: {e}"))?;
+
+    Ok(())
+}
+
+/// Get all folder sync states for an account.
+pub fn get_all_folder_sync_states(
+    conn: &Connection,
+    account_id: &str,
+) -> Result<Vec<FolderSyncState>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT folder_path, uidvalidity, last_uid, modseq, last_sync_at \
+             FROM folder_sync_state WHERE account_id = ?1",
+        )
+        .map_err(|e| format!("prepare folder sync states: {e}"))?;
+
+    let rows = stmt
+        .query_map(rusqlite::params![account_id], |row| {
+            Ok(FolderSyncState {
+                folder_path: row.get(0)?,
+                uidvalidity: row.get(1)?,
+                last_uid: row.get(2)?,
+                _modseq: row.get(3)?,
+                _last_sync_at: row.get(4)?,
+            })
+        })
+        .map_err(|e| format!("query folder sync states: {e}"))?;
+
+    let mut states = Vec::new();
+    for row in rows {
+        states.push(row.map_err(|e| format!("read row: {e}"))?);
+    }
+    Ok(states)
+}
+
+pub struct FolderSyncState {
+    pub folder_path: String,
+    pub uidvalidity: Option<u32>,
+    pub last_uid: u32,
+    pub _modseq: Option<i64>,
+    pub _last_sync_at: Option<i64>,
+}

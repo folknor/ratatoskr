@@ -23,6 +23,12 @@ import { imapDeltaSync, imapInitialSync } from "../imap/imapSync";
 import { ensureFreshToken } from "../oauth/oauthTokenManager";
 import { deltaSync, initialSync, type SyncProgress } from "./sync";
 import { getGmailClient } from "./tokenManager";
+import {
+  syncImapInitial,
+  syncImapDelta,
+  type ImapSyncResult,
+} from "@/core/rustDb";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 const SYNC_INTERVAL_MS = 60_000; // 60 seconds — delta syncs are lightweight (single API call when idle)
 
@@ -95,9 +101,124 @@ async function syncGmailAccount(accountId: string): Promise<void> {
 }
 
 /**
+ * Run IMAP sync via the Rust sync engine (Phase 4).
+ *
+ * The entire pipeline runs in Rust: IMAP fetch → parse → DB write →
+ * body store → tantivy index → JWZ threading → thread storage.
+ * Zero IPC during the pipeline — only one invoke() call.
+ *
+ * Post-sync hooks (filters, notifications, AI categorization) run in TS
+ * using the returned new message IDs.
+ */
+async function syncImapAccountRust(accountId: string): Promise<void> {
+  const account = await getAccount(accountId);
+  if (!account) throw new Error("Account not found");
+
+  // Refresh OAuth2 token before syncing (if applicable).
+  // The Rust engine reads the password from DB, so we need the fresh token
+  // written to DB before invoking.
+  if (account.auth_method === "oauth2") {
+    await ensureFreshToken(account);
+  }
+
+  // Listen for progress events from Rust
+  let unlisten: UnlistenFn | null = null;
+  try {
+    unlisten = await listen<{
+      accountId: string;
+      phase: string;
+      current: number;
+      total: number;
+      folder: string | null;
+    }>("imap-sync-progress", (event) => {
+      if (event.payload.accountId !== accountId) return;
+      statusCallback?.(accountId, "syncing", {
+        phase: mapImapPhase(event.payload.phase),
+        current: event.payload.current,
+        total: event.payload.total,
+      });
+    });
+  } catch {
+    // Listen failure is non-fatal — sync will work without progress events
+  }
+
+  try {
+    let result: ImapSyncResult;
+
+    if (account.history_id) {
+      result = await syncImapDelta(accountId);
+
+      // Recovery: if delta found nothing but DB has no threads, force full resync
+      if (result.storedCount === 0) {
+        const threadCount = await getThreadCountForAccount(accountId);
+        if (threadCount === 0) {
+          console.warn(
+            `[syncManager] Rust delta sync found 0 messages, DB has 0 threads — forcing full re-sync`,
+          );
+          await clearAccountHistoryId(accountId);
+          await clearAllFolderSyncStates(accountId);
+          result = await syncImapInitial(accountId);
+        }
+      }
+    } else {
+      result = await syncImapInitial(accountId);
+    }
+
+    // Post-sync hooks: apply filters and categorization to new inbox messages
+    if (result.newInboxMessageIds.length > 0) {
+      // We need ParsedMessage-like objects for filters. Build lightweight versions.
+      // For now, fire the TS-side post-sync hooks using dynamic imports.
+      try {
+        const { applyFiltersToNewMessageIds } = await import(
+          "../filters/filterEngine"
+        );
+        await applyFiltersToNewMessageIds(
+          accountId,
+          result.newInboxMessageIds,
+        );
+      } catch (err) {
+        console.error("[syncManager] Filter application failed:", err);
+      }
+
+      // Smart labels (fire-and-forget)
+      import("@/services/smartLabels/smartLabelManager")
+        .then(({ applySmartLabelsToNewMessageIds }) =>
+          applySmartLabelsToNewMessageIds?.(
+            accountId,
+            result.newInboxMessageIds,
+          ),
+        )
+        .catch((err) =>
+          console.error("[syncManager] Smart label error:", err),
+        );
+    }
+
+    // AI categorization (fire-and-forget)
+    if (result.storedCount > 0) {
+      import("@/services/ai/categorizationManager")
+        .then(({ categorizeNewThreads }) => categorizeNewThreads(accountId))
+        .catch((err) =>
+          console.error("[syncManager] Categorization error:", err),
+        );
+    }
+  } finally {
+    unlisten?.();
+  }
+}
+
+/**
  * Run a sync for a single IMAP account (initial or delta).
+ * Uses the Rust sync engine by default, falls back to TS if disabled.
  */
 async function syncImapAccount(accountId: string): Promise<void> {
+  // Feature flag: use Rust sync engine (default: true for IMAP accounts)
+  const useRustSync = (await getSetting("use_rust_sync")) !== "false";
+
+  if (useRustSync) {
+    return syncImapAccountRust(accountId);
+  }
+
+  // Fallback: TS sync path
   const account = await getAccount(accountId);
 
   if (!account) {

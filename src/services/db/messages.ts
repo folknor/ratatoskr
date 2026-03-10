@@ -43,6 +43,20 @@ export async function getMessagesForThread(
   );
 }
 
+export async function getMessagesByIds(
+  accountId: string,
+  messageIds: string[],
+): Promise<DbMessage[]> {
+  if (messageIds.length === 0) return [];
+  const db = await getDb();
+  // Build parameterized IN clause
+  const placeholders = messageIds.map((_, i) => `$${i + 2}`).join(", ");
+  return db.select<DbMessage[]>(
+    `SELECT * FROM messages WHERE account_id = $1 AND id IN (${placeholders})`,
+    [accountId, ...messageIds],
+  );
+}
+
 export async function upsertMessage(msg: {
   id: string;
   accountId: string;
