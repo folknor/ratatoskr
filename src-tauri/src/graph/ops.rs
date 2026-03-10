@@ -254,9 +254,23 @@ impl ProviderOps for GraphOps {
         &self,
         ctx: &ProviderCtx<'_>,
     ) -> Result<Vec<ProviderFolder>, String> {
-        // Refresh folder map (re-syncs from server)
-        let folder_map = super::sync::sync_folders_public(&self.client, ctx).await?;
-        self.client.set_folder_map(folder_map.clone()).await;
+        // Use cached folder map if it was synced less than 60 seconds ago
+        let use_cache = if let Some(age) = self.client.folder_map_age().await {
+            age < std::time::Duration::from_secs(60) && self.client.folder_map().await.is_some()
+        } else {
+            false
+        };
+
+        let folder_map = if use_cache {
+            // Safe to unwrap: we just checked is_some() above
+            self.client.folder_map().await.ok_or("Folder map vanished")?
+        } else {
+            let map = super::sync::sync_folders_public(&self.client, ctx).await?;
+            self.client.set_folder_map(map.clone()).await;
+            self.client.set_folder_map_synced().await;
+            map
+        };
+
         let folders = folder_map
             .all_mappings()
             .map(|m| ProviderFolder {

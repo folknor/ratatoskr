@@ -52,6 +52,7 @@ pub struct GraphMessage {
     pub inference_classification: Option<String>,
     pub internet_message_headers: Option<Vec<GraphInternetHeader>>,
     pub internet_message_id: Option<String>,
+    pub attachments: Option<Vec<GraphAttachment>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

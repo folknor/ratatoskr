@@ -45,12 +45,26 @@ async function saveDraft(): Promise<void> {
     });
 
     if (state.draftId) {
-      await updateDraftAction(
+      const result = await updateDraftAction(
         accountId,
         state.draftId,
         raw,
         state.threadId ?? undefined,
       );
+      // Update draft ID if the provider returned a new one (e.g. Graph/IMAP
+      // delete-then-create yields a different ID).
+      if (result.success && result.data) {
+        const newId =
+          typeof result.data === "string"
+            ? result.data
+            : typeof result.data === "object" &&
+                "draftId" in (result.data as Record<string, unknown>)
+              ? (result.data as { draftId: string }).draftId
+              : null;
+        if (newId && newId !== state.draftId) {
+          state.setDraftId(newId);
+        }
+      }
     } else {
       const result = await createDraftAction(
         accountId,

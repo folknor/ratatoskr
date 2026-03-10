@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
@@ -43,6 +44,8 @@ struct ClientInner {
     encryption_key: [u8; 32],
     semaphore: Arc<Semaphore>,
     folder_map: RwLock<Option<FolderMap>>,
+    folder_map_last_sync: RwLock<Option<std::time::Instant>>,
+    sync_cycle_counter: AtomicU32,
 }
 
 /// Tauri-managed state holding all Graph clients and the encryption key.
@@ -111,6 +114,8 @@ impl GraphClient {
                 encryption_key,
                 semaphore: Arc::new(Semaphore::new(CONCURRENCY_LIMIT)),
                 folder_map: RwLock::new(None),
+                folder_map_last_sync: RwLock::new(None),
+                sync_cycle_counter: AtomicU32::new(0),
             }),
         })
     }
@@ -127,6 +132,33 @@ impl GraphClient {
     /// Store a new folder map.
     pub async fn set_folder_map(&self, map: FolderMap) {
         *self.inner.folder_map.write().await = Some(map);
+    }
+
+    /// How long ago the folder map was last synced from the server.
+    pub async fn folder_map_age(&self) -> Option<std::time::Duration> {
+        self.inner
+            .folder_map_last_sync
+            .read()
+            .await
+            .map(|t| t.elapsed())
+    }
+
+    /// Atomically increment the sync cycle counter and return the new value.
+    pub fn increment_sync_cycle(&self) -> u32 {
+        self.inner
+            .sync_cycle_counter
+            .fetch_add(1, Ordering::Relaxed)
+            + 1
+    }
+
+    /// Read the current sync cycle counter value.
+    pub fn sync_cycle(&self) -> u32 {
+        self.inner.sync_cycle_counter.load(Ordering::Relaxed)
+    }
+
+    /// Record that the folder map was just synced from the server.
+    pub async fn set_folder_map_synced(&self) {
+        *self.inner.folder_map_last_sync.write().await = Some(std::time::Instant::now());
     }
 
     // ── HTTP methods ────────────────────────────────────────

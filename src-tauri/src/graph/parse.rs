@@ -1,6 +1,17 @@
 use super::folder_mapper::FolderMap;
 use super::types::{GraphMessage, GraphRecipient};
 
+/// Parsed attachment metadata ready for DB persistence.
+#[derive(Debug, Clone)]
+pub struct ParsedGraphAttachment {
+    pub id: String,
+    pub filename: Option<String>,
+    pub mime_type: Option<String>,
+    pub size: Option<i64>,
+    pub is_inline: bool,
+    pub content_id: Option<String>,
+}
+
 /// Parsed Graph message ready for DB persistence.
 ///
 /// Matches the shape written to the `messages` table + body store.
@@ -31,6 +42,7 @@ pub struct ParsedGraphMessage {
     pub auth_results: Option<String>,
     pub list_unsubscribe: Option<String>,
     pub list_unsubscribe_post: Option<String>,
+    pub attachments: Vec<ParsedGraphAttachment>,
 }
 
 /// Convert a Graph API message to our DB-ready struct.
@@ -111,6 +123,22 @@ pub fn parse_graph_message(
     let list_unsubscribe = get_header(headers, "List-Unsubscribe");
     let list_unsubscribe_post = get_header(headers, "List-Unsubscribe-Post");
 
+    // Attachments
+    let attachments: Vec<ParsedGraphAttachment> = msg
+        .attachments
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .map(|a| ParsedGraphAttachment {
+            id: a.id.clone(),
+            filename: a.name.clone(),
+            mime_type: a.content_type.clone(),
+            size: a.size,
+            is_inline: a.is_inline.unwrap_or(false),
+            content_id: a.content_id.clone(),
+        })
+        .collect();
+
     Ok(ParsedGraphMessage {
         id,
         thread_id,
@@ -136,6 +164,7 @@ pub fn parse_graph_message(
         auth_results,
         list_unsubscribe,
         list_unsubscribe_post,
+        attachments,
     })
 }
 

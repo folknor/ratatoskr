@@ -127,6 +127,13 @@ pub(crate) async fn graph_initial_sync(
 /// Delta Graph sync: per-folder delta queries → targeted updates.
 ///
 /// Returns new inbox message IDs and affected thread IDs for TS post-sync hooks.
+///
+/// Uses priority-based scheduling to reduce API calls:
+/// - Tier 0 (INBOX, SENT, DRAFT): every cycle
+/// - Tier 1 (TRASH, SPAM, archive): every 5th cycle
+/// - Tier 2 (user folders): every 20th cycle
+///
+/// Every 10th cycle, refreshes the folder tree and bootstraps new folders.
 pub(crate) async fn graph_delta_sync(
     client: &GraphClient,
     ctx: &ProviderCtx<'_>,
@@ -140,26 +147,78 @@ pub(crate) async fn graph_delta_sync(
         app_handle: ctx.app_handle,
     };
 
+    let cycle = client.increment_sync_cycle();
+
     // Load stored delta tokens
-    let tokens = load_delta_tokens(ctx.db, ctx.account_id).await?;
+    let mut tokens = load_delta_tokens(ctx.db, ctx.account_id).await?;
     if tokens.is_empty() {
         return Err("GRAPH_NO_DELTA_STATE".to_string());
     }
 
-    // Get or refresh folder map
-    let folder_map = if let Some(map) = client.folder_map().await {
+    // Every 10th cycle, refresh the folder tree to discover new/removed folders
+    let folder_map = if cycle % 10 == 0 {
+        let map = sync_folders(client, ctx).await?;
+        client.set_folder_map(map.clone()).await;
+        client.set_folder_map_synced().await;
+
+        // Bootstrap delta tokens for newly discovered folders
+        let known_folder_ids: HashSet<&str> =
+            map.folder_entries().map(|(fid, _)| fid).collect();
+        let token_folder_ids: HashSet<String> = tokens.keys().cloned().collect();
+
+        for folder_id in &known_folder_ids {
+            if !token_folder_ids.contains(*folder_id) {
+                log::info!("Graph delta sync: bootstrapping new folder {folder_id}");
+                match bootstrap_delta_token_latest(client, ctx.db, folder_id).await {
+                    Ok(delta_link) => {
+                        save_delta_token(ctx.db, ctx.account_id, folder_id, &delta_link).await?;
+                        tokens.insert(folder_id.to_string(), delta_link);
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "Graph delta sync: failed to bootstrap folder {folder_id}: {e}"
+                        );
+                    }
+                }
+            }
+        }
+
+        // Clean up delta tokens for folders that no longer exist
+        let stale_ids: Vec<String> = token_folder_ids
+            .iter()
+            .filter(|fid| !known_folder_ids.contains(fid.as_str()))
+            .cloned()
+            .collect();
+        for stale_id in &stale_ids {
+            log::info!("Graph delta sync: removing stale delta token for folder {stale_id}");
+            delete_delta_token(ctx.db, ctx.account_id, stale_id).await?;
+            tokens.remove(stale_id);
+        }
+
+        map
+    } else if let Some(map) = client.folder_map().await {
         map
     } else {
         let map = sync_folders(client, ctx).await?;
         client.set_folder_map(map.clone()).await;
+        client.set_folder_map_synced().await;
         map
     };
 
     let mut new_inbox_ids = Vec::new();
     let mut affected_thread_ids = HashSet::new();
 
-    // Process each folder with a stored delta token
+    // Process each folder with a stored delta token, filtered by priority tier
     for (folder_id, delta_link) in &tokens {
+        let label_id = folder_map
+            .get_by_folder_id(folder_id)
+            .map(|m| m.label_id.as_str())
+            .unwrap_or("");
+
+        if !should_sync_folder(label_id, cycle) {
+            continue;
+        }
+
         let (folder_new, folder_affected) =
             sync_folder_delta(&sctx, folder_id, delta_link, &folder_map).await?;
         new_inbox_ids.extend(folder_new);
@@ -170,6 +229,15 @@ pub(crate) async fn graph_delta_sync(
         new_inbox_message_ids: new_inbox_ids,
         affected_thread_ids: affected_thread_ids.into_iter().collect(),
     })
+}
+
+/// Decide whether a folder should be synced this cycle based on its priority tier.
+fn should_sync_folder(label_id: &str, cycle: u32) -> bool {
+    match folder_priority(label_id) {
+        0 => true,            // Tier 0: every cycle
+        1 => cycle % 5 == 0,  // Tier 1: every 5th cycle
+        _ => cycle % 20 == 0, // Tier 2: every 20th cycle
+    }
 }
 
 /// Process delta changes for a single folder.
@@ -352,6 +420,7 @@ async fn fetch_folder_messages(
         "/me/mailFolders/{folder_id}/messages\
          ?$filter=receivedDateTime ge {since_iso}\
          &$select={MESSAGE_SELECT}\
+         &$expand=attachments($select=id,name,contentType,size,isInline,contentId)\
          &$top={BATCH_SIZE}\
          &$orderby=receivedDateTime desc"
     );
@@ -547,6 +616,47 @@ async fn load_delta_tokens(
     .await
 }
 
+/// Bootstrap a delta token for a folder using `$deltatoken=latest`.
+///
+/// This asks the server for a fresh delta token without fetching any existing
+/// messages. Ideal for newly discovered folders during delta sync — we'll
+/// pick up new messages starting from the next cycle.
+async fn bootstrap_delta_token_latest(
+    client: &GraphClient,
+    db: &DbState,
+    folder_id: &str,
+) -> Result<String, String> {
+    let url = format!(
+        "/me/mailFolders/{folder_id}/messages/delta?$deltatoken=latest"
+    );
+    let page: ODataCollection<serde_json::Value> = client.get_json(&url, db).await?;
+
+    page.delta_link.ok_or_else(|| {
+        format!("Delta bootstrap (latest) for folder {folder_id} returned no deltaLink")
+    })
+}
+
+/// Delete a delta token for a folder that no longer exists.
+async fn delete_delta_token(
+    db: &DbState,
+    account_id: &str,
+    folder_id: &str,
+) -> Result<(), String> {
+    let aid = account_id.to_string();
+    let fid = folder_id.to_string();
+
+    db.with_conn(move |conn| {
+        conn.execute(
+            "DELETE FROM graph_folder_delta_tokens \
+             WHERE account_id = ?1 AND folder_id = ?2",
+            rusqlite::params![aid, fid],
+        )
+        .map_err(|e| format!("delete delta token: {e}"))?;
+        Ok(())
+    })
+    .await
+}
+
 // ---------------------------------------------------------------------------
 // Pending operations filter (sync vs queue coordination)
 // ---------------------------------------------------------------------------
@@ -705,6 +815,7 @@ fn store_thread_to_db(
     upsert_thread_record(tx, account_id, thread_id, messages)?;
     set_thread_labels(tx, account_id, thread_id, messages)?;
     upsert_messages(tx, account_id, messages)?;
+    upsert_attachments(tx, account_id, messages)?;
     Ok(())
 }
 
@@ -830,6 +941,37 @@ fn upsert_messages(
             ],
         )
         .map_err(|e| format!("upsert message: {e}"))?;
+    }
+    Ok(())
+}
+
+fn upsert_attachments(
+    tx: &rusqlite::Transaction,
+    account_id: &str,
+    messages: &[ParsedGraphMessage],
+) -> Result<(), String> {
+    for msg in messages {
+        for att in &msg.attachments {
+            let att_id = format!("{}_{}", msg.id, att.id);
+            tx.execute(
+                "INSERT OR REPLACE INTO attachments \
+                 (id, message_id, account_id, filename, mime_type, size, \
+                  gmail_attachment_id, content_id, is_inline) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![
+                    att_id,
+                    msg.id,
+                    account_id,
+                    att.filename,
+                    att.mime_type,
+                    att.size,
+                    att.id,
+                    att.content_id,
+                    att.is_inline,
+                ],
+            )
+            .map_err(|e| format!("upsert attachment: {e}"))?;
+        }
     }
     Ok(())
 }

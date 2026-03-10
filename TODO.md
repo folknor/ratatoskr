@@ -80,9 +80,7 @@
 
 - [x] **~~`fetch_all_folders` pagination bug~~** — Fixed. Moved folder fetching to `src-tauri/src/graph/sync.rs` with consistent `get_absolute()` for OData `@odata.nextLink` pagination. Both `fetch_all_folders()` and `fetch_child_folders()` now use `get_json()` for the initial request and `get_absolute()` for all subsequent pages.
 
-- [ ] **`addr_to_recipients` mail-parser API unverified** — `src-tauri/src/graph/ops.rs`
-
-  Uses `mail_parser::Address::iter()` assuming it yields individual `Addr` structs. If mail-parser 0.11 has a `Group` vs `Addr` enum situation, this may silently drop addresses. Needs verification against actual MIME before relying on it for send.
+- [x] **~~`addr_to_recipients` mail-parser API unverified~~** — Verified correct. `Address::iter()` in mail-parser 0.11 transparently yields `&Addr` items from both `List` and `Group` variants. The code matches the proven pattern in `imap/parse.rs`.
 
 - [ ] **Category add/remove is racy** — `src-tauri/src/graph/ops.rs`
 
@@ -92,9 +90,7 @@
 
   Thread-level actions loop through messages one-by-one. The plan doc describes batching up to 20 requests per `/$batch` call. Left as follow-up — per-message approach is correct but slower under the 4-concurrent limit.
 
-- [ ] **`update_draft` changes the draft ID** — `src-tauri/src/graph/ops.rs`
-
-  Implemented as delete-then-create since Graph has no draft mutation. The trait returns the new ID, but need to verify the TS call sites in `draftAutoSave.ts` and composer actually use the returned value rather than caching the old ID.
+- [x] **~~`update_draft` changes the draft ID~~** — Fixed. `draftAutoSave.ts` now captures the returned `ActionResult` from `updateDraftAction()` and calls `setDraftId()` with the new ID when it differs. Handles both plain string (Rust Graph) and `{ draftId }` object (IMAP TS) return shapes.
 
 - [x] **~~Sync is fully stubbed~~** — Fixed. Implemented in `src-tauri/src/graph/sync.rs` (~550 lines) + `src-tauri/src/graph/parse.rs` (~170 lines). Covers: folder sync + label persistence, per-folder paginated message fetch with date filter, message parsing (GraphMessage → DB-ready struct with header extraction, label derivation, ISO date parsing), per-folder delta token bootstrap and incremental delta sync, DB writes (thread/message/label upsert), body store (zstd-compressed), Tantivy search indexing, pending-ops conflict filter, and progress events.
 
@@ -102,25 +98,17 @@
 
   The client reads `microsoft_client_id` from the settings table but there's no migration, settings UI, or `AddGraphAccount` flow to set it. Need setup flow before any real Graph account can connect.
 
-- [ ] **No attachment enumeration during sync** — `src-tauri/src/graph/sync.rs`
-
-  JMAP and Gmail both populate the `attachments` table during sync (attachment metadata is inline in their API responses). Graph doesn't include attachment metadata in message responses by default — it requires `$expand=attachments($select=id,name,contentType,size,isInline,contentId)` added to the message query. Currently only the `has_attachments` flag on threads is correct. The attachment library will be empty for Graph accounts until a user opens a message and fetches attachments on demand. Fix: add `$expand=attachments` to the message `$select` in sync, then populate the `attachments` table during `persist_messages`. This is deferred item #16 in the plan doc.
+- [x] **~~No attachment enumeration during sync~~** — Fixed. Added `$expand=attachments($select=id,name,contentType,size,isInline,contentId)` to message fetch URLs, `GraphAttachment` fields on `GraphMessage`, `ParsedGraphAttachment` struct in parse.rs, and `upsert_attachments()` in sync.rs following the JMAP pattern. Graph attachment IDs stored in `gmail_attachment_id` column.
 
 - [ ] **`raw_size` is always 0 for Graph messages** — `src-tauri/src/graph/sync.rs`
 
   Graph's message API doesn't expose a byte-size field. JMAP has `size`, Gmail has `sizeEstimate`. The `raw_size` column in `messages` is written as `0i64`. Only affects storage stats display — not functional.
 
-- [ ] **`list_folders` always re-syncs from server** — `src-tauri/src/graph/ops.rs`
+- [x] **~~`list_folders` always re-syncs from server~~** — Fixed. Added `folder_map_last_sync: RwLock<Option<Instant>>` to `ClientInner`. `list_folders` now returns the cached `FolderMap` if it was synced within the last 60 seconds, avoiding unnecessary API calls.
 
-  The old code had a `build_or_get_folder_map` that returned the cached folder map if available. The current implementation calls `sync_folders_public` which always hits the Graph API and persists labels. This is correct for the trait contract (caller expects a fresh folder list), but heavier than necessary. Under the 4-concurrent semaphore limit, frequent calls could compete with sync. Consider adding a short TTL cache (e.g., return cached map if <60s old).
+- [x] **~~Delta sync processes all folders every cycle~~** — Fixed. Added `sync_cycle_counter: AtomicU32` to `ClientInner`. `graph_delta_sync` increments on each run and filters folders by priority tier: INBOX/SENT/DRAFT every cycle, TRASH/SPAM/archive every 5th, user folders every 20th.
 
-- [ ] **Delta sync processes all folders every cycle** — `src-tauri/src/graph/sync.rs`
-
-  The plan doc describes priority-based folder ordering: Inbox/Sent/Drafts every cycle, Archive/Trash every 5th, user folders every 20th. The current implementation queries every folder with a delta token on every sync cycle. Each delta call is cheap if nothing changed (returns empty result + new deltaLink), but on mailboxes with 30+ folders this means 30+ API calls per 60s cycle under a 3-concurrent semaphore. Needs a sync-cycle counter (in memory on `GraphClient`, reset on app restart is fine) and priority-based folder filtering before real-world testing.
-
-- [ ] **No folder tree re-traversal during delta sync** — `src-tauri/src/graph/sync.rs`
-
-  Delta sync only processes folders that already have delta tokens from initial sync. New folders created after initial sync won't be discovered until `list_folders` is explicitly called or the user triggers a fresh initial sync. The plan doc specifies re-traversing the full folder tree every 10th sync cycle to detect new/renamed/deleted folders, bootstrap delta tokens for new ones, and clean up tokens for deleted ones. This should be implemented alongside the sync-cycle counter for folder priority ordering.
+- [x] **~~No folder tree re-traversal during delta sync~~** — Fixed. Every 10th sync cycle, `graph_delta_sync` calls `sync_folders()` to discover new/renamed/deleted folders. New folders get delta tokens bootstrapped via `$deltatoken=latest`. Stale tokens for removed folders are cleaned up from the DB.
 
 ---
 
