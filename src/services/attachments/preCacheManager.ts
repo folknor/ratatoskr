@@ -1,4 +1,4 @@
-import { useUIStore } from "@/stores/uiStore";
+import { useSyncStateStore } from "@/stores/syncStateStore";
 import {
   type BackgroundChecker,
   createBackgroundChecker,
@@ -16,7 +16,7 @@ let checker: BackgroundChecker | null = null;
 
 async function preCacheRecent(): Promise<void> {
   // Skip if offline
-  if (!useUIStore.getState().isOnline) return;
+  if (!useSyncStateStore.getState().isOnline) return;
 
   const db = await getDb();
 

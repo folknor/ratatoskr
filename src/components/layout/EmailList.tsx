@@ -10,7 +10,7 @@ import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useContextMenuStore } from "@/stores/contextMenuStore";
 import type { Thread } from "@/stores/threadStore";
-import { useUIStore } from "@/stores/uiStore";
+import { useUILayoutStore } from "@/stores/uiLayoutStore";
 import { ThreadCard } from "../email/ThreadCard";
 import { EmailListSkeleton } from "../ui/Skeleton";
 import { BundleRow } from "./BundleRow";
@@ -27,7 +27,7 @@ export function EmailList({
 }): React.ReactNode {
   const { t } = useTranslation("email");
   const selectedThreadId = useSelectedThreadId();
-  const readingPanePosition = useUIStore((s) => s.readingPanePosition);
+  const readingPanePosition = useUILayoutStore((s) => s.readingPanePosition);
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
   const openMenu = useContextMenuStore((s) => s.openMenu);
   const openComposer = useComposerStore((s) => s.openComposer);

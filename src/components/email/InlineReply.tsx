@@ -27,7 +27,7 @@ import type { DbMessage } from "@/core/queries";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import type { Thread } from "@/stores/threadStore";
-import { useUIStore } from "@/stores/uiStore";
+import { useUIPreferencesStore } from "@/stores/uiPreferencesStore";
 import { buildRawEmail } from "@/utils/emailBuilder";
 
 type ReplyMode = "reply" | "replyAll" | "forward";
@@ -229,7 +229,7 @@ export function InlineReply({
           await sendEmail(accountId, raw, thread.id);
 
           // Send & archive: remove from inbox if enabled
-          if (useUIStore.getState().sendAndArchive) {
+          if (useUIPreferencesStore.getState().sendAndArchive) {
             try {
               await archiveThread(accountId, thread.id, []);
             } catch {

@@ -1,7 +1,4 @@
-import Image from "@tiptap/extension-image";
-import Placeholder from "@tiptap/extension-placeholder";
-import { EditorContent, useEditor } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
+import { EditorContent } from "@tiptap/react";
 import { Clock, ExternalLink, Maximize2, Minimize2 } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -10,7 +7,6 @@ import { CSSTransition } from "react-transition-group";
 
 import { Button } from "@/components/ui/Button";
 import {
-  type DbTemplate,
   getAliasesForAccount,
   getDefaultSignature,
   getTemplatesForAccount,
@@ -30,13 +26,14 @@ import {
 import { getSetting } from "@/core/settings";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
-import { useUIStore } from "@/stores/uiStore";
+import { useUIPreferencesStore } from "@/stores/uiPreferencesStore";
 import { buildRawEmail } from "@/utils/emailBuilder";
 import { readFileAsBase64 } from "@/utils/fileUtils";
 import { resolveFromAddress } from "@/utils/resolveFromAddress";
 import { sanitizeHtml } from "@/utils/sanitize";
-import { interpolateVariables } from "@/utils/templateVariables";
 import { AddressInput } from "./AddressInput";
+import { useEditorSetup } from "./useEditorSetup";
+import { useTemplateShortcuts } from "./useTemplateShortcuts";
 import { AiAssistPanel } from "./AiAssistPanel";
 import { AttachmentPicker } from "./AttachmentPicker";
 import { EditorToolbar } from "./EditorToolbar";
@@ -80,83 +77,12 @@ export function Composer(): React.ReactNode {
   const [showAiAssist, setShowAiAssist] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [aliases, setAliases] = useState<SendAsAlias[]>([]);
-  const templateShortcutsRef = useRef<DbTemplate[]>([]);
+  const { templateShortcutsRef, checkTemplateShortcut } =
+    useTemplateShortcuts(setSubject);
   const dragCounterRef = useRef(0);
   const overlayRef = useRef<HTMLDivElement | null>(null);
 
-  const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        heading: { levels: [1, 2, 3] },
-        link: { openOnClick: false },
-      }),
-      Placeholder.configure({
-        placeholder: t("writePlaceholder"),
-      }),
-      Image.configure({
-        inline: true,
-        allowBase64: true,
-      }),
-    ],
-    content: useComposerStore.getState().bodyHtml,
-    // biome-ignore lint/nursery/useExplicitType: tiptap callback
-    onUpdate: ({ editor: ed }) => {
-      useComposerStore.getState().setBodyHtml(ed.getHTML());
-
-      // Check for template shortcut triggers
-      const templates = templateShortcutsRef.current;
-      if (templates.length === 0) return;
-
-      const text = ed.state.doc.textContent;
-      for (const tmpl of templates) {
-        if (!tmpl.shortcut) continue;
-        if (text.endsWith(tmpl.shortcut)) {
-          // Delete the shortcut text and insert template body with variables resolved
-          const { from } = ed.state.selection;
-          const deleteFrom = from - tmpl.shortcut.length;
-          if (deleteFrom >= 0) {
-            const state = useComposerStore.getState();
-            const account = useAccountStore
-              .getState()
-              .accounts.find(
-                (a) => a.id === useAccountStore.getState().activeAccountId,
-              );
-            void interpolateVariables(tmpl.body_html, {
-              recipientEmail: state.to[0],
-              senderEmail: account?.email,
-              senderName: account?.displayName ?? undefined,
-              subject: state.subject || undefined,
-            }).then((resolved) => {
-              ed.chain()
-                .deleteRange({ from: deleteFrom, to: from })
-                .insertContent(resolved)
-                .run();
-            });
-            if (tmpl.subject && !state.subject) {
-              setSubject(tmpl.subject);
-            }
-          }
-          break;
-        }
-      }
-    },
-    editorProps: {
-      attributes: {
-        class:
-          "prose prose-sm max-w-none px-4 py-3 min-h-[200px] focus:outline-none text-text-primary",
-      },
-      // biome-ignore lint/nursery/useExplicitType: tiptap callback
-      handleDrop: (_view, event) => {
-        // Prevent TipTap from handling file drops as inline content.
-        // Returning true stops TipTap's Image extension from intercepting the drop,
-        // allowing the event to bubble up to the composer's onDrop for attachment handling.
-        if (event.dataTransfer?.files?.length) {
-          return true;
-        }
-        return false;
-      },
-    },
-  });
+  const editor = useEditorSetup(checkTemplateShortcut);
 
   // Load signature, aliases, and templates in parallel when composer opens
   useEffect(() => {
@@ -320,7 +246,7 @@ export function Composer(): React.ReactNode {
         }
 
         // Send & archive: remove from inbox if replying to a thread
-        if (useUIStore.getState().sendAndArchive && state.threadId) {
+        if (useUIPreferencesStore.getState().sendAndArchive && state.threadId) {
           try {
             await archiveThread(activeAccountId, state.threadId, []);
           } catch {

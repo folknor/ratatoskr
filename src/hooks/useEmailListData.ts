@@ -20,7 +20,8 @@ import {
 import { useAccountStore } from "@/stores/accountStore";
 import { useSmartFolderStore } from "@/stores/smartFolderStore";
 import { type Thread, useThreadStore } from "@/stores/threadStore";
-import { useUIStore } from "@/stores/uiStore";
+import { useUILayoutStore } from "@/stores/uiLayoutStore";
+import { useUIPreferencesStore } from "@/stores/uiPreferencesStore";
 
 const PAGE_SIZE = 50;
 
@@ -92,9 +93,9 @@ export function useEmailListData(): EmailListData {
 
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
   const activeLabel = useActiveLabel();
-  const readFilter = useUIStore((s) => s.readFilter);
+  const readFilter = useUILayoutStore((s) => s.readFilter);
   const smartFolders = useSmartFolderStore((s) => s.folders);
-  const inboxViewMode = useUIStore((s) => s.inboxViewMode);
+  const inboxViewMode = useUIPreferencesStore((s) => s.inboxViewMode);
   const routerCategory = useActiveCategory();
 
   // Smart folder detection

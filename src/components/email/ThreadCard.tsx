@@ -7,7 +7,7 @@ import type { DragData } from "@/components/dnd/DndProvider";
 import { useActiveLabel } from "@/hooks/useRouteNavigation";
 import type { Thread } from "@/stores/threadStore";
 import { useThreadStore } from "@/stores/threadStore";
-import { useUIStore } from "@/stores/uiStore";
+import { useUIPreferencesStore } from "@/stores/uiPreferencesStore";
 import { formatRelativeDate } from "@/utils/date";
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -47,7 +47,7 @@ export const ThreadCard = memo(
     );
     const selectThreadRange = useThreadStore((s) => s.selectThreadRange);
     const activeLabel = useActiveLabel();
-    const emailDensity = useUIStore((s) => s.emailDensity);
+    const emailDensity = useUIPreferencesStore((s) => s.emailDensity);
     const isSpam = thread.labelIds.includes("SPAM");
 
     // Read selectedThreadIds lazily for drag — avoids subscribing all cards to the Set reference

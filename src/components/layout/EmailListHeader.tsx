@@ -3,7 +3,7 @@ import type React from "react";
 import { useTranslation } from "react-i18next";
 import { LABEL_MAP } from "@/hooks/useEmailListData";
 import { useLabelStore } from "@/stores/labelStore";
-import { useUIStore } from "@/stores/uiStore";
+import { useUILayoutStore } from "@/stores/uiLayoutStore";
 import { CategoryTabs } from "../email/CategoryTabs";
 import { SearchBar } from "../search/SearchBar";
 
@@ -27,8 +27,8 @@ export function EmailListHeader({
   categoryUnreadCounts: Map<string, number>;
 }): React.ReactNode {
   const { t } = useTranslation("email");
-  const readFilter = useUIStore((s) => s.readFilter);
-  const setReadFilter = useUIStore((s) => s.setReadFilter);
+  const readFilter = useUILayoutStore((s) => s.readFilter);
+  const setReadFilter = useUILayoutStore((s) => s.setReadFilter);
   const userLabels = useLabelStore((s) => s.labels);
 
   return (

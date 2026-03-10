@@ -13,7 +13,8 @@ import { getGmailClient } from "@/core/sync";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useThreadStore } from "@/stores/threadStore";
-import { useUIStore } from "@/stores/uiStore";
+import { useUILayoutStore } from "@/stores/uiLayoutStore";
+import { useUIPreferencesStore } from "@/stores/uiPreferencesStore";
 
 interface Command {
   id: string;
@@ -37,8 +38,8 @@ export function CommandPalette({
   const [selectedIdx, setSelectedIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
-  const toggleSidebar = useUIStore((s) => s.toggleSidebar);
-  const setTheme = useUIStore((s) => s.setTheme);
+  const toggleSidebar = useUILayoutStore((s) => s.toggleSidebar);
+  const setTheme = useUIPreferencesStore((s) => s.setTheme);
   const openComposer = useComposerStore((s) => s.openComposer);
   const activeLabel = useActiveLabel();
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
@@ -173,7 +174,7 @@ export function CommandPalette({
         category: t("categoryTasks"),
         action: (): void => {
           onClose();
-          useUIStore.getState().setTaskSidebarVisible(true);
+          useUILayoutStore.getState().setTaskSidebarVisible(true);
         },
       },
       {
@@ -206,7 +207,7 @@ export function CommandPalette({
         label: t("toggleTaskPanel"),
         category: t("categoryTasks"),
         action: (): void => {
-          useUIStore.getState().toggleTaskSidebar();
+          useUILayoutStore.getState().toggleTaskSidebar();
           onClose();
         },
       },

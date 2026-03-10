@@ -17,8 +17,8 @@ vi.mock("@/services/db/imageAllowlist", () => ({
   addToAllowlist: vi.fn(),
 }));
 
-vi.mock("@/stores/uiStore", () => ({
-  useUIStore: (selector: (s: { theme: string }) => string) =>
+vi.mock("@/stores/uiPreferencesStore", () => ({
+  useUIPreferencesStore: (selector: (s: { theme: string }) => string) =>
     selector({ theme: "light" }),
 }));
 

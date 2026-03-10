@@ -13,7 +13,7 @@ import {
   uncompleteTask,
 } from "@/core/tasks";
 import { useTaskStore } from "@/stores/taskStore";
-import { useUIStore } from "@/stores/uiStore";
+import { useUILayoutStore } from "@/stores/uiLayoutStore";
 import { TaskItem } from "./TaskItem";
 import { TaskQuickAdd } from "./TaskQuickAdd";
 
@@ -28,7 +28,7 @@ export function TaskSidebar({
 }: TaskSidebarProps): React.ReactNode {
   const threadTasks = useTaskStore((s) => s.threadTasks);
   const setThreadTasks = useTaskStore((s) => s.setThreadTasks);
-  const toggleTaskSidebar = useUIStore((s) => s.toggleTaskSidebar);
+  const toggleTaskSidebar = useUILayoutStore((s) => s.toggleTaskSidebar);
 
   useEffect(() => {
     let cancelled = false;

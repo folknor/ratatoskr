@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock dependencies
-vi.mock("@/stores/uiStore", () => ({
-  useUIStore: {
+vi.mock("@/stores/syncStateStore", () => ({
+  useSyncStateStore: {
     getState: vi.fn(() => ({ isOnline: true })),
   },
 }));
@@ -47,7 +47,7 @@ import { enqueuePendingOp } from "@/core/rustDb";
 import { getSelectedThreadId, navigateToThread } from "@/router/navigate";
 import { getEmailProvider } from "@/services/email/providerFactory";
 import { useThreadStore } from "@/stores/threadStore";
-import { useUIStore } from "@/stores/uiStore";
+import { useSyncStateStore } from "@/stores/syncStateStore";
 import {
   createMockEmailProvider,
   createMockThreadStoreState,
@@ -73,7 +73,7 @@ describe("emailActions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getEmailProvider).mockResolvedValue(mockProvider as never);
-    vi.mocked(useUIStore.getState).mockReturnValue(
+    vi.mocked(useSyncStateStore.getState).mockReturnValue(
       createMockUIStoreState() as never,
     );
     vi.mocked(useThreadStore.getState).mockReturnValue(
@@ -123,7 +123,7 @@ describe("emailActions", () => {
 
   describe("offline queueing", () => {
     beforeEach(() => {
-      vi.mocked(useUIStore.getState).mockReturnValue({
+      vi.mocked(useSyncStateStore.getState).mockReturnValue({
         isOnline: false,
       } as never);
     });
@@ -149,7 +149,7 @@ describe("emailActions", () => {
 
   describe("network error → queue fallback", () => {
     it("queues on retryable network error", async () => {
-      vi.mocked(useUIStore.getState).mockReturnValue({
+      vi.mocked(useSyncStateStore.getState).mockReturnValue({
         isOnline: true,
       } as never);
       mockProvider.archive.mockRejectedValueOnce(new Error("Failed to fetch"));
@@ -163,7 +163,7 @@ describe("emailActions", () => {
 
   describe("permanent error → revert", () => {
     it("reverts star on permanent error", async () => {
-      vi.mocked(useUIStore.getState).mockReturnValue({
+      vi.mocked(useSyncStateStore.getState).mockReturnValue({
         isOnline: true,
       } as never);
       mockProvider.star.mockRejectedValueOnce(new Error("Invalid request"));
@@ -176,7 +176,7 @@ describe("emailActions", () => {
     });
 
     it("reverts markRead on permanent error", async () => {
-      vi.mocked(useUIStore.getState).mockReturnValue({
+      vi.mocked(useSyncStateStore.getState).mockReturnValue({
         isOnline: true,
       } as never);
       mockProvider.markRead.mockRejectedValueOnce(new Error("Bad request"));

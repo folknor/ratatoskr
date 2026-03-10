@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/stores/uiStore", () => ({
-  useUIStore: {
+vi.mock("@/stores/syncStateStore", () => ({
+  useSyncStateStore: {
     getState: vi.fn(() => ({ isOnline: true, setPendingOpsCount: vi.fn() })),
   },
 }));
@@ -34,7 +34,7 @@ vi.mock("../backgroundCheckers", () => ({
   })),
 }));
 
-import { useUIStore } from "@/stores/uiStore";
+import { useSyncStateStore } from "@/stores/syncStateStore";
 import { createMockUIStoreState } from "@/test/mocks";
 import { classifyError } from "@/utils/networkErrors";
 import {
@@ -56,7 +56,7 @@ const mockSetPendingOpsCount = vi.fn();
 describe("queueProcessor", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(useUIStore.getState).mockReturnValue(
+    vi.mocked(useSyncStateStore.getState).mockReturnValue(
       createMockUIStoreState({
         setPendingOpsCount: mockSetPendingOpsCount,
       }) as never,
@@ -65,7 +65,7 @@ describe("queueProcessor", () => {
   });
 
   it("skips processing when offline", async () => {
-    vi.mocked(useUIStore.getState).mockReturnValue(
+    vi.mocked(useSyncStateStore.getState).mockReturnValue(
       createMockUIStoreState({
         isOnline: false,
         setPendingOpsCount: mockSetPendingOpsCount,

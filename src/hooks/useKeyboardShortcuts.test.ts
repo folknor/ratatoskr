@@ -3,9 +3,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Mock dependencies needed for the hook to mount and dispatch events.
 // The hook reads store state and calls navigate/emailActions — only mock
 // what's needed for the three event-dispatch tests below.
-vi.mock("@/stores/uiStore", () => ({
-  useUIStore: {
-    getState: () => ({ inboxViewMode: "unified", toggleSidebar: vi.fn() }),
+vi.mock("@/stores/uiLayoutStore", () => ({
+  useUILayoutStore: {
+    getState: () => ({ readingPanePosition: "right", toggleSidebar: vi.fn() }),
+  },
+}));
+vi.mock("@/stores/uiPreferencesStore", () => ({
+  useUIPreferencesStore: {
+    getState: () => ({ inboxViewMode: "unified", defaultReplyMode: "reply" }),
+  },
+}));
+vi.mock("@/stores/syncStateStore", () => ({
+  useSyncStateStore: {
+    getState: () => ({ setSyncingFolder: vi.fn() }),
   },
 }));
 vi.mock("@/stores/threadStore", () => ({

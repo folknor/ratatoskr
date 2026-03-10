@@ -17,7 +17,8 @@ import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useContextMenuStore } from "@/stores/contextMenuStore";
 import type { Thread } from "@/stores/threadStore";
-import { useUIStore } from "@/stores/uiStore";
+import { useUILayoutStore } from "@/stores/uiLayoutStore";
+import { useUIPreferencesStore } from "@/stores/uiPreferencesStore";
 import { isNoReplyAddress } from "@/utils/noReply";
 import { escapeHtml, sanitizeHtml } from "@/utils/sanitize";
 import { ActionBar } from "./ActionBar";
@@ -65,9 +66,9 @@ async function handlePopOut(thread: Thread): Promise<void> {
 export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
   const { t } = useTranslation("email");
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
-  const contactSidebarVisible = useUIStore((s) => s.contactSidebarVisible);
-  const toggleContactSidebar = useUIStore((s) => s.toggleContactSidebar);
-  const taskSidebarVisible = useUIStore((s) => s.taskSidebarVisible);
+  const contactSidebarVisible = useUILayoutStore((s) => s.contactSidebarVisible);
+  const toggleContactSidebar = useUILayoutStore((s) => s.toggleContactSidebar);
+  const taskSidebarVisible = useUILayoutStore((s) => s.taskSidebarVisible);
   const [showTaskExtract, setShowTaskExtract] = useState(false);
   const [messages, setMessages] = useState<DbMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,7 +117,7 @@ export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
   }, [activeAccountId, messages]);
 
   // Auto-mark unread threads as read when opened (respects mark-as-read setting)
-  const markAsReadBehavior = useUIStore((s) => s.markAsReadBehavior);
+  const markAsReadBehavior = useUIPreferencesStore((s) => s.markAsReadBehavior);
   useEffect(() => {
     if (
       !activeAccountId ||
@@ -147,7 +148,7 @@ export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
 
   const openComposer = useComposerStore((s) => s.openComposer);
   const openMenu = useContextMenuStore((s) => s.openMenu);
-  const defaultReplyMode = useUIStore((s) => s.defaultReplyMode);
+  const defaultReplyMode = useUIPreferencesStore((s) => s.defaultReplyMode);
   const lastMessage = messages[messages.length - 1];
 
   const forwardLabels: ForwardI18n = useMemo(
@@ -300,7 +301,7 @@ export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
 
   // Arrow key handler for message navigation (only in full-screen thread view)
   // In split-pane mode, arrows navigate the thread list instead (handled by useKeyboardShortcuts)
-  const readingPanePosition = useUIStore((s) => s.readingPanePosition);
+  const readingPanePosition = useUILayoutStore((s) => s.readingPanePosition);
   useEffect(() => {
     if (readingPanePosition !== "hidden") return;
 
@@ -466,7 +467,7 @@ export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
           onExport={handleExport}
           onPopOut={() => handlePopOut(thread)}
           onToggleContactSidebar={toggleContactSidebar}
-          onToggleTaskSidebar={() => useUIStore.getState().toggleTaskSidebar()}
+          onToggleTaskSidebar={() => useUILayoutStore.getState().toggleTaskSidebar()}
         />
 
         {/* Thread subject */}

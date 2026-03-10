@@ -29,7 +29,9 @@ import { useComposerStore } from "@/stores/composerStore";
 import { useContextMenuStore } from "@/stores/contextMenuStore";
 import { useShortcutStore } from "@/stores/shortcutStore";
 import { useThreadStore } from "@/stores/threadStore";
-import { useUIStore } from "@/stores/uiStore";
+import { useUILayoutStore } from "@/stores/uiLayoutStore";
+import { useUIPreferencesStore } from "@/stores/uiPreferencesStore";
+import { useSyncStateStore } from "@/stores/syncStateStore";
 import { resolveKeyboardTargets } from "@/utils/multiSelectTargets";
 
 /**
@@ -210,7 +212,7 @@ export function useKeyboardShortcuts(): void {
       // (In split-pane mode or list-only view, arrows move between threads)
       if (key === "ArrowDown" || key === "ArrowUp") {
         const selectedId = getSelectedThreadId();
-        const paneOff = useUIStore.getState().readingPanePosition === "hidden";
+        const paneOff = useUILayoutStore.getState().readingPanePosition === "hidden";
         // Only handle here if no thread is open in full-screen mode
         // (when pane is off and a thread is selected, ThreadView handles arrows for message nav)
         if (!(paneOff && selectedId)) {
@@ -279,27 +281,27 @@ async function executeAction(actionId: string): Promise<void> {
       navigateToLabel("drafts");
       break;
     case "nav.goPrimary":
-      if (useUIStore.getState().inboxViewMode === "split") {
+      if (useUIPreferencesStore.getState().inboxViewMode === "split") {
         navigateToLabel("inbox", { category: "Primary" });
       }
       break;
     case "nav.goUpdates":
-      if (useUIStore.getState().inboxViewMode === "split") {
+      if (useUIPreferencesStore.getState().inboxViewMode === "split") {
         navigateToLabel("inbox", { category: "Updates" });
       }
       break;
     case "nav.goPromotions":
-      if (useUIStore.getState().inboxViewMode === "split") {
+      if (useUIPreferencesStore.getState().inboxViewMode === "split") {
         navigateToLabel("inbox", { category: "Promotions" });
       }
       break;
     case "nav.goSocial":
-      if (useUIStore.getState().inboxViewMode === "split") {
+      if (useUIPreferencesStore.getState().inboxViewMode === "split") {
         navigateToLabel("inbox", { category: "Social" });
       }
       break;
     case "nav.goNewsletters":
-      if (useUIStore.getState().inboxViewMode === "split") {
+      if (useUIPreferencesStore.getState().inboxViewMode === "split") {
         navigateToLabel("inbox", { category: "Newsletters" });
       }
       break;
@@ -324,7 +326,7 @@ async function executeAction(actionId: string): Promise<void> {
       break;
     case "action.reply": {
       if (selectedId) {
-        const replyMode = useUIStore.getState().defaultReplyMode;
+        const replyMode = useUIPreferencesStore.getState().defaultReplyMode;
         window.dispatchEvent(
           new CustomEvent("ratatoskr-inline-reply", { detail: { mode: replyMode } }),
         );
@@ -493,7 +495,7 @@ async function executeAction(actionId: string): Promise<void> {
       window.dispatchEvent(new Event("ratatoskr-toggle-command-palette"));
       break;
     case "app.toggleSidebar":
-      useUIStore.getState().toggleSidebar();
+      useUILayoutStore.getState().toggleSidebar();
       break;
     case "app.askInbox":
       window.dispatchEvent(new Event("ratatoskr-toggle-ask-inbox"));
@@ -504,7 +506,7 @@ async function executeAction(actionId: string): Promise<void> {
     case "app.syncFolder": {
       if (activeAccountId) {
         const currentLabel = getActiveLabel();
-        useUIStore.getState().setSyncingFolder(currentLabel);
+        useSyncStateStore.getState().setSyncingFolder(currentLabel);
         triggerSync([activeAccountId]);
       }
       break;

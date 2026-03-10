@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useUIStore } from "./uiStore";
 
-vi.mock("@/services/db/settings", () => ({
+vi.mock("@/core/settings", () => ({
   setSetting: vi.fn(() => Promise.resolve()),
 }));
 
-import { setSetting } from "@/services/db/settings";
+import { setSetting } from "@/core/settings";
 
 describe("uiStore", () => {
   beforeEach(() => {

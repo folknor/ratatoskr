@@ -24,8 +24,8 @@ vi.mock("@/stores/threadStore", () => ({
   ),
 }));
 
-vi.mock("@/stores/uiStore", () => ({
-  useUIStore: (selector: (s: Record<string, unknown>) => unknown) =>
+vi.mock("@/stores/uiPreferencesStore", () => ({
+  useUIPreferencesStore: (selector: (s: Record<string, unknown>) => unknown) =>
     selector({ emailDensity: "default" }),
 }));
 

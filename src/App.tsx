@@ -77,7 +77,9 @@ import {
 import { useAccountStore } from "./stores/accountStore";
 import { useShortcutStore } from "./stores/shortcutStore";
 import { useTaskStore } from "./stores/taskStore";
-import { useUIStore } from "./stores/uiStore";
+import { useUILayoutStore } from "./stores/uiLayoutStore";
+import { useUIPreferencesStore } from "./stores/uiPreferencesStore";
+import { useSyncStateStore } from "./stores/syncStateStore";
 import { formatSyncError } from "./utils/networkErrors";
 
 /**
@@ -102,12 +104,12 @@ import { useThreadStore } from "./stores/threadStore";
 
 export default function App(): React.ReactNode {
   const { t } = useTranslation();
-  const theme = useUIStore((s) => s.theme);
-  const fontScale = useUIStore((s) => s.fontScale);
-  const colorTheme = useUIStore((s) => s.colorTheme);
-  const reduceMotion = useUIStore((s) => s.reduceMotion);
-  const showSyncStatusBar = useUIStore((s) => s.showSyncStatusBar);
-  const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
+  const theme = useUIPreferencesStore((s) => s.theme);
+  const fontScale = useUIPreferencesStore((s) => s.fontScale);
+  const colorTheme = useUIPreferencesStore((s) => s.colorTheme);
+  const reduceMotion = useUIPreferencesStore((s) => s.reduceMotion);
+  const showSyncStatusBar = useUIPreferencesStore((s) => s.showSyncStatusBar);
+  const sidebarCollapsed = useUILayoutStore((s) => s.sidebarCollapsed);
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
@@ -128,7 +130,7 @@ export default function App(): React.ReactNode {
 
   // Network status detection
   useEffect(() => {
-    const { setOnline } = useUIStore.getState();
+    const { setOnline } = useSyncStateStore.getState();
     setOnline(navigator.onLine);
 
     const handleOnline = (): void => {
@@ -236,7 +238,8 @@ export default function App(): React.ReactNode {
         const { loadPersistedLanguage } = await import("./i18n");
         await loadPersistedLanguage();
 
-        const ui = useUIStore.getState();
+        const layout = useUILayoutStore.getState();
+        const prefs = useUIPreferencesStore.getState();
 
         // Restore persisted theme
         const savedTheme = await getSetting("theme");
@@ -245,19 +248,19 @@ export default function App(): React.ReactNode {
           savedTheme === "dark" ||
           savedTheme === "system"
         ) {
-          ui.setTheme(savedTheme);
+          prefs.setTheme(savedTheme);
         }
 
         // Restore persisted sidebar state
         const savedSidebar = await getSetting("sidebar_collapsed");
         if (savedSidebar === "true") {
-          ui.setSidebarCollapsed(true);
+          layout.setSidebarCollapsed(true);
         }
 
         // Restore contact sidebar visibility
         const savedContactSidebar = await getSetting("contact_sidebar_visible");
         if (savedContactSidebar === "false") {
-          ui.setContactSidebarVisible(false);
+          layout.setContactSidebarVisible(false);
         }
 
         // Restore reading pane position
@@ -267,7 +270,7 @@ export default function App(): React.ReactNode {
           savedPanePos === "bottom" ||
           savedPanePos === "hidden"
         ) {
-          ui.setReadingPanePosition(savedPanePos);
+          layout.setReadingPanePosition(savedPanePos);
         }
 
         // Restore read filter
@@ -277,14 +280,14 @@ export default function App(): React.ReactNode {
           savedReadFilter === "read" ||
           savedReadFilter === "unread"
         ) {
-          ui.setReadFilter(savedReadFilter);
+          layout.setReadFilter(savedReadFilter);
         }
 
         // Restore email list width
         const savedListWidth = await getSetting("email_list_width");
         if (savedListWidth) {
           const w = parseInt(savedListWidth, 10);
-          if (w >= 240 && w <= 800) ui.setEmailListWidth(w);
+          if (w >= 240 && w <= 800) layout.setEmailListWidth(w);
         }
 
         // Restore email density
@@ -294,13 +297,13 @@ export default function App(): React.ReactNode {
           savedDensity === "default" ||
           savedDensity === "spacious"
         ) {
-          ui.setEmailDensity(savedDensity);
+          prefs.setEmailDensity(savedDensity);
         }
 
         // Restore default reply mode
         const savedReplyMode = await getSetting("default_reply_mode");
         if (savedReplyMode === "reply" || savedReplyMode === "replyAll") {
-          ui.setDefaultReplyMode(savedReplyMode);
+          prefs.setDefaultReplyMode(savedReplyMode);
         }
 
         // Restore mark-as-read behavior
@@ -310,13 +313,13 @@ export default function App(): React.ReactNode {
           savedMarkRead === "2s" ||
           savedMarkRead === "manual"
         ) {
-          ui.setMarkAsReadBehavior(savedMarkRead);
+          prefs.setMarkAsReadBehavior(savedMarkRead);
         }
 
         // Restore send and archive
         const savedSendArchive = await getSetting("send_and_archive");
         if (savedSendArchive === "true") {
-          ui.setSendAndArchive(true);
+          prefs.setSendAndArchive(true);
         }
 
         // Restore font scale
@@ -327,7 +330,7 @@ export default function App(): React.ReactNode {
           savedFontScale === "large" ||
           savedFontScale === "xlarge"
         ) {
-          ui.setFontScale(savedFontScale);
+          prefs.setFontScale(savedFontScale);
         }
 
         // Restore color theme
@@ -336,31 +339,31 @@ export default function App(): React.ReactNode {
           savedColorTheme &&
           COLOR_THEMES.some((ct) => ct.id === savedColorTheme)
         ) {
-          ui.setColorTheme(savedColorTheme as ColorThemeId);
+          prefs.setColorTheme(savedColorTheme as ColorThemeId);
         }
 
         // Restore inbox view mode
         const savedViewMode = await getSetting("inbox_view_mode");
         if (savedViewMode === "unified" || savedViewMode === "split") {
-          ui.setInboxViewMode(savedViewMode);
+          prefs.setInboxViewMode(savedViewMode);
         }
 
         // Restore reduce motion preference
         const savedReduceMotion = await getSetting("reduce_motion");
         if (savedReduceMotion === "true") {
-          ui.setReduceMotion(true);
+          prefs.setReduceMotion(true);
         }
 
         // Restore show sync status bar preference
         const savedShowSyncStatus = await getSetting("show_sync_status");
         if (savedShowSyncStatus === "false") {
-          ui.setShowSyncStatusBar(false);
+          prefs.setShowSyncStatusBar(false);
         }
 
         // Restore task sidebar visibility
         const savedTaskSidebar = await getSetting("task_sidebar_visible");
         if (savedTaskSidebar === "true") {
-          ui.setTaskSidebarVisible(true);
+          layout.setTaskSidebarVisible(true);
         }
 
         // Restore sidebar nav config
@@ -368,7 +371,7 @@ export default function App(): React.ReactNode {
         if (savedNavConfig) {
           try {
             const parsed = JSON.parse(savedNavConfig);
-            if (Array.isArray(parsed)) ui.restoreSidebarNavConfig(parsed);
+            if (Array.isArray(parsed)) layout.restoreSidebarNavConfig(parsed);
           } catch {
             /* ignore malformed JSON */
           }

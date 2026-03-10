@@ -11,10 +11,10 @@ import { initializeClients } from "./services/gmail/tokenManager";
 import { useAccountStore } from "./stores/accountStore";
 import type { ComposerMode } from "./stores/composerStore";
 import { useComposerStore } from "./stores/composerStore";
-import { useUIStore } from "./stores/uiStore";
+import { useUIPreferencesStore } from "./stores/uiPreferencesStore";
 
 export default function ComposerWindow(): React.ReactNode {
-  const { setTheme, setFontScale, setColorTheme } = useUIStore();
+  const { setTheme, setFontScale, setColorTheme } = useUIPreferencesStore();
   const { setAccounts } = useAccountStore();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -127,7 +127,7 @@ export default function ComposerWindow(): React.ReactNode {
   }, [setAccounts, setColorTheme, setFontScale, setTheme]);
 
   // Sync theme class to <html>
-  const theme = useUIStore((s) => s.theme);
+  const theme = useUIPreferencesStore((s) => s.theme);
   useEffect((): (() => void) | undefined => {
     const root = document.documentElement;
     if (theme === "dark") {
@@ -149,7 +149,7 @@ export default function ComposerWindow(): React.ReactNode {
   }, [theme]);
 
   // Sync font-scale class to <html>
-  const fontScale = useUIStore((s) => s.fontScale);
+  const fontScale = useUIPreferencesStore((s) => s.fontScale);
   useEffect((): void => {
     const root = document.documentElement;
     root.classList.remove(
@@ -162,7 +162,7 @@ export default function ComposerWindow(): React.ReactNode {
   }, [fontScale]);
 
   // Apply color theme CSS custom properties to <html>
-  const colorTheme = useUIStore((s) => s.colorTheme);
+  const colorTheme = useUIPreferencesStore((s) => s.colorTheme);
   useEffect((): (() => void) | undefined => {
     const root = document.documentElement;
     const props = [

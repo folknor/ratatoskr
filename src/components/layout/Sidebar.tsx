@@ -41,7 +41,9 @@ import { useContextMenuStore } from "@/stores/contextMenuStore";
 import { type Label, useLabelStore } from "@/stores/labelStore";
 import { useSmartFolderStore } from "@/stores/smartFolderStore";
 import { useTaskStore } from "@/stores/taskStore";
-import { useUIStore } from "@/stores/uiStore";
+import { useUILayoutStore } from "@/stores/uiLayoutStore";
+import { useUIPreferencesStore } from "@/stores/uiPreferencesStore";
+import { useSyncStateStore } from "@/stores/syncStateStore";
 import { AccountSwitcher } from "../accounts/AccountSwitcher";
 import { LabelForm } from "../labels/LabelForm";
 import { InputDialog } from "../ui/InputDialog";
@@ -244,11 +246,11 @@ export function Sidebar({
 }: SidebarProps): React.ReactNode {
   const { t } = useTranslation("sidebar");
   const activeLabel = useActiveLabel();
-  const toggleSidebar = useUIStore((s) => s.toggleSidebar);
-  const sidebarNavConfig = useUIStore((s) => s.sidebarNavConfig);
+  const toggleSidebar = useUILayoutStore((s) => s.toggleSidebar);
+  const sidebarNavConfig = useUILayoutStore((s) => s.sidebarNavConfig);
   const taskIncompleteCount = useTaskStore((s) => s.incompleteCount);
-  const inboxViewMode = useUIStore((s) => s.inboxViewMode);
-  const setInboxViewMode = useUIStore((s) => s.setInboxViewMode);
+  const inboxViewMode = useUIPreferencesStore((s) => s.inboxViewMode);
+  const setInboxViewMode = useUIPreferencesStore((s) => s.setInboxViewMode);
   const activeCategory = useActiveCategory();
   const openComposer = useComposerStore((s) => s.openComposer);
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
@@ -311,7 +313,7 @@ export function Sidebar({
   const [showNewLabelForm, setShowNewLabelForm] = useState(false);
 
   const openMenu = useContextMenuStore((s) => s.openMenu);
-  const isSyncingFolder = useUIStore((s) => s.isSyncingFolder);
+  const isSyncingFolder = useSyncStateStore((s) => s.isSyncingFolder);
 
   const handleNavContextMenu = useCallback(
     (e: React.MouseEvent, navId: string) => {
@@ -346,7 +348,7 @@ export function Sidebar({
           void loadLabels(activeAccountId);
           void refreshSmartFolderCounts(activeAccountId);
         }
-        useUIStore.getState().setSyncingFolder(null);
+        useSyncStateStore.getState().setSyncingFolder(null);
       }, 500);
     };
     window.addEventListener("ratatoskr-sync-done", handler);
@@ -815,7 +817,7 @@ function PendingOpsIndicator({
   collapsed: boolean;
 }): React.ReactNode {
   const { t } = useTranslation("sidebar");
-  const pendingOpsCount = useUIStore((s) => s.pendingOpsCount);
+  const pendingOpsCount = useSyncStateStore((s) => s.pendingOpsCount);
   if (pendingOpsCount <= 0) return null;
 
   return (

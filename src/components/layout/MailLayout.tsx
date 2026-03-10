@@ -1,13 +1,13 @@
 import type React from "react";
 import { useCallback, useRef } from "react";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
-import { useUIStore } from "@/stores/uiStore";
+import { useUILayoutStore } from "@/stores/uiLayoutStore";
 import { EmailList } from "./EmailList";
 import { ReadingPane } from "./ReadingPane";
 
 function ResizableEmailLayout(): React.ReactNode {
-  const emailListWidth = useUIStore((s) => s.emailListWidth);
-  const setEmailListWidth = useUIStore((s) => s.setEmailListWidth);
+  const emailListWidth = useUILayoutStore((s) => s.emailListWidth);
+  const setEmailListWidth = useUILayoutStore((s) => s.setEmailListWidth);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
 
@@ -55,7 +55,7 @@ function ResizableEmailLayout(): React.ReactNode {
 }
 
 export function MailLayout(): React.ReactNode {
-  const readingPanePosition = useUIStore((s) => s.readingPanePosition);
+  const readingPanePosition = useUILayoutStore((s) => s.readingPanePosition);
 
   if (readingPanePosition === "right") {
     return (

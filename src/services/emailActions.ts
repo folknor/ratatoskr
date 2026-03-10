@@ -18,7 +18,7 @@ import {
 import { getSelectedThreadId, navigateToThread } from "@/router/navigate";
 import { getEmailProvider } from "@/services/email/providerFactory";
 import { useThreadStore } from "@/stores/threadStore";
-import { useUIStore } from "@/stores/uiStore";
+import { useSyncStateStore } from "@/stores/syncStateStore";
 import { classifyError } from "@/utils/networkErrors";
 
 // ---------------------------------------------------------------------------
@@ -339,7 +339,7 @@ export async function executeEmailAction(
   }
 
   // 3. If offline, queue for later
-  if (!useUIStore.getState().isOnline) {
+  if (!useSyncStateStore.getState().isOnline) {
     await enqueuePendingOp(
       accountId,
       action.type,

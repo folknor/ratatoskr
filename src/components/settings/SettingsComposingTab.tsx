@@ -1,6 +1,6 @@
 import type React from "react";
 import { useTranslation } from "react-i18next";
-import { useUIStore } from "@/stores/uiStore";
+import { useUIPreferencesStore } from "@/stores/uiPreferencesStore";
 import { Section, SettingRow, ToggleRow } from "./SettingsShared";
 import { SignatureEditor } from "./SignatureEditor";
 import { TemplateEditor } from "./TemplateEditor";
@@ -15,12 +15,12 @@ export function SettingsComposingTab({
   handleUndoDelayChange,
 }: SettingsComposingTabProps): React.ReactNode {
   const { t } = useTranslation("settings");
-  const defaultReplyMode = useUIStore((s) => s.defaultReplyMode);
-  const setDefaultReplyMode = useUIStore((s) => s.setDefaultReplyMode);
-  const markAsReadBehavior = useUIStore((s) => s.markAsReadBehavior);
-  const setMarkAsReadBehavior = useUIStore((s) => s.setMarkAsReadBehavior);
-  const sendAndArchive = useUIStore((s) => s.sendAndArchive);
-  const setSendAndArchive = useUIStore((s) => s.setSendAndArchive);
+  const defaultReplyMode = useUIPreferencesStore((s) => s.defaultReplyMode);
+  const setDefaultReplyMode = useUIPreferencesStore((s) => s.setDefaultReplyMode);
+  const markAsReadBehavior = useUIPreferencesStore((s) => s.markAsReadBehavior);
+  const setMarkAsReadBehavior = useUIPreferencesStore((s) => s.setMarkAsReadBehavior);
+  const sendAndArchive = useUIPreferencesStore((s) => s.sendAndArchive);
+  const setSendAndArchive = useUIPreferencesStore((s) => s.setSendAndArchive);
 
   return (
     <>

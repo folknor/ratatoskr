@@ -12,7 +12,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { addToAllowlist } from "@/core/mutations";
 import type { DbAttachment } from "@/core/queries";
-import { useUIStore } from "@/stores/uiStore";
+import { useUIPreferencesStore } from "@/stores/uiPreferencesStore";
 import { hasBlockedImages, stripRemoteImages } from "@/utils/imageBlocker";
 import { escapeHtml, sanitizeHtml } from "@/utils/sanitize";
 
@@ -44,7 +44,7 @@ export function EmailRenderer({
   const [overrideShow, setOverrideShow] = useState(false);
   const [cidMap, setCidMap] = useState<Map<string, string>>(new Map());
 
-  const theme = useUIStore((s) => s.theme);
+  const theme = useUIPreferencesStore((s) => s.theme);
   const isDark =
     theme === "dark" ||
     (theme === "system" &&

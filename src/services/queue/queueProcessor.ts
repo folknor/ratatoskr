@@ -1,4 +1,4 @@
-import { useUIStore } from "@/stores/uiStore";
+import { useSyncStateStore } from "@/stores/syncStateStore";
 import { classifyError } from "@/utils/networkErrors";
 import {
   type BackgroundChecker,
@@ -20,7 +20,7 @@ let checker: BackgroundChecker | null = null;
 
 async function processQueue(): Promise<void> {
   // Skip if offline
-  if (!useUIStore.getState().isOnline) return;
+  if (!useSyncStateStore.getState().isOnline) return;
 
   // Compact first to eliminate redundant ops
   await compactQueue();
@@ -76,7 +76,7 @@ async function processQueue(): Promise<void> {
 
 async function updatePendingCount(): Promise<void> {
   const count = await getPendingOpsCount();
-  useUIStore.getState().setPendingOpsCount(count);
+  useSyncStateStore.getState().setPendingOpsCount(count);
 }
 
 export function startQueueProcessor(): void {

@@ -11,8 +11,9 @@ import {
   type SupportedLanguage,
 } from "@/i18n";
 import { setSetting } from "@/core/settings";
-import type { SidebarNavItem } from "@/stores/uiStore";
-import { useUIStore } from "@/stores/uiStore";
+import type { SidebarNavItem } from "@/stores/uiLayoutStore";
+import { useUILayoutStore } from "@/stores/uiLayoutStore";
+import { useUIPreferencesStore } from "@/stores/uiPreferencesStore";
 import { Section, SettingRow, ToggleRow } from "./SettingsShared";
 
 export interface SettingsGeneralTabProps {
@@ -57,22 +58,22 @@ export function SettingsGeneralTab({
   setCacheSizeMb,
 }: SettingsGeneralTabProps): React.ReactNode {
   const { t } = useTranslation("settings");
-  const theme = useUIStore((s) => s.theme);
-  const setTheme = useUIStore((s) => s.setTheme);
-  const readingPanePosition = useUIStore((s) => s.readingPanePosition);
-  const setReadingPanePosition = useUIStore((s) => s.setReadingPanePosition);
-  const emailDensity = useUIStore((s) => s.emailDensity);
-  const setEmailDensity = useUIStore((s) => s.setEmailDensity);
-  const fontScale = useUIStore((s) => s.fontScale);
-  const setFontScale = useUIStore((s) => s.setFontScale);
-  const colorTheme = useUIStore((s) => s.colorTheme);
-  const setColorTheme = useUIStore((s) => s.setColorTheme);
-  const inboxViewMode = useUIStore((s) => s.inboxViewMode);
-  const setInboxViewMode = useUIStore((s) => s.setInboxViewMode);
-  const showSyncStatusBar = useUIStore((s) => s.showSyncStatusBar);
-  const setShowSyncStatusBar = useUIStore((s) => s.setShowSyncStatusBar);
-  const reduceMotion = useUIStore((s) => s.reduceMotion);
-  const setReduceMotion = useUIStore((s) => s.setReduceMotion);
+  const theme = useUIPreferencesStore((s) => s.theme);
+  const setTheme = useUIPreferencesStore((s) => s.setTheme);
+  const readingPanePosition = useUILayoutStore((s) => s.readingPanePosition);
+  const setReadingPanePosition = useUILayoutStore((s) => s.setReadingPanePosition);
+  const emailDensity = useUIPreferencesStore((s) => s.emailDensity);
+  const setEmailDensity = useUIPreferencesStore((s) => s.setEmailDensity);
+  const fontScale = useUIPreferencesStore((s) => s.fontScale);
+  const setFontScale = useUIPreferencesStore((s) => s.setFontScale);
+  const colorTheme = useUIPreferencesStore((s) => s.colorTheme);
+  const setColorTheme = useUIPreferencesStore((s) => s.setColorTheme);
+  const inboxViewMode = useUIPreferencesStore((s) => s.inboxViewMode);
+  const setInboxViewMode = useUIPreferencesStore((s) => s.setInboxViewMode);
+  const showSyncStatusBar = useUIPreferencesStore((s) => s.showSyncStatusBar);
+  const setShowSyncStatusBar = useUIPreferencesStore((s) => s.setShowSyncStatusBar);
+  const reduceMotion = useUIPreferencesStore((s) => s.reduceMotion);
+  const setReduceMotion = useUIPreferencesStore((s) => s.setReduceMotion);
 
   return (
     <>
@@ -345,8 +346,8 @@ export function SettingsGeneralTab({
 
 function SidebarNavEditor(): React.ReactNode {
   const { t } = useTranslation("settings");
-  const sidebarNavConfig = useUIStore((s) => s.sidebarNavConfig);
-  const setSidebarNavConfig = useUIStore((s) => s.setSidebarNavConfig);
+  const sidebarNavConfig = useUILayoutStore((s) => s.sidebarNavConfig);
+  const setSidebarNavConfig = useUILayoutStore((s) => s.setSidebarNavConfig);
 
   const items: SidebarNavItem[] = (() => {
     if (!sidebarNavConfig)

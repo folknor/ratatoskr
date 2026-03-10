@@ -1,11 +1,11 @@
 import { WifiOff } from "lucide-react";
 import type React from "react";
 import { useTranslation } from "react-i18next";
-import { useUIStore } from "@/stores/uiStore";
+import { useSyncStateStore } from "@/stores/syncStateStore";
 
 export function OfflineBanner(): React.ReactNode {
   const { t } = useTranslation();
-  const isOnline = useUIStore((s) => s.isOnline);
+  const isOnline = useSyncStateStore((s) => s.isOnline);
 
   if (isOnline) return null;
 
