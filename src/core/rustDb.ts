@@ -1053,3 +1053,82 @@ export async function deleteSearchDocument(messageId: string): Promise<void> {
 export async function rebuildSearchIndex(): Promise<number> {
   return invoke<number>("rebuild_search_index");
 }
+
+// ═══════════════════════════════════════════════════════════════
+// FILTER ENGINE (Phase 6 — evaluate filters in Rust)
+// ═══════════════════════════════════════════════════════════════
+
+/** Message data needed for filter matching (sent to Rust). */
+export interface FilterableMessage {
+  thread_id: string;
+  from_name: string | null;
+  from_address: string | null;
+  to_addresses: string | null;
+  subject: string | null;
+  body_text: string | null;
+  body_html: string | null;
+  has_attachments: boolean;
+}
+
+/** Per-thread filter result returned from Rust. */
+export interface RustFilterResult {
+  add_label_ids: string[];
+  remove_label_ids: string[];
+  mark_read: boolean;
+  star: boolean;
+}
+
+/**
+ * Evaluate enabled filters for an account against a set of messages.
+ * Reads filter rules from DB in Rust, runs matching, returns per-thread actions.
+ */
+export async function filtersEvaluate(
+  accountId: string,
+  messages: FilterableMessage[],
+): Promise<Record<string, RustFilterResult>> {
+  if (messages.length === 0) return {};
+  return invoke<Record<string, RustFilterResult>>("filters_evaluate", {
+    accountId,
+    messages,
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// JWZ THREADING (Phase 6 — threading algorithm in Rust)
+// ═══════════════════════════════════════════════════════════════
+
+/** Message data for threading (sent to Rust). */
+export interface ThreadableMessageInput {
+  id: string;
+  message_id: string;
+  in_reply_to: string | null;
+  references: string | null;
+  subject: string | null;
+  date: number;
+}
+
+/** Thread group returned from Rust. */
+export interface RustThreadGroup {
+  thread_id: string;
+  message_ids: string[];
+}
+
+/** Build threads from messages using JWZ algorithm (Rust). */
+export async function threadingBuildThreads(
+  messages: ThreadableMessageInput[],
+): Promise<RustThreadGroup[]> {
+  if (messages.length === 0) return [];
+  return invoke<RustThreadGroup[]>("threading_build_threads", { messages });
+}
+
+/** Incrementally update thread assignments (Rust). */
+export async function threadingUpdateThreads(
+  existingThreads: RustThreadGroup[],
+  newMessages: ThreadableMessageInput[],
+): Promise<RustThreadGroup[]> {
+  if (newMessages.length === 0) return [];
+  return invoke<RustThreadGroup[]>("threading_update_threads", {
+    existingThreads,
+    newMessages,
+  });
+}

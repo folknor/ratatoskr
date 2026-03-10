@@ -596,17 +596,22 @@ Components and stores import from `@/core` instead of `@/services/db/*`. Some se
 
 **Risk**: Low-medium. Well-defined operations, straightforward port.
 
-### Phase 6: Remaining Services — NOT STARTED
+### Phase 6: Remaining Services — IN PROGRESS
 
 Move one at a time as needed:
-- Filter engine (`filterEngine.ts`)
-- Threading / JWZ algorithm (`threadBuilder.ts`)
+- ✅ Filter engine → `src-tauri/src/filters/` — `filters_evaluate` command reads filter rules from DB, matches against messages in Rust, returns per-thread actions. TS caller applies actions via `emailActions`. Pure computation + DB read in one IPC call (was: DB read IPC + JSON parse in TS + match loop).
+- ✅ JWZ threading algorithm → `src-tauri/src/threading/` — `threading_build_threads` and `threading_update_threads` commands. Pure computation, no DB. Full JWZ algorithm: container-based linking, phantom parents, subject-based merging, deterministic thread IDs (djb2 hash, verified compatible with TS). Critical for Phase 4 (Rust sync).
 - Categorization (`ruleEngine.ts`, `categorizationManager.ts`)
 - Snooze, scheduled send, follow-up checkers
 - Notification manager
 - Badge count
 
 Each is independent. Prioritize by performance impact.
+
+**Known gaps for Phase 4 integration:**
+- **Filter field name mapping**: Rust `FilterableMessage` uses snake_case (`from_name`, `has_attachments`); TS `ParsedMessage` uses camelCase. Callers must map fields when wiring up the Rust path. For Phase 4 (Rust sync), this goes away — Rust will produce the messages directly.
+- **Filter apply is still per-action IPC**: `filters_evaluate` returns what to do, but applying (add label, mark read, star) fires individual `emailActions` calls from TS. Phase 4 should add a `filters_apply` command that does matching + DB updates atomically in Rust — zero IPC per action.
+- **`updateThreads` can't detect cross-thread bridges**: It only has thread IDs + local message IDs for existing threads, not full `ThreadableMessage` data. A new message that bridges two previously separate threads may not merge them. Same limitation as the TS implementation. Full re-threading on sync would fix this but is expensive.
 
 ---
 
@@ -658,11 +663,11 @@ This is the Apple Mail architecture (SQLite Envelope Index + .emlx files + Spotl
 | **Phase 3**: Tantivy search | ✅ Core complete | tantivy 0.25, 5 commands, sync integration wired |
 | **Phase 4**: Rust sync | Not started | — |
 | **Phase 5**: Rust actions | ✅ Complete | 15 action commands + 1 centralized queue command |
-| **Phase 6**: Remaining services | Not started | — |
+| **Phase 6**: Remaining services | In progress | Filter engine + JWZ threading ported (3 commands) |
 
 **Phases 0, 1, 2, 3, and 5 are done.** The biggest user-visible improvements (eliminating IPC overhead on every query, instant full-text search, compressed body storage, atomic email actions) are delivered. Remaining phases (Rust sync engine, remaining services) are performance and architecture wins that can be tackled incrementally.
 
 **Immediate next steps**:
 1. Integration test the app with Rust paths active (`pnpm tauri dev`)
-2. Phase 4 (Rust sync engine) — highest impact remaining phase
-3. Phase 6 (remaining services) — port independently as needed
+2. Phase 4 (Rust sync engine) — highest impact remaining phase. Filter engine and JWZ threading are now available in Rust as building blocks.
+3. Phase 6 (remaining services) — continue porting independently as needed

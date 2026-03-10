@@ -10,10 +10,12 @@ mod body_store;
 mod commands;
 mod db;
 mod email_actions;
+mod filters;
 mod imap;
 mod oauth;
 mod search;
 mod smtp;
+mod threading;
 
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
@@ -222,6 +224,11 @@ pub fn run() {
             email_actions::commands::email_action_remove_label,
             email_actions::commands::email_action_move_to_folder,
             email_actions::commands::db_enqueue_pending_operation,
+            // Filter engine (Phase 6)
+            filters::commands::filters_evaluate,
+            // JWZ threading (Phase 6)
+            threading::commands::threading_build_threads,
+            threading::commands::threading_update_threads,
         ])
         .setup(|app| {
             {
