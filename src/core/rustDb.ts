@@ -873,11 +873,13 @@ export async function emailActionMoveToFolder(
   accountId: string,
   threadId: string,
   folderLabelId: string,
+  sourceLabelId?: string,
 ): Promise<void> {
   return invoke<void>("email_action_move_to_folder", {
     accountId,
     threadId,
     folderLabelId,
+    sourceLabelId: sourceLabelId ?? null,
   });
 }
 

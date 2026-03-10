@@ -90,6 +90,20 @@ export function MoveToFolderDialog({
       onClose();
 
       for (const threadId of threadIds) {
+        // Determine source folder label for local DB removal
+        const thread = useThreadStore
+          .getState()
+          .threads.find((th) => th.id === threadId);
+        const sourceLabel = thread?.labelIds.find(
+          (l) =>
+            l !== dest.id &&
+            (l === "INBOX" ||
+              l === "TRASH" ||
+              l === "SPAM" ||
+              l === "SENT" ||
+              l === "DRAFT"),
+        );
+
         if (dest.id === "__archive__") {
           await archiveThread(activeAccountId, threadId, []);
         } else if (dest.id === "TRASH") {
@@ -98,7 +112,7 @@ export function MoveToFolderDialog({
           await spamThread(activeAccountId, threadId, [], true);
         } else if (dest.id === "INBOX") {
           if (isImap) {
-            await moveThread(activeAccountId, threadId, [], "INBOX");
+            await moveThread(activeAccountId, threadId, [], "INBOX", sourceLabel);
           } else {
             // Gmail: add INBOX label (un-archive)
             await addThreadLabel(activeAccountId, threadId, "INBOX");
@@ -106,14 +120,11 @@ export function MoveToFolderDialog({
         } else if (dest.type === "label") {
           if (isImap) {
             // IMAP: move to folder. The label's id is the folder path for IMAP accounts.
-            await moveThread(activeAccountId, threadId, [], dest.id);
+            await moveThread(activeAccountId, threadId, [], dest.id, sourceLabel);
           } else {
             // Gmail: add destination label + remove from current location (archive)
             await addThreadLabel(activeAccountId, threadId, dest.id);
             // Remove INBOX to complete the "move" semantics
-            const thread = useThreadStore
-              .getState()
-              .threads.find((th) => th.id === threadId);
             if (thread?.labelIds.includes("INBOX")) {
               await removeThreadLabel(activeAccountId, threadId, "INBOX");
             }

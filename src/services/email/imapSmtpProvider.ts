@@ -184,7 +184,11 @@ export class ImapSmtpProvider implements EmailProvider {
 
     const config = await this.getImapConfig();
     const data = await imapFetchAttachment(config, folder, uid, attachmentId);
-    return { data, size: data.length };
+    // data is base64-encoded, so data.length overestimates the real byte size
+    // by ~33%. Compute actual size accounting for padding characters.
+    const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+    const size = Math.ceil((data.length * 3) / 4) - padding;
+    return { data, size };
   }
 
   async fetchRawMessage(messageId: string): Promise<string> {

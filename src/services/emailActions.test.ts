@@ -139,128 +139,119 @@ describe("emailActions", () => {
     });
   });
 
-  describe("Gmail online execution (via Rust invoke)", () => {
+  describe("Gmail online execution (via provider_* Rust commands)", () => {
     beforeEach(() => {
       vi.mocked(getAccount).mockResolvedValue(
         createMockGmailAccount() as never,
       );
     });
 
-    it("archives a thread via gmail_modify_thread", async () => {
+    it("archives a thread via provider_archive", async () => {
       const result = await archiveThread("acct-1", "t1", ["m1"]);
       expect(result.success).toBe(true);
-      expect(invoke).toHaveBeenCalledWith("gmail_modify_thread", {
+      expect(invoke).toHaveBeenCalledWith("provider_archive", {
         accountId: "acct-1",
         threadId: "t1",
-        addLabels: [],
-        removeLabels: ["INBOX"],
       });
       expect(mockProvider.archive).not.toHaveBeenCalled();
     });
 
-    it("trashes a thread via gmail_modify_thread", async () => {
+    it("trashes a thread via provider_trash", async () => {
       const result = await trashThread("acct-1", "t1", ["m1"]);
       expect(result.success).toBe(true);
-      expect(invoke).toHaveBeenCalledWith("gmail_modify_thread", {
+      expect(invoke).toHaveBeenCalledWith("provider_trash", {
         accountId: "acct-1",
         threadId: "t1",
-        addLabels: ["TRASH"],
-        removeLabels: ["INBOX"],
       });
     });
 
-    it("permanently deletes a thread via gmail_delete_thread", async () => {
+    it("permanently deletes a thread via provider_permanent_delete", async () => {
       const result = await permanentDeleteThread("acct-1", "t1", ["m1"]);
       expect(result.success).toBe(true);
-      expect(invoke).toHaveBeenCalledWith("gmail_delete_thread", {
+      expect(invoke).toHaveBeenCalledWith("provider_permanent_delete", {
         accountId: "acct-1",
         threadId: "t1",
       });
     });
 
-    it("marks thread read via gmail_modify_thread", async () => {
+    it("marks thread read via provider_mark_read", async () => {
       const result = await markThreadRead("acct-1", "t1", ["m1"], true);
       expect(result.success).toBe(true);
-      expect(invoke).toHaveBeenCalledWith("gmail_modify_thread", {
+      expect(invoke).toHaveBeenCalledWith("provider_mark_read", {
         accountId: "acct-1",
         threadId: "t1",
-        addLabels: [],
-        removeLabels: ["UNREAD"],
+        read: true,
       });
     });
 
-    it("marks thread unread via gmail_modify_thread", async () => {
+    it("marks thread unread via provider_mark_read", async () => {
       const result = await markThreadRead("acct-1", "t1", ["m1"], false);
       expect(result.success).toBe(true);
-      expect(invoke).toHaveBeenCalledWith("gmail_modify_thread", {
+      expect(invoke).toHaveBeenCalledWith("provider_mark_read", {
         accountId: "acct-1",
         threadId: "t1",
-        addLabels: ["UNREAD"],
-        removeLabels: [],
+        read: false,
       });
     });
 
-    it("stars a thread via gmail_modify_thread", async () => {
+    it("stars a thread via provider_star", async () => {
       const result = await starThread("acct-1", "t1", ["m1"], true);
       expect(result.success).toBe(true);
-      expect(invoke).toHaveBeenCalledWith("gmail_modify_thread", {
+      expect(invoke).toHaveBeenCalledWith("provider_star", {
         accountId: "acct-1",
         threadId: "t1",
-        addLabels: ["STARRED"],
-        removeLabels: [],
+        starred: true,
       });
     });
 
-    it("unstars a thread via gmail_modify_thread", async () => {
+    it("unstars a thread via provider_star", async () => {
       const result = await starThread("acct-1", "t1", ["m1"], false);
       expect(result.success).toBe(true);
-      expect(invoke).toHaveBeenCalledWith("gmail_modify_thread", {
+      expect(invoke).toHaveBeenCalledWith("provider_star", {
         accountId: "acct-1",
         threadId: "t1",
-        addLabels: [],
-        removeLabels: ["STARRED"],
+        starred: false,
       });
     });
 
-    it("reports spam via gmail_modify_thread", async () => {
+    it("reports spam via provider_spam", async () => {
       const result = await spamThread("acct-1", "t1", ["m1"], true);
       expect(result.success).toBe(true);
-      expect(invoke).toHaveBeenCalledWith("gmail_modify_thread", {
+      expect(invoke).toHaveBeenCalledWith("provider_spam", {
         accountId: "acct-1",
         threadId: "t1",
-        addLabels: ["SPAM"],
-        removeLabels: ["INBOX"],
+        isSpam: true,
       });
     });
 
-    it("sends a message via gmail_send_email", async () => {
+    it("sends a message via provider_send_email", async () => {
       const result = await executeEmailAction("acct-1", {
         type: "sendMessage",
         rawBase64Url: "base64data",
         threadId: "t1",
       });
       expect(result.success).toBe(true);
-      expect(invoke).toHaveBeenCalledWith("gmail_send_email", {
+      expect(invoke).toHaveBeenCalledWith("provider_send_email", {
         accountId: "acct-1",
-        raw: "base64data",
+        rawBase64url: "base64data",
         threadId: "t1",
       });
     });
 
-    it("creates a draft via gmail_create_draft", async () => {
+    it("creates a draft via provider_create_draft", async () => {
       const result = await executeEmailAction("acct-1", {
         type: "createDraft",
         rawBase64Url: "base64data",
       });
       expect(result.success).toBe(true);
-      expect(invoke).toHaveBeenCalledWith("gmail_create_draft", {
+      expect(invoke).toHaveBeenCalledWith("provider_create_draft", {
         accountId: "acct-1",
-        raw: "base64data",
+        rawBase64url: "base64data",
         threadId: null,
       });
     });
 
-    it("updates a draft via gmail_update_draft", async () => {
+    it("updates a draft via provider_update_draft", async () => {
       const result = await executeEmailAction("acct-1", {
         type: "updateDraft",
         draftId: "d1",
@@ -268,34 +259,33 @@ describe("emailActions", () => {
         threadId: "t1",
       });
       expect(result.success).toBe(true);
-      expect(invoke).toHaveBeenCalledWith("gmail_update_draft", {
+      expect(invoke).toHaveBeenCalledWith("provider_update_draft", {
         accountId: "acct-1",
         draftId: "d1",
-        raw: "base64data",
+        rawBase64url: "base64data",
         threadId: "t1",
       });
     });
 
-    it("deletes a draft via gmail_delete_draft", async () => {
+    it("deletes a draft via provider_delete_draft", async () => {
       const result = await executeEmailAction("acct-1", {
         type: "deleteDraft",
         draftId: "d1",
       });
       expect(result.success).toBe(true);
-      expect(invoke).toHaveBeenCalledWith("gmail_delete_draft", {
+      expect(invoke).toHaveBeenCalledWith("provider_delete_draft", {
         accountId: "acct-1",
         draftId: "d1",
       });
     });
 
-    it("moves to folder via gmail_modify_thread", async () => {
+    it("moves to folder via provider_move_to_folder", async () => {
       const result = await moveThread("acct-1", "t1", ["m1"], "Label_123");
       expect(result.success).toBe(true);
-      expect(invoke).toHaveBeenCalledWith("gmail_modify_thread", {
+      expect(invoke).toHaveBeenCalledWith("provider_move_to_folder", {
         accountId: "acct-1",
         threadId: "t1",
-        addLabels: ["Label_123"],
-        removeLabels: [],
+        folderId: "Label_123",
       });
     });
   });

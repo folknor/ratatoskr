@@ -12,6 +12,7 @@ import {
 import type React from "react";
 import { useCallback, useRef, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
+import { StepIndicator, type StepDef } from "./StepIndicator";
 import { deleteAccount, insertJmapAccount } from "@/services/db/accounts";
 import { useAccountStore } from "@/stores/accountStore";
 
@@ -73,6 +74,12 @@ export function AddJmapAccount({
   const addAccount = useAccountStore((s) => s.addAccount);
 
   const currentStepIndex = steps.indexOf(currentStep);
+
+  const stepDefs: StepDef[] = steps.map((s) => ({
+    key: s,
+    label: stepLabels[s],
+    icon: stepIcons[s],
+  }));
 
   const canAdvanceFromCredentials =
     email.trim().includes("@") && password.trim().length > 0;
@@ -227,36 +234,6 @@ export function AddJmapAccount({
     await cleanup();
     onCancel();
   };
-
-  const renderStepIndicator = (): React.ReactNode => (
-    <div className="flex items-center justify-center gap-1 mb-6">
-      {steps.map((step, i) => {
-        const isActive = i === currentStepIndex;
-        const isCompleted = i < currentStepIndex;
-        return (
-          <div key={step} className="flex items-center gap-1">
-            {i > 0 && (
-              <div
-                className={`w-6 h-px ${isCompleted ? "bg-accent" : "bg-border-primary"}`}
-              />
-            )}
-            <div
-              className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium transition-colors ${
-                isActive
-                  ? "bg-accent/10 text-accent"
-                  : isCompleted
-                    ? "text-accent"
-                    : "text-text-tertiary"
-              }`}
-            >
-              {stepIcons[step]}
-              <span className="hidden sm:inline">{stepLabels[step]}</span>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
 
   const renderCredentialsStep = (): React.ReactNode => (
     <div className="space-y-4">
@@ -440,7 +417,7 @@ export function AddJmapAccount({
     >
       {/* biome-ignore lint/a11y/noStaticElementInteractions: keyboard handler for form navigation */}
       <div className="p-4" onKeyDown={handleKeyDown}>
-        {renderStepIndicator()}
+        <StepIndicator steps={stepDefs} currentStepIndex={currentStepIndex} />
         {renderStepContent()}
 
         <div className="flex items-center justify-between mt-6">

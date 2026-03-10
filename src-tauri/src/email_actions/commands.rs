@@ -341,10 +341,17 @@ pub async fn email_action_move_to_folder(
     account_id: String,
     thread_id: String,
     folder_label_id: String,
+    source_label_id: Option<String>,
 ) -> Result<(), String> {
     state
         .with_conn(move |conn| {
-            insert_label(conn, &account_id, &thread_id, &folder_label_id)
+            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+            if let Some(source) = &source_label_id {
+                remove_label(&tx, &account_id, &thread_id, source)?;
+            }
+            insert_label(&tx, &account_id, &thread_id, &folder_label_id)?;
+            tx.commit().map_err(|e| e.to_string())?;
+            Ok(())
         })
         .await
 }

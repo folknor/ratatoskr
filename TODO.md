@@ -6,14 +6,6 @@
 
 - [ ] **Auto-updater should check local permissions** — Don't show update prompts if the user lacks write access to the app installation directory (e.g., installed system-wide without admin rights). The update would fail anyway — detect this upfront and either hide the prompt or show a helpful message.
 
-### LOW
-
-- [ ] **IMAP `fetchAttachment` returns base64 `data.length` as `size`** — `src/services/email/imapSmtpProvider.ts:267-269`
-
-  Base64 inflates size by ~33%. The `EmailProvider` interface says `size` is in bytes, but the returned value is the base64 string length.
-
-  Fix: Return `Math.floor(data.length * 3 / 4)` or decode and measure.
-
 ---
 
 ## Security & Data Safety
@@ -27,12 +19,6 @@
   Fix: Use `SAVEPOINT`/`RELEASE` if the pool issue is specifically with nested transactions. Or move critical multi-step writes to Rust-side `DbState::with_conn` where real transactions are available.
 
 ### MEDIUM
-
-- [ ] **AI API keys may be stored in plaintext** — `src/services/db/settings.ts`
-
-  `getSecureSetting`/`setSecureSetting` exist, but if any code path uses `setSetting` instead of `setSecureSetting` for API keys, they are stored unencrypted.
-
-  Fix: Audit all settings writes for credential-like keys to ensure they use `setSecureSetting`.
 
 - [ ] **`sql:allow-execute` grants arbitrary SQL from frontend** — `src-tauri/capabilities/default.json:17`
 
@@ -56,29 +42,7 @@
 
 ---
 
-## Refactoring — Patterns & Boilerplate
-
-- [ ] **`moveToFolder` only adds label, doesn't remove source** — `src-tauri/src/email_actions/commands.rs`
-
-  `email_action_move_to_folder` inserts the target folder label into `thread_labels` but doesn't remove the old label (e.g., INBOX). The TS code had the same behavior, so it's a pre-existing gap — the provider-side IMAP MOVE or Gmail API call handles the actual folder change on the server, but the local DB state shows both labels until the next sync refreshes thread labels.
-
-  In practice this means a thread moved from Inbox to Archive will briefly appear in both views until the next delta sync (≤60s). Not a functional bug since the server state is correct and the UI will self-correct, but it can cause momentary confusion. The fix would be to DELETE the old label in the same transaction, but that requires knowing which label to remove — for archive it's always INBOX, but for arbitrary folder moves the source isn't passed to the command. Would need to either pass the source label as a parameter or query existing labels in the command.
-
----
-
 ## Consolidation — Dead Code & Duplication
-
-- [ ] **JMAP `commands.rs` action commands duplicate `ops.rs` trait implementations** — `src-tauri/src/jmap/commands.rs:228-555`
-
-  ~330 lines of `jmap_archive`, `jmap_trash`, `jmap_mark_read`, etc. are exact duplicates of the `JmapOps` trait methods. Since `emailActions.ts` now routes through unified `provider_*` commands, these per-provider commands are dead from the action dispatch path. The `jmap_*` lifecycle/sync/folder/attachment commands should remain.
-
-  Fix: Remove ~330 lines from `commands.rs` and registrations from `lib.rs`. **Risk: MEDIUM** — verify no TS code calls `jmap_archive` etc. directly.
-
-- [ ] **Wizard step indicator duplicated across account components** — `AddImapAccount.tsx:363-391`, `AddJmapAccount.tsx:226-254`
-
-  Nearly identical `renderStepIndicator()` functions with same CSS, layout, and active/completed state logic.
-
-  Fix: Extract `<StepIndicator steps={...} currentStep={...} />`. Saves ~60 lines. **Risk: LOW.**
 
 - [ ] **`GmailClient` TS class (461 lines) + legacy `tokenManager.ts` kept for one caller** — `src/services/gmail/client.ts`, `tokenManager.ts`
 
@@ -98,8 +62,6 @@
 
   Fix: Remove once Rust IMAP sync is proven stable. **Risk: HIGH** — gate on release milestone.
 
-- [ ] **`emailActions.test.ts` references old command names** — Tests assert `gmail_modify_thread`, `gmail_delete_thread`, `gmail_send_email`, `gmail_create_draft` etc., but code now calls `provider_*` commands. Tests may be broken or giving false confidence.
-
 ---
 
 ## Gmail→Rust Migration Follow-ups
@@ -112,35 +74,19 @@
 
 ## Phase 4 (Rust Sync Engine) Follow-ups
 
-### MEDIUM
-
-- [ ] **Body text unavailable for filter body matching** — `src/services/filters/filterEngine.ts:168`
-
-  `dbMessageToParsedMessage()` reads `body_html`/`body_text` from the `messages` table columns, but these are always NULL — message bodies live in the separate `bodies.db` file (zstd-compressed, accessed via `body_store_get`/`body_store_get_batch`). This means any filter rule with `criteria.body` set will never match, because the body fields on the `DbMessage` object are null.
-
-  This affects the `applyFiltersToNewMessageIds()` path used by the Rust sync engine (`syncManager.ts:182`) and the `applyFiltersToMessages()` path used by TS IMAP delta sync (`imapSync.ts:886`). The Gmail delta sync path (`sync.ts:510`) is not affected because it passes `ParsedMessage` objects that already have bodies populated from the API response before they're stored.
-
-  Options: (1) Hydrate bodies from the body store in `applyFiltersToNewMessageIds()` by calling `bodyStoreGetBatch()` for the message IDs — simplest fix, adds one IPC call but only when filters with body criteria exist. (2) Move filter evaluation into the Rust sync pipeline where bodies are available before compression — more efficient but much larger change. (3) Accept the limitation and document that body-matching filters only work on Gmail API accounts — least effort, but surprising to users. Option 1 is probably the right call.
-
 ### LOW
 
 - [ ] **Gmail sync still fully in TS** — `src/services/gmail/syncManager.ts:80-112`
 
-  `syncGmailAccount()` uses the Gmail REST API via `GmailClient` (HTTP, not IMAP), so it doesn't benefit from the Rust IMAP sync engine at all. The function calls `initialSync()` or `deltaSync()` from `sync.ts`, which make HTTP requests to `googleapis.com` via the Tauri HTTP plugin, parse JSON responses, and store to the TS-side DB layer.
-
-  Porting would mean: (1) implementing Gmail REST API calls in Rust with `reqwest` (threads.list, threads.get, history.list, messages.get), (2) handling OAuth token refresh in Rust (currently `GmailClient` auto-refreshes 5min before expiry), (3) reimplementing the batched thread fetch logic, history-based delta sync, and HISTORY_EXPIRED fallback. This is a large effort because the Gmail API has different semantics from IMAP — it returns threads natively (no JWZ threading needed), uses history IDs instead of UIDs, and requires OAuth2 bearer tokens. The current TS implementation works well and the HTTP overhead dominates anyway (not IPC), so the benefit of porting is minimal. Only worth considering if we want a unified Rust sync pipeline for architectural consistency.
+  `syncGmailAccount()` uses the Gmail REST API via `GmailClient` (HTTP, not IMAP), so it doesn't benefit from the Rust IMAP sync engine at all. Porting is a large effort with minimal benefit since HTTP overhead dominates.
 
 - [ ] **No per-operation timeout on Rust IMAP fetches** — `src-tauri/src/sync/imap_initial.rs`
 
-  Connection-level timeouts exist via `async-imap`'s TCP stream configuration, but there's no operation-level timeout on individual FETCH commands. A folder with 50K+ messages could result in a single IMAP FETCH that takes arbitrarily long — the server might be slow, rate-limiting, or the connection could be half-open (TCP keepalive not triggered yet).
-
-  The risk is a sync that hangs indefinitely on a large folder, blocking the sync timer for that account. Since sync runs sequentially per account (`syncAccountInternal` is awaited), a hang blocks all subsequent accounts too. The fix would be wrapping each `imap_fetch_messages` call (or the entire folder sync) in a `tokio::time::timeout()`. Need to choose a reasonable duration — probably 5-10 minutes per folder, since legitimate large-folder fetches can take a while. The `async-imap` session would need to be dropped on timeout to close the connection cleanly. Low priority because it's a rare edge case (most IMAP servers handle large fetches fine), but it's a robustness improvement for pathological cases.
+  No operation-level timeout on individual FETCH commands. A folder with 50K+ messages could hang indefinitely. Fix: wrap in `tokio::time::timeout()`. Low priority — rare edge case.
 
 - [ ] **JMAP initial sync re-queries entire result set every batch** — `src-tauri/src/jmap/sync.rs:108-146`
 
-  The loop re-executes `email_query` on every iteration, getting the full result set, then does `.skip(position).take(BATCH_SIZE)`. For 10,000 emails with `BATCH_SIZE=50`, this makes 200 queries each returning 10,000 IDs. If the result set changes between queries, position-based skip can miss messages or process duplicates.
-
-  Fix: Use JMAP query's `position` + `limit` parameters for server-side pagination, or cache IDs from the first query and batch-fetch from the cached list.
+  O(n²) server calls. Fix: use JMAP `position` + `limit` for server-side pagination, or cache IDs from first query.
 
 ---
 
@@ -156,15 +102,15 @@
 
 - [ ] **Category add/remove is racy** — `src-tauri/src/graph/ops.rs`
 
-  `add_category`/`remove_category` do a read-then-write (fetch current categories, modify, PATCH back). Two concurrent actions on the same message could clobber each other. Graph has no atomic "add to array" operation, so this is unavoidable but worth knowing.
+  `add_category`/`remove_category` do a read-then-write. Two concurrent actions could clobber each other. Graph has no atomic "add to array" operation — unavoidable.
 
 - [ ] **No `$batch` optimization for thread actions** — `src-tauri/src/graph/ops.rs`
 
-  Thread-level actions loop through messages one-by-one. The plan doc describes batching up to 20 requests per `/$batch` call. Left as follow-up — per-message approach is correct but slower under the 4-concurrent limit.
+  Thread-level actions loop per-message. Batching up to 20 per `/$batch` call would be faster.
 
 - [ ] **`raw_size` is always 0 for Graph messages** — `src-tauri/src/graph/sync.rs`
 
-  Graph's message API has no first-class size property. The MAPI extended property `PidTagMessageSize` (`0x0E08`) is available via `$expand=singleValueExtendedProperties($filter=id eq 'Integer 0x0E08')`, but this can't be combined with `$select` (Microsoft treats it as an advanced query conflict). Dropping `$select` to get size would fetch full message objects — unacceptable for sync performance under the 4-concurrent limit. Separate per-message calls are equally impractical. Accepted as a cosmetic limitation — only affects storage stats display, not functional.
+  Graph API has no first-class size property. `PidTagMessageSize` can't combine with `$select`. Accepted cosmetic limitation.
 
 ---
 

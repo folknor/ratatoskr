@@ -54,6 +54,7 @@ export type EmailAction =
       threadId: string;
       messageIds: string[];
       folderPath: string;
+      sourceLabel?: string;
     }
   | { type: "addLabel"; threadId: string; labelId: string }
   | { type: "removeLabel"; threadId: string; labelId: string }
@@ -236,6 +237,7 @@ async function applyLocalDbUpdate(
         accountId,
         action.threadId,
         action.folderPath,
+        action.sourceLabel,
       );
       break;
     case "pin":
@@ -596,13 +598,16 @@ export function moveThread(
   threadId: string,
   messageIds: string[],
   folderPath: string,
+  sourceLabel?: string,
 ): Promise<ActionResult> {
-  return executeEmailAction(accountId, {
+  const action: EmailAction = {
     type: "moveToFolder",
     threadId,
     messageIds,
     folderPath,
-  });
+    ...(sourceLabel ? { sourceLabel } : {}),
+  };
+  return executeEmailAction(accountId, action);
 }
 
 export function addThreadLabel(

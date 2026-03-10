@@ -11,6 +11,7 @@ import type React from "react";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "@/components/ui/Modal";
+import { StepIndicator, type StepDef } from "./StepIndicator";
 import {
   insertImapAccount,
   insertOAuthImapAccount,
@@ -87,6 +88,12 @@ export function AddImapAccount({
   const addAccount = useAccountStore((s) => s.addAccount);
 
   const currentStepIndex = steps.indexOf(currentStep);
+
+  const stepDefs: StepDef[] = steps.map((s) => ({
+    key: s,
+    label: t(stepLabelKeys[s]),
+    icon: stepIcons[s],
+  }));
 
   const updateForm = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) => {
@@ -360,36 +367,6 @@ export function AddImapAccount({
     }
   };
 
-  const renderStepIndicator = (): React.ReactNode => (
-    <div className="flex items-center justify-center gap-1 mb-6">
-      {steps.map((step, i) => {
-        const isActive = i === currentStepIndex;
-        const isCompleted = i < currentStepIndex;
-        return (
-          <div key={step} className="flex items-center gap-1">
-            {i > 0 && (
-              <div
-                className={`w-6 h-px ${isCompleted ? "bg-accent" : "bg-border-primary"}`}
-              />
-            )}
-            <div
-              className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium transition-colors ${
-                isActive
-                  ? "bg-accent/10 text-accent"
-                  : isCompleted
-                    ? "text-accent"
-                    : "text-text-tertiary"
-              }`}
-            >
-              {stepIcons[step]}
-              <span className="hidden sm:inline">{t(stepLabelKeys[step])}</span>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-
   const renderStepContent = (): React.ReactNode => {
     switch (currentStep) {
       case "basic":
@@ -446,7 +423,7 @@ export function AddImapAccount({
     >
       {/* biome-ignore lint/a11y/noStaticElementInteractions: keyboard handler for form navigation */}
       <div className="p-4" onKeyDown={handleKeyDown}>
-        {renderStepIndicator()}
+        <StepIndicator steps={stepDefs} currentStepIndex={currentStepIndex} />
         {renderStepContent()}
 
         <div className="flex items-center justify-between mt-6">

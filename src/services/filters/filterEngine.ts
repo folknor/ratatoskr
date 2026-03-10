@@ -1,3 +1,4 @@
+import { bodyStoreGetBatch } from "@/core/rustDb";
 import type { FilterActions, FilterCriteria } from "../db/filters";
 import { getEnabledFiltersForAccount } from "../db/filters";
 import { getMessagesByIds, type DbMessage } from "../db/messages";
@@ -197,6 +198,10 @@ export function dbMessageToParsedMessage(row: DbMessage): ParsedMessage {
 
 /**
  * Load messages by IDs from DB, apply filters. Used by Rust sync post-sync hooks.
+ *
+ * Message bodies live in a separate body store (bodies.db), not in the messages
+ * table. When any active filter uses `criteria.body`, we hydrate bodies from
+ * the body store before evaluating filters.
  */
 export async function applyFiltersToNewMessageIds(
   accountId: string,
@@ -205,6 +210,30 @@ export async function applyFiltersToNewMessageIds(
   if (messageIds.length === 0) return;
   const rows = await getMessagesByIds(accountId, messageIds);
   if (rows.length === 0) return;
+
+  // Check if any filter needs body matching so we can hydrate from body store
+  const filters = await getEnabledFiltersForAccount(accountId);
+  const needsBody = filters.some((f) => {
+    try {
+      const criteria = JSON.parse(f.criteria_json) as FilterCriteria;
+      return Boolean(criteria.body);
+    } catch {
+      return false;
+    }
+  });
+
+  if (needsBody) {
+    const bodies = await bodyStoreGetBatch(rows.map((r) => r.id));
+    const bodyMap = new Map(bodies.map((b) => [b.messageId, b]));
+    for (const row of rows) {
+      const body = bodyMap.get(row.id);
+      if (body) {
+        row.body_html = body.bodyHtml;
+        row.body_text = body.bodyText;
+      }
+    }
+  }
+
   const messages = rows.map(dbMessageToParsedMessage);
   await applyFiltersToMessages(accountId, messages);
 }
