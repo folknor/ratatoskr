@@ -196,8 +196,16 @@ export class GmailClient {
 
   async getMessage(
     messageId: string,
+    format: "raw",
+  ): Promise<GmailRawMessage>;
+  async getMessage(
+    messageId: string,
+    format?: "full" | "metadata" | "minimal",
+  ): Promise<GmailMessage>;
+  async getMessage(
+    messageId: string,
     format: "full" | "metadata" | "minimal" | "raw" = "full",
-  ): Promise<GmailMessage> {
+  ): Promise<GmailMessage | GmailRawMessage> {
     return this.request(`/messages/${messageId}?format=${format}`);
   }
 
@@ -418,6 +426,14 @@ export interface GmailMessage {
   historyId: string;
   internalDate: string;
   payload: GmailMessagePart;
+  sizeEstimate: number;
+}
+
+export interface GmailRawMessage {
+  id: string;
+  threadId: string;
+  labelIds: string[];
+  raw: string;
   sizeEstimate: number;
 }
 

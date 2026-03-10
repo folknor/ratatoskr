@@ -16,8 +16,7 @@
 
   In practice this means a thread moved from Inbox to Archive will briefly appear in both views until the next delta sync (≤60s). Not a functional bug since the server state is correct and the UI will self-correct, but it can cause momentary confusion. The fix would be to DELETE the old label in the same transaction, but that requires knowing which label to remove — for archive it's always INBOX, but for arbitrary folder moves the source isn't passed to the command. Would need to either pass the source label as a parameter or query existing labels in the command.
 
-- [ ] **Unsafe type assertions** — `src/services/email/gmailProvider.ts:140`, `src/utils/crypto.ts:54`, `src/components/ui/ContextMenuPortal.tsx:167-268`
-  Multiple `as unknown as` casts and untyped context menu data. Create typed payload interfaces and guards.
+- [x] **~~Unsafe type assertions~~** — Fixed. `gmailProvider.ts` cast eliminated via `GmailRawMessage` type + function overloads on `getMessage()`. `crypto.ts` cast is a genuine TS lib limitation (Uint8Array vs BufferSource generics) — kept with explanatory comment. `ContextMenuPortal.tsx` casts were removed during the earlier component split refactor.
 
 ---
 
