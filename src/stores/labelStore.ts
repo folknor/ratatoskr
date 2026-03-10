@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import type { StoreApi, UseBoundStore } from "zustand";
 import { create } from "zustand";
 import {
@@ -6,7 +7,6 @@ import {
   updateLabelSortOrder,
   upsertLabel,
 } from "@/core/labels";
-import { getGmailClient } from "@/core/mutations";
 
 export interface Label {
   id: string;
@@ -94,8 +94,17 @@ export const useLabelStore: UseBoundStore<StoreApi<LabelState>> =
       name: string,
       color?: { textColor: string; backgroundColor: string },
     ) => {
-      const client = await getGmailClient(accountId);
-      const gmailLabel = await client.createLabel(name, color);
+      const gmailLabel = await invoke<{
+        id: string;
+        name: string;
+        type: string;
+        color?: { textColor: string; backgroundColor: string };
+      }>("gmail_create_label", {
+        accountId,
+        name,
+        textColor: color?.textColor,
+        bgColor: color?.backgroundColor,
+      });
       await upsertLabel({
         id: gmailLabel.id,
         accountId,
@@ -115,8 +124,18 @@ export const useLabelStore: UseBoundStore<StoreApi<LabelState>> =
         color?: { textColor: string; backgroundColor: string } | null;
       },
     ) => {
-      const client = await getGmailClient(accountId);
-      const gmailLabel = await client.updateLabel(labelId, updates);
+      const gmailLabel = await invoke<{
+        id: string;
+        name: string;
+        type: string;
+        color?: { textColor: string; backgroundColor: string };
+      }>("gmail_update_label", {
+        accountId,
+        labelId,
+        name: updates.name,
+        textColor: updates.color?.textColor,
+        bgColor: updates.color?.backgroundColor,
+      });
       await upsertLabel({
         id: gmailLabel.id,
         accountId,
@@ -129,8 +148,7 @@ export const useLabelStore: UseBoundStore<StoreApi<LabelState>> =
     },
 
     deleteLabel: async (accountId: string, labelId: string) => {
-      const client = await getGmailClient(accountId);
-      await client.deleteLabel(labelId);
+      await invoke("gmail_delete_label", { accountId, labelId });
       await dbDeleteLabel(accountId, labelId);
       await get().loadLabels(accountId);
     },

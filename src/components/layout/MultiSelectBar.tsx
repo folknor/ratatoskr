@@ -4,8 +4,11 @@ import { useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { CSSTransition } from "react-transition-group";
 import {
+  archiveThread,
   deleteThread as deleteThreadFromDb,
-  getGmailClient,
+  permanentDeleteThread,
+  spamThread,
+  trashThread,
 } from "@/core/mutations";
 import { useThreadStore } from "@/stores/threadStore";
 
@@ -32,14 +35,13 @@ export function MultiSelectBar({
     const ids = [...selectedThreadIds];
     removeThreads(ids);
     try {
-      const client = await getGmailClient(activeAccountId);
       await Promise.all(
         ids.map(async (id) => {
           if (isTrashView) {
-            await client.deleteThread(id);
+            await permanentDeleteThread(activeAccountId, id, []);
             await deleteThreadFromDb(activeAccountId, id);
           } else {
-            await client.modifyThread(id, ["TRASH"], ["INBOX"]);
+            await trashThread(activeAccountId, id, []);
           }
         }),
       );
@@ -59,9 +61,8 @@ export function MultiSelectBar({
     const ids = [...selectedThreadIds];
     removeThreads(ids);
     try {
-      const client = await getGmailClient(activeAccountId);
       await Promise.all(
-        ids.map((id) => client.modifyThread(id, undefined, ["INBOX"])),
+        ids.map((id) => archiveThread(activeAccountId, id, [])),
       );
     } catch (err) {
       console.error("Bulk archive failed:", err);
@@ -74,13 +75,8 @@ export function MultiSelectBar({
     const isSpamView = activeLabel === "spam";
     removeThreads(ids);
     try {
-      const client = await getGmailClient(activeAccountId);
       await Promise.all(
-        ids.map((id) =>
-          isSpamView
-            ? client.modifyThread(id, ["INBOX"], ["SPAM"])
-            : client.modifyThread(id, ["SPAM"], ["INBOX"]),
-        ),
+        ids.map((id) => spamThread(activeAccountId, id, [], !isSpamView)),
       );
     } catch (err) {
       console.error("Bulk spam failed:", err);

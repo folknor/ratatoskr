@@ -43,10 +43,9 @@ export {
 // Thread category writes (Rust-backed)
 export { setThreadCategory } from "./rustDb";
 
-// Gmail client & sync triggers
+// Sync triggers & draft cleanup
 export { deleteDraftsForThread } from "@/services/gmail/draftDeletion";
 export { triggerSync } from "@/services/gmail/syncManager";
-export { getGmailClient } from "@/services/gmail/tokenManager";
 
 // Quick step execution & defaults
 export { executeQuickStep } from "@/services/quickSteps/executor";

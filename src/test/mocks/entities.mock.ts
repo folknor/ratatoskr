@@ -112,7 +112,7 @@ export function createMockGmailAccount(
     smtp_host: null,
     smtp_port: null,
     smtp_security: null,
-    auth_method: "oauth",
+    auth_method: "oauth2",
     imap_password: null,
     oauth_provider: null,
     oauth_client_id: null,

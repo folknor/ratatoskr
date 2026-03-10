@@ -4,8 +4,8 @@ import { useTranslation } from "react-i18next";
 import { useSelectedThreadId } from "@/hooks/useRouteNavigation";
 import { useEmailListData, PAGE_SIZE } from "@/hooks/useEmailListData";
 import { navigateToThread } from "@/router/navigate";
+import { invoke } from "@tauri-apps/api/core";
 import { getMessagesForThread } from "@/core/queries";
-import { getGmailClient } from "@/core/sync";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useContextMenuStore } from "@/stores/contextMenuStore";
@@ -78,8 +78,9 @@ export function EmailList({
         // Look up the Gmail draft ID so auto-save can update the existing draft
         let draftId: string | null = null;
         try {
-          const client = await getGmailClient(activeAccountId);
-          const drafts = await client.listDrafts();
+          const drafts = await invoke<
+            { id: string; message: { id: string; threadId: string } }[]
+          >("gmail_list_drafts", { accountId: activeAccountId });
           const match = drafts.find((d) => d.message?.id === draftMsg.id);
           if (match) draftId = match.id;
         } catch {

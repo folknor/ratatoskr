@@ -10,9 +10,8 @@ export {
   triggerSync,
 } from "@/services/gmail/syncManager";
 
-// Gmail client access
+// Account lifecycle
 export {
-  getGmailClient,
   reauthorizeAccount,
   removeClient,
 } from "@/services/gmail/tokenManager";

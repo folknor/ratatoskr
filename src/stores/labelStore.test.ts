@@ -8,8 +8,8 @@ vi.mock("@/services/db/labels", () => ({
   upsertLabel: vi.fn(),
 }));
 
-vi.mock("@/services/gmail/tokenManager", () => ({
-  getGmailClient: vi.fn(),
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
 }));
 
 import {
@@ -18,15 +18,13 @@ import {
   updateLabelSortOrder,
   upsertLabel,
 } from "@/services/db/labels";
-import { getGmailClient } from "@/services/gmail/tokenManager";
+import { invoke } from "@tauri-apps/api/core";
 
 const mockGetLabels = vi.mocked(getLabelsForAccount);
 const mockDbDeleteLabel = vi.mocked(dbDeleteLabel);
 const mockUpdateSortOrder = vi.mocked(updateLabelSortOrder);
 const mockUpsertLabel = vi.mocked(upsertLabel);
-const mockGetGmailClient = vi.mocked(getGmailClient);
-
-import { createMockGmailClient } from "@/test/mocks";
+const mockInvoke = vi.mocked(invoke);
 
 describe("labelStore", () => {
   beforeEach(() => {
@@ -148,15 +146,13 @@ describe("labelStore", () => {
     expect(state.isLoading).toBe(false);
   });
 
-  it("should create a label via Gmail API and update DB", async () => {
-    const mockClient = createMockGmailClient();
-    mockClient.createLabel.mockResolvedValue({
+  it("should create a label via Rust command and update DB", async () => {
+    mockInvoke.mockResolvedValue({
       id: "Label_new",
       name: "New Label",
       type: "user",
       color: { backgroundColor: "#fb4c2f", textColor: "#ffffff" },
     });
-    mockGetGmailClient.mockResolvedValue(mockClient);
     mockUpsertLabel.mockResolvedValue(undefined);
     mockGetLabels.mockResolvedValue([]);
 
@@ -165,9 +161,11 @@ describe("labelStore", () => {
       backgroundColor: "#fb4c2f",
     });
 
-    expect(mockClient.createLabel).toHaveBeenCalledWith("New Label", {
+    expect(mockInvoke).toHaveBeenCalledWith("gmail_create_label", {
+      accountId: "acc1",
+      name: "New Label",
       textColor: "#ffffff",
-      backgroundColor: "#fb4c2f",
+      bgColor: "#fb4c2f",
     });
     expect(mockUpsertLabel).toHaveBeenCalledWith({
       id: "Label_new",
@@ -180,15 +178,13 @@ describe("labelStore", () => {
     expect(mockGetLabels).toHaveBeenCalledWith("acc1");
   });
 
-  it("should update a label via Gmail API and update DB", async () => {
-    const mockClient = createMockGmailClient();
-    mockClient.updateLabel.mockResolvedValue({
+  it("should update a label via Rust command and update DB", async () => {
+    mockInvoke.mockResolvedValue({
       id: "Label_1",
       name: "Renamed",
       type: "user",
       color: { backgroundColor: "#16a765", textColor: "#ffffff" },
     });
-    mockGetGmailClient.mockResolvedValue(mockClient);
     mockUpsertLabel.mockResolvedValue(undefined);
     mockGetLabels.mockResolvedValue([]);
 
@@ -197,23 +193,27 @@ describe("labelStore", () => {
       color: { textColor: "#ffffff", backgroundColor: "#16a765" },
     });
 
-    expect(mockClient.updateLabel).toHaveBeenCalledWith("Label_1", {
+    expect(mockInvoke).toHaveBeenCalledWith("gmail_update_label", {
+      accountId: "acc1",
+      labelId: "Label_1",
       name: "Renamed",
-      color: { textColor: "#ffffff", backgroundColor: "#16a765" },
+      textColor: "#ffffff",
+      bgColor: "#16a765",
     });
     expect(mockUpsertLabel).toHaveBeenCalled();
   });
 
-  it("should delete a label via Gmail API and DB", async () => {
-    const mockClient = createMockGmailClient();
-    mockClient.deleteLabel.mockResolvedValue(undefined);
-    mockGetGmailClient.mockResolvedValue(mockClient);
+  it("should delete a label via Rust command and DB", async () => {
+    mockInvoke.mockResolvedValue(undefined);
     mockDbDeleteLabel.mockResolvedValue(undefined);
     mockGetLabels.mockResolvedValue([]);
 
     await useLabelStore.getState().deleteLabel("acc1", "Label_1");
 
-    expect(mockClient.deleteLabel).toHaveBeenCalledWith("Label_1");
+    expect(mockInvoke).toHaveBeenCalledWith("gmail_delete_label", {
+      accountId: "acc1",
+      labelId: "Label_1",
+    });
     expect(mockDbDeleteLabel).toHaveBeenCalledWith("acc1", "Label_1");
     expect(mockGetLabels).toHaveBeenCalledWith("acc1");
   });

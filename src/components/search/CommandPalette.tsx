@@ -9,7 +9,7 @@ import {
   navigateToLabel,
 } from "@/router/navigate";
 import { type DbTemplate, getTemplatesForAccount } from "@/core/composer";
-import { getGmailClient } from "@/core/sync";
+import { spamThread } from "@/core/mutations";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useThreadStore } from "@/stores/threadStore";
@@ -154,12 +154,8 @@ export function CommandPalette({
           const accountId = useAccountStore.getState().activeAccountId;
           if (!(selectedId && accountId)) return;
           try {
-            const client = await getGmailClient(accountId);
-            if (activeLabel === "spam") {
-              await client.modifyThread(selectedId, ["INBOX"], ["SPAM"]);
-            } else {
-              await client.modifyThread(selectedId, ["SPAM"], ["INBOX"]);
-            }
+            const isSpam = activeLabel !== "spam";
+            await spamThread(accountId, selectedId, [], isSpam);
             useThreadStore.getState().removeThread(selectedId);
           } catch (err) {
             console.error("Spam action failed:", err);

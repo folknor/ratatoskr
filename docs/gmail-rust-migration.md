@@ -25,12 +25,11 @@ All Gmail API logic has been moved from TypeScript to Rust.
 | File | Purpose |
 |------|---------|
 | `crypto.rs` | AES-256-GCM encrypt/decrypt matching TS format. Used by all providers (Gmail, IMAP, future JMAP). |
-| `token.rs` | `TokenState` struct + `refresh_google_token()`. Currently **Google-specific** — hardcodes `https://oauth2.googleapis.com/token`. The PKCE/client-secret logic is generic, only the endpoint is baked in. Needs generalization (endpoint as parameter) before reuse by other OAuth providers. |
+| `token.rs` | `TokenState` struct + `refresh_oauth_token()` (generic, accepts any token endpoint) + `refresh_google_token()` (convenience wrapper for Google endpoint). Ready for reuse by other OAuth providers. |
 
-#### What `provider/` does NOT include (yet)
+| `http.rs` | `build_http_client()` (shared reqwest defaults), `RetryConfig`, `compute_retry_delay()` (Retry-After header + exponential backoff). Used by Gmail client. |
 
-- **No shared HTTP client builder** — Gmail's retry logic (429 exponential backoff, 401 force-refresh) lives inline in `gmail/client.rs`. A `provider/http.rs` with `build_http_client()` and a reusable retry helper should be extracted before the next Rust provider.
-- **No RFC 5322 message construction** — the TS composer builds raw RFC 5322 messages; Rust commands accept pre-built `raw_base64url` bytes. This is the correct boundary — there is no need for a `provider/message.rs`.
+**No RFC 5322 message construction** — the TS composer builds raw RFC 5322 messages; Rust commands accept pre-built `raw_base64url` bytes. This is the correct boundary — there is no need for a `provider/message.rs`.
 
 ### TS layer (Rust-backed)
 
@@ -64,22 +63,22 @@ Two writers mutate local state: Rust sync (every 60s) and TS queue processor (ev
 
 ## Remaining: `getGmailClient()` callers
 
-`client.ts` and `getGmailClient()` are retained because ~15 files still use the TS `GmailClient` directly. All have Rust equivalents — migration is mechanical but broad.
+`client.ts` and `getGmailClient()` are retained only for Calendar.
 
 **Calendar** (different API): `googleCalendarProvider.ts` uses `GmailClient` for Google Calendar API calls (same OAuth token, different endpoint). Needs a separate Rust Calendar client.
 
-**UI/service callers** (all have `gmail_*` Rust equivalents):
+**Migrated callers** (now use `invoke('gmail_*')` or `emailActions`):
 
-| File | Operations used |
-|------|----------------|
-| `stores/labelStore.ts` | `createLabel`, `updateLabel`, `deleteLabel` |
-| `components/search/CommandPalette.tsx` | `listDrafts` |
-| `components/layout/EmailList.tsx` | `listDrafts` |
-| `components/layout/MultiSelectBar.tsx` | `modifyThread` |
-| `services/snooze/scheduledSendManager.ts` | `sendMessage` |
-| `services/unsubscribe/unsubscribeManager.ts` | `sendMessage` |
+| File | Before | After |
+|------|--------|-------|
+| `stores/labelStore.ts` | `client.createLabel/updateLabel/deleteLabel` | `invoke('gmail_create_label')` etc. |
+| `components/search/CommandPalette.tsx` | `client.modifyThread` (spam) | `spamThread()` from emailActions |
+| `components/layout/EmailList.tsx` | `client.listDrafts` | `invoke('gmail_list_drafts')` |
+| `components/layout/MultiSelectBar.tsx` | `client.modifyThread/deleteThread` | `trashThread/archiveThread/spamThread/permanentDeleteThread` from emailActions |
+| `services/snooze/scheduledSendManager.ts` | `client.sendMessage` | `invoke('gmail_send_email')` |
+| `services/unsubscribe/unsubscribeManager.ts` | `client.sendMessage` | `invoke('gmail_send_email')` |
 
-`getGmailClient()` can be deleted after these callers are migrated and Calendar gets its own Rust client.
+`getGmailClient()` can be deleted once Calendar gets its own Rust client.
 
 ---
 

@@ -79,29 +79,26 @@ export async function executeUnsubscribe(
   // Method 2: mailto via Gmail API
   if (!success && parsed.mailtoAddress) {
     try {
-      const { getGmailClient } = await import("../gmail/tokenManager");
-      const client = await getGmailClient(accountId);
-      if (client) {
-        const to = parsed.mailtoAddress.split("?")[0] ?? parsed.mailtoAddress;
-        // Extract subject from mailto params if present
-        const subjectMatch = parsed.mailtoAddress.match(/subject=([^&]+)/i);
-        const subject = subjectMatch
-          ? decodeURIComponent(subjectMatch[1] ?? "")
-          : "unsubscribe";
+      const { invoke } = await import("@tauri-apps/api/core");
+      const to = parsed.mailtoAddress.split("?")[0] ?? parsed.mailtoAddress;
+      // Extract subject from mailto params if present
+      const subjectMatch = parsed.mailtoAddress.match(/subject=([^&]+)/i);
+      const subject = subjectMatch
+        ? decodeURIComponent(subjectMatch[1] ?? "")
+        : "unsubscribe";
 
-        const { getAccount } = await import("../db/accounts");
-        const account = await getAccount(accountId);
-        const { buildRawEmail } = await import("../../utils/emailBuilder");
-        const raw = buildRawEmail({
-          from: account?.email ?? "",
-          to: [to],
-          subject,
-          htmlBody: "unsubscribe",
-        });
-        await client.sendMessage(raw);
-        method = "mailto";
-        success = true;
-      }
+      const { getAccount } = await import("../db/accounts");
+      const account = await getAccount(accountId);
+      const { buildRawEmail } = await import("../../utils/emailBuilder");
+      const raw = buildRawEmail({
+        from: account?.email ?? "",
+        to: [to],
+        subject,
+        htmlBody: "unsubscribe",
+      });
+      await invoke("gmail_send_email", { accountId, raw });
+      method = "mailto";
+      success = true;
     } catch (err) {
       console.error("Mailto unsubscribe failed, trying fallback:", err);
     }

@@ -802,6 +802,13 @@ const MIGRATIONS: { version: number; description: string; sql: string }[] = [
       );
     `,
   },
+  {
+    version: 26,
+    description: "Normalize auth_method 'oauth' to 'oauth2'",
+    sql: `
+      UPDATE accounts SET auth_method = 'oauth2' WHERE auth_method = 'oauth';
+    `,
+  },
 ];
 
 /**

@@ -673,6 +673,11 @@ static MIGRATIONS: &[Migration] = &[
         description: "Accept self-signed certificates for IMAP/SMTP",
         sql: "ALTER TABLE accounts ADD COLUMN accept_invalid_certs INTEGER DEFAULT 0;",
     },
+    Migration {
+        version: 24,
+        description: "Normalize auth_method 'oauth' to 'oauth2'",
+        sql: "UPDATE accounts SET auth_method = 'oauth2' WHERE auth_method = 'oauth';",
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -819,6 +824,6 @@ mod tests {
                 row.get(0)
             })
             .expect("query");
-        assert_eq!(max_ver, 23);
+        assert_eq!(max_ver, 24);
     }
 }
