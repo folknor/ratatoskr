@@ -301,6 +301,30 @@ pub async fn db_pending_ops_clear_failed(
         .await
 }
 
+/// Reset any operations stuck in 'executing' back to 'pending'.
+/// Called at startup to recover from crash/forced quit.
+#[tauri::command]
+pub async fn db_pending_ops_recover_executing(
+    state: State<'_, DbState>,
+) -> Result<i64, String> {
+    state
+        .with_conn(move |conn| {
+            let count = conn
+                .execute(
+                    "UPDATE pending_operations SET status = 'pending' WHERE status = 'executing'",
+                    [],
+                )
+                .map_err(|e| format!("recover executing ops: {e}"))?;
+            let count =
+                i64::try_from(count).map_err(|_| "row count exceeds i64 range".to_string())?;
+            if count > 0 {
+                log::warn!("[pending_ops] Recovered {count} stranded executing operations");
+            }
+            Ok(count)
+        })
+        .await
+}
+
 #[tauri::command]
 pub async fn db_pending_ops_retry_failed(
     state: State<'_, DbState>,

@@ -78,7 +78,15 @@ export async function initNotifications(): Promise<void> {
     await onAction((event) => {
       void (async (): Promise<void> => {
         const actionId = event.actionTypeId;
-        const ctx = lastNotificationContext;
+        // Look up context for the specific notification the user interacted with,
+        // falling back to lastNotificationContext for platforms that don't round-trip extra.
+        const notifThreadId = (
+          event.extra as Record<string, unknown> | undefined
+        )?.threadId;
+        const ctx =
+          (typeof notifThreadId === "string" &&
+            recentContexts.get(notifThreadId)) ||
+          lastNotificationContext;
 
         if (actionId === "reply" && ctx?.threadId && ctx?.accountId) {
           await showAndFocusMainWindow();
@@ -140,12 +148,14 @@ export function queueNewEmailNotification(
         title: from,
         body: subject || i18n.t("common:noSubject"),
         actionTypeId: "email",
+        ...(threadId ? { extra: { threadId } } : {}),
       });
     } else if (pendingCount > 1) {
       sendNotification({
         title: i18n.t("notifications:ratatoskr"),
         body: i18n.t("notifications:newEmails", { count: pendingCount }),
         actionTypeId: "email",
+        ...(threadId ? { extra: { threadId } } : {}),
       });
     }
     pendingCount = 0;
@@ -187,6 +197,7 @@ export function notifyFollowUpDue(
     title: i18n.t("notifications:followUpNeeded"),
     body: subject || i18n.t("common:noSubject"),
     actionTypeId: "email",
+    ...(threadId ? { extra: { threadId } } : {}),
   });
 }
 

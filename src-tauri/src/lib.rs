@@ -382,6 +382,7 @@ pub fn run() {
             db::pending_ops::db_pending_ops_compact,
             db::pending_ops::db_pending_ops_clear_failed,
             db::pending_ops::db_pending_ops_retry_failed,
+            db::pending_ops::db_pending_ops_recover_executing,
             // Filter engine (Phase 6)
             filters::commands::filters_evaluate,
             // JWZ threading (Phase 6)

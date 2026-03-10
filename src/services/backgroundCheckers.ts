@@ -13,12 +13,17 @@ export function createBackgroundChecker(
   intervalMs: number = 60_000,
 ): BackgroundChecker {
   let interval: ReturnType<typeof setInterval> | null = null;
+  let running = false;
 
   const run = async (): Promise<void> => {
+    if (running) return; // Prevent overlapping runs
+    running = true;
     try {
       await checkFn();
     } catch (err) {
       console.error(`[${name}] check failed:`, err);
+    } finally {
+      running = false;
     }
   };
 

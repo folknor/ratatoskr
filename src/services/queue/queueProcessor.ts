@@ -10,6 +10,7 @@ import {
   getPendingOperations,
   getPendingOpsCount,
   incrementRetry,
+  recoverExecutingOperations,
   updateOperationStatus,
 } from "../db/pendingOperations";
 import { executeQueuedAction } from "../emailActions";
@@ -79,6 +80,10 @@ async function updatePendingCount(): Promise<void> {
 
 export function startQueueProcessor(): void {
   if (checker) return;
+  // Recover any operations stranded in 'executing' from a previous crash
+  recoverExecutingOperations().catch((err) =>
+    console.error("[QueueProcessor] failed to recover executing ops:", err),
+  );
   checker = createBackgroundChecker("QueueProcessor", processQueue, 30_000);
   checker.start();
 }

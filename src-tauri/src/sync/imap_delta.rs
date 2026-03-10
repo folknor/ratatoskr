@@ -340,6 +340,15 @@ async fn fetch_folder_uids(
 
     if sr.uids.is_empty() {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+        // Still persist sync state so this folder isn't treated as "new" on every delta cycle
+        let aid = account_id.to_string();
+        let fp = folder.raw_path.clone();
+        let uv = sr.folder_status.uidvalidity;
+        let sat = chrono::Utc::now().timestamp();
+        db.with_conn(move |conn| {
+            pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, 0, sat)
+        })
+        .await?;
         return Ok(());
     }
 
@@ -457,6 +466,16 @@ async fn process_folder_delta(
 
         if sr.uids.is_empty() {
             let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+            // Persist the new uidvalidity even for empty folders, so we don't
+            // repeat the expensive UIDVALIDITY recovery on every sync cycle
+            let aid = account_id.to_string();
+            let fp = folder.raw_path.clone();
+            let uv = sr.folder_status.uidvalidity;
+            let sat = chrono::Utc::now().timestamp();
+            db.with_conn(move |conn| {
+                pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, 0, sat)
+            })
+            .await?;
             return Ok(());
         }
 

@@ -112,17 +112,21 @@ pub async fn sync_imap_delta(
             days,
         ).await?;
 
-        // Recovery: if delta found nothing and DB has no threads, the previous
-        // initial sync likely failed. Clear sync state and run initial sync.
+        // Recovery: if delta found nothing and DB has no threads AND no folder
+        // sync states, the previous initial sync likely failed. An account with
+        // 0 threads but existing folder sync states is just a legitimately empty
+        // mailbox — don't wipe its state.
         if result.stored_count == 0 {
-            let needs_recovery = {
+            let (thread_count, folder_state_count) = {
                 let aid = account_id.clone();
                 db.with_conn(move |conn| {
-                    super::pipeline::get_thread_count(conn, &aid)
+                    let tc = super::pipeline::get_thread_count(conn, &aid)?;
+                    let fsc = super::pipeline::get_all_folder_sync_states(conn, &aid)?;
+                    Ok((tc, fsc.len()))
                 }).await?
             };
 
-            if needs_recovery == 0 {
+            if thread_count == 0 && folder_state_count == 0 {
                 log::warn!(
                     "[sync] Delta found 0 messages, DB has 0 threads for {account_id} — forcing full re-sync"
                 );

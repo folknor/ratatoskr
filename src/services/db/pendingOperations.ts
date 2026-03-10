@@ -100,3 +100,11 @@ export async function retryFailedOperations(accountId?: string): Promise<void> {
     accountId: accountId ?? null,
   });
 }
+
+/**
+ * Reset any operations stuck in 'executing' back to 'pending'.
+ * Call at startup to recover from crash/forced quit.
+ */
+export async function recoverExecutingOperations(): Promise<number> {
+  return invoke("db_pending_ops_recover_executing");
+}
