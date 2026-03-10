@@ -12,8 +12,8 @@ use crate::threading;
 
 use super::convert::{convert_imap_message, ConvertedMessage};
 use super::folder_mapper::{get_syncable_folders, map_folder_to_label};
-use super::imap_initial::{store_chunk, CHUNK_SIZE};
 use super::pipeline;
+use super::pipeline::{store_chunk, CHUNK_SIZE};
 use super::types::{ImapSyncResult, MessageMeta};
 
 const CIRCUIT_BREAKER_THRESHOLD: u32 = 3;

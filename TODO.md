@@ -106,6 +106,52 @@
 
 ---
 
+## Phase 4 (Rust Sync Engine) Follow-ups
+
+### HIGH
+
+- [x] ~~**`has_attachments` missing from `DbMessage` interface** — `src/services/db/messages.ts:5`
+  Fixed: added `has_attachments: number` to `DbMessage`, updated `dbMessageToParsedMessage()` to use it.~~
+
+- [x] ~~**`getMessagesByIds` hits SQLite parameter limit** — `src/services/db/messages.ts:46`
+  Fixed: chunked into batches of 500 to stay under SQLite's 999-parameter limit.~~
+
+- [x] ~~**No notification dispatch in Rust sync path** — `src/services/gmail/syncManager.ts:113`
+  Fixed: added full notification pipeline (smart notifications, VIP senders, muted threads, category gating) to `syncImapAccountRust()`, only on delta sync.~~
+
+### MEDIUM
+
+- [ ] **Body text unavailable for filter body matching** — `src/services/filters/filterEngine.ts:168`
+  `dbMessageToParsedMessage()` reads `body_html`/`body_text` from the messages table, but these are always NULL (bodies live in `bodies.db`). `criteria.body` filter matching will never match. Options: hydrate from body store, move filter evaluation into Rust pipeline, or accept the limitation.
+
+- [ ] **`is_starred` column audit** — `src/services/db/messages.ts:5`
+  `DbMessage` uses `SELECT *` which works if schema and interface stay aligned, but there's no compile-time check. Audit the full column list against the interface to catch any mismatches.
+
+- [ ] **Recovery logic duplicated between TS wrapper and Rust** — `src/services/gmail/syncManager.ts:151-163`
+  The "delta found 0 + DB has 0 threads → force full resync" recovery is in TS (`syncImapAccountRust`), requiring 2 extra IPC calls. Could move entirely into Rust commands for fewer round-trips.
+
+- [x] ~~**`store_chunk`/`DbInsertData` should move to `pipeline.rs`** — `src-tauri/src/sync/imap_initial.rs`
+  Fixed: moved to `pipeline.rs`, both initial and delta sync now import from there.~~
+
+- [x] ~~**Post-sync hooks use dynamic imports unnecessarily** — `src/services/gmail/syncManager.ts:172-193`
+  Fixed: converted to static imports for `applyFiltersToNewMessageIds`, `applySmartLabelsToNewMessageIds`, and `categorizeNewThreads`.~~
+
+### LOW
+
+- [ ] **Gmail sync still fully in TS** — `src/services/gmail/syncManager.ts:69`
+  `syncGmailAccount` is unchanged. HTTP-based with OAuth coupling, so lower priority, but Gmail accounts don't benefit from Phase 4. Consider porting long-term.
+
+- [ ] **No per-operation timeout on Rust IMAP fetches** — `src-tauri/src/sync/imap_initial.rs`
+  Connection timeouts exist via `async-imap`, but long-running fetches on large folders have no operation-level timeout. A 50K-message folder could hang indefinitely.
+
+- [ ] **`velo-sync-done` event dispatch not verified** — `src/services/gmail/syncManager.ts`
+  The Rust path emits `statusCallback?.(accountId, "done")` but other UI side-channel events (`velo-sync-done` in `App.tsx`) should be verified during integration testing.
+
+- [x] ~~**Phase 6 docs slightly stale** — `docs/rust-core-architecture.md:599`
+  Fixed: updated to include categorization commands (5 total).~~
+
+---
+
 ## TypeScript Strictness
 
 - [ ] **39 remaining TS errors** — Mostly from `exactOptionalPropertyTypes` (34 TS2375/TS2379) and other type mismatches (TS2322, TS2345). Decide whether to fix all or relax the option.

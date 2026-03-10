@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::Connection;
 
 use crate::body_store::BodyStoreState;
+use crate::db::DbState;
 use crate::search::{SearchDocument, SearchState};
 use crate::threading::ThreadGroup;
 
@@ -13,8 +14,227 @@ use super::types::MessageMeta;
 // Constants (matching TS imapSyncFetch.ts)
 // ---------------------------------------------------------------------------
 
+/// Messages to fetch per IMAP FETCH command.
+pub(crate) const CHUNK_SIZE: usize = 200;
+
 /// Number of thread groups to process per transaction.
 pub const THREAD_BATCH_SIZE: usize = 100;
+
+// ---------------------------------------------------------------------------
+// DB insert helper (moveable across threads for spawn_blocking)
+// ---------------------------------------------------------------------------
+
+/// Data needed to insert a message into the DB, extractable from ConvertedMessage.
+pub(crate) struct DbInsertData {
+    id: String,
+    account_id: String,
+    from_address: Option<String>,
+    from_name: Option<String>,
+    to_addresses: Option<String>,
+    cc_addresses: Option<String>,
+    bcc_addresses: Option<String>,
+    reply_to: Option<String>,
+    subject: Option<String>,
+    snippet: String,
+    date: i64,
+    is_read: bool,
+    is_starred: bool,
+    has_attachments: bool,
+    raw_size: u32,
+    list_unsubscribe: Option<String>,
+    list_unsubscribe_post: Option<String>,
+    auth_results: Option<String>,
+    message_id_header: Option<String>,
+    references_header: Option<String>,
+    in_reply_to_header: Option<String>,
+    imap_uid: u32,
+    imap_folder: String,
+    has_body: bool,
+    attachments: Vec<DbAttachment>,
+}
+
+struct DbAttachment {
+    att_id: String,
+    message_id: String,
+    account_id: String,
+    filename: String,
+    mime_type: String,
+    size: u32,
+    part_id: String,
+    content_id: Option<String>,
+    is_inline: bool,
+}
+
+impl DbInsertData {
+    pub(crate) fn from_converted(c: &ConvertedMessage, account_id: &str) -> Self {
+        let imap = &c.imap_msg;
+        Self {
+            id: c.id.clone(),
+            account_id: account_id.to_string(),
+            from_address: imap.from_address.clone(),
+            from_name: imap.from_name.clone(),
+            to_addresses: imap.to_addresses.clone(),
+            cc_addresses: imap.cc_addresses.clone(),
+            bcc_addresses: imap.bcc_addresses.clone(),
+            reply_to: imap.reply_to.clone(),
+            subject: imap.subject.clone(),
+            snippet: c.meta.snippet.clone(),
+            date: c.meta.date,
+            is_read: imap.is_read,
+            is_starred: imap.is_starred,
+            has_attachments: c.meta.has_attachments,
+            raw_size: imap.raw_size,
+            list_unsubscribe: imap.list_unsubscribe.clone(),
+            list_unsubscribe_post: imap.list_unsubscribe_post.clone(),
+            auth_results: imap.auth_results.clone(),
+            message_id_header: imap.message_id.clone(),
+            references_header: imap.references.clone(),
+            in_reply_to_header: imap.in_reply_to.clone(),
+            imap_uid: imap.uid,
+            imap_folder: imap.folder.clone(),
+            has_body: imap.body_html.is_some() || imap.body_text.is_some(),
+            attachments: imap
+                .attachments
+                .iter()
+                .map(|att| DbAttachment {
+                    att_id: format!("{}_{}", c.id, att.part_id),
+                    message_id: c.id.clone(),
+                    account_id: account_id.to_string(),
+                    filename: att.filename.clone(),
+                    mime_type: att.mime_type.clone(),
+                    size: att.size,
+                    part_id: att.part_id.clone(),
+                    content_id: att.content_id.clone(),
+                    is_inline: att.is_inline,
+                })
+                .collect(),
+        }
+    }
+
+    pub(crate) fn insert(&self, tx: &rusqlite::Transaction) -> Result<(), String> {
+        // Placeholder thread
+        tx.execute(
+            "INSERT OR REPLACE INTO threads \
+             (id, account_id, subject, snippet, last_message_at, message_count, \
+              is_read, is_starred, is_important, has_attachments) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, 0, ?8)",
+            rusqlite::params![
+                self.id,
+                self.account_id,
+                self.subject,
+                self.snippet,
+                self.date,
+                self.is_read,
+                self.is_starred,
+                self.has_attachments,
+            ],
+        )
+        .map_err(|e| format!("upsert placeholder thread: {e}"))?;
+
+        // Message (body_html/body_text = NULL, bodies in body store)
+        tx.execute(
+            "INSERT OR REPLACE INTO messages \
+             (id, account_id, thread_id, from_address, from_name, to_addresses, \
+              cc_addresses, bcc_addresses, reply_to, subject, snippet, date, \
+              is_read, is_starred, body_html, body_text, raw_size, internal_date, \
+              list_unsubscribe, list_unsubscribe_post, auth_results, \
+              message_id_header, references_header, in_reply_to_header, \
+              imap_uid, imap_folder, body_cached) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, \
+                     ?13, ?14, NULL, NULL, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
+            rusqlite::params![
+                self.id,
+                self.account_id,
+                self.id, // placeholder thread_id = message_id
+                self.from_address,
+                self.from_name,
+                self.to_addresses,
+                self.cc_addresses,
+                self.bcc_addresses,
+                self.reply_to,
+                self.subject,
+                self.snippet,
+                self.date,
+                self.is_read,
+                self.is_starred,
+                self.raw_size,
+                self.date, // internal_date
+                self.list_unsubscribe,
+                self.list_unsubscribe_post,
+                self.auth_results,
+                self.message_id_header,
+                self.references_header,
+                self.in_reply_to_header,
+                self.imap_uid as i64,
+                self.imap_folder,
+                if self.has_body { 1i64 } else { 0i64 },
+            ],
+        )
+        .map_err(|e| format!("upsert message: {e}"))?;
+
+        // Attachments
+        for att in &self.attachments {
+            tx.execute(
+                "INSERT OR REPLACE INTO attachments \
+                 (id, message_id, account_id, filename, mime_type, size, \
+                  gmail_attachment_id, content_id, is_inline) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![
+                    att.att_id,
+                    att.message_id,
+                    att.account_id,
+                    att.filename,
+                    att.mime_type,
+                    att.size,
+                    att.part_id,
+                    att.content_id,
+                    att.is_inline,
+                ],
+            )
+            .map_err(|e| format!("upsert attachment: {e}"))?;
+        }
+
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shared helper: store a chunk of converted messages to DB + body store + search
+// ---------------------------------------------------------------------------
+
+/// Store a chunk of converted messages to all three subsystems.
+pub(crate) async fn store_chunk(
+    db: &DbState,
+    body_store: &BodyStoreState,
+    search: &SearchState,
+    chunk: &[ConvertedMessage],
+    account_id: &str,
+) -> Result<(), String> {
+    // 1. Store to DB (blocking)
+    let db_data: Vec<DbInsertData> = chunk
+        .iter()
+        .map(|c| DbInsertData::from_converted(c, account_id))
+        .collect();
+    db.with_conn(move |conn| {
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| format!("begin tx: {e}"))?;
+        for d in &db_data {
+            d.insert(&tx)?;
+        }
+        tx.commit().map_err(|e| format!("commit: {e}"))?;
+        Ok(())
+    })
+    .await?;
+
+    // 2. Store bodies (async, fire-and-forget)
+    store_bodies(body_store, chunk).await;
+
+    // 3. Index in tantivy (async, fire-and-forget)
+    index_messages(search, chunk, account_id).await;
+
+    Ok(())
+}
 
 // ---------------------------------------------------------------------------
 // Body store + search index helpers

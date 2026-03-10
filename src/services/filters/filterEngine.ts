@@ -187,7 +187,7 @@ export function dbMessageToParsedMessage(row: DbMessage): ParsedMessage {
     rawSize: row.raw_size ?? 0,
     internalDate: row.internal_date ?? row.date,
     labelIds: [],
-    hasAttachments: false, // not critical for filter matching
+    hasAttachments: row.has_attachments === 1,
     attachments: [],
     listUnsubscribe: row.list_unsubscribe,
     listUnsubscribePost: row.list_unsubscribe_post,

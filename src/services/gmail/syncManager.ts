@@ -28,6 +28,17 @@ import {
   syncImapDelta,
   type ImapSyncResult,
 } from "@/core/rustDb";
+import { applyFiltersToNewMessageIds } from "@/services/filters/filterEngine";
+import { applySmartLabelsToNewMessageIds } from "@/services/smartLabels/smartLabelManager";
+import { categorizeNewThreads } from "@/services/ai/categorizationManager";
+import { getMessagesByIds } from "@/services/db/messages";
+import { getMutedThreadIds } from "@/services/db/threads";
+import { getThreadCategory } from "@/services/db/threadCategories";
+import { getVipSenders } from "@/services/db/notificationVips";
+import {
+  queueNewEmailNotification,
+  shouldNotifyForMessage,
+} from "@/services/notifications/notificationManager";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 const SYNC_INTERVAL_MS = 60_000; // 60 seconds — delta syncs are lightweight (single API call when idle)
@@ -144,8 +155,9 @@ async function syncImapAccountRust(accountId: string): Promise<void> {
 
   try {
     let result: ImapSyncResult;
+    const isDelta = !!account.history_id;
 
-    if (account.history_id) {
+    if (isDelta) {
       result = await syncImapDelta(accountId);
 
       // Recovery: if delta found nothing but DB has no threads, force full resync
@@ -166,12 +178,7 @@ async function syncImapAccountRust(accountId: string): Promise<void> {
 
     // Post-sync hooks: apply filters and categorization to new inbox messages
     if (result.newInboxMessageIds.length > 0) {
-      // We need ParsedMessage-like objects for filters. Build lightweight versions.
-      // For now, fire the TS-side post-sync hooks using dynamic imports.
       try {
-        const { applyFiltersToNewMessageIds } = await import(
-          "../filters/filterEngine"
-        );
         await applyFiltersToNewMessageIds(
           accountId,
           result.newInboxMessageIds,
@@ -181,25 +188,67 @@ async function syncImapAccountRust(accountId: string): Promise<void> {
       }
 
       // Smart labels (fire-and-forget)
-      import("@/services/smartLabels/smartLabelManager")
-        .then(({ applySmartLabelsToNewMessageIds }) =>
-          applySmartLabelsToNewMessageIds?.(
+      applySmartLabelsToNewMessageIds(
+        accountId,
+        result.newInboxMessageIds,
+      ).catch((err) =>
+        console.error("[syncManager] Smart label error:", err),
+      );
+
+      // Notifications — only on delta sync (not initial)
+      if (isDelta) {
+        try {
+          const smartNotifSetting = await getSetting("smart_notifications");
+          const smartEnabled = smartNotifSetting === "true";
+          const notifCatSetting =
+            (await getSetting("notify_categories")) ?? "Primary";
+          const allowedCategories = new Set(
+            notifCatSetting.split(",").map((s) => s.trim()),
+          );
+          const vipSenders = smartEnabled
+            ? await getVipSenders(accountId)
+            : new Set<string>();
+          const mutedThreadIds = await getMutedThreadIds(accountId);
+
+          const newMsgs = await getMessagesByIds(
             accountId,
             result.newInboxMessageIds,
-          ),
-        )
-        .catch((err) =>
-          console.error("[syncManager] Smart label error:", err),
-        );
+          );
+          for (const msg of newMsgs) {
+            if (mutedThreadIds.has(msg.thread_id)) continue;
+            const category = await getThreadCategory(
+              accountId,
+              msg.thread_id,
+            );
+            if (
+              shouldNotifyForMessage(
+                smartEnabled,
+                allowedCategories,
+                vipSenders,
+                category,
+                msg.from_address ?? undefined,
+              )
+            ) {
+              queueNewEmailNotification(
+                msg.from_name ?? msg.from_address ?? "Unknown",
+                msg.subject ?? "",
+                msg.thread_id,
+                accountId,
+                msg.from_address ?? undefined,
+              );
+            }
+          }
+        } catch (err) {
+          console.error("[syncManager] Notification dispatch failed:", err);
+        }
+      }
     }
 
     // AI categorization (fire-and-forget)
     if (result.storedCount > 0) {
-      import("@/services/ai/categorizationManager")
-        .then(({ categorizeNewThreads }) => categorizeNewThreads(accountId))
-        .catch((err) =>
-          console.error("[syncManager] Categorization error:", err),
-        );
+      categorizeNewThreads(accountId).catch((err) =>
+        console.error("[syncManager] Categorization error:", err),
+      );
     }
   } finally {
     unlisten?.();

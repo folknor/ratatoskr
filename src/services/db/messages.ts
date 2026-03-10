@@ -17,6 +17,7 @@ export interface DbMessage {
   date: number;
   is_read: number;
   is_starred: number;
+  has_attachments: number;
   body_html: string | null;
   body_text: string | null;
   body_cached: number;
@@ -49,12 +50,19 @@ export async function getMessagesByIds(
 ): Promise<DbMessage[]> {
   if (messageIds.length === 0) return [];
   const db = await getDb();
-  // Build parameterized IN clause
-  const placeholders = messageIds.map((_, i) => `$${i + 2}`).join(", ");
-  return db.select<DbMessage[]>(
-    `SELECT * FROM messages WHERE account_id = $1 AND id IN (${placeholders})`,
-    [accountId, ...messageIds],
-  );
+  // SQLite has a 999-parameter limit. Chunk to stay well under.
+  const CHUNK = 500;
+  const results: DbMessage[] = [];
+  for (let i = 0; i < messageIds.length; i += CHUNK) {
+    const chunk = messageIds.slice(i, i + CHUNK);
+    const placeholders = chunk.map((_, j) => `$${j + 2}`).join(", ");
+    const rows = await db.select<DbMessage[]>(
+      `SELECT * FROM messages WHERE account_id = $1 AND id IN (${placeholders})`,
+      [accountId, ...chunk],
+    );
+    results.push(...rows);
+  }
+  return results;
 }
 
 export async function upsertMessage(msg: {
