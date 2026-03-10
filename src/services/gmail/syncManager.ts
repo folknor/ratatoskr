@@ -287,33 +287,40 @@ async function syncAccountInternal(accountId: string): Promise<void> {
 }
 
 async function runSync(accountIds: string[]): Promise<void> {
-  if (await syncPromise) {
-    // Queue these accounts, merging with any already-pending IDs
+  // If a sync is already in progress, merge into the pending set and wait for
+  // the active cycle to drain the queue. Using a Set ensures no IDs are lost
+  // even under rapid concurrent triggers — all mutations of pendingAccountIds
+  // happen synchronously (no await between read and write).
+  if (syncPromise) {
     const existing = new Set(pendingAccountIds ?? []);
     for (const id of accountIds) existing.add(id);
     pendingAccountIds = [...existing];
+    // Wait for the active sync (and any queued drains) to finish so callers
+    // that `await runSync(...)` only resolve once their IDs have been processed.
+    await syncPromise;
     return;
   }
 
   syncPromise = (async () => {
-    try {
-      for (const id of accountIds) {
+    let toSync: string[] | null = accountIds;
+
+    // Loop: process current batch, then drain anything queued while we were busy.
+    while (toSync) {
+      for (const id of toSync) {
         await syncAccountInternal(id);
       }
-    } finally {
-      syncPromise = null;
-    }
 
-    // Drain the queue — if something was queued while we were syncing, run it now
-    // biome-ignore lint/nursery/noMisusedPromises: pendingAccountIds is string[]|null, not a Promise
-    if (pendingAccountIds) {
-      const queued = pendingAccountIds;
+      // Atomically grab and clear the pending queue (synchronous — no race window).
+      toSync = pendingAccountIds;
       pendingAccountIds = null;
-      await runSync(queued);
     }
   })();
 
-  return syncPromise;
+  try {
+    await syncPromise;
+  } finally {
+    syncPromise = null;
+  }
 }
 
 /**
