@@ -3,6 +3,8 @@
 **Date**: March 2026
 **Context**: Ratatoskr uses `async-imap` v0.11 with a 477-line raw TCP fallback (`src-tauri/src/imap/raw.rs`) to work around parser failures on non-standard IMAP servers. This document evaluates whether better alternatives exist.
 
+**Note**: The IMAP crate ecosystem analysis below remains current. The JMAP and Microsoft Graph recommendations in the final sections are outdated — both providers were subsequently implemented in Rust. See `docs/jmap-rust-migration.md` and `docs/graph-rust-migration.md` for completed summaries.
+
 ---
 
 ## Table of Contents
@@ -265,6 +267,8 @@ Google and Microsoft have no incentive to support an open protocol that would co
 
 ### JMAP Verdict
 
+> **Update**: JMAP was implemented as a Rust provider using `jmap-client` 0.4. See `docs/jmap-rust-migration.md`.
+
 **Not viable as a primary protocol for a multi-provider email client.** Only Fastmail supports it in production. Gmail, Outlook, Yahoo, iCloud — none do and none will. Adding JMAP would mean maintaining a third provider type for ~1-2% of users.
 
 It could make sense as a future nice-to-have for Fastmail users (their JMAP is faster and more capable than their IMAP), but it is not a strategic priority. The implementation cost would be moderate given `jmap-client`'s quality and our existing `EmailProvider` abstraction — a `JmapProvider` behind the same interface.
@@ -314,12 +318,14 @@ If these happen, migrating from async-imap to imap-client would let us delete `r
 
 ### Long-term considerations
 
+> **Update**: Microsoft Graph provider was implemented in Rust. See `docs/graph-rust-migration.md`.
+
 - **IMAP4rev2**: No Rust crate supports it. When Dovecot/Cyrus deployments start requiring it, the ecosystem will need to catch up. This may force a choice between contributing to an existing crate or building our own parser.
-- **JMAP**: Only worth adding if Fastmail users become a meaningful segment. Low priority.
-- **Microsoft Graph API**: If we want first-class Outlook support (beyond basic IMAP), the proprietary API is the practical path — same pattern as our Gmail API provider.
+- **JMAP**: Only worth adding if Fastmail users become a meaningful segment. Low priority. **Update**: JMAP was subsequently implemented. See `docs/jmap-rust-migration.md`.
+- **Microsoft Graph API**: If we want first-class Outlook support (beyond basic IMAP), the proprietary API is the practical path — same pattern as our Gmail API provider. **Update**: Microsoft Graph provider was implemented in Rust. See `docs/graph-rust-migration.md`.
 
 ### What we should NOT do
 
 - **Do not migrate to imap-next/io-imap today.** It crashes on Gmail, has unresolved design flaws, and zero closed issues. The theoretical benefits (fuzz-testing, QRESYNC) do not outweigh the practical risks.
 - **Do not attempt FFI with C/C++ IMAP libraries.** The viable options don't exist, and the build complexity isn't worth it.
-- **Do not invest heavily in JMAP.** Provider adoption makes it a Fastmail-only feature for the foreseeable future.
+- **Do not invest heavily in JMAP.** Provider adoption makes it a Fastmail-only feature for the foreseeable future. **Update**: JMAP was subsequently implemented for Fastmail support. See `docs/jmap-rust-migration.md`.

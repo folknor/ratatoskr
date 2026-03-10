@@ -2,11 +2,11 @@
 
 **Completed**: March 2026
 
-Rust-native JMAP (RFC 8620/8621) email provider using `jmap-client` 0.4 crate. Basic auth only. 27 Tauri commands (`jmap_*` prefix). Full sync engine (initial + delta via state strings). All email actions, send/drafts, attachment download. TS integration wired through providerFactory, syncManager, emailActions. Account setup UI (`AddJmapAccount.tsx`) with auto-discovery.
+Rust-native JMAP (RFC 8620/8621) email provider using `jmap-client` 0.4 crate. Basic auth only. 25 Tauri commands (`jmap_*` prefix). Full sync engine (initial + delta via state strings). All email actions, send/drafts, attachment download. TS integration wired through providerFactory, syncManager, emailActions. Account setup UI (`AddJmapAccount.tsx`) with auto-discovery.
 
 ### What was built
 
-- `src-tauri/src/jmap/` — 6 modules: `client.rs`, `sync.rs`, `commands.rs`, `parse.rs`, `mailbox_mapper.rs`, `auto_discovery.rs`
+- `src-tauri/src/jmap/` — 7 modules: `client.rs`, `sync.rs`, `commands.rs`, `parse.rs`, `mailbox_mapper.rs`, `auto_discovery.rs`, `ops.rs`
 - `src/services/email/jmapProvider.ts` — `JmapProvider` implementing `EmailProvider`
 - `src/components/accounts/AddJmapAccount.tsx` — 3-step account setup wizard
 - DB migration v25: `accounts.jmap_url` column + `jmap_sync_state` table
@@ -27,7 +27,7 @@ Rust-native JMAP (RFC 8620/8621) email provider using `jmap-client` 0.4 crate. B
 - **`JmapClient` wraps `Arc<Client>` and is `Clone`**: The plan showed a plain struct with `&` references. Implementation uses `Arc` so the client can be cloned out of the `RwLock` (avoids holding the read lock across await points).
 - **`JmapState` takes `encryption_key`**: The plan showed `JmapState::new()` with no args. Implementation passes the encryption key at construction (same key loaded once in `lib.rs` setup, shared with `GmailState`).
 - **Initial sync pagination**: The plan described paginated `Email/query`. Implementation re-queries each loop iteration with position offset (no JMAP `position` parameter used), which works but re-fetches the full ID list each time. Could be optimized.
-- **27 commands, not 23**: Final command count is 27 (the plan estimated ~23). Extra commands from `jmap_get_profile`, `jmap_discover_url` as separate commands, and folder CRUD.
+- **25 commands, not 23**: Final command count is 25 (the plan estimated ~23). Extra commands from `jmap_get_profile`, `jmap_discover_url` as separate commands, and folder CRUD.
 
 ### jmap-client 0.4 API gotchas (learned during implementation)
 
@@ -49,8 +49,8 @@ These are non-obvious behaviors of the `jmap-client` crate that will matter if t
 ## Deferred Work
 
 1. **Bearer/OAuth JMAP** — requires per-provider OAuth endpoint config (Fastmail has its own OAuth URLs/scopes), acquisition UI flow, and client rebuild-on-refresh (jmap-client binds credentials at construction). Either rebuild `JmapClientInner` on token refresh, or patch the crate for a credential callback.
-2. **Shared Rust `EmailProvider` trait** — both Gmail and JMAP now exist as Rust providers. Extract the trait from real code. See `docs/rust-provider-crate-research.md`. This informs how Graph (step 3) is structured.
-3. **Provider-agnostic Tauri commands** — depends on trait extraction above.
+2. ~~**Shared Rust `EmailProvider` trait**~~ — **Done.** `ProviderOps` trait in `provider/ops.rs`, implemented by Gmail, JMAP, and Graph providers.
+3. ~~**Provider-agnostic Tauri commands**~~ — **Done.** 17 `provider_*` commands in `provider/commands.rs` dispatch via `ProviderOps`.
 4. **JMAP push notifications** — `jmap-client` supports WebSocket push (`EventSource`). Could replace polling for real-time sync.
 5. **JMAP Sieve filter management** — `jmap-client` supports full Sieve CRUD. Server-side filter management.
 6. **List-Unsubscribe** — fetch via `header:List-Unsubscribe:asText` in `Email/get`.

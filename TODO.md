@@ -100,7 +100,7 @@
 
 - [ ] **`raw_size` is always 0 for Graph messages** — `src-tauri/src/graph/sync.rs`
 
-  Graph's message API doesn't expose a byte-size field. JMAP has `size`, Gmail has `sizeEstimate`. The `raw_size` column in `messages` is written as `0i64`. Only affects storage stats display — not functional.
+  Graph's message API has no first-class size property. The MAPI extended property `PidTagMessageSize` (`0x0E08`) is available via `$expand=singleValueExtendedProperties($filter=id eq 'Integer 0x0E08')`, but this can't be combined with `$select` (Microsoft treats it as an advanced query conflict). Dropping `$select` to get size would fetch full message objects — unacceptable for sync performance under the 4-concurrent limit. Separate per-message calls are equally impractical. Accepted as a cosmetic limitation — only affects storage stats display, not functional.
 
 - [x] **~~`list_folders` always re-syncs from server~~** — Fixed. Added `folder_map_last_sync: RwLock<Option<Instant>>` to `ClientInner`. `list_folders` now returns the cached `FolderMap` if it was synced within the last 60 seconds, avoiding unnecessary API calls.
 
