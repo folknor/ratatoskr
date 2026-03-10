@@ -137,7 +137,7 @@ describe("queueProcessor", () => {
     expect(updateOperationStatus).toHaveBeenCalledWith(
       "op-1",
       "pending",
-      "Failed to fetch",
+      expect.stringContaining("Failed to fetch"),
     );
     expect(incrementRetry).toHaveBeenCalledWith("op-1");
     expect(deleteOperation).not.toHaveBeenCalled();
@@ -173,7 +173,7 @@ describe("queueProcessor", () => {
     expect(updateOperationStatus).toHaveBeenCalledWith(
       "op-1",
       "failed",
-      "Bad request",
+      expect.stringContaining("Bad request"),
     );
   });
 

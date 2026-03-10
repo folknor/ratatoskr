@@ -6,16 +6,6 @@
 
 - [ ] **Auto-updater should check local permissions** — Don't show update prompts if the user lacks write access to the app installation directory (e.g., installed system-wide without admin rights). The update would fail anyway — detect this upfront and either hide the prompt or show a helpful message.
 
-### LOW
-
-- [ ] **pendingOperations.ts still uses direct SQL** — `src/services/db/pendingOperations.ts`
-
-  All 10 functions in this file use `getDb()` direct SQL instead of Rust Tauri commands. The Rust side already has `db_enqueue_pending_operation` in `email_actions/commands.rs` and a pending-ops conflict check in `sync/pipeline.rs:457`, but the TS `enqueuePendingOperation` doesn't even call the Rust one — it has its own INSERT. The reads (`getPendingOperations`, `updateOperationStatus`, `deleteOperation`, `incrementRetry`, `getPendingOpsCount`, `getFailedOpsCount`, `getPendingOpsForResource`, `clearFailedOperations`, `retryFailedOperations`) are all direct SQL too.
-
-  The hardest function to port is `compactQueue()` — it loads all pending ops, groups by resource, detects toggle-pair cancellations (star on/off, markRead on/off), cancels matching addLabel/removeLabel pairs, and collapses sequential moveToFolder ops into just the latest. This is ~80 lines of non-trivial JS logic that would need to be reimplemented in Rust.
-
-  The main consumer is `queueProcessor.ts`, which calls `compactQueue()` → `getPendingOperations()` → loops over ops calling `updateOperationStatus("executing")` → `executeQueuedAction()` → `deleteOperation()` or `incrementRetry()` — that's 5+ IPC round-trips per queued operation. Moving the whole compact+fetch+status-update loop into a single Rust command would reduce this, but the queue typically processes 0-5 ops every 30 seconds, so the IPC overhead is negligible. Other callers: `getPendingOpsForResource()` is used for conflict detection in `imapSync.ts`, `imapSyncStore.ts`, and `gmail/sync.ts`. Low priority — consistency improvement, not a performance or correctness issue.
-
 ---
 
 ## Refactoring — Patterns & Boilerplate

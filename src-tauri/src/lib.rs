@@ -228,6 +228,18 @@ pub fn run() {
             email_actions::commands::email_action_remove_label,
             email_actions::commands::email_action_move_to_folder,
             email_actions::commands::db_enqueue_pending_operation,
+            // Pending operations queue
+            db::pending_ops::db_pending_ops_enqueue,
+            db::pending_ops::db_pending_ops_get,
+            db::pending_ops::db_pending_ops_update_status,
+            db::pending_ops::db_pending_ops_delete,
+            db::pending_ops::db_pending_ops_increment_retry,
+            db::pending_ops::db_pending_ops_count,
+            db::pending_ops::db_pending_ops_failed_count,
+            db::pending_ops::db_pending_ops_for_resource,
+            db::pending_ops::db_pending_ops_compact,
+            db::pending_ops::db_pending_ops_clear_failed,
+            db::pending_ops::db_pending_ops_retry_failed,
             // Filter engine (Phase 6)
             filters::commands::filters_evaluate,
             // JWZ threading (Phase 6)

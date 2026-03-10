@@ -1,16 +1,10 @@
+import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/services/db/connection", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/services/db/connection")>();
-  return {
-    ...actual,
-    getDb: vi.fn(),
-  };
-});
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+}));
 
-import { getDb } from "@/services/db/connection";
-import { createMockDb } from "@/test/mocks";
 import {
   clearFailedOperations,
   compactQueue,
@@ -25,18 +19,15 @@ import {
   updateOperationStatus,
 } from "./pendingOperations";
 
-const mockDb = createMockDb();
+const mockInvoke = vi.mocked(invoke);
 
 describe("pendingOperations DB service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getDb).mockResolvedValue(
-      mockDb as unknown as Awaited<ReturnType<typeof getDb>>,
-    );
   });
 
   describe("enqueuePendingOperation", () => {
-    it("inserts a new operation with UUID", async () => {
+    it("invokes the Rust command with UUID", async () => {
       const id = await enqueuePendingOperation(
         "acct-1",
         "archive",
@@ -44,229 +35,168 @@ describe("pendingOperations DB service", () => {
         { messageIds: ["m1"] },
       );
       expect(id).toBeTruthy();
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("INSERT INTO pending_operations"),
-        expect.arrayContaining(["acct-1", "archive", "thread-1"]),
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_pending_ops_enqueue", {
+        id: expect.any(String),
+        accountId: "acct-1",
+        operationType: "archive",
+        resourceId: "thread-1",
+        paramsJson: JSON.stringify({ messageIds: ["m1"] }),
+      });
     });
   });
 
   describe("getPendingOperations", () => {
     it("fetches pending ops for a specific account", async () => {
+      mockInvoke.mockResolvedValueOnce([]);
       await getPendingOperations("acct-1");
-      expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringContaining("account_id = $1"),
-        expect.arrayContaining(["acct-1"]),
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_pending_ops_get", {
+        accountId: "acct-1",
+        limit: 50,
+      });
     });
 
     it("fetches all pending ops when no account specified", async () => {
+      mockInvoke.mockResolvedValueOnce([]);
       await getPendingOperations();
-      expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringContaining("status = 'pending'"),
-        expect.not.arrayContaining(["acct-1"]),
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_pending_ops_get", {
+        accountId: null,
+        limit: 50,
+      });
+    });
+
+    it("respects custom limit", async () => {
+      mockInvoke.mockResolvedValueOnce([]);
+      await getPendingOperations(undefined, 10);
+      expect(mockInvoke).toHaveBeenCalledWith("db_pending_ops_get", {
+        accountId: null,
+        limit: 10,
+      });
     });
   });
 
   describe("updateOperationStatus", () => {
     it("updates the status and error message", async () => {
       await updateOperationStatus("op-1", "failed", "Network timeout");
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("UPDATE pending_operations SET status"),
-        ["failed", "Network timeout", "op-1"],
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_pending_ops_update_status",
+        {
+          id: "op-1",
+          status: "failed",
+          errorMessage: "Network timeout",
+        },
       );
     });
 
-    it("sets error_message to null when not provided", async () => {
+    it("passes null error_message when not provided", async () => {
       await updateOperationStatus("op-1", "pending");
-      expect(mockDb.execute).toHaveBeenCalledWith(expect.any(String), [
-        "pending",
-        null,
-        "op-1",
-      ]);
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_pending_ops_update_status",
+        {
+          id: "op-1",
+          status: "pending",
+          errorMessage: null,
+        },
+      );
     });
   });
 
   describe("deleteOperation", () => {
     it("deletes by id", async () => {
       await deleteOperation("op-1");
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("DELETE FROM pending_operations WHERE id"),
-        ["op-1"],
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_pending_ops_delete", {
+        id: "op-1",
+      });
     });
   });
 
   describe("incrementRetry", () => {
-    it("increments retry count with exponential backoff", async () => {
-      mockDb.select.mockResolvedValueOnce([
-        { retry_count: 0, max_retries: 10 },
-      ]);
+    it("invokes the Rust command", async () => {
       await incrementRetry("op-1");
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("retry_count = $1"),
-        expect.arrayContaining([1]),
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_pending_ops_increment_retry",
+        { id: "op-1" },
       );
-    });
-
-    it("marks as failed when max retries reached", async () => {
-      mockDb.select.mockResolvedValueOnce([
-        { retry_count: 9, max_retries: 10 },
-      ]);
-      await incrementRetry("op-1");
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("status = 'failed'"),
-        [10, "op-1"],
-      );
-    });
-
-    it("does nothing if operation not found", async () => {
-      mockDb.select.mockResolvedValueOnce([]);
-      await incrementRetry("nonexistent");
-      expect(mockDb.execute).not.toHaveBeenCalled();
     });
   });
 
   describe("getPendingOpsCount", () => {
     it("returns count for specific account", async () => {
-      mockDb.select.mockResolvedValueOnce([{ count: 5 }]);
+      mockInvoke.mockResolvedValueOnce(5);
       const count = await getPendingOpsCount("acct-1");
       expect(count).toBe(5);
+      expect(mockInvoke).toHaveBeenCalledWith("db_pending_ops_count", {
+        accountId: "acct-1",
+      });
     });
 
     it("returns global count", async () => {
-      mockDb.select.mockResolvedValueOnce([{ count: 12 }]);
+      mockInvoke.mockResolvedValueOnce(12);
       const count = await getPendingOpsCount();
       expect(count).toBe(12);
+      expect(mockInvoke).toHaveBeenCalledWith("db_pending_ops_count", {
+        accountId: null,
+      });
     });
   });
 
   describe("getFailedOpsCount", () => {
     it("returns count of failed operations", async () => {
-      mockDb.select.mockResolvedValueOnce([{ count: 3 }]);
+      mockInvoke.mockResolvedValueOnce(3);
       const count = await getFailedOpsCount();
       expect(count).toBe(3);
+      expect(mockInvoke).toHaveBeenCalledWith("db_pending_ops_failed_count", {
+        accountId: null,
+      });
     });
   });
 
   describe("getPendingOpsForResource", () => {
     it("queries by account and resource", async () => {
+      mockInvoke.mockResolvedValueOnce([]);
       await getPendingOpsForResource("acct-1", "thread-1");
-      expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringContaining("resource_id = $2"),
-        ["acct-1", "thread-1"],
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_pending_ops_for_resource",
+        {
+          accountId: "acct-1",
+          resourceId: "thread-1",
+        },
       );
     });
   });
 
   describe("compactQueue", () => {
-    it("removes cancelling star toggle pairs", async () => {
-      mockDb.select.mockResolvedValueOnce([
-        {
-          id: "op-1",
-          account_id: "a1",
-          resource_id: "t1",
-          operation_type: "star",
-          params: '{"starred":true}',
-          status: "pending",
-          created_at: 1,
-        },
-        {
-          id: "op-2",
-          account_id: "a1",
-          resource_id: "t1",
-          operation_type: "star",
-          params: '{"starred":false}',
-          status: "pending",
-          created_at: 2,
-        },
-      ]);
+    it("invokes the Rust compact command", async () => {
+      mockInvoke.mockResolvedValueOnce(2);
       const removed = await compactQueue();
       expect(removed).toBe(2);
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("DELETE"),
-        expect.arrayContaining(["op-1", "op-2"]),
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_pending_ops_compact", {
+        accountId: null,
+      });
     });
 
-    it("removes cancelling addLabel+removeLabel pairs", async () => {
-      mockDb.select.mockResolvedValueOnce([
-        {
-          id: "op-1",
-          account_id: "a1",
-          resource_id: "t1",
-          operation_type: "addLabel",
-          params: '{"labelId":"L1"}',
-          status: "pending",
-          created_at: 1,
-        },
-        {
-          id: "op-2",
-          account_id: "a1",
-          resource_id: "t1",
-          operation_type: "removeLabel",
-          params: '{"labelId":"L1"}',
-          status: "pending",
-          created_at: 2,
-        },
-      ]);
-      const removed = await compactQueue();
-      expect(removed).toBe(2);
-    });
-
-    it("collapses sequential moves keeping only the latest", async () => {
-      mockDb.select.mockResolvedValueOnce([
-        {
-          id: "op-1",
-          account_id: "a1",
-          resource_id: "t1",
-          operation_type: "moveToFolder",
-          params: '{"folderPath":"Folder1"}',
-          status: "pending",
-          created_at: 1,
-        },
-        {
-          id: "op-2",
-          account_id: "a1",
-          resource_id: "t1",
-          operation_type: "moveToFolder",
-          params: '{"folderPath":"Folder2"}',
-          status: "pending",
-          created_at: 2,
-        },
-      ]);
-      const removed = await compactQueue();
-      expect(removed).toBe(1);
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("DELETE"),
-        ["op-1"],
-      );
-    });
-
-    it("returns 0 when nothing to compact", async () => {
-      mockDb.select.mockResolvedValueOnce([]);
-      const removed = await compactQueue();
-      expect(removed).toBe(0);
-      expect(mockDb.execute).not.toHaveBeenCalled();
+    it("passes account_id when provided", async () => {
+      mockInvoke.mockResolvedValueOnce(0);
+      await compactQueue("acct-1");
+      expect(mockInvoke).toHaveBeenCalledWith("db_pending_ops_compact", {
+        accountId: "acct-1",
+      });
     });
   });
 
   describe("clearFailedOperations", () => {
-    it("deletes all failed ops", async () => {
+    it("clears all failed ops", async () => {
       await clearFailedOperations();
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining(
-          "DELETE FROM pending_operations WHERE status = 'failed'",
-        ),
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_pending_ops_clear_failed",
+        { accountId: null },
       );
     });
 
-    it("deletes failed ops for specific account", async () => {
+    it("clears failed ops for specific account", async () => {
       await clearFailedOperations("acct-1");
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("account_id = $1"),
-        ["acct-1"],
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_pending_ops_clear_failed",
+        { accountId: "acct-1" },
       );
     });
   });
@@ -274,8 +204,9 @@ describe("pendingOperations DB service", () => {
   describe("retryFailedOperations", () => {
     it("resets failed ops to pending", async () => {
       await retryFailedOperations();
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("SET status = 'pending'"),
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "db_pending_ops_retry_failed",
+        { accountId: null },
       );
     });
   });

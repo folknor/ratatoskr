@@ -1,0 +1,470 @@
+// tauri::command macro generates code that trips let_underscore_must_use
+#![allow(clippy::let_underscore_must_use)]
+
+use rusqlite::{params, Connection};
+use serde::{Deserialize, Serialize};
+use tauri::State;
+
+use super::DbState;
+
+// ── Types ────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingOperation {
+    pub id: String,
+    pub account_id: String,
+    pub operation_type: String,
+    pub resource_id: String,
+    pub params: String,
+    pub status: String,
+    pub retry_count: i64,
+    pub max_retries: i64,
+    pub next_retry_at: Option<i64>,
+    pub created_at: i64,
+    pub error_message: Option<String>,
+}
+
+fn row_to_pending_op(row: &rusqlite::Row<'_>) -> rusqlite::Result<PendingOperation> {
+    Ok(PendingOperation {
+        id: row.get("id")?,
+        account_id: row.get("account_id")?,
+        operation_type: row.get("operation_type")?,
+        resource_id: row.get("resource_id")?,
+        params: row.get("params")?,
+        status: row.get("status")?,
+        retry_count: row.get("retry_count")?,
+        max_retries: row.get("max_retries")?,
+        next_retry_at: row.get("next_retry_at")?,
+        created_at: row.get("created_at")?,
+        error_message: row.get("error_message")?,
+    })
+}
+
+// ── Backoff schedule (seconds) ───────────────────────────────
+
+const BACKOFF_SCHEDULE: &[i64] = &[60, 300, 900, 3600];
+
+// ── Commands ─────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn db_pending_ops_enqueue(
+    state: State<'_, DbState>,
+    id: String,
+    account_id: String,
+    operation_type: String,
+    resource_id: String,
+    params_json: String,
+) -> Result<(), String> {
+    state
+        .with_conn(move |conn| {
+            conn.execute(
+                "INSERT INTO pending_operations (id, account_id, operation_type, resource_id, params, status)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'pending')",
+                params![id, account_id, operation_type, resource_id, params_json],
+            )
+            .map_err(|e| format!("enqueue pending op: {e}"))?;
+            Ok(())
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn db_pending_ops_get(
+    state: State<'_, DbState>,
+    account_id: Option<String>,
+    limit: Option<i64>,
+) -> Result<Vec<PendingOperation>, String> {
+    state
+        .with_conn(move |conn| {
+            let lim = limit.unwrap_or(50);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_secs() as i64;
+
+            if let Some(ref aid) = account_id {
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT * FROM pending_operations
+                         WHERE account_id = ?1 AND status = 'pending'
+                           AND (next_retry_at IS NULL OR next_retry_at <= ?2)
+                         ORDER BY created_at ASC LIMIT ?3",
+                    )
+                    .map_err(|e| e.to_string())?;
+                stmt.query_map(params![aid, now, lim], row_to_pending_op)
+                    .map_err(|e| e.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())
+            } else {
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT * FROM pending_operations
+                         WHERE status = 'pending'
+                           AND (next_retry_at IS NULL OR next_retry_at <= ?1)
+                         ORDER BY created_at ASC LIMIT ?2",
+                    )
+                    .map_err(|e| e.to_string())?;
+                stmt.query_map(params![now, lim], row_to_pending_op)
+                    .map_err(|e| e.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())
+            }
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn db_pending_ops_update_status(
+    state: State<'_, DbState>,
+    id: String,
+    status: String,
+    error_message: Option<String>,
+) -> Result<(), String> {
+    state
+        .with_conn(move |conn| {
+            conn.execute(
+                "UPDATE pending_operations SET status = ?1, error_message = ?2 WHERE id = ?3",
+                params![status, error_message, id],
+            )
+            .map_err(|e| format!("update op status: {e}"))?;
+            Ok(())
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn db_pending_ops_delete(
+    state: State<'_, DbState>,
+    id: String,
+) -> Result<(), String> {
+    state
+        .with_conn(move |conn| {
+            conn.execute("DELETE FROM pending_operations WHERE id = ?1", params![id])
+                .map_err(|e| format!("delete op: {e}"))?;
+            Ok(())
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn db_pending_ops_increment_retry(
+    state: State<'_, DbState>,
+    id: String,
+) -> Result<(), String> {
+    state
+        .with_conn(move |conn| {
+            let (retry_count, max_retries): (i64, i64) = conn
+                .query_row(
+                    "SELECT retry_count, max_retries FROM pending_operations WHERE id = ?1",
+                    params![id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(|e| format!("get retry info: {e}"))?;
+
+            let new_count = retry_count + 1;
+            if new_count >= max_retries {
+                conn.execute(
+                    "UPDATE pending_operations SET status = 'failed', retry_count = ?1 WHERE id = ?2",
+                    params![new_count, id],
+                )
+                .map_err(|e| format!("mark failed: {e}"))?;
+                return Ok(());
+            }
+
+            let backoff_idx = std::cmp::min(
+                (new_count - 1) as usize,
+                BACKOFF_SCHEDULE.len() - 1,
+            );
+            let delay_sec = BACKOFF_SCHEDULE[backoff_idx];
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_secs() as i64;
+            let next_retry_at = now + delay_sec;
+
+            conn.execute(
+                "UPDATE pending_operations SET retry_count = ?1, next_retry_at = ?2 WHERE id = ?3",
+                params![new_count, next_retry_at, id],
+            )
+            .map_err(|e| format!("increment retry: {e}"))?;
+            Ok(())
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn db_pending_ops_count(
+    state: State<'_, DbState>,
+    account_id: Option<String>,
+) -> Result<i64, String> {
+    state
+        .with_conn(move |conn| {
+            if let Some(ref aid) = account_id {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM pending_operations WHERE account_id = ?1 AND status = 'pending'",
+                    params![aid],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())
+            } else {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM pending_operations WHERE status = 'pending'",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())
+            }
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn db_pending_ops_failed_count(
+    state: State<'_, DbState>,
+    account_id: Option<String>,
+) -> Result<i64, String> {
+    state
+        .with_conn(move |conn| {
+            if let Some(ref aid) = account_id {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM pending_operations WHERE account_id = ?1 AND status = 'failed'",
+                    params![aid],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())
+            } else {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM pending_operations WHERE status = 'failed'",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())
+            }
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn db_pending_ops_for_resource(
+    state: State<'_, DbState>,
+    account_id: String,
+    resource_id: String,
+) -> Result<Vec<PendingOperation>, String> {
+    state
+        .with_conn(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT * FROM pending_operations
+                     WHERE account_id = ?1 AND resource_id = ?2 AND status = 'pending'
+                     ORDER BY created_at ASC",
+                )
+                .map_err(|e| e.to_string())?;
+            stmt.query_map(params![account_id, resource_id], row_to_pending_op)
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn db_pending_ops_compact(
+    state: State<'_, DbState>,
+    account_id: Option<String>,
+) -> Result<i64, String> {
+    state
+        .with_conn(move |conn| compact_queue(conn, account_id.as_deref()))
+        .await
+}
+
+#[tauri::command]
+pub async fn db_pending_ops_clear_failed(
+    state: State<'_, DbState>,
+    account_id: Option<String>,
+) -> Result<(), String> {
+    state
+        .with_conn(move |conn| {
+            if let Some(ref aid) = account_id {
+                conn.execute(
+                    "DELETE FROM pending_operations WHERE account_id = ?1 AND status = 'failed'",
+                    params![aid],
+                )
+                .map_err(|e| format!("clear failed: {e}"))?;
+            } else {
+                conn.execute(
+                    "DELETE FROM pending_operations WHERE status = 'failed'",
+                    [],
+                )
+                .map_err(|e| format!("clear failed: {e}"))?;
+            }
+            Ok(())
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn db_pending_ops_retry_failed(
+    state: State<'_, DbState>,
+    account_id: Option<String>,
+) -> Result<(), String> {
+    state
+        .with_conn(move |conn| {
+            if let Some(ref aid) = account_id {
+                conn.execute(
+                    "UPDATE pending_operations SET status = 'pending', retry_count = 0, next_retry_at = NULL, error_message = NULL
+                     WHERE account_id = ?1 AND status = 'failed'",
+                    params![aid],
+                )
+                .map_err(|e| format!("retry failed: {e}"))?;
+            } else {
+                conn.execute(
+                    "UPDATE pending_operations SET status = 'pending', retry_count = 0, next_retry_at = NULL, error_message = NULL
+                     WHERE status = 'failed'",
+                    [],
+                )
+                .map_err(|e| format!("retry failed: {e}"))?;
+            }
+            Ok(())
+        })
+        .await
+}
+
+// ── Queue compaction logic ───────────────────────────────────
+//
+// Groups pending ops by resource, then:
+// 1. Cancels toggle pairs (star true+false, markRead true+false)
+// 2. Cancels matching addLabel/removeLabel for same label
+// 3. Collapses sequential moveToFolder ops (keeps only the latest)
+
+fn compact_queue(conn: &Connection, account_id: Option<&str>) -> Result<i64, String> {
+    // Fetch all pending ops, optionally filtered by account
+    let ops: Vec<PendingOperation> = if let Some(aid) = account_id {
+        let mut stmt = conn
+            .prepare(
+                "SELECT * FROM pending_operations WHERE status = 'pending' AND account_id = ?1
+                 ORDER BY created_at ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        stmt.query_map(params![aid], row_to_pending_op)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
+    } else {
+        let mut stmt = conn
+            .prepare(
+                "SELECT * FROM pending_operations WHERE status = 'pending'
+                 ORDER BY created_at ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        stmt.query_map([], row_to_pending_op)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
+    };
+
+    // Group by account_id:resource_id
+    let mut by_resource: std::collections::HashMap<String, Vec<&PendingOperation>> =
+        std::collections::HashMap::new();
+    for op in &ops {
+        let key = format!("{}:{}", op.account_id, op.resource_id);
+        by_resource.entry(key).or_default().push(op);
+    }
+
+    let mut to_delete: Vec<&str> = Vec::new();
+
+    for resource_ops in by_resource.values() {
+        // 1. Cancel toggle pairs: star(true)+star(false), markRead(true)+markRead(false)
+        for toggle_type in &["star", "markRead"] {
+            let toggle_ops: Vec<&&PendingOperation> = resource_ops
+                .iter()
+                .filter(|o| o.operation_type == *toggle_type)
+                .collect();
+
+            let mut i = 0;
+            while i + 1 < toggle_ops.len() {
+                let params_a: serde_json::Value =
+                    serde_json::from_str(&toggle_ops[i].params).unwrap_or_default();
+                let params_b: serde_json::Value =
+                    serde_json::from_str(&toggle_ops[i + 1].params).unwrap_or_default();
+
+                let opposite = match *toggle_type {
+                    "star" => params_a.get("starred") != params_b.get("starred"),
+                    "markRead" => params_a.get("read") != params_b.get("read"),
+                    _ => false,
+                };
+
+                if opposite {
+                    to_delete.push(&toggle_ops[i].id);
+                    to_delete.push(&toggle_ops[i + 1].id);
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+        }
+
+        // 2. Cancel matching addLabel/removeLabel for same label on same resource
+        let add_label_ops: Vec<&&PendingOperation> = resource_ops
+            .iter()
+            .filter(|o| o.operation_type == "addLabel")
+            .collect();
+        let mut remove_label_ops: Vec<&&PendingOperation> = resource_ops
+            .iter()
+            .filter(|o| o.operation_type == "removeLabel")
+            .collect();
+
+        for add_op in &add_label_ops {
+            let add_params: serde_json::Value =
+                serde_json::from_str(&add_op.params).unwrap_or_default();
+            let add_label_id = add_params.get("labelId");
+
+            if let Some(match_idx) = remove_label_ops.iter().position(|r| {
+                let r_params: serde_json::Value =
+                    serde_json::from_str(&r.params).unwrap_or_default();
+                r_params.get("labelId") == add_label_id
+            }) {
+                to_delete.push(&add_op.id);
+                to_delete.push(&remove_label_ops[match_idx].id);
+                remove_label_ops.remove(match_idx);
+            }
+        }
+
+        // 3. Collapse sequential moveToFolder — keep only the latest
+        let move_ops: Vec<&&PendingOperation> = resource_ops
+            .iter()
+            .filter(|o| o.operation_type == "moveToFolder")
+            .collect();
+        if move_ops.len() > 1 {
+            for op in &move_ops[..move_ops.len() - 1] {
+                to_delete.push(&op.id);
+            }
+        }
+    }
+
+    // Delete compacted ops
+    let deleted = to_delete.len() as i64;
+    if !to_delete.is_empty() {
+        // Batch delete in chunks to stay within SQLite parameter limits
+        for chunk in to_delete.chunks(100) {
+            let placeholders: String = chunk
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("?{}", i + 1))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "DELETE FROM pending_operations WHERE id IN ({placeholders})"
+            );
+            let param_values: Vec<Box<dyn rusqlite::types::ToSql>> = chunk
+                .iter()
+                .map(|id| Box::new(id.to_string()) as Box<dyn rusqlite::types::ToSql>)
+                .collect();
+            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                param_values.iter().map(AsRef::as_ref).collect();
+            conn.execute(&sql, param_refs.as_slice())
+                .map_err(|e| format!("compact delete: {e}"))?;
+        }
+    }
+
+    Ok(deleted)
+}
