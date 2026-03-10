@@ -443,9 +443,9 @@ export function useEmailListData(): EmailListData {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => void loadThreads(), 500);
     };
-    window.addEventListener("velo-sync-done", handler);
+    window.addEventListener("ratatoskr-sync-done", handler);
     return (): void => {
-      window.removeEventListener("velo-sync-done", handler);
+      window.removeEventListener("ratatoskr-sync-done", handler);
       if (timer) clearTimeout(timer);
     };
   }, [loadThreads]);

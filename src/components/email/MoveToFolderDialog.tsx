@@ -122,7 +122,7 @@ export function MoveToFolderDialog({
       }
 
       // Refresh thread list
-      window.dispatchEvent(new Event("velo-sync-done"));
+      window.dispatchEvent(new Event("ratatoskr-sync-done"));
     },
     [activeAccountId, threadIds, isImap, onClose],
   );

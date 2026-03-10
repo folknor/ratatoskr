@@ -21,7 +21,7 @@ async function checkFollowUps(): Promise<void> {
   }
 
   if (triggered.length > 0) {
-    window.dispatchEvent(new Event("velo-sync-done"));
+    window.dispatchEvent(new Event("ratatoskr-sync-done"));
   }
 }
 

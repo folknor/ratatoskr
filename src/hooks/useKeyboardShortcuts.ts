@@ -156,7 +156,7 @@ export function useKeyboardShortcuts(): void {
             !paletteBinding
           ) {
             e.preventDefault();
-            window.dispatchEvent(new Event("velo-toggle-command-palette"));
+            window.dispatchEvent(new Event("ratatoskr-toggle-command-palette"));
             return;
           }
         }
@@ -326,7 +326,7 @@ async function executeAction(actionId: string): Promise<void> {
       if (selectedId) {
         const replyMode = useUIStore.getState().defaultReplyMode;
         window.dispatchEvent(
-          new CustomEvent("velo-inline-reply", { detail: { mode: replyMode } }),
+          new CustomEvent("ratatoskr-inline-reply", { detail: { mode: replyMode } }),
         );
       }
       break;
@@ -334,7 +334,7 @@ async function executeAction(actionId: string): Promise<void> {
     case "action.replyAll":
       if (selectedId) {
         window.dispatchEvent(
-          new CustomEvent("velo-inline-reply", {
+          new CustomEvent("ratatoskr-inline-reply", {
             detail: { mode: "replyAll" },
           }),
         );
@@ -343,7 +343,7 @@ async function executeAction(actionId: string): Promise<void> {
     case "action.forward":
       if (selectedId) {
         window.dispatchEvent(
-          new CustomEvent("velo-inline-reply", { detail: { mode: "forward" } }),
+          new CustomEvent("ratatoskr-inline-reply", { detail: { mode: "forward" } }),
         );
       }
       break;
@@ -468,7 +468,7 @@ async function executeAction(actionId: string): Promise<void> {
     case "action.createTaskFromEmail": {
       if (selectedId) {
         window.dispatchEvent(
-          new CustomEvent("velo-extract-task", {
+          new CustomEvent("ratatoskr-extract-task", {
             detail: { threadId: selectedId },
           }),
         );
@@ -482,7 +482,7 @@ async function executeAction(actionId: string): Promise<void> {
       );
       if (moveThreadIds.length > 0) {
         window.dispatchEvent(
-          new CustomEvent("velo-move-to-folder", {
+          new CustomEvent("ratatoskr-move-to-folder", {
             detail: { threadIds: moveThreadIds },
           }),
         );
@@ -490,16 +490,16 @@ async function executeAction(actionId: string): Promise<void> {
       break;
     }
     case "app.commandPalette":
-      window.dispatchEvent(new Event("velo-toggle-command-palette"));
+      window.dispatchEvent(new Event("ratatoskr-toggle-command-palette"));
       break;
     case "app.toggleSidebar":
       useUIStore.getState().toggleSidebar();
       break;
     case "app.askInbox":
-      window.dispatchEvent(new Event("velo-toggle-ask-inbox"));
+      window.dispatchEvent(new Event("ratatoskr-toggle-ask-inbox"));
       break;
     case "app.help":
-      window.dispatchEvent(new Event("velo-toggle-shortcuts-help"));
+      window.dispatchEvent(new Event("ratatoskr-toggle-shortcuts-help"));
       break;
     case "app.syncFolder": {
       if (activeAccountId) {

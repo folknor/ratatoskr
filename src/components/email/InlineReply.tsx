@@ -142,9 +142,9 @@ export function InlineReply({
         activateMode(detail.mode);
       }
     };
-    window.addEventListener("velo-inline-reply", handler);
+    window.addEventListener("ratatoskr-inline-reply", handler);
     return (): void => {
-      window.removeEventListener("velo-inline-reply", handler);
+      window.removeEventListener("ratatoskr-inline-reply", handler);
     };
   }, [activateMode]);
 

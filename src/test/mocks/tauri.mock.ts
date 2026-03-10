@@ -22,6 +22,13 @@ export function createMockTauriFs(): {
       readFile: vi.fn(async () => new Uint8Array([1, 2, 3])),
       mkdir: vi.fn(async () => {}),
       remove: vi.fn(async () => {}),
+      rename: vi.fn(async (oldPath: string, newPath: string) => {
+        const content = store.get(oldPath);
+        if (content !== undefined) {
+          store.set(newPath, content);
+          store.delete(oldPath);
+        }
+      }),
       BaseDirectory: { AppData: 26 },
     },
   };

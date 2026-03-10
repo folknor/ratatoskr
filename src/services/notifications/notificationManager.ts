@@ -143,7 +143,7 @@ export function queueNewEmailNotification(
       });
     } else if (pendingCount > 1) {
       sendNotification({
-        title: i18n.t("notifications:velo"),
+        title: i18n.t("notifications:ratatoskr"),
         body: i18n.t("notifications:newEmails", { count: pendingCount }),
         actionTypeId: "email",
       });

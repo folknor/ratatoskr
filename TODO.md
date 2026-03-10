@@ -144,11 +144,19 @@
 - [ ] **No per-operation timeout on Rust IMAP fetches** — `src-tauri/src/sync/imap_initial.rs`
   Connection timeouts exist via `async-imap`, but long-running fetches on large folders have no operation-level timeout. A 50K-message folder could hang indefinitely.
 
-- [ ] **`velo-sync-done` event dispatch not verified** — `src/services/gmail/syncManager.ts`
-  The Rust path emits `statusCallback?.(accountId, "done")` but other UI side-channel events (`velo-sync-done` in `App.tsx`) should be verified during integration testing.
+- [ ] **`ratatoskr-sync-done` event dispatch not verified** — `src/services/gmail/syncManager.ts`
+  The Rust path emits `statusCallback?.(accountId, "done")` but other UI side-channel events (`ratatoskr-sync-done` in `App.tsx`) should be verified during integration testing.
 
 - [x] ~~**Phase 6 docs slightly stale** — `docs/rust-core-architecture.md:599`
   Fixed: updated to include categorization commands (5 total).~~
+
+---
+
+## Branding / Assets
+
+- [ ] **Replace logo SVG** — `src/assets/logo.svg` still renders the old "VELO" text as path outlines. Needs a new logo for Ratatoskr.
+
+- [ ] **Replace app icons** — `src-tauri/icons/` contains the old Velo app icons (icon.png, icon.ico, various sizes). Need new Ratatoskr icons for all platforms (macOS .icns, Windows .ico, Linux .png at 32x32, 128x128, 256x256, 512x512).
 
 ---
 

@@ -9,10 +9,12 @@ import {
   exists,
   mkdir,
   readTextFile,
+  rename,
   writeTextFile,
 } from "@tauri-apps/plugin-fs";
 
-const KEY_FILE_NAME = "velo.key";
+const KEY_FILE_NAME = "ratatoskr.key";
+const OLD_KEY_FILE_NAME = "velo.key";
 const ALGORITHM = "AES-GCM";
 const KEY_LENGTH = 256;
 const IV_LENGTH = 12;
@@ -56,6 +58,15 @@ function asBufferSource(arr: Uint8Array): BufferSource {
 
 async function getOrCreateKey(): Promise<CryptoKey> {
   if (cachedKey) return cachedKey;
+
+  // Migrate from old key file name (velo.key → ratatoskr.key)
+  if (!(await exists(KEY_FILE_NAME, FS_OPTIONS)) && (await exists(OLD_KEY_FILE_NAME, FS_OPTIONS))) {
+    console.info("Migrating key file: velo.key → ratatoskr.key");
+    await rename(OLD_KEY_FILE_NAME, KEY_FILE_NAME, {
+      oldPathBaseDir: BaseDirectory.AppData,
+      newPathBaseDir: BaseDirectory.AppData,
+    });
+  }
 
   let rawKeyB64: string;
   if (await exists(KEY_FILE_NAME, FS_OPTIONS)) {

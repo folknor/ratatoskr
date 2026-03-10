@@ -123,13 +123,13 @@ async function executeSingleAction(
             ),
           ),
         );
-        window.dispatchEvent(new Event("velo-sync-done"));
+        window.dispatchEvent(new Event("ratatoskr-sync-done"));
       }
       break;
 
     case "reply":
       window.dispatchEvent(
-        new CustomEvent("velo-inline-reply", {
+        new CustomEvent("ratatoskr-inline-reply", {
           detail: { threadId: threadIds[0], accountId, mode: "reply" },
         }),
       );
@@ -137,7 +137,7 @@ async function executeSingleAction(
 
     case "replyAll":
       window.dispatchEvent(
-        new CustomEvent("velo-inline-reply", {
+        new CustomEvent("ratatoskr-inline-reply", {
           detail: { threadId: threadIds[0], accountId, mode: "replyAll" },
         }),
       );
@@ -145,7 +145,7 @@ async function executeSingleAction(
 
     case "forward":
       window.dispatchEvent(
-        new CustomEvent("velo-inline-reply", {
+        new CustomEvent("ratatoskr-inline-reply", {
           detail: { threadId: threadIds[0], accountId, mode: "forward" },
         }),
       );

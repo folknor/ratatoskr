@@ -60,7 +60,7 @@
 	},
 	"plugins": {
 		"sql": {
-			"preload": ["sqlite:velo.db"]
+			"preload": ["sqlite:ratatoskr.db"]
 		},
 		"deep-link": {
 			"mobile": [],

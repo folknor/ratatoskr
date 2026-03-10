@@ -352,7 +352,7 @@ export function ActionBar({
           onClick={() => {
             if (!activeAccountId) return;
             window.dispatchEvent(
-              new CustomEvent("velo-move-to-folder", {
+              new CustomEvent("ratatoskr-move-to-folder", {
                 detail: { threadIds: [thread.id] },
               }),
             );

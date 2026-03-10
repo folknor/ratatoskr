@@ -349,9 +349,9 @@ export function Sidebar({
         useUIStore.getState().setSyncingFolder(null);
       }, 500);
     };
-    window.addEventListener("velo-sync-done", handler);
+    window.addEventListener("ratatoskr-sync-done", handler);
     return (): void => {
-      window.removeEventListener("velo-sync-done", handler);
+      window.removeEventListener("ratatoskr-sync-done", handler);
       if (timer) clearTimeout(timer);
     };
   }, [activeAccountId, loadLabels, refreshSmartFolderCounts]);

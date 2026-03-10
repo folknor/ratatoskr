@@ -31,7 +31,7 @@ function syntheticMessageId(
   folder: string,
   uid: number,
 ): string {
-  return `synthetic-${accountId}-${folder}-${uid}@velo.local`;
+  return `synthetic-${accountId}-${folder}-${uid}@ratatoskr.local`;
 }
 
 /**

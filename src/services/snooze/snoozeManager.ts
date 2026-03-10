@@ -26,7 +26,7 @@ async function checkSnoozedThreads(): Promise<void> {
     await emailActionUnsnoozeBatch(threadIds);
 
     // Notify the UI to refresh
-    window.dispatchEvent(new Event("velo-sync-done"));
+    window.dispatchEvent(new Event("ratatoskr-sync-done"));
   }
 }
 

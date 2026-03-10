@@ -2,8 +2,6 @@ import {
   Download,
   ExternalLink,
   Github,
-  Globe,
-  Mail,
   RefreshCw,
   Scale,
 } from "lucide-react";
@@ -208,11 +206,11 @@ function AboutTab(): React.ReactNode {
 
   return (
     <>
-      <Section title={t("veloMail")}>
+      <Section title={t("ratatoskrMail")}>
         <div className="flex items-center gap-3 mb-2">
-          <img src={appIcon} alt="Velo" className="w-12 h-12 rounded-xl" />
+          <img src={appIcon} alt="Ratatoskr" className="w-12 h-12 rounded-xl" />
           <div>
-            <h3 className="text-base font-semibold text-text-primary">Velo</h3>
+            <h3 className="text-base font-semibold text-text-primary">Ratatoskr</h3>
             <p className="text-sm text-text-tertiary">
               {appVersion ? `${t("version")} ${appVersion}` : t("loading")}
             </p>
@@ -227,21 +225,8 @@ function AboutTab(): React.ReactNode {
         <div className="space-y-1">
           <button
             type="button"
-            onClick={(): void => void openExternal("https://velomail.app")}
-            className="flex items-center gap-3 w-full px-4 py-2.5 rounded-lg bg-bg-secondary hover:bg-bg-hover transition-colors text-left"
-          >
-            <Globe size={16} className="text-text-tertiary shrink-0" />
-            <div className="min-w-0 flex-1">
-              <span className="text-sm text-text-primary">{t("website")}</span>
-              <p className="text-xs text-text-tertiary">velomail.app</p>
-            </div>
-            <ExternalLink size={14} className="text-text-tertiary shrink-0" />
-          </button>
-
-          <button
-            type="button"
             onClick={(): void =>
-              void openExternal("https://github.com/avihaymenahem/velo")
+              void openExternal("https://github.com/folknor/ratatoskr")
             }
             className="flex items-center gap-3 w-full px-4 py-2.5 rounded-lg bg-bg-secondary hover:bg-bg-hover transition-colors text-left"
           >
@@ -250,20 +235,9 @@ function AboutTab(): React.ReactNode {
               <span className="text-sm text-text-primary">
                 {t("githubRepository")}
               </span>
-              <p className="text-xs text-text-tertiary">avihaymenahem/velo</p>
-            </div>
-            <ExternalLink size={14} className="text-text-tertiary shrink-0" />
-          </button>
-
-          <button
-            type="button"
-            onClick={(): void => void openExternal("mailto:info@velomail.app")}
-            className="flex items-center gap-3 w-full px-4 py-2.5 rounded-lg bg-bg-secondary hover:bg-bg-hover transition-colors text-left"
-          >
-            <Mail size={16} className="text-text-tertiary shrink-0" />
-            <div className="min-w-0 flex-1">
-              <span className="text-sm text-text-primary">{t("contact")}</span>
-              <p className="text-xs text-text-tertiary">info@velomail.app</p>
+              <p className="text-xs text-text-tertiary">
+                folknor/ratatoskr
+              </p>
             </div>
             <ExternalLink size={14} className="text-text-tertiary shrink-0" />
           </button>

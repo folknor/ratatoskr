@@ -60,7 +60,7 @@ async function checkBundleDelivery(): Promise<void> {
         if (released > 0) {
           await updateLastDelivered(account.id, rule.category);
           // Refresh UI
-          window.dispatchEvent(new Event("velo-sync-done"));
+          window.dispatchEvent(new Event("ratatoskr-sync-done"));
         }
       }
     }

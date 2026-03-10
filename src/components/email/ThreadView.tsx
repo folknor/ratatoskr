@@ -344,9 +344,9 @@ export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
       };
       setRawMessageTarget(detail);
     };
-    window.addEventListener("velo-view-raw-message", handler);
+    window.addEventListener("ratatoskr-view-raw-message", handler);
     return (): void =>
-      window.removeEventListener("velo-view-raw-message", handler);
+      window.removeEventListener("ratatoskr-view-raw-message", handler);
   }, []);
 
   // Listen for extract-task event from keyboard shortcut
@@ -359,8 +359,8 @@ export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
         setShowTaskExtract(true);
       }
     };
-    window.addEventListener("velo-extract-task", handler);
-    return (): void => window.removeEventListener("velo-extract-task", handler);
+    window.addEventListener("ratatoskr-extract-task", handler);
+    return (): void => window.removeEventListener("ratatoskr-extract-task", handler);
   }, [thread.id]);
 
   const handleMessageContextMenu = useCallback(

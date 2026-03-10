@@ -169,15 +169,15 @@ export default function App(): React.ReactNode {
       const detail = (e as CustomEvent<{ threadIds: string[] }>).detail;
       setMoveToFolderState({ open: true, threadIds: detail.threadIds });
     };
-    window.addEventListener("velo-toggle-command-palette", togglePalette);
-    window.addEventListener("velo-toggle-shortcuts-help", toggleHelp);
-    window.addEventListener("velo-toggle-ask-inbox", toggleAskInbox);
-    window.addEventListener("velo-move-to-folder", handleMoveToFolder);
+    window.addEventListener("ratatoskr-toggle-command-palette", togglePalette);
+    window.addEventListener("ratatoskr-toggle-shortcuts-help", toggleHelp);
+    window.addEventListener("ratatoskr-toggle-ask-inbox", toggleAskInbox);
+    window.addEventListener("ratatoskr-move-to-folder", handleMoveToFolder);
     return (): void => {
-      window.removeEventListener("velo-toggle-command-palette", togglePalette);
-      window.removeEventListener("velo-toggle-shortcuts-help", toggleHelp);
-      window.removeEventListener("velo-toggle-ask-inbox", toggleAskInbox);
-      window.removeEventListener("velo-move-to-folder", handleMoveToFolder);
+      window.removeEventListener("ratatoskr-toggle-command-palette", togglePalette);
+      window.removeEventListener("ratatoskr-toggle-shortcuts-help", toggleHelp);
+      window.removeEventListener("ratatoskr-toggle-ask-inbox", toggleAskInbox);
+      window.removeEventListener("ratatoskr-move-to-folder", handleMoveToFolder);
     };
   }, []);
 
@@ -489,7 +489,7 @@ export default function App(): React.ReactNode {
         }
       } else if (status === "done") {
         setSyncStatus(null);
-        window.dispatchEvent(new Event("velo-sync-done"));
+        window.dispatchEvent(new Event("ratatoskr-sync-done"));
         void updateBadgeCount();
 
         // Backfill uncategorized threads after first successful sync per account
@@ -506,7 +506,7 @@ export default function App(): React.ReactNode {
           error ? `Sync failed: ${formatSyncError(error)}` : "Sync failed",
         );
         // Still dispatch sync-done so the UI refreshes with any partially stored data
-        window.dispatchEvent(new Event("velo-sync-done"));
+        window.dispatchEvent(new Event("ratatoskr-sync-done"));
         // Auto-clear the error after 8 seconds
         setTimeout(() => setSyncStatus(null), 8_000);
       }

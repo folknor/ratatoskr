@@ -183,7 +183,7 @@ describe("executeQuickStep", () => {
     expect(result.success).toBe(true);
     expect(dispatchSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: "velo-inline-reply",
+        type: "ratatoskr-inline-reply",
         detail: { threadId: "t1", accountId: "acct-1", mode: "reply" },
       }),
     );
@@ -247,7 +247,7 @@ describe("executeQuickStep", () => {
       true,
     );
     expect(dispatchSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "velo-sync-done" }),
+      expect.objectContaining({ type: "ratatoskr-sync-done" }),
     );
 
     dispatchSpy.mockRestore();

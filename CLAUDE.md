@@ -105,7 +105,7 @@ Thread pop-out windows via `ThreadWindow.tsx`. Entry point in `main.tsx` checks 
 
 ### Cross-component communication
 
-Custom window events: `velo-sync-done`, `velo-toggle-command-palette`, `velo-toggle-shortcuts-help`, `velo-toggle-ask-inbox`, `velo-move-to-folder`. Tray emits `tray-check-mail` via Tauri event system. `single-instance-args` event for deep link forwarding.
+Custom window events: `ratatoskr-sync-done`, `ratatoskr-toggle-command-palette`, `ratatoskr-toggle-shortcuts-help`, `ratatoskr-toggle-ask-inbox`, `ratatoskr-move-to-folder`. Tray emits `tray-check-mail` via Tauri event system. `single-instance-args` event for deep link forwarding.
 
 ### Keyboard shortcuts
 
@@ -178,14 +178,14 @@ Key tables (37 total): `accounts` (with `provider` "gmail_api"|"imap", IMAP/SMTP
 ## Key Gotchas
 
 - **Message bodies are in a separate DB**: `body_html` and `body_text` columns in the `messages` table are NULL. Bodies live in `bodies.db` (zstd-compressed). Use `body_store_get`/`body_store_get_batch` to fetch bodies. The Rust `db_get_messages_for_thread` command auto-hydrates bodies. When reading messages from TS SQL queries, call `bodyStoreGetBatch()` to hydrate. When writing, call `bodyStorePut()` — `upsertMessage()` already does this.
-- **Tauri SQL plugin config**: `preload` in tauri.conf.json must be an array `["sqlite:velo.db"]` — NOT an object/map
+- **Tauri SQL plugin config**: `preload` in tauri.conf.json must be an array `["sqlite:ratatoskr.db"]` — NOT an object/map
 - **Tauri Emitter trait**: Must `use tauri::Emitter;` to call `.emit()` on windows
 - **Tauri capabilities**: Any new plugin needs explicit permissions added to `src-tauri/capabilities/default.json`. Windows allow `"main"`, `"splashscreen"`, and `"thread-*"` wildcard
 - **Tauri window config**: Custom titlebar — macOS uses `titleBarStyle: "Overlay"`, Windows/Linux removes decorations programmatically in Rust setup. 1200x800 default, 800x600 minimum. Splash screen: 400x300, no decorations, center, always on top
 - **Single instance**: `tauri-plugin-single-instance` must be first plugin registered. Forwards args for deep linking
 - **Minimize-to-tray**: Use `.on_window_event()` on the Builder, not `window.on_window_event()`
 - **Windows WebView2**: `Chrome_WidgetWin_0` error on close is benign — ignore it
-- **Windows AUMID**: Set explicitly in Rust for proper notification identity (`com.velomail.app`)
+- **Windows AUMID**: Set explicitly in Rust for proper notification identity (`com.folknor.ratatoskr`)
 - **OAuth (Gmail)**: Localhost server tries ports 17248-17251. PKCE flow, no client secret. Client ID stored in SQLite settings table, configured by user in Settings
 - **IMAP message IDs**: Format is `imap-{accountId}-{folder}-{uid}` — not the RFC Message-ID header
 - **IMAP security mapping**: UI shows "SSL/TLS", "STARTTLS", "None" but config stores "ssl", "starttls", "none"

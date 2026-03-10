@@ -146,7 +146,7 @@
   "contextOpenInNewWindow": "Open in New Window",
   "contextCopyText": "Copy Message Text",
   "contextViewSource": "View Source",
-  "readingPaneTitle": "Velo",
+  "readingPaneTitle": "Ratatoskr",
   "readingPaneSubtitle": "Select an email to read",
   "forwardedMessageSeparator": "---------- Forwarded message ---------",
   "quoteWrote": "{{name}} wrote:",

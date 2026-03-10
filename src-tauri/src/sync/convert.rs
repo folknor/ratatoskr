@@ -18,7 +18,7 @@ pub struct ConvertedMessage {
 
 /// Generate a synthetic Message-ID for messages that lack one.
 fn synthetic_message_id(account_id: &str, folder: &str, uid: u32) -> String {
-    format!("synthetic-{account_id}-{folder}-{uid}@velo.local")
+    format!("synthetic-{account_id}-{folder}-{uid}@ratatoskr.local")
 }
 
 /// Convert an IMAP message to the format needed for DB storage and threading.

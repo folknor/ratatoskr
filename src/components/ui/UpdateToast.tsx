@@ -49,7 +49,7 @@ export function UpdateToast(): React.ReactNode {
       >
         <div className="px-4 py-3 space-y-2">
           <p className="text-sm font-medium text-text-primary">
-            Velo v{version} is available
+            Ratatoskr v{version} is available
           </p>
           <div className="flex items-center gap-2">
             <button

@@ -170,8 +170,8 @@ export function AttachmentLibrary(): React.ReactNode {
     const handler = (): void => {
       if (accountId) void loadData(accountId);
     };
-    window.addEventListener("velo-sync-done", handler);
-    return () => window.removeEventListener("velo-sync-done", handler);
+    window.addEventListener("ratatoskr-sync-done", handler);
+    return () => window.removeEventListener("ratatoskr-sync-done", handler);
   }, [accountId, loadData]);
 
   const filtered = useMemo(() => {

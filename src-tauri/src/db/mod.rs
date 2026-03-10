@@ -22,7 +22,23 @@ impl DbState {
     pub fn init(app_data_dir: &PathBuf) -> Result<Self, String> {
         std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create app dir: {e}"))?;
 
-        let db_path = app_data_dir.join("velo.db");
+        // Migrate from old database name (velo.db → ratatoskr.db)
+        let db_path = app_data_dir.join("ratatoskr.db");
+        let old_db_path = app_data_dir.join("velo.db");
+        if !db_path.exists() && old_db_path.exists() {
+            log::info!("Migrating database: velo.db → ratatoskr.db");
+            std::fs::rename(&old_db_path, &db_path)
+                .map_err(|e| format!("rename velo.db → ratatoskr.db: {e}"))?;
+            // Also migrate WAL files if they exist
+            let old_shm = app_data_dir.join("velo.db-shm");
+            let old_wal = app_data_dir.join("velo.db-wal");
+            if old_shm.exists() {
+                let _ = std::fs::rename(&old_shm, app_data_dir.join("ratatoskr.db-shm"));
+            }
+            if old_wal.exists() {
+                let _ = std::fs::rename(&old_wal, app_data_dir.join("ratatoskr.db-wal"));
+            }
+        }
         let conn = Connection::open(&db_path)
             .map_err(|e| format!("open db {}: {e}", db_path.display()))?;
 

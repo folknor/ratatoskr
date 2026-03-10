@@ -1,6 +1,6 @@
 # Architecture
 
-Velo follows a **three-layer architecture** with clear separation of concerns.
+Ratatoskr follows a **three-layer architecture** with clear separation of concerns.
 
 ```
 +--------------------------+
@@ -48,7 +48,7 @@ Velo follows a **three-layer architecture** with clear separation of concerns.
 ## Project Structure
 
 ```
-velo/
+ratatoskr/
 ├── src/
 │   ├── components/           # React components (14 groups, ~94 files)
 │   │   ├── layout/           # Sidebar, EmailList, ReadingPane, TitleBar
@@ -211,6 +211,6 @@ Key tables: `accounts` (with `provider`, IMAP/SMTP fields), `messages` (with FTS
 
 ## Packaging & Distribution
 
-Velo supports standard Linux distribution formats via automated and local build processes:
+Ratatoskr supports standard Linux distribution formats via automated and local build processes:
 
 - **RPM & COPR**: Native RPM generation is integrated via Tauri's bundler (`tauri build -b rpm`), making it trivial to build and test RPMs locally or publish SRPMs to Fedora COPR.

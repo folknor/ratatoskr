@@ -396,7 +396,7 @@ async function syncCalendarForAccount(accountId: string): Promise<void> {
     }
 
     // Emit event for UI update
-    window.dispatchEvent(new CustomEvent("velo-calendar-sync-done"));
+    window.dispatchEvent(new CustomEvent("ratatoskr-calendar-sync-done"));
   } catch (err) {
     console.warn(
       `[syncManager] Calendar sync failed for account ${accountId}:`,

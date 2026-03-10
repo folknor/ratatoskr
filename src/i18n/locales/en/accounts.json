@@ -1,6 +1,6 @@
 {
   "addGmailAccount": "Add Gmail Account",
-  "gmailSignInDescription": "Sign in with your Google account to connect it to Velo.",
+  "gmailSignInDescription": "Sign in with your Google account to connect it to Ratatoskr.",
   "waitingForSignIn": "Waiting for Google sign-in...",
   "completeSignIn": "Complete the sign-in in your browser, then return here.",
   "signInWithGoogle": "Sign in with Google",

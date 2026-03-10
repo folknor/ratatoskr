@@ -571,7 +571,7 @@ function ThreadMenu({
       shortcut: "v",
       action: () => {
         window.dispatchEvent(
-          new CustomEvent("velo-move-to-folder", {
+          new CustomEvent("ratatoskr-move-to-folder", {
             detail: { threadIds: [...targetIds] },
           }),
         );
@@ -588,7 +588,7 @@ function ThreadMenu({
           for (const id of targetIds) {
             await setThreadCategory(activeAccountId, id, cat, true);
           }
-          window.dispatchEvent(new Event("velo-sync-done"));
+          window.dispatchEvent(new Event("ratatoskr-sync-done"));
         },
       })),
     },
@@ -774,7 +774,7 @@ function MessageMenu({
             icon: Code,
             action: () => {
               window.dispatchEvent(
-                new CustomEvent("velo-view-raw-message", {
+                new CustomEvent("ratatoskr-view-raw-message", {
                   detail: { messageId, accountId },
                 }),
               );

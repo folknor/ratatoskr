@@ -83,7 +83,7 @@ function extractInlineImages(html: string): {
     /<img([^>]*)\ssrc="data:([^;]+);base64,([^"]+)"([^>]*)>/g,
     // biome-ignore lint/complexity/useMaxParams: regex replace callback requires all capture groups
     (_match, before: string, mime: string, data: string, after: string) => {
-      const cid = `inline_${Date.now()}_${images.length}@velomail`;
+      const cid = `inline_${Date.now()}_${images.length}@ratatoskr`;
       images.push({ cid, mimeType: mime, base64: data });
       return `<img${before} src="cid:${cid}"${after}>`;
     },
@@ -97,7 +97,7 @@ function extractInlineImages(html: string): {
 function generateMessageId(from: string): string {
   const timestamp = Date.now();
   const random = Math.random().toString(36).slice(2, 10);
-  const domain = from.includes("@") ? from.split("@")[1] : "velomail.local";
+  const domain = from.includes("@") ? from.split("@")[1] : "ratatoskr.local";
   return `<${timestamp}.${random}@${domain}>`;
 }
 

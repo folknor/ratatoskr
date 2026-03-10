@@ -47,7 +47,7 @@ export function TitleBar(): React.ReactNode {
           data-tauri-drag-region
           className="text-xs font-semibold text-sidebar-text tracking-wide"
         >
-          {t("common:velo")}
+          {t("common:ratatoskr")}
         </span>
       </div>
 
