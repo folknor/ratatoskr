@@ -1,16 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/services/db/connection", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/services/db/connection")>();
-  return {
-    ...actual,
-    getDb: vi.fn(),
-  };
-});
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+}));
 
-import { getDb } from "@/services/db/connection";
-import { createMockDb } from "@/test/mocks";
+import { invoke } from "@tauri-apps/api/core";
 import {
   getAttachmentSenders,
   getAttachmentsForAccount,
@@ -18,18 +12,15 @@ import {
   upsertAttachment,
 } from "./attachments";
 
-const mockDb = createMockDb();
+const mockInvoke = vi.mocked(invoke);
 
 describe("attachments DB service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getDb).mockResolvedValue(
-      mockDb as unknown as Awaited<ReturnType<typeof getDb>>,
-    );
   });
 
   describe("getAttachmentsForAccount", () => {
-    it("queries with correct SQL joining messages", async () => {
+    it("calls invoke with correct command and params", async () => {
       const mockData = [
         {
           id: "att-1",
@@ -38,50 +29,51 @@ describe("attachments DB service", () => {
           date: 1000,
         },
       ];
-      mockDb.select.mockResolvedValueOnce(mockData);
+      mockInvoke.mockResolvedValueOnce(mockData);
 
       const result = await getAttachmentsForAccount("acc-1");
 
-      expect(mockDb.select).toHaveBeenCalledTimes(1);
-      const [sql, params] = mockDb.select.mock.calls[0] ?? [];
-      expect(sql).toContain("JOIN messages m");
-      expect(sql).toContain("a.account_id = $1");
-      expect(sql).toContain("filename IS NOT NULL");
-      expect(sql).toContain("ORDER BY m.date DESC");
-      expect(params).toEqual(["acc-1", 200, 0]);
+      expect(mockInvoke).toHaveBeenCalledWith("db_get_attachments_for_account", {
+        accountId: "acc-1",
+        limit: 200,
+        offset: 0,
+      });
       expect(result).toEqual(mockData);
     });
 
     it("supports custom limit and offset", async () => {
-      mockDb.select.mockResolvedValueOnce([]);
+      mockInvoke.mockResolvedValueOnce([]);
 
       await getAttachmentsForAccount("acc-1", 50, 100);
 
-      const [, params] = mockDb.select.mock.calls[0] ?? [];
-      expect(params).toEqual(["acc-1", 50, 100]);
+      expect(mockInvoke).toHaveBeenCalledWith("db_get_attachments_for_account", {
+        accountId: "acc-1",
+        limit: 50,
+        offset: 100,
+      });
     });
   });
 
   describe("getAttachmentSenders", () => {
-    it("queries distinct senders with counts", async () => {
+    it("calls invoke with correct command", async () => {
       const mockSenders = [
         { from_address: "alice@example.com", from_name: "Alice", count: 5 },
       ];
-      mockDb.select.mockResolvedValueOnce(mockSenders);
+      mockInvoke.mockResolvedValueOnce(mockSenders);
 
       const result = await getAttachmentSenders("acc-1");
 
-      expect(mockDb.select).toHaveBeenCalledTimes(1);
-      const [sql, params] = mockDb.select.mock.calls[0] ?? [];
-      expect(sql).toContain("GROUP BY m.from_address");
-      expect(sql).toContain("ORDER BY count DESC");
-      expect(params).toEqual(["acc-1"]);
+      expect(mockInvoke).toHaveBeenCalledWith("db_get_attachment_senders", {
+        accountId: "acc-1",
+      });
       expect(result).toEqual(mockSenders);
     });
   });
 
   describe("upsertAttachment", () => {
-    it("executes upsert with correct params", async () => {
+    it("calls invoke with correct params", async () => {
+      mockInvoke.mockResolvedValueOnce(undefined);
+
       await upsertAttachment({
         id: "att-1",
         messageId: "msg-1",
@@ -94,34 +86,30 @@ describe("attachments DB service", () => {
         isInline: false,
       });
 
-      expect(mockDb.execute).toHaveBeenCalledTimes(1);
-      const [sql, params] = mockDb.execute.mock.calls[0] ?? [];
-      expect(sql).toContain("INSERT INTO attachments");
-      expect(sql).toContain("ON CONFLICT");
-      expect(params).toEqual([
-        "att-1",
-        "msg-1",
-        "acc-1",
-        "test.pdf",
-        "application/pdf",
-        1024,
-        "gid-1",
-        null,
-        0,
-      ]);
+      expect(mockInvoke).toHaveBeenCalledWith("db_upsert_attachment", {
+        id: "att-1",
+        messageId: "msg-1",
+        accountId: "acc-1",
+        filename: "test.pdf",
+        mimeType: "application/pdf",
+        size: 1024,
+        gmailAttachmentId: "gid-1",
+        contentId: null,
+        isInline: false,
+      });
     });
   });
 
   describe("getAttachmentsForMessage", () => {
-    it("queries attachments for a specific message", async () => {
-      mockDb.select.mockResolvedValueOnce([]);
+    it("calls invoke for a specific message", async () => {
+      mockInvoke.mockResolvedValueOnce([]);
 
       await getAttachmentsForMessage("acc-1", "msg-1");
 
-      expect(mockDb.select).toHaveBeenCalledWith(
-        "SELECT * FROM attachments WHERE account_id = $1 AND message_id = $2 ORDER BY filename ASC",
-        ["acc-1", "msg-1"],
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_get_attachments_for_message", {
+        accountId: "acc-1",
+        messageId: "msg-1",
+      });
     });
   });
 });

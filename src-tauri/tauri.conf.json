@@ -63,10 +63,7 @@
 			"endpoints": [],
 			"pubkey": ""
 		},
-		"sql": {
-			"preload": ["sqlite:ratatoskr.db"]
-		},
-		"deep-link": {
+"deep-link": {
 			"mobile": [],
 			"desktop": {
 				"schemes": ["mailto"]

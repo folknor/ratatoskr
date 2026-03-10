@@ -5,7 +5,6 @@ import { UndoSendToast } from "./components/composer/UndoSendToast";
 import type { ColorThemeId } from "./constants/themes";
 import { COLOR_THEMES, getThemeById } from "./constants/themes";
 import { getAllAccounts } from "./services/db/accounts";
-import { runMigrations } from "./services/db/migrations";
 import { getSetting } from "./services/db/settings";
 import { initializeClients } from "./services/gmail/tokenManager";
 import { useAccountStore } from "./stores/accountStore";
@@ -24,8 +23,6 @@ export default function ComposerWindow(): React.ReactNode {
 
     async function init(): Promise<void> {
       try {
-        await runMigrations();
-
         // Load persisted language
         const { loadPersistedLanguage } = await import("./i18n");
         await loadPersistedLanguage();

@@ -1,14 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+}));
+
+import { invoke } from "@tauri-apps/api/core";
 import {
+  findSpecialFolder,
   groupMessagesByFolder,
   type ImapMessageInfo,
+  getImapUidsForMessages,
   securityToConfigType,
+  updateMessageImapFolder,
 } from "./messageHelper";
 
-// Mock the DB module
-vi.mock("../db/connection", () => ({
-  getDb: vi.fn(),
-}));
+const mockInvoke = vi.mocked(invoke);
 
 describe("messageHelper", () => {
   beforeEach(() => {
@@ -70,7 +76,6 @@ describe("messageHelper", () => {
 
   describe("getImapUidsForMessages", () => {
     it("returns empty map for empty input", async () => {
-      const { getImapUidsForMessages } = await import("./messageHelper");
       const result = await getImapUidsForMessages("acc1", []);
       expect(result.size).toBe(0);
     });
@@ -78,90 +83,41 @@ describe("messageHelper", () => {
 
   describe("findSpecialFolder", () => {
     it("returns null when no matching folder exists", async () => {
-      const { getDb } = await import("../db/connection");
-      const mockDb = {
-        select: vi.fn().mockResolvedValue([]),
-      };
-      vi.mocked(getDb).mockResolvedValue(mockDb as never);
+      mockInvoke.mockResolvedValueOnce(null);
 
-      const { findSpecialFolder } = await import("./messageHelper");
       const result = await findSpecialFolder("acc1", "\\Trash");
       expect(result).toBeNull();
+      expect(mockInvoke).toHaveBeenCalledWith("db_find_special_folder", {
+        accountId: "acc1",
+        specialUse: "\\Trash",
+        fallbackLabelId: "TRASH",
+      });
     });
 
-    it("falls back to label ID lookup when imap_special_use not found", async () => {
-      const { getDb } = await import("../db/connection");
-      const mockDb = {
-        select: vi
-          .fn()
-          .mockResolvedValueOnce([]) // first query: imap_special_use lookup → empty
-          .mockResolvedValueOnce([
-            { imap_folder_path: "unsolbox", name: "Trash" },
-          ]), // fallback: label ID lookup
-      };
-      vi.mocked(getDb).mockResolvedValue(mockDb as never);
+    it("returns folder path from invoke result", async () => {
+      mockInvoke.mockResolvedValueOnce("INBOX.Trash");
 
-      const { findSpecialFolder } = await import("./messageHelper");
-      const result = await findSpecialFolder("acc1", "\\Trash");
-      expect(result).toBe("unsolbox");
-      expect(mockDb.select).toHaveBeenCalledTimes(2);
-    });
-
-    it("returns imap_folder_path when available", async () => {
-      const { getDb } = await import("../db/connection");
-      const mockDb = {
-        select: vi
-          .fn()
-          .mockResolvedValue([
-            { imap_folder_path: "INBOX.Trash", name: "Trash" },
-          ]),
-      };
-      vi.mocked(getDb).mockResolvedValue(mockDb as never);
-
-      const { findSpecialFolder } = await import("./messageHelper");
       const result = await findSpecialFolder("acc1", "\\Trash");
       expect(result).toBe("INBOX.Trash");
-    });
-
-    it("falls back to name when imap_folder_path is null", async () => {
-      const { getDb } = await import("../db/connection");
-      const mockDb = {
-        select: vi
-          .fn()
-          .mockResolvedValue([{ imap_folder_path: null, name: "Trash" }]),
-      };
-      vi.mocked(getDb).mockResolvedValue(mockDb as never);
-
-      const { findSpecialFolder } = await import("./messageHelper");
-      const result = await findSpecialFolder("acc1", "\\Trash");
-      expect(result).toBe("Trash");
     });
   });
 
   describe("updateMessageImapFolder", () => {
     it("does nothing for empty message list", async () => {
-      const { getDb } = await import("../db/connection");
-      const mockDb = { execute: vi.fn() };
-      vi.mocked(getDb).mockResolvedValue(mockDb as never);
-
-      const { updateMessageImapFolder } = await import("./messageHelper");
       await updateMessageImapFolder("acc1", [], "INBOX");
-      expect(mockDb.execute).not.toHaveBeenCalled();
+      expect(mockInvoke).not.toHaveBeenCalled();
     });
 
     it("updates folder for given messages", async () => {
-      const { getDb } = await import("../db/connection");
-      const mockDb = { execute: vi.fn().mockResolvedValue(undefined) };
-      vi.mocked(getDb).mockResolvedValue(mockDb as never);
+      mockInvoke.mockResolvedValueOnce(undefined);
 
-      const { updateMessageImapFolder } = await import("./messageHelper");
       await updateMessageImapFolder("acc1", ["msg1", "msg2"], "Trash");
 
-      expect(mockDb.execute).toHaveBeenCalledTimes(1);
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("UPDATE messages SET imap_folder"),
-        ["Trash", "acc1", "msg1", "msg2"],
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_update_message_imap_folder", {
+        accountId: "acc1",
+        messageIds: ["msg1", "msg2"],
+        newFolder: "Trash",
+      });
     });
   });
 });

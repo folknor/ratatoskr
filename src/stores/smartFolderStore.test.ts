@@ -15,12 +15,8 @@ vi.mock("@/services/search/smartFolderQuery", () => ({
   })),
 }));
 
-vi.mock("@/services/db/connection", () => ({
-  getDb: vi.fn(() =>
-    Promise.resolve({
-      select: vi.fn(() => Promise.resolve([{ count: 5 }])),
-    }),
-  ),
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(() => Promise.resolve([{ count: 5 }])),
 }));
 
 import {
@@ -51,7 +47,7 @@ describe("smartFolderStore", () => {
           icon: "MailOpen",
           color: null,
           sort_order: 0,
-          is_default: 1,
+          is_default: true,
           created_at: 1000,
         },
         {
@@ -62,7 +58,7 @@ describe("smartFolderStore", () => {
           icon: "Star",
           color: "#ff0000",
           sort_order: 1,
-          is_default: 0,
+          is_default: false,
           created_at: 2000,
         },
       ]);

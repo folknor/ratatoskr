@@ -675,13 +675,23 @@ static MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 24,
-        description: "Normalize auth_method 'oauth' to 'oauth2'",
-        sql: "UPDATE accounts SET auth_method = 'oauth2' WHERE auth_method = 'oauth';",
-    },
-    Migration {
-        version: 25,
-        description: "Per-folder delta tokens for Graph provider",
+        description: "Post-release consolidation: JMAP, Graph delta tokens, FTS5 removal, auth normalization",
         sql: r#"
+            -- Normalize auth_method 'oauth' to 'oauth2'
+            UPDATE accounts SET auth_method = 'oauth2' WHERE auth_method = 'oauth';
+
+            -- JMAP provider support
+            ALTER TABLE accounts ADD COLUMN jmap_url TEXT;
+            CREATE TABLE IF NOT EXISTS jmap_sync_state (
+                account_id TEXT NOT NULL,
+                type TEXT NOT NULL,
+                state TEXT NOT NULL,
+                updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                PRIMARY KEY (account_id, type),
+                FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+            );
+
+            -- Graph provider per-folder delta tokens
             CREATE TABLE IF NOT EXISTS graph_folder_delta_tokens (
                 account_id TEXT NOT NULL,
                 folder_id TEXT NOT NULL,
@@ -690,12 +700,8 @@ static MIGRATIONS: &[Migration] = &[
                 PRIMARY KEY (account_id, folder_id),
                 FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
             );
-        "#,
-    },
-    Migration {
-        version: 26,
-        description: "Drop FTS5 virtual table and body_html/body_text columns from messages",
-        sql: r#"
+
+            -- Drop FTS5 (replaced by tantivy) and unused body columns (moved to body store)
             DROP TRIGGER IF EXISTS messages_ai;
             DROP TRIGGER IF EXISTS messages_ad;
             DROP TRIGGER IF EXISTS messages_au;
@@ -769,12 +775,61 @@ pub fn run_all(conn: &Connection) -> Result<(), String> {
     let mut stmt = conn
         .prepare("SELECT version FROM _migrations ORDER BY version")
         .map_err(|e| format!("prepare: {e}"))?;
-    let applied: std::collections::HashSet<u32> = stmt
+    let mut applied: std::collections::HashSet<u32> = stmt
         .query_map([], |row| row.get::<_, u32>(0))
         .map_err(|e| format!("query: {e}"))?
         .filter_map(Result::ok)
         .collect();
+    drop(stmt);
 
+    // ── Repair logic ───────────────────────────────────────────
+    // If v14 is marked applied but imap_folder_path column is missing, re-run v14+
+    if applied.contains(&14) {
+        let has_col: bool = conn
+            .prepare("PRAGMA table_info(labels)")
+            .and_then(|mut s| {
+                let cols: Vec<String> = s
+                    .query_map([], |row| row.get::<_, String>(1))?
+                    .filter_map(Result::ok)
+                    .collect();
+                Ok(cols.iter().any(|c| c == "imap_folder_path"))
+            })
+            .unwrap_or(false);
+        if !has_col {
+            log::warn!("Migration v14 marked applied but imap_folder_path column missing — re-running");
+            let _ = conn.execute("DELETE FROM _migrations WHERE version >= 14", []);
+            applied.retain(|v| *v < 14);
+        }
+    }
+    // If v18 is marked applied but tasks table is missing, re-run
+    if applied.contains(&18) {
+        let has_table: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='tasks'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_table {
+            log::warn!("Migration v18 marked applied but tasks table missing — re-running");
+            let _ = conn.execute("DELETE FROM _migrations WHERE version = 18", []);
+            applied.remove(&18);
+        }
+    }
+    // Clean up stale TS-only migration records (v25-27) that the old TS runner
+    // may have inserted with different content than Rust's v24. Since we folded
+    // everything post-v23 into Rust v24, remove these so they don't confuse things.
+    // v24 itself uses INSERT OR IGNORE so it won't conflict.
+    if applied.contains(&25) || applied.contains(&26) || applied.contains(&27) {
+        log::info!("Cleaning up stale TS migration records v25-v27");
+        let _ = conn.execute("DELETE FROM _migrations WHERE version IN (25, 26, 27)", []);
+        applied.remove(&25);
+        applied.remove(&26);
+        applied.remove(&27);
+    }
+
+    // ── Run pending migrations ─────────────────────────────────
     for m in MIGRATIONS {
         if applied.contains(&m.version) {
             continue;
@@ -790,8 +845,11 @@ pub fn run_all(conn: &Connection) -> Result<(), String> {
         for s in &stmts {
             if let Err(e) = conn.execute_batch(s) {
                 let msg = e.to_string();
-                if msg.contains("duplicate column") {
-                    log::warn!("Skipping duplicate column in v{}: {msg}", m.version);
+                if msg.contains("duplicate column")
+                    || msg.contains("no such column")  // DROP COLUMN on already-dropped column
+                    || msg.contains("no such table")    // DROP TABLE on already-dropped table
+                {
+                    log::warn!("Skipping in v{}: {msg}", m.version);
                 } else {
                     log::error!("Migration v{} failed: {msg}", m.version);
                     drop(conn.execute_batch("ROLLBACK"));
@@ -807,6 +865,45 @@ pub fn run_all(conn: &Connection) -> Result<(), String> {
         .map_err(|e| format!("record migration: {e}"))?;
         conn.execute_batch("COMMIT")
             .map_err(|e| format!("commit: {e}"))?;
+    }
+
+    // ── One-time repairs ───────────────────────────────────────
+    // Force IMAP attachment resync with corrected Rust binary (runs once)
+    let repair_done: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM settings WHERE key = 'imap_attachment_repair_v1'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !repair_done {
+        let imap_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM accounts WHERE provider = 'imap'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if imap_count > 0 {
+            log::info!("[repair] Forcing IMAP attachment resync with corrected part IDs...");
+            let _ = conn.execute(
+                "DELETE FROM attachments WHERE account_id IN (SELECT id FROM accounts WHERE provider = 'imap')",
+                [],
+            );
+            let _ = conn.execute(
+                "DELETE FROM folder_sync_state WHERE account_id IN (SELECT id FROM accounts WHERE provider = 'imap')",
+                [],
+            );
+            let _ = conn.execute(
+                "UPDATE accounts SET history_id = NULL WHERE provider = 'imap'",
+                [],
+            );
+        }
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('imap_attachment_repair_v1', '1')",
+            [],
+        );
     }
 
     log::info!("All migrations applied.");
@@ -849,6 +946,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))
             .expect("query");
-        assert_eq!(max_ver, 25);
+        assert_eq!(max_ver, 24);
     }
 }

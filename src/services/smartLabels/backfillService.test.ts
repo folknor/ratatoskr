@@ -1,12 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockSelect = vi.fn();
-const { mockGetDb } = vi.hoisted(() => ({
-  mockGetDb: vi.fn(),
-}));
-
-vi.mock("@/services/db/connection", () => ({
-  getDb: mockGetDb,
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
 }));
 
 vi.mock("./smartLabelService", () => ({
@@ -21,14 +16,16 @@ vi.mock("@/core/rustDb", () => ({
   bodyStoreGetBatch: vi.fn(() => Promise.resolve([])),
 }));
 
+import { invoke } from "@tauri-apps/api/core";
 import { addThreadLabel } from "@/services/emailActions";
 import { backfillSmartLabels } from "./backfillService";
 import { matchSmartLabels } from "./smartLabelService";
 
+const mockInvoke = vi.mocked(invoke);
+
 describe("backfillSmartLabels", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetDb.mockResolvedValue({ select: mockSelect, execute: vi.fn() });
   });
 
   it("processes inbox threads in batches", async () => {
@@ -43,7 +40,9 @@ describe("backfillSmartLabels", () => {
       id: `msg-${i}`,
     }));
 
-    mockSelect.mockResolvedValueOnce(batch1).mockResolvedValueOnce([]); // second batch empty
+    mockInvoke
+      .mockResolvedValueOnce(batch1) // first batch
+      .mockResolvedValueOnce([]); // second batch empty
 
     vi.mocked(matchSmartLabels).mockResolvedValue([
       { threadId: "t0", labelIds: ["label-1"] },
@@ -57,7 +56,7 @@ describe("backfillSmartLabels", () => {
   });
 
   it("returns 0 when no threads in inbox", async () => {
-    mockSelect.mockResolvedValueOnce([]);
+    mockInvoke.mockResolvedValueOnce([]);
 
     const count = await backfillSmartLabels("acc-1");
 
@@ -89,7 +88,7 @@ describe("backfillSmartLabels", () => {
       },
     ];
 
-    mockSelect.mockResolvedValueOnce(batch1).mockResolvedValueOnce([]); // terminates because batch1.length < batchSize
+    mockInvoke.mockResolvedValueOnce(batch1); // terminates because batch1.length < batchSize
 
     vi.mocked(matchSmartLabels).mockResolvedValue([
       { threadId: "t1", labelIds: ["label-a", "label-b"] },
@@ -115,12 +114,12 @@ describe("backfillSmartLabels", () => {
       },
     ];
 
-    mockSelect.mockResolvedValueOnce(smallBatch);
+    mockInvoke.mockResolvedValueOnce(smallBatch);
     vi.mocked(matchSmartLabels).mockResolvedValue([]);
 
     await backfillSmartLabels("acc-1", 50);
 
-    // Should only call select once (batch was < 50)
-    expect(mockSelect).toHaveBeenCalledTimes(1);
+    // Should only call invoke once for the batch query (batch was < 50)
+    expect(mockInvoke).toHaveBeenCalledTimes(1);
   });
 });

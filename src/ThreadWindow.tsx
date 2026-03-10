@@ -6,7 +6,6 @@ import { ThreadView } from "./components/email/ThreadView";
 import type { ColorThemeId } from "./constants/themes";
 import { COLOR_THEMES, getThemeById } from "./constants/themes";
 import { getAllAccounts } from "./services/db/accounts";
-import { runMigrations } from "./services/db/migrations";
 import { getSetting } from "./services/db/settings";
 import { getThreadById, getThreadLabelIds } from "./services/db/threads";
 import { initializeClients } from "./services/gmail/tokenManager";
@@ -37,8 +36,6 @@ export default function ThreadWindow(): React.ReactNode {
 
     async function init(): Promise<void> {
       try {
-        await runMigrations();
-
         // Load persisted language
         const { loadPersistedLanguage } = await import("./i18n");
         await loadPersistedLanguage();

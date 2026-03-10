@@ -32,7 +32,6 @@ import {
   stopBundleChecker,
 } from "./services/bundles/bundleManager";
 import { getAllAccounts } from "./services/db/accounts";
-import { runMigrations } from "./services/db/migrations";
 import { getSetting } from "./services/db/settings";
 import { getIncompleteTaskCount } from "./services/db/tasks";
 import { initDeepLinkHandler } from "./services/deepLinkHandler";
@@ -209,7 +208,7 @@ export default function App(): React.ReactNode {
   useEffect(() => {
     async function init(): Promise<void> {
       try {
-        await runMigrations();
+        // Rust backend runs DB migrations during init (DbState::init → migrations::run_all).
 
         // Migrate existing bodies from metadata DB to compressed body store (Phase 2).
         // This is idempotent — once all bodies are migrated, it's a no-op.

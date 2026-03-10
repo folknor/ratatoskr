@@ -1,25 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockGetDb } = vi.hoisted(() => ({
-  mockGetDb: vi.fn(),
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
 }));
 
-vi.mock("@/services/db/connection", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/services/db/connection")>();
-  return {
-    ...actual,
-    getDb: mockGetDb,
-    selectFirstBy: async (query: string, params: unknown[] = []) => {
-      const db = await mockGetDb();
-      const rows = await db.select(query, params);
-      return rows[0] ?? null;
-    },
-  };
-});
-
-import { getDb } from "@/services/db/connection";
-import { createMockDb } from "@/test/mocks";
+import { invoke } from "@tauri-apps/api/core";
 import {
   type DbSendAsAlias,
   deleteAlias,
@@ -30,31 +15,29 @@ import {
   upsertAlias,
 } from "./sendAsAliases";
 
-const mockDb = createMockDb();
+const mockInvoke = vi.mocked(invoke);
 
 describe("sendAsAliases service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getDb).mockResolvedValue(
-      mockDb as unknown as Awaited<ReturnType<typeof getDb>>,
-    );
   });
 
   describe("getAliasesForAccount", () => {
-    it("queries aliases ordered by is_primary DESC, email", async () => {
+    it("calls invoke with correct command", async () => {
+      mockInvoke.mockResolvedValueOnce([]);
+
       await getAliasesForAccount("acc-1");
 
-      expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringContaining(
-          "SELECT * FROM send_as_aliases WHERE account_id = $1",
-        ),
-        ["acc-1"],
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_get_aliases_for_account", {
+        accountId: "acc-1",
+      });
     });
   });
 
   describe("upsertAlias", () => {
     it("inserts an alias with correct parameters", async () => {
+      mockInvoke.mockResolvedValueOnce("alias-id");
+
       await upsertAlias({
         accountId: "acc-1",
         email: "user@example.com",
@@ -65,35 +48,38 @@ describe("sendAsAliases service", () => {
         verificationStatus: "accepted",
       });
 
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("INSERT INTO send_as_aliases"),
-        expect.arrayContaining([
-          "acc-1",
-          "user@example.com",
-          "User Name",
-          null, // replyToAddress
-          null, // signatureId
-          1, // isPrimary
-          0, // isDefault
-          1, // treatAsAlias
-          "accepted",
-        ]),
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_upsert_alias", {
+        accountId: "acc-1",
+        email: "user@example.com",
+        displayName: "User Name",
+        replyToAddress: null,
+        signatureId: null,
+        isPrimary: true,
+        isDefault: false,
+        treatAsAlias: true,
+        verificationStatus: "accepted",
+      });
     });
 
-    it("defaults treatAsAlias to 1 when not specified", async () => {
+    it("defaults treatAsAlias to true when not specified", async () => {
+      mockInvoke.mockResolvedValueOnce("alias-id");
+
       await upsertAlias({
         accountId: "acc-1",
         email: "user@example.com",
       });
 
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("INSERT INTO send_as_aliases"),
-        expect.arrayContaining([
-          1, // treatAsAlias default
-          "accepted", // verificationStatus default
-        ]),
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_upsert_alias", {
+        accountId: "acc-1",
+        email: "user@example.com",
+        displayName: null,
+        replyToAddress: null,
+        signatureId: null,
+        isPrimary: false,
+        isDefault: false,
+        treatAsAlias: true,
+        verificationStatus: "accepted",
+      });
     });
   });
 
@@ -112,44 +98,18 @@ describe("sendAsAliases service", () => {
         verification_status: "accepted",
         created_at: 1000,
       };
-      mockDb.select.mockResolvedValueOnce([alias]);
+      mockInvoke.mockResolvedValueOnce(alias);
 
       const result = await getDefaultAlias("acc-1");
 
       expect(result).toEqual(alias);
-      expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringContaining("is_default = 1"),
-        ["acc-1"],
-      );
-    });
-
-    it("falls back to primary alias when no default exists", async () => {
-      const primary: DbSendAsAlias = {
-        id: "alias-2",
-        account_id: "acc-1",
-        email: "primary@example.com",
-        display_name: "Primary",
-        reply_to_address: null,
-        signature_id: null,
-        is_primary: 1,
-        is_default: 0,
-        treat_as_alias: 1,
-        verification_status: "accepted",
-        created_at: 1000,
-      };
-      mockDb.select
-        .mockResolvedValueOnce([]) // no default
-        .mockResolvedValueOnce([primary]); // primary fallback
-
-      const result = await getDefaultAlias("acc-1");
-
-      expect(result).toEqual(primary);
+      expect(mockInvoke).toHaveBeenCalledWith("db_get_default_alias", {
+        accountId: "acc-1",
+      });
     });
 
     it("returns null when no aliases exist", async () => {
-      mockDb.select
-        .mockResolvedValueOnce([]) // no default
-        .mockResolvedValueOnce([]); // no primary
+      mockInvoke.mockResolvedValueOnce(null);
 
       const result = await getDefaultAlias("acc-1");
 
@@ -158,29 +118,27 @@ describe("sendAsAliases service", () => {
   });
 
   describe("setDefaultAlias", () => {
-    it("clears existing defaults and sets the specified one", async () => {
+    it("calls invoke with correct params", async () => {
+      mockInvoke.mockResolvedValueOnce(undefined);
+
       await setDefaultAlias("acc-1", "alias-3");
 
-      expect(mockDb.execute).toHaveBeenCalledTimes(2);
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("UPDATE send_as_aliases SET is_default = 0"),
-        ["acc-1"],
-      );
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("UPDATE send_as_aliases SET is_default = 1"),
-        ["alias-3", "acc-1"],
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_set_default_alias", {
+        accountId: "acc-1",
+        aliasId: "alias-3",
+      });
     });
   });
 
   describe("deleteAlias", () => {
     it("deletes the alias by id", async () => {
+      mockInvoke.mockResolvedValueOnce(undefined);
+
       await deleteAlias("alias-5");
 
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        "DELETE FROM send_as_aliases WHERE id = $1",
-        ["alias-5"],
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_delete_alias", {
+        id: "alias-5",
+      });
     });
   });
 
