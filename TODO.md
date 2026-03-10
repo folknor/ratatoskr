@@ -89,8 +89,8 @@
 - [ ] **`moveToFolder` only adds label, doesn't remove source** — `src-tauri/src/email_actions/commands.rs`
   `email_action_move_to_folder` inserts the target folder label but doesn't remove the old label (e.g., INBOX). The TS code had the same behavior, so it's a pre-existing gap — the provider-side move handles the actual folder change, but the local DB state is incomplete until next sync.
 
-- [ ] **Rust timeout error messages** — `src-tauri/src/imap/client.rs`
-  Same `format!("...timed out after {}s — check your server...")` repeated 10+ times. Create a timeout error helper or macro.
+- [x] **Rust timeout error messages** — `src-tauri/src/imap/client.rs`
+  Same `format!("...timed out after {}s — check your server...")` repeated 10+ times. Create a timeout error helper or macro. *(Done — `timeout_err()` helper function.)*
 
 - [ ] **Zustand settings persistence** — `src/stores/uiStore.ts`
   15× identical `setSetting("key", value).catch(() => {})`. Create a `persistSetting()` helper with logging.

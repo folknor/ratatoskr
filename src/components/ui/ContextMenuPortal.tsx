@@ -361,33 +361,48 @@ function ThreadMenu({
     }
   };
 
-  const handleToggleRead = async (): Promise<void> => {
+  const batchToggle = async (
+    action: (id: string, current: boolean) => Promise<unknown>,
+    getState: (t: (typeof threads)[number]) => boolean,
+  ): Promise<void> => {
     for (const id of targetIds) {
       const t = threads.find((th) => th.id === id);
       if (!t) continue;
-      await markThreadRead(activeAccountId, id, [], !t.isRead);
+      await action(id, getState(t));
     }
   };
 
-  const handleToggleStar = async (): Promise<void> => {
-    for (const id of targetIds) {
-      const t = threads.find((th) => th.id === id);
-      if (!t) continue;
-      await starThread(activeAccountId, id, [], !t.isStarred);
-    }
-  };
+  const handleToggleRead = (): Promise<void> =>
+    batchToggle(
+      (id, isCurrentlyRead) =>
+        markThreadRead(activeAccountId, id, [], !isCurrentlyRead),
+      (t) => t.isRead,
+    );
 
-  const handleTogglePin = async (): Promise<void> => {
-    for (const id of targetIds) {
-      const t = threads.find((th) => th.id === id);
-      if (!t) continue;
-      if (t.isPinned) {
-        await unpinThread(activeAccountId, id);
-      } else {
-        await pinThread(activeAccountId, id);
-      }
-    }
-  };
+  const handleToggleStar = (): Promise<void> =>
+    batchToggle(
+      (id, isCurrentlyStarred) =>
+        starThread(activeAccountId, id, [], !isCurrentlyStarred),
+      (t) => t.isStarred,
+    );
+
+  const handleTogglePin = (): Promise<void> =>
+    batchToggle(
+      (id, isCurrentlyPinned) =>
+        isCurrentlyPinned
+          ? unpinThread(activeAccountId, id)
+          : pinThread(activeAccountId, id),
+      (t) => t.isPinned,
+    );
+
+  const handleToggleMute = (): Promise<void> =>
+    batchToggle(
+      (id, isCurrentlyMuted) =>
+        isCurrentlyMuted
+          ? unmuteThread(activeAccountId, id)
+          : muteThread(activeAccountId, id, []),
+      (t) => t.isMuted,
+    );
 
   const handleSpam = async (): Promise<void> => {
     for (const id of targetIds) {
@@ -397,18 +412,6 @@ function ThreadMenu({
 
   const handleSnooze = (): void => {
     onSnooze({ threadIds: [...targetIds], accountId: activeAccountId });
-  };
-
-  const handleToggleMute = async (): Promise<void> => {
-    for (const id of targetIds) {
-      const t = threads.find((th) => th.id === id);
-      if (!t) continue;
-      if (t.isMuted) {
-        await unmuteThread(activeAccountId, id);
-      } else {
-        await muteThread(activeAccountId, id, []);
-      }
-    }
   };
 
   const handlePopOut = async (): Promise<void> => {
