@@ -196,6 +196,8 @@ pub fn run() {
             db::queries_extra::db_get_bundle_rules,
             db::queries_extra::db_get_bundle_summaries,
             db::queries_extra::db_get_held_thread_ids,
+            db::queries_extra::db_attachment_cache_total_size,
+            db::queries_extra::db_uncached_recent_attachments,
             // Body store (Phase 2 — compressed body storage)
             body_store::commands::body_store_put,
             body_store::commands::body_store_put_batch,
@@ -227,7 +229,6 @@ pub fn run() {
             email_actions::commands::email_action_add_label,
             email_actions::commands::email_action_remove_label,
             email_actions::commands::email_action_move_to_folder,
-            email_actions::commands::db_enqueue_pending_operation,
             // Pending operations queue
             db::pending_ops::db_pending_ops_enqueue,
             db::pending_ops::db_pending_ops_get,

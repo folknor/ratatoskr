@@ -881,26 +881,6 @@ export async function emailActionMoveToFolder(
   });
 }
 
-// ═══════════════════════════════════════════════════════════════
-// PENDING OPERATIONS QUEUE (centralized)
-// ═══════════════════════════════════════════════════════════════
-
-export async function enqueuePendingOp(
-  accountId: string,
-  operationType: string,
-  resourceId: string,
-  params: Record<string, unknown>,
-): Promise<string> {
-  const id = crypto.randomUUID();
-  await invoke<void>("db_enqueue_pending_operation", {
-    id,
-    accountId,
-    operationType,
-    resourceId,
-    paramsJson: JSON.stringify(params),
-  });
-  return id;
-}
 
 // ═══════════════════════════════════════════════════════════════
 // BODY STORE (Phase 2 — compressed body storage)

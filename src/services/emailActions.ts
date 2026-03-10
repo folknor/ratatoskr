@@ -13,10 +13,10 @@ import {
   emailActionTrash,
   emailActionUnmute,
   emailActionUnpin,
-  enqueuePendingOp,
 } from "@/core/rustDb";
 import { getSelectedThreadId, navigateToThread } from "@/router/navigate";
 import { getEmailProvider } from "@/services/email/providerFactory";
+import { enqueuePendingOperation } from "@/services/db/pendingOperations";
 import { useThreadStore } from "@/stores/threadStore";
 import { useSyncStateStore } from "@/stores/syncStateStore";
 import { classifyError } from "@/utils/networkErrors";
@@ -340,7 +340,7 @@ export async function executeEmailAction(
 
   // 3. If offline, queue for later
   if (!useSyncStateStore.getState().isOnline) {
-    await enqueuePendingOp(
+    await enqueuePendingOperation(
       accountId,
       action.type,
       getResourceId(action),
@@ -357,7 +357,7 @@ export async function executeEmailAction(
     const classified = classifyError(err);
 
     if (classified.isRetryable) {
-      await enqueuePendingOp(
+      await enqueuePendingOperation(
         accountId,
         action.type,
         getResourceId(action),

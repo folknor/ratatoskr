@@ -268,3 +268,13 @@ pub struct DbAttachment {
     pub is_inline: bool,
     pub local_path: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UncachedAttachment {
+    pub id: String,
+    pub message_id: String,
+    pub account_id: String,
+    pub size: i64,
+    pub gmail_attachment_id: Option<String>,
+    pub imap_part_id: Option<String>,
+}

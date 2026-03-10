@@ -348,27 +348,3 @@ pub async fn email_action_move_to_folder(
         })
         .await
 }
-
-// ── Centralized pending operation queue ──────────────────────
-
-#[tauri::command]
-pub async fn db_enqueue_pending_operation(
-    state: State<'_, DbState>,
-    id: String,
-    account_id: String,
-    operation_type: String,
-    resource_id: String,
-    params_json: String,
-) -> Result<(), String> {
-    state
-        .with_conn(move |conn| {
-            conn.execute(
-                "INSERT INTO pending_operations (id, account_id, operation_type, resource_id, params, status)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'pending')",
-                params![id, account_id, operation_type, resource_id, params_json],
-            )
-            .map_err(|e| format!("enqueue pending op: {e}"))?;
-            Ok(())
-        })
-        .await
-}

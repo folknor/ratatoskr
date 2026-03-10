@@ -591,17 +591,21 @@ Components and stores import from `@/core` instead of `@/services/db/*`. Some se
 
 **Goal**: Direct DB access for all email modify operations.
 
-**Status**: Done. 15 Rust commands for local DB updates + 1 centralized queue command:
+**Status**: Done. 15 Rust commands for local DB updates, plus 11 pending ops commands in `db/pending_ops.rs`:
 
 **Rust backend** (`src-tauri/src/email_actions/`):
 - `mod.rs` — shared helpers: `remove_label`, `insert_label`, `remove_inbox_label`
-- `commands.rs` — 15 action commands (archive, trash, permanent_delete, spam, mark_read, star, snooze, unsnooze, pin, unpin, mute, unmute, add_label, remove_label, move_to_folder) + `db_enqueue_pending_operation`
+- `commands.rs` — 15 action commands (archive, trash, permanent_delete, spam, mark_read, star, snooze, unsnooze, pin, unpin, mute, unmute, add_label, remove_label, move_to_folder)
 - Multi-statement actions (trash, spam, star, snooze, unsnooze, mute) use `unchecked_transaction()` for atomicity
 - Local-only actions (pin, unpin, unmute) skip transactions
 
+**Rust backend** (`src-tauri/src/db/pending_ops.rs`):
+- 11 commands: enqueue, get, update_status, delete, increment_retry, count, failed_count, for_resource, compact, clear_failed, retry_failed
+- `compact_queue()` reimplements toggle-pair cancellation (star, markRead), addLabel/removeLabel pair cancellation, and sequential moveToFolder collapsing
+- All `pendingOperations.ts` functions now use `invoke()` instead of direct SQL
+
 **Design decisions**:
 - **DB update and queueing are separate concerns**: Rust commands only do the DB update. Queueing is handled by TS after provider execution outcome is known. This avoids double-execution (Rust can't know online/offline status) and keeps queue params in camelCase matching TS `EmailAction` discriminants
-- **Centralized queue command**: `db_enqueue_pending_operation` replaces the old TS direct-SQL `enqueuePendingOperation`. All queue writes go through one Rust command
 - Optimistic UI updates (Zustand store) stay in TS
 - Provider execution (Gmail/IMAP) stays in TS
 - `snoozeManager.ts` uses `emailActionUnsnooze` instead of direct SQL

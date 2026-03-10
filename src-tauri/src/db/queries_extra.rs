@@ -9,7 +9,7 @@ use super::queries::row_to_contact;
 use super::types::{
     BundleSummary, ContactAttachmentRow, ContactStats, DbBundleRule, DbContact, DbFilterRule,
     DbFollowUpReminder, DbQuickStep, DbSmartFolder, DbSmartLabelRule, RecentThread,
-    SameDomainContact, SortOrderItem, TriggeredFollowUp,
+    SameDomainContact, SortOrderItem, TriggeredFollowUp, UncachedAttachment,
 };
 
 // ── Dynamic update helper ───────────────────────────────────
@@ -1310,6 +1310,63 @@ pub async fn db_get_held_thread_ids(
                 .map_err(|e| e.to_string())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| e.to_string())
+        })
+        .await
+}
+
+// ── Attachment pre-cache queries ─────────────────────────────
+
+#[tauri::command]
+pub async fn db_attachment_cache_total_size(
+    state: State<'_, DbState>,
+) -> Result<i64, String> {
+    state
+        .with_conn(move |conn| {
+            conn.query_row(
+                "SELECT COALESCE(SUM(cache_size), 0) FROM attachments WHERE cached_at IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn db_uncached_recent_attachments(
+    state: State<'_, DbState>,
+    max_size: i64,
+    cutoff_epoch: i64,
+    limit: i64,
+) -> Result<Vec<UncachedAttachment>, String> {
+    state
+        .with_conn(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT a.id, a.message_id, a.account_id, a.size, a.gmail_attachment_id, a.imap_part_id
+                     FROM attachments a
+                     INNER JOIN messages m ON m.account_id = a.account_id AND m.id = a.message_id
+                     WHERE a.cached_at IS NULL
+                       AND a.is_inline = 0
+                       AND a.size IS NOT NULL AND a.size <= ?1
+                       AND m.date >= ?2
+                     ORDER BY m.date DESC
+                     LIMIT ?3",
+                )
+                .map_err(|e| e.to_string())?;
+            stmt.query_map(params![max_size, cutoff_epoch, limit], |row| {
+                Ok(UncachedAttachment {
+                    id: row.get("id")?,
+                    message_id: row.get("message_id")?,
+                    account_id: row.get("account_id")?,
+                    size: row.get("size")?,
+                    gmail_attachment_id: row.get("gmail_attachment_id")?,
+                    imap_part_id: row.get("imap_part_id")?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
         })
         .await
 }
