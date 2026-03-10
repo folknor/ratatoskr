@@ -3,6 +3,7 @@ use tauri::{AppHandle, State};
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
 use crate::gmail::client::GmailState;
+use crate::graph::client::GraphState;
 use crate::jmap::client::JmapState;
 use crate::search::SearchState;
 
@@ -19,12 +20,13 @@ pub async fn provider_sync_initial(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
     jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -42,12 +44,13 @@ pub async fn provider_sync_delta(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
     jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<SyncResult, String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -60,6 +63,7 @@ pub async fn provider_sync_delta(
 
 // ── Actions (thread-level) ──────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn provider_archive(
     account_id: String,
@@ -67,12 +71,13 @@ pub async fn provider_archive(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
     jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -83,6 +88,7 @@ pub async fn provider_archive(
     ops.archive(&ctx, &thread_id).await
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn provider_trash(
     account_id: String,
@@ -90,12 +96,13 @@ pub async fn provider_trash(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
     jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -106,6 +113,7 @@ pub async fn provider_trash(
     ops.trash(&ctx, &thread_id).await
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn provider_permanent_delete(
     account_id: String,
@@ -113,12 +121,13 @@ pub async fn provider_permanent_delete(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
     jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -138,12 +147,13 @@ pub async fn provider_mark_read(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
     jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -163,12 +173,13 @@ pub async fn provider_star(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
     jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -188,12 +199,13 @@ pub async fn provider_spam(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
     jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -213,12 +225,13 @@ pub async fn provider_move_to_folder(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
     jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -238,12 +251,13 @@ pub async fn provider_add_tag(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
     jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -263,12 +277,13 @@ pub async fn provider_remove_tag(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
     jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -290,12 +305,13 @@ pub async fn provider_send_email(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
     jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -316,12 +332,13 @@ pub async fn provider_create_draft(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
     jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -343,12 +360,13 @@ pub async fn provider_update_draft(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
     jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -360,6 +378,7 @@ pub async fn provider_update_draft(
         .await
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn provider_delete_draft(
     account_id: String,
@@ -367,12 +386,13 @@ pub async fn provider_delete_draft(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
     jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -394,12 +414,13 @@ pub async fn provider_fetch_attachment(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
     jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<AttachmentData, String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,
@@ -413,18 +434,20 @@ pub async fn provider_fetch_attachment(
 
 // ── Folders ─────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn provider_list_folders(
     account_id: String,
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
     jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
     body_store: State<'_, BodyStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<Vec<ProviderFolder>, String> {
     let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(&provider, &account_id, &gmail, &jmap).await?;
+    let ops = get_ops(&provider, &account_id, &gmail, &jmap, &graph).await?;
     let ctx = ProviderCtx {
         account_id: &account_id,
         db: &db,

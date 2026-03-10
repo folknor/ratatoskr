@@ -13,6 +13,7 @@ mod db;
 mod email_actions;
 mod filters;
 mod gmail;
+mod graph;
 mod imap;
 mod jmap;
 mod oauth;
@@ -306,6 +307,11 @@ pub fn run() {
             jmap::commands::jmap_update_draft,
             jmap::commands::jmap_delete_draft,
             jmap::commands::jmap_fetch_attachment,
+            // Graph provider commands (Phase 3b)
+            graph::commands::graph_init_client,
+            graph::commands::graph_remove_client,
+            graph::commands::graph_test_connection,
+            graph::commands::graph_get_profile,
             // Provider-agnostic commands (Phase 3a)
             provider::commands::provider_sync_initial,
             provider::commands::provider_sync_delta,
@@ -374,6 +380,9 @@ pub fn run() {
 
                 // JMAP provider state — shares the same encryption key
                 app.manage(jmap::client::JmapState::new(encryption_key));
+
+                // Graph provider state — shares the same encryption key
+                app.manage(graph::client::GraphState::new(encryption_key));
             }
 
             #[cfg(not(target_os = "linux"))]

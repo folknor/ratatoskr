@@ -678,6 +678,20 @@ static MIGRATIONS: &[Migration] = &[
         description: "Normalize auth_method 'oauth' to 'oauth2'",
         sql: "UPDATE accounts SET auth_method = 'oauth2' WHERE auth_method = 'oauth';",
     },
+    Migration {
+        version: 25,
+        description: "Per-folder delta tokens for Graph provider",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS graph_folder_delta_tokens (
+                account_id TEXT NOT NULL,
+                folder_id TEXT NOT NULL,
+                delta_link TEXT NOT NULL,
+                updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                PRIMARY KEY (account_id, folder_id),
+                FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+            );
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -824,6 +838,6 @@ mod tests {
                 row.get(0)
             })
             .expect("query");
-        assert_eq!(max_ver, 24);
+        assert_eq!(max_ver, 25);
     }
 }

@@ -1,6 +1,8 @@
 use crate::db::DbState;
 use crate::gmail::client::GmailState;
 use crate::gmail::ops::GmailOps;
+use crate::graph::client::GraphState;
+use crate::graph::ops::GraphOps;
 use crate::jmap::client::JmapState;
 use crate::jmap::ops::JmapOps;
 
@@ -20,11 +22,13 @@ pub async fn get_provider_type(db: &DbState, account_id: &str) -> Result<String,
 }
 
 /// Resolve account → provider → `Box<dyn ProviderOps>`.
+#[allow(clippy::too_many_arguments)]
 pub async fn get_ops(
     provider: &str,
     account_id: &str,
     gmail: &GmailState,
     jmap: &JmapState,
+    graph: &GraphState,
 ) -> Result<Box<dyn ProviderOps>, String> {
     match provider {
         "gmail_api" => {
@@ -34,6 +38,10 @@ pub async fn get_ops(
         "jmap" => {
             let client = jmap.get(account_id).await?;
             Ok(Box::new(JmapOps { client }))
+        }
+        "graph" => {
+            let client = graph.get(account_id).await?;
+            Ok(Box::new(GraphOps { client }))
         }
         "imap" => Err("IMAP uses TS provider path".into()),
         other => Err(format!("Unknown provider: {other}")),
