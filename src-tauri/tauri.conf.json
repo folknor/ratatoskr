@@ -4,10 +4,10 @@
 	"version": "0.4.21",
 	"identifier": "com.folknor.ratatoskr",
 	"build": {
-		"frontendDist": "../dist",
+		"beforeDevCommand": "bunx vite",
 		"devUrl": "http://localhost:1420",
-		"beforeDevCommand": "pnpm run dev",
-		"beforeBuildCommand": "pnpm run build"
+		"beforeBuildCommand": "bunx tsc && bunx vite build",
+		"frontendDist": "../dist"
 	},
 	"app": {
 		"windows": [
@@ -59,6 +59,10 @@
 		}
 	},
 	"plugins": {
+		"updater": {
+			"endpoints": [],
+			"pubkey": ""
+		},
 		"sql": {
 			"preload": ["sqlite:ratatoskr.db"]
 		},

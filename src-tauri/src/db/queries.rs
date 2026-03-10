@@ -49,8 +49,8 @@ fn row_to_message(row: &Row<'_>) -> rusqlite::Result<DbMessage> {
         date: row.get("date")?,
         is_read: row.get::<_, i64>("is_read")? != 0,
         is_starred: row.get::<_, i64>("is_starred")? != 0,
-        body_html: row.get("body_html")?,
-        body_text: row.get("body_text")?,
+        body_html: None,
+        body_text: None,
         body_cached: row.get::<_, Option<i64>>("body_cached")?.map(|v| v != 0),
         raw_size: row.get("raw_size")?,
         internal_date: row.get("internal_date")?,
@@ -303,12 +303,8 @@ pub async fn db_get_messages_for_thread(
         })
         .await?;
 
-    // 2. Hydrate bodies from the body store for messages that don't already have them
-    let ids_needing_bodies: Vec<String> = messages
-        .iter()
-        .filter(|m| m.body_html.is_none() && m.body_text.is_none())
-        .map(|m| m.id.clone())
-        .collect();
+    // 2. Hydrate bodies from the body store
+    let ids_needing_bodies: Vec<String> = messages.iter().map(|m| m.id.clone()).collect();
 
     if !ids_needing_bodies.is_empty() {
         let bodies = body_store.get_batch(ids_needing_bodies).await?;
@@ -318,10 +314,7 @@ pub async fn db_get_messages_for_thread(
             .collect();
 
         for msg in &mut messages {
-            if msg.body_html.is_none()
-                && msg.body_text.is_none()
-                && let Some(body) = body_map.get(&msg.id)
-            {
+            if let Some(body) = body_map.get(&msg.id) {
                 msg.body_html = body.body_html.clone();
                 msg.body_text = body.body_text.clone();
             }

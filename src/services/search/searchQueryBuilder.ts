@@ -18,26 +18,16 @@ export function buildSearchQuery(
   let paramIdx = 1;
 
   const whereClauses: string[] = [];
-  let needsFts = false;
 
-  // Base query - we'll add FTS join conditionally
-  let fromClause = "FROM messages m";
+  const fromClause = "FROM messages m";
 
-  // Free text search via FTS5 — sanitize to prevent FTS5 syntax injection
+  // Free text search via LIKE on subject, from_name, from_address, snippet
   if (parsed.freeText) {
-    const sanitized = parsed.freeText
-      .split(/\s+/)
-      .filter(Boolean)
-      .map((term) => `"${term.replace(/"/g, '""')}"`)
-      .join(" ");
-    if (sanitized) {
-      needsFts = true;
-      fromClause =
-        "FROM messages_fts JOIN messages m ON m.rowid = messages_fts.rowid";
-      whereClauses.push(`messages_fts MATCH $${paramIdx}`);
-      params.push(sanitized);
-      paramIdx++;
-    }
+    whereClauses.push(
+      `(m.subject LIKE '%' || $${paramIdx} || '%' OR m.from_name LIKE '%' || $${paramIdx} || '%' OR m.from_address LIKE '%' || $${paramIdx} || '%' OR m.snippet LIKE '%' || $${paramIdx} || '%')`,
+    );
+    params.push(parsed.freeText);
+    paramIdx++;
   }
 
   // Account filter
@@ -117,7 +107,6 @@ export function buildSearchQuery(
 
   const whereStr =
     whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
-  const orderBy = needsFts ? "ORDER BY rank" : "ORDER BY m.date DESC";
 
   params.push(limit);
 
@@ -130,10 +119,10 @@ export function buildSearchQuery(
     m.from_address,
     m.snippet,
     m.date,
-    ${needsFts ? "rank" : "0 as rank"}
+    0 as rank
   ${fromClause}
   ${whereStr}
-  ${orderBy}
+  ORDER BY m.date DESC
   LIMIT $${paramIdx}`;
 
   return { sql, params };

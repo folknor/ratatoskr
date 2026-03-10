@@ -155,7 +155,7 @@ export async function askMyInbox(
     };
   }
 
-  // Search messages using existing FTS
+  // Search messages using tantivy
   const results = await searchMessages(terms, accountId, 15);
 
   if (results.length === 0) {

@@ -81,7 +81,7 @@ pub async fn rebuild_search_index(
                     .prepare(
                         "SELECT m.id, m.account_id, m.thread_id, m.subject,
                                 m.from_name, m.from_address, m.to_addresses,
-                                m.body_text, m.snippet, m.date,
+                                m.snippet, m.date,
                                 m.is_read, m.is_starred,
                                 (SELECT COUNT(*) FROM attachments a WHERE a.message_id = m.id) > 0 as has_attachment
                          FROM messages m
@@ -103,7 +103,7 @@ pub async fn rebuild_search_index(
                                 from_name: row.get("from_name")?,
                                 from_address: row.get("from_address")?,
                                 to_addresses: row.get("to_addresses")?,
-                                body_text: row.get("body_text")?,
+                                body_text: None,
                                 snippet: row.get("snippet")?,
                                 date: row.get::<_, Option<String>>("date")?
                                     .and_then(|d| {
@@ -133,12 +133,9 @@ pub async fn rebuild_search_index(
             break;
         }
 
-        // Hydrate body_text from body store for docs that have None
-        let ids_needing_bodies: Vec<String> = docs
-            .iter()
-            .filter(|d| d.body_text.is_none())
-            .map(|d| d.message_id.clone())
-            .collect();
+        // Hydrate body_text from body store
+        let ids_needing_bodies: Vec<String> =
+            docs.iter().map(|d| d.message_id.clone()).collect();
 
         if !ids_needing_bodies.is_empty() {
             let bodies = body_store.get_batch(ids_needing_bodies).await?;

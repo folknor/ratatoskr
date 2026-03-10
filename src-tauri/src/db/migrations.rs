@@ -692,6 +692,18 @@ static MIGRATIONS: &[Migration] = &[
             );
         "#,
     },
+    Migration {
+        version: 26,
+        description: "Drop FTS5 virtual table and body_html/body_text columns from messages",
+        sql: r#"
+            DROP TRIGGER IF EXISTS messages_ai;
+            DROP TRIGGER IF EXISTS messages_ad;
+            DROP TRIGGER IF EXISTS messages_au;
+            DROP TABLE IF EXISTS messages_fts;
+            ALTER TABLE messages DROP COLUMN body_html;
+            ALTER TABLE messages DROP COLUMN body_text;
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks

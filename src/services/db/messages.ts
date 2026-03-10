@@ -114,13 +114,12 @@ export async function upsertMessage(msg: {
   // Metadata DB — no longer stores body_html/body_text.
   // body_cached flag is set only after bodyStorePut succeeds above.
   await db.execute(
-    `INSERT INTO messages (id, account_id, thread_id, from_address, from_name, to_addresses, cc_addresses, bcc_addresses, reply_to, subject, snippet, date, is_read, is_starred, body_html, body_text, body_cached, raw_size, internal_date, list_unsubscribe, list_unsubscribe_post, auth_results, message_id_header, references_header, in_reply_to_header, imap_uid, imap_folder)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NULL, NULL, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+    `INSERT INTO messages (id, account_id, thread_id, from_address, from_name, to_addresses, cc_addresses, bcc_addresses, reply_to, subject, snippet, date, is_read, is_starred, body_cached, raw_size, internal_date, list_unsubscribe, list_unsubscribe_post, auth_results, message_id_header, references_header, in_reply_to_header, imap_uid, imap_folder)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
      ON CONFLICT(account_id, id) DO UPDATE SET
        from_address = $4, from_name = $5, to_addresses = $6, cc_addresses = $7,
        bcc_addresses = $8, reply_to = $9, subject = $10, snippet = $11,
        date = $12, is_read = $13, is_starred = $14,
-       body_html = NULL, body_text = NULL,
        body_cached = CASE WHEN $15 = 1 THEN 1 ELSE body_cached END,
        raw_size = $16, internal_date = $17, list_unsubscribe = $18, list_unsubscribe_post = $19,
        auth_results = $20, message_id_header = COALESCE($21, message_id_header),

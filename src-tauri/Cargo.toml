@@ -93,3 +93,12 @@ windows = { version = "0.61", features = ["Win32_UI_Shell"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tray-item = { version = "0.10.0", default-features = false, features = ["ksni"] }
+
+[profile.dev]
+debug = 0
+incremental = true
+codegen-units = 256
+
+[profile.release]
+lto = "thin"
+codegen-units = 16

@@ -260,7 +260,7 @@
     "search-operators": {
       "title": "Search operators",
       "summary": "Gmail-style operators to refine search results.",
-      "description": "Search uses Gmail-style operators for precise filtering. Combine multiple operators to find exactly what you need. All searches run against your local database using FTS5 full-text indexing, so results are instant. Operators can be combined freely — they use AND logic, so each additional operator narrows the results further.",
+      "description": "Search uses Gmail-style operators for precise filtering. Combine multiple operators to find exactly what you need. All searches run against a local Tantivy full-text index, so results are instant. Operators can be combined freely — they use AND logic, so each additional operator narrows the results further.",
       "tips": [
         "from:jane — emails from a specific sender",
         "to:team@ — emails sent to a specific address",

@@ -5,12 +5,11 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"scripts": {
-		"dev": "vite",
-		"build": "tsc && vite build",
-		"preview": "vite preview",
+		"dev": "bunx tauri dev",
+		"build": "bunx tauri build",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"tauri": "tauri",
+		"typecheck": "tsc --noEmit -p tsconfig.json",
 		"lint": "pnpm exec biome check --max-diagnostics=none --reporter=github --formatter-enabled=true --linter-enabled=true --assist-enabled=true"
 	},
 	"dependencies": {

@@ -810,6 +810,19 @@ const MIGRATIONS: { version: number; description: string; sql: string }[] = [
       UPDATE accounts SET auth_method = 'oauth2' WHERE auth_method = 'oauth';
     `,
   },
+  {
+    version: 27,
+    description:
+      "Drop FTS5 virtual table and body_html/body_text columns from messages",
+    sql: `
+      DROP TRIGGER IF EXISTS messages_ai;
+      DROP TRIGGER IF EXISTS messages_ad;
+      DROP TRIGGER IF EXISTS messages_au;
+      DROP TABLE IF EXISTS messages_fts;
+      ALTER TABLE messages DROP COLUMN body_html;
+      ALTER TABLE messages DROP COLUMN body_text;
+    `,
+  },
 ];
 
 /**

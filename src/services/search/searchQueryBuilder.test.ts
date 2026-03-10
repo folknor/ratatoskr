@@ -3,11 +3,14 @@ import type { ParsedSearchQuery } from "./searchParser";
 import { buildSearchQuery } from "./searchQueryBuilder";
 
 describe("buildSearchQuery", () => {
-  it("builds FTS query for free text only", () => {
+  it("builds LIKE query for free text only", () => {
     const parsed: ParsedSearchQuery = { freeText: "hello world" };
     const { sql, params } = buildSearchQuery(parsed);
-    expect(sql).toContain("messages_fts MATCH");
-    expect(sql).toContain("ORDER BY rank");
+    expect(sql).toContain("m.subject LIKE");
+    expect(sql).toContain("m.from_name LIKE");
+    expect(sql).toContain("m.from_address LIKE");
+    expect(sql).toContain("m.snippet LIKE");
+    expect(sql).toContain("ORDER BY m.date DESC");
     expect(params[0]).toBe("hello world");
   });
 
@@ -101,24 +104,25 @@ describe("buildSearchQuery", () => {
       isUnread: true,
     };
     const { sql, params } = buildSearchQuery(parsed);
-    expect(sql).toContain("messages_fts MATCH");
+    expect(sql).toContain("m.subject LIKE");
+    expect(sql).toContain("m.snippet LIKE");
     expect(sql).toContain("m.from_address LIKE");
     expect(sql).toContain("m.is_read = 0");
     expect(params).toContain("budget");
     expect(params).toContain("john");
   });
 
-  it("uses date DESC ordering when no free text", () => {
+  it("uses date DESC ordering always", () => {
     const parsed: ParsedSearchQuery = { freeText: "", isUnread: true };
     const { sql } = buildSearchQuery(parsed);
     expect(sql).toContain("ORDER BY m.date DESC");
-    expect(sql).not.toContain("ORDER BY rank");
   });
 
-  it("uses rank ordering when free text present", () => {
+  it("uses date DESC ordering when free text present", () => {
     const parsed: ParsedSearchQuery = { freeText: "test", isUnread: true };
     const { sql } = buildSearchQuery(parsed);
-    expect(sql).toContain("ORDER BY rank");
+    expect(sql).toContain("ORDER BY m.date DESC");
+    expect(sql).not.toContain("ORDER BY rank");
   });
 
   it("uses parameterized queries (no SQL injection)", () => {

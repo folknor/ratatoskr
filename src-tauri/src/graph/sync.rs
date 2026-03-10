@@ -1142,11 +1142,11 @@ fn upsert_messages(
             "INSERT OR REPLACE INTO messages \
              (id, account_id, thread_id, from_address, from_name, to_addresses, \
               cc_addresses, bcc_addresses, reply_to, subject, snippet, date, \
-              is_read, is_starred, body_html, body_text, raw_size, internal_date, \
+              is_read, is_starred, raw_size, internal_date, \
               list_unsubscribe, list_unsubscribe_post, auth_results, \
               message_id_header, references_header, in_reply_to_header, body_cached) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, \
-                     ?13, ?14, NULL, NULL, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+                     ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
             rusqlite::params![
                 msg.id,
                 account_id,
