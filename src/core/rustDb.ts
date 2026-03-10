@@ -716,42 +716,30 @@ export async function getHeldThreadIds(
 }
 
 // ═══════════════════════════════════════════════════════════════
-// EMAIL ACTIONS (Phase 5 — local DB + pending op queue)
+// EMAIL ACTIONS (Phase 5 — local DB updates only, no queueing)
 // ═══════════════════════════════════════════════════════════════
 
 export async function emailActionArchive(
   accountId: string,
   threadId: string,
-  operationId: string,
 ): Promise<void> {
-  return invoke<void>("email_action_archive", {
-    accountId,
-    threadId,
-    operationId,
-  });
+  return invoke<void>("email_action_archive", { accountId, threadId });
 }
 
 export async function emailActionTrash(
   accountId: string,
   threadId: string,
-  operationId: string,
 ): Promise<void> {
-  return invoke<void>("email_action_trash", {
-    accountId,
-    threadId,
-    operationId,
-  });
+  return invoke<void>("email_action_trash", { accountId, threadId });
 }
 
 export async function emailActionPermanentDelete(
   accountId: string,
   threadId: string,
-  operationId: string,
 ): Promise<void> {
   return invoke<void>("email_action_permanent_delete", {
     accountId,
     threadId,
-    operationId,
   });
 }
 
@@ -759,27 +747,19 @@ export async function emailActionSpam(
   accountId: string,
   threadId: string,
   isSpam: boolean,
-  operationId: string,
 ): Promise<void> {
-  return invoke<void>("email_action_spam", {
-    accountId,
-    threadId,
-    isSpam,
-    operationId,
-  });
+  return invoke<void>("email_action_spam", { accountId, threadId, isSpam });
 }
 
 export async function emailActionMarkRead(
   accountId: string,
   threadId: string,
   isRead: boolean,
-  operationId: string,
 ): Promise<void> {
   return invoke<void>("email_action_mark_read", {
     accountId,
     threadId,
     isRead,
-    operationId,
   });
 }
 
@@ -787,40 +767,31 @@ export async function emailActionStar(
   accountId: string,
   threadId: string,
   isStarred: boolean,
-  operationId: string,
 ): Promise<void> {
   return invoke<void>("email_action_star", {
     accountId,
     threadId,
     isStarred,
-    operationId,
   });
 }
 
 export async function emailActionSnooze(
   accountId: string,
   threadId: string,
-  snoozeUntil: string,
-  operationId: string,
+  snoozeUntil: number,
 ): Promise<void> {
   return invoke<void>("email_action_snooze", {
     accountId,
     threadId,
     snoozeUntil,
-    operationId,
   });
 }
 
 export async function emailActionUnsnooze(
   accountId: string,
   threadId: string,
-  operationId: string,
 ): Promise<void> {
-  return invoke<void>("email_action_unsnooze", {
-    accountId,
-    threadId,
-    operationId,
-  });
+  return invoke<void>("email_action_unsnooze", { accountId, threadId });
 }
 
 export async function emailActionPin(
@@ -840,13 +811,8 @@ export async function emailActionUnpin(
 export async function emailActionMute(
   accountId: string,
   threadId: string,
-  operationId: string,
 ): Promise<void> {
-  return invoke<void>("email_action_mute", {
-    accountId,
-    threadId,
-    operationId,
-  });
+  return invoke<void>("email_action_mute", { accountId, threadId });
 }
 
 export async function emailActionUnmute(
@@ -860,13 +826,11 @@ export async function emailActionAddLabel(
   accountId: string,
   threadId: string,
   labelId: string,
-  operationId: string,
 ): Promise<void> {
   return invoke<void>("email_action_add_label", {
     accountId,
     threadId,
     labelId,
-    operationId,
   });
 }
 
@@ -874,13 +838,11 @@ export async function emailActionRemoveLabel(
   accountId: string,
   threadId: string,
   labelId: string,
-  operationId: string,
 ): Promise<void> {
   return invoke<void>("email_action_remove_label", {
     accountId,
     threadId,
     labelId,
-    operationId,
   });
 }
 
@@ -888,14 +850,33 @@ export async function emailActionMoveToFolder(
   accountId: string,
   threadId: string,
   folderLabelId: string,
-  operationId: string,
 ): Promise<void> {
   return invoke<void>("email_action_move_to_folder", {
     accountId,
     threadId,
     folderLabelId,
-    operationId,
   });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PENDING OPERATIONS QUEUE (centralized)
+// ═══════════════════════════════════════════════════════════════
+
+export async function enqueuePendingOp(
+  accountId: string,
+  operationType: string,
+  resourceId: string,
+  params: Record<string, unknown>,
+): Promise<string> {
+  const id = crypto.randomUUID();
+  await invoke<void>("db_enqueue_pending_operation", {
+    id,
+    accountId,
+    operationType,
+    resourceId,
+    paramsJson: JSON.stringify(params),
+  });
+  return id;
 }
 
 // ═══════════════════════════════════════════════════════════════

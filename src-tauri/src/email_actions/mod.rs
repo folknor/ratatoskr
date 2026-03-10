@@ -39,21 +39,3 @@ pub fn remove_inbox_label(
 ) -> Result<(), String> {
     remove_label(conn, account_id, thread_id, "INBOX")
 }
-
-/// Queue a pending operation for remote execution.
-pub fn queue_pending_op(
-    conn: &Connection,
-    op_id: &str,
-    account_id: &str,
-    operation_type: &str,
-    resource_id: &str,
-    params_json: &str,
-) -> Result<(), String> {
-    conn.execute(
-        "INSERT INTO pending_operations (id, account_id, operation_type, resource_id, params, status)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'pending')",
-        params![op_id, account_id, operation_type, resource_id, params_json],
-    )
-    .map_err(|e| format!("queue pending op: {e}"))?;
-    Ok(())
-}

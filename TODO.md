@@ -35,6 +35,9 @@
 - [ ] **Migration rollback error swallowed** — `src/services/db/migrations.ts:915`
   `ROLLBACK` failure caught and ignored. Could leave transaction open.
 
+- [ ] **pendingOperations.ts still uses direct SQL for reads** — `src/services/db/pendingOperations.ts`
+  Queue writes now go through Rust (`db_enqueue_pending_operation`), but reads (`getPendingOperations`, `compactQueue`, `incrementRetry`, `deleteOperation`, etc.) still use `getDb()` direct SQL. Port to Rust commands for consistency.
+
 ---
 
 ## Duplicated Business Logic
@@ -82,6 +85,9 @@
 
 - [ ] **Rust IMAP session boilerplate** — `src-tauri/src/commands.rs`
   8 command functions with identical connect → work → logout pattern. Create a `with_imap_session()` helper.
+
+- [ ] **`moveToFolder` only adds label, doesn't remove source** — `src-tauri/src/email_actions/commands.rs`
+  `email_action_move_to_folder` inserts the target folder label but doesn't remove the old label (e.g., INBOX). The TS code had the same behavior, so it's a pre-existing gap — the provider-side move handles the actual folder change, but the local DB state is incomplete until next sync.
 
 - [ ] **Rust timeout error messages** — `src-tauri/src/imap/client.rs`
   Same `format!("...timed out after {}s — check your server...")` repeated 10+ times. Create a timeout error helper or macro.

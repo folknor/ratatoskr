@@ -20,17 +20,22 @@ vi.mock("@/services/email/providerFactory", () => ({
   getEmailProvider: vi.fn(),
 }));
 
-vi.mock("@/services/db/pendingOperations", () => ({
-  enqueuePendingOperation: vi.fn(() => Promise.resolve("op-1")),
-}));
-
-vi.mock("@/services/db/connection", () => ({
-  getDb: vi.fn(() =>
-    Promise.resolve({
-      execute: vi.fn(() => Promise.resolve()),
-      select: vi.fn(() => Promise.resolve([])),
-    }),
-  ),
+vi.mock("@/core/rustDb", () => ({
+  emailActionArchive: vi.fn(() => Promise.resolve()),
+  emailActionTrash: vi.fn(() => Promise.resolve()),
+  emailActionPermanentDelete: vi.fn(() => Promise.resolve()),
+  emailActionSpam: vi.fn(() => Promise.resolve()),
+  emailActionMarkRead: vi.fn(() => Promise.resolve()),
+  emailActionStar: vi.fn(() => Promise.resolve()),
+  emailActionSnooze: vi.fn(() => Promise.resolve()),
+  emailActionPin: vi.fn(() => Promise.resolve()),
+  emailActionUnpin: vi.fn(() => Promise.resolve()),
+  emailActionMute: vi.fn(() => Promise.resolve()),
+  emailActionUnmute: vi.fn(() => Promise.resolve()),
+  emailActionAddLabel: vi.fn(() => Promise.resolve()),
+  emailActionRemoveLabel: vi.fn(() => Promise.resolve()),
+  emailActionMoveToFolder: vi.fn(() => Promise.resolve()),
+  enqueuePendingOp: vi.fn(() => Promise.resolve("op-1")),
 }));
 
 vi.mock("@/router/navigate", () => ({
@@ -38,8 +43,8 @@ vi.mock("@/router/navigate", () => ({
   getSelectedThreadId: vi.fn(() => null),
 }));
 
+import { enqueuePendingOp } from "@/core/rustDb";
 import { getSelectedThreadId, navigateToThread } from "@/router/navigate";
-import { enqueuePendingOperation } from "@/services/db/pendingOperations";
 import { getEmailProvider } from "@/services/email/providerFactory";
 import { useThreadStore } from "@/stores/threadStore";
 import { useUIStore } from "@/stores/uiStore";
@@ -128,7 +133,7 @@ describe("emailActions", () => {
       expect(result.success).toBe(true);
       expect(result.queued).toBe(true);
       expect(mockProvider.archive).not.toHaveBeenCalled();
-      expect(enqueuePendingOperation).toHaveBeenCalledWith(
+      expect(enqueuePendingOp).toHaveBeenCalledWith(
         "acct-1",
         "archive",
         "t1",
@@ -152,7 +157,7 @@ describe("emailActions", () => {
       const result = await archiveThread("acct-1", "t1", ["m1"]);
       expect(result.success).toBe(true);
       expect(result.queued).toBe(true);
-      expect(enqueuePendingOperation).toHaveBeenCalled();
+      expect(enqueuePendingOp).toHaveBeenCalled();
     });
   });
 

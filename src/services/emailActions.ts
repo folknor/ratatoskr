@@ -13,9 +13,9 @@ import {
   emailActionTrash,
   emailActionUnmute,
   emailActionUnpin,
+  enqueuePendingOp,
 } from "@/core/rustDb";
 import { getSelectedThreadId, navigateToThread } from "@/router/navigate";
-import { enqueuePendingOperation } from "@/services/db/pendingOperations";
 import { getEmailProvider } from "@/services/email/providerFactory";
 import { useThreadStore } from "@/stores/threadStore";
 import { useUIStore } from "@/stores/uiStore";
@@ -190,104 +190,67 @@ function revertOptimisticUpdate(action: EmailAction): void {
 }
 
 // ---------------------------------------------------------------------------
-// Local DB updates (Rust commands handle DB + pending op queue atomically)
+// Local DB updates (Rust commands — DB only, no queueing)
 // ---------------------------------------------------------------------------
 
-/**
- * Apply local DB update via Rust. For actions that need remote execution
- * (archive, trash, etc.), Rust also inserts into pending_operations in the
- * same transaction. Returns true if queueing was handled by Rust.
- */
 async function applyLocalDbUpdate(
   accountId: string,
   action: EmailAction,
-  operationId: string,
-): Promise<boolean> {
+): Promise<void> {
   switch (action.type) {
     case "archive":
-      await emailActionArchive(accountId, action.threadId, operationId);
-      return true;
+      await emailActionArchive(accountId, action.threadId);
+      break;
     case "trash":
-      await emailActionTrash(accountId, action.threadId, operationId);
-      return true;
+      await emailActionTrash(accountId, action.threadId);
+      break;
     case "permanentDelete":
-      await emailActionPermanentDelete(
-        accountId,
-        action.threadId,
-        operationId,
-      );
-      return true;
+      await emailActionPermanentDelete(accountId, action.threadId);
+      break;
     case "markRead":
-      await emailActionMarkRead(
-        accountId,
-        action.threadId,
-        action.read,
-        operationId,
-      );
-      return true;
+      await emailActionMarkRead(accountId, action.threadId, action.read);
+      break;
     case "star":
-      await emailActionStar(
-        accountId,
-        action.threadId,
-        action.starred,
-        operationId,
-      );
-      return true;
+      await emailActionStar(accountId, action.threadId, action.starred);
+      break;
     case "spam":
-      await emailActionSpam(
-        accountId,
-        action.threadId,
-        action.isSpam,
-        operationId,
-      );
-      return true;
+      await emailActionSpam(accountId, action.threadId, action.isSpam);
+      break;
     case "snooze":
       await emailActionSnooze(
         accountId,
         action.threadId,
-        String(action.snoozeUntil),
-        operationId,
+        action.snoozeUntil,
       );
-      return true;
+      break;
     case "addLabel":
-      await emailActionAddLabel(
-        accountId,
-        action.threadId,
-        action.labelId,
-        operationId,
-      );
-      return true;
+      await emailActionAddLabel(accountId, action.threadId, action.labelId);
+      break;
     case "removeLabel":
-      await emailActionRemoveLabel(
-        accountId,
-        action.threadId,
-        action.labelId,
-        operationId,
-      );
-      return true;
+      await emailActionRemoveLabel(accountId, action.threadId, action.labelId);
+      break;
     case "moveToFolder":
       await emailActionMoveToFolder(
         accountId,
         action.threadId,
         action.folderPath,
-        operationId,
       );
-      return true;
+      break;
     case "pin":
       await emailActionPin(accountId, action.threadId);
-      return false; // local-only, no queue
+      break;
     case "unpin":
       await emailActionUnpin(accountId, action.threadId);
-      return false;
+      break;
     case "mute":
-      await emailActionMute(accountId, action.threadId, operationId);
-      return true;
+      await emailActionMute(accountId, action.threadId);
+      break;
     case "unmute":
       await emailActionUnmute(accountId, action.threadId);
-      return false; // local-only
+      break;
     default:
       // sendMessage, createDraft, updateDraft, deleteDraft — no local DB update
-      return false;
+      break;
   }
 }
 
@@ -365,29 +328,24 @@ export async function executeEmailAction(
   accountId: string,
   action: EmailAction,
 ): Promise<ActionResult> {
-  const operationId = crypto.randomUUID();
-
   // 1. Optimistic UI update
   applyOptimisticUpdate(action);
 
-  // 2. Local DB update (Rust handles DB + pending op queue atomically)
-  let queuedByRust = false;
+  // 2. Local DB update via Rust
   try {
-    queuedByRust = await applyLocalDbUpdate(accountId, action, operationId);
+    await applyLocalDbUpdate(accountId, action);
   } catch (err) {
     console.warn("Local DB update failed:", err);
   }
 
-  // 3. If offline, queue (only for actions not already queued by Rust)
+  // 3. If offline, queue for later
   if (!useUIStore.getState().isOnline) {
-    if (!queuedByRust) {
-      await enqueuePendingOperation(
-        accountId,
-        action.type,
-        getResourceId(action),
-        actionToParams(action),
-      );
-    }
+    await enqueuePendingOp(
+      accountId,
+      action.type,
+      getResourceId(action),
+      actionToParams(action),
+    );
     return { success: true, queued: true };
   }
 
@@ -399,15 +357,12 @@ export async function executeEmailAction(
     const classified = classifyError(err);
 
     if (classified.isRetryable) {
-      // Already queued by Rust for most actions; only queue draft/send actions
-      if (!queuedByRust) {
-        await enqueuePendingOperation(
-          accountId,
-          action.type,
-          getResourceId(action),
-          actionToParams(action),
-        );
-      }
+      await enqueuePendingOp(
+        accountId,
+        action.type,
+        getResourceId(action),
+        actionToParams(action),
+      );
       return { success: true, queued: true };
     }
 

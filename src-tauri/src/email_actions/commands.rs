@@ -5,7 +5,7 @@ use rusqlite::params;
 use tauri::State;
 
 use crate::db::DbState;
-use super::{insert_label, queue_pending_op, remove_inbox_label, remove_label};
+use super::{insert_label, remove_inbox_label, remove_label};
 
 // ── Archive ──────────────────────────────────────────────────
 
@@ -14,15 +14,10 @@ pub async fn email_action_archive(
     state: State<'_, DbState>,
     account_id: String,
     thread_id: String,
-    operation_id: String,
 ) -> Result<(), String> {
     state
         .with_conn(move |conn| {
-            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-            remove_inbox_label(&tx, &account_id, &thread_id)?;
-            queue_pending_op(&tx, &operation_id, &account_id, "archive", &thread_id, "{}")?;
-            tx.commit().map_err(|e| e.to_string())?;
-            Ok(())
+            remove_inbox_label(conn, &account_id, &thread_id)
         })
         .await
 }
@@ -34,14 +29,12 @@ pub async fn email_action_trash(
     state: State<'_, DbState>,
     account_id: String,
     thread_id: String,
-    operation_id: String,
 ) -> Result<(), String> {
     state
         .with_conn(move |conn| {
             let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
             remove_inbox_label(&tx, &account_id, &thread_id)?;
             insert_label(&tx, &account_id, &thread_id, "TRASH")?;
-            queue_pending_op(&tx, &operation_id, &account_id, "trash", &thread_id, "{}")?;
             tx.commit().map_err(|e| e.to_string())?;
             Ok(())
         })
@@ -55,25 +48,14 @@ pub async fn email_action_permanent_delete(
     state: State<'_, DbState>,
     account_id: String,
     thread_id: String,
-    operation_id: String,
 ) -> Result<(), String> {
     state
         .with_conn(move |conn| {
-            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-            tx.execute(
+            conn.execute(
                 "DELETE FROM threads WHERE account_id = ?1 AND id = ?2",
                 params![account_id, thread_id],
             )
             .map_err(|e| e.to_string())?;
-            queue_pending_op(
-                &tx,
-                &operation_id,
-                &account_id,
-                "permanent_delete",
-                &thread_id,
-                "{}",
-            )?;
-            tx.commit().map_err(|e| e.to_string())?;
             Ok(())
         })
         .await
@@ -87,7 +69,6 @@ pub async fn email_action_spam(
     account_id: String,
     thread_id: String,
     is_spam: bool,
-    operation_id: String,
 ) -> Result<(), String> {
     state
         .with_conn(move |conn| {
@@ -99,8 +80,6 @@ pub async fn email_action_spam(
                 remove_label(&tx, &account_id, &thread_id, "SPAM")?;
                 insert_label(&tx, &account_id, &thread_id, "INBOX")?;
             }
-            let params_json = format!(r#"{{"is_spam":{is_spam}}}"#);
-            queue_pending_op(&tx, &operation_id, &account_id, "spam", &thread_id, &params_json)?;
             tx.commit().map_err(|e| e.to_string())?;
             Ok(())
         })
@@ -115,26 +94,14 @@ pub async fn email_action_mark_read(
     account_id: String,
     thread_id: String,
     is_read: bool,
-    operation_id: String,
 ) -> Result<(), String> {
     state
         .with_conn(move |conn| {
-            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-            tx.execute(
+            conn.execute(
                 "UPDATE threads SET is_read = ?3 WHERE account_id = ?1 AND id = ?2",
                 params![account_id, thread_id, is_read],
             )
             .map_err(|e| e.to_string())?;
-            let params_json = format!(r#"{{"is_read":{is_read}}}"#);
-            queue_pending_op(
-                &tx,
-                &operation_id,
-                &account_id,
-                "mark_read",
-                &thread_id,
-                &params_json,
-            )?;
-            tx.commit().map_err(|e| e.to_string())?;
             Ok(())
         })
         .await
@@ -148,7 +115,6 @@ pub async fn email_action_star(
     account_id: String,
     thread_id: String,
     is_starred: bool,
-    operation_id: String,
 ) -> Result<(), String> {
     state
         .with_conn(move |conn| {
@@ -163,8 +129,6 @@ pub async fn email_action_star(
             } else {
                 remove_label(&tx, &account_id, &thread_id, "STARRED")?;
             }
-            let params_json = format!(r#"{{"is_starred":{is_starred}}}"#);
-            queue_pending_op(&tx, &operation_id, &account_id, "star", &thread_id, &params_json)?;
             tx.commit().map_err(|e| e.to_string())?;
             Ok(())
         })
@@ -178,8 +142,7 @@ pub async fn email_action_snooze(
     state: State<'_, DbState>,
     account_id: String,
     thread_id: String,
-    snooze_until: String,
-    operation_id: String,
+    snooze_until: i64,
 ) -> Result<(), String> {
     state
         .with_conn(move |conn| {
@@ -191,8 +154,6 @@ pub async fn email_action_snooze(
             .map_err(|e| e.to_string())?;
             remove_inbox_label(&tx, &account_id, &thread_id)?;
             insert_label(&tx, &account_id, &thread_id, "SNOOZED")?;
-            let params_json = format!(r#"{{"snooze_until":"{snooze_until}"}}"#);
-            queue_pending_op(&tx, &operation_id, &account_id, "snooze", &thread_id, &params_json)?;
             tx.commit().map_err(|e| e.to_string())?;
             Ok(())
         })
@@ -206,7 +167,6 @@ pub async fn email_action_unsnooze(
     state: State<'_, DbState>,
     account_id: String,
     thread_id: String,
-    operation_id: String,
 ) -> Result<(), String> {
     state
         .with_conn(move |conn| {
@@ -218,14 +178,13 @@ pub async fn email_action_unsnooze(
             .map_err(|e| e.to_string())?;
             remove_label(&tx, &account_id, &thread_id, "SNOOZED")?;
             insert_label(&tx, &account_id, &thread_id, "INBOX")?;
-            queue_pending_op(&tx, &operation_id, &account_id, "unsnooze", &thread_id, "{}")?;
             tx.commit().map_err(|e| e.to_string())?;
             Ok(())
         })
         .await
 }
 
-// ── Pin / unpin (local only, no queue) ───────────────────────
+// ── Pin / unpin (local only) ─────────────────────────────────
 
 #[tauri::command]
 pub async fn email_action_pin(
@@ -270,7 +229,6 @@ pub async fn email_action_mute(
     state: State<'_, DbState>,
     account_id: String,
     thread_id: String,
-    operation_id: String,
 ) -> Result<(), String> {
     state
         .with_conn(move |conn| {
@@ -281,15 +239,13 @@ pub async fn email_action_mute(
             )
             .map_err(|e| e.to_string())?;
             remove_inbox_label(&tx, &account_id, &thread_id)?;
-            // Queue archive operation — server doesn't know about "mute"
-            queue_pending_op(&tx, &operation_id, &account_id, "archive", &thread_id, "{}")?;
             tx.commit().map_err(|e| e.to_string())?;
             Ok(())
         })
         .await
 }
 
-// ── Unmute (local only, no queue) ────────────────────────────
+// ── Unmute (local only) ──────────────────────────────────────
 
 #[tauri::command]
 pub async fn email_action_unmute(
@@ -317,23 +273,10 @@ pub async fn email_action_add_label(
     account_id: String,
     thread_id: String,
     label_id: String,
-    operation_id: String,
 ) -> Result<(), String> {
     state
         .with_conn(move |conn| {
-            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-            insert_label(&tx, &account_id, &thread_id, &label_id)?;
-            let params_json = format!(r#"{{"label_id":"{label_id}"}}"#);
-            queue_pending_op(
-                &tx,
-                &operation_id,
-                &account_id,
-                "add_label",
-                &thread_id,
-                &params_json,
-            )?;
-            tx.commit().map_err(|e| e.to_string())?;
-            Ok(())
+            insert_label(conn, &account_id, &thread_id, &label_id)
         })
         .await
 }
@@ -344,23 +287,10 @@ pub async fn email_action_remove_label(
     account_id: String,
     thread_id: String,
     label_id: String,
-    operation_id: String,
 ) -> Result<(), String> {
     state
         .with_conn(move |conn| {
-            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-            remove_label(&tx, &account_id, &thread_id, &label_id)?;
-            let params_json = format!(r#"{{"label_id":"{label_id}"}}"#);
-            queue_pending_op(
-                &tx,
-                &operation_id,
-                &account_id,
-                "remove_label",
-                &thread_id,
-                &params_json,
-            )?;
-            tx.commit().map_err(|e| e.to_string())?;
-            Ok(())
+            remove_label(conn, &account_id, &thread_id, &label_id)
         })
         .await
 }
@@ -373,22 +303,33 @@ pub async fn email_action_move_to_folder(
     account_id: String,
     thread_id: String,
     folder_label_id: String,
-    operation_id: String,
 ) -> Result<(), String> {
     state
         .with_conn(move |conn| {
-            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-            insert_label(&tx, &account_id, &thread_id, &folder_label_id)?;
-            let params_json = format!(r#"{{"folder_label_id":"{folder_label_id}"}}"#);
-            queue_pending_op(
-                &tx,
-                &operation_id,
-                &account_id,
-                "move_to_folder",
-                &thread_id,
-                &params_json,
-            )?;
-            tx.commit().map_err(|e| e.to_string())?;
+            insert_label(conn, &account_id, &thread_id, &folder_label_id)
+        })
+        .await
+}
+
+// ── Centralized pending operation queue ──────────────────────
+
+#[tauri::command]
+pub async fn db_enqueue_pending_operation(
+    state: State<'_, DbState>,
+    id: String,
+    account_id: String,
+    operation_type: String,
+    resource_id: String,
+    params_json: String,
+) -> Result<(), String> {
+    state
+        .with_conn(move |conn| {
+            conn.execute(
+                "INSERT INTO pending_operations (id, account_id, operation_type, resource_id, params, status)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'pending')",
+                params![id, account_id, operation_type, resource_id, params_json],
+            )
+            .map_err(|e| format!("enqueue pending op: {e}"))?;
             Ok(())
         })
         .await

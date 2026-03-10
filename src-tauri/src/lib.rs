@@ -221,6 +221,7 @@ pub fn run() {
             email_actions::commands::email_action_add_label,
             email_actions::commands::email_action_remove_label,
             email_actions::commands::email_action_move_to_folder,
+            email_actions::commands::db_enqueue_pending_operation,
         ])
         .setup(|app| {
             {

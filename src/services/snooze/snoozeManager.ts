@@ -23,8 +23,7 @@ async function checkSnoozedThreads(): Promise<void> {
 
   if (snoozed.length > 0) {
     for (const thread of snoozed) {
-      const opId = crypto.randomUUID();
-      await emailActionUnsnooze(thread.account_id, thread.id, opId);
+      await emailActionUnsnooze(thread.account_id, thread.id);
     }
 
     // Notify the UI to refresh

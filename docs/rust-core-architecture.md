@@ -575,14 +575,24 @@ Components and stores import from `@/core` instead of `@/services/db/*`. Some se
 
 **Note**: Tantivy indexing is already wired into the TS sync paths (fire-and-forget `indexMessage()` calls). Moving sync to Rust would eliminate the IPC overhead of these indexing calls entirely.
 
-### Phase 5: Rust Email Actions — NOT STARTED
+### Phase 5: Rust Email Actions ✅ COMPLETE
 
 **Goal**: Direct DB access for all email modify operations.
 
-- Port `emailActions.ts` to Rust
-- Rust handles: optimistic DB update → queue operation → process queue → emit result
-- Frontend calls `invoke("archive_thread", { id })` and gets back immediately
-- Offline queue processor runs in Rust (currently `queueProcessor.ts` at 30s interval)
+**Status**: Done. 15 Rust commands for local DB updates + 1 centralized queue command:
+
+**Rust backend** (`src-tauri/src/email_actions/`):
+- `mod.rs` — shared helpers: `remove_label`, `insert_label`, `remove_inbox_label`
+- `commands.rs` — 15 action commands (archive, trash, permanent_delete, spam, mark_read, star, snooze, unsnooze, pin, unpin, mute, unmute, add_label, remove_label, move_to_folder) + `db_enqueue_pending_operation`
+- Multi-statement actions (trash, spam, star, snooze, unsnooze, mute) use `unchecked_transaction()` for atomicity
+- Local-only actions (pin, unpin, unmute) skip transactions
+
+**Design decisions**:
+- **DB update and queueing are separate concerns**: Rust commands only do the DB update. Queueing is handled by TS after provider execution outcome is known. This avoids double-execution (Rust can't know online/offline status) and keeps queue params in camelCase matching TS `EmailAction` discriminants
+- **Centralized queue command**: `db_enqueue_pending_operation` replaces the old TS direct-SQL `enqueuePendingOperation`. All queue writes go through one Rust command
+- Optimistic UI updates (Zustand store) stay in TS
+- Provider execution (Gmail/IMAP) stays in TS
+- `snoozeManager.ts` uses `emailActionUnsnooze` instead of direct SQL
 
 **Risk**: Low-medium. Well-defined operations, straightforward port.
 
@@ -647,12 +657,12 @@ This is the Apple Mail architecture (SQLite Envelope Index + .emlx files + Spotl
 | **Phase 2**: Body storage | ✅ Core complete | `bodies.db` with zstd, 7 commands, auto-migration |
 | **Phase 3**: Tantivy search | ✅ Core complete | tantivy 0.25, 5 commands, sync integration wired |
 | **Phase 4**: Rust sync | Not started | — |
-| **Phase 5**: Rust actions | Not started | — |
+| **Phase 5**: Rust actions | ✅ Complete | 15 action commands + 1 centralized queue command |
 | **Phase 6**: Remaining services | Not started | — |
 
-**Phases 0, 1, 2, and 3 are done.** The biggest user-visible improvements (eliminating IPC overhead on every query, instant full-text search, compressed body storage) are delivered. Remaining phases (Rust sync engine, Rust email actions, remaining services) are performance and architecture wins that can be tackled incrementally.
+**Phases 0, 1, 2, 3, and 5 are done.** The biggest user-visible improvements (eliminating IPC overhead on every query, instant full-text search, compressed body storage, atomic email actions) are delivered. Remaining phases (Rust sync engine, remaining services) are performance and architecture wins that can be tackled incrementally.
 
 **Immediate next steps**:
 1. Integration test the app with Rust paths active (`pnpm tauri dev`)
-2. Bootstrap tantivy index on first run (call `rebuildSearchIndex`)
-3. Phase 4 (Rust sync engine) — highest impact remaining phase
+2. Phase 4 (Rust sync engine) — highest impact remaining phase
+3. Phase 6 (remaining services) — port independently as needed
