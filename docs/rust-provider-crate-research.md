@@ -9,16 +9,14 @@
 
 ### Current state
 
-Ratatoskr has four email provider paths:
+Ratatoskr has two email provider paths today:
 
 | Provider | Protocol | Implementation | Status |
 |----------|----------|---------------|--------|
 | **IMAP/SMTP** | TCP/TLS custom protocol | **Rust** (`src-tauri/src/imap/`, `smtp/`) | Production |
 | **Gmail API** | REST/JSON over HTTPS | **TypeScript** (`src/services/gmail/`) | Production, moving to Rust |
-| **JMAP** | JSON-over-HTTP (RFC 8620/8621) | **Not yet implemented** | Planned — reference impl in `docs/jmap.md` |
-| **Microsoft Graph** | REST/JSON over HTTPS | **Not yet implemented** | Planned — research in `docs/microsoft-exchange-assessment.md` |
 
-The problem: Gmail lives in TypeScript, which means token refresh, HTTP calls, message parsing, sync logic, and DB writes all cross the IPC boundary repeatedly. JMAP and Graph would add two more TS provider implementations with the same overhead. Meanwhile IMAP already proves the Rust-native pattern works — direct DB access, direct body store writes, direct search indexing, no serialization per message.
+The problem: Gmail lives in TypeScript, which means token refresh, HTTP calls, message parsing, sync logic, and DB writes all cross the IPC boundary repeatedly. Adding JMAP and Microsoft Graph as additional TS provider implementations would compound this overhead. Meanwhile IMAP already proves the Rust-native pattern works — direct DB access, direct body store writes, direct search indexing, no serialization per message.
 
 ### Target state
 
