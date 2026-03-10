@@ -1,6 +1,7 @@
 import { getAccount } from "../db/accounts";
 import { GmailApiProvider } from "./gmailProvider";
 import { ImapSmtpProvider } from "./imapSmtpProvider";
+import { JmapProvider } from "./jmapProvider";
 import type { EmailProvider } from "./types";
 
 const providers: Map<string, EmailProvider> = new Map<string, EmailProvider>();
@@ -20,7 +21,9 @@ export async function getEmailProvider(
 
   let provider: EmailProvider;
 
-  if (account.provider === "imap") {
+  if (account.provider === "jmap") {
+    provider = new JmapProvider(accountId);
+  } else if (account.provider === "imap") {
     provider = new ImapSmtpProvider(accountId);
   } else {
     // Default: gmail_api — uses Rust Gmail client via Tauri commands

@@ -45,6 +45,7 @@ import {
   queueNewEmailNotification,
   shouldNotifyForMessage,
 } from "@/services/notifications/notificationManager";
+import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 const SYNC_INTERVAL_MS = 60_000; // 60 seconds — delta syncs are lightweight (single API call when idle)
@@ -209,6 +210,102 @@ async function syncGmailAccount(accountId: string): Promise<void> {
     }
   } finally {
     unlisten?.();
+  }
+}
+
+/**
+ * Run a sync for a single JMAP account (initial or delta).
+ *
+ * The entire sync pipeline runs in Rust: JMAP API calls → message parsing →
+ * DB writes → body store → tantivy indexing.
+ * TS only calls the Rust command and runs post-sync hooks on the result.
+ */
+async function syncJmapAccount(accountId: string): Promise<void> {
+  try {
+    const result: { newInboxEmailIds: string[]; affectedThreadIds: string[] } =
+      await invoke("jmap_sync_delta", { accountId });
+
+    // Post-sync hooks: apply filters and smart labels to new inbox messages
+    if (result.newInboxEmailIds.length > 0) {
+      try {
+        await applyFiltersToNewMessageIds(
+          accountId,
+          result.newInboxEmailIds,
+        );
+      } catch (err) {
+        console.error("[syncManager] Filter application failed:", err);
+      }
+
+      // Smart labels (fire-and-forget)
+      applySmartLabelsToNewMessageIds(
+        accountId,
+        result.newInboxEmailIds,
+      ).catch((err) =>
+        console.error("[syncManager] Smart label error:", err),
+      );
+
+      // Notifications for new inbox messages
+      try {
+        const smartNotifSetting = await getSetting("smart_notifications");
+        const smartEnabled = smartNotifSetting === "true";
+        const notifCatSetting =
+          (await getSetting("notify_categories")) ?? "Primary";
+        const allowedCategories = new Set(
+          notifCatSetting.split(",").map((s) => s.trim()),
+        );
+        const vipSenders = smartEnabled
+          ? await getVipSenders(accountId)
+          : new Set<string>();
+        const mutedThreadIds = await getMutedThreadIds(accountId);
+
+        const newMsgs = await getMessagesByIds(
+          accountId,
+          result.newInboxEmailIds,
+        );
+        for (const msg of newMsgs) {
+          if (mutedThreadIds.has(msg.thread_id)) continue;
+          const category = await getThreadCategory(
+            accountId,
+            msg.thread_id,
+          );
+          if (
+            shouldNotifyForMessage(
+              smartEnabled,
+              allowedCategories,
+              vipSenders,
+              category,
+              msg.from_address ?? undefined,
+            )
+          ) {
+            queueNewEmailNotification(
+              msg.from_name ?? msg.from_address ?? "Unknown",
+              msg.subject ?? "",
+              msg.thread_id,
+              accountId,
+              msg.from_address ?? undefined,
+            );
+          }
+        }
+      } catch (err) {
+        console.error("[syncManager] Notification dispatch failed:", err);
+      }
+    }
+
+    // AI categorization (fire-and-forget)
+    if (result.affectedThreadIds.length > 0) {
+      categorizeNewThreads(accountId).catch((err) =>
+        console.error("[syncManager] Categorization error:", err),
+      );
+    }
+  } catch (err) {
+    const message = String(err ?? "");
+    if (message === "JMAP_STATE_EXPIRED" || message === "JMAP_NO_STATE" ||
+        message.includes("JMAP_STATE_EXPIRED") || message.includes("JMAP_NO_STATE")) {
+      // Fallback to full initial sync
+      await invoke("jmap_sync_initial", { accountId });
+    } else {
+      throw err;
+    }
   }
 }
 
@@ -520,7 +617,9 @@ async function syncAccountInternal(accountId: string): Promise<void> {
       return;
     }
 
-    if (account.provider === "imap") {
+    if (account.provider === "jmap") {
+      await syncJmapAccount(accountId);
+    } else if (account.provider === "imap") {
       await syncImapAccount(accountId);
     } else {
       await syncGmailAccount(accountId);

@@ -384,6 +384,96 @@ async function executeViaGmailRust(
 }
 
 // ---------------------------------------------------------------------------
+// JMAP execution via Rust Tauri commands
+// ---------------------------------------------------------------------------
+
+async function executeViaJmapRust(
+  accountId: string,
+  action: EmailAction,
+): Promise<unknown> {
+  switch (action.type) {
+    case "archive":
+      return invoke("jmap_archive", { accountId, threadId: action.threadId });
+    case "trash":
+      return invoke("jmap_trash", { accountId, threadId: action.threadId });
+    case "permanentDelete":
+      return invoke("jmap_permanent_delete", {
+        accountId,
+        emailIds: action.messageIds,
+      });
+    case "markRead":
+      return invoke("jmap_mark_read", {
+        accountId,
+        threadId: action.threadId,
+        read: action.read,
+      });
+    case "star":
+      return invoke("jmap_star", {
+        accountId,
+        threadId: action.threadId,
+        starred: action.starred,
+      });
+    case "spam":
+      return invoke("jmap_spam", {
+        accountId,
+        threadId: action.threadId,
+        isSpam: action.isSpam,
+      });
+    case "moveToFolder":
+      return invoke("jmap_move_to_folder", {
+        accountId,
+        threadId: action.threadId,
+        folderId: action.folderPath,
+      });
+    case "addLabel":
+      return invoke("jmap_add_label", {
+        accountId,
+        threadId: action.threadId,
+        labelId: action.labelId,
+      });
+    case "removeLabel":
+      return invoke("jmap_remove_label", {
+        accountId,
+        threadId: action.threadId,
+        labelId: action.labelId,
+      });
+    case "sendMessage":
+      return invoke("jmap_send_email", {
+        accountId,
+        rawBase64url: action.rawBase64Url,
+        threadId: action.threadId ?? null,
+      });
+    case "createDraft":
+      return invoke("jmap_create_draft", {
+        accountId,
+        rawBase64url: action.rawBase64Url,
+        threadId: action.threadId ?? null,
+      });
+    case "updateDraft":
+      return invoke("jmap_update_draft", {
+        accountId,
+        draftId: action.draftId,
+        rawBase64url: action.rawBase64Url,
+        threadId: action.threadId ?? null,
+      });
+    case "deleteDraft":
+      return invoke("jmap_delete_draft", {
+        accountId,
+        draftId: action.draftId,
+      });
+    case "snooze":
+    case "mute":
+      // Snooze/mute are local state; on the provider side we just archive
+      return invoke("jmap_archive", { accountId, threadId: action.threadId });
+    case "pin":
+    case "unpin":
+    case "unmute":
+      // Local-only operations — no JMAP concept of pin or unmute
+      return;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // IMAP execution via EmailProvider
 // ---------------------------------------------------------------------------
 
@@ -452,11 +542,13 @@ async function executeViaProvider(
   const account = await getAccount(accountId);
   if (!account) throw new Error(`Account ${accountId} not found`);
 
-  if (account.provider === "gmail_api" || account.provider !== "imap") {
+  if (account.provider === "jmap") {
+    return executeViaJmapRust(accountId, action);
+  } else if (account.provider === "gmail_api" || account.provider !== "imap") {
     return executeViaGmailRust(accountId, action);
+  } else {
+    return executeViaImapProvider(accountId, action);
   }
-
-  return executeViaImapProvider(accountId, action);
 }
 
 export async function executeEmailAction(

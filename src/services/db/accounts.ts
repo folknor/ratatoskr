@@ -34,6 +34,7 @@ export interface DbAccount {
   caldav_home_url: string | null;
   calendar_provider: string | null;
   accept_invalid_certs: number;
+  jmap_url: string | null;
 }
 
 async function decryptAccountTokens(account: DbAccount): Promise<DbAccount> {
@@ -250,6 +251,23 @@ export async function insertCalDavAccount(account: {
       account.caldavPrincipalUrl ?? null,
       account.caldavHomeUrl ?? null,
     ],
+  );
+}
+
+export async function insertJmapAccount(account: {
+  id: string;
+  email: string;
+  displayName: string | null;
+  jmapUrl: string;
+  password: string;
+  username?: string | null;
+}): Promise<void> {
+  const db = await getDb();
+  const encPassword = await encryptValue(account.password);
+  await db.execute(
+    `INSERT INTO accounts (id, email, display_name, provider, auth_method, jmap_url, imap_password, imap_username)
+     VALUES ($1, $2, $3, 'jmap', 'password', $4, $5, $6)`,
+    [account.id, account.email, account.displayName, account.jmapUrl, encPassword, account.username || null],
   );
 }
 

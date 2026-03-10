@@ -392,6 +392,15 @@ export default function App(): React.ReactNode {
         // Initialize Gmail clients for existing accounts
         await initializeClients();
 
+        // Initialize JMAP clients
+        for (const account of dbAccounts.filter(a => a.is_active && a.provider === "jmap")) {
+          try {
+            await invoke("jmap_init_client", { accountId: account.id });
+          } catch (err) {
+            console.warn(`Failed to init JMAP client for ${account.id}:`, err);
+          }
+        }
+
         // Fetch send-as aliases for each active email account (skip CalDAV-only)
         const activeIds = mapped.filter((a) => a.isActive).map((a) => a.id);
         const emailAccountIds = mapped
