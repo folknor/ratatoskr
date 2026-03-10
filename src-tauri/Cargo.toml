@@ -82,6 +82,9 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 tantivy = "0.25"
 chrono = { version = "0.4", features = ["serde"] }
 zstd = "0.13"
+aes-gcm = "0.10"
+getrandom = { version = "0.2", features = ["std"] }
+urlencoding = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = ["Win32_UI_Shell"] }

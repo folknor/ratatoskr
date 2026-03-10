@@ -12,8 +12,10 @@ mod commands;
 mod db;
 mod email_actions;
 mod filters;
+mod gmail;
 mod imap;
 mod oauth;
+mod provider;
 mod search;
 mod smtp;
 mod sync;
@@ -252,6 +254,28 @@ pub fn run() {
             // IMAP sync engine (Phase 4)
             sync::commands::sync_imap_initial,
             sync::commands::sync_imap_delta,
+            // Gmail API provider (Rust)
+            gmail::commands::gmail_init_client,
+            gmail::commands::gmail_remove_client,
+            gmail::commands::gmail_test_connection,
+            gmail::commands::gmail_list_labels,
+            gmail::commands::gmail_create_label,
+            gmail::commands::gmail_update_label,
+            gmail::commands::gmail_delete_label,
+            gmail::commands::gmail_list_threads,
+            gmail::commands::gmail_get_thread,
+            gmail::commands::gmail_modify_thread,
+            gmail::commands::gmail_delete_thread,
+            gmail::commands::gmail_get_message,
+            gmail::commands::gmail_get_parsed_message,
+            gmail::commands::gmail_send_email,
+            gmail::commands::gmail_fetch_attachment,
+            gmail::commands::gmail_get_history,
+            gmail::commands::gmail_create_draft,
+            gmail::commands::gmail_update_draft,
+            gmail::commands::gmail_delete_draft,
+            gmail::commands::gmail_list_drafts,
+            gmail::commands::gmail_fetch_send_as,
         ])
         .setup(|app| {
             {
@@ -291,6 +315,14 @@ pub fn run() {
                 app.manage(search_state);
 
                 app.manage(sync::SyncState::new());
+
+                // Gmail provider state — load encryption key for token decryption
+                let encryption_key = provider::crypto::load_encryption_key(&app_data_dir)
+                    .unwrap_or_else(|e| {
+                        log::warn!("Gmail provider: no encryption key ({e}), will init on first use");
+                        [0u8; 32]
+                    });
+                app.manage(gmail::client::GmailState::new(encryption_key));
             }
 
             #[cfg(not(target_os = "linux"))]
