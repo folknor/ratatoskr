@@ -1,6 +1,6 @@
 #![allow(clippy::let_underscore_must_use)]
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
@@ -541,6 +541,12 @@ pub async fn provider_fetch_attachment(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<AttachmentData, String> {
+    // 1. Check cache
+    if let Some(hit) = try_cache_hit(&db, &app_handle, &account_id, &message_id, &attachment_id).await? {
+        return Ok(hit);
+    }
+
+    // 2. Cache miss — fetch from provider
     let provider = get_provider_type(&db, &account_id).await?;
     let ops = get_ops(
         &provider,
@@ -558,8 +564,99 @@ pub async fn provider_fetch_attachment(
         search: &search,
         app_handle: &app_handle,
     };
-    ops.fetch_attachment(&ctx, &message_id, &attachment_id)
-        .await
+    let result = ops
+        .fetch_attachment(&ctx, &message_id, &attachment_id)
+        .await?;
+
+    // 3. Cache the result (fire-and-forget — don't delay response)
+    cache_after_fetch(&db, &app_handle, &account_id, &message_id, &attachment_id, &result.data);
+
+    Ok(result)
+}
+
+/// Check the content-addressed cache for a previously fetched attachment.
+async fn try_cache_hit(
+    db: &DbState,
+    app_handle: &AppHandle,
+    account_id: &str,
+    message_id: &str,
+    attachment_id: &str,
+) -> Result<Option<AttachmentData>, String> {
+    use crate::attachment_cache::{encode_base64, find_cache_info, read_cached};
+
+    let app = app_handle.clone();
+    let (acct, msg, att) = (
+        account_id.to_string(),
+        message_id.to_string(),
+        attachment_id.to_string(),
+    );
+
+    db.with_conn(move |conn| {
+        let info = find_cache_info(conn, &acct, &msg, &att)?;
+        let Some(info) = info else { return Ok(None) };
+        let Some(ref hash) = info.content_hash else {
+            return Ok(None);
+        };
+
+        if let Some(bytes) = read_cached(&app, hash) {
+            let size = bytes.len();
+            let data = encode_base64(&bytes);
+            return Ok(Some(AttachmentData { data, size }));
+        }
+
+        Ok(None)
+    })
+    .await
+}
+
+/// After a provider fetch, decode + hash + write to cache + update DB.
+fn cache_after_fetch(
+    _db: &DbState,
+    app_handle: &AppHandle,
+    account_id: &str,
+    message_id: &str,
+    attachment_id: &str,
+    base64_data: &str,
+) {
+    use crate::attachment_cache::{
+        decode_base64, find_cache_info, hash_bytes, update_cache_fields, write_cached,
+    };
+
+    let app = app_handle.clone();
+    let (acct, msg, att, data) = (
+        account_id.to_string(),
+        message_id.to_string(),
+        attachment_id.to_string(),
+        base64_data.to_string(),
+    );
+
+    tokio::task::spawn(async move {
+        let result: Result<(), String> = async {
+            let bytes = decode_base64(&data)?;
+            let content_hash = hash_bytes(&bytes);
+            let local_path = write_cached(&app, &content_hash, &bytes)?;
+
+            #[allow(clippy::cast_possible_wrap)]
+            let cache_size = bytes.len() as i64;
+
+            let db: tauri::State<'_, DbState> = app.state();
+            db.with_conn(move |conn| {
+                let info = find_cache_info(conn, &acct, &msg, &att)?;
+                if let Some(info) = info {
+                    update_cache_fields(
+                        conn, &info.id, &local_path, cache_size, &content_hash,
+                    )?;
+                }
+                Ok(())
+            })
+            .await
+        }
+        .await;
+
+        if let Err(e) = result {
+            log::warn!("Failed to cache attachment: {e}");
+        }
+    });
 }
 
 // ── Folders ─────────────────────────────────────────────────

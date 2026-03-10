@@ -6,6 +6,7 @@ use tauri::{
 };
 use tauri_plugin_autostart::MacosLauncher;
 
+mod attachment_cache;
 mod body_store;
 mod categorization;
 mod commands;
@@ -337,6 +338,7 @@ pub fn run() {
             db::queries_extra::db_get_oldest_cached_attachments,
             db::queries_extra::db_clear_attachment_cache_entry,
             db::queries_extra::db_clear_all_attachment_cache,
+            db::queries_extra::db_count_cached_by_hash,
             db::queries_extra::db_get_inbox_threads_for_backfill,
             db::queries_extra::db_update_scheduled_email_attachments,
             db::queries_extra::db_query_raw_select,

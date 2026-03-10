@@ -2722,6 +2722,7 @@ pub async fn db_get_attachments_for_account(
                 .prepare(
                     "SELECT a.id, a.message_id, a.account_id, a.filename, a.mime_type, a.size,
                             a.gmail_attachment_id, a.content_id, a.is_inline, a.local_path,
+                            a.content_hash,
                             m.from_address, m.from_name, m.date, m.subject, m.thread_id
                      FROM attachments a
                      JOIN messages m ON a.message_id = m.id AND a.account_id = m.account_id
@@ -2742,6 +2743,7 @@ pub async fn db_get_attachments_for_account(
                     content_id: row.get("content_id")?,
                     is_inline: row.get("is_inline")?,
                     local_path: row.get("local_path")?,
+                    content_hash: row.get("content_hash")?,
                     from_address: row.get("from_address")?,
                     from_name: row.get("from_name")?,
                     date: row.get("date")?,
@@ -4861,7 +4863,7 @@ pub async fn db_get_oldest_cached_attachments(
         .with_conn(move |conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, local_path, cache_size FROM attachments WHERE cached_at IS NOT NULL ORDER BY cached_at ASC LIMIT ?1",
+                    "SELECT id, local_path, cache_size, content_hash FROM attachments WHERE cached_at IS NOT NULL ORDER BY cached_at ASC LIMIT ?1",
                 )
                 .map_err(|e| e.to_string())?;
             stmt.query_map(params![limit], |row| {
@@ -4869,6 +4871,7 @@ pub async fn db_get_oldest_cached_attachments(
                     id: row.get(0)?,
                     local_path: row.get(1)?,
                     cache_size: row.get(2)?,
+                    content_hash: row.get(3)?,
                 })
             })
             .map_err(|e| e.to_string())?
@@ -4907,6 +4910,24 @@ pub async fn db_clear_all_attachment_cache(
             )
             .map_err(|e| e.to_string())?;
             Ok(())
+        })
+        .await
+}
+
+/// Count cached attachments sharing a content hash (for safe eviction).
+#[tauri::command]
+pub async fn db_count_cached_by_hash(
+    state: State<'_, DbState>,
+    content_hash: String,
+) -> Result<i64, String> {
+    state
+        .with_conn(move |conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM attachments WHERE content_hash = ?1 AND cached_at IS NOT NULL",
+                params![content_hash],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())
         })
         .await
 }

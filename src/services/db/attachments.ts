@@ -11,6 +11,7 @@ export interface DbAttachment {
   content_id: string | null;
   is_inline: number;
   local_path: string | null;
+  content_hash: string | null;
 }
 
 export async function upsertAttachment(att: {
@@ -48,6 +49,7 @@ export interface AttachmentWithContext {
   content_id: string | null;
   is_inline: number;
   local_path: string | null;
+  content_hash: string | null;
   from_address: string | null;
   from_name: string | null;
   date: number | null;

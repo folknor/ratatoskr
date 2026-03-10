@@ -153,11 +153,44 @@ fn extract_body(part: &GmailPayload, mime_type: &str) -> Option<String> {
     None
 }
 
-/// Recursively extract attachments from a message payload.
+/// Recursively extract attachments from a message payload, deduplicated by attachment ID.
+///
+/// Gmail can expose the same blob under multiple MIME parts (e.g. inline in
+/// multipart/related AND as a named attachment in multipart/mixed). Since each
+/// blob has a unique `attachment_id`, we collapse duplicates and merge metadata.
 fn extract_attachments(part: &GmailPayload) -> Vec<ParsedAttachment> {
     let mut results = Vec::new();
     collect_attachments(part, &mut results);
-    results
+    dedup_by_attachment_id(results)
+}
+
+/// Collapse attachments that share the same `gmail_attachment_id`.
+/// Prefers the entry with a real filename and preserves `content_id`.
+fn dedup_by_attachment_id(attachments: Vec<ParsedAttachment>) -> Vec<ParsedAttachment> {
+    use std::collections::HashMap;
+
+    let mut seen: HashMap<String, ParsedAttachment> = HashMap::new();
+    for att in attachments {
+        seen.entry(att.gmail_attachment_id.clone())
+            .and_modify(|existing| {
+                // Prefer whichever has a real filename
+                if existing.filename == existing.content_id.as_deref().unwrap_or("inline")
+                    && att.filename != att.content_id.as_deref().unwrap_or("inline")
+                {
+                    existing.filename.clone_from(&att.filename);
+                }
+                // Preserve content_id for CID resolution
+                if existing.content_id.is_none() && att.content_id.is_some() {
+                    existing.content_id.clone_from(&att.content_id);
+                }
+                // Mark as inline if either copy is
+                if att.is_inline {
+                    existing.is_inline = true;
+                }
+            })
+            .or_insert(att);
+    }
+    seen.into_values().collect()
 }
 
 fn collect_attachments(part: &GmailPayload, results: &mut Vec<ParsedAttachment>) {

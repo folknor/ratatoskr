@@ -5,8 +5,6 @@ import {
   createBackgroundChecker,
 } from "../backgroundCheckers";
 import { getSetting } from "../db/settings";
-import { getEmailProvider } from "../email/providerFactory";
-import { cacheAttachment } from "./cacheManager";
 
 const MAX_ATTACHMENT_SIZE: number = 5 * 1024 * 1024; // 5MB
 const RECENT_DAYS = 7;
@@ -59,15 +57,12 @@ async function preCacheRecent(): Promise<void> {
       const attachmentId = att.gmail_attachment_id ?? att.imap_part_id;
       if (!attachmentId) continue;
 
-      const provider = await getEmailProvider(att.account_id);
-      const result = await provider.fetchAttachment(
-        att.message_id,
+      // provider_fetch_attachment now handles caching automatically
+      await invoke("provider_fetch_attachment", {
+        accountId: att.account_id,
+        messageId: att.message_id,
         attachmentId,
-      );
-
-      // Decode base64 data
-      const binary = Uint8Array.from(atob(result.data), (c) => c.charCodeAt(0));
-      await cacheAttachment(att.id, binary);
+      });
     } catch (err) {
       console.warn(`[PreCache] Failed to cache attachment ${att.id}:`, err);
     }

@@ -1187,10 +1187,13 @@ fn upsert_attachments(
         for att in &msg.attachments {
             let att_id = format!("{}_{}", msg.id, att.id);
             tx.execute(
-                "INSERT OR REPLACE INTO attachments \
+                "INSERT INTO attachments \
                  (id, message_id, account_id, filename, mime_type, size, \
                   gmail_attachment_id, content_id, is_inline) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
+                 ON CONFLICT(id) DO UPDATE SET \
+                   filename = ?4, mime_type = ?5, size = ?6, \
+                   gmail_attachment_id = ?7, content_id = ?8, is_inline = ?9",
                 rusqlite::params![
                     att_id,
                     msg.id,

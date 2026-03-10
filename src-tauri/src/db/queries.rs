@@ -104,6 +104,7 @@ fn row_to_attachment(row: &Row<'_>) -> rusqlite::Result<DbAttachment> {
         content_id: row.get("content_id")?,
         is_inline: row.get::<_, i64>("is_inline")? != 0,
         local_path: row.get("local_path")?,
+        content_hash: row.get("content_hash")?,
     })
 }
 

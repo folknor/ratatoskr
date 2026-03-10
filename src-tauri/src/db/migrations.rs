@@ -710,6 +710,14 @@ static MIGRATIONS: &[Migration] = &[
             ALTER TABLE messages DROP COLUMN body_text;
         "#,
     },
+    Migration {
+        version: 25,
+        description: "Add content_hash column to attachments for content-addressed caching",
+        sql: r#"
+            ALTER TABLE attachments ADD COLUMN content_hash TEXT;
+            CREATE INDEX IF NOT EXISTS idx_attachments_content_hash ON attachments(content_hash);
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks

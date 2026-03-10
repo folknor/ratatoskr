@@ -59,6 +59,7 @@ pub struct ImapAttachment {
     pub size: u32,
     pub content_id: Option<String>,
     pub is_inline: bool,
+    pub content_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

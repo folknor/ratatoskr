@@ -63,6 +63,7 @@ struct DbAttachment {
     part_id: String,
     content_id: Option<String>,
     is_inline: bool,
+    content_hash: Option<String>,
 }
 
 impl DbInsertData {
@@ -106,6 +107,7 @@ impl DbInsertData {
                     part_id: att.part_id.clone(),
                     content_id: att.content_id.clone(),
                     is_inline: att.is_inline,
+                    content_hash: att.content_hash.clone(),
                 })
                 .collect(),
         }
@@ -175,10 +177,14 @@ impl DbInsertData {
         // Attachments
         for att in &self.attachments {
             tx.execute(
-                "INSERT OR REPLACE INTO attachments \
+                "INSERT INTO attachments \
                  (id, message_id, account_id, filename, mime_type, size, \
-                  gmail_attachment_id, content_id, is_inline) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                  gmail_attachment_id, content_id, is_inline, content_hash) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
+                 ON CONFLICT(id) DO UPDATE SET \
+                   filename = ?4, mime_type = ?5, size = ?6, \
+                   gmail_attachment_id = ?7, content_id = ?8, is_inline = ?9, \
+                   content_hash = COALESCE(?10, attachments.content_hash)",
                 rusqlite::params![
                     att.att_id,
                     att.message_id,
@@ -189,6 +195,7 @@ impl DbInsertData {
                     att.part_id,
                     att.content_id,
                     att.is_inline,
+                    att.content_hash,
                 ],
             )
             .map_err(|e| format!("upsert attachment: {e}"))?;

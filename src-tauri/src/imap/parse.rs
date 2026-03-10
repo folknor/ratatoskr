@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use mail_parser::{MessageParser, MimeHeaders};
+use xxhash_rust::xxh3::xxh3_64;
 
 use super::types::*;
 
@@ -136,47 +139,57 @@ pub(crate) fn parse_message(
         section_map,
     );
 
-    // Attachments
-    let attachments: Vec<ImapAttachment> = message
-        .attachments
-        .iter()
-        .filter_map(|&part_idx| {
-            let att = message.parts.get(part_idx as usize)?;
-            let section = match section_map.get(&(part_idx as usize)) {
-                Some(s) => s.clone(),
-                None => {
-                    log::warn!(
-                        "IMAP UID {uid}: attachment at part index {part_idx} not found in section map (map has {} entries)",
-                        section_map.len(),
-                    );
-                    return None;
-                }
-            };
+    // Attachments — deduplicated by xxh3 content hash to collapse identical inline
+    // parts that appear under different MIME sections (e.g. multipart/related + mixed).
+    let attachments: Vec<ImapAttachment> = {
+        let all: Vec<(u64, ImapAttachment)> = message
+            .attachments
+            .iter()
+            .filter_map(|&part_idx| {
+                let att = message.parts.get(part_idx as usize)?;
+                let section = match section_map.get(&(part_idx as usize)) {
+                    Some(s) => s.clone(),
+                    None => {
+                        log::warn!(
+                            "IMAP UID {uid}: attachment at part index {part_idx} not found in section map (map has {} entries)",
+                            section_map.len(),
+                        );
+                        return None;
+                    }
+                };
 
-            let mime_type = att
-                .content_type()
-                .map(|ct| {
-                    let ctype = ct.ctype();
-                    let subtype = ct.subtype().unwrap_or("octet-stream");
-                    format!("{ctype}/{subtype}")
-                })
-                .unwrap_or_else(|| "application/octet-stream".to_string());
+                let mime_type = att
+                    .content_type()
+                    .map(|ct| {
+                        let ctype = ct.ctype();
+                        let subtype = ct.subtype().unwrap_or("octet-stream");
+                        format!("{ctype}/{subtype}")
+                    })
+                    .unwrap_or_else(|| "application/octet-stream".to_string());
 
-            #[allow(clippy::cast_possible_truncation)]
-            let size = att.len() as u32;
-            Some(ImapAttachment {
-                part_id: section,
-                filename: att
-                    .attachment_name()
-                    .unwrap_or("attachment")
-                    .to_string(),
-                mime_type,
-                size,
-                content_id: att.content_id().map(ToString::to_string),
-                is_inline: att.content_disposition().is_some_and(mail_parser::ContentType::is_inline),
+                let raw_hash = xxh3_64(att.contents());
+                let content_hash = format!("{raw_hash:016x}");
+
+                #[allow(clippy::cast_possible_truncation)]
+                let size = att.len() as u32;
+                let attachment = ImapAttachment {
+                    part_id: section,
+                    filename: att
+                        .attachment_name()
+                        .unwrap_or("attachment")
+                        .to_string(),
+                    mime_type,
+                    size,
+                    content_id: att.content_id().map(ToString::to_string),
+                    is_inline: att.content_disposition().is_some_and(mail_parser::ContentType::is_inline),
+                    content_hash: Some(content_hash),
+                };
+                Some((raw_hash, attachment))
             })
-        })
-        .collect();
+            .collect();
+
+        dedup_attachments_by_hash(all)
+    };
 
     Ok(ImapMessage {
         uid,
@@ -253,6 +266,36 @@ pub(crate) fn build_imap_section_map(
     }
 
     map
+}
+
+/// Deduplicate attachments by content hash.
+///
+/// When multiple MIME parts have identical bytes (same xxh3 hash), keep only one.
+/// Prefer the record with a real filename over "attachment", and prefer one with
+/// a `content_id` so CID references in the HTML body resolve correctly.
+fn dedup_attachments_by_hash(parts: Vec<(u64, ImapAttachment)>) -> Vec<ImapAttachment> {
+    let mut seen: HashMap<u64, ImapAttachment> = HashMap::new();
+    for (hash, att) in parts {
+        seen.entry(hash)
+            .and_modify(|existing| {
+                // Prefer whichever has a real filename
+                let existing_has_name = existing.filename != "attachment";
+                let new_has_name = att.filename != "attachment";
+                if !existing_has_name && new_has_name {
+                    existing.filename = att.filename.clone();
+                }
+                // Prefer whichever has a content_id
+                if existing.content_id.is_none() && att.content_id.is_some() {
+                    existing.content_id.clone_from(&att.content_id);
+                }
+                // Mark as inline if either copy is
+                if att.is_inline {
+                    existing.is_inline = true;
+                }
+            })
+            .or_insert(att);
+    }
+    seen.into_values().collect()
 }
 
 /// Extract a text value from a HeaderValue, if present.

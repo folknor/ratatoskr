@@ -89,6 +89,7 @@ jmap-client = { version = "0.4", default-features = false, features = ["async"] 
 async-trait = "0.1"
 hickory-resolver = { version = "0.25", features = ["tokio"] }
 quick-xml = "0.37"
+xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = ["Win32_UI_Shell"] }

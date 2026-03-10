@@ -5,11 +5,11 @@ import { useTranslation } from "react-i18next";
 import { type DbAttachment, getEmailProvider } from "@/core/attachments";
 import { formatFileSize, isImage, isPdf } from "@/utils/fileTypeHelpers";
 
-/** Dedup attachments by filename+size (content-based) */
+/** Dedup attachments by content_id (preferred) or filename+size fallback */
 function dedup(attachments: DbAttachment[]): DbAttachment[] {
   const seen = new Set<string>();
   return attachments.filter((a) => {
-    const key = `${a.filename}:${a.size}`;
+    const key = a.content_id ?? `${a.filename}:${a.size}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
