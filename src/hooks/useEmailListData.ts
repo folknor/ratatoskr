@@ -205,7 +205,7 @@ export function useEmailListData(): EmailListData {
           };
         }),
       ),
-    [],
+    [activeAccountId],
   );
 
   const loadThreads = useCallback(async () => {
