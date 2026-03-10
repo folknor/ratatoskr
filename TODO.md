@@ -20,6 +20,34 @@
 
 ---
 
+## Gmail→Rust Migration Follow-ups
+
+### HIGH
+
+- [ ] **`scheduledSendManager` is Gmail-only** — `src/services/snooze/scheduledSendManager.ts:30`
+
+  Uses `invoke('gmail_send_email')` directly. If a scheduled send fires for an IMAP or JMAP account, it will fail. Should use `sendEmail()` from `emailActions.ts` which routes through the provider abstraction. Pre-existing bug (was `getGmailClient` before), carried forward during migration.
+
+- [ ] **`unsubscribeManager` mailto send is Gmail-only** — `src/services/unsubscribe/unsubscribeManager.ts:82`
+
+  Same issue. The mailto fallback unsubscribe path uses `invoke('gmail_send_email')`. Should use `sendEmail()` from `emailActions.ts`.
+
+### MEDIUM
+
+- [ ] **`EmailList` draft lookup is Gmail-only** — `src/components/layout/EmailList.tsx:81`
+
+  Uses `invoke('gmail_list_drafts')` to find the draft ID when opening a draft for editing. Won't work for IMAP/JMAP accounts. Needs a provider-agnostic draft listing command or a local DB query for draft IDs.
+
+- [ ] **`MultiSelectBar` permanent delete may double-delete locally** — `src/components/layout/MultiSelectBar.tsx:39-40`
+
+  Calls `permanentDeleteThread()` (emailActions, which does optimistic local cleanup) then `deleteThreadFromDb()`. The second call may be redundant if emailActions already removes the thread from the local DB, or it may be intentionally thorough (cascade-deleting messages/attachments that the optimistic update skips). Verify whether this causes issues or is needed.
+
+- [ ] **`getGmailClient()` retained for Calendar only** — `src/services/calendar/googleCalendarProvider.ts`
+
+  The TS `GmailClient` class and `tokenManager.ts` client cache are kept solely because `googleCalendarProvider.ts` uses `GmailClient` for Google Calendar API calls (same OAuth token, different endpoint). Once a Rust Calendar client exists, `getGmailClient()`, `client.ts`, and the legacy client cache in `tokenManager.ts` can be deleted entirely.
+
+---
+
 ## Phase 4 (Rust Sync Engine) Follow-ups
 
 ### MEDIUM
