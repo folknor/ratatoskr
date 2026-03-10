@@ -716,6 +716,69 @@ export async function getHeldThreadIds(
 }
 
 // ═══════════════════════════════════════════════════════════════
+// BODY STORE (Phase 2 — compressed body storage)
+// ═══════════════════════════════════════════════════════════════
+
+export interface MessageBody {
+  messageId: string;
+  bodyHtml: string | null;
+  bodyText: string | null;
+}
+
+export interface BodyStoreStats {
+  messageCount: number;
+  compressedHtmlBytes: number;
+  compressedTextBytes: number;
+}
+
+/** Store a single message body (zstd-compressed in Rust). */
+export async function bodyStorePut(
+  messageId: string,
+  bodyHtml: string | null,
+  bodyText: string | null,
+): Promise<void> {
+  return invoke<void>("body_store_put", { messageId, bodyHtml, bodyText });
+}
+
+/** Store multiple message bodies in a single transaction. */
+export async function bodyStorePutBatch(
+  bodies: MessageBody[],
+): Promise<void> {
+  return invoke<void>("body_store_put_batch", { bodies });
+}
+
+/** Retrieve a single message body (decompressed). */
+export async function bodyStoreGet(
+  messageId: string,
+): Promise<MessageBody | null> {
+  return invoke<MessageBody | null>("body_store_get", { messageId });
+}
+
+/** Retrieve multiple message bodies (decompressed). */
+export async function bodyStoreGetBatch(
+  messageIds: string[],
+): Promise<MessageBody[]> {
+  return invoke<MessageBody[]>("body_store_get_batch", { messageIds });
+}
+
+/** Delete bodies for given message IDs. */
+export async function bodyStoreDelete(
+  messageIds: string[],
+): Promise<number> {
+  return invoke<number>("body_store_delete", { messageIds });
+}
+
+/** Get body store statistics. */
+export async function bodyStoreStats(): Promise<BodyStoreStats> {
+  return invoke<BodyStoreStats>("body_store_stats");
+}
+
+/** Migrate existing bodies from metadata DB to body store. Returns count migrated. */
+export async function bodyStoreMigrate(): Promise<number> {
+  return invoke<number>("body_store_migrate");
+}
+
+// ═══════════════════════════════════════════════════════════════
 // TANTIVY FULL-TEXT SEARCH (Phase 3)
 // ═══════════════════════════════════════════════════════════════
 

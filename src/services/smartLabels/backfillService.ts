@@ -1,3 +1,4 @@
+import { bodyStoreGetBatch } from "@/core/rustDb";
 import { getDb } from "@/services/db/connection";
 import { addThreadLabel } from "@/services/emailActions";
 import type { ParsedMessage } from "@/services/gmail/messageParser";
@@ -9,8 +10,6 @@ interface BackfillRow {
   snippet: string | null;
   from_address: string | null;
   from_name: string | null;
-  body_text: string | null;
-  body_html: string | null;
   to_addresses: string | null;
   has_attachments: number;
   id: string;
@@ -30,10 +29,10 @@ export async function backfillSmartLabels(
 
   // biome-ignore lint/nursery/noUnnecessaryConditions: intentional infinite loop broken by empty batch check
   while (true) {
-    // Fetch inbox threads with their latest message data
+    // Fetch inbox threads with their latest message data (bodies from body store)
     const rows = await db.select<BackfillRow[]>(
       `SELECT t.id AS thread_id, t.subject, t.snippet,
-              m.from_address, m.from_name, m.body_text, m.body_html,
+              m.from_address, m.from_name,
               m.to_addresses, m.has_attachments, m.id
        FROM threads t
        INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
@@ -47,32 +46,40 @@ export async function backfillSmartLabels(
 
     if (rows.length === 0) break;
 
-    // Build lightweight ParsedMessage objects from DB rows
-    const messages: ParsedMessage[] = rows.map((row) => ({
-      id: row.id,
-      threadId: row.thread_id,
-      fromAddress: row.from_address,
-      fromName: row.from_name,
-      toAddresses: row.to_addresses,
-      ccAddresses: null,
-      bccAddresses: null,
-      replyTo: null,
-      subject: row.subject,
-      snippet: row.snippet ?? "",
-      date: 0,
-      isRead: false,
-      isStarred: false,
-      bodyHtml: row.body_html,
-      bodyText: row.body_text,
-      rawSize: 0,
-      internalDate: 0,
-      labelIds: [],
-      hasAttachments: Boolean(row.has_attachments),
-      attachments: [],
-      listUnsubscribe: null,
-      listUnsubscribePost: null,
-      authResults: null,
-    }));
+    // Hydrate bodies from body store
+    const messageIds = rows.map((r) => r.id).filter(Boolean);
+    const bodies = messageIds.length > 0 ? await bodyStoreGetBatch(messageIds) : [];
+    const bodyMap = new Map(bodies.map((b) => [b.messageId, b]));
+
+    // Build lightweight ParsedMessage objects from DB rows + body store
+    const messages: ParsedMessage[] = rows.map((row) => {
+      const body = bodyMap.get(row.id);
+      return {
+        id: row.id,
+        threadId: row.thread_id,
+        fromAddress: row.from_address,
+        fromName: row.from_name,
+        toAddresses: row.to_addresses,
+        ccAddresses: null,
+        bccAddresses: null,
+        replyTo: null,
+        subject: row.subject,
+        snippet: row.snippet ?? "",
+        date: 0,
+        isRead: false,
+        isStarred: false,
+        bodyHtml: body?.bodyHtml ?? null,
+        bodyText: body?.bodyText ?? null,
+        rawSize: 0,
+        internalDate: 0,
+        labelIds: [],
+        hasAttachments: Boolean(row.has_attachments),
+        attachments: [],
+        listUnsubscribe: null,
+        listUnsubscribePost: null,
+        authResults: null,
+      };
+    });
 
     const matches = await matchSmartLabels(accountId, messages);
 

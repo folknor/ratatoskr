@@ -5,6 +5,7 @@ use rusqlite::params;
 use tauri::State;
 
 use super::{SearchDocument, SearchParams, SearchResult, SearchState};
+use crate::body_store::BodyStoreState;
 
 #[tauri::command]
 pub async fn search_messages(
@@ -44,6 +45,7 @@ const REBUILD_BATCH_SIZE: usize = 10_000;
 pub async fn rebuild_search_index(
     state: State<'_, SearchState>,
     db_state: State<'_, crate::db::DbState>,
+    body_store: State<'_, BodyStoreState>,
 ) -> Result<u64, String> {
     // Step 1: Clear the existing index
     state.clear_index().await?;
@@ -72,7 +74,7 @@ pub async fn rebuild_search_index(
 
     loop {
         let batch_offset = offset;
-        let docs: Vec<SearchDocument> = db_state
+        let mut docs: Vec<SearchDocument> = db_state
             .with_conn(move |conn| {
                 let mut stmt = conn
                     .prepare(
@@ -128,6 +130,29 @@ pub async fn rebuild_search_index(
 
         if docs.is_empty() {
             break;
+        }
+
+        // Hydrate body_text from body store for docs that have None
+        let ids_needing_bodies: Vec<String> = docs
+            .iter()
+            .filter(|d| d.body_text.is_none())
+            .map(|d| d.message_id.clone())
+            .collect();
+
+        if !ids_needing_bodies.is_empty() {
+            let bodies = body_store.get_batch(ids_needing_bodies).await?;
+            let body_map: std::collections::HashMap<String, String> = bodies
+                .into_iter()
+                .filter_map(|b| b.body_text.map(|t| (b.message_id, t)))
+                .collect();
+
+            for doc in &mut docs {
+                if doc.body_text.is_none() {
+                    if let Some(text) = body_map.get(&doc.message_id) {
+                        doc.body_text = Some(text.clone());
+                    }
+                }
+            }
         }
 
         let batch_len = docs.len();

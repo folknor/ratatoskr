@@ -4521,6 +4521,7 @@ dependencies = [
  "tray-item",
  "utf7-imap",
  "windows",
+ "zstd",
 ]
 
 [[package]]

@@ -497,15 +497,35 @@ Components and stores import from `@/core` instead of `@/services/db/*`. Some se
 
 **Commits**: `572bc16`, `218df0c`, `507a104`, `f9ee081`, `f0e95a8`, `e59d084`
 
-### Phase 2: Separate Body Storage — NOT STARTED
+### Phase 2: Separate Body Storage ✅ COMPLETE (core wired, polish remaining)
 
 **Goal**: Remove message bodies from the metadata DB.
 
-- Create a separate SQLite DB (or LMDB/redb) for bodies: `message_id → zstd_compressed(body)`
-- Modify message insert/fetch to split metadata from body
-- Add zstd compression with per-domain dictionary training
-- Drop body columns from the messages table
-- Metadata DB shrinks from potentially 60GB+ to <2GB
+**Status**: Done. Separate `bodies.db` with zstd compression:
+
+**Rust backend** (`src-tauri/src/body_store/`):
+- `mod.rs` — `BodyStoreState` with separate SQLite DB (`bodies.db`), zstd level 3 compression (~3-4x ratio)
+  - Schema: `message_id TEXT PRIMARY KEY, body_html BLOB, body_text BLOB`
+  - Performance pragmas: WAL, 2GB mmap, 32MB cache
+  - `put()` / `put_batch()` — compress and store bodies
+  - `get()` / `get_batch()` — decompress and return bodies
+  - `delete()` — remove bodies by message ID
+  - `stats()` — count, compressed HTML/text byte totals
+- `commands.rs` — 7 Tauri commands: `body_store_put`, `body_store_put_batch`, `body_store_get`, `body_store_get_batch`, `body_store_delete`, `body_store_stats`, `body_store_migrate`
+
+**Migration**: `body_store_migrate` command reads body_html/body_text from metadata DB in batches (1000/batch), compresses into body store, then NULLs the columns in metadata DB. Runs automatically on app startup (idempotent — no-op once complete).
+
+**Integration**:
+- `upsertMessage()` now stores bodies in body store (fire-and-forget) and writes NULL to metadata DB columns
+- `db_get_messages_for_thread` Rust command hydrates bodies from body store for messages with NULL body columns
+- `rebuild_search_index` hydrates body_text from body store when rebuilding tantivy index
+- `backfillService.ts` and `getRecentSentMessages()` hydrate bodies from body store
+
+**Remaining polish**:
+- [ ] Per-domain zstd dictionary training (currently uses generic level 3 compression)
+- [ ] Drop body_html/body_text columns from messages table once migration is proven stable
+- [ ] Add body store VACUUM/compaction command
+- [ ] Consider LMDB (heed) or redb if SQLite body store becomes a bottleneck at scale
 
 **Risk**: Low-medium. Requires careful migration of existing data.
 
@@ -624,15 +644,15 @@ This is the Apple Mail architecture (SQLite Envelope Index + .emlx files + Spotl
 |-------|--------|------------|
 | **Phase 0**: Facade layer | ✅ Complete | `src/core/` with queries.ts, mutations.ts, rustDb.ts |
 | **Phase 1**: Rust-owned DB | ✅ Complete | 67 Rust commands, all DB reads/writes via `invoke()` |
-| **Phase 2**: Body storage | Not started | — |
+| **Phase 2**: Body storage | ✅ Core complete | `bodies.db` with zstd, 7 commands, auto-migration |
 | **Phase 3**: Tantivy search | ✅ Core complete | tantivy 0.25, 5 commands, sync integration wired |
 | **Phase 4**: Rust sync | Not started | — |
 | **Phase 5**: Rust actions | Not started | — |
 | **Phase 6**: Remaining services | Not started | — |
 
-**Phases 0, 1, and 3 are done.** The biggest user-visible improvements (eliminating IPC overhead on every query, instant full-text search) are delivered. Remaining phases (body storage, Rust sync engine, Rust email actions) are performance and architecture wins that can be tackled incrementally.
+**Phases 0, 1, 2, and 3 are done.** The biggest user-visible improvements (eliminating IPC overhead on every query, instant full-text search, compressed body storage) are delivered. Remaining phases (Rust sync engine, Rust email actions, remaining services) are performance and architecture wins that can be tackled incrementally.
 
 **Immediate next steps**:
 1. Integration test the app with Rust paths active (`pnpm tauri dev`)
 2. Bootstrap tantivy index on first run (call `rebuildSearchIndex`)
-3. Phase 2 (body storage) or Phase 4 (Rust sync) — both are independently shippable
+3. Phase 4 (Rust sync engine) — highest impact remaining phase

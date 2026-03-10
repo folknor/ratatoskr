@@ -283,10 +283,12 @@ pub async fn db_get_thread_label_ids(
 #[tauri::command]
 pub async fn db_get_messages_for_thread(
     state: State<'_, DbState>,
+    body_store: State<'_, crate::body_store::BodyStoreState>,
     account_id: String,
     thread_id: String,
 ) -> Result<Vec<DbMessage>, String> {
-    state
+    // 1. Fetch message metadata from the metadata DB
+    let mut messages: Vec<DbMessage> = state
         .with_conn(move |conn| {
             let mut stmt = conn
                 .prepare(
@@ -299,7 +301,33 @@ pub async fn db_get_messages_for_thread(
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| e.to_string())
         })
-        .await
+        .await?;
+
+    // 2. Hydrate bodies from the body store for messages that don't already have them
+    let ids_needing_bodies: Vec<String> = messages
+        .iter()
+        .filter(|m| m.body_html.is_none() && m.body_text.is_none())
+        .map(|m| m.id.clone())
+        .collect();
+
+    if !ids_needing_bodies.is_empty() {
+        let bodies = body_store.get_batch(ids_needing_bodies).await?;
+        let body_map: std::collections::HashMap<String, crate::body_store::MessageBody> = bodies
+            .into_iter()
+            .map(|b| (b.message_id.clone(), b))
+            .collect();
+
+        for msg in &mut messages {
+            if msg.body_html.is_none() && msg.body_text.is_none() {
+                if let Some(body) = body_map.get(&msg.id) {
+                    msg.body_html = body.body_html.clone();
+                    msg.body_text = body.body_text.clone();
+                }
+            }
+        }
+    }
+
+    Ok(messages)
 }
 
 // ── Label queries ────────────────────────────────────────────

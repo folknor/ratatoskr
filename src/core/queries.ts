@@ -110,6 +110,19 @@ export {
   type QuickStepExecutionResult,
 } from "@/services/quickSteps/types";
 
+// ── Body Store (Phase 2 — compressed body storage) ───────────
+export {
+  bodyStoreGet,
+  bodyStoreGetBatch,
+  bodyStorePut,
+  bodyStorePutBatch,
+  bodyStoreStats,
+  bodyStoreMigrate,
+  bodyStoreDelete,
+  type BodyStoreStats,
+  type MessageBody,
+} from "./rustDb";
+
 // ── Search (tantivy full-text search — Phase 3) ─────────────
 export {
   type SearchResult,

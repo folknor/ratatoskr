@@ -1,3 +1,5 @@
+import { bodyStorePut } from "@/core/rustDb";
+
 import { getDb } from "./connection";
 
 export interface DbMessage {
@@ -70,20 +72,31 @@ export async function upsertMessage(msg: {
   imapFolder?: string | null;
 }): Promise<void> {
   const db = await getDb();
+
+  // Store bodies in the compressed body store (Phase 2) — fire-and-forget
+  // so it doesn't block the metadata upsert
+  if (msg.bodyHtml || msg.bodyText) {
+    bodyStorePut(msg.id, msg.bodyHtml, msg.bodyText).catch((e) =>
+      console.warn("body_store_put failed:", e),
+    );
+  }
+
+  // Metadata DB — no longer stores body_html/body_text.
+  // body_cached flag is still set so existing code knows a body exists.
   await db.execute(
     `INSERT INTO messages (id, account_id, thread_id, from_address, from_name, to_addresses, cc_addresses, bcc_addresses, reply_to, subject, snippet, date, is_read, is_starred, body_html, body_text, body_cached, raw_size, internal_date, list_unsubscribe, list_unsubscribe_post, auth_results, message_id_header, references_header, in_reply_to_header, imap_uid, imap_folder)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NULL, NULL, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
      ON CONFLICT(account_id, id) DO UPDATE SET
        from_address = $4, from_name = $5, to_addresses = $6, cc_addresses = $7,
        bcc_addresses = $8, reply_to = $9, subject = $10, snippet = $11,
        date = $12, is_read = $13, is_starred = $14,
-       body_html = COALESCE($15, body_html), body_text = COALESCE($16, body_text),
-       body_cached = CASE WHEN $15 IS NOT NULL THEN 1 ELSE body_cached END,
-       raw_size = $18, internal_date = $19, list_unsubscribe = $20, list_unsubscribe_post = $21,
-       auth_results = $22, message_id_header = COALESCE($23, message_id_header),
-       references_header = COALESCE($24, references_header),
-       in_reply_to_header = COALESCE($25, in_reply_to_header),
-       imap_uid = COALESCE($26, imap_uid), imap_folder = COALESCE($27, imap_folder)`,
+       body_html = NULL, body_text = NULL,
+       body_cached = CASE WHEN $15 = 1 THEN 1 ELSE body_cached END,
+       raw_size = $16, internal_date = $17, list_unsubscribe = $18, list_unsubscribe_post = $19,
+       auth_results = $20, message_id_header = COALESCE($21, message_id_header),
+       references_header = COALESCE($22, references_header),
+       in_reply_to_header = COALESCE($23, in_reply_to_header),
+       imap_uid = COALESCE($24, imap_uid), imap_folder = COALESCE($25, imap_folder)`,
     [
       msg.id,
       msg.accountId,
@@ -99,9 +112,7 @@ export async function upsertMessage(msg: {
       msg.date,
       msg.isRead ? 1 : 0,
       msg.isStarred ? 1 : 0,
-      msg.bodyHtml,
-      msg.bodyText,
-      msg.bodyHtml ? 1 : 0,
+      msg.bodyHtml || msg.bodyText ? 1 : 0,
       msg.rawSize,
       msg.internalDate,
       msg.listUnsubscribe ?? null,
@@ -153,7 +164,7 @@ export async function deleteAllMessagesForAccount(
 
 /**
  * Get recent sent messages for an account, matching from_address to account email.
- * Used for writing style analysis.
+ * Used for writing style analysis. Hydrates bodies from body store.
  */
 export async function getRecentSentMessages(
   accountId: string,
@@ -161,11 +172,34 @@ export async function getRecentSentMessages(
   limit: number = 15,
 ): Promise<DbMessage[]> {
   const db = await getDb();
-  return db.select<DbMessage[]>(
+  const messages = await db.select<DbMessage[]>(
     `SELECT * FROM messages
      WHERE account_id = $1 AND LOWER(from_address) = LOWER($2)
-       AND body_text IS NOT NULL AND LENGTH(body_text) > 50
+       AND body_cached = 1
      ORDER BY date DESC LIMIT $3`,
     [accountId, accountEmail, limit],
   );
+
+  // Hydrate bodies from body store
+  if (messages.length > 0) {
+    const { bodyStoreGetBatch } = await import("@/core/rustDb");
+    const ids = messages.map((m) => m.id);
+    const bodies = await bodyStoreGetBatch(ids);
+    const bodyMap = new Map(bodies.map((b) => [b.messageId, b]));
+
+    for (const msg of messages) {
+      const body = bodyMap.get(msg.id);
+      if (body) {
+        msg.body_html = body.bodyHtml;
+        msg.body_text = body.bodyText;
+      }
+    }
+
+    // Filter to messages that actually have body_text with content
+    return messages.filter(
+      (m) => m.body_text != null && m.body_text.length > 50,
+    );
+  }
+
+  return messages;
 }

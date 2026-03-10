@@ -17,6 +17,10 @@ vi.mock("@/services/emailActions", () => ({
   addThreadLabel: vi.fn(() => Promise.resolve({ success: true })),
 }));
 
+vi.mock("@/core/rustDb", () => ({
+  bodyStoreGetBatch: vi.fn(() => Promise.resolve([])),
+}));
+
 import { addThreadLabel } from "@/services/emailActions";
 import { backfillSmartLabels } from "./backfillService";
 import { matchSmartLabels } from "./smartLabelService";
@@ -34,8 +38,6 @@ describe("backfillSmartLabels", () => {
       snippet: `Snippet ${i}`,
       from_address: `sender${i}@example.com`,
       from_name: `Sender ${i}`,
-      body_text: null,
-      body_html: null,
       to_addresses: null,
       has_attachments: 0,
       id: `msg-${i}`,
@@ -71,8 +73,6 @@ describe("backfillSmartLabels", () => {
         snippet: "a",
         from_address: "a@b.com",
         from_name: null,
-        body_text: null,
-        body_html: null,
         to_addresses: null,
         has_attachments: 0,
         id: "m1",
@@ -83,8 +83,6 @@ describe("backfillSmartLabels", () => {
         snippet: "b",
         from_address: "b@b.com",
         from_name: null,
-        body_text: null,
-        body_html: null,
         to_addresses: null,
         has_attachments: 0,
         id: "m2",
@@ -111,8 +109,6 @@ describe("backfillSmartLabels", () => {
         snippet: "a",
         from_address: "a@b.com",
         from_name: null,
-        body_text: null,
-        body_html: null,
         to_addresses: null,
         has_attachments: 0,
         id: "m1",

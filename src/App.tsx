@@ -206,6 +206,14 @@ export default function App(): React.ReactNode {
       try {
         await runMigrations();
 
+        // Migrate existing bodies from metadata DB to compressed body store (Phase 2).
+        // This is idempotent — once all bodies are migrated, it's a no-op.
+        import("@/core/rustDb").then(({ bodyStoreMigrate }) =>
+          bodyStoreMigrate().catch((e: unknown) =>
+            console.warn("Body store migration skipped:", e),
+          ),
+        );
+
         // Load persisted language (must be after migrations, before UI renders)
         const { loadPersistedLanguage } = await import("./i18n");
         await loadPersistedLanguage();

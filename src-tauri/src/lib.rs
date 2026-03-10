@@ -6,6 +6,7 @@ use tauri::{
 use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::MacosLauncher;
 
+mod body_store;
 mod commands;
 mod db;
 mod imap;
@@ -189,6 +190,14 @@ pub fn run() {
             db::queries_extra::db_get_bundle_rules,
             db::queries_extra::db_get_bundle_summaries,
             db::queries_extra::db_get_held_thread_ids,
+            // Body store (Phase 2 — compressed body storage)
+            body_store::commands::body_store_put,
+            body_store::commands::body_store_put_batch,
+            body_store::commands::body_store_get,
+            body_store::commands::body_store_get_batch,
+            body_store::commands::body_store_delete,
+            body_store::commands::body_store_stats,
+            body_store::commands::body_store_migrate,
             // Tantivy full-text search (Phase 3)
             search::commands::search_messages,
             search::commands::index_message,
@@ -221,6 +230,12 @@ pub fn run() {
                     Box::new(std::io::Error::other(format!("db init: {e}")))
                 })?;
                 app.manage(db_state);
+
+                let body_store_state =
+                    body_store::BodyStoreState::init(&app_data_dir).map_err(|e| {
+                        Box::new(std::io::Error::other(format!("body store init: {e}")))
+                    })?;
+                app.manage(body_store_state);
 
                 let search_state = search::SearchState::init(&app_data_dir).map_err(|e| {
                     Box::new(std::io::Error::other(format!("search init: {e}")))
