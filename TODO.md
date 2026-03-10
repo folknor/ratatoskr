@@ -102,6 +102,26 @@
 
   The client reads `microsoft_client_id` from the settings table but there's no migration, settings UI, or `AddGraphAccount` flow to set it. Need setup flow before any real Graph account can connect.
 
+- [ ] **No attachment enumeration during sync** — `src-tauri/src/graph/sync.rs`
+
+  JMAP and Gmail both populate the `attachments` table during sync (attachment metadata is inline in their API responses). Graph doesn't include attachment metadata in message responses by default — it requires `$expand=attachments($select=id,name,contentType,size,isInline,contentId)` added to the message query. Currently only the `has_attachments` flag on threads is correct. The attachment library will be empty for Graph accounts until a user opens a message and fetches attachments on demand. Fix: add `$expand=attachments` to the message `$select` in sync, then populate the `attachments` table during `persist_messages`. This is deferred item #16 in the plan doc.
+
+- [ ] **`raw_size` is always 0 for Graph messages** — `src-tauri/src/graph/sync.rs`
+
+  Graph's message API doesn't expose a byte-size field. JMAP has `size`, Gmail has `sizeEstimate`. The `raw_size` column in `messages` is written as `0i64`. Only affects storage stats display — not functional.
+
+- [ ] **`list_folders` always re-syncs from server** — `src-tauri/src/graph/ops.rs`
+
+  The old code had a `build_or_get_folder_map` that returned the cached folder map if available. The current implementation calls `sync_folders_public` which always hits the Graph API and persists labels. This is correct for the trait contract (caller expects a fresh folder list), but heavier than necessary. Under the 4-concurrent semaphore limit, frequent calls could compete with sync. Consider adding a short TTL cache (e.g., return cached map if <60s old).
+
+- [ ] **Delta sync processes all folders every cycle** — `src-tauri/src/graph/sync.rs`
+
+  The plan doc describes priority-based folder ordering: Inbox/Sent/Drafts every cycle, Archive/Trash every 5th, user folders every 20th. The current implementation queries every folder with a delta token on every sync cycle. Each delta call is cheap if nothing changed (returns empty result + new deltaLink), but on mailboxes with 30+ folders this means 30+ API calls per 60s cycle under a 3-concurrent semaphore. Needs a sync-cycle counter (in memory on `GraphClient`, reset on app restart is fine) and priority-based folder filtering before real-world testing.
+
+- [ ] **No folder tree re-traversal during delta sync** — `src-tauri/src/graph/sync.rs`
+
+  Delta sync only processes folders that already have delta tokens from initial sync. New folders created after initial sync won't be discovered until `list_folders` is explicitly called or the user triggers a fresh initial sync. The plan doc specifies re-traversing the full folder tree every 10th sync cycle to detect new/renamed/deleted folders, bootstrap delta tokens for new ones, and clean up tokens for deleted ones. This should be implemented alongside the sync-cycle counter for folder priority ordering.
+
 ---
 
 ## TypeScript Strictness
