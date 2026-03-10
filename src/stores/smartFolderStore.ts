@@ -48,7 +48,12 @@ interface SmartFolderState {
   ) => Promise<string>;
   updateFolder: (
     id: string,
-    updates: { name?: string | undefined; query?: string | undefined; icon?: string | undefined; color?: string | undefined },
+    updates: {
+      name?: string | undefined;
+      query?: string | undefined;
+      icon?: string | undefined;
+      color?: string | undefined;
+    },
   ) => Promise<void>;
   deleteFolder: (id: string) => Promise<void>;
   refreshUnreadCounts: (accountId: string) => Promise<void>;
@@ -108,12 +113,19 @@ export const useSmartFolderStore: UseBoundStore<StoreApi<SmartFolderState>> =
 
     updateFolder: async (
       id: string,
-      updates: { name?: string | undefined; query?: string | undefined; icon?: string | undefined; color?: string | undefined },
+      updates: {
+        name?: string | undefined;
+        query?: string | undefined;
+        icon?: string | undefined;
+        color?: string | undefined;
+      },
     ) => {
       await updateSmartFolderDb(id, updates);
       const { folders } = get();
       set({
-        folders: folders.map((f) => (f.id === id ? { ...f, ...updates } as SmartFolder : f)),
+        folders: folders.map((f) =>
+          f.id === id ? ({ ...f, ...updates } as SmartFolder) : f,
+        ),
       });
     },
 

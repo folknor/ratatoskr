@@ -55,9 +55,7 @@ describe("GoogleCalendarProvider", () => {
 
       expect(fetchSpy).toHaveBeenCalledTimes(1);
       const calledUrl = fetchSpy.mock.calls[0][0] as string;
-      expect(calledUrl).toBe(
-        `${CALENDAR_API_BASE}/users/me/calendarList`,
-      );
+      expect(calledUrl).toBe(`${CALENDAR_API_BASE}/users/me/calendarList`);
       expect(result).toEqual([
         {
           remoteId: "primary",
@@ -75,9 +73,7 @@ describe("GoogleCalendarProvider", () => {
     });
 
     it("returns empty array when no items", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        mockFetchResponse({}),
-      );
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(mockFetchResponse({}));
 
       const result = await provider.listCalendars();
 
@@ -102,9 +98,9 @@ describe("GoogleCalendarProvider", () => {
         etag: '"etag-1"',
       };
 
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        mockFetchResponse({ items: [googleEvent] }),
-      );
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(mockFetchResponse({ items: [googleEvent] }));
 
       const result = await provider.fetchEvents(
         "cal-id",
@@ -142,9 +138,9 @@ describe("GoogleCalendarProvider", () => {
     });
 
     it("encodes calendar ID in URL", async () => {
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        mockFetchResponse({ items: [] }),
-      );
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(mockFetchResponse({ items: [] }));
 
       await provider.fetchEvents(
         "user@example.com",
@@ -169,9 +165,9 @@ describe("GoogleCalendarProvider", () => {
         status: "confirmed",
       };
 
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        mockFetchResponse(createdEvent),
-      );
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(mockFetchResponse(createdEvent));
 
       const result = await provider.createEvent("cal-1", {
         summary: "Lunch",
@@ -299,9 +295,9 @@ describe("GoogleCalendarProvider", () => {
 
   describe("deleteEvent", () => {
     it("sends DELETE request with correct URL", async () => {
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        mockFetchResponse(undefined, 204),
-      );
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(mockFetchResponse(undefined, 204));
 
       await provider.deleteEvent("cal-1", "evt-1");
 
@@ -314,9 +310,9 @@ describe("GoogleCalendarProvider", () => {
     });
 
     it("encodes calendar and event IDs", async () => {
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        mockFetchResponse(undefined, 204),
-      );
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(mockFetchResponse(undefined, 204));
 
       await provider.deleteEvent("user@example.com", "evt/special");
 
@@ -411,7 +407,8 @@ describe("GoogleCalendarProvider", () => {
     });
 
     it("follows pagination with nextPageToken", async () => {
-      const fetchSpy = vi.spyOn(globalThis, "fetch")
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
         .mockResolvedValueOnce(
           mockFetchResponse({
             items: [
@@ -476,8 +473,12 @@ describe("GoogleCalendarProvider", () => {
         .mockResolvedValueOnce("refreshed-token"); // force refresh
       // After force refresh, retry also fails
       vi.spyOn(globalThis, "fetch")
-        .mockResolvedValueOnce(mockFetchResponse({ error: "Unauthorized" }, 401))
-        .mockResolvedValueOnce(mockFetchResponse({ error: "Unauthorized" }, 401));
+        .mockResolvedValueOnce(
+          mockFetchResponse({ error: "Unauthorized" }, 401),
+        )
+        .mockResolvedValueOnce(
+          mockFetchResponse({ error: "Unauthorized" }, 401),
+        );
 
       const result = await provider.testConnection();
 
@@ -501,8 +502,11 @@ describe("GoogleCalendarProvider", () => {
 
   describe("token refresh on 401", () => {
     it("retries with refreshed token after 401", async () => {
-      const fetchSpy = vi.spyOn(globalThis, "fetch")
-        .mockResolvedValueOnce(mockFetchResponse({ error: "Unauthorized" }, 401))
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          mockFetchResponse({ error: "Unauthorized" }, 401),
+        )
         .mockResolvedValueOnce(mockFetchResponse({ items: [] }));
 
       vi.mocked(invoke)

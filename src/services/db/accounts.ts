@@ -267,7 +267,14 @@ export async function insertJmapAccount(account: {
   await db.execute(
     `INSERT INTO accounts (id, email, display_name, provider, auth_method, jmap_url, imap_password, imap_username)
      VALUES ($1, $2, $3, 'jmap', 'password', $4, $5, $6)`,
-    [account.id, account.email, account.displayName, account.jmapUrl, encPassword, account.username || null],
+    [
+      account.id,
+      account.email,
+      account.displayName,
+      account.jmapUrl,
+      encPassword,
+      account.username || null,
+    ],
   );
 }
 

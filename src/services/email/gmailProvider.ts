@@ -86,7 +86,8 @@ export class GmailApiProvider implements EmailProvider {
       id: label.id,
       name: label.name,
       path: label.id,
-      type: label.labelType === "system" ? ("system" as const) : ("user" as const),
+      type:
+        label.labelType === "system" ? ("system" as const) : ("user" as const),
       specialUse:
         label.labelType === "system"
           ? (GMAIL_SPECIAL_USE[label.id] ?? null)
@@ -234,8 +235,7 @@ export class GmailApiProvider implements EmailProvider {
     } catch (err) {
       return {
         success: false,
-        message:
-          err instanceof Error ? err.message : String(err),
+        message: err instanceof Error ? err.message : String(err),
       };
     }
   }

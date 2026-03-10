@@ -183,7 +183,9 @@ export function CommandPalette({
           const threadId = getSelectedThreadId();
           if (threadId) {
             window.dispatchEvent(
-              new CustomEvent("ratatoskr-extract-task", { detail: { threadId } }),
+              new CustomEvent("ratatoskr-extract-task", {
+                detail: { threadId },
+              }),
             );
           }
         },

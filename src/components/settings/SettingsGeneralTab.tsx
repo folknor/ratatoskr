@@ -61,7 +61,9 @@ export function SettingsGeneralTab({
   const theme = useUIPreferencesStore((s) => s.theme);
   const setTheme = useUIPreferencesStore((s) => s.setTheme);
   const readingPanePosition = useUILayoutStore((s) => s.readingPanePosition);
-  const setReadingPanePosition = useUILayoutStore((s) => s.setReadingPanePosition);
+  const setReadingPanePosition = useUILayoutStore(
+    (s) => s.setReadingPanePosition,
+  );
   const emailDensity = useUIPreferencesStore((s) => s.emailDensity);
   const setEmailDensity = useUIPreferencesStore((s) => s.setEmailDensity);
   const fontScale = useUIPreferencesStore((s) => s.fontScale);
@@ -71,7 +73,9 @@ export function SettingsGeneralTab({
   const inboxViewMode = useUIPreferencesStore((s) => s.inboxViewMode);
   const setInboxViewMode = useUIPreferencesStore((s) => s.setInboxViewMode);
   const showSyncStatusBar = useUIPreferencesStore((s) => s.showSyncStatusBar);
-  const setShowSyncStatusBar = useUIPreferencesStore((s) => s.setShowSyncStatusBar);
+  const setShowSyncStatusBar = useUIPreferencesStore(
+    (s) => s.setShowSyncStatusBar,
+  );
   const reduceMotion = useUIPreferencesStore((s) => s.reduceMotion);
   const setReduceMotion = useUIPreferencesStore((s) => s.setReduceMotion);
 

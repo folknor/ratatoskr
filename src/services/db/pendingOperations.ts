@@ -61,17 +61,13 @@ export async function incrementRetry(id: string): Promise<void> {
   await invoke("db_pending_ops_increment_retry", { id });
 }
 
-export async function getPendingOpsCount(
-  accountId?: string,
-): Promise<number> {
+export async function getPendingOpsCount(accountId?: string): Promise<number> {
   return invoke("db_pending_ops_count", {
     accountId: accountId ?? null,
   });
 }
 
-export async function getFailedOpsCount(
-  accountId?: string,
-): Promise<number> {
+export async function getFailedOpsCount(accountId?: string): Promise<number> {
   return invoke("db_pending_ops_failed_count", {
     accountId: accountId ?? null,
   });
@@ -87,25 +83,19 @@ export async function getPendingOpsForResource(
   });
 }
 
-export async function compactQueue(
-  accountId?: string,
-): Promise<number> {
+export async function compactQueue(accountId?: string): Promise<number> {
   return invoke("db_pending_ops_compact", {
     accountId: accountId ?? null,
   });
 }
 
-export async function clearFailedOperations(
-  accountId?: string,
-): Promise<void> {
+export async function clearFailedOperations(accountId?: string): Promise<void> {
   await invoke("db_pending_ops_clear_failed", {
     accountId: accountId ?? null,
   });
 }
 
-export async function retryFailedOperations(
-  accountId?: string,
-): Promise<void> {
+export async function retryFailedOperations(accountId?: string): Promise<void> {
   await invoke("db_pending_ops_retry_failed", {
     accountId: accountId ?? null,
   });

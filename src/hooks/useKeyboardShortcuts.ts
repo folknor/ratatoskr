@@ -209,7 +209,8 @@ export function useKeyboardShortcuts(): void {
       // (In split-pane mode or list-only view, arrows move between threads)
       if (key === "ArrowDown" || key === "ArrowUp") {
         const selectedId = getSelectedThreadId();
-        const paneOff = useUILayoutStore.getState().readingPanePosition === "hidden";
+        const paneOff =
+          useUILayoutStore.getState().readingPanePosition === "hidden";
         // Only handle here if no thread is open in full-screen mode
         // (when pane is off and a thread is selected, ThreadView handles arrows for message nav)
         if (!(paneOff && selectedId)) {
@@ -325,7 +326,9 @@ async function executeAction(actionId: string): Promise<void> {
       if (selectedId) {
         const replyMode = useUIPreferencesStore.getState().defaultReplyMode;
         window.dispatchEvent(
-          new CustomEvent("ratatoskr-inline-reply", { detail: { mode: replyMode } }),
+          new CustomEvent("ratatoskr-inline-reply", {
+            detail: { mode: replyMode },
+          }),
         );
       }
       break;
@@ -342,7 +345,9 @@ async function executeAction(actionId: string): Promise<void> {
     case "action.forward":
       if (selectedId) {
         window.dispatchEvent(
-          new CustomEvent("ratatoskr-inline-reply", { detail: { mode: "forward" } }),
+          new CustomEvent("ratatoskr-inline-reply", {
+            detail: { mode: "forward" },
+          }),
         );
       }
       break;

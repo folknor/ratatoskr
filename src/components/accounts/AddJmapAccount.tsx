@@ -124,10 +124,9 @@ export function AddJmapAccount({
   const handleDiscover = async (): Promise<void> => {
     setDiscoveryStatus({ state: "loading" });
     try {
-      const result = await invoke<DiscoveryResult | null>(
-        "jmap_discover_url",
-        { email: email.trim() },
-      );
+      const result = await invoke<DiscoveryResult | null>("jmap_discover_url", {
+        email: email.trim(),
+      });
       if (result) {
         setJmapUrl(result.sessionUrl);
         setDiscoveryStatus({
@@ -137,7 +136,8 @@ export function AddJmapAccount({
       } else {
         setDiscoveryStatus({
           state: "error",
-          message: "Could not auto-discover JMAP URL. Please enter it manually.",
+          message:
+            "Could not auto-discover JMAP URL. Please enter it manually.",
         });
       }
     } catch (err) {

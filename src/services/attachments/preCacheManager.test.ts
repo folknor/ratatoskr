@@ -103,18 +103,16 @@ describe("preCacheManager", () => {
   });
 
   it("uses imap_part_id when gmail_attachment_id is null", async () => {
-    mockInvoke
-      .mockResolvedValueOnce(0)
-      .mockResolvedValueOnce([
-        {
-          id: "att-2",
-          message_id: "msg-2",
-          account_id: "acc-2",
-          size: 2048,
-          gmail_attachment_id: null,
-          imap_part_id: "1.2",
-        },
-      ]);
+    mockInvoke.mockResolvedValueOnce(0).mockResolvedValueOnce([
+      {
+        id: "att-2",
+        message_id: "msg-2",
+        account_id: "acc-2",
+        size: 2048,
+        gmail_attachment_id: null,
+        imap_part_id: "1.2",
+      },
+    ]);
 
     mockFetchAttachment.mockResolvedValueOnce({ data: btoa("data") });
 
@@ -124,18 +122,16 @@ describe("preCacheManager", () => {
   });
 
   it("skips attachments without any attachment id", async () => {
-    mockInvoke
-      .mockResolvedValueOnce(0)
-      .mockResolvedValueOnce([
-        {
-          id: "att-3",
-          message_id: "msg-3",
-          account_id: "acc-3",
-          size: 512,
-          gmail_attachment_id: null,
-          imap_part_id: null,
-        },
-      ]);
+    mockInvoke.mockResolvedValueOnce(0).mockResolvedValueOnce([
+      {
+        id: "att-3",
+        message_id: "msg-3",
+        account_id: "acc-3",
+        size: 512,
+        gmail_attachment_id: null,
+        imap_part_id: null,
+      },
+    ]);
 
     await runPreCache();
 
@@ -143,18 +139,16 @@ describe("preCacheManager", () => {
   });
 
   it("silently skips on fetch error", async () => {
-    mockInvoke
-      .mockResolvedValueOnce(0)
-      .mockResolvedValueOnce([
-        {
-          id: "att-4",
-          message_id: "msg-4",
-          account_id: "acc-4",
-          size: 1024,
-          gmail_attachment_id: "gmail-att-4",
-          imap_part_id: null,
-        },
-      ]);
+    mockInvoke.mockResolvedValueOnce(0).mockResolvedValueOnce([
+      {
+        id: "att-4",
+        message_id: "msg-4",
+        account_id: "acc-4",
+        size: 1024,
+        gmail_attachment_id: "gmail-att-4",
+        imap_part_id: null,
+      },
+    ]);
 
     mockFetchAttachment.mockRejectedValueOnce(new Error("network error"));
 

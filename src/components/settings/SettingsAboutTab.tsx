@@ -1,10 +1,4 @@
-import {
-  Download,
-  ExternalLink,
-  Github,
-  RefreshCw,
-  Scale,
-} from "lucide-react";
+import { Download, ExternalLink, Github, RefreshCw, Scale } from "lucide-react";
 import type React from "react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -210,7 +204,9 @@ function AboutTab(): React.ReactNode {
         <div className="flex items-center gap-3 mb-2">
           <img src={appIcon} alt="Ratatoskr" className="w-12 h-12 rounded-xl" />
           <div>
-            <h3 className="text-base font-semibold text-text-primary">Ratatoskr</h3>
+            <h3 className="text-base font-semibold text-text-primary">
+              Ratatoskr
+            </h3>
             <p className="text-sm text-text-tertiary">
               {appVersion ? `${t("version")} ${appVersion}` : t("loading")}
             </p>
@@ -235,9 +231,7 @@ function AboutTab(): React.ReactNode {
               <span className="text-sm text-text-primary">
                 {t("githubRepository")}
               </span>
-              <p className="text-xs text-text-tertiary">
-                folknor/ratatoskr
-              </p>
+              <p className="text-xs text-text-tertiary">folknor/ratatoskr</p>
             </div>
             <ExternalLink size={14} className="text-text-tertiary shrink-0" />
           </button>

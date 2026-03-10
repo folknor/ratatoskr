@@ -38,10 +38,18 @@ export function ContextMenuPortal(): React.ReactNode {
   return (
     <>
       {menuType === "sidebarLabel" && (
-        <SidebarLabelContextMenu position={position} data={data} onClose={closeMenu} />
+        <SidebarLabelContextMenu
+          position={position}
+          data={data}
+          onClose={closeMenu}
+        />
       )}
       {menuType === "sidebarNav" && (
-        <SidebarNavContextMenu position={position} data={data} onClose={closeMenu} />
+        <SidebarNavContextMenu
+          position={position}
+          data={data}
+          onClose={closeMenu}
+        />
       )}
       {menuType === "thread" && (
         <ThreadContextMenu
@@ -52,7 +60,11 @@ export function ContextMenuPortal(): React.ReactNode {
         />
       )}
       {menuType === "message" && (
-        <MessageContextMenu position={position} data={data} onClose={closeMenu} />
+        <MessageContextMenu
+          position={position}
+          data={data}
+          onClose={closeMenu}
+        />
       )}
       {snoozeTarget != null && (
         <SnoozeDialog

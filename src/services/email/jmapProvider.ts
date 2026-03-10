@@ -1,6 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ParsedMessage } from "../gmail/messageParser";
-import type { AccountProvider, EmailFolder, EmailProvider, SyncResult } from "./types";
+import type {
+  AccountProvider,
+  EmailFolder,
+  EmailProvider,
+  SyncResult,
+} from "./types";
 
 interface JmapFolder {
   id: string;
@@ -35,7 +40,9 @@ export class JmapProvider implements EmailProvider {
       id: f.id,
       name: f.name,
       path: f.path,
-      type: (f.folderType === "system" ? "system" : "user") as "system" | "user",
+      type: (f.folderType === "system" ? "system" : "user") as
+        | "system"
+        | "user",
       specialUse: f.specialUse,
       delimiter: "/",
       messageCount: f.messageCount,
@@ -54,7 +61,9 @@ export class JmapProvider implements EmailProvider {
       id: folder.id,
       name: folder.name,
       path: folder.path,
-      type: (folder.folderType === "system" ? "system" : "user") as "system" | "user",
+      type: (folder.folderType === "system" ? "system" : "user") as
+        | "system"
+        | "user",
       specialUse: folder.specialUse,
       delimiter: "/",
       messageCount: folder.messageCount,
@@ -92,10 +101,10 @@ export class JmapProvider implements EmailProvider {
   }
 
   async deltaSync(_syncToken: string): Promise<SyncResult> {
-    const result = await invoke<{ newInboxEmailIds: string[]; affectedThreadIds: string[] }>(
-      "jmap_sync_delta",
-      { accountId: this.accountId },
-    );
+    const result = await invoke<{
+      newInboxEmailIds: string[];
+      affectedThreadIds: string[];
+    }>("jmap_sync_delta", { accountId: this.accountId });
 
     const syncResult: SyncResult = { messages: [] };
     if (result.affectedThreadIds.length > 0) {
@@ -134,9 +143,12 @@ export class JmapProvider implements EmailProvider {
   // ---- Connection ----
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
-    return invoke<{ success: boolean; message: string }>("jmap_test_connection", {
-      accountId: this.accountId,
-    });
+    return invoke<{ success: boolean; message: string }>(
+      "jmap_test_connection",
+      {
+        accountId: this.accountId,
+      },
+    );
   }
 
   async getProfile(): Promise<{ email: string; name?: string | undefined }> {

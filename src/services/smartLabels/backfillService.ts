@@ -48,7 +48,8 @@ export async function backfillSmartLabels(
 
     // Hydrate bodies from body store
     const messageIds = rows.map((r) => r.id).filter(Boolean);
-    const bodies = messageIds.length > 0 ? await bodyStoreGetBatch(messageIds) : [];
+    const bodies =
+      messageIds.length > 0 ? await bodyStoreGetBatch(messageIds) : [];
     const bodyMap = new Map(bodies.map((b) => [b.messageId, b]));
 
     // Build lightweight ParsedMessage objects from DB rows + body store

@@ -127,9 +127,7 @@ export function SettingsAiTab({
               setAiProvider(val);
               setAiTestResult(null);
               await setSetting("ai_provider", val);
-              const { clearProviderClients } = await import(
-                "@/core/ai"
-              );
+              const { clearProviderClients } = await import("@/core/ai");
               clearProviderClients();
             }}
             className="w-48 bg-bg-tertiary text-text-primary text-sm px-3 py-1.5 rounded-md border border-border-primary focus:border-accent outline-none"
@@ -182,9 +180,7 @@ export function SettingsAiTab({
                 onClick={async () => {
                   await setSetting("ollama_server_url", ollamaServerUrl.trim());
                   await setSetting("ollama_model", ollamaModel.trim());
-                  const { clearProviderClients } = await import(
-                    "@/core/ai"
-                  );
+                  const { clearProviderClients } = await import("@/core/ai");
                   clearProviderClients();
                   setAiKeySaved(true);
                   setTimeout(() => setAiKeySaved(false), 2000);
@@ -200,9 +196,7 @@ export function SettingsAiTab({
                   setAiTesting(true);
                   setAiTestResult(null);
                   try {
-                    const { testConnection } = await import(
-                      "@/core/ai"
-                    );
+                    const { testConnection } = await import("@/core/ai");
                     const ok = await testConnection();
                     setAiTestResult(ok ? "success" : "fail");
                   } catch {
@@ -297,9 +291,7 @@ export function SettingsAiTab({
                   else if (aiProvider === "copilot") setCopilotModel(val);
                   else setGeminiModel(val);
                   await setSetting(modelSettingMap[aiProvider], val);
-                  const { clearProviderClients } = await import(
-                    "@/core/ai"
-                  );
+                  const { clearProviderClients } = await import("@/core/ai");
                   clearProviderClients();
                 }}
                 className="w-48 bg-bg-tertiary text-text-primary text-sm px-3 py-1.5 rounded-md border border-border-primary focus:border-accent outline-none"
@@ -332,9 +324,7 @@ export function SettingsAiTab({
                           : geminiApiKey.trim();
                   if (keyValue) {
                     await setSecureSetting(keySettingMap[aiProvider], keyValue);
-                    const { clearProviderClients } = await import(
-                      "@/core/ai"
-                    );
+                    const { clearProviderClients } = await import("@/core/ai");
                     clearProviderClients();
                   }
                   setAiKeySaved(true);
@@ -359,9 +349,7 @@ export function SettingsAiTab({
                   setAiTesting(true);
                   setAiTestResult(null);
                   try {
-                    const { testConnection } = await import(
-                      "@/core/ai"
-                    );
+                    const { testConnection } = await import("@/core/ai");
                     const ok = await testConnection();
                     setAiTestResult(ok ? "success" : "fail");
                   } catch {
@@ -475,9 +463,7 @@ export function SettingsAiTab({
                 try {
                   const activeId = accounts.find((a) => a.isActive)?.id;
                   if (activeId) {
-                    const { refreshWritingStyle } = await import(
-                      "@/core/ai"
-                    );
+                    const { refreshWritingStyle } = await import("@/core/ai");
                     await refreshWritingStyle(activeId);
                     setStyleAnalyzeDone(true);
                     setTimeout(() => setStyleAnalyzeDone(false), 3000);

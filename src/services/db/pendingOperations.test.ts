@@ -77,26 +77,20 @@ describe("pendingOperations DB service", () => {
   describe("updateOperationStatus", () => {
     it("updates the status and error message", async () => {
       await updateOperationStatus("op-1", "failed", "Network timeout");
-      expect(mockInvoke).toHaveBeenCalledWith(
-        "db_pending_ops_update_status",
-        {
-          id: "op-1",
-          status: "failed",
-          errorMessage: "Network timeout",
-        },
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_pending_ops_update_status", {
+        id: "op-1",
+        status: "failed",
+        errorMessage: "Network timeout",
+      });
     });
 
     it("passes null error_message when not provided", async () => {
       await updateOperationStatus("op-1", "pending");
-      expect(mockInvoke).toHaveBeenCalledWith(
-        "db_pending_ops_update_status",
-        {
-          id: "op-1",
-          status: "pending",
-          errorMessage: null,
-        },
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_pending_ops_update_status", {
+        id: "op-1",
+        status: "pending",
+        errorMessage: null,
+      });
     });
   });
 
@@ -154,13 +148,10 @@ describe("pendingOperations DB service", () => {
     it("queries by account and resource", async () => {
       mockInvoke.mockResolvedValueOnce([]);
       await getPendingOpsForResource("acct-1", "thread-1");
-      expect(mockInvoke).toHaveBeenCalledWith(
-        "db_pending_ops_for_resource",
-        {
-          accountId: "acct-1",
-          resourceId: "thread-1",
-        },
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_pending_ops_for_resource", {
+        accountId: "acct-1",
+        resourceId: "thread-1",
+      });
     });
   });
 
@@ -186,28 +177,25 @@ describe("pendingOperations DB service", () => {
   describe("clearFailedOperations", () => {
     it("clears all failed ops", async () => {
       await clearFailedOperations();
-      expect(mockInvoke).toHaveBeenCalledWith(
-        "db_pending_ops_clear_failed",
-        { accountId: null },
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_pending_ops_clear_failed", {
+        accountId: null,
+      });
     });
 
     it("clears failed ops for specific account", async () => {
       await clearFailedOperations("acct-1");
-      expect(mockInvoke).toHaveBeenCalledWith(
-        "db_pending_ops_clear_failed",
-        { accountId: "acct-1" },
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_pending_ops_clear_failed", {
+        accountId: "acct-1",
+      });
     });
   });
 
   describe("retryFailedOperations", () => {
     it("resets failed ops to pending", async () => {
       await retryFailedOperations();
-      expect(mockInvoke).toHaveBeenCalledWith(
-        "db_pending_ops_retry_failed",
-        { accountId: null },
-      );
+      expect(mockInvoke).toHaveBeenCalledWith("db_pending_ops_retry_failed", {
+        accountId: null,
+      });
     });
   });
 });

@@ -17,7 +17,11 @@ async function checkFollowUps(): Promise<void> {
   const triggered = await checkFollowUpReminders();
 
   for (const reminder of triggered) {
-    notifyFollowUpDue(reminder.subject, reminder.thread_id, reminder.account_id);
+    notifyFollowUpDue(
+      reminder.subject,
+      reminder.thread_id,
+      reminder.account_id,
+    );
   }
 
   if (triggered.length > 0) {

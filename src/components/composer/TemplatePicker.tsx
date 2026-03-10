@@ -2,10 +2,7 @@ import type { Editor } from "@tiptap/react";
 import { ChevronDown, FileText } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  type DbTemplate,
-  getTemplatesForAccount,
-} from "@/core/composer";
+import { type DbTemplate, getTemplatesForAccount } from "@/core/composer";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 

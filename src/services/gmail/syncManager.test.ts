@@ -44,10 +44,26 @@ vi.mock("../db/calendarEvents", () => ({
   deleteEventByRemoteId: vi.fn(),
 }));
 vi.mock("@/core/rustDb", () => ({
-  syncImapInitial: vi.fn().mockResolvedValue({ storedCount: 0, threadCount: 0, newInboxMessageIds: [], affectedThreadIds: [] }),
-  syncImapDelta: vi.fn().mockResolvedValue({ storedCount: 0, threadCount: 0, newInboxMessageIds: [], affectedThreadIds: [] }),
+  syncImapInitial: vi
+    .fn()
+    .mockResolvedValue({
+      storedCount: 0,
+      threadCount: 0,
+      newInboxMessageIds: [],
+      affectedThreadIds: [],
+    }),
+  syncImapDelta: vi
+    .fn()
+    .mockResolvedValue({
+      storedCount: 0,
+      threadCount: 0,
+      newInboxMessageIds: [],
+      affectedThreadIds: [],
+    }),
   syncGmailInitial: vi.fn().mockResolvedValue(undefined),
-  syncGmailDelta: vi.fn().mockResolvedValue({ newInboxMessageIds: [], affectedThreadIds: [] }),
+  syncGmailDelta: vi
+    .fn()
+    .mockResolvedValue({ newInboxMessageIds: [], affectedThreadIds: [] }),
 }));
 vi.mock("@/services/filters/filterEngine", () => ({
   applyFiltersToNewMessageIds: vi.fn(),
@@ -121,7 +137,10 @@ describe("syncManager", () => {
     vi.clearAllMocks();
     stopBackgroundSync();
     mockSyncGmailInitial.mockResolvedValue(undefined);
-    mockSyncGmailDelta.mockResolvedValue({ newInboxMessageIds: [], affectedThreadIds: [] });
+    mockSyncGmailDelta.mockResolvedValue({
+      newInboxMessageIds: [],
+      affectedThreadIds: [],
+    });
   });
 
   afterEach(() => {
@@ -168,9 +187,15 @@ describe("syncManager", () => {
       mockSyncGmailDelta.mockImplementation(() => {
         if (firstCall) {
           firstCall = false;
-          return barrier.then(() => ({ newInboxMessageIds: [], affectedThreadIds: [] }));
+          return barrier.then(() => ({
+            newInboxMessageIds: [],
+            affectedThreadIds: [],
+          }));
         }
-        return Promise.resolve({ newInboxMessageIds: [], affectedThreadIds: [] });
+        return Promise.resolve({
+          newInboxMessageIds: [],
+          affectedThreadIds: [],
+        });
       });
 
       const first = syncAccount("a1");

@@ -30,8 +30,7 @@ const providers: Record<string, OAuthProviderConfig> = {
   microsoft_graph: {
     id: "microsoft_graph",
     name: "Microsoft (Graph)",
-    authUrl:
-      "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+    authUrl: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
     tokenUrl: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
     scopes: [
       "Mail.ReadWrite",

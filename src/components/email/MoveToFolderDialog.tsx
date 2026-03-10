@@ -112,7 +112,13 @@ export function MoveToFolderDialog({
           await spamThread(activeAccountId, threadId, [], true);
         } else if (dest.id === "INBOX") {
           if (isImap) {
-            await moveThread(activeAccountId, threadId, [], "INBOX", sourceLabel);
+            await moveThread(
+              activeAccountId,
+              threadId,
+              [],
+              "INBOX",
+              sourceLabel,
+            );
           } else {
             // Gmail: add INBOX label (un-archive)
             await addThreadLabel(activeAccountId, threadId, "INBOX");
@@ -120,7 +126,13 @@ export function MoveToFolderDialog({
         } else if (dest.type === "label") {
           if (isImap) {
             // IMAP: move to folder. The label's id is the folder path for IMAP accounts.
-            await moveThread(activeAccountId, threadId, [], dest.id, sourceLabel);
+            await moveThread(
+              activeAccountId,
+              threadId,
+              [],
+              dest.id,
+              sourceLabel,
+            );
           } else {
             // Gmail: add destination label + remove from current location (archive)
             await addThreadLabel(activeAccountId, threadId, dest.id);

@@ -1,9 +1,6 @@
 import type React from "react";
 import { useEffect, useState } from "react";
-import {
-  type DbSignature,
-  getSignaturesForAccount,
-} from "@/core/composer";
+import { type DbSignature, getSignaturesForAccount } from "@/core/composer";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 

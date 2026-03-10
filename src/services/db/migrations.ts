@@ -779,7 +779,8 @@ const MIGRATIONS: { version: number; description: string; sql: string }[] = [
   },
   {
     version: 24,
-    description: "Drop FTS5 triggers (bodies moved to body store, tantivy handles search)",
+    description:
+      "Drop FTS5 triggers (bodies moved to body store, tantivy handles search)",
     sql: `
       DROP TRIGGER IF EXISTS messages_ai;
       DROP TRIGGER IF EXISTS messages_ad;

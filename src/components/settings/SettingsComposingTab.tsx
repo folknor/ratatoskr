@@ -16,9 +16,13 @@ export function SettingsComposingTab({
 }: SettingsComposingTabProps): React.ReactNode {
   const { t } = useTranslation("settings");
   const defaultReplyMode = useUIPreferencesStore((s) => s.defaultReplyMode);
-  const setDefaultReplyMode = useUIPreferencesStore((s) => s.setDefaultReplyMode);
+  const setDefaultReplyMode = useUIPreferencesStore(
+    (s) => s.setDefaultReplyMode,
+  );
   const markAsReadBehavior = useUIPreferencesStore((s) => s.markAsReadBehavior);
-  const setMarkAsReadBehavior = useUIPreferencesStore((s) => s.setMarkAsReadBehavior);
+  const setMarkAsReadBehavior = useUIPreferencesStore(
+    (s) => s.setMarkAsReadBehavior,
+  );
   const sendAndArchive = useUIPreferencesStore((s) => s.sendAndArchive);
   const setSendAndArchive = useUIPreferencesStore((s) => s.setSendAndArchive);
 

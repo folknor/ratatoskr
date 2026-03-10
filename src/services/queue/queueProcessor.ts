@@ -49,9 +49,7 @@ async function processQueue(): Promise<void> {
       const fullErrorContext = [
         `[${classified.type}] ${classified.message}`,
         originalError?.stack ? `Stack: ${originalError.stack}` : null,
-        originalError?.cause
-          ? `Cause: ${String(originalError.cause)}`
-          : null,
+        originalError?.cause ? `Cause: ${String(originalError.cause)}` : null,
       ]
         .filter(Boolean)
         .join("\n");

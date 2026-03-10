@@ -1,6 +1,11 @@
 import type { ParsedMessage } from "../gmail/messageParser";
 
-export type AccountProvider = "gmail_api" | "imap" | "caldav" | "jmap" | "graph";
+export type AccountProvider =
+  | "gmail_api"
+  | "imap"
+  | "caldav"
+  | "jmap"
+  | "graph";
 
 export interface EmailFolder {
   id: string;
@@ -58,7 +63,11 @@ export interface EmailProvider {
     messageIds: string[],
     read: boolean,
   ): Promise<void>;
-  star?(threadId: string, messageIds: string[], starred: boolean): Promise<void>;
+  star?(
+    threadId: string,
+    messageIds: string[],
+    starred: boolean,
+  ): Promise<void>;
   spam?(threadId: string, messageIds: string[], isSpam: boolean): Promise<void>;
   moveToFolder?(
     threadId: string,
@@ -70,7 +79,10 @@ export interface EmailProvider {
 
   // Send/Draft operations
   // Only implemented by IMAP provider — Gmail/JMAP/Graph route through Rust provider_* commands.
-  sendMessage?(rawBase64Url: string, threadId?: string): Promise<{ id: string }>;
+  sendMessage?(
+    rawBase64Url: string,
+    threadId?: string,
+  ): Promise<{ id: string }>;
   createDraft?(
     rawBase64Url: string,
     threadId?: string,

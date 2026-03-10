@@ -87,9 +87,27 @@ describe("GmailApiProvider", () => {
 
     it("maps special-use flags for system labels", async () => {
       mockInvoke.mockResolvedValue([
-        { id: "TRASH", name: "TRASH", labelType: "system", messagesTotal: null, messagesUnread: null },
-        { id: "DRAFT", name: "DRAFT", labelType: "system", messagesTotal: null, messagesUnread: null },
-        { id: "SPAM", name: "SPAM", labelType: "system", messagesTotal: null, messagesUnread: null },
+        {
+          id: "TRASH",
+          name: "TRASH",
+          labelType: "system",
+          messagesTotal: null,
+          messagesUnread: null,
+        },
+        {
+          id: "DRAFT",
+          name: "DRAFT",
+          labelType: "system",
+          messagesTotal: null,
+          messagesUnread: null,
+        },
+        {
+          id: "SPAM",
+          name: "SPAM",
+          labelType: "system",
+          messagesTotal: null,
+          messagesUnread: null,
+        },
       ]);
 
       const folders = await provider.listFolders();
@@ -221,5 +239,4 @@ describe("GmailApiProvider", () => {
       expect(result).toEqual({ data: "base64data", size: 1024 });
     });
   });
-
 });

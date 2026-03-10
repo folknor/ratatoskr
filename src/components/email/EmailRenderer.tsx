@@ -73,9 +73,7 @@ export function EmailRenderer({
 
     void (async () => {
       try {
-        const { getEmailProvider } = await import(
-          "@/core/attachments"
-        );
+        const { getEmailProvider } = await import("@/core/attachments");
         const provider = await getEmailProvider(accountId);
         const resolved = new Map<string, string>();
 

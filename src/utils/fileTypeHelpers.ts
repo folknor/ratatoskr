@@ -49,9 +49,9 @@ export function isDocument(
   const ext = filename?.toLowerCase();
   return Boolean(
     ext?.endsWith(".doc") ||
-    ext?.endsWith(".docx") ||
-    ext?.endsWith(".odt") ||
-    ext?.endsWith(".rtf"),
+      ext?.endsWith(".docx") ||
+      ext?.endsWith(".odt") ||
+      ext?.endsWith(".rtf"),
   );
 }
 
@@ -70,9 +70,9 @@ export function isSpreadsheet(
   const ext = filename?.toLowerCase();
   return Boolean(
     ext?.endsWith(".xls") ||
-    ext?.endsWith(".xlsx") ||
-    ext?.endsWith(".ods") ||
-    ext?.endsWith(".csv"),
+      ext?.endsWith(".xlsx") ||
+      ext?.endsWith(".ods") ||
+      ext?.endsWith(".csv"),
   );
 }
 

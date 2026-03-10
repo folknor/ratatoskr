@@ -218,11 +218,7 @@ async function applyLocalDbUpdate(
       await emailActionSpam(accountId, action.threadId, action.isSpam);
       break;
     case "snooze":
-      await emailActionSnooze(
-        accountId,
-        action.threadId,
-        action.snoozeUntil,
-      );
+      await emailActionSnooze(accountId, action.threadId, action.snoozeUntil);
       break;
     case "addLabel":
       await emailActionAddLabel(accountId, action.threadId, action.labelId);

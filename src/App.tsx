@@ -173,10 +173,16 @@ export default function App(): React.ReactNode {
     window.addEventListener("ratatoskr-toggle-ask-inbox", toggleAskInbox);
     window.addEventListener("ratatoskr-move-to-folder", handleMoveToFolder);
     return (): void => {
-      window.removeEventListener("ratatoskr-toggle-command-palette", togglePalette);
+      window.removeEventListener(
+        "ratatoskr-toggle-command-palette",
+        togglePalette,
+      );
       window.removeEventListener("ratatoskr-toggle-shortcuts-help", toggleHelp);
       window.removeEventListener("ratatoskr-toggle-ask-inbox", toggleAskInbox);
-      window.removeEventListener("ratatoskr-move-to-folder", handleMoveToFolder);
+      window.removeEventListener(
+        "ratatoskr-move-to-folder",
+        handleMoveToFolder,
+      );
     };
   }, []);
 
@@ -222,7 +228,10 @@ export default function App(): React.ReactNode {
             import("@/core/rustDb").then(async (rustDb) => {
               try {
                 const count = await rustDb.rebuildSearchIndex();
-                await rustDb.setSetting("search_index_version", SEARCH_INDEX_VERSION);
+                await rustDb.setSetting(
+                  "search_index_version",
+                  SEARCH_INDEX_VERSION,
+                );
                 console.log(`Search index built: ${String(count)} documents`);
               } catch (e) {
                 console.warn("Search index rebuild failed:", e);
@@ -393,7 +402,9 @@ export default function App(): React.ReactNode {
         await initializeClients();
 
         // Initialize JMAP clients
-        for (const account of dbAccounts.filter(a => a.is_active && a.provider === "jmap")) {
+        for (const account of dbAccounts.filter(
+          (a) => a.is_active && a.provider === "jmap",
+        )) {
           try {
             await invoke("jmap_init_client", { accountId: account.id });
           } catch (err) {
@@ -402,7 +413,9 @@ export default function App(): React.ReactNode {
         }
 
         // Initialize Graph clients
-        for (const account of dbAccounts.filter(a => a.is_active && a.provider === "graph")) {
+        for (const account of dbAccounts.filter(
+          (a) => a.is_active && a.provider === "graph",
+        )) {
           try {
             await invoke("graph_init_client", { accountId: account.id });
           } catch (err) {
@@ -638,10 +651,7 @@ export default function App(): React.ReactNode {
       // Fetch send-as aliases in the background (non-blocking, skip CalDAV-only accounts)
       if (newest.provider !== "caldav") {
         fetchSendAsAliases(newest.id).catch((err) =>
-          console.warn(
-            `Failed to fetch send-as aliases for new account:`,
-            err,
-          ),
+          console.warn(`Failed to fetch send-as aliases for new account:`, err),
         );
       }
     }

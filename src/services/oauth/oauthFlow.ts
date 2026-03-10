@@ -138,7 +138,10 @@ async function exchangeCode(
     redirectUri,
     codeVerifier: provider.usePkce ? codeVerifier : null,
     clientSecret: clientSecret || null,
-    scope: provider.id === "microsoft" || provider.id === "microsoft_graph" ? provider.scopes.join(" ") : null,
+    scope:
+      provider.id === "microsoft" || provider.id === "microsoft_graph"
+        ? provider.scopes.join(" ")
+        : null,
   });
 }
 
@@ -157,7 +160,10 @@ export async function refreshProviderToken(
     refreshToken,
     clientId,
     clientSecret: clientSecret || null,
-    scope: provider.id === "microsoft" || provider.id === "microsoft_graph" ? provider.scopes.join(" ") : null,
+    scope:
+      provider.id === "microsoft" || provider.id === "microsoft_graph"
+        ? provider.scopes.join(" ")
+        : null,
   });
 }
 

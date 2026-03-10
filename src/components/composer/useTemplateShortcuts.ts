@@ -11,9 +11,7 @@ import { interpolateVariables } from "@/utils/templateVariables";
  * Returns a ref to update loaded templates and a handler to check/apply
  * shortcut triggers inside the TipTap editor's onUpdate callback.
  */
-export function useTemplateShortcuts(
-  setSubject: (subject: string) => void,
-): {
+export function useTemplateShortcuts(setSubject: (subject: string) => void): {
   templateShortcutsRef: React.RefObject<DbTemplate[]>;
   checkTemplateShortcut: (ed: Editor) => void;
 } {

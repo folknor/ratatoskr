@@ -136,10 +136,7 @@ export async function getAllSettings(): Promise<Record<string, string>> {
   return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }
 
-export async function setSetting(
-  key: string,
-  value: string,
-): Promise<void> {
+export async function setSetting(key: string, value: string): Promise<void> {
   return invoke<void>("db_set_setting", { key, value });
 }
 
@@ -243,9 +240,7 @@ export async function deleteContact(id: string): Promise<void> {
   return invoke<void>("db_delete_contact", { id });
 }
 
-export async function getContactStats(
-  email: string,
-): Promise<ContactStats> {
+export async function getContactStats(email: string): Promise<ContactStats> {
   return invoke<ContactStats>("db_get_contact_stats", { email });
 }
 
@@ -269,7 +264,11 @@ export async function getRecentThreadsWithContact(
   email: string,
   limit: number = 5,
 ): Promise<
-  { thread_id: string; subject: string | null; last_message_at: string | null }[]
+  {
+    thread_id: string;
+    subject: string | null;
+    last_message_at: string | null;
+  }[]
 > {
   return invoke("db_get_recent_threads_with_contact", { email, limit });
 }
@@ -325,7 +324,9 @@ export async function updateFilter(
   return invoke<void>("db_update_filter", {
     id,
     name: updates.name,
-    criteriaJson: updates.criteria ? JSON.stringify(updates.criteria) : undefined,
+    criteriaJson: updates.criteria
+      ? JSON.stringify(updates.criteria)
+      : undefined,
     actionsJson: updates.actions ? JSON.stringify(updates.actions) : undefined,
     isEnabled: updates.isEnabled,
   });
@@ -590,9 +591,7 @@ export async function updateQuickStep(
       name: updates.name ?? "",
       description: updates.description ?? null,
       shortcut: updates.shortcut ?? null,
-      actions_json: updates.actions
-        ? JSON.stringify(updates.actions)
-        : "[]",
+      actions_json: updates.actions ? JSON.stringify(updates.actions) : "[]",
       icon: updates.icon ?? null,
       is_enabled: updates.isEnabled ?? true,
       continue_on_error: updates.continueOnError ?? false,
@@ -811,9 +810,7 @@ export async function emailActionUnsnooze(
   return invoke<void>("email_action_unsnooze", { accountId, threadId });
 }
 
-export function emailActionUnsnoozeBatch(
-  threadIds: string[],
-): Promise<number> {
+export function emailActionUnsnoozeBatch(threadIds: string[]): Promise<number> {
   return invoke<number>("email_action_unsnooze_batch", { threadIds });
 }
 
@@ -883,7 +880,6 @@ export async function emailActionMoveToFolder(
   });
 }
 
-
 // ═══════════════════════════════════════════════════════════════
 // BODY STORE (Phase 2 — compressed body storage)
 // ═══════════════════════════════════════════════════════════════
@@ -910,9 +906,7 @@ export async function bodyStorePut(
 }
 
 /** Store multiple message bodies in a single transaction. */
-export async function bodyStorePutBatch(
-  bodies: MessageBody[],
-): Promise<void> {
+export async function bodyStorePutBatch(bodies: MessageBody[]): Promise<void> {
   return invoke<void>("body_store_put_batch", { bodies });
 }
 
@@ -931,9 +925,7 @@ export async function bodyStoreGetBatch(
 }
 
 /** Delete bodies for given message IDs. */
-export async function bodyStoreDelete(
-  messageIds: string[],
-): Promise<number> {
+export async function bodyStoreDelete(messageIds: string[]): Promise<number> {
   return invoke<number>("body_store_delete", { messageIds });
 }
 
@@ -1008,7 +1000,7 @@ export async function searchMessages(
         to: parsed.to ?? null,
         subject: parsed.subject ?? null,
         hasAttachment: parsed.hasAttachment ?? null,
-        isUnread: parsed.isUnread ?? parsed.isRead === true ? false : null,
+        isUnread: (parsed.isUnread ?? parsed.isRead === true) ? false : null,
         isStarred: parsed.isStarred ?? null,
         before: parsed.before ?? null,
         after: parsed.after ?? null,
@@ -1229,8 +1221,6 @@ export function syncGmailInitial(
  * Run delta Gmail sync entirely in Rust via History API.
  * Returns new inbox message IDs and affected thread IDs for TS post-sync hooks.
  */
-export function syncGmailDelta(
-  accountId: string,
-): Promise<GmailSyncResult> {
+export function syncGmailDelta(accountId: string): Promise<GmailSyncResult> {
   return invoke<GmailSyncResult>("gmail_sync_delta", { accountId });
 }

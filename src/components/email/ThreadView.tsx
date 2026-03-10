@@ -66,7 +66,9 @@ async function handlePopOut(thread: Thread): Promise<void> {
 export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
   const { t } = useTranslation("email");
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
-  const contactSidebarVisible = useUILayoutStore((s) => s.contactSidebarVisible);
+  const contactSidebarVisible = useUILayoutStore(
+    (s) => s.contactSidebarVisible,
+  );
   const toggleContactSidebar = useUILayoutStore((s) => s.toggleContactSidebar);
   const taskSidebarVisible = useUILayoutStore((s) => s.taskSidebarVisible);
   const [showTaskExtract, setShowTaskExtract] = useState(false);
@@ -377,7 +379,8 @@ export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
       }
     };
     window.addEventListener("ratatoskr-extract-task", handler);
-    return (): void => window.removeEventListener("ratatoskr-extract-task", handler);
+    return (): void =>
+      window.removeEventListener("ratatoskr-extract-task", handler);
   }, [thread.id]);
 
   const handleMessageContextMenu = useCallback(
@@ -483,7 +486,9 @@ export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
           onExport={handleExport}
           onPopOut={() => handlePopOut(thread)}
           onToggleContactSidebar={toggleContactSidebar}
-          onToggleTaskSidebar={() => useUILayoutStore.getState().toggleTaskSidebar()}
+          onToggleTaskSidebar={() =>
+            useUILayoutStore.getState().toggleTaskSidebar()
+          }
         />
 
         {/* Thread subject */}

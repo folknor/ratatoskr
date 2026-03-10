@@ -10,10 +10,7 @@ import type React from "react";
 import { useCallback, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { TextField } from "@/components/ui/TextField";
-import {
-  discoverCalDavSettings,
-  testCalDavConnection,
-} from "@/core/calendar";
+import { discoverCalDavSettings, testCalDavConnection } from "@/core/calendar";
 import { insertCalDavAccount } from "@/core/accounts";
 import { useAccountStore } from "@/stores/accountStore";
 

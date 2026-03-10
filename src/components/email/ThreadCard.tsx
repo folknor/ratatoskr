@@ -27,208 +27,204 @@ interface ThreadCardProps {
   hasFollowUp?: boolean | undefined;
 }
 
-export const ThreadCard = memo(
-  function ThreadCardInner({
-    thread,
-    isSelected,
-    onClick,
-    onContextMenu,
-    category,
-    showCategoryBadge,
-    hasFollowUp,
-  }: ThreadCardProps): React.ReactNode {
-    const { t } = useTranslation("email");
-    const isMultiSelected = useThreadStore((s) =>
-      s.selectedThreadIds.has(thread.id),
-    );
-    const hasMultiSelect = useThreadStore((s) => s.selectedThreadIds.size > 0);
-    const toggleThreadSelection = useThreadStore(
-      (s) => s.toggleThreadSelection,
-    );
-    const selectThreadRange = useThreadStore((s) => s.selectThreadRange);
-    const activeLabel = useActiveLabel();
-    const emailDensity = useUIPreferencesStore((s) => s.emailDensity);
-    const isSpam = thread.labelIds.includes("SPAM");
+export const ThreadCard = memo(function ThreadCardInner({
+  thread,
+  isSelected,
+  onClick,
+  onContextMenu,
+  category,
+  showCategoryBadge,
+  hasFollowUp,
+}: ThreadCardProps): React.ReactNode {
+  const { t } = useTranslation("email");
+  const isMultiSelected = useThreadStore((s) =>
+    s.selectedThreadIds.has(thread.id),
+  );
+  const hasMultiSelect = useThreadStore((s) => s.selectedThreadIds.size > 0);
+  const toggleThreadSelection = useThreadStore((s) => s.toggleThreadSelection);
+  const selectThreadRange = useThreadStore((s) => s.selectThreadRange);
+  const activeLabel = useActiveLabel();
+  const emailDensity = useUIPreferencesStore((s) => s.emailDensity);
+  const isSpam = thread.labelIds.includes("SPAM");
 
-    // Read selectedThreadIds lazily for drag — avoids subscribing all cards to the Set reference
-    const dragData: DragData = useMemo(
-      () => ({
-        threadIds:
-          hasMultiSelect && isMultiSelected
-            ? [...useThreadStore.getState().selectedThreadIds]
-            : [thread.id],
-        sourceLabel: activeLabel,
-      }),
-      [hasMultiSelect, isMultiSelected, thread.id, activeLabel],
-    );
+  // Read selectedThreadIds lazily for drag — avoids subscribing all cards to the Set reference
+  const dragData: DragData = useMemo(
+    () => ({
+      threadIds:
+        hasMultiSelect && isMultiSelected
+          ? [...useThreadStore.getState().selectedThreadIds]
+          : [thread.id],
+      sourceLabel: activeLabel,
+    }),
+    [hasMultiSelect, isMultiSelected, thread.id, activeLabel],
+  );
 
-    const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-      id: `thread-${thread.id}`,
-      data: dragData,
-    });
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `thread-${thread.id}`,
+    data: dragData,
+  });
 
-    const handleClick = (e: React.MouseEvent): void => {
-      if (e.shiftKey) {
-        e.preventDefault();
-        selectThreadRange(thread.id);
-      } else if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        toggleThreadSelection(thread.id);
-      } else if (hasMultiSelect) {
-        toggleThreadSelection(thread.id);
-      } else {
-        onClick(thread);
-      }
-    };
+  const handleClick = (e: React.MouseEvent): void => {
+    if (e.shiftKey) {
+      e.preventDefault();
+      selectThreadRange(thread.id);
+    } else if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      toggleThreadSelection(thread.id);
+    } else if (hasMultiSelect) {
+      toggleThreadSelection(thread.id);
+    } else {
+      onClick(thread);
+    }
+  };
 
-    const handleContextMenu: ((e: React.MouseEvent) => void) | undefined =
-      onContextMenu
-        ? (e: React.MouseEvent): void => onContextMenu(e, thread.id)
-        : undefined;
-    const initial = (
-      thread.fromName?.[0] ??
-      thread.fromAddress?.[0] ??
-      "?"
-    ).toUpperCase();
+  const handleContextMenu: ((e: React.MouseEvent) => void) | undefined =
+    onContextMenu
+      ? (e: React.MouseEvent): void => onContextMenu(e, thread.id)
+      : undefined;
+  const initial = (
+    thread.fromName?.[0] ??
+    thread.fromAddress?.[0] ??
+    "?"
+  ).toUpperCase();
 
-    return (
-      <button
-        ref={setNodeRef}
-        {...attributes}
-        {...listeners}
-        onClick={handleClick}
-        onContextMenu={handleContextMenu}
-        aria-label={`${thread.isRead ? "" : "Unread "}email from ${thread.fromName ?? thread.fromAddress ?? t("common:unknown")}: ${thread.subject ?? t("common:noSubject")}`}
-        aria-pressed={isSelected}
-        className={`w-full text-left border-b border-border-secondary group hover-lift press-scale ${
-          emailDensity === "compact"
-            ? "px-3 py-1.5"
-            : emailDensity === "spacious"
-              ? "px-4 py-4"
-              : "px-4 py-3"
-        } ${
-          isDragging
-            ? "opacity-50"
-            : isMultiSelected
-              ? "bg-accent/10"
-              : isSelected
-                ? "bg-bg-selected"
-                : "hover:bg-bg-hover"
-        } ${isSpam ? "bg-red-500/8 dark:bg-red-500/10" : ""}`}
-      >
-        <div className="flex items-start gap-3">
-          {/* Avatar */}
-          <div
-            className={`rounded-full flex items-center justify-center shrink-0 font-medium text-white ${
-              emailDensity === "compact"
-                ? "w-7 h-7 text-xs"
-                : emailDensity === "spacious"
-                  ? "w-10 h-10 text-sm"
-                  : "w-9 h-9 text-sm"
-            } ${
-              isMultiSelected
-                ? "bg-accent"
-                : thread.isRead
-                  ? "bg-text-tertiary"
-                  : "bg-accent"
-            }`}
-          >
-            {isMultiSelected ? (
-              <Check size={emailDensity === "compact" ? 14 : 16} />
-            ) : (
-              initial
-            )}
-          </div>
+  return (
+    <button
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      onClick={handleClick}
+      onContextMenu={handleContextMenu}
+      aria-label={`${thread.isRead ? "" : "Unread "}email from ${thread.fromName ?? thread.fromAddress ?? t("common:unknown")}: ${thread.subject ?? t("common:noSubject")}`}
+      aria-pressed={isSelected}
+      className={`w-full text-left border-b border-border-secondary group hover-lift press-scale ${
+        emailDensity === "compact"
+          ? "px-3 py-1.5"
+          : emailDensity === "spacious"
+            ? "px-4 py-4"
+            : "px-4 py-3"
+      } ${
+        isDragging
+          ? "opacity-50"
+          : isMultiSelected
+            ? "bg-accent/10"
+            : isSelected
+              ? "bg-bg-selected"
+              : "hover:bg-bg-hover"
+      } ${isSpam ? "bg-red-500/8 dark:bg-red-500/10" : ""}`}
+    >
+      <div className="flex items-start gap-3">
+        {/* Avatar */}
+        <div
+          className={`rounded-full flex items-center justify-center shrink-0 font-medium text-white ${
+            emailDensity === "compact"
+              ? "w-7 h-7 text-xs"
+              : emailDensity === "spacious"
+                ? "w-10 h-10 text-sm"
+                : "w-9 h-9 text-sm"
+          } ${
+            isMultiSelected
+              ? "bg-accent"
+              : thread.isRead
+                ? "bg-text-tertiary"
+                : "bg-accent"
+          }`}
+        >
+          {isMultiSelected ? (
+            <Check size={emailDensity === "compact" ? 14 : 16} />
+          ) : (
+            initial
+          )}
+        </div>
 
-          {/* Content */}
-          <div className="flex-1 min-w-0">
-            {/* First row: sender + date */}
-            <div className="flex items-center justify-between gap-2">
-              <span
-                className={`text-sm truncate ${
-                  thread.isRead
-                    ? "text-text-secondary"
-                    : "font-semibold text-text-primary"
-                }`}
-              >
-                {thread.fromName ?? thread.fromAddress ?? t("common:unknown")}
-              </span>
-              <span className="text-xs text-text-tertiary whitespace-nowrap shrink-0">
-                {formatRelativeDate(thread.lastMessageAt)}
-              </span>
-            </div>
-
-            {/* Subject */}
-            <div
-              className={`text-sm truncate mt-0.5 ${
-                thread.isRead ? "text-text-secondary" : "text-text-primary"
+        {/* Content */}
+        <div className="flex-1 min-w-0">
+          {/* First row: sender + date */}
+          <div className="flex items-center justify-between gap-2">
+            <span
+              className={`text-sm truncate ${
+                thread.isRead
+                  ? "text-text-secondary"
+                  : "font-semibold text-text-primary"
               }`}
             >
-              {thread.subject ?? t("common:noSubject")}
-            </div>
+              {thread.fromName ?? thread.fromAddress ?? t("common:unknown")}
+            </span>
+            <span className="text-xs text-text-tertiary whitespace-nowrap shrink-0">
+              {formatRelativeDate(thread.lastMessageAt)}
+            </span>
+          </div>
 
-            {/* Snippet + indicators */}
-            <div
-              className={`flex items-center gap-1.5 mt-0.5 ${emailDensity === "compact" ? "hidden" : ""}`}
-            >
-              <span className="text-xs text-text-tertiary truncate flex-1">
-                {thread.snippet}
+          {/* Subject */}
+          <div
+            className={`text-sm truncate mt-0.5 ${
+              thread.isRead ? "text-text-secondary" : "text-text-primary"
+            }`}
+          >
+            {thread.subject ?? t("common:noSubject")}
+          </div>
+
+          {/* Snippet + indicators */}
+          <div
+            className={`flex items-center gap-1.5 mt-0.5 ${emailDensity === "compact" ? "hidden" : ""}`}
+          >
+            <span className="text-xs text-text-tertiary truncate flex-1">
+              {thread.snippet}
+            </span>
+            {Boolean(
+              showCategoryBadge &&
+                category &&
+                category !== "Primary" &&
+                CATEGORY_COLORS[category],
+            ) && (
+              <span
+                className={`shrink-0 text-[0.625rem] px-1.5 rounded-full leading-normal ${CATEGORY_COLORS[category ?? ""]}`}
+              >
+                {t(`sidebar:${(category ?? "").toLowerCase()}`)}
               </span>
-              {Boolean(
-                showCategoryBadge &&
-                  category &&
-                  category !== "Primary" &&
-                  CATEGORY_COLORS[category],
-              ) && (
-                <span
-                  className={`shrink-0 text-[0.625rem] px-1.5 rounded-full leading-normal ${CATEGORY_COLORS[category ?? ""]}`}
-                >
-                  {t(`sidebar:${(category ?? "").toLowerCase()}`)}
-                </span>
-              )}
-              {hasFollowUp === true && (
-                <span
-                  className="shrink-0 text-accent"
-                  title={t("followUpReminderSet")}
-                >
-                  <BellRing size={12} />
-                </span>
-              )}
-              {thread.isMuted === true && (
-                <span className="shrink-0 text-warning" title={t("muted")}>
-                  <VolumeX size={12} />
-                </span>
-              )}
-              {thread.isPinned === true && (
-                <span className="shrink-0 text-accent" title={t("pinned")}>
-                  <Pin size={12} className="fill-current" />
-                </span>
-              )}
-              {thread.hasAttachments === true && (
-                <span
-                  className="shrink-0 text-text-tertiary"
-                  title={t("hasAttachments")}
-                >
-                  <Paperclip size={12} />
-                </span>
-              )}
-              {thread.isStarred === true && (
-                <span
-                  className="shrink-0 text-warning star-animate"
-                  title="Starred"
-                >
-                  <Star size={12} className="fill-current" />
-                </span>
-              )}
-              {thread.messageCount > 1 && (
-                <span className="text-xs text-text-tertiary shrink-0 bg-bg-tertiary rounded-full px-1.5">
-                  {thread.messageCount}
-                </span>
-              )}
-            </div>
+            )}
+            {hasFollowUp === true && (
+              <span
+                className="shrink-0 text-accent"
+                title={t("followUpReminderSet")}
+              >
+                <BellRing size={12} />
+              </span>
+            )}
+            {thread.isMuted === true && (
+              <span className="shrink-0 text-warning" title={t("muted")}>
+                <VolumeX size={12} />
+              </span>
+            )}
+            {thread.isPinned === true && (
+              <span className="shrink-0 text-accent" title={t("pinned")}>
+                <Pin size={12} className="fill-current" />
+              </span>
+            )}
+            {thread.hasAttachments === true && (
+              <span
+                className="shrink-0 text-text-tertiary"
+                title={t("hasAttachments")}
+              >
+                <Paperclip size={12} />
+              </span>
+            )}
+            {thread.isStarred === true && (
+              <span
+                className="shrink-0 text-warning star-animate"
+                title="Starred"
+              >
+                <Star size={12} className="fill-current" />
+              </span>
+            )}
+            {thread.messageCount > 1 && (
+              <span className="text-xs text-text-tertiary shrink-0 bg-bg-tertiary rounded-full px-1.5">
+                {thread.messageCount}
+              </span>
+            )}
           </div>
         </div>
-      </button>
-    );
-  },
-);
+      </div>
+    </button>
+  );
+});

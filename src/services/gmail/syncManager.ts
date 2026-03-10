@@ -200,7 +200,10 @@ async function syncGmailAccount(accountId: string): Promise<void> {
         );
       } catch (err) {
         const message = String(err ?? "");
-        if (message === "HISTORY_EXPIRED" || message.includes("HISTORY_EXPIRED")) {
+        if (
+          message === "HISTORY_EXPIRED" ||
+          message.includes("HISTORY_EXPIRED")
+        ) {
           // Fallback to full sync
           await syncGmailInitial(accountId, syncDays);
         } else {
@@ -240,8 +243,12 @@ async function syncJmapAccount(accountId: string): Promise<void> {
     );
   } catch (err) {
     const message = String(err ?? "");
-    if (message === "JMAP_STATE_EXPIRED" || message === "JMAP_NO_STATE" ||
-        message.includes("JMAP_STATE_EXPIRED") || message.includes("JMAP_NO_STATE")) {
+    if (
+      message === "JMAP_STATE_EXPIRED" ||
+      message === "JMAP_NO_STATE" ||
+      message.includes("JMAP_STATE_EXPIRED") ||
+      message.includes("JMAP_NO_STATE")
+    ) {
       // Fallback to full initial sync
       await invoke("jmap_sync_initial", { accountId });
     } else {
@@ -263,8 +270,10 @@ async function syncGraphAccount(accountId: string): Promise<void> {
   const isDelta = !!account?.history_id;
 
   try {
-    const result: { newInboxMessageIds: string[]; affectedThreadIds: string[] } =
-      await invoke("provider_sync_delta", { accountId });
+    const result: {
+      newInboxMessageIds: string[];
+      affectedThreadIds: string[];
+    } = await invoke("provider_sync_delta", { accountId });
 
     await runPostSyncHooks(
       accountId,
@@ -274,7 +283,10 @@ async function syncGraphAccount(accountId: string): Promise<void> {
     );
   } catch (err) {
     const message = String(err ?? "");
-    if (message === "GRAPH_NO_DELTA_STATE" || message.includes("GRAPH_NO_DELTA_STATE")) {
+    if (
+      message === "GRAPH_NO_DELTA_STATE" ||
+      message.includes("GRAPH_NO_DELTA_STATE")
+    ) {
       // Fallback to full initial sync
       const syncPeriodStr = await getSetting("sync_period_days");
       const syncDays = parseInt(syncPeriodStr ?? "365", 10) || 365;

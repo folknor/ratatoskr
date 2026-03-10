@@ -64,7 +64,12 @@ export async function insertSmartFolder(folder: {
 
 export async function updateSmartFolder(
   id: string,
-  updates: { name?: string | undefined; query?: string | undefined; icon?: string | undefined; color?: string | undefined },
+  updates: {
+    name?: string | undefined;
+    query?: string | undefined;
+    icon?: string | undefined;
+    color?: string | undefined;
+  },
 ): Promise<void> {
   const fields: [string, unknown][] = [];
   if (updates.name !== undefined) fields.push(["name", updates.name]);
