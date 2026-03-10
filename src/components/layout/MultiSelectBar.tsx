@@ -5,7 +5,6 @@ import { useTranslation } from "react-i18next";
 import { CSSTransition } from "react-transition-group";
 import {
   archiveThread,
-  deleteThread as deleteThreadFromDb,
   permanentDeleteThread,
   spamThread,
   trashThread,
@@ -39,7 +38,6 @@ export function MultiSelectBar({
         ids.map(async (id) => {
           if (isTrashView) {
             await permanentDeleteThread(activeAccountId, id, []);
-            await deleteThreadFromDb(activeAccountId, id);
           } else {
             await trashThread(activeAccountId, id, []);
           }

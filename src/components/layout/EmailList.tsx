@@ -75,14 +75,24 @@ export function EmailList({
         const draftMsg = messages[messages.length - 1];
         if (!draftMsg) return;
 
-        // Look up the Gmail draft ID so auto-save can update the existing draft
+        // Look up the draft ID so auto-save can update the existing draft.
+        // Gmail has a separate draft resource wrapping the message — resolve via API.
+        // IMAP/JMAP: the message ID *is* the draft ID.
         let draftId: string | null = null;
+        const account = useAccountStore
+          .getState()
+          .accounts.find((a) => a.id === activeAccountId);
         try {
-          const drafts = await invoke<
-            { id: string; message: { id: string; threadId: string } }[]
-          >("gmail_list_drafts", { accountId: activeAccountId });
-          const match = drafts.find((d) => d.message?.id === draftMsg.id);
-          if (match) draftId = match.id;
+          if (account?.provider === "gmail_api") {
+            const drafts = await invoke<
+              { id: string; message: { id: string; threadId: string } }[]
+            >("gmail_list_drafts", { accountId: activeAccountId });
+            const match = drafts.find((d) => d.message?.id === draftMsg.id);
+            if (match) draftId = match.id;
+          } else {
+            // IMAP/JMAP: message ID serves as draft ID
+            draftId = draftMsg.id;
+          }
         } catch {
           // If we can't get draft ID, composer will create a new draft on save
         }

@@ -22,25 +22,13 @@
 
 ## Gmail→Rust Migration Follow-ups
 
-### HIGH
+- [x] **~~`scheduledSendManager` is Gmail-only~~** — Fixed. Now uses `sendEmail()` from `emailActions.ts` (provider-agnostic).
 
-- [ ] **`scheduledSendManager` is Gmail-only** — `src/services/snooze/scheduledSendManager.ts:30`
+- [x] **~~`unsubscribeManager` mailto send is Gmail-only~~** — Fixed. Now uses `sendEmail()` from `emailActions.ts` via dynamic import.
 
-  Uses `invoke('gmail_send_email')` directly. If a scheduled send fires for an IMAP or JMAP account, it will fail. Should use `sendEmail()` from `emailActions.ts` which routes through the provider abstraction. Pre-existing bug (was `getGmailClient` before), carried forward during migration.
+- [x] **~~`EmailList` draft lookup is Gmail-only~~** — Fixed. Now branches on `account.provider`: Gmail calls `gmail_list_drafts`, IMAP/JMAP use message ID directly as draft ID.
 
-- [ ] **`unsubscribeManager` mailto send is Gmail-only** — `src/services/unsubscribe/unsubscribeManager.ts:82`
-
-  Same issue. The mailto fallback unsubscribe path uses `invoke('gmail_send_email')`. Should use `sendEmail()` from `emailActions.ts`.
-
-### MEDIUM
-
-- [ ] **`EmailList` draft lookup is Gmail-only** — `src/components/layout/EmailList.tsx:81`
-
-  Uses `invoke('gmail_list_drafts')` to find the draft ID when opening a draft for editing. Won't work for IMAP/JMAP accounts. Needs a provider-agnostic draft listing command or a local DB query for draft IDs.
-
-- [ ] **`MultiSelectBar` permanent delete may double-delete locally** — `src/components/layout/MultiSelectBar.tsx:39-40`
-
-  Calls `permanentDeleteThread()` (emailActions, which does optimistic local cleanup) then `deleteThreadFromDb()`. The second call may be redundant if emailActions already removes the thread from the local DB, or it may be intentionally thorough (cascade-deleting messages/attachments that the optimistic update skips). Verify whether this causes issues or is needed.
+- [x] **~~`MultiSelectBar` permanent delete double-deletes locally~~** — Fixed. Removed redundant `deleteThreadFromDb()` call — `permanentDeleteThread()` already executes the identical `DELETE FROM threads` via Rust.
 
 - [ ] **`getGmailClient()` retained for Calendar only** — `src/services/calendar/googleCalendarProvider.ts`
 

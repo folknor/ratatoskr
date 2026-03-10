@@ -76,10 +76,9 @@ export async function executeUnsubscribe(
     }
   }
 
-  // Method 2: mailto via Gmail API
+  // Method 2: mailto via provider-agnostic send
   if (!success && parsed.mailtoAddress) {
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
       const to = parsed.mailtoAddress.split("?")[0] ?? parsed.mailtoAddress;
       // Extract subject from mailto params if present
       const subjectMatch = parsed.mailtoAddress.match(/subject=([^&]+)/i);
@@ -96,7 +95,8 @@ export async function executeUnsubscribe(
         subject,
         htmlBody: "unsubscribe",
       });
-      await invoke("gmail_send_email", { accountId, raw });
+      const { sendEmail } = await import("../emailActions");
+      await sendEmail(accountId, raw);
       method = "mailto";
       success = true;
     } catch (err) {

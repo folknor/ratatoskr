@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
 import { buildRawEmail, type EmailAttachment } from "@/utils/emailBuilder";
+import { sendEmail } from "@/services/emailActions";
 import {
   type BackgroundChecker,
   createBackgroundChecker,
@@ -54,11 +54,7 @@ async function checkScheduledEmails(): Promise<void> {
         attachments,
       });
 
-      await invoke("gmail_send_email", {
-        accountId: email.account_id,
-        raw,
-        threadId: email.thread_id ?? undefined,
-      });
+      await sendEmail(email.account_id, raw, email.thread_id ?? undefined);
       await updateScheduledEmailStatus(email.id, "sent");
     } catch (err) {
       console.error(`Failed to send scheduled email ${email.id}:`, err);
