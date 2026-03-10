@@ -75,8 +75,8 @@ async function preCacheRecent(): Promise<void> {
       // Decode base64 data
       const binary = Uint8Array.from(atob(result.data), (c) => c.charCodeAt(0));
       await cacheAttachment(att.id, binary);
-    } catch {
-      // Silently skip — will retry next interval
+    } catch (err) {
+      console.warn(`[PreCache] Failed to cache attachment ${att.id}:`, err);
     }
   }
 }

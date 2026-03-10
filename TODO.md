@@ -57,8 +57,7 @@
 - [ ] **IMAP messages may skip filter engine**
   `src/services/filters/filterEngine.ts` runs for Gmail sync but appears missing from the IMAP sync flow (`src/services/imap/imapSync.ts`). Verify and add if missing.
 
-- [ ] **Multi-select target resolution duplicated**
-  `src/components/ui/ContextMenuPortal.tsx:264-268` and `src/components/layout/EmailList.tsx` both compute target thread IDs from selection. Extract to a shared utility.
+- [x] ~~**Multi-select target resolution duplicated** — extracted `resolveContextMenuTargets` and `resolveKeyboardTargets` into `src/utils/multiSelectTargets.ts`~~
 
 ---
 
