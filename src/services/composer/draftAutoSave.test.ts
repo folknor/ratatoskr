@@ -17,6 +17,7 @@ vi.mock("@/stores/accountStore", () => ({
     getState: () =>
       createMockAccountStoreState({
         accounts: [{ id: "account-1", email: "test@example.com" }],
+        activeAccountId: "account-1",
       }),
   },
 }));

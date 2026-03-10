@@ -8,14 +8,14 @@ import { buildRawEmail } from "@/utils/emailBuilder";
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let unsubscribe: (() => void) | null = null;
-let currentAccountId: string | null = null;
 
 const DEBOUNCE_MS = 3000;
 
 async function saveDraft(): Promise<void> {
   const state = useComposerStore.getState();
-  // Capture the accountId at save time to avoid mismatch if user switches accounts during debounce
-  const accountId = currentAccountId;
+  // Read the active account ID at save time (not capture time) so that
+  // switching accounts during the 3s debounce window doesn't save to the wrong account.
+  const accountId = useAccountStore.getState().activeAccountId;
   if (!(state.isOpen && accountId)) return;
 
   const accounts = useAccountStore.getState().accounts;
@@ -82,9 +82,11 @@ function scheduleSave(): void {
 /**
  * Start watching composerStore changes and auto-saving drafts.
  */
-export function startAutoSave(accountId: string): void {
+export function startAutoSave(_accountId?: string): void {
+  // Note: _accountId is accepted for backward compatibility but ignored.
+  // The active account ID is read from the account store at save time to
+  // prevent saving to the wrong account if the user switches during debounce.
   stopAutoSave();
-  currentAccountId = accountId;
 
   // Subscribe to store changes — trigger debounced save on any field change
   unsubscribe = useComposerStore.subscribe((state, prevState) => {
@@ -115,5 +117,4 @@ export function stopAutoSave(): void {
     unsubscribe();
     unsubscribe = null;
   }
-  currentAccountId = null;
 }
