@@ -614,12 +614,14 @@ Move one at a time as needed:
 - ✅ Filter engine → `src-tauri/src/filters/` — `filters_evaluate` command reads filter rules from DB, matches against messages in Rust, returns per-thread actions. TS caller applies actions via `emailActions`. Pure computation + DB read in one IPC call (was: DB read IPC + JSON parse in TS + match loop).
 - ✅ JWZ threading algorithm → `src-tauri/src/threading/` — `threading_build_threads` and `threading_update_threads` commands. Pure computation, no DB. Full JWZ algorithm: container-based linking, phantom parents, subject-based merging, deterministic thread IDs (djb2 hash, verified compatible with TS). Critical for Phase 4 (Rust sync).
 - ✅ Categorization rule engine → `src-tauri/src/categorization/` — `categorize_thread_by_rules` and `categorize_threads_by_rules` commands. Pattern matching on sender/subject for Primary/Updates/Promotions/Social/Newsletters classification. Pure computation, no DB.
-- Remaining categorization (`categorizationManager.ts` AI fallback)
-- Snooze, scheduled send, follow-up checkers
-- Notification manager
-- Badge count
+- ✅ Snooze checker → `email_action_unsnooze_batch` command — single transaction for N thread unsnoozes (was N individual IPC calls). TS checker calls once.
+- ✅ Follow-up checker → `db_check_follow_up_reminders` command — fetches pending reminders, checks replies, cancels/triggers in one transaction (~30 round-trips → 1). Returns triggered reminders for TS notification dispatch.
+- Remaining categorization (`categorizationManager.ts` AI fallback) — AI API is the bottleneck, not worth porting
+- Scheduled send checker — Gmail API send is the bottleneck, not worth porting
+- Notification manager — UI orchestration, already optimal
+- Badge count — trivial (28 lines, 1-3 IPC), not worth porting
 
-Each is independent. Prioritize by performance impact.
+Remaining items are bottlenecked by external APIs or are already trivial orchestration. Phase 6 is effectively complete for meaningful performance gains.
 
 **Known gaps:**
 - **Filter apply post-sync is still per-action IPC**: Post-sync filter/smart-label hooks load messages from DB in TS and apply via `emailActions`. A future `filters_apply` Rust command could do matching + DB updates atomically — zero IPC per action.
@@ -675,7 +677,7 @@ This is the Apple Mail architecture (SQLite Envelope Index + .emlx files + Spotl
 | **Phase 3**: Tantivy search | ✅ Core complete | tantivy 0.25, 5 commands, sync integration wired |
 | **Phase 4**: Rust sync | ✅ Complete | 2 commands, 9 Rust modules, feature-flagged |
 | **Phase 5**: Rust actions | ✅ Complete | 15 action commands + 1 centralized queue command |
-| **Phase 6**: Remaining services | In progress | Filter engine + JWZ threading + categorization rules ported (5 commands) |
+| **Phase 6**: Remaining services | ✅ Effectively complete | 7 commands: filters, threading, categorization, batch unsnooze, batch follow-up |
 
 **Phases 0, 1, 2, 3, and 5 are done.** The biggest user-visible improvements (eliminating IPC overhead on every query, instant full-text search, compressed body storage, atomic email actions) are delivered. Remaining phases (Rust sync engine, remaining services) are performance and architecture wins that can be tackled incrementally.
 
