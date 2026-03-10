@@ -59,6 +59,7 @@ import { useContextMenuStore } from "@/stores/contextMenuStore";
 import { useLabelStore } from "@/stores/labelStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { useUIStore } from "@/stores/uiStore";
+import { resolveContextMenuTargets } from "@/utils/multiSelectTargets";
 import { SnoozeDialog } from "../email/SnoozeDialog";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 
@@ -256,12 +257,10 @@ function ThreadMenu({
   }, [activeAccountId]);
 
   // Determine target threads: if right-clicked thread is in multi-select, use all selected; otherwise just this one
-  const isInMultiSelect = selectedThreadIds.has(threadId);
-  const targetIds =
-    isInMultiSelect && selectedThreadIds.size > 1
-      ? [...selectedThreadIds]
-      : [threadId];
-  const isMulti = targetIds.length > 1;
+  const { targetIds, isMulti } = resolveContextMenuTargets(
+    threadId,
+    selectedThreadIds,
+  );
 
   const thread = threads.find((t) => t.id === threadId);
   if (!(thread && activeAccountId)) {

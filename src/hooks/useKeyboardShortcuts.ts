@@ -30,6 +30,7 @@ import { useContextMenuStore } from "@/stores/contextMenuStore";
 import { useShortcutStore } from "@/stores/shortcutStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { useUIStore } from "@/stores/uiStore";
+import { resolveKeyboardTargets } from "@/utils/multiSelectTargets";
 
 /**
  * Parse a key binding string and check if it matches a keyboard event.
@@ -347,14 +348,14 @@ async function executeAction(actionId: string): Promise<void> {
       }
       break;
     case "action.archive": {
-      const multiIds = useThreadStore.getState().selectedThreadIds;
-      if (multiIds.size > 0 && activeAccountId) {
-        const ids = [...multiIds];
-        for (const id of ids) {
+      const archiveIds = resolveKeyboardTargets(
+        useThreadStore.getState().selectedThreadIds,
+        selectedId,
+      );
+      if (archiveIds.length > 0 && activeAccountId) {
+        for (const id of archiveIds) {
           await archiveThread(activeAccountId, id, []);
         }
-      } else if (selectedId && activeAccountId) {
-        await archiveThread(activeAccountId, selectedId, []);
       }
       break;
     }
@@ -362,10 +363,12 @@ async function executeAction(actionId: string): Promise<void> {
       const deleteLabelCtx = getActiveLabel();
       const isTrashView = deleteLabelCtx === "trash";
       const isDraftsView = deleteLabelCtx === "drafts";
-      const multiDeleteIds = useThreadStore.getState().selectedThreadIds;
-      if (multiDeleteIds.size > 0 && activeAccountId) {
-        const ids = [...multiDeleteIds];
-        for (const id of ids) {
+      const deleteIds = resolveKeyboardTargets(
+        useThreadStore.getState().selectedThreadIds,
+        selectedId,
+      );
+      if (deleteIds.length > 0 && activeAccountId) {
+        for (const id of deleteIds) {
           if (isTrashView) {
             await permanentDeleteThread(activeAccountId, id, []);
             await deleteThreadFromDb(activeAccountId, id);
@@ -381,21 +384,6 @@ async function executeAction(actionId: string): Promise<void> {
             await trashThread(activeAccountId, id, []);
           }
         }
-      } else if (selectedId && activeAccountId) {
-        if (isTrashView) {
-          await permanentDeleteThread(activeAccountId, selectedId, []);
-          await deleteThreadFromDb(activeAccountId, selectedId);
-        } else if (isDraftsView) {
-          try {
-            const client = await getGmailClient(activeAccountId);
-            await deleteDraftsForThread(client, activeAccountId, selectedId);
-            useThreadStore.getState().removeThread(selectedId);
-          } catch (err) {
-            console.error("Draft delete failed:", err);
-          }
-        } else {
-          await trashThread(activeAccountId, selectedId, []);
-        }
       }
       break;
     }
@@ -410,14 +398,14 @@ async function executeAction(actionId: string): Promise<void> {
     }
     case "action.spam": {
       const isSpamView = getActiveLabel() === "spam";
-      const multiSpamIds = useThreadStore.getState().selectedThreadIds;
-      if (multiSpamIds.size > 0 && activeAccountId) {
-        const ids = [...multiSpamIds];
-        for (const id of ids) {
+      const spamIds = resolveKeyboardTargets(
+        useThreadStore.getState().selectedThreadIds,
+        selectedId,
+      );
+      if (spamIds.length > 0 && activeAccountId) {
+        for (const id of spamIds) {
           await spamThread(activeAccountId, id, [], !isSpamView);
         }
-      } else if (selectedId && activeAccountId) {
-        await spamThread(activeAccountId, selectedId, [], !isSpamView);
       }
       break;
     }
@@ -461,24 +449,17 @@ async function executeAction(actionId: string): Promise<void> {
       break;
     }
     case "action.mute": {
-      const multiMuteIds = useThreadStore.getState().selectedThreadIds;
-      if (multiMuteIds.size > 0 && activeAccountId) {
-        const ids = [...multiMuteIds];
-        for (const id of ids) {
+      const muteIds = resolveKeyboardTargets(
+        useThreadStore.getState().selectedThreadIds,
+        selectedId,
+      );
+      if (muteIds.length > 0 && activeAccountId) {
+        for (const id of muteIds) {
           const t = threads.find((thread) => thread.id === id);
           if (t?.isMuted) {
             await unmuteThread(activeAccountId, id);
           } else {
             await muteThread(activeAccountId, id, []);
-          }
-        }
-      } else if (selectedId && activeAccountId) {
-        const thread = threads.find((t) => t.id === selectedId);
-        if (thread) {
-          if (thread.isMuted) {
-            await unmuteThread(activeAccountId, selectedId);
-          } else {
-            await muteThread(activeAccountId, selectedId, []);
           }
         }
       }
@@ -495,13 +476,10 @@ async function executeAction(actionId: string): Promise<void> {
       break;
     }
     case "action.moveToFolder": {
-      const multiMoveIds = useThreadStore.getState().selectedThreadIds;
-      const moveThreadIds =
-        multiMoveIds.size > 0
-          ? [...multiMoveIds]
-          : selectedId
-            ? [selectedId]
-            : [];
+      const moveThreadIds = resolveKeyboardTargets(
+        useThreadStore.getState().selectedThreadIds,
+        selectedId,
+      );
       if (moveThreadIds.length > 0) {
         window.dispatchEvent(
           new CustomEvent("velo-move-to-folder", {
