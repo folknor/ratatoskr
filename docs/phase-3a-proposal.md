@@ -1,7 +1,7 @@
 # Phase 3a: Provider Consolidation Proposal
 
 **Date**: March 2026
-**Status**: Implemented (steps 1-8 complete)
+**Status**: Implemented (steps 1-9 complete)
 **Prerequisite for**: Graph provider (Phase 3b/3c)
 
 ---
@@ -437,9 +437,9 @@ pub struct ProviderFolder {
 6. ~~**Add `provider/commands.rs`**~~ — 17 `provider_*` Tauri commands ✅
 7. ~~**Register commands in `lib.rs`**~~ ✅
 8. ~~**Simplify `emailActions.ts`**~~ — `executeViaProviderRust()` replaces Gmail+JMAP dispatchers ✅
-9. **Build Graph** (Phase 3b) — add `GraphOps` + one arm in `get_ops()`
+9. ~~**Build Graph** (Phase 3b) — add `GraphOps` + one arm in `get_ops()`~~ ✅
 
-Steps 1-8 are Phase 3a (complete). Step 9 is Phase 3b.
+Steps 1-8 are Phase 3a. Step 9 is Phase 3b. All complete.
 
 ### Actual scope
 
@@ -476,4 +476,4 @@ The commands file ended up larger than estimated (~370 vs ~100) because we used 
 | Dispatch | Match per command function | Single `get_ops()` → trait dispatch | One place to add a new provider |
 | Label semantics | `addLabel`/`removeLabel` provider-interpreted | `add_tag`/`remove_tag` + `move_to_folder` | Eliminates `graph-cat-` hack, clear semantic boundary |
 | Graph send complexity | "~50-80 lines" | "100-200 lines, verify in Phase 3b" | Honest about inline attachments, multipart, threading |
-| Command boilerplate | ~350 lines manual | ~100 lines via macro | Trait enables mechanical generation |
+| Command boilerplate | ~350 lines manual | ~370 lines explicit (no macro) | Clarity over brevity; boilerplate is mechanical |
