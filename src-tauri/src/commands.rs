@@ -6,6 +6,24 @@ use crate::imap::types::{
 use crate::smtp::client as smtp_client;
 use crate::smtp::types::{SmtpConfig, SmtpSendResult};
 
+// ---------- IMAP session helper ----------
+
+/// Connect to IMAP, run the body expression with `$session`, then logout.
+/// Ensures logout runs regardless of whether the work succeeds or fails.
+///
+/// Usage:
+///   with_imap_session!(&config, session => {
+///       imap_client::list_folders(&mut session).await
+///   })
+macro_rules! with_imap_session {
+    ($config:expr, $session:ident => $body:expr) => {{
+        let mut $session = imap_client::connect($config).await?;
+        let result = $body;
+        drop($session.logout().await);
+        result
+    }};
+}
+
 // ---------- IMAP commands ----------
 
 #[tauri::command]
@@ -15,10 +33,9 @@ pub async fn imap_test_connection(config: ImapConfig) -> Result<String, String> 
 
 #[tauri::command]
 pub async fn imap_list_folders(config: ImapConfig) -> Result<Vec<ImapFolder>, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let folders = imap_client::list_folders(&mut session).await?;
-    drop(session.logout().await);
-    Ok(folders)
+    with_imap_session!(&config, session => {
+        imap_client::list_folders(&mut session).await
+    })
 }
 
 #[tauri::command]
@@ -38,9 +55,9 @@ pub async fn imap_fetch_messages(
         .collect::<Vec<_>>()
         .join(",");
 
-    let mut session = imap_client::connect(&config).await?;
-    let result = imap_client::fetch_messages(&mut session, &folder, &uid_set).await;
-    drop(session.logout().await);
+    let result = with_imap_session!(&config, session => {
+        imap_client::fetch_messages(&mut session, &folder, &uid_set).await
+    });
 
     match result {
         Ok(r) => Ok(r),
@@ -59,10 +76,9 @@ pub async fn imap_fetch_new_uids(
     folder: String,
     since_uid: u32,
 ) -> Result<Vec<u32>, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let uids = imap_client::fetch_new_uids(&mut session, &folder, since_uid).await?;
-    drop(session.logout().await);
-    Ok(uids)
+    with_imap_session!(&config, session => {
+        imap_client::fetch_new_uids(&mut session, &folder, since_uid).await
+    })
 }
 
 #[tauri::command]
@@ -70,10 +86,9 @@ pub async fn imap_search_all_uids(
     config: ImapConfig,
     folder: String,
 ) -> Result<Vec<u32>, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let uids = imap_client::search_all_uids(&mut session, &folder).await?;
-    drop(session.logout().await);
-    Ok(uids)
+    with_imap_session!(&config, session => {
+        imap_client::search_all_uids(&mut session, &folder).await
+    })
 }
 
 #[tauri::command]
@@ -82,10 +97,9 @@ pub async fn imap_fetch_message_body(
     folder: String,
     uid: u32,
 ) -> Result<ImapMessage, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let message = imap_client::fetch_message_body(&mut session, &folder, uid).await?;
-    drop(session.logout().await);
-    Ok(message)
+    with_imap_session!(&config, session => {
+        imap_client::fetch_message_body(&mut session, &folder, uid).await
+    })
 }
 
 #[tauri::command]
@@ -94,10 +108,9 @@ pub async fn imap_fetch_raw_message(
     folder: String,
     uid: u32,
 ) -> Result<String, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let raw = imap_client::fetch_raw_message(&mut session, &folder, uid).await?;
-    drop(session.logout().await);
-    Ok(raw)
+    with_imap_session!(&config, session => {
+        imap_client::fetch_raw_message(&mut session, &folder, uid).await
+    })
 }
 
 #[tauri::command]
@@ -111,8 +124,6 @@ pub async fn imap_set_flags(
     if uids.is_empty() {
         return Ok(());
     }
-
-    let mut session = imap_client::connect(&config).await?;
 
     let uid_set: String = uids
         .iter()
@@ -139,9 +150,9 @@ pub async fn imap_set_flags(
             .join(" ")
     );
 
-    imap_client::set_flags(&mut session, &folder, &uid_set, flag_op, &flags_str).await?;
-    drop(session.logout().await);
-    Ok(())
+    with_imap_session!(&config, session => {
+        imap_client::set_flags(&mut session, &folder, &uid_set, flag_op, &flags_str).await
+    })
 }
 
 #[tauri::command]
@@ -155,17 +166,15 @@ pub async fn imap_move_messages(
         return Ok(());
     }
 
-    let mut session = imap_client::connect(&config).await?;
-
     let uid_set: String = uids
         .iter()
         .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join(",");
 
-    imap_client::move_messages(&mut session, &folder, &uid_set, &destination).await?;
-    drop(session.logout().await);
-    Ok(())
+    with_imap_session!(&config, session => {
+        imap_client::move_messages(&mut session, &folder, &uid_set, &destination).await
+    })
 }
 
 #[tauri::command]
@@ -178,17 +187,15 @@ pub async fn imap_delete_messages(
         return Ok(());
     }
 
-    let mut session = imap_client::connect(&config).await?;
-
     let uid_set: String = uids
         .iter()
         .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join(",");
 
-    imap_client::delete_messages(&mut session, &folder, &uid_set).await?;
-    drop(session.logout().await);
-    Ok(())
+    with_imap_session!(&config, session => {
+        imap_client::delete_messages(&mut session, &folder, &uid_set).await
+    })
 }
 
 #[tauri::command]
@@ -196,10 +203,9 @@ pub async fn imap_get_folder_status(
     config: ImapConfig,
     folder: String,
 ) -> Result<ImapFolderStatus, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let status = imap_client::get_folder_status(&mut session, &folder).await?;
-    drop(session.logout().await);
-    Ok(status)
+    with_imap_session!(&config, session => {
+        imap_client::get_folder_status(&mut session, &folder).await
+    })
 }
 
 #[tauri::command]
@@ -209,10 +215,9 @@ pub async fn imap_fetch_attachment(
     uid: u32,
     part_id: String,
 ) -> Result<String, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let data = imap_client::fetch_attachment(&mut session, &folder, uid, &part_id).await?;
-    drop(session.logout().await);
-    Ok(data)
+    with_imap_session!(&config, session => {
+        imap_client::fetch_attachment(&mut session, &folder, uid, &part_id).await
+    })
 }
 
 #[tauri::command]
@@ -222,15 +227,13 @@ pub async fn imap_append_message(
     flags: Option<String>,
     raw_message: String,
 ) -> Result<(), String> {
-    let mut session = imap_client::connect(&config).await?;
-
-    // raw_message is base64url-encoded; decode it
+    // raw_message is base64url-encoded; decode it before entering the session
     let raw_bytes = base64url_decode(&raw_message)?;
 
-    let flags_ref = flags.as_deref();
-    imap_client::append_message(&mut session, &folder, flags_ref, &raw_bytes).await?;
-    drop(session.logout().await);
-    Ok(())
+    with_imap_session!(&config, session => {
+        let flags_ref = flags.as_deref();
+        imap_client::append_message(&mut session, &folder, flags_ref, &raw_bytes).await
+    })
 }
 
 fn base64url_decode(input: &str) -> Result<Vec<u8>, String> {
@@ -247,10 +250,9 @@ pub async fn imap_search_folder(
     folder: String,
     since_date: Option<String>,
 ) -> Result<ImapFolderSearchResult, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let result = imap_client::search_folder(&mut session, &folder, since_date).await;
-    drop(session.logout().await);
-    result
+    with_imap_session!(&config, session => {
+        imap_client::search_folder(&mut session, &folder, since_date).await
+    })
 }
 
 #[tauri::command]
@@ -260,10 +262,9 @@ pub async fn imap_sync_folder(
     batch_size: u32,
     since_date: Option<String>,
 ) -> Result<ImapFolderSyncResult, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let result = imap_client::sync_folder(&mut session, &folder, batch_size, since_date).await;
-    drop(session.logout().await);
-    result
+    with_imap_session!(&config, session => {
+        imap_client::sync_folder(&mut session, &folder, batch_size, since_date).await
+    })
 }
 
 #[tauri::command]
@@ -280,10 +281,9 @@ pub async fn imap_delta_check(
     config: ImapConfig,
     folders: Vec<DeltaCheckRequest>,
 ) -> Result<Vec<DeltaCheckResult>, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let results = imap_client::delta_check_folders(&mut session, &folders).await?;
-    drop(session.logout().await);
-    Ok(results)
+    with_imap_session!(&config, session => {
+        imap_client::delta_check_folders(&mut session, &folders).await
+    })
 }
 
 // ---------- SMTP commands ----------
