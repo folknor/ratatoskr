@@ -1,6 +1,6 @@
 import { getAiCache, setAiCache } from "@/services/db/aiCache";
 import type { DbMessage } from "@/services/db/messages";
-import { AiError } from "./errors";
+import { completeAi, testAiConnection } from "./client";
 import {
   ASK_INBOX_PROMPT,
   CATEGORIZE_PROMPT,
@@ -14,29 +14,12 @@ import {
   SMART_REPLY_PROMPT,
   SUMMARIZE_PROMPT,
 } from "./prompts";
-import { getActiveProvider } from "./providerManager";
 
 async function callAi(
   systemPrompt: string,
   userContent: string,
 ): Promise<string> {
-  try {
-    const provider = await getActiveProvider();
-    return await provider.complete({ systemPrompt, userContent });
-  } catch (err) {
-    if (err instanceof AiError) throw err;
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.includes("401") || message.includes("authentication")) {
-      throw new AiError("AUTH_ERROR", "Invalid API key");
-    }
-    if (message.includes("429") || message.includes("rate")) {
-      throw new AiError(
-        "RATE_LIMITED",
-        "Rate limited — please try again shortly",
-      );
-    }
-    throw new AiError("NETWORK_ERROR", message);
-  }
+  return completeAi({ systemPrompt, userContent });
 }
 
 function formatMessageForSummary(msg: DbMessage): string {
@@ -282,8 +265,7 @@ export async function extractTaskFromThread(
 
 export async function testConnection(): Promise<boolean> {
   try {
-    const provider = await getActiveProvider();
-    return await provider.testConnection();
+    return await testAiConnection();
   } catch {
     return false;
   }

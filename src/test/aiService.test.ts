@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockComplete = vi.fn();
+const { mockCompleteAi } = vi.hoisted(() => ({
+  mockCompleteAi: vi.fn(),
+}));
 
-vi.mock("./providerManager", () => ({
-  getActiveProvider: vi.fn(() => ({
-    complete: mockComplete,
-    testConnection: vi.fn(() => Promise.resolve(true)),
-  })),
+vi.mock("@/services/ai/client", () => ({
+  completeAi: mockCompleteAi,
+  testAiConnection: vi.fn(() => Promise.resolve(true)),
 }));
 
 vi.mock("@/services/db/aiCache", () => ({
@@ -14,7 +14,7 @@ vi.mock("@/services/db/aiCache", () => ({
   setAiCache: vi.fn(),
 }));
 
-import { classifyThreadsBySmartLabels } from "./aiService";
+import { classifyThreadsBySmartLabels } from "@/services/ai/aiService";
 
 describe("classifyThreadsBySmartLabels", () => {
   beforeEach(() => {
@@ -54,7 +54,7 @@ describe("classifyThreadsBySmartLabels", () => {
   ];
 
   it("parses valid AI response into assignments map", async () => {
-    mockComplete.mockResolvedValueOnce("t1:label-jobs\nt2:label-orders");
+    mockCompleteAi.mockResolvedValueOnce("t1:label-jobs\nt2:label-orders");
 
     const result = await classifyThreadsBySmartLabels(threads, labelRules);
 
@@ -64,7 +64,7 @@ describe("classifyThreadsBySmartLabels", () => {
   });
 
   it("supports multi-label assignments", async () => {
-    mockComplete.mockResolvedValueOnce("t1:label-jobs,label-orders");
+    mockCompleteAi.mockResolvedValueOnce("t1:label-jobs,label-orders");
 
     const result = await classifyThreadsBySmartLabels(threads, labelRules);
 
@@ -72,7 +72,9 @@ describe("classifyThreadsBySmartLabels", () => {
   });
 
   it("ignores invalid thread IDs", async () => {
-    mockComplete.mockResolvedValueOnce("invalid-id:label-jobs\nt1:label-jobs");
+    mockCompleteAi.mockResolvedValueOnce(
+      "invalid-id:label-jobs\nt1:label-jobs",
+    );
 
     const result = await classifyThreadsBySmartLabels(threads, labelRules);
 
@@ -82,7 +84,7 @@ describe("classifyThreadsBySmartLabels", () => {
   });
 
   it("ignores invalid label IDs", async () => {
-    mockComplete.mockResolvedValueOnce("t1:label-jobs,fake-label");
+    mockCompleteAi.mockResolvedValueOnce("t1:label-jobs,fake-label");
 
     const result = await classifyThreadsBySmartLabels(threads, labelRules);
 
@@ -90,7 +92,7 @@ describe("classifyThreadsBySmartLabels", () => {
   });
 
   it("skips threads where all labels are invalid", async () => {
-    mockComplete.mockResolvedValueOnce("t1:fake-label");
+    mockCompleteAi.mockResolvedValueOnce("t1:fake-label");
 
     const result = await classifyThreadsBySmartLabels(threads, labelRules);
 
@@ -98,7 +100,7 @@ describe("classifyThreadsBySmartLabels", () => {
   });
 
   it("handles empty AI response", async () => {
-    mockComplete.mockResolvedValueOnce("");
+    mockCompleteAi.mockResolvedValueOnce("");
 
     const result = await classifyThreadsBySmartLabels(threads, labelRules);
 
@@ -106,7 +108,7 @@ describe("classifyThreadsBySmartLabels", () => {
   });
 
   it("handles blank lines and whitespace in response", async () => {
-    mockComplete.mockResolvedValueOnce(
+    mockCompleteAi.mockResolvedValueOnce(
       "\n  t1:label-jobs  \n\n  t2:label-orders\n",
     );
 
@@ -118,12 +120,14 @@ describe("classifyThreadsBySmartLabels", () => {
   });
 
   it("passes label definitions and thread data to AI", async () => {
-    mockComplete.mockResolvedValueOnce("");
+    mockCompleteAi.mockResolvedValueOnce("");
 
     await classifyThreadsBySmartLabels(threads, labelRules);
 
-    expect(mockComplete).toHaveBeenCalledTimes(1);
-    const callArgs = mockComplete.mock.calls[0]?.[0] as { userContent: string };
+    expect(mockCompleteAi).toHaveBeenCalledTimes(1);
+    const callArgs = mockCompleteAi.mock.calls[0]?.[0] as {
+      userContent: string;
+    };
     expect(callArgs.userContent).toContain("label-jobs");
     expect(callArgs.userContent).toContain("Job applications");
     expect(callArgs.userContent).toContain("t1");
