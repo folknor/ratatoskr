@@ -12,7 +12,8 @@ use crate::search::SearchState;
 
 use super::router::{get_ops, get_provider_type};
 use super::types::{
-    AttachmentData, ProviderCtx, ProviderFolder, ProviderProfile, ProviderTestResult, SyncResult,
+    AttachmentData, ProviderCtx, ProviderFolder, ProviderParsedMessage, ProviderProfile,
+    ProviderTestResult, SyncResult,
 };
 
 // ── Sync ────────────────────────────────────────────────────
@@ -771,6 +772,76 @@ fn cache_after_fetch(
             log::warn!("Failed to cache attachment: {e}");
         }
     });
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn provider_fetch_message(
+    account_id: String,
+    message_id: String,
+    db: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
+    jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
+    body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
+    search: State<'_, SearchState>,
+    app_handle: AppHandle,
+) -> Result<ProviderParsedMessage, String> {
+    let provider = get_provider_type(&db, &account_id).await?;
+    let ops = get_ops(
+        &provider,
+        &account_id,
+        &gmail,
+        &jmap,
+        &graph,
+        *gmail.encryption_key(),
+    )
+    .await?;
+    let ctx = ProviderCtx {
+        account_id: &account_id,
+        db: &db,
+        body_store: &body_store,
+        inline_images: &inline_images,
+        search: &search,
+        app_handle: &app_handle,
+    };
+    ops.fetch_message(&ctx, &message_id).await
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn provider_fetch_raw_message(
+    account_id: String,
+    message_id: String,
+    db: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
+    jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
+    body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
+    search: State<'_, SearchState>,
+    app_handle: AppHandle,
+) -> Result<String, String> {
+    let provider = get_provider_type(&db, &account_id).await?;
+    let ops = get_ops(
+        &provider,
+        &account_id,
+        &gmail,
+        &jmap,
+        &graph,
+        *gmail.encryption_key(),
+    )
+    .await?;
+    let ctx = ProviderCtx {
+        account_id: &account_id,
+        db: &db,
+        body_store: &body_store,
+        inline_images: &inline_images,
+        search: &search,
+        app_handle: &app_handle,
+    };
+    ops.fetch_raw_message(&ctx, &message_id).await
 }
 
 // ── Folders ─────────────────────────────────────────────────

@@ -264,6 +264,9 @@ impl ProviderOps for GraphOps {
                 } else {
                     None
                 },
+                delimiter: Some("/".to_string()),
+                message_count: None,
+                unread_count: None,
                 color_bg: None,
                 color_fg: None,
             })

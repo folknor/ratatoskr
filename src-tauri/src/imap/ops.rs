@@ -6,7 +6,8 @@ use rusqlite::Connection;
 
 use crate::provider::ops::ProviderOps;
 use crate::provider::types::{
-    AttachmentData, ProviderCtx, ProviderFolder, ProviderProfile, ProviderTestResult, SyncResult,
+    AttachmentData, ProviderCtx, ProviderFolder, ProviderParsedAttachment, ProviderParsedMessage,
+    ProviderProfile, ProviderTestResult, SyncResult,
 };
 use crate::smtp;
 
@@ -95,6 +96,64 @@ fn uid_set(uids: &[u32]) -> String {
         .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn imap_message_to_provider_message(
+    account_id: &str,
+    folder_label_id: &str,
+    msg: &super::types::ImapMessage,
+) -> ProviderParsedMessage {
+    let attachments = msg
+        .attachments
+        .iter()
+        .map(|att| ProviderParsedAttachment {
+            filename: att.filename.clone(),
+            mime_type: att.mime_type.clone(),
+            size: att.size,
+            gmail_attachment_id: att.part_id.clone(),
+            content_id: att.content_id.clone(),
+            is_inline: att.is_inline,
+        })
+        .collect::<Vec<_>>();
+    let mut label_ids = vec![folder_label_id.to_string()];
+    if !msg.is_read {
+        label_ids.push("UNREAD".to_string());
+    }
+    if msg.is_starred {
+        label_ids.push("STARRED".to_string());
+    }
+    if msg.is_draft {
+        label_ids.push("DRAFT".to_string());
+    }
+
+    ProviderParsedMessage {
+        id: format!("imap-{account_id}-{}-{}", msg.folder, msg.uid),
+        thread_id: String::new(),
+        from_address: msg.from_address.clone(),
+        from_name: msg.from_name.clone(),
+        to_addresses: msg.to_addresses.clone(),
+        cc_addresses: msg.cc_addresses.clone(),
+        bcc_addresses: msg.bcc_addresses.clone(),
+        reply_to: msg.reply_to.clone(),
+        subject: msg.subject.clone(),
+        snippet: msg
+            .snippet
+            .clone()
+            .unwrap_or_else(|| msg.body_text.clone().unwrap_or_default().chars().take(200).collect()),
+        date: msg.date * 1000,
+        is_read: msg.is_read,
+        is_starred: msg.is_starred,
+        body_html: msg.body_html.clone(),
+        body_text: msg.body_text.clone(),
+        raw_size: msg.raw_size,
+        internal_date: msg.date * 1000,
+        label_ids,
+        has_attachments: !attachments.is_empty(),
+        attachments,
+        list_unsubscribe: msg.list_unsubscribe.clone(),
+        list_unsubscribe_post: msg.list_unsubscribe_post.clone(),
+        auth_results: msg.auth_results.clone(),
+    }
 }
 
 /// Look up a special-use IMAP folder path from the labels table.
@@ -631,6 +690,72 @@ impl ProviderOps for ImapOps {
         Ok(AttachmentData { data, size })
     }
 
+    async fn fetch_message(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        message_id: &str,
+    ) -> Result<ProviderParsedMessage, String> {
+        let prefix = format!("imap-{}-", ctx.account_id);
+        if !message_id.starts_with(&prefix) {
+            return Err(format!("Invalid IMAP message ID: {message_id}"));
+        }
+
+        let remainder = &message_id[prefix.len()..];
+        let last_dash = remainder
+            .rfind('-')
+            .ok_or_else(|| format!("Invalid message ID format: {message_id}"))?;
+        let folder = &remainder[..last_dash];
+        let uid: u32 = remainder[last_dash + 1..]
+            .parse()
+            .map_err(|_| format!("Invalid UID in message ID: {message_id}"))?;
+
+        let account_id = ctx.account_id.to_string();
+        let folder_owned = folder.to_string();
+        let config =
+            crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
+                .await?;
+
+        let message = with_session!(&config, session => {
+            imap_client::fetch_message_body(&mut session, &folder_owned, uid).await
+        })?;
+
+        Ok(imap_message_to_provider_message(
+            &account_id,
+            &folder_owned,
+            &message,
+        ))
+    }
+
+    async fn fetch_raw_message(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        message_id: &str,
+    ) -> Result<String, String> {
+        let prefix = format!("imap-{}-", ctx.account_id);
+        if !message_id.starts_with(&prefix) {
+            return Err(format!("Invalid IMAP message ID: {message_id}"));
+        }
+
+        let remainder = &message_id[prefix.len()..];
+        let last_dash = remainder
+            .rfind('-')
+            .ok_or_else(|| format!("Invalid message ID format: {message_id}"))?;
+        let folder = &remainder[..last_dash];
+        let uid: u32 = remainder[last_dash + 1..]
+            .parse()
+            .map_err(|_| format!("Invalid UID in message ID: {message_id}"))?;
+
+        let account_id = ctx.account_id.to_string();
+        let folder_owned = folder.to_string();
+        let config =
+            crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
+                .await?;
+
+        with_session!(&config, session => {
+            imap_client::fetch_raw_message(&mut session, &folder_owned, uid).await
+        })
+    }
+
     // ── Folders ─────────────────────────────────────────────────────────
 
     async fn list_folders(&self, ctx: &ProviderCtx<'_>) -> Result<Vec<ProviderFolder>, String> {
@@ -655,6 +780,9 @@ impl ProviderOps for ImapOps {
                     "user".to_string()
                 },
                 special_use: f.special_use,
+                delimiter: Some(f.delimiter),
+                message_count: Some(f.exists),
+                unread_count: Some(f.unseen),
                 color_bg: None,
                 color_fg: None,
             })

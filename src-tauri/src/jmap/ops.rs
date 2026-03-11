@@ -387,6 +387,9 @@ impl ProviderOps for JmapOps {
                 path: name.to_string(),
                 folder_type: mapping.label_type.to_string(),
                 special_use: role_str.map(String::from),
+                delimiter: Some("/".to_string()),
+                message_count: None,
+                unread_count: None,
                 color_bg: None,
                 color_fg: None,
             });
@@ -416,6 +419,9 @@ impl ProviderOps for JmapOps {
             path: name.to_string(),
             folder_type: "user".to_string(),
             special_use: None,
+            delimiter: Some("/".to_string()),
+            message_count: None,
+            unread_count: None,
             color_bg: None,
             color_fg: None,
         })
@@ -442,6 +448,9 @@ impl ProviderOps for JmapOps {
             path: new_name.to_string(),
             folder_type: "user".to_string(),
             special_use: None,
+            delimiter: Some("/".to_string()),
+            message_count: None,
+            unread_count: None,
             color_bg: None,
             color_fg: None,
         })

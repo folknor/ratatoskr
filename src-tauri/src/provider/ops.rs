@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 
 use super::types::{
-    AttachmentData, ProviderCtx, ProviderFolder, ProviderProfile, ProviderTestResult, SyncResult,
+    AttachmentData, ProviderCtx, ProviderFolder, ProviderParsedMessage, ProviderProfile,
+    ProviderTestResult, SyncResult,
 };
 
 /// Common operations that every email provider must support.
@@ -95,6 +96,22 @@ pub trait ProviderOps: Send + Sync {
         message_id: &str,
         attachment_id: &str,
     ) -> Result<AttachmentData, String>;
+
+    async fn fetch_message(
+        &self,
+        _ctx: &ProviderCtx<'_>,
+        _message_id: &str,
+    ) -> Result<ProviderParsedMessage, String> {
+        Err("Fetching parsed messages is not supported for this provider.".to_string())
+    }
+
+    async fn fetch_raw_message(
+        &self,
+        _ctx: &ProviderCtx<'_>,
+        _message_id: &str,
+    ) -> Result<String, String> {
+        Err("Fetching raw messages is not supported for this provider.".to_string())
+    }
 
     // ── Folders ─────────────────────────────────────────────────
 

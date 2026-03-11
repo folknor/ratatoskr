@@ -469,6 +469,8 @@ pub fn run() {
             provider::commands::provider_update_draft,
             provider::commands::provider_delete_draft,
             provider::commands::provider_fetch_attachment,
+            provider::commands::provider_fetch_message,
+            provider::commands::provider_fetch_raw_message,
             provider::commands::provider_test_connection,
             provider::commands::provider_get_profile,
             provider::commands::provider_list_folders,

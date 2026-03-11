@@ -240,6 +240,9 @@ impl ProviderOps for GmailOps {
                         "user".to_string()
                     },
                     special_use: special.map(String::from),
+                    delimiter: Some("/".to_string()),
+                    message_count: l.messages_total.map(|v| v as u32),
+                    unread_count: l.messages_unread.map(|v| v as u32),
                     color_bg: l.color.as_ref().map(|c| c.background_color.clone()),
                     color_fg: l.color.as_ref().map(|c| c.text_color.clone()),
                 }
@@ -267,6 +270,9 @@ impl ProviderOps for GmailOps {
             path: label.name,
             folder_type: "user".to_string(),
             special_use: None,
+            delimiter: Some("/".to_string()),
+            message_count: label.messages_total.map(|v| v as u32),
+            unread_count: label.messages_unread.map(|v| v as u32),
             color_bg: label.color.as_ref().map(|c| c.background_color.clone()),
             color_fg: label.color.as_ref().map(|c| c.text_color.clone()),
         })
@@ -298,6 +304,9 @@ impl ProviderOps for GmailOps {
                 "user".to_string()
             },
             special_use: None,
+            delimiter: Some("/".to_string()),
+            message_count: label.messages_total.map(|v| v as u32),
+            unread_count: label.messages_unread.map(|v| v as u32),
             color_bg: label.color.as_ref().map(|c| c.background_color.clone()),
             color_fg: label.color.as_ref().map(|c| c.text_color.clone()),
         })

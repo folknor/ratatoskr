@@ -1,16 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { type DbAccount, getAccount } from "../db/accounts";
 import type { ParsedMessage } from "../gmail/messageParser";
-import { getSyncableFolders, mapFolderToLabel } from "../imap/folderMapper";
-import { buildImapConfig } from "../imap/imapConfigBuilder";
-import { imapMessageToParsedMessage } from "../imap/imapSyncConvert";
-import {
-  type ImapConfig,
-  imapFetchMessageBody,
-  imapFetchRawMessage,
-  imapListFolders,
-} from "../imap/tauriCommands";
-import { ensureFreshToken } from "../oauth/oauthTokenManager";
 import type { EmailFolder, EmailProvider, SyncResult } from "./types";
 
 interface ProviderTestResult {
@@ -34,65 +23,40 @@ interface ProviderFolder {
   path: string;
   folderType: string;
   specialUse?: string | null;
+  delimiter?: string | null;
+  messageCount?: number | null;
+  unreadCount?: number | null;
 }
 
 /**
- * Thin IMAP adapter.
- * Remaining direct IMAP calls are limited to folder listing and on-demand
- * message/raw fetch until the unified provider DTOs cover those cases.
+ * Thin IMAP adapter backed by unified Rust provider commands.
  */
 export class ImapSmtpProvider implements EmailProvider {
   readonly accountId: string;
   readonly type = "imap" as const;
 
-  private imapConfig: ImapConfig | null = null;
-
   constructor(accountId: string) {
     this.accountId = accountId;
   }
 
-  private async getAccount(): Promise<DbAccount> {
-    const account = await getAccount(this.accountId);
-    if (!account) {
-      throw new Error(`Account ${this.accountId} not found`);
-    }
-    return account;
-  }
-
-  private async getLegacyImapConfig(): Promise<ImapConfig> {
-    const account = await this.getAccount();
-    if (account.auth_method === "oauth2") {
-      const token = await ensureFreshToken(account);
-      return buildImapConfig(account, token);
-    }
-    if (!this.imapConfig) {
-      this.imapConfig = buildImapConfig(account);
-    }
-    return this.imapConfig;
-  }
-
   clearConfigCache(): void {
-    this.imapConfig = null;
+    // No-op: IMAP config loading now lives in Rust.
   }
 
   async listFolders(): Promise<EmailFolder[]> {
-    const config = await this.getLegacyImapConfig();
-    const imapFolders = await imapListFolders(config);
-    const syncable = getSyncableFolders(imapFolders);
-
-    return syncable.map((folder) => {
-      const mapping = mapFolderToLabel(folder);
-      return {
-        id: mapping.labelId,
-        name: mapping.labelName,
-        path: folder.path,
-        type: mapping.type as "system" | "user",
-        specialUse: folder.special_use,
-        delimiter: folder.delimiter,
-        messageCount: folder.exists,
-        unreadCount: folder.unseen,
-      };
+    const folders = await invoke<ProviderFolder[]>("provider_list_folders", {
+      accountId: this.accountId,
     });
+    return folders.map((folder) => ({
+      id: folder.id,
+      name: folder.name,
+      path: folder.path,
+      type: folder.folderType === "system" ? "system" : "user",
+      specialUse: folder.specialUse ?? null,
+      delimiter: folder.delimiter ?? "/",
+      messageCount: folder.messageCount ?? 0,
+      unreadCount: folder.unreadCount ?? 0,
+    }));
   }
 
   async createFolder(name: string, parentPath?: string): Promise<EmailFolder> {
@@ -107,9 +71,9 @@ export class ImapSmtpProvider implements EmailProvider {
       path: folder.path,
       type: folder.folderType === "system" ? "system" : "user",
       specialUse: folder.specialUse ?? null,
-      delimiter: "/",
-      messageCount: 0,
-      unreadCount: 0,
+      delimiter: folder.delimiter ?? "/",
+      messageCount: folder.messageCount ?? 0,
+      unreadCount: folder.unreadCount ?? 0,
     };
   }
 
@@ -146,20 +110,10 @@ export class ImapSmtpProvider implements EmailProvider {
   }
 
   async fetchMessage(messageId: string): Promise<ParsedMessage> {
-    const { folder, uid } = this.parseImapMessageId(messageId);
-    if (uid === null || !folder) {
-      throw new Error(`Invalid IMAP message ID format: ${messageId}`);
-    }
-
-    const config = await this.getLegacyImapConfig();
-    const imapMsg = await imapFetchMessageBody(config, folder, uid);
-    const { parsed } = imapMessageToParsedMessage(
-      imapMsg,
-      this.accountId,
-      folder,
-    );
-    parsed.id = messageId;
-    return parsed;
+    return invoke<ParsedMessage>("provider_fetch_message", {
+      accountId: this.accountId,
+      messageId,
+    });
   }
 
   async fetchAttachment(
@@ -174,13 +128,10 @@ export class ImapSmtpProvider implements EmailProvider {
   }
 
   async fetchRawMessage(messageId: string): Promise<string> {
-    const { folder, uid } = this.parseImapMessageId(messageId);
-    if (uid === null || !folder) {
-      throw new Error(`Invalid IMAP message ID format: ${messageId}`);
-    }
-
-    const config = await this.getLegacyImapConfig();
-    return imapFetchRawMessage(config, folder, uid);
+    return invoke<string>("provider_fetch_raw_message", {
+      accountId: this.accountId,
+      messageId,
+    });
   }
 
   async archive(threadId: string, _messageIds: string[]): Promise<void> {
@@ -326,29 +277,5 @@ export class ImapSmtpProvider implements EmailProvider {
     return invoke<ProviderProfile>("provider_get_profile", {
       accountId: this.accountId,
     });
-  }
-
-  private parseImapMessageId(messageId: string): {
-    folder: string | null;
-    uid: number | null;
-  } {
-    const prefix = `imap-${this.accountId}-`;
-    if (!messageId.startsWith(prefix)) {
-      return { folder: null, uid: null };
-    }
-
-    const remainder = messageId.slice(prefix.length);
-    const lastDash = remainder.lastIndexOf("-");
-    if (lastDash === -1) {
-      return { folder: null, uid: null };
-    }
-
-    const folder = remainder.slice(0, lastDash);
-    const uid = parseInt(remainder.slice(lastDash + 1), 10);
-    if (!folder || Number.isNaN(uid)) {
-      return { folder: null, uid: null };
-    }
-
-    return { folder, uid };
   }
 }
