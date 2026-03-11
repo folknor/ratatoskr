@@ -155,7 +155,7 @@ export function CommandPalette({
           if (!(selectedId && accountId)) return;
           try {
             const isSpam = activeLabel !== "spam";
-            await spamThread(accountId, selectedId, [], isSpam);
+            await spamThread(accountId, selectedId, isSpam);
             useThreadStore.getState().removeThread(selectedId);
           } catch (err) {
             console.error("Spam action failed:", err);

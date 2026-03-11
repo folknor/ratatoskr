@@ -232,7 +232,7 @@ export function InlineReply({
           // Send & archive: remove from inbox if enabled
           if (useUIPreferencesStore.getState().sendAndArchive) {
             try {
-              await archiveThread(accountId, thread.id, []);
+              await archiveThread(accountId, thread.id);
             } catch {
               /* ignore */
             }

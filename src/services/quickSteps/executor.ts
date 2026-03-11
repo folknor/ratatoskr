@@ -31,35 +31,35 @@ async function executeSingleAction(
   switch (action.type) {
     case "archive":
       await Promise.all(
-        threadIds.map((id) => archiveThread(accountId, id, [])),
+        threadIds.map((id) => archiveThread(accountId, id)),
       );
       break;
 
     case "trash":
-      await Promise.all(threadIds.map((id) => trashThread(accountId, id, [])));
+      await Promise.all(threadIds.map((id) => trashThread(accountId, id)));
       break;
 
     case "markRead":
       await Promise.all(
-        threadIds.map((id) => markThreadRead(accountId, id, [], true)),
+        threadIds.map((id) => markThreadRead(accountId, id, true)),
       );
       break;
 
     case "markUnread":
       await Promise.all(
-        threadIds.map((id) => markThreadRead(accountId, id, [], false)),
+        threadIds.map((id) => markThreadRead(accountId, id, false)),
       );
       break;
 
     case "star":
       await Promise.all(
-        threadIds.map((id) => starThread(accountId, id, [], true)),
+        threadIds.map((id) => starThread(accountId, id, true)),
       );
       break;
 
     case "unstar":
       await Promise.all(
-        threadIds.map((id) => starThread(accountId, id, [], false)),
+        threadIds.map((id) => starThread(accountId, id, false)),
       );
       break;
 
@@ -155,20 +155,20 @@ async function executeSingleAction(
       if (action.params?.snoozeDuration) {
         const until = Date.now() + action.params.snoozeDuration;
         await Promise.all(
-          threadIds.map((id) => snoozeThread(accountId, id, [], until)),
+          threadIds.map((id) => snoozeThread(accountId, id, until)),
         );
       }
       break;
 
     case "spam":
       await Promise.all(
-        threadIds.map((id) => spamThread(accountId, id, [], true)),
+        threadIds.map((id) => spamThread(accountId, id, true)),
       );
       break;
 
     case "notSpam":
       await Promise.all(
-        threadIds.map((id) => spamThread(accountId, id, [], false)),
+        threadIds.map((id) => spamThread(accountId, id, false)),
       );
       break;
   }

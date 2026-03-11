@@ -246,7 +246,7 @@ export function Composer(): React.ReactNode {
         // Send & archive: remove from inbox if replying to a thread
         if (useUIPreferencesStore.getState().sendAndArchive && state.threadId) {
           try {
-            await archiveThread(activeAccountId, state.threadId, []);
+            await archiveThread(activeAccountId, state.threadId);
           } catch {
             /* ignore */
           }

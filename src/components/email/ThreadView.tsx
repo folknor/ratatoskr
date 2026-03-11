@@ -139,7 +139,7 @@ export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
 
     const markRead = (): void => {
       markedReadRef.current = thread.id;
-      markThreadRead(activeAccountId, thread.id, [], true).catch(
+      markThreadRead(activeAccountId, thread.id, true).catch(
         (err: unknown) => {
           console.error("Failed to mark thread as read:", err);
         },

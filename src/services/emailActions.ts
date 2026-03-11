@@ -26,31 +26,27 @@ import { classifyError } from "@/utils/networkErrors";
 // ---------------------------------------------------------------------------
 
 export type EmailAction =
-  | { type: "archive"; threadId: string; messageIds: string[] }
-  | { type: "trash"; threadId: string; messageIds: string[] }
-  | { type: "permanentDelete"; threadId: string; messageIds: string[] }
+  | { type: "archive"; threadId: string }
+  | { type: "trash"; threadId: string }
+  | { type: "permanentDelete"; threadId: string }
   | {
       type: "markRead";
       threadId: string;
-      messageIds: string[];
       read: boolean;
     }
   | {
       type: "star";
       threadId: string;
-      messageIds: string[];
       starred: boolean;
     }
   | {
       type: "spam";
       threadId: string;
-      messageIds: string[];
       isSpam: boolean;
     }
   | {
       type: "moveToFolder";
       threadId: string;
-      messageIds: string[];
       folderPath: string;
       sourceLabel?: string;
     }
@@ -76,12 +72,11 @@ export type EmailAction =
   | {
       type: "snooze";
       threadId: string;
-      messageIds: string[];
       snoozeUntil: number;
     }
   | { type: "pin"; threadId: string }
   | { type: "unpin"; threadId: string }
-  | { type: "mute"; threadId: string; messageIds: string[] }
+  | { type: "mute"; threadId: string }
   | { type: "unmute"; threadId: string };
 
 // ---------------------------------------------------------------------------
@@ -448,49 +443,41 @@ export async function executeQueuedAction(
 export function archiveThread(
   accountId: string,
   threadId: string,
-  messageIds: string[],
 ): Promise<ActionResult> {
   return executeEmailAction(accountId, {
     type: "archive",
     threadId,
-    messageIds,
   });
 }
 
 export function trashThread(
   accountId: string,
   threadId: string,
-  messageIds: string[],
 ): Promise<ActionResult> {
   return executeEmailAction(accountId, {
     type: "trash",
     threadId,
-    messageIds,
   });
 }
 
 export function permanentDeleteThread(
   accountId: string,
   threadId: string,
-  messageIds: string[],
 ): Promise<ActionResult> {
   return executeEmailAction(accountId, {
     type: "permanentDelete",
     threadId,
-    messageIds,
   });
 }
 
 export function markThreadRead(
   accountId: string,
   threadId: string,
-  messageIds: string[],
   read: boolean,
 ): Promise<ActionResult> {
   return executeEmailAction(accountId, {
     type: "markRead",
     threadId,
-    messageIds,
     read,
   });
 }
@@ -498,13 +485,11 @@ export function markThreadRead(
 export function starThread(
   accountId: string,
   threadId: string,
-  messageIds: string[],
   starred: boolean,
 ): Promise<ActionResult> {
   return executeEmailAction(accountId, {
     type: "star",
     threadId,
-    messageIds,
     starred,
   });
 }
@@ -512,13 +497,11 @@ export function starThread(
 export function spamThread(
   accountId: string,
   threadId: string,
-  messageIds: string[],
   isSpam: boolean,
 ): Promise<ActionResult> {
   return executeEmailAction(accountId, {
     type: "spam",
     threadId,
-    messageIds,
     isSpam,
   });
 }
@@ -526,14 +509,12 @@ export function spamThread(
 export function moveThread(
   accountId: string,
   threadId: string,
-  messageIds: string[],
   folderPath: string,
   sourceLabel?: string,
 ): Promise<ActionResult> {
   const action: EmailAction = {
     type: "moveToFolder",
     threadId,
-    messageIds,
     folderPath,
     ...(sourceLabel ? { sourceLabel } : {}),
   };
@@ -633,12 +614,10 @@ export function unpinThread(
 export function muteThread(
   accountId: string,
   threadId: string,
-  messageIds: string[],
 ): Promise<ActionResult> {
   return executeEmailAction(accountId, {
     type: "mute",
     threadId,
-    messageIds,
   });
 }
 
@@ -652,13 +631,11 @@ export function unmuteThread(
 export function snoozeThread(
   accountId: string,
   threadId: string,
-  messageIds: string[],
   snoozeUntil: number,
 ): Promise<ActionResult> {
   return executeEmailAction(accountId, {
     type: "snooze",
     threadId,
-    messageIds,
     snoozeUntil,
   });
 }

@@ -64,7 +64,7 @@ import {
   spamThread,
   starThread,
   trashThread,
-} from "./emailActions";
+} from "@/services/emailActions";
 
 const mockUpdateThread = vi.fn();
 const mockRemoveThread = vi.fn();
@@ -85,7 +85,7 @@ describe("emailActions", () => {
 
   describe("online execution (via provider_* Rust commands)", () => {
     it("archives a thread via provider_archive", async () => {
-      const result = await archiveThread("acct-1", "t1", ["m1"]);
+      const result = await archiveThread("acct-1", "t1");
       expect(result.success).toBe(true);
       expect(invoke).toHaveBeenCalledWith("provider_archive", {
         accountId: "acct-1",
@@ -94,7 +94,7 @@ describe("emailActions", () => {
     });
 
     it("trashes a thread via provider_trash", async () => {
-      const result = await trashThread("acct-1", "t1", ["m1"]);
+      const result = await trashThread("acct-1", "t1");
       expect(result.success).toBe(true);
       expect(invoke).toHaveBeenCalledWith("provider_trash", {
         accountId: "acct-1",
@@ -103,7 +103,7 @@ describe("emailActions", () => {
     });
 
     it("permanently deletes a thread via provider_permanent_delete", async () => {
-      const result = await permanentDeleteThread("acct-1", "t1", ["m1"]);
+      const result = await permanentDeleteThread("acct-1", "t1");
       expect(result.success).toBe(true);
       expect(invoke).toHaveBeenCalledWith("provider_permanent_delete", {
         accountId: "acct-1",
@@ -112,7 +112,7 @@ describe("emailActions", () => {
     });
 
     it("marks thread read via provider_mark_read", async () => {
-      const result = await markThreadRead("acct-1", "t1", ["m1"], true);
+      const result = await markThreadRead("acct-1", "t1", true);
       expect(result.success).toBe(true);
       expect(invoke).toHaveBeenCalledWith("provider_mark_read", {
         accountId: "acct-1",
@@ -122,7 +122,7 @@ describe("emailActions", () => {
     });
 
     it("marks thread unread via provider_mark_read", async () => {
-      const result = await markThreadRead("acct-1", "t1", ["m1"], false);
+      const result = await markThreadRead("acct-1", "t1", false);
       expect(result.success).toBe(true);
       expect(invoke).toHaveBeenCalledWith("provider_mark_read", {
         accountId: "acct-1",
@@ -132,7 +132,7 @@ describe("emailActions", () => {
     });
 
     it("stars a thread via provider_star", async () => {
-      const result = await starThread("acct-1", "t1", ["m1"], true);
+      const result = await starThread("acct-1", "t1", true);
       expect(result.success).toBe(true);
       expect(invoke).toHaveBeenCalledWith("provider_star", {
         accountId: "acct-1",
@@ -142,7 +142,7 @@ describe("emailActions", () => {
     });
 
     it("unstars a thread via provider_star", async () => {
-      const result = await starThread("acct-1", "t1", ["m1"], false);
+      const result = await starThread("acct-1", "t1", false);
       expect(result.success).toBe(true);
       expect(invoke).toHaveBeenCalledWith("provider_star", {
         accountId: "acct-1",
@@ -152,7 +152,7 @@ describe("emailActions", () => {
     });
 
     it("reports spam via provider_spam", async () => {
-      const result = await spamThread("acct-1", "t1", ["m1"], true);
+      const result = await spamThread("acct-1", "t1", true);
       expect(result.success).toBe(true);
       expect(invoke).toHaveBeenCalledWith("provider_spam", {
         accountId: "acct-1",
@@ -217,7 +217,7 @@ describe("emailActions", () => {
     });
 
     it("moves to folder via provider_move_to_folder", async () => {
-      const result = await moveThread("acct-1", "t1", ["m1"], "Label_123");
+      const result = await moveThread("acct-1", "t1", "Label_123");
       expect(result.success).toBe(true);
       expect(invoke).toHaveBeenCalledWith("provider_move_to_folder", {
         accountId: "acct-1",
@@ -235,7 +235,7 @@ describe("emailActions", () => {
     });
 
     it("queues archive when offline", async () => {
-      const result = await archiveThread("acct-1", "t1", ["m1"]);
+      const result = await archiveThread("acct-1", "t1");
       expect(result.success).toBe(true);
       expect(result.queued).toBe(true);
       expect(invoke).not.toHaveBeenCalled();
@@ -243,12 +243,12 @@ describe("emailActions", () => {
         "acct-1",
         "archive",
         "t1",
-        expect.objectContaining({ threadId: "t1", messageIds: ["m1"] }),
+        expect.objectContaining({ threadId: "t1" }),
       );
     });
 
     it("still applies optimistic UI update when offline", async () => {
-      await starThread("acct-1", "t1", ["m1"], true);
+      await starThread("acct-1", "t1", true);
       expect(mockUpdateThread).toHaveBeenCalledWith("t1", { isStarred: true });
     });
   });
@@ -260,7 +260,7 @@ describe("emailActions", () => {
       } as never);
       vi.mocked(invoke).mockRejectedValueOnce(new Error("Failed to fetch"));
 
-      const result = await archiveThread("acct-1", "t1", ["m1"]);
+      const result = await archiveThread("acct-1", "t1");
       expect(result.success).toBe(true);
       expect(result.queued).toBe(true);
       expect(enqueuePendingOperation).toHaveBeenCalled();
@@ -274,7 +274,7 @@ describe("emailActions", () => {
       } as never);
       vi.mocked(invoke).mockRejectedValueOnce(new Error("Invalid request"));
 
-      const result = await starThread("acct-1", "t1", ["m1"], true);
+      const result = await starThread("acct-1", "t1", true);
       expect(result.success).toBe(false);
       expect(result.error).toBeTruthy();
       // Revert: set starred to false
@@ -287,7 +287,7 @@ describe("emailActions", () => {
       } as never);
       vi.mocked(invoke).mockRejectedValueOnce(new Error("Bad request"));
 
-      const result = await markThreadRead("acct-1", "t1", ["m1"], true);
+      const result = await markThreadRead("acct-1", "t1", true);
       expect(result.success).toBe(false);
       // Revert: set read to false
       expect(mockUpdateThread).toHaveBeenCalledWith("t1", { isRead: false });
@@ -307,7 +307,7 @@ describe("emailActions", () => {
         }) as never,
       );
 
-      await archiveThread("acct-1", "t2", ["m1"]);
+      await archiveThread("acct-1", "t2");
       expect(navigateToThread).toHaveBeenCalledWith("t3");
     });
 
@@ -321,7 +321,7 @@ describe("emailActions", () => {
         }) as never,
       );
 
-      await archiveThread("acct-1", "t3", ["m1"]);
+      await archiveThread("acct-1", "t3");
       expect(navigateToThread).toHaveBeenCalledWith("t2");
     });
 
@@ -335,7 +335,7 @@ describe("emailActions", () => {
         }) as never,
       );
 
-      await archiveThread("acct-1", "t2", ["m1"]);
+      await archiveThread("acct-1", "t2");
       expect(navigateToThread).not.toHaveBeenCalled();
     });
 
@@ -349,7 +349,7 @@ describe("emailActions", () => {
         }) as never,
       );
 
-      await archiveThread("acct-1", "t1", ["m1"]);
+      await archiveThread("acct-1", "t1");
       expect(navigateToThread).not.toHaveBeenCalled();
     });
 
@@ -363,7 +363,7 @@ describe("emailActions", () => {
         }) as never,
       );
 
-      await trashThread("acct-1", "t1", ["m1"]);
+      await trashThread("acct-1", "t1");
       expect(navigateToThread).toHaveBeenCalledWith("t2");
     });
 
@@ -377,7 +377,7 @@ describe("emailActions", () => {
         }) as never,
       );
 
-      await spamThread("acct-1", "t1", ["m1"], true);
+      await spamThread("acct-1", "t1", true);
       expect(navigateToThread).toHaveBeenCalledWith("t2");
     });
 
@@ -391,7 +391,7 @@ describe("emailActions", () => {
         }) as never,
       );
 
-      await permanentDeleteThread("acct-1", "t2", ["m1"]);
+      await permanentDeleteThread("acct-1", "t2");
       expect(navigateToThread).toHaveBeenCalledWith("t3");
     });
 
@@ -405,7 +405,7 @@ describe("emailActions", () => {
         }) as never,
       );
 
-      await moveThread("acct-1", "t2", ["m1"], "Archive");
+      await moveThread("acct-1", "t2", "Archive");
       expect(navigateToThread).toHaveBeenCalledWith("t3");
     });
   });

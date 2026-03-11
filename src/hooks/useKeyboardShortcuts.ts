@@ -358,7 +358,7 @@ async function executeAction(actionId: string): Promise<void> {
       );
       if (archiveIds.length > 0 && activeAccountId) {
         for (const id of archiveIds) {
-          await archiveThread(activeAccountId, id, []);
+          await archiveThread(activeAccountId, id);
         }
       }
       break;
@@ -374,7 +374,7 @@ async function executeAction(actionId: string): Promise<void> {
       if (deleteIds.length > 0 && activeAccountId) {
         for (const id of deleteIds) {
           if (isTrashView) {
-            await permanentDeleteThread(activeAccountId, id, []);
+            await permanentDeleteThread(activeAccountId, id);
             await deleteThreadFromDb(activeAccountId, id);
           } else if (isDraftsView) {
             try {
@@ -384,7 +384,7 @@ async function executeAction(actionId: string): Promise<void> {
               console.error("Draft delete failed:", err);
             }
           } else {
-            await trashThread(activeAccountId, id, []);
+            await trashThread(activeAccountId, id);
           }
         }
       }
@@ -394,7 +394,7 @@ async function executeAction(actionId: string): Promise<void> {
       if (selectedId && activeAccountId) {
         const thread = threads.find((t) => t.id === selectedId);
         if (thread) {
-          await starThread(activeAccountId, selectedId, [], !thread.isStarred);
+          await starThread(activeAccountId, selectedId, !thread.isStarred);
         }
       }
       break;
@@ -407,7 +407,7 @@ async function executeAction(actionId: string): Promise<void> {
       );
       if (spamIds.length > 0 && activeAccountId) {
         for (const id of spamIds) {
-          await spamThread(activeAccountId, id, [], !isSpamView);
+          await spamThread(activeAccountId, id, !isSpamView);
         }
       }
       break;
@@ -448,7 +448,7 @@ async function executeAction(actionId: string): Promise<void> {
               unsubMsg.list_unsubscribe,
               unsubMsg.list_unsubscribe_post ?? null,
             );
-            await archiveThread(activeAccountId, selectedId, []);
+            await archiveThread(activeAccountId, selectedId);
           }
         } catch (err) {
           console.error("Unsubscribe failed:", err);
@@ -467,7 +467,7 @@ async function executeAction(actionId: string): Promise<void> {
           if (t?.isMuted) {
             await unmuteThread(activeAccountId, id);
           } else {
-            await muteThread(activeAccountId, id, []);
+            await muteThread(activeAccountId, id);
           }
         }
       }

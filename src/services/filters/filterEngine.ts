@@ -150,12 +150,12 @@ export async function applyFiltersToMessages(
 
         // Mark as read via provider
         if (result.markRead) {
-          await markThreadRead(accountId, threadId, [], true);
+          await markThreadRead(accountId, threadId, true);
         }
 
         // Star via provider
         if (result.star) {
-          await starThread(accountId, threadId, [], true);
+          await starThread(accountId, threadId, true);
         }
       } catch (err) {
         console.error(

@@ -36,10 +36,9 @@ async function checkSnoozedThreads(): Promise<void> {
 export async function snoozeThread(
   accountId: string,
   threadId: string,
-  messageIds: string[],
   snoozeUntil: number,
 ): Promise<void> {
-  await snoozeThreadAction(accountId, threadId, messageIds, snoozeUntil);
+  await snoozeThreadAction(accountId, threadId, snoozeUntil);
 }
 
 const snoozeChecker: BackgroundChecker = createBackgroundChecker(

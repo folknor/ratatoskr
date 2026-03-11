@@ -22,7 +22,6 @@
 
 ## Provider Operations
 
-- [ ] **Thread-level vs message-level semantics change** — All action methods (`archive`, `trash`, `markRead`, `star`, etc.) now pass `threadId` to Rust commands and ignore `_messageIds`. If any caller passes specific message IDs (e.g., marking individual messages as read), the entire thread is affected instead. *(MED)*
 
 - [ ] **Graph folder CRUD returns "not supported"** — `create_folder`, `rename_folder`, `delete_folder` are stubbed in `src-tauri/src/graph/ops.rs`. Graph API actually supports folder CRUD via `/me/mailFolders`. *(LOW)*
 

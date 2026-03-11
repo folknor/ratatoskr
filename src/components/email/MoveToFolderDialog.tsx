@@ -105,20 +105,14 @@ export function MoveToFolderDialog({
         );
 
         if (dest.id === "__archive__") {
-          await archiveThread(activeAccountId, threadId, []);
+          await archiveThread(activeAccountId, threadId);
         } else if (dest.id === "TRASH") {
-          await trashThread(activeAccountId, threadId, []);
+          await trashThread(activeAccountId, threadId);
         } else if (dest.id === "SPAM") {
-          await spamThread(activeAccountId, threadId, [], true);
+          await spamThread(activeAccountId, threadId, true);
         } else if (dest.id === "INBOX") {
           if (isImap) {
-            await moveThread(
-              activeAccountId,
-              threadId,
-              [],
-              "INBOX",
-              sourceLabel,
-            );
+            await moveThread(activeAccountId, threadId, "INBOX", sourceLabel);
           } else {
             // Gmail: add INBOX label (un-archive)
             await addThreadLabel(activeAccountId, threadId, "INBOX");
@@ -126,13 +120,7 @@ export function MoveToFolderDialog({
         } else if (dest.type === "label") {
           if (isImap) {
             // IMAP: move to folder. The label's id is the folder path for IMAP accounts.
-            await moveThread(
-              activeAccountId,
-              threadId,
-              [],
-              dest.id,
-              sourceLabel,
-            );
+            await moveThread(activeAccountId, threadId, dest.id, sourceLabel);
           } else {
             // Gmail: add destination label + remove from current location (archive)
             await addThreadLabel(activeAccountId, threadId, dest.id);
@@ -228,9 +216,12 @@ export function MoveToFolderDialog({
                 setQuery(e.target.value);
                 setSelectedIdx(0);
               }}
-              placeholder={t("moveToSearch")}
+              placeholder={t("moveThreadToSearch")}
               className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-tertiary outline-none"
             />
+          </div>
+          <div className="px-3 py-2 border-b border-border-secondary text-xs text-text-tertiary">
+            {t("moveAppliesToEntireThread")}
           </div>
 
           {/* Destination list */}

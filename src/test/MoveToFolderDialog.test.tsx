@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MoveToFolderDialog } from "./MoveToFolderDialog";
+import { MoveToFolderDialog } from "@/components/email/MoveToFolderDialog";
 
 // Mock dependencies
 vi.mock("@/stores/labelStore", () => ({
@@ -149,7 +149,7 @@ describe("MoveToFolderDialog", () => {
   it("filters destinations by search query", () => {
     render(<MoveToFolderDialog {...defaultProps} />);
 
-    const input = screen.getByPlaceholderText("Move to...");
+    const input = screen.getByPlaceholderText("Move thread to...");
     fireEvent.change(input, { target: { value: "work" } });
 
     expect(screen.getByText("Work")).toBeInTheDocument();
@@ -160,7 +160,7 @@ describe("MoveToFolderDialog", () => {
   it("shows empty state when no matches", () => {
     render(<MoveToFolderDialog {...defaultProps} />);
 
-    const input = screen.getByPlaceholderText("Move to...");
+    const input = screen.getByPlaceholderText("Move thread to...");
     fireEvent.change(input, { target: { value: "nonexistent" } });
 
     expect(
@@ -174,7 +174,7 @@ describe("MoveToFolderDialog", () => {
     fireEvent.click(screen.getByText("Archive"));
 
     expect(defaultProps.onClose).toHaveBeenCalled();
-    expect(archiveThread).toHaveBeenCalledWith("acc-1", "thread-1", []);
+    expect(archiveThread).toHaveBeenCalledWith("acc-1", "thread-1");
   });
 
   it("calls trashThread when Trash is selected", async () => {
@@ -183,7 +183,7 @@ describe("MoveToFolderDialog", () => {
     fireEvent.click(screen.getByText("Trash"));
 
     expect(defaultProps.onClose).toHaveBeenCalled();
-    expect(trashThread).toHaveBeenCalledWith("acc-1", "thread-1", []);
+    expect(trashThread).toHaveBeenCalledWith("acc-1", "thread-1");
   });
 
   it("calls spamThread when Spam is selected", async () => {
@@ -192,7 +192,7 @@ describe("MoveToFolderDialog", () => {
     fireEvent.click(screen.getByText("Spam"));
 
     expect(defaultProps.onClose).toHaveBeenCalled();
-    expect(spamThread).toHaveBeenCalledWith("acc-1", "thread-1", [], true);
+    expect(spamThread).toHaveBeenCalledWith("acc-1", "thread-1", true);
   });
 
   it("calls addThreadLabel + removeThreadLabel for Gmail label selection", async () => {
@@ -224,7 +224,7 @@ describe("MoveToFolderDialog", () => {
   it("closes on Escape key", () => {
     render(<MoveToFolderDialog {...defaultProps} />);
 
-    const input = screen.getByPlaceholderText("Move to...");
+    const input = screen.getByPlaceholderText("Move thread to...");
     fireEvent.keyDown(input, { key: "Escape" });
 
     expect(defaultProps.onClose).toHaveBeenCalled();
@@ -233,14 +233,14 @@ describe("MoveToFolderDialog", () => {
   it("navigates with arrow keys and selects with Enter", () => {
     render(<MoveToFolderDialog {...defaultProps} />);
 
-    const input = screen.getByPlaceholderText("Move to...");
+    const input = screen.getByPlaceholderText("Move thread to...");
 
     // Arrow down to "Archive" (index 1)
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(defaultProps.onClose).toHaveBeenCalled();
-    expect(archiveThread).toHaveBeenCalledWith("acc-1", "thread-1", []);
+    expect(archiveThread).toHaveBeenCalledWith("acc-1", "thread-1");
   });
 
   it("handles multiple threadIds", async () => {
@@ -256,8 +256,8 @@ describe("MoveToFolderDialog", () => {
     await vi.waitFor(() => {
       expect(archiveThread).toHaveBeenCalledTimes(2);
     });
-    expect(archiveThread).toHaveBeenCalledWith("acc-1", "thread-1", []);
-    expect(archiveThread).toHaveBeenCalledWith("acc-1", "thread-2", []);
+    expect(archiveThread).toHaveBeenCalledWith("acc-1", "thread-1");
+    expect(archiveThread).toHaveBeenCalledWith("acc-1", "thread-2");
   });
 
   it("closes when clicking the backdrop", () => {

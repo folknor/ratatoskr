@@ -24,7 +24,7 @@ export function ContextMenuPortal(): React.ReactNode {
         <SnoozeDialog
           onSnooze={async (until: number) => {
             for (const id of snoozeTarget.threadIds) {
-              await snoozeThread(snoozeTarget.accountId, id, [], until);
+              await snoozeThread(snoozeTarget.accountId, id, until);
             }
             setSnoozeTarget(null);
           }}
@@ -70,7 +70,7 @@ export function ContextMenuPortal(): React.ReactNode {
         <SnoozeDialog
           onSnooze={async (until: number) => {
             for (const id of snoozeTarget.threadIds) {
-              await snoozeThread(snoozeTarget.accountId, id, [], until);
+              await snoozeThread(snoozeTarget.accountId, id, until);
             }
             setSnoozeTarget(null);
           }}

@@ -76,38 +76,28 @@ export class ImapSmtpProvider extends RustBackedProviderBase {
     });
   }
 
-  override async archive(
-    threadId: string,
-    _messageIds: string[],
-  ): Promise<void> {
+  override async archive(threadId: string): Promise<void> {
     await invoke("provider_archive", {
       accountId: this.accountId,
       threadId,
     });
   }
 
-  override async trash(threadId: string, _messageIds: string[]): Promise<void> {
+  override async trash(threadId: string): Promise<void> {
     await invoke("provider_trash", {
       accountId: this.accountId,
       threadId,
     });
   }
 
-  override async permanentDelete(
-    threadId: string,
-    _messageIds: string[],
-  ): Promise<void> {
+  override async permanentDelete(threadId: string): Promise<void> {
     await invoke("provider_permanent_delete", {
       accountId: this.accountId,
       threadId,
     });
   }
 
-  override async markRead(
-    threadId: string,
-    _messageIds: string[],
-    read: boolean,
-  ): Promise<void> {
+  override async markRead(threadId: string, read: boolean): Promise<void> {
     await invoke("provider_mark_read", {
       accountId: this.accountId,
       threadId,
@@ -115,11 +105,7 @@ export class ImapSmtpProvider extends RustBackedProviderBase {
     });
   }
 
-  override async star(
-    threadId: string,
-    _messageIds: string[],
-    starred: boolean,
-  ): Promise<void> {
+  override async star(threadId: string, starred: boolean): Promise<void> {
     await invoke("provider_star", {
       accountId: this.accountId,
       threadId,
@@ -127,11 +113,7 @@ export class ImapSmtpProvider extends RustBackedProviderBase {
     });
   }
 
-  override async spam(
-    threadId: string,
-    _messageIds: string[],
-    isSpam: boolean,
-  ): Promise<void> {
+  override async spam(threadId: string, isSpam: boolean): Promise<void> {
     await invoke("provider_spam", {
       accountId: this.accountId,
       threadId,
@@ -141,7 +123,6 @@ export class ImapSmtpProvider extends RustBackedProviderBase {
 
   override async moveToFolder(
     threadId: string,
-    _messageIds: string[],
     folderPath: string,
   ): Promise<void> {
     await invoke("provider_move_to_folder", {

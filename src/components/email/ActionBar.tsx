@@ -107,17 +107,17 @@ export function ActionBar({
 
   const handleToggleRead = async (): Promise<void> => {
     if (!activeAccountId) return;
-    await markThreadRead(activeAccountId, thread.id, [], !thread.isRead);
+    await markThreadRead(activeAccountId, thread.id, !thread.isRead);
   };
 
   const handleToggleStar = async (): Promise<void> => {
     if (!activeAccountId) return;
-    await starThread(activeAccountId, thread.id, [], !thread.isStarred);
+    await starThread(activeAccountId, thread.id, !thread.isStarred);
   };
 
   const handleArchive = async (): Promise<void> => {
     if (!activeAccountId) return;
-    await archiveThread(activeAccountId, thread.id, []);
+    await archiveThread(activeAccountId, thread.id);
   };
 
   const handleDelete = async (): Promise<void> => {
@@ -125,7 +125,7 @@ export function ActionBar({
     const isTrashView = activeLabel === "trash";
     const isDraftsView = activeLabel === "drafts";
     if (isTrashView) {
-      await permanentDeleteThread(activeAccountId, thread.id, []);
+      await permanentDeleteThread(activeAccountId, thread.id);
       await deleteThreadFromDb(activeAccountId, thread.id);
     } else if (isDraftsView) {
       removeThread(thread.id);
@@ -135,7 +135,7 @@ export function ActionBar({
         console.error("Failed to delete drafts:", err);
       }
     } else {
-      await trashThread(activeAccountId, thread.id, []);
+      await trashThread(activeAccountId, thread.id);
     }
   };
 
@@ -143,7 +143,7 @@ export function ActionBar({
     if (!activeAccountId) return;
     setShowSnooze(false);
     try {
-      await snoozeThread(activeAccountId, thread.id, [], until);
+      await snoozeThread(activeAccountId, thread.id, until);
     } catch (err) {
       console.error("Failed to snooze:", err);
     }
@@ -151,7 +151,7 @@ export function ActionBar({
 
   const handleSpam = async (): Promise<void> => {
     if (!activeAccountId) return;
-    await spamThread(activeAccountId, thread.id, [], !isSpamView);
+    await spamThread(activeAccountId, thread.id, !isSpamView);
   };
 
   // Find the first message with an unsubscribe header
@@ -179,7 +179,7 @@ export function ActionBar({
       if (result.success) {
         setUnsubscribeStatus("done");
         // Auto-archive after successful unsubscribe
-        await archiveThread(activeAccountId, thread.id, []);
+        await archiveThread(activeAccountId, thread.id);
       } else {
         setUnsubscribeStatus("idle");
       }
@@ -203,7 +203,7 @@ export function ActionBar({
     if (thread.isMuted) {
       await unmuteThread(activeAccountId, thread.id);
     } else {
-      await muteThread(activeAccountId, thread.id, []);
+      await muteThread(activeAccountId, thread.id);
     }
   };
 
@@ -300,21 +300,21 @@ export function ActionBar({
           iconOnly
           icon={<Archive size={15} />}
           onClick={handleArchive}
-          title={t("archiveShortcut")}
+          title={t("archiveThreadShortcut")}
         />
         <Button
           variant="secondary"
           iconOnly
           icon={<Trash2 size={15} />}
           onClick={handleDelete}
-          title={t("deleteShortcut")}
+          title={t("deleteThreadShortcut")}
         />
         <Button
           variant="secondary"
           iconOnly
           icon={thread.isRead ? <Mail size={15} /> : <MailOpen size={15} />}
           onClick={handleToggleRead}
-          title={thread.isRead ? t("markUnread") : t("markRead")}
+          title={thread.isRead ? t("markThreadUnread") : t("markThreadRead")}
         />
         <Button
           variant="secondary"
@@ -326,7 +326,9 @@ export function ActionBar({
             />
           }
           onClick={handleToggleStar}
-          title={thread.isStarred ? t("unstarShortcut") : t("starShortcut")}
+          title={
+            thread.isStarred ? t("unstarThreadShortcut") : t("starThreadShortcut")
+          }
           className={thread.isStarred ? "text-warning" : ""}
         />
         <Button
@@ -334,14 +336,18 @@ export function ActionBar({
           iconOnly
           icon={<Clock size={15} />}
           onClick={() => setShowSnooze(true)}
-          title={t("snoozeShortcut")}
+          title={t("snoozeThreadShortcut")}
         />
         <Button
           variant="secondary"
           iconOnly
           icon={<Ban size={15} />}
           onClick={handleSpam}
-          title={isSpamView ? t("notSpamShortcut") : t("reportSpamShortcut")}
+          title={
+            isSpamView
+              ? t("markThreadNotSpamShortcut")
+              : t("reportThreadSpamShortcut")
+          }
         />
         <Button
           variant="secondary"
@@ -355,7 +361,7 @@ export function ActionBar({
               }),
             );
           }}
-          title={t("moveToFolderShortcut")}
+          title={t("moveThreadToFolderShortcut")}
         />
         <Button
           variant="secondary"
@@ -364,7 +370,9 @@ export function ActionBar({
             <Pin size={15} className={thread.isPinned ? "fill-current" : ""} />
           }
           onClick={handleTogglePin}
-          title={thread.isPinned ? t("unpinShortcut") : t("pinShortcut")}
+          title={
+            thread.isPinned ? t("unpinThreadShortcut") : t("pinThreadShortcut")
+          }
           className={thread.isPinned ? "text-accent" : ""}
         />
         <Button
@@ -377,7 +385,9 @@ export function ActionBar({
             />
           }
           onClick={handleToggleMute}
-          title={thread.isMuted ? t("unmuteShortcut") : t("muteShortcut")}
+          title={
+            thread.isMuted ? t("unmuteThreadShortcut") : t("muteThreadShortcut")
+          }
           className={thread.isMuted ? "text-warning" : ""}
         />
         {hasFollowUp ? (

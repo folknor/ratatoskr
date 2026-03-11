@@ -99,7 +99,7 @@ export async function initNotifications(): Promise<void> {
         } else if (actionId === "archive" && ctx?.threadId && ctx?.accountId) {
           try {
             const { archiveThread } = await import("../emailActions");
-            await archiveThread(ctx.accountId, ctx.threadId, []);
+            await archiveThread(ctx.accountId, ctx.threadId);
           } catch (err) {
             console.error("Failed to archive from notification:", err);
           }

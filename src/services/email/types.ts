@@ -81,27 +81,15 @@ export interface EmailProvider {
   ): Promise<{ data: string; size: number }>;
   fetchRawMessage(messageId: string): Promise<string>;
 
-  // Actions (operate on thread/message level)
-  // Only implemented by IMAP provider — Gmail/JMAP/Graph route through Rust provider_* commands.
-  archive?(threadId: string, messageIds: string[]): Promise<void>;
-  trash?(threadId: string, messageIds: string[]): Promise<void>;
-  permanentDelete?(threadId: string, messageIds: string[]): Promise<void>;
-  markRead?(
-    threadId: string,
-    messageIds: string[],
-    read: boolean,
-  ): Promise<void>;
-  star?(
-    threadId: string,
-    messageIds: string[],
-    starred: boolean,
-  ): Promise<void>;
-  spam?(threadId: string, messageIds: string[], isSpam: boolean): Promise<void>;
-  moveToFolder?(
-    threadId: string,
-    messageIds: string[],
-    folderPath: string,
-  ): Promise<void>;
+  // Actions operate at thread scope. Message-level reply/forward lives elsewhere.
+  // Gmail/JMAP/Graph route through Rust provider_* commands.
+  archive?(threadId: string): Promise<void>;
+  trash?(threadId: string): Promise<void>;
+  permanentDelete?(threadId: string): Promise<void>;
+  markRead?(threadId: string, read: boolean): Promise<void>;
+  star?(threadId: string, starred: boolean): Promise<void>;
+  spam?(threadId: string, isSpam: boolean): Promise<void>;
+  moveToFolder?(threadId: string, folderPath: string): Promise<void>;
   addLabel?(threadId: string, labelId: string): Promise<void>;
   removeLabel?(threadId: string, labelId: string): Promise<void>;
 

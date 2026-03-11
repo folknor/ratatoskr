@@ -17,7 +17,7 @@ import {
   incrementRetry,
   retryFailedOperations,
   updateOperationStatus,
-} from "./pendingOperations";
+} from "@/services/db/pendingOperations";
 
 const mockInvoke = vi.mocked(invoke);
 
@@ -32,7 +32,7 @@ describe("pendingOperations DB service", () => {
         "acct-1",
         "archive",
         "thread-1",
-        { messageIds: ["m1"] },
+        { threadId: "thread-1" },
       );
       expect(id).toBeTruthy();
       expect(mockInvoke).toHaveBeenCalledWith("db_pending_ops_enqueue", {
@@ -40,7 +40,7 @@ describe("pendingOperations DB service", () => {
         accountId: "acct-1",
         operationType: "archive",
         resourceId: "thread-1",
-        paramsJson: JSON.stringify({ messageIds: ["m1"] }),
+        paramsJson: JSON.stringify({ threadId: "thread-1" }),
       });
     });
   });

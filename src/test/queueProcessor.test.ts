@@ -6,16 +6,17 @@ vi.mock("@/stores/syncStateStore", () => ({
   },
 }));
 
-vi.mock("../db/pendingOperations", () => ({
+vi.mock("@/services/db/pendingOperations", () => ({
   getPendingOperations: vi.fn(() => Promise.resolve([])),
   updateOperationStatus: vi.fn(() => Promise.resolve()),
   deleteOperation: vi.fn(() => Promise.resolve()),
   incrementRetry: vi.fn(() => Promise.resolve()),
   getPendingOpsCount: vi.fn(() => Promise.resolve(0)),
   compactQueue: vi.fn(() => Promise.resolve(0)),
+  recoverExecutingOperations: vi.fn(() => Promise.resolve(0)),
 }));
 
-vi.mock("../emailActions", () => ({
+vi.mock("@/services/emailActions", () => ({
   executeQueuedAction: vi.fn(() => Promise.resolve()),
 }));
 
@@ -27,7 +28,7 @@ vi.mock("@/utils/networkErrors", () => ({
   })),
 }));
 
-vi.mock("../backgroundCheckers", () => ({
+vi.mock("@/services/backgroundCheckers", () => ({
   createBackgroundChecker: vi.fn((_name: string, fn: () => Promise<void>) => ({
     start: () => fn(),
     stop: vi.fn(),
@@ -43,13 +44,13 @@ import {
   getPendingOperations,
   incrementRetry,
   updateOperationStatus,
-} from "../db/pendingOperations";
-import { executeQueuedAction } from "../emailActions";
+} from "@/services/db/pendingOperations";
+import { executeQueuedAction } from "@/services/emailActions";
 import {
   startQueueProcessor,
   stopQueueProcessor,
   triggerQueueFlush,
-} from "./queueProcessor";
+} from "@/services/queue/queueProcessor";
 
 const mockSetPendingOpsCount = vi.fn();
 
@@ -87,7 +88,7 @@ describe("queueProcessor", () => {
         account_id: "acct-1",
         operation_type: "archive",
         resource_id: "t1",
-        params: '{"threadId":"t1","messageIds":[]}',
+        params: '{"threadId":"t1"}',
         status: "pending",
         retry_count: 0,
         max_retries: 10,
@@ -102,7 +103,6 @@ describe("queueProcessor", () => {
     expect(updateOperationStatus).toHaveBeenCalledWith("op-1", "executing");
     expect(executeQueuedAction).toHaveBeenCalledWith("acct-1", "archive", {
       threadId: "t1",
-      messageIds: [],
     });
     expect(deleteOperation).toHaveBeenCalledWith("op-1");
   });
@@ -114,7 +114,7 @@ describe("queueProcessor", () => {
         account_id: "acct-1",
         operation_type: "star",
         resource_id: "t1",
-        params: '{"threadId":"t1","messageIds":[],"starred":true}',
+        params: '{"threadId":"t1","starred":true}',
         status: "pending",
         retry_count: 0,
         max_retries: 10,
@@ -150,7 +150,7 @@ describe("queueProcessor", () => {
         account_id: "acct-1",
         operation_type: "archive",
         resource_id: "t1",
-        params: '{"threadId":"t1","messageIds":[]}',
+        params: '{"threadId":"t1"}',
         status: "pending",
         retry_count: 0,
         max_retries: 10,

@@ -37,9 +37,9 @@ export function MultiSelectBar({
       await Promise.all(
         ids.map(async (id) => {
           if (isTrashView) {
-            await permanentDeleteThread(activeAccountId, id, []);
+            await permanentDeleteThread(activeAccountId, id);
           } else {
-            await trashThread(activeAccountId, id, []);
+            await trashThread(activeAccountId, id);
           }
         }),
       );
@@ -60,7 +60,7 @@ export function MultiSelectBar({
     removeThreads(ids);
     try {
       await Promise.all(
-        ids.map((id) => archiveThread(activeAccountId, id, [])),
+        ids.map((id) => archiveThread(activeAccountId, id)),
       );
     } catch (err) {
       console.error("Bulk archive failed:", err);
@@ -74,7 +74,7 @@ export function MultiSelectBar({
     removeThreads(ids);
     try {
       await Promise.all(
-        ids.map((id) => spamThread(activeAccountId, id, [], !isSpamView)),
+        ids.map((id) => spamThread(activeAccountId, id, !isSpamView)),
       );
     } catch (err) {
       console.error("Bulk spam failed:", err);

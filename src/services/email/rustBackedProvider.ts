@@ -31,50 +31,31 @@ export abstract class RustBackedProviderBase implements EmailProvider {
 
   // Thread actions for Rust-backed providers are routed through `emailActions.ts`
   // rather than these defaults, so these throw-only fallbacks act as guard rails.
-  async archive(_threadId: string, _messageIds: string[]): Promise<void> {
+  async archive(_threadId: string): Promise<void> {
     throw new Error("Archive is not supported for this provider.");
   }
 
-  async trash(_threadId: string, _messageIds: string[]): Promise<void> {
+  async trash(_threadId: string): Promise<void> {
     throw new Error("Trash is not supported for this provider.");
   }
 
-  async permanentDelete(
-    _threadId: string,
-    _messageIds: string[],
-  ): Promise<void> {
+  async permanentDelete(_threadId: string): Promise<void> {
     throw new Error("Permanent delete is not supported for this provider.");
   }
 
-  async markRead(
-    _threadId: string,
-    _messageIds: string[],
-    _read: boolean,
-  ): Promise<void> {
+  async markRead(_threadId: string, _read: boolean): Promise<void> {
     throw new Error("Mark read is not supported for this provider.");
   }
 
-  async star(
-    _threadId: string,
-    _messageIds: string[],
-    _starred: boolean,
-  ): Promise<void> {
+  async star(_threadId: string, _starred: boolean): Promise<void> {
     throw new Error("Star is not supported for this provider.");
   }
 
-  async spam(
-    _threadId: string,
-    _messageIds: string[],
-    _isSpam: boolean,
-  ): Promise<void> {
+  async spam(_threadId: string, _isSpam: boolean): Promise<void> {
     throw new Error("Spam actions are not supported for this provider.");
   }
 
-  async moveToFolder(
-    _threadId: string,
-    _messageIds: string[],
-    _folderPath: string,
-  ): Promise<void> {
+  async moveToFolder(_threadId: string, _folderPath: string): Promise<void> {
     throw new Error("Move to folder is not supported for this provider.");
   }
 

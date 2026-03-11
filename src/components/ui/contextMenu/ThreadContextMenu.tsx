@@ -160,14 +160,14 @@ export function ThreadContextMenu({
 
   const handleArchive = async (): Promise<void> => {
     for (const id of targetIds) {
-      await archiveThread(activeAccountId, id, []);
+      await archiveThread(activeAccountId, id);
     }
   };
 
   const handleDelete = async (): Promise<void> => {
     for (const id of targetIds) {
       if (isTrashView) {
-        await permanentDeleteThread(activeAccountId, id, []);
+        await permanentDeleteThread(activeAccountId, id);
         await deleteThreadFromDb(activeAccountId, id);
       } else if (isDraftsView) {
         useThreadStore.getState().removeThread(id);
@@ -177,7 +177,7 @@ export function ThreadContextMenu({
           console.error("Failed to delete drafts:", err);
         }
       } else {
-        await trashThread(activeAccountId, id, []);
+        await trashThread(activeAccountId, id);
       }
     }
   };
@@ -196,14 +196,14 @@ export function ThreadContextMenu({
   const handleToggleRead = (): Promise<void> =>
     batchToggle(
       (id, isCurrentlyRead) =>
-        markThreadRead(activeAccountId, id, [], !isCurrentlyRead),
+        markThreadRead(activeAccountId, id, !isCurrentlyRead),
       (t) => t.isRead,
     );
 
   const handleToggleStar = (): Promise<void> =>
     batchToggle(
       (id, isCurrentlyStarred) =>
-        starThread(activeAccountId, id, [], !isCurrentlyStarred),
+        starThread(activeAccountId, id, !isCurrentlyStarred),
       (t) => t.isStarred,
     );
 
@@ -221,13 +221,13 @@ export function ThreadContextMenu({
       (id, isCurrentlyMuted) =>
         isCurrentlyMuted
           ? unmuteThread(activeAccountId, id)
-          : muteThread(activeAccountId, id, []),
+          : muteThread(activeAccountId, id),
       (t) => t.isMuted,
     );
 
   const handleSpam = async (): Promise<void> => {
     for (const id of targetIds) {
-      await spamThread(activeAccountId, id, [], !isSpamView);
+      await spamThread(activeAccountId, id, !isSpamView);
     }
   };
 
@@ -320,14 +320,20 @@ export function ThreadContextMenu({
     { id: "sep-1", label: "", separator: true },
     {
       id: "archive",
-      label: "Archive",
+      label: isMulti ? "Archive threads" : "Archive thread",
       icon: Archive,
       shortcut: "e",
       action: handleArchive,
     },
     {
       id: "delete",
-      label: isTrashView ? "Delete Permanently" : "Delete",
+      label: isTrashView
+        ? isMulti
+          ? "Delete threads permanently"
+          : "Delete thread permanently"
+        : isMulti
+          ? "Delete threads"
+          : "Delete thread",
       icon: Trash2,
       shortcut: "#",
       danger: isTrashView,
@@ -335,13 +341,25 @@ export function ThreadContextMenu({
     },
     {
       id: "toggle-read",
-      label: isRead ? "Mark as Unread" : "Mark as Read",
+      label: isRead
+        ? isMulti
+          ? "Mark threads unread"
+          : "Mark thread unread"
+        : isMulti
+          ? "Mark threads read"
+          : "Mark thread read",
       icon: isRead ? Mail : MailOpen,
       action: handleToggleRead,
     },
     {
       id: "toggle-star",
-      label: isStarred ? "Unstar" : "Star",
+      label: isStarred
+        ? isMulti
+          ? "Unstar threads"
+          : "Unstar thread"
+        : isMulti
+          ? "Star threads"
+          : "Star thread",
       icon: Star,
       shortcut: "s",
       action: handleToggleStar,
@@ -349,28 +367,46 @@ export function ThreadContextMenu({
     { id: "sep-2", label: "", separator: true },
     {
       id: "snooze",
-      label: "Snooze...",
+      label: isMulti ? "Snooze threads..." : "Snooze thread...",
       icon: Clock,
       shortcut: "h",
       action: handleSnooze,
     },
     {
       id: "toggle-pin",
-      label: isPinned ? "Unpin" : "Pin",
+      label: isPinned
+        ? isMulti
+          ? "Unpin threads"
+          : "Unpin thread"
+        : isMulti
+          ? "Pin threads"
+          : "Pin thread",
       icon: Pin,
       shortcut: "p",
       action: handleTogglePin,
     },
     {
       id: "toggle-mute",
-      label: isMuted ? "Unmute" : "Mute",
+      label: isMuted
+        ? isMulti
+          ? "Unmute threads"
+          : "Unmute thread"
+        : isMulti
+          ? "Mute threads"
+          : "Mute thread",
       icon: VolumeX,
       shortcut: "m",
       action: handleToggleMute,
     },
     {
       id: "spam",
-      label: isSpamView ? "Not Spam" : "Report Spam",
+      label: isSpamView
+        ? isMulti
+          ? "Mark threads not spam"
+          : "Mark thread not spam"
+        : isMulti
+          ? "Report threads as spam"
+          : "Report thread as spam",
       icon: Ban,
       shortcut: "!",
       action: handleSpam,
@@ -388,7 +424,7 @@ export function ThreadContextMenu({
       : []),
     {
       id: "move-to-folder",
-      label: "Move to Folder",
+      label: isMulti ? "Move threads to folder" : "Move thread to folder",
       icon: FolderInput,
       shortcut: "v",
       action: () => {
