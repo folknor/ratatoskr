@@ -4,6 +4,7 @@ use tauri::{AppHandle, State};
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
+use crate::gmail::client::GmailState;
 use crate::inline_image_store::InlineImageStoreState;
 use crate::search::SearchState;
 
@@ -20,6 +21,7 @@ use super::types::ImapSyncResult;
 pub async fn sync_imap_initial(
     app: AppHandle,
     db: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
     body_store: State<'_, BodyStoreState>,
     inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
@@ -34,19 +36,21 @@ pub async fn sync_imap_initial(
 
     let result = async {
         // Read account + config from DB
-        let (imap_config, actual_days_back) = {
+        let actual_days_back = {
             let account_id = account_id.clone();
             db.with_conn(move |conn| {
                 let account = config::get_account(conn, &account_id)?;
                 if account.provider != "imap" {
                     return Err(format!("Account {account_id} is not an IMAP account"));
                 }
-                let imap_config = config::build_imap_config(&account)?;
                 let days = config::get_sync_period_days(conn);
-                Ok((imap_config, days))
+                Ok(days)
             })
             .await?
         };
+        let imap_config =
+            crate::imap::account_config::load_imap_config(&db, &account_id, gmail.encryption_key())
+                .await?;
 
         let days = days_back.unwrap_or(actual_days_back);
 
@@ -81,6 +85,7 @@ pub async fn sync_imap_initial(
 pub async fn sync_imap_delta(
     app: AppHandle,
     db: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
     body_store: State<'_, BodyStoreState>,
     inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
@@ -93,18 +98,20 @@ pub async fn sync_imap_delta(
     }
 
     let result = async {
-        let (imap_config, actual_days_back) = {
+        let actual_days_back = {
             let account_id = account_id.clone();
             db.with_conn(move |conn| {
                 let account = config::get_account(conn, &account_id)?;
                 if account.provider != "imap" {
                     return Err(format!("Account {account_id} is not an IMAP account"));
                 }
-                let imap_config = config::build_imap_config(&account)?;
                 let days = config::get_sync_period_days(conn);
-                Ok((imap_config, days))
+                Ok(days)
             }).await?
         };
+        let imap_config =
+            crate::imap::account_config::load_imap_config(&db, &account_id, gmail.encryption_key())
+                .await?;
 
         let days = days_back.unwrap_or(actual_days_back);
 
