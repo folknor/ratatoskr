@@ -1,16 +1,22 @@
 #![allow(clippy::let_underscore_must_use)]
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
 use crate::gmail::client::GmailState;
+use crate::graph::client::GraphState;
 use crate::inline_image_store::InlineImageStoreState;
+use crate::jmap::client::JmapState;
+use crate::provider::commands::provider_sync_auto_impl;
+use crate::provider::router::get_provider_type;
 use crate::search::SearchState;
 
-use super::SyncState;
+use super::{SyncQueueState, SyncState};
 use super::config;
-use super::types::ImapSyncResult;
+use super::types::{ImapSyncResult, SyncStatusEvent};
+
+const SYNC_INTERVAL_MS: u64 = 60_000;
 
 #[tauri::command]
 pub async fn sync_prepare_full_sync(
@@ -47,6 +53,192 @@ pub async fn sync_prepare_account_resync(
         Ok(())
     })
     .await
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn sync_run_accounts(
+    app: AppHandle,
+    queue: State<'_, SyncQueueState>,
+    account_ids: Vec<String>,
+) -> Result<(), String> {
+    queue_sync_accounts(&app, &queue, &account_ids).await
+}
+
+#[tauri::command]
+pub async fn sync_start_background(
+    app: AppHandle,
+    background: State<'_, super::BackgroundSyncState>,
+    account_ids: Vec<String>,
+    skip_immediate_sync: Option<bool>,
+) -> Result<(), String> {
+    let app_handle = app.clone();
+    let ids = account_ids;
+    let skip_immediate = skip_immediate_sync.unwrap_or(false);
+
+    let task = tokio::spawn(async move {
+        if !skip_immediate {
+            let queue: tauri::State<'_, SyncQueueState> = app_handle.state();
+            let _ = queue_sync_accounts(&app_handle, &queue, &ids).await;
+        }
+
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(SYNC_INTERVAL_MS)).await;
+            let queue: tauri::State<'_, SyncQueueState> = app_handle.state();
+            let _ = queue_sync_accounts(&app_handle, &queue, &ids).await;
+        }
+    });
+
+    background.replace(task);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn sync_stop_background(
+    background: State<'_, super::BackgroundSyncState>,
+) -> Result<(), String> {
+    background.stop();
+    Ok(())
+}
+
+async fn run_sync_queue(app: AppHandle) {
+    loop {
+        let queue: tauri::State<'_, SyncQueueState> = app.state();
+        let account_ids = queue.take_pending_batch();
+        if account_ids.is_empty() {
+            if let Some(waiters) = queue.finish_if_idle() {
+                for waiter in waiters {
+                    let _ = waiter.send(());
+                }
+                return;
+            }
+            continue;
+        }
+
+        for account_id in account_ids {
+            run_sync_account(&app, &account_id).await;
+        }
+    }
+}
+
+async fn queue_sync_accounts(
+    app: &AppHandle,
+    queue: &SyncQueueState,
+    account_ids: &[String],
+) -> Result<(), String> {
+    let (should_spawn, rx) = queue.enqueue(account_ids);
+    if should_spawn {
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            run_sync_queue(app_handle).await;
+        });
+    }
+
+    rx.await
+        .map_err(|_| "Sync queue worker stopped unexpectedly".to_string())
+}
+
+async fn run_sync_account(app: &AppHandle, account_id: &str) {
+    let db: tauri::State<'_, DbState> = app.state();
+    let gmail: tauri::State<'_, GmailState> = app.state();
+    let jmap: tauri::State<'_, JmapState> = app.state();
+    let graph: tauri::State<'_, GraphState> = app.state();
+    let body_store: tauri::State<'_, BodyStoreState> = app.state();
+    let inline_images: tauri::State<'_, InlineImageStoreState> = app.state();
+    let search: tauri::State<'_, SearchState> = app.state();
+
+    let provider = match get_provider_type(&db, account_id).await {
+        Ok(provider) => provider,
+        Err(error) => {
+            emit_sync_status(
+                app,
+                SyncStatusEvent {
+                    account_id: account_id.to_string(),
+                    provider: "unknown".to_string(),
+                    status: "error".to_string(),
+                    error: Some(error),
+                    new_inbox_message_ids: None,
+                    affected_thread_ids: None,
+                    is_delta: None,
+                },
+            );
+            return;
+        }
+    };
+
+    emit_sync_status(
+        app,
+        SyncStatusEvent {
+            account_id: account_id.to_string(),
+            provider: provider.clone(),
+            status: "syncing".to_string(),
+            error: None,
+            new_inbox_message_ids: None,
+            affected_thread_ids: None,
+            is_delta: None,
+        },
+    );
+
+    if provider == "caldav" {
+        emit_sync_status(
+            app,
+            SyncStatusEvent {
+                account_id: account_id.to_string(),
+                provider,
+                status: "done".to_string(),
+                error: None,
+                new_inbox_message_ids: Some(Vec::new()),
+                affected_thread_ids: Some(Vec::new()),
+                is_delta: Some(false),
+            },
+        );
+        return;
+    }
+
+    match provider_sync_auto_impl(
+        account_id,
+        &db,
+        &gmail,
+        &jmap,
+        &graph,
+        &body_store,
+        &inline_images,
+        &search,
+        app,
+    )
+    .await
+    {
+        Ok(result) => emit_sync_status(
+            app,
+            SyncStatusEvent {
+                account_id: account_id.to_string(),
+                provider,
+                status: "done".to_string(),
+                error: None,
+                new_inbox_message_ids: Some(result.new_inbox_message_ids),
+                affected_thread_ids: Some(result.affected_thread_ids),
+                is_delta: Some(result.was_delta && !result.fell_back_to_initial),
+            },
+        ),
+        Err(error) => emit_sync_status(
+            app,
+            SyncStatusEvent {
+                account_id: account_id.to_string(),
+                provider,
+                status: "error".to_string(),
+                error: Some(error),
+                new_inbox_message_ids: None,
+                affected_thread_ids: None,
+                is_delta: None,
+            },
+        ),
+    }
+}
+
+fn emit_sync_status(app: &AppHandle, event: SyncStatusEvent) {
+    if let Err(error) = app.emit("sync-status", &event) {
+        log::warn!("Failed to emit sync-status event: {error}");
+    }
 }
 
 /// Run initial IMAP sync for an account.

@@ -406,6 +406,9 @@ pub fn run() {
             categorization::commands::categorize_thread_by_rules,
             categorization::commands::categorize_threads_by_rules,
             // IMAP sync engine (Phase 4)
+            sync::commands::sync_run_accounts,
+            sync::commands::sync_start_background,
+            sync::commands::sync_stop_background,
             sync::commands::sync_imap_initial,
             sync::commands::sync_imap_delta,
             sync::commands::sync_prepare_full_sync,
@@ -530,6 +533,8 @@ pub fn run() {
                 app.manage(search_state);
 
                 app.manage(sync::SyncState::new());
+                app.manage(sync::SyncQueueState::new());
+                app.manage(sync::BackgroundSyncState::new());
 
                 // Gmail provider state — load encryption key for token decryption
                 let encryption_key = provider::crypto::load_encryption_key(&app_data_dir)

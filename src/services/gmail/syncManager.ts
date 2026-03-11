@@ -2,7 +2,6 @@ import {
   getCalendarProvider,
   hasCalendarSupport,
 } from "../calendar/providerFactory";
-import { getAccount } from "../db/accounts";
 import {
   deleteEventByRemoteId,
   upsertCalendarEvent,
@@ -32,8 +31,6 @@ import {
   shouldNotifyForMessage,
 } from "@/services/notifications/notificationManager";
 import { applySmartLabelsToNewMessageIds } from "@/services/smartLabels/smartLabelManager";
-
-const SYNC_INTERVAL_MS = 60_000; // 60 seconds — delta syncs are lightweight (single API call when idle)
 
 /**
  * Shared post-sync hooks: apply filters, smart labels, notifications, and AI categorization.
@@ -120,14 +117,6 @@ function mapImapPhase(
   return phase as "labels" | "threads" | "messages" | "done";
 }
 
-function getSyncEventName(provider: string): string | null {
-  if (provider === "gmail_api") return "gmail-sync-progress";
-  if (provider === "imap") return "imap-sync-progress";
-  if (provider === "jmap") return "jmap-sync-progress";
-  if (provider === "graph") return "graph-sync-progress";
-  return null;
-}
-
 function mapProviderSyncProgress(
   provider: string,
   payload: Record<string, unknown>,
@@ -147,16 +136,17 @@ function mapProviderSyncProgress(
   };
 }
 
-interface ProviderAutoSyncResult {
-  newInboxMessageIds: string[];
-  affectedThreadIds: string[];
-  wasDelta: boolean;
-  fellBackToInitial: boolean;
+interface SyncStatusEvent {
+  accountId: string;
+  provider: string;
+  status: "syncing" | "done" | "error";
+  error?: string | null;
+  newInboxMessageIds?: string[] | null;
+  affectedThreadIds?: string[] | null;
+  isDelta?: boolean | null;
 }
 
-let syncTimer: ReturnType<typeof setInterval> | null = null;
-let syncPromise: Promise<void> | null = null;
-let pendingAccountIds: string[] | null = null;
+let syncListenersPromise: Promise<void> | null = null;
 
 export type SyncStatusCallback = (
   accountId: string,
@@ -168,47 +158,102 @@ export type SyncStatusCallback = (
 let statusCallback: SyncStatusCallback | null = null;
 
 export function onSyncStatus(cb: SyncStatusCallback): () => void {
+  void ensureSyncListeners();
   statusCallback = cb;
   return () => {
     statusCallback = null;
   };
 }
 
-async function syncEmailAccount(accountId: string): Promise<void> {
-  const account = await getAccount(accountId);
-  if (!account) throw new Error("Account not found");
+async function ensureSyncListeners(): Promise<void> {
+  if (syncListenersPromise !== null) {
+    await syncListenersPromise;
+    return;
+  }
 
-  // Listen for progress events from Rust
-  let unlisten: UnlistenFn | null = null;
-  const eventName = getSyncEventName(account.provider);
-  try {
-    if (eventName) {
-      unlisten = await listen<Record<string, unknown>>(eventName, (event) => {
-        if (event.payload.accountId !== accountId) return;
-        statusCallback?.(
-          accountId,
-          "syncing",
-          mapProviderSyncProgress(account.provider, event.payload),
+  syncListenersPromise = (async () => {
+    const unlisteners: UnlistenFn[] = [];
+
+    const progressEvents = [
+      { provider: "gmail_api", eventName: "gmail-sync-progress" },
+      { provider: "imap", eventName: "imap-sync-progress" },
+      { provider: "jmap", eventName: "jmap-sync-progress" },
+      { provider: "graph", eventName: "graph-sync-progress" },
+    ] as const;
+
+    for (const { provider, eventName } of progressEvents) {
+      try {
+        const unlisten = await listen<Record<string, unknown>>(
+          eventName,
+          (event) => {
+            const accountId = String(event.payload.accountId ?? "");
+            if (accountId.length === 0) return;
+            statusCallback?.(
+              accountId,
+              "syncing",
+              mapProviderSyncProgress(provider, event.payload),
+            );
+          },
         );
-      });
+        unlisteners.push(unlisten);
+      } catch {
+        // Listen failure is non-fatal — sync will still complete without progress events
+      }
     }
-  } catch {
-    // Listen failure is non-fatal — sync will work without progress events
+
+    try {
+      const unlisten = await listen<SyncStatusEvent>("sync-status", (event) => {
+        void handleSyncStatusEvent(event.payload);
+      });
+      unlisteners.push(unlisten);
+    } catch {
+      // The queue invoke still returns errors to callers; lack of events mainly
+      // means the UI won't get progressive status updates.
+    }
+
+    void unlisteners;
+  })();
+
+  await syncListenersPromise;
+}
+
+async function handleSyncStatusEvent(event: SyncStatusEvent): Promise<void> {
+  if (event.status === "syncing") {
+    statusCallback?.(event.accountId, "syncing");
+    return;
   }
 
-  try {
-    const result = await invoke<ProviderAutoSyncResult>("provider_sync_auto", {
-      accountId,
-    });
-    await runPostSyncHooks(
-      accountId,
-      result.newInboxMessageIds,
-      result.affectedThreadIds,
-      result.wasDelta && !result.fellBackToInitial,
+  if (event.status === "error") {
+    const message = event.error ?? "Unknown error";
+    console.error(
+      `[syncManager] Sync failed for account ${event.accountId}:`,
+      message,
     );
-  } finally {
-    unlisten?.();
+    statusCallback?.(event.accountId, "error", undefined, message);
+    return;
   }
+
+  if (event.provider === "caldav") {
+    await syncCalendarForAccount(event.accountId);
+    statusCallback?.(event.accountId, "done");
+    return;
+  }
+
+  await runPostSyncHooks(
+    event.accountId,
+    event.newInboxMessageIds ?? [],
+    event.affectedThreadIds ?? [],
+    event.isDelta === true,
+  );
+
+  statusCallback?.(event.accountId, "done");
+
+  syncCalendarForAccount(event.accountId).catch((err) => {
+    console.warn(
+      `[syncManager] Calendar sync error for ${event.accountId}:`,
+      err,
+    );
+  });
 }
 
 /**
@@ -298,87 +343,9 @@ async function syncCalendarForAccount(accountId: string): Promise<void> {
   }
 }
 
-/**
- * Run a sync for a single account (initial or delta).
- */
-async function syncAccountInternal(accountId: string): Promise<void> {
-  try {
-    const account = await getAccount(accountId);
-
-    if (!account) {
-      throw new Error("Account not found");
-    }
-
-    statusCallback?.(accountId, "syncing");
-
-    console.log(
-      `[syncManager] Syncing account ${accountId} (provider=${account.provider}, history_id=${account.history_id ?? "null"})`,
-    );
-
-    if (account.provider === "caldav") {
-      // CalDAV-only accounts — skip email sync, only sync calendar
-      await syncCalendarForAccount(accountId);
-      statusCallback?.(accountId, "done");
-      return;
-    }
-
-    await syncEmailAccount(accountId);
-
-    // Always emit "done" when an initial sync completes (clears the bar).
-    // Also emit for delta syncs that fell back to initial (recovery re-sync)
-    // since those emit progress via statusCallback inside syncImapAccount.
-    statusCallback?.(accountId, "done");
-
-    // Sync calendar alongside email (non-blocking — calendar errors don't affect email sync)
-    syncCalendarForAccount(accountId).catch((err) => {
-      console.warn(`[syncManager] Calendar sync error for ${accountId}:`, err);
-    });
-  } catch (err) {
-    const message =
-      err instanceof Error ? err.message : String(err ?? "Unknown error");
-    console.error(
-      `[syncManager] Sync failed for account ${accountId}:`,
-      message,
-    );
-    statusCallback?.(accountId, "error", undefined, message);
-  }
-}
-
 async function runSync(accountIds: string[]): Promise<void> {
-  // If a sync is already in progress, merge into the pending set and wait for
-  // the active cycle to drain the queue. Using a Set ensures no IDs are lost
-  // even under rapid concurrent triggers — all mutations of pendingAccountIds
-  // happen synchronously (no await between read and write).
-  if (syncPromise !== null) {
-    const existing = new Set(pendingAccountIds ?? []);
-    for (const id of accountIds) existing.add(id);
-    pendingAccountIds = [...existing];
-    // Wait for the active sync (and any queued drains) to finish so callers
-    // that `await runSync(...)` only resolve once their IDs have been processed.
-    await syncPromise;
-    return;
-  }
-
-  syncPromise = (async () => {
-    let toSync: string[] | null = accountIds;
-
-    // Loop: process current batch, then drain anything queued while we were busy.
-    while (toSync !== null) {
-      for (const id of toSync) {
-        await syncAccountInternal(id);
-      }
-
-      // Atomically grab and clear the pending queue (synchronous — no race window).
-      toSync = pendingAccountIds;
-      pendingAccountIds = null;
-    }
-  })();
-
-  try {
-    await syncPromise;
-  } finally {
-    syncPromise = null;
-  }
+  await ensureSyncListeners();
+  await invoke("sync_run_accounts", { accountIds });
 }
 
 /**
@@ -399,26 +366,15 @@ export function startBackgroundSync(
   skipImmediateSync: boolean = false,
 ): void {
   stopBackgroundSync();
-
-  if (!skipImmediateSync) {
-    // Immediate sync
-    void runSync(accountIds);
-  }
-
-  // Periodic sync
-  syncTimer = setInterval(() => {
-    void runSync(accountIds);
-  }, SYNC_INTERVAL_MS);
+  void ensureSyncListeners();
+  void invoke("sync_start_background", { accountIds, skipImmediateSync });
 }
 
 /**
  * Stop the background sync timer.
  */
 export function stopBackgroundSync(): void {
-  if (syncTimer) {
-    clearInterval(syncTimer);
-    syncTimer = null;
-  }
+  void invoke("sync_stop_background");
 }
 
 /**

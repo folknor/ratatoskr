@@ -34,6 +34,20 @@ pub struct SyncErrorEvent {
     pub error: String,
 }
 
+/// Generic sync lifecycle event emitted for queued/manual sync runs.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncStatusEvent {
+    pub account_id: String,
+    pub provider: String,
+    /// "syncing" | "done" | "error"
+    pub status: String,
+    pub error: Option<String>,
+    pub new_inbox_message_ids: Option<Vec<String>>,
+    pub affected_thread_ids: Option<Vec<String>>,
+    pub is_delta: Option<bool>,
+}
+
 /// Lightweight metadata kept in memory during sync for the threading pass.
 /// Bodies and full ParsedMessage data are already written to DB at this point.
 #[derive(Debug, Clone)]
