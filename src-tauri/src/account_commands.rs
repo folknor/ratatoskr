@@ -106,6 +106,7 @@ pub struct CreateImapOAuthAccountRequest {
     pub oauth_provider: String,
     pub oauth_client_id: String,
     pub oauth_client_secret: Option<String>,
+    pub oauth_token_url: Option<String>,
     pub imap_username: Option<String>,
     pub accept_invalid_certs: bool,
 }
@@ -175,6 +176,26 @@ pub async fn account_create_gmail_via_oauth(
     gmail: State<'_, GmailState>,
 ) -> Result<GmailAccountResult, String> {
     let oauth = perform_google_oauth(&app, &db, gmail.encryption_key()).await?;
+
+    let email_for_check = oauth.user_info.email.clone();
+    let duplicate = db
+        .with_conn(move |conn| {
+            conn.query_row(
+                "SELECT id FROM accounts WHERE email = ?1 AND provider = 'gmail_api' LIMIT 1",
+                rusqlite::params![email_for_check],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|e| format!("Duplicate Gmail check failed: {e}"))
+        })
+        .await?;
+    if let Some(existing_id) = duplicate {
+        return Err(format!(
+            "A Gmail account for {} already exists (id: {existing_id})",
+            oauth.user_info.email
+        ));
+    }
+
     let account_id = uuid::Uuid::new_v4().to_string();
     let expires_at = chrono::Utc::now().timestamp() + oauth.tokens.expires_in;
     let access_token = encrypt_value(gmail.encryption_key(), &oauth.tokens.access_token)?;
@@ -424,9 +445,10 @@ pub async fn account_create_imap_oauth(
             "INSERT INTO accounts (id, email, display_name, avatar_url, access_token, \
              refresh_token, token_expires_at, provider, auth_method, imap_host, imap_port, \
              imap_security, smtp_host, smtp_port, smtp_security, oauth_provider, \
-             oauth_client_id, oauth_client_secret, imap_username, accept_invalid_certs) \
+             oauth_client_id, oauth_client_secret, oauth_token_url, imap_username, \
+             accept_invalid_certs) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'imap', 'oauth2', ?8, ?9, ?10, ?11, ?12, \
-             ?13, ?14, ?15, ?16, ?17, ?18)",
+             ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             rusqlite::params![
                 request.id,
                 request.email,
@@ -444,6 +466,7 @@ pub async fn account_create_imap_oauth(
                 request.oauth_provider,
                 request.oauth_client_id,
                 oauth_client_secret,
+                request.oauth_token_url,
                 request.imap_username,
                 if request.accept_invalid_certs { 1 } else { 0 },
             ],
@@ -519,10 +542,33 @@ pub async fn account_create_graph_via_oauth(
     })
     .await?;
 
-    let client = GraphClient::from_account(&db, &account_id, *graph.encryption_key()).await?;
-    let profile: GraphProfile = client
-        .get_json("/me?$select=displayName,mail,userPrincipalName", &db)
-        .await?;
+    let init_result = async {
+        let client =
+            GraphClient::from_account(&db, &account_id, *graph.encryption_key()).await?;
+        let profile: GraphProfile = client
+            .get_json("/me?$select=displayName,mail,userPrincipalName", &db)
+            .await?;
+        Ok::<_, String>((client, profile))
+    }
+    .await;
+
+    let (client, profile) = match init_result {
+        Ok(pair) => pair,
+        Err(e) => {
+            let cleanup_id = account_id.clone();
+            let _ = db
+                .with_conn(move |conn| {
+                    conn.execute(
+                        "DELETE FROM accounts WHERE id = ?1",
+                        rusqlite::params![cleanup_id],
+                    )
+                    .map_err(|de| format!("cleanup delete failed: {de}"))?;
+                    Ok(())
+                })
+                .await;
+            return Err(e);
+        }
+    };
     graph.insert(account_id.clone(), client).await;
 
     let email = profile

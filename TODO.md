@@ -49,13 +49,13 @@
 
 - [x] **Empty email on account creation** — Fixed: `fetch_provider_userinfo` and `parse_microsoft_userinfo` now return `Err` if email is empty or missing; the redundant empty-email check in `account_create_graph_via_oauth` was removed. *(BUG)*
 
-- [ ] **No rollback if Graph client init or profile fetch fails** — `account_create_graph_via_oauth` inserts the account row first, then calls `GraphClient::from_account` and `get_json("/me")`. If either fails, the account row remains orphaned in the DB. Should delete the account on post-insert failure. *(MED)*
+- [x] **No rollback if Graph client init or profile fetch fails** — Fixed: client init and profile fetch wrapped in an async block; on failure the inserted account row is deleted before returning the error. *(MED)*
 
-- [ ] **No token refresh concurrency protection for IMAP** — `ensure_oauth_access_token` has no mutex or coalescing. Concurrent IMAP operations may both detect an expired token and issue parallel refresh requests. The second refresh may invalidate the first's token. Gmail client has a `refresh_lock` Mutex — IMAP should too. *(MED)*
+- [x] **No token refresh concurrency protection for IMAP** — Fixed: added `IMAP_REFRESH_LOCKS` static (per-account `tokio::sync::Mutex`) in `imap/account_config.rs`; `ensure_oauth_access_token` acquires the lock before refreshing and re-reads from DB after acquiring (double-check pattern). *(MED)*
 
-- [ ] **No duplicate account check on Gmail creation** — `account_create_gmail_via_oauth` doesn't check if an account with the same email already exists. Users can create duplicate entries. *(MED)*
+- [x] **No duplicate account check on Gmail creation** — Fixed: `account_create_gmail_via_oauth` queries for an existing account with the same email and provider before inserting. *(MED)*
 
-- [ ] **`oauth_token_endpoint` hardcoded to 3 providers** — `src-tauri/src/imap/account_config.rs:61-67` only supports `microsoft`, `microsoft_graph`, and `yahoo`. Custom OAuth IMAP providers will fail with "Unsupported OAuth provider". The token URL should be stored in the account record. *(MED)*
+- [x] **`oauth_token_endpoint` hardcoded to 3 providers** — Fixed: added migration 26 (`oauth_token_url` column), `CreateImapOAuthAccountRequest` now carries `oauth_token_url`, the stored URL takes precedence in `oauth_token_endpoint`, and `AddImapAccount.tsx` passes the provider's `tokenUrl` at account creation time. *(MED)*
 
 - [ ] **Plaintext tokens round-trip through IPC** — `account_authorize_oauth_provider` returns raw `access_token`/`refresh_token` to TS, which passes them back to `account_create_imap_oauth` for encryption. The Gmail flow avoids this by handling everything in a single Rust command. Consider merging or documenting why the split is needed. *(MED)*
 

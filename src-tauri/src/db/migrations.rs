@@ -718,6 +718,11 @@ static MIGRATIONS: &[Migration] = &[
             CREATE INDEX IF NOT EXISTS idx_attachments_content_hash ON attachments(content_hash);
         "#,
     },
+    Migration {
+        version: 26,
+        description: "Store OAuth token URL with IMAP accounts",
+        sql: "ALTER TABLE accounts ADD COLUMN oauth_token_url TEXT;",
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks

@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
+
 use rusqlite::OptionalExtension;
 
 use crate::db::DbState;
@@ -6,6 +9,18 @@ use crate::provider::token::refresh_oauth_token;
 use crate::smtp::types::SmtpConfig;
 
 use super::types::ImapConfig;
+
+static IMAP_REFRESH_LOCKS: OnceLock<StdMutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
+    OnceLock::new();
+
+fn get_refresh_lock(account_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    let map = IMAP_REFRESH_LOCKS.get_or_init(|| StdMutex::new(HashMap::new()));
+    let mut guard = map.lock().expect("IMAP refresh lock map poisoned");
+    guard
+        .entry(account_id.to_string())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone()
+}
 
 const MICROSOFT_TOKEN_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
 const YAHOO_TOKEN_URL: &str = "https://api.login.yahoo.com/oauth2/get_token";
@@ -28,6 +43,7 @@ struct AccountConfigRecord {
     oauth_provider: Option<String>,
     oauth_client_id: Option<String>,
     oauth_client_secret: Option<String>,
+    oauth_token_url: Option<String>,
 }
 
 fn map_security(security: Option<&str>) -> String {
@@ -52,11 +68,17 @@ fn decrypt_if_needed(encryption_key: &[u8; 32], value: Option<String>) -> Option
     })
 }
 
-fn oauth_token_endpoint(provider_id: &str) -> Result<&'static str, String> {
+fn oauth_token_endpoint<'a>(
+    provider_id: &str,
+    stored_url: Option<&'a str>,
+) -> Result<std::borrow::Cow<'a, str>, String> {
+    if let Some(url) = stored_url.filter(|u| !u.is_empty()) {
+        return Ok(std::borrow::Cow::Borrowed(url));
+    }
     match provider_id {
-        "microsoft" | "microsoft_graph" => Ok(MICROSOFT_TOKEN_URL),
-        "yahoo" => Ok(YAHOO_TOKEN_URL),
-        other => Err(format!("Unsupported OAuth provider for IMAP account: {other}")),
+        "microsoft" | "microsoft_graph" => Ok(std::borrow::Cow::Borrowed(MICROSOFT_TOKEN_URL)),
+        "yahoo" => Ok(std::borrow::Cow::Borrowed(YAHOO_TOKEN_URL)),
+        other => Err(format!("Unsupported OAuth provider for IMAP account: {other}. Set oauth_token_url in the account record.")),
     }
 }
 
@@ -68,7 +90,7 @@ async fn load_account_record(db: &DbState, account_id: &str) -> Result<AccountCo
             "SELECT email, imap_host, imap_port, imap_security, smtp_host, smtp_port, \
              smtp_security, imap_username, imap_password, auth_method, accept_invalid_certs, \
              access_token, refresh_token, token_expires_at, oauth_provider, oauth_client_id, \
-             oauth_client_secret FROM accounts WHERE id = ?1",
+             oauth_client_secret, oauth_token_url FROM accounts WHERE id = ?1",
             rusqlite::params![aid],
             |row| {
                 let accept_invalid_certs: Option<i64> = row.get(10)?;
@@ -90,6 +112,7 @@ async fn load_account_record(db: &DbState, account_id: &str) -> Result<AccountCo
                     oauth_provider: row.get(14)?,
                     oauth_client_id: row.get(15)?,
                     oauth_client_secret: row.get(16)?,
+                    oauth_token_url: row.get(17)?,
                 })
             },
         )
@@ -115,23 +138,52 @@ async fn ensure_oauth_access_token(
         .as_deref()
         .filter(|value| !value.is_empty())
         .ok_or_else(|| format!("OAuth IMAP account {account_id} has no client ID"))?;
-    let refresh_token = decrypt_if_needed(encryption_key, record.refresh_token.clone())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| format!("OAuth IMAP account {account_id} has no refresh token"))?;
     let access_token = decrypt_if_needed(encryption_key, record.access_token.clone())
         .filter(|value| !value.is_empty())
         .ok_or_else(|| format!("OAuth IMAP account {account_id} has no access token"))?;
     let expires_at = record.token_expires_at.unwrap_or_default();
-    let now = chrono::Utc::now().timestamp();
 
-    if expires_at - now >= 300 {
+    if expires_at - chrono::Utc::now().timestamp() >= 300 {
         return Ok(access_token);
     }
 
+    // Acquire per-account lock to prevent concurrent refreshes
+    let lock = get_refresh_lock(account_id);
+    let _guard = lock.lock().await;
+
+    // Double-check after acquiring lock — another task may have already refreshed
+    let aid = account_id.to_string();
+    let (fresh_access, fresh_expires, fresh_refresh) = db
+        .with_conn(move |conn| {
+            conn.query_row(
+                "SELECT access_token, token_expires_at, refresh_token FROM accounts WHERE id = ?1",
+                rusqlite::params![aid],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<i64>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .map_err(|e| format!("Re-check token query failed: {e}"))
+        })
+        .await?;
+
+    if fresh_expires.unwrap_or_default() - chrono::Utc::now().timestamp() >= 300 {
+        return decrypt_if_needed(encryption_key, fresh_access)
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| format!("IMAP token re-check: missing access token for {account_id}"));
+    }
+
+    let refresh_token = decrypt_if_needed(encryption_key, fresh_refresh)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("OAuth IMAP account {account_id} has no refresh token"))?;
     let client_secret = decrypt_if_needed(encryption_key, record.oauth_client_secret.clone());
+    let token_url = oauth_token_endpoint(oauth_provider, record.oauth_token_url.as_deref())?;
     let refreshed = refresh_oauth_token(
         &reqwest::Client::new(),
-        oauth_token_endpoint(oauth_provider)?,
+        &token_url,
         &refresh_token,
         client_id,
         client_secret.as_deref(),
@@ -141,8 +193,8 @@ async fn ensure_oauth_access_token(
     let aid = account_id.to_string();
     db.with_conn(move |conn| {
         conn.execute(
-            "UPDATE accounts SET access_token = ?1, token_expires_at = ?2, updated_at = unixepoch() \
-             WHERE id = ?3",
+            "UPDATE accounts SET access_token = ?1, token_expires_at = ?2, \
+             updated_at = unixepoch() WHERE id = ?3",
             rusqlite::params![encrypted_access_token, refreshed.expires_at, aid],
         )
         .map_err(|e| format!("Failed to persist refreshed IMAP OAuth token: {e}"))?;
