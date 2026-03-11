@@ -10,11 +10,7 @@ Tauri v2 desktop email client. Rust backend, React 19 frontend. ~23k lines Rust,
 
 ## Gotchas that will break your code
 
-**Dual database**: Message bodies live in a separate `bodies.db` (zstd-compressed), NOT in the `messages` table. Use `body_store_get`/`body_store_get_batch` Rust commands to fetch bodies. `db_get_messages_for_thread` auto-hydrates. When writing, `upsertMessage()` handles `bodyStorePut()` automatically. The `body_cached` flag on `messages` indicates whether a body exists in the body store.
-
-**Dual migration systems**: Rust has 25 migrations (`src-tauri/src/db/migrations.rs`), TS has 26 (`src/services/db/migrations.ts`). Both run independently and must stay in sync when adding schema changes.
-
-**TS and Rust share the same SQLite file**: TS opens `ratatoskr.db` via `tauri-plugin-sql`, Rust opens it via `rusqlite`. Do NOT use explicit `BEGIN`/`COMMIT` in TS — the plugin's connection pool will deadlock. Use `withSerializedExecution()` instead.
+**Multiple content stores**: Message metadata is not the whole story. Message bodies live outside the main `messages` table in `bodies.db` (zstd-compressed), and inline multipart images have their own attachment database as well. Use the Rust-side data access layer and existing fetch/write commands rather than assuming message content is fully stored in the main SQLite database.
 
 **Four email providers in Rust**: `gmail_api`, `jmap`, `graph` (Microsoft), `imap`. All unified behind the `ProviderOps` trait (`provider/ops.rs`). Provider-agnostic commands in `provider/commands.rs`. The TS `EmailProvider` interface still exists but Graph throws — it uses Rust commands directly.
 

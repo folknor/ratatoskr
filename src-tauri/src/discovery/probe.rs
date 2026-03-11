@@ -103,10 +103,7 @@ async fn probe_single(candidate: ProbeCandidate) -> Option<ServerConfig> {
 async fn probe_tls(stream: TcpStream, candidate: &ProbeCandidate) -> Option<ServerConfig> {
     let connector = native_tls::TlsConnector::new().ok()?;
     let connector = TlsConnector::from(connector);
-    let mut tls_stream = connector
-        .connect(&candidate.hostname, stream)
-        .await
-        .ok()?;
+    let mut tls_stream = connector.connect(&candidate.hostname, stream).await.ok()?;
 
     let mut banner = vec![0u8; 256];
     let n = timeout(PROBE_TIMEOUT, tls_stream.read(&mut banner))

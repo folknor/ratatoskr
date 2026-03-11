@@ -19,8 +19,7 @@ fn cache_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| format!("resolve app data dir: {e}"))?;
     let dir = base.join(CACHE_DIR);
     if !dir.exists() {
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| format!("create cache dir: {e}"))?;
+        std::fs::create_dir_all(&dir).map_err(|e| format!("create cache dir: {e}"))?;
     }
     Ok(dir)
 }
@@ -40,8 +39,7 @@ pub fn write_cached(
 ) -> Result<String, String> {
     let path = cache_dir(app_handle)?.join(content_hash);
     if !path.exists() {
-        std::fs::write(&path, data)
-            .map_err(|e| format!("write cache file: {e}"))?;
+        std::fs::write(&path, data).map_err(|e| format!("write cache file: {e}"))?;
     }
     Ok(format!("{CACHE_DIR}/{content_hash}"))
 }
@@ -51,8 +49,7 @@ pub fn remove_cached(app_handle: &tauri::AppHandle, content_hash: &str) -> Resul
     let path = cache_dir(app_handle).ok().map(|d| d.join(content_hash));
     if let Some(path) = path {
         if path.exists() {
-            std::fs::remove_file(&path)
-                .map_err(|e| format!("remove cache file: {e}"))?;
+            std::fs::remove_file(&path).map_err(|e| format!("remove cache file: {e}"))?;
         }
     }
     Ok(())
@@ -129,10 +126,7 @@ pub fn update_cache_fields(
 }
 
 /// Count how many attachment rows share the same content_hash.
-pub fn count_by_hash(
-    conn: &rusqlite::Connection,
-    content_hash: &str,
-) -> Result<i64, String> {
+pub fn count_by_hash(conn: &rusqlite::Connection, content_hash: &str) -> Result<i64, String> {
     conn.query_row(
         "SELECT COUNT(*) FROM attachments WHERE content_hash = ?1 AND cached_at IS NOT NULL",
         rusqlite::params![content_hash],

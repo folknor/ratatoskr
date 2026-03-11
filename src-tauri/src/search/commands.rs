@@ -134,8 +134,7 @@ pub async fn rebuild_search_index(
         }
 
         // Hydrate body_text from body store
-        let ids_needing_bodies: Vec<String> =
-            docs.iter().map(|d| d.message_id.clone()).collect();
+        let ids_needing_bodies: Vec<String> = docs.iter().map(|d| d.message_id.clone()).collect();
 
         if !ids_needing_bodies.is_empty() {
             let bodies = body_store.get_batch(ids_needing_bodies).await?;

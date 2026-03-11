@@ -6,6 +6,14 @@
 
 - [ ] **Auto-updater should check local permissions** — Don't show update prompts if the user lacks write access to the app installation directory (e.g., installed system-wide without admin rights). The update would fail anyway — detect this upfront and either hide the prompt or show a helpful message.
 
+- [ ] **App not killed when main window is closed** — Closing the main window doesn't terminate the process. Investigate: likely minimize-to-tray or `on_window_event` handler preventing exit. May be related to single-instance plugin or background sync tasks keeping the runtime alive.
+
+- [ ] **Remove "launch at login" feature** — Remove the UI option, the Rust `auto-launch` crate dependency, and any related Tauri plugin/capability config. Not needed.
+
+- [ ] **Remove "reduce motion" setting** — Remove the UI option and any associated CSS/animation logic. Not needed.
+
+- [ ] **"Undo send" delay needs a disable option** — Currently forced on with no way to turn it off. Add a "None" / 0s option to the delay picker.
+
 ---
 
 ## Security & Data Safety

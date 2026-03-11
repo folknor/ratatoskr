@@ -1,6 +1,4 @@
-use crate::discovery::types::{
-    AuthConfig, AuthMethod, DiscoverySource, Protocol, ProtocolOption,
-};
+use crate::discovery::types::{AuthConfig, AuthMethod, DiscoverySource, Protocol, ProtocolOption};
 
 /// Stage 4: Probe `.well-known/jmap` for JMAP support (RFC 8620 §2.2).
 pub async fn probe(domain: &str) -> Option<ProtocolOption> {
@@ -24,9 +22,7 @@ pub async fn probe(domain: &str) -> Option<ProtocolOption> {
     }
 
     Some(ProtocolOption {
-        protocol: Protocol::Jmap {
-            session_url: url,
-        },
+        protocol: Protocol::Jmap { session_url: url },
         auth: AuthConfig {
             method: AuthMethod::Password,
             alternatives: Vec::new(),

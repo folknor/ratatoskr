@@ -350,10 +350,8 @@ async fn fetch_folder_uids(
         let fp = folder.raw_path.clone();
         let uv = sr.folder_status.uidvalidity;
         let sat = chrono::Utc::now().timestamp();
-        db.with_conn(move |conn| {
-            pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, 0, sat)
-        })
-        .await?;
+        db.with_conn(move |conn| pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, 0, sat))
+            .await?;
         return Ok(());
     }
 
@@ -424,7 +422,15 @@ async fn fetch_uids_on_session(
         }
 
         if !converted.is_empty() {
-            store_chunk(db, body_store, inline_images, search, &converted, account_id).await?;
+            store_chunk(
+                db,
+                body_store,
+                inline_images,
+                search,
+                &converted,
+                account_id,
+            )
+            .await?;
 
             for c in &converted {
                 all_meta.insert(c.id.clone(), c.meta.clone());

@@ -2856,9 +2856,7 @@ fn row_to_account(row: &Row<'_>) -> rusqlite::Result<DbAccount> {
 }
 
 #[tauri::command]
-pub async fn db_get_all_accounts(
-    state: State<'_, DbState>,
-) -> Result<Vec<DbAccount>, String> {
+pub async fn db_get_all_accounts(state: State<'_, DbState>) -> Result<Vec<DbAccount>, String> {
     state
         .with_conn(move |conn| {
             let mut stmt = conn
@@ -3070,10 +3068,7 @@ pub async fn db_clear_account_history_id(
 }
 
 #[tauri::command]
-pub async fn db_delete_account(
-    state: State<'_, DbState>,
-    id: String,
-) -> Result<(), String> {
+pub async fn db_delete_account(state: State<'_, DbState>, id: String) -> Result<(), String> {
     state
         .with_conn(move |conn| {
             conn.execute("DELETE FROM accounts WHERE id = ?1", params![id])
@@ -4125,9 +4120,7 @@ pub async fn db_set_thread_categories_batch(
 ) -> Result<(), String> {
     state
         .with_conn(move |conn| {
-            let tx = conn
-                .unchecked_transaction()
-                .map_err(|e| e.to_string())?;
+            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
             for (thread_id, category) in &categories {
                 tx.execute(
                     "INSERT INTO thread_categories (account_id, thread_id, category, is_manual)
@@ -4466,10 +4459,7 @@ pub async fn db_get_calendar_events_in_range_multi(
     end_time: i64,
 ) -> Result<Vec<DbCalendarEvent>, String> {
     if calendar_ids.is_empty() {
-        return db_get_calendar_events_in_range(
-            state, account_id, start_time, end_time,
-        )
-        .await;
+        return db_get_calendar_events_in_range(state, account_id, start_time, end_time).await;
     }
     state
         .with_conn(move |conn| {
@@ -4485,8 +4475,7 @@ pub async fn db_get_calendar_events_in_range_multi(
                    AND (calendar_id IN ({placeholders}) OR calendar_id IS NULL) \
                  ORDER BY start_time ASC"
             );
-            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
-                Vec::new();
+            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
             param_values.push(Box::new(account_id));
             param_values.push(Box::new(start_time));
             param_values.push(Box::new(end_time));
@@ -4495,8 +4484,7 @@ pub async fn db_get_calendar_events_in_range_multi(
             }
             let param_refs: Vec<&dyn rusqlite::types::ToSql> =
                 param_values.iter().map(AsRef::as_ref).collect();
-            let mut stmt =
-                conn.prepare(&sql).map_err(|e| e.to_string())?;
+            let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
             stmt.query_map(param_refs.as_slice(), row_to_calendar_event)
                 .map_err(|e| e.to_string())?
                 .collect::<Result<Vec<_>, _>>()
@@ -4797,7 +4785,9 @@ pub async fn db_update_message_imap_folder(
     }
     state
         .with_conn(move |conn| {
-            let placeholders: Vec<String> = (0..message_ids.len()).map(|i| format!("?{}", i + 3)).collect();
+            let placeholders: Vec<String> = (0..message_ids.len())
+                .map(|i| format!("?{}", i + 3))
+                .collect();
             let sql = format!(
                 "UPDATE messages SET imap_folder = ?1 WHERE account_id = ?2 AND id IN ({})",
                 placeholders.join(", ")
@@ -4808,8 +4798,10 @@ pub async fn db_update_message_imap_folder(
             for id in &message_ids {
                 param_values.push(Box::new(id.clone()));
             }
-            let param_refs: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|p| p.as_ref()).collect();
-            conn.execute(&sql, param_refs.as_slice()).map_err(|e| e.to_string())?;
+            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                param_values.iter().map(|p| p.as_ref()).collect();
+            conn.execute(&sql, param_refs.as_slice())
+                .map_err(|e| e.to_string())?;
             Ok(())
         })
         .await
@@ -4837,9 +4829,7 @@ pub async fn db_update_attachment_cached(
 }
 
 #[tauri::command]
-pub async fn db_get_attachment_cache_size(
-    state: State<'_, DbState>,
-) -> Result<i64, String> {
+pub async fn db_get_attachment_cache_size(state: State<'_, DbState>) -> Result<i64, String> {
     state
         .with_conn(move |conn| {
             let total: i64 = conn
@@ -4899,9 +4889,7 @@ pub async fn db_clear_attachment_cache_entry(
 }
 
 #[tauri::command]
-pub async fn db_clear_all_attachment_cache(
-    state: State<'_, DbState>,
-) -> Result<(), String> {
+pub async fn db_clear_all_attachment_cache(state: State<'_, DbState>) -> Result<(), String> {
     state
         .with_conn(move |conn| {
             conn.execute(
@@ -5052,7 +5040,9 @@ pub async fn db_query_raw_select(
                         let val: rusqlite::types::Value = row.get(i)?;
                         let json_val = match val {
                             rusqlite::types::Value::Null => serde_json::Value::Null,
-                            rusqlite::types::Value::Integer(n) => serde_json::Value::Number(n.into()),
+                            rusqlite::types::Value::Integer(n) => {
+                                serde_json::Value::Number(n.into())
+                            }
                             rusqlite::types::Value::Real(f) => {
                                 serde_json::json!(f)
                             }
@@ -5066,7 +5056,8 @@ pub async fn db_query_raw_select(
                     Ok(map)
                 })
                 .map_err(|e| e.to_string())?;
-            rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())
         })
         .await
 }
@@ -5077,8 +5068,16 @@ fn base64_encode(data: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     for chunk in data.chunks(3) {
         let b0 = chunk[0] as usize;
-        let b1 = if chunk.len() > 1 { chunk[1] as usize } else { 0 };
-        let b2 = if chunk.len() > 2 { chunk[2] as usize } else { 0 };
+        let b1 = if chunk.len() > 1 {
+            chunk[1] as usize
+        } else {
+            0
+        };
+        let b2 = if chunk.len() > 2 {
+            chunk[2] as usize
+        } else {
+            0
+        };
         let _ = write!(s, "{}", CHARS[(b0 >> 2) & 0x3F] as char);
         let _ = write!(s, "{}", CHARS[((b0 << 4) | (b1 >> 4)) & 0x3F] as char);
         if chunk.len() > 1 {

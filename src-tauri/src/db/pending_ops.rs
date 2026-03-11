@@ -304,9 +304,7 @@ pub async fn db_pending_ops_clear_failed(
 /// Reset any operations stuck in 'executing' back to 'pending'.
 /// Called at startup to recover from crash/forced quit.
 #[tauri::command]
-pub async fn db_pending_ops_recover_executing(
-    state: State<'_, DbState>,
-) -> Result<i64, String> {
+pub async fn db_pending_ops_recover_executing(state: State<'_, DbState>) -> Result<i64, String> {
     state
         .with_conn(move |conn| {
             let count = conn

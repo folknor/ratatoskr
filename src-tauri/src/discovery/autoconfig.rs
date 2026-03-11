@@ -3,14 +3,16 @@ use crate::discovery::types::{
     AuthConfig, AuthMethod, DiscoverySource, Protocol, ProtocolOption, Security, ServerConfig,
     UsernameFormat,
 };
-use quick_xml::events::Event;
 use quick_xml::Reader;
+use quick_xml::events::Event;
 
 /// Stage 2: Fetch and parse Mozilla autoconfig XML.
 pub async fn fetch(domain: &str, email: &str) -> Vec<ProtocolOption> {
     let urls = [
         format!("https://autoconfig.{domain}/mail/config-v1.1.xml?emailaddress={email}"),
-        format!("https://{domain}/.well-known/autoconfig/mail/config-v1.1.xml?emailaddress={email}"),
+        format!(
+            "https://{domain}/.well-known/autoconfig/mail/config-v1.1.xml?emailaddress={email}"
+        ),
     ];
 
     for url in &urls {

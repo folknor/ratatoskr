@@ -804,7 +804,9 @@ pub fn run_all(conn: &Connection) -> Result<(), String> {
             })
             .unwrap_or(false);
         if !has_col {
-            log::warn!("Migration v14 marked applied but imap_folder_path column missing — re-running");
+            log::warn!(
+                "Migration v14 marked applied but imap_folder_path column missing — re-running"
+            );
             let _ = conn.execute("DELETE FROM _migrations WHERE version >= 14", []);
             applied.retain(|v| *v < 14);
         }
@@ -855,7 +857,8 @@ pub fn run_all(conn: &Connection) -> Result<(), String> {
                 let msg = e.to_string();
                 if msg.contains("duplicate column")
                     || msg.contains("no such column")  // DROP COLUMN on already-dropped column
-                    || msg.contains("no such table")    // DROP TABLE on already-dropped table
+                    || msg.contains("no such table")
+                // DROP TABLE on already-dropped table
                 {
                     log::warn!("Skipping in v{}: {msg}", m.version);
                 } else {

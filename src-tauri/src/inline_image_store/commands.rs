@@ -2,7 +2,7 @@
 
 use tauri::State;
 
-use super::{InlineImageStoreState, InlineImageStats};
+use super::{InlineImageStats, InlineImageStoreState};
 
 /// Retrieve an inline image by content hash, returned as base64.
 #[tauri::command]
@@ -31,9 +31,7 @@ pub async fn inline_image_stats(
 
 /// Clear all stored inline images.
 #[tauri::command]
-pub async fn inline_image_clear(
-    state: State<'_, InlineImageStoreState>,
-) -> Result<u64, String> {
+pub async fn inline_image_clear(state: State<'_, InlineImageStoreState>) -> Result<u64, String> {
     state.clear().await
 }
 

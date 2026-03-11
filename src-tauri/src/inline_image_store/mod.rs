@@ -32,8 +32,8 @@ impl InlineImageStoreState {
         std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create app dir: {e}"))?;
 
         let db_path = app_data_dir.join("inline_images.db");
-        let conn = Connection::open(&db_path)
-            .map_err(|e| format!("open inline image store: {e}"))?;
+        let conn =
+            Connection::open(&db_path).map_err(|e| format!("open inline image store: {e}"))?;
 
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;

@@ -418,7 +418,15 @@ async fn sync_single_folder(
         }
 
         if !chunk_converted.is_empty() {
-            store_chunk(db, body_store, inline_images, search, &chunk_converted, account_id).await?;
+            store_chunk(
+                db,
+                body_store,
+                inline_images,
+                search,
+                &chunk_converted,
+                account_id,
+            )
+            .await?;
 
             for c in &chunk_converted {
                 all_meta.insert(c.id.clone(), c.meta.clone());

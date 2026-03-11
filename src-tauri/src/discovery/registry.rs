@@ -165,10 +165,8 @@ static REGISTRY: &[RegistryEntry] = &[
                 Some(RegistryAuthConfig {
                     primary: RegistryAuth::OAuth2 {
                         provider_id: "microsoft",
-                        auth_url:
-                            "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize",
-                        token_url:
-                            "https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
+                        auth_url: "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize",
+                        token_url: "https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
                         scopes: &[
                             "https://outlook.office.com/IMAP.AccessAsUser.All",
                             "https://outlook.office.com/SMTP.Send",

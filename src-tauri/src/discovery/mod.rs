@@ -129,12 +129,11 @@ async fn run_stages(
     let resolved_domain = r3.1.clone();
 
     // Signal port probe if IMAP found
-    let has_imap = r1
-        .0
-        .iter()
-        .chain(r2.0.iter())
-        .chain(r3.0.iter())
-        .any(|opt| matches!(opt.protocol, types::Protocol::Imap { .. }));
+    let has_imap =
+        r1.0.iter()
+            .chain(r2.0.iter())
+            .chain(r3.0.iter())
+            .any(|opt| matches!(opt.protocol, types::Protocol::Imap { .. }));
     if has_imap {
         imap_found.notify_one();
     }

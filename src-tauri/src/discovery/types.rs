@@ -100,9 +100,13 @@ pub enum AuthMethod {
 pub enum DiscoverySource {
     Registry,
     #[serde(rename_all = "camelCase")]
-    AutoconfigXml { url: String },
+    AutoconfigXml {
+        url: String,
+    },
     #[serde(rename_all = "camelCase")]
-    MxLookup { mx_domain: String },
+    MxLookup {
+        mx_domain: String,
+    },
     JmapWellKnown,
     PortProbe,
 }

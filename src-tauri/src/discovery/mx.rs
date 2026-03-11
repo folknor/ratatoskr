@@ -99,8 +99,8 @@ fn extract_base_domain(hostname: &str) -> Option<String> {
 
     // Known multi-part TLDs where we need 3 segments
     let multi_part_tlds = [
-        "co.uk", "co.jp", "com.au", "com.br", "co.in", "co.nz", "co.za",
-        "com.mx", "com.ar", "com.sg",
+        "co.uk", "co.jp", "com.au", "com.br", "co.in", "co.nz", "co.za", "com.mx", "com.ar",
+        "com.sg",
     ];
 
     let last_two = format!(
@@ -110,10 +110,7 @@ fn extract_base_domain(hostname: &str) -> Option<String> {
     );
 
     if multi_part_tlds.contains(&last_two.as_str()) && segments.len() >= 3 {
-        Some(format!(
-            "{}.{last_two}",
-            segments[segments.len() - 3],
-        ))
+        Some(format!("{}.{last_two}", segments[segments.len() - 3],))
     } else {
         Some(last_two)
     }
