@@ -20,21 +20,11 @@
 
 - [ ] **`GmailState` used as encryption key source for non-Gmail code** — `account_create_imap_oauth`, `sync/commands.rs` (`sync_imap_initial`, `sync_imap_delta`), and `account_create_graph_via_oauth` (partially) all depend on `GmailState` solely for the encryption key. The key is app-wide. Rename to `AppCryptoState` or similar. *(LOW)*
 
-- [ ] **Microsoft ID token parsed without signature verification** — `parse_microsoft_userinfo` base64-decodes the JWT payload without verifying the signature. Fine for display info but add a comment noting it's intentional, to prevent someone later using it for auth decisions. *(LOW)*
-
 - [ ] **Account ID generated TS-side for IMAP, Rust-side for Gmail** — Inconsistent ownership of ID generation between the two flows. *(LOW)*
-
-- [ ] **`start_oauth_server` is both a Tauri command and called internally** — Two code paths can trigger OAuth. If the old TS path is no longer needed, remove it from the invoke handler. *(LOW)*
-
-- [ ] **`reqwest::Client::new()` on every token refresh** — `account_config.rs` creates a new HTTP client per refresh. Should reuse a shared client. *(LOW)*
 
 - [ ] **`load_smtp_config` uses `imap_password` for SMTP auth** — `account_config.rs:213` — SMTP password comes from `record.imap_password`. No `smtp_password` column exists. Pre-existing design (same credentials for both), but the new code carries this assumption forward without comment. *(LOW)*
 
-- [ ] **`initializeClients` no longer checks token presence before init** — Old code skipped accounts without `access_token`/`refresh_token`. New code attempts `gmail_init_client` for all active gmail_api accounts, producing console errors for partially-configured accounts. *(LOW)*
-
 - [ ] **CalDAV password decryption error now propagated instead of fallback** — Old TS silently fell back to raw value. New Rust propagates error via `?`, failing the operation. Could break CalDAV for accounts with corrupted encrypted passwords. *(LOW)*
-
-- [ ] **Inconsistent null handling between new account commands** — `account_get_basic_info` returns `Option` for missing accounts, `account_get_caldav_connection_info` returns an error. *(LOW)*
 
 ---
 

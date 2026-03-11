@@ -1,22 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../db/accounts", () => ({
+vi.mock("@/services/db/accounts", () => ({
   updateAccountTokens: vi.fn(),
 }));
 
-vi.mock("./providers", () => ({
+vi.mock("@/services/oauth/providers", () => ({
   getOAuthProvider: vi.fn(),
 }));
 
-vi.mock("./oauthFlow", () => ({
+vi.mock("@/services/oauth/oauthFlow", () => ({
   refreshProviderToken: vi.fn(),
 }));
 
 import { createMockDbAccount } from "@/test/mocks";
-import { updateAccountTokens } from "../db/accounts";
-import { refreshProviderToken } from "./oauthFlow";
-import { ensureFreshToken } from "./oauthTokenManager";
-import { getOAuthProvider } from "./providers";
+import { updateAccountTokens } from "@/services/db/accounts";
+import { refreshProviderToken } from "@/services/oauth/oauthFlow";
+import { ensureFreshToken } from "@/services/oauth/oauthTokenManager";
+import { getOAuthProvider } from "@/services/oauth/providers";
 
 const oauthOverrides = {
   email: "user@outlook.com",

@@ -1,8 +1,14 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
+use std::sync::OnceLock;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+
+fn shared_http_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(reqwest::Client::new)
+}
 
 #[derive(Serialize)]
 pub struct OAuthResult {
@@ -85,14 +91,6 @@ pub async fn await_oauth_callback(listener: TcpListener, state: &str) -> Result<
         state: returned_state,
         actual_port,
     })
-}
-
-/// Binds to a localhost port for OAuth callback. Tries the given port first,
-/// falls back to nearby ports if taken.
-#[tauri::command]
-pub async fn start_oauth_server(port: u16, state: String) -> Result<OAuthResult, String> {
-    let (listener, _) = bind_oauth_listener(port).await?;
-    await_oauth_callback(listener, &state).await
 }
 
 fn parse_auth_code_and_state(request: &str) -> Result<(String, String), String> {
@@ -196,8 +194,7 @@ pub async fn oauth_exchange_token(
         params.push(("scope", s));
     }
 
-    let client = reqwest::Client::new();
-    let response = client
+    let response = shared_http_client()
         .post(&token_url)
         .form(&params)
         .send()
@@ -241,8 +238,7 @@ pub async fn oauth_refresh_token(
         params.push(("scope", s));
     }
 
-    let client = reqwest::Client::new();
-    let response = client
+    let response = shared_http_client()
         .post(&token_url)
         .form(&params)
         .send()

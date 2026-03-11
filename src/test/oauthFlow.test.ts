@@ -1,17 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { OAuthProviderConfig } from "./providers";
+import type { OAuthProviderConfig } from "@/services/oauth/providers";
 
 // Mock Tauri APIs
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }));
 
-vi.mock("@tauri-apps/plugin-opener", () => ({
-  openUrl: vi.fn(),
-}));
-
 import { invoke } from "@tauri-apps/api/core";
-import { refreshProviderToken } from "./oauthFlow";
+import { refreshProviderToken } from "@/services/oauth/oauthFlow";
 
 const microsoftProvider: OAuthProviderConfig = {
   id: "microsoft",
@@ -116,52 +112,5 @@ describe("refreshProviderToken", () => {
     await expect(
       refreshProviderToken(microsoftProvider, "bad-refresh", "client"),
     ).rejects.toThrow("Token refresh failed: 400");
-  });
-});
-
-// Test parseIdToken indirectly through the module
-// Since parseIdToken is private, we test it via startProviderOAuthFlow's fetchUserInfo path
-// We'll test the JWT parsing logic directly by importing the module internals
-
-describe("parseIdToken (via module internals)", () => {
-  // Create a valid JWT-like structure for testing
-  function makeIdToken(payload: Record<string, unknown>): string {
-    const header = btoa(JSON.stringify({ alg: "RS256", typ: "JWT" }));
-    const body = btoa(JSON.stringify(payload))
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/, "");
-    return `${header}.${body}.fake-signature`;
-  }
-
-  it("correctly parses email and name from ID token", async () => {
-    // We can't directly test parseIdToken since it's not exported,
-    // but we can verify the JWT encoding/decoding round-trip logic
-    const payload = {
-      email: "user@outlook.com",
-      name: "Test User",
-      preferred_username: "user@outlook.com",
-    };
-
-    const token = makeIdToken(payload);
-    const parts = token.split(".");
-    const decoded = JSON.parse(
-      atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")),
-    );
-
-    expect(decoded.email).toBe("user@outlook.com");
-    expect(decoded.name).toBe("Test User");
-    expect(decoded.preferred_username).toBe("user@outlook.com");
-  });
-
-  it("handles base64url special characters", () => {
-    // Payload that generates +, /, = in standard base64
-    const payload = { email: "test+special@example.com", name: "Ünïcödé Üser" };
-    const token = makeIdToken(payload);
-    const parts = token.split(".");
-    // Should not contain standard base64 chars that are replaced
-    expect(parts[1]).not.toContain("+");
-    expect(parts[1]).not.toContain("/");
-    expect(parts[1]).not.toContain("=");
   });
 });

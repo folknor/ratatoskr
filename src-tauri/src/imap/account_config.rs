@@ -13,6 +13,11 @@ use super::types::ImapConfig;
 static IMAP_REFRESH_LOCKS: OnceLock<StdMutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
     OnceLock::new();
 
+fn shared_http_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(reqwest::Client::new)
+}
+
 fn get_refresh_lock(account_id: &str) -> Arc<tokio::sync::Mutex<()>> {
     let map = IMAP_REFRESH_LOCKS.get_or_init(|| StdMutex::new(HashMap::new()));
     let mut guard = map.lock().expect("IMAP refresh lock map poisoned");
@@ -185,7 +190,7 @@ async fn ensure_oauth_access_token(
     let client_secret = decrypt_if_needed(encryption_key, record.oauth_client_secret.clone());
     let token_url = oauth_token_endpoint(oauth_provider, record.oauth_token_url.as_deref())?;
     let refreshed = refresh_oauth_token(
-        &reqwest::Client::new(),
+        shared_http_client(),
         &token_url,
         &refresh_token,
         client_id,

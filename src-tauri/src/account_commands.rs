@@ -259,10 +259,10 @@ pub async fn account_get_caldav_connection_info(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
     account_id: String,
-) -> Result<CaldavConnectionInfo, String> {
+) -> Result<Option<CaldavConnectionInfo>, String> {
     let encryption_key = *gmail.encryption_key();
     db.with_conn(move |conn| {
-        let row = conn
+        let Some(row) = conn
             .query_row(
                 "SELECT email, caldav_url, caldav_username, caldav_password FROM accounts WHERE id = ?1",
                 rusqlite::params![account_id],
@@ -277,7 +277,9 @@ pub async fn account_get_caldav_connection_info(
             )
             .optional()
             .map_err(|e| format!("query caldav account: {e}"))?
-            .ok_or_else(|| "Account not found".to_string())?;
+        else {
+            return Ok(None);
+        };
 
         let server_url = row
             .1
@@ -297,11 +299,11 @@ pub async fn account_get_caldav_connection_info(
             .filter(|value| !value.trim().is_empty())
             .unwrap_or(row.0);
 
-        Ok(CaldavConnectionInfo {
+        Ok(Some(CaldavConnectionInfo {
             server_url,
             username,
             password,
-        })
+        }))
     })
     .await
 }
@@ -913,6 +915,8 @@ async fn fetch_provider_userinfo(
 fn parse_microsoft_userinfo(
     tokens: &crate::oauth::TokenExchangeResult,
 ) -> Result<OAuthProviderUserInfo, String> {
+    // This is only used to populate local profile fields after OAuth completes.
+    // We intentionally do not treat these claims as an authentication boundary.
     let id_token = tokens
         .id_token
         .as_deref()
