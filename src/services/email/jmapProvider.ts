@@ -4,7 +4,7 @@ import { RustBackedProviderBase } from "./rustBackedProvider";
 import type {
   AccountProvider,
   EmailFolder,
-  ProviderFolderResult,
+  ProviderFolderListResult,
   SyncResult,
 } from "./types";
 
@@ -24,7 +24,7 @@ export class JmapProvider extends RustBackedProviderBase {
   // ---- Folder/Label operations ----
 
   override async listFolders(): Promise<EmailFolder[]> {
-    const folders = await invoke<ProviderFolderResult[]>(
+    const folders = await invoke<ProviderFolderListResult[]>(
       "provider_list_folders",
       {
         accountId: this.accountId,

@@ -2,7 +2,7 @@ export interface ParsedAttachment {
   filename: string;
   mimeType: string;
   size: number;
-  gmailAttachmentId: string;
+  attachmentId: string;
   contentId: string | null;
   isInline: boolean;
 }

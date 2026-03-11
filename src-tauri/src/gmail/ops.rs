@@ -1,6 +1,7 @@
 use crate::provider::ops::ProviderOps;
 use crate::provider::types::{
-    AttachmentData, ProviderCtx, ProviderFolder, ProviderProfile, ProviderTestResult, SyncResult,
+    AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation, ProviderProfile,
+    ProviderTestResult, SyncResult,
 };
 use async_trait::async_trait;
 
@@ -221,7 +222,7 @@ impl ProviderOps for GmailOps {
         })
     }
 
-    async fn list_folders(&self, ctx: &ProviderCtx<'_>) -> Result<Vec<ProviderFolder>, String> {
+    async fn list_folders(&self, ctx: &ProviderCtx<'_>) -> Result<Vec<ProviderFolderEntry>, String> {
         let labels = self.client.list_labels(ctx.db).await?;
         Ok(labels
             .into_iter()
@@ -234,7 +235,7 @@ impl ProviderOps for GmailOps {
                     "DRAFT" => Some("drafts"),
                     _ => None,
                 };
-                ProviderFolder {
+                ProviderFolderEntry {
                     id: l.id.clone(),
                     name: l.name.clone(),
                     path: l.name,
@@ -261,22 +262,20 @@ impl ProviderOps for GmailOps {
         parent_id: Option<&str>,
         text_color: Option<&str>,
         bg_color: Option<&str>,
-    ) -> Result<ProviderFolder, String> {
+    ) -> Result<ProviderFolderMutation, String> {
         let full_name = parent_id.map_or_else(|| name.to_string(), |p| format!("{p}/{name}"));
         let color = match (text_color, bg_color) {
             (Some(tc), Some(bc)) => Some((tc, bc)),
             _ => None,
         };
         let label = self.client.create_label(&full_name, color, ctx.db).await?;
-        Ok(ProviderFolder {
+        Ok(ProviderFolderMutation {
             id: label.id,
             name: label.name.clone(),
             path: label.name,
             folder_type: "user".to_string(),
             special_use: None,
             delimiter: Some("/".to_string()),
-            message_count: label.messages_total.map(|v| v as u32),
-            unread_count: label.messages_unread.map(|v| v as u32),
             color_bg: label.color.as_ref().map(|c| c.background_color.clone()),
             color_fg: label.color.as_ref().map(|c| c.text_color.clone()),
         })
@@ -289,7 +288,7 @@ impl ProviderOps for GmailOps {
         new_name: &str,
         text_color: Option<&str>,
         bg_color: Option<&str>,
-    ) -> Result<ProviderFolder, String> {
+    ) -> Result<ProviderFolderMutation, String> {
         let color = match (text_color, bg_color) {
             (Some(tc), Some(bc)) => Some(Some((tc, bc))),
             _ => None,
@@ -298,7 +297,7 @@ impl ProviderOps for GmailOps {
             .client
             .update_label(folder_id, Some(new_name), color, ctx.db)
             .await?;
-        Ok(ProviderFolder {
+        Ok(ProviderFolderMutation {
             id: label.id,
             name: label.name.clone(),
             path: label.name,
@@ -309,8 +308,6 @@ impl ProviderOps for GmailOps {
             },
             special_use: None,
             delimiter: Some("/".to_string()),
-            message_count: label.messages_total.map(|v| v as u32),
-            unread_count: label.messages_unread.map(|v| v as u32),
             color_bg: label.color.as_ref().map(|c| c.background_color.clone()),
             color_fg: label.color.as_ref().map(|c| c.text_color.clone()),
         })

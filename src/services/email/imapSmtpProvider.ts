@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ParsedMessage } from "../gmail/messageParser";
 import { RustBackedProviderBase } from "./rustBackedProvider";
-import type { EmailFolder, ProviderFolderResult, SyncResult } from "./types";
+import type { EmailFolder, ProviderFolderListResult, SyncResult } from "./types";
 
 interface ProviderAttachment {
   data: string;
@@ -25,7 +25,7 @@ export class ImapSmtpProvider extends RustBackedProviderBase {
   }
 
   override async listFolders(): Promise<EmailFolder[]> {
-    const folders = await invoke<ProviderFolderResult[]>(
+    const folders = await invoke<ProviderFolderListResult[]>(
       "provider_list_folders",
       {
         accountId: this.accountId,

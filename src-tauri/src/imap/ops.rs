@@ -6,8 +6,9 @@ use rusqlite::Connection;
 
 use crate::provider::ops::ProviderOps;
 use crate::provider::types::{
-    AttachmentData, ProviderCtx, ProviderFolder, ProviderParsedAttachment, ProviderParsedMessage,
-    ProviderProfile, ProviderTestResult, SyncResult,
+    AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
+    ProviderParsedAttachment, ProviderParsedMessage, ProviderProfile, ProviderTestResult,
+    SyncResult,
 };
 use crate::smtp;
 
@@ -136,7 +137,7 @@ fn imap_message_to_provider_message(
             filename: att.filename.clone(),
             mime_type: att.mime_type.clone(),
             size: att.size,
-            gmail_attachment_id: att.part_id.clone(),
+            attachment_id: att.part_id.clone(),
             content_id: att.content_id.clone(),
             is_inline: att.is_inline,
         })
@@ -799,7 +800,7 @@ impl ProviderOps for ImapOps {
 
     // ── Folders ─────────────────────────────────────────────────────────
 
-    async fn list_folders(&self, ctx: &ProviderCtx<'_>) -> Result<Vec<ProviderFolder>, String> {
+    async fn list_folders(&self, ctx: &ProviderCtx<'_>) -> Result<Vec<ProviderFolderEntry>, String> {
         let account_id = ctx.account_id.to_string();
         let config =
             crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
@@ -814,7 +815,7 @@ impl ProviderOps for ImapOps {
             .map(|f| {
                 let id = canonical_folder_id(&f.path, f.special_use.as_deref());
                 let special_use = f.special_use;
-                ProviderFolder {
+                ProviderFolderEntry {
                     id,
                     name: f.name,
                     path: f.path,
@@ -841,7 +842,7 @@ impl ProviderOps for ImapOps {
         _parent_id: Option<&str>,
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
-    ) -> Result<ProviderFolder, String> {
+    ) -> Result<ProviderFolderMutation, String> {
         Err(
             "Creating folders is not supported for IMAP accounts via the current provider API."
                 .to_string(),
@@ -855,7 +856,7 @@ impl ProviderOps for ImapOps {
         _new_name: &str,
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
-    ) -> Result<ProviderFolder, String> {
+    ) -> Result<ProviderFolderMutation, String> {
         Err(
             "Renaming folders is not supported for IMAP accounts via the current provider API."
                 .to_string(),

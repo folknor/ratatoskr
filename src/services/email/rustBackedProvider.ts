@@ -3,7 +3,8 @@ import type { ParsedMessage } from "../gmail/messageParser";
 import type {
   EmailFolder,
   EmailProvider,
-  ProviderFolderResult,
+  ProviderFolderListResult,
+  ProviderFolderMutationResult,
   ProviderProfile,
   ProviderTestResult,
   SyncResult,
@@ -112,7 +113,7 @@ export abstract class RustBackedProviderBase implements EmailProvider {
   }
 
   async createFolder(name: string, parentPath?: string): Promise<EmailFolder> {
-    const folder = await invoke<ProviderFolderResult>(
+    const folder = await invoke<ProviderFolderMutationResult>(
       "provider_create_folder",
       {
         accountId: this.accountId,
@@ -154,7 +155,9 @@ export abstract class RustBackedProviderBase implements EmailProvider {
     });
   }
 
-  protected mapFolder(folder: ProviderFolderResult): EmailFolder {
+  protected mapFolder(
+    folder: ProviderFolderListResult | ProviderFolderMutationResult,
+  ): EmailFolder {
     return {
       id: folder.id,
       name: folder.name,
@@ -162,8 +165,8 @@ export abstract class RustBackedProviderBase implements EmailProvider {
       type: folder.folderType === "system" ? "system" : "user",
       specialUse: folder.specialUse ?? null,
       delimiter: folder.delimiter ?? "/",
-      messageCount: folder.messageCount ?? 0,
-      unreadCount: folder.unreadCount ?? 0,
+      messageCount: "messageCount" in folder ? folder.messageCount ?? 0 : 0,
+      unreadCount: "unreadCount" in folder ? folder.unreadCount ?? 0 : 0,
     };
   }
 }

@@ -24,7 +24,7 @@ use super::{SyncQueueState, SyncState};
 use super::config;
 use super::types::{
     AICategorizationCandidate, ImapSyncResult, NotificationCandidate, SyncStatus,
-    SyncStatusEvent,
+    SyncStatusDonePayload, SyncStatusEvent,
 };
 
 const SYNC_INTERVAL_MS: u64 = 60_000;
@@ -214,14 +214,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                     provider: "unknown".to_string(),
                     status: SyncStatus::Error,
                     error: Some(error),
-                    should_sync_calendar: None,
-                    new_inbox_message_ids: None,
-                    affected_thread_ids: None,
-                    criteria_smart_label_matches: None,
-                    notifications_to_queue: None,
-                    ai_categorization_candidates: None,
-                    ai_smart_label_threads: None,
-                    ai_smart_label_rules: None,
+                    result: None,
                 },
             );
             return;
@@ -236,14 +229,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
             provider: provider.clone(),
             status: SyncStatus::Syncing,
             error: None,
-            should_sync_calendar: None,
-            new_inbox_message_ids: None,
-            affected_thread_ids: None,
-            criteria_smart_label_matches: None,
-            notifications_to_queue: None,
-            ai_categorization_candidates: None,
-            ai_smart_label_threads: None,
-            ai_smart_label_rules: None,
+            result: None,
         },
     );
 
@@ -255,14 +241,16 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 provider,
                 status: SyncStatus::Done,
                 error: None,
-                should_sync_calendar: Some(true),
-                new_inbox_message_ids: Some(Vec::new()),
-                affected_thread_ids: Some(Vec::new()),
-                criteria_smart_label_matches: Some(Vec::new()),
-                notifications_to_queue: Some(Vec::new()),
-                ai_categorization_candidates: Some(Vec::new()),
-                ai_smart_label_threads: Some(Vec::new()),
-                ai_smart_label_rules: Some(Vec::new()),
+                result: Some(SyncStatusDonePayload {
+                    should_sync_calendar: true,
+                    new_inbox_message_ids: Vec::new(),
+                    affected_thread_ids: Vec::new(),
+                    criteria_smart_label_matches: Vec::new(),
+                    notifications_to_queue: Vec::new(),
+                    ai_categorization_candidates: Vec::new(),
+                    ai_smart_label_threads: Vec::new(),
+                    ai_smart_label_rules: Vec::new(),
+                }),
             },
         );
         return;
@@ -444,14 +432,16 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                     provider,
                     status: SyncStatus::Done,
                     error: None,
-                    should_sync_calendar: Some(should_sync_calendar),
-                    new_inbox_message_ids: Some(result.new_inbox_message_ids),
-                    affected_thread_ids: Some(result.affected_thread_ids),
-                    criteria_smart_label_matches: Some(criteria_smart_label_matches),
-                    notifications_to_queue: Some(notifications_to_queue),
-                    ai_categorization_candidates: Some(ai_categorization_candidates),
-                    ai_smart_label_threads: Some(ai_smart_label_threads),
-                    ai_smart_label_rules: Some(ai_smart_label_rules),
+                    result: Some(SyncStatusDonePayload {
+                        should_sync_calendar,
+                        new_inbox_message_ids: result.new_inbox_message_ids,
+                        affected_thread_ids: result.affected_thread_ids,
+                        criteria_smart_label_matches,
+                        notifications_to_queue,
+                        ai_categorization_candidates,
+                        ai_smart_label_threads,
+                        ai_smart_label_rules,
+                    }),
                 },
             )
         }
@@ -462,14 +452,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 provider,
                 status: SyncStatus::Error,
                 error: Some(error),
-                should_sync_calendar: None,
-                new_inbox_message_ids: None,
-                affected_thread_ids: None,
-                criteria_smart_label_matches: None,
-                notifications_to_queue: None,
-                ai_categorization_candidates: None,
-                ai_smart_label_threads: None,
-                ai_smart_label_rules: None,
+                result: None,
             },
         ),
     }

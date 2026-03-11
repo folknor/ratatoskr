@@ -24,17 +24,11 @@
 
 - [ ] **Thread-level vs message-level semantics change** — All action methods (`archive`, `trash`, `markRead`, `star`, etc.) now pass `threadId` to Rust commands and ignore `_messageIds`. If any caller passes specific message IDs (e.g., marking individual messages as read), the entire thread is affected instead. *(MED)*
 
-- [ ] **Boilerplate `ProviderCtx` construction in `commands.rs`** — Every provider command repeats the same ~15-line block (`get_provider_type` → `get_ops` → build `ProviderCtx`). Extract a helper like `with_provider_ops(account_id, states, |ops, ctx| ...)`. *(LOW)*
-
 - [ ] **Graph folder CRUD returns "not supported"** — `create_folder`, `rename_folder`, `delete_folder` are stubbed in `src-tauri/src/graph/ops.rs`. Graph API actually supports folder CRUD via `/me/mailFolders`. *(LOW)*
 
 - [ ] **No Graph provider class** — Graph throws in `providerFactory.ts`. `RustBackedProviderBase` is a natural fit for a `GraphProvider`. *(LOW)*
 
-- [ ] **`gmail_attachment_id` field name in `ProviderParsedAttachment`** — Set to `att.part_id` for IMAP. Name is provider-specific but the struct is provider-agnostic. Should be renamed when the TS interface is cleaned up. *(LOW)*
-
 - [ ] **Snippet fallback truncation not grapheme-safe** — `imap_message_to_provider_message` uses `.chars().take(200).collect()` which can split multi-byte grapheme clusters. Minor cosmetic issue. *(LOW)*
-
-- [ ] **`ProviderFolder` struct growing wide** — Now has 10 fields. Most providers return `None` for several. Doing double duty as creation result and listing result. Could split later. *(LOW)*
 
 ---
 
@@ -64,11 +58,7 @@
 
 - [ ] **Filter body hydration loads all bodies before evaluation** — When any filter has a body criterion, `body_store.get_batch` is called for all message IDs upfront. Could defer to only messages passing non-body criteria first. *(LOW)*
 
-- [ ] **`SyncStatusEvent` has grown to 13 fields** — Accumulated across post-sync hook additions. Most fields are `Option<...>` set to `None` in non-success paths. Consider a nested result type or separate event types for post-sync hook results. *(LOW)*
-
 - [ ] **Correlated subquery for latest message per thread** — `AND m.date = (SELECT MAX(m2.date) ...)` runs per-thread. Fine with LIMIT 20 but inherited technical debt. *(LOW)*
-
-- [ ] **`load_enabled_rules_for_ai` overlaps with `load_enabled_criteria_rules`** — Both query same table for same account. Could be a single query. *(LOW)*
 
 - [ ] **`smart_labels_apply_matches` only callable via IPC** — Label application after AI classification still crosses the IPC boundary. Could be called directly in Rust once AI classification moves too. *(LOW)*
 

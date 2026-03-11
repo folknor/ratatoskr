@@ -18,6 +18,11 @@ use crate::search::SearchState;
 
 use super::{AppliedSmartLabelMatch, SmartLabelAIRule, SmartLabelAIThread};
 
+struct LoadedSmartLabelRules {
+    criteria_rules: Vec<(String, FilterCriteria)>,
+    ai_rules: Vec<EnabledSmartLabelRule>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn smart_labels_apply_criteria_to_new_message_ids_impl(
     account_id: &str,
@@ -201,12 +206,21 @@ pub(crate) async fn load_enabled_criteria_rules(
     db: &DbState,
     account_id: &str,
 ) -> Result<Vec<(String, FilterCriteria)>, String> {
+    Ok(load_enabled_smart_label_rules(db, account_id)
+        .await?
+        .criteria_rules)
+}
+
+async fn load_enabled_smart_label_rules(
+    db: &DbState,
+    account_id: &str,
+) -> Result<LoadedSmartLabelRules, String> {
     let account_id = account_id.to_string();
     db.with_conn(move |conn| {
         let mut stmt = conn
             .prepare(
-                "SELECT label_id, criteria_json FROM smart_label_rules
-                 WHERE account_id = ?1 AND is_enabled = 1 AND criteria_json IS NOT NULL
+                "SELECT label_id, ai_description, criteria_json FROM smart_label_rules
+                 WHERE account_id = ?1 AND is_enabled = 1
                  ORDER BY sort_order, created_at",
             )
             .map_err(|e| format!("prepare smart label rules query: {e}"))?;
@@ -214,31 +228,44 @@ pub(crate) async fn load_enabled_criteria_rules(
         let rows = stmt
             .query_map(rusqlite::params![account_id], |row| {
                 let label_id: String = row.get(0)?;
-                let criteria_json: String = row.get(1)?;
-                Ok((label_id, criteria_json))
+                let description: String = row.get(1)?;
+                let criteria_json: Option<String> = row.get(2)?;
+                Ok((label_id, description, criteria_json))
             })
             .map_err(|e| format!("query smart label rules: {e}"))?;
 
-        let mut rules = Vec::new();
+        let mut criteria_rules = Vec::new();
+        let mut ai_rules = Vec::new();
         for row in rows {
-            let (label_id, criteria_json) =
+            let (label_id, description, criteria_json) =
                 row.map_err(|e| format!("read smart label row: {e}"))?;
-            let criteria: FilterCriteria = match serde_json::from_str(&criteria_json) {
-                Ok(criteria) => criteria,
-                Err(_) => continue,
-            };
-            if criteria.from.is_none()
-                && criteria.to.is_none()
-                && criteria.subject.is_none()
-                && criteria.body.is_none()
-                && criteria.has_attachment.is_none()
-            {
-                continue;
+
+            ai_rules.push(EnabledSmartLabelRule {
+                label_id: label_id.clone(),
+                description,
+            });
+
+            if let Some(criteria_json) = criteria_json {
+                let criteria: FilterCriteria = match serde_json::from_str(&criteria_json) {
+                    Ok(criteria) => criteria,
+                    Err(_) => continue,
+                };
+                if criteria.from.is_none()
+                    && criteria.to.is_none()
+                    && criteria.subject.is_none()
+                    && criteria.body.is_none()
+                    && criteria.has_attachment.is_none()
+                {
+                    continue;
+                }
+                criteria_rules.push((label_id, criteria));
             }
-            rules.push((label_id, criteria));
         }
 
-        Ok(rules)
+        Ok(LoadedSmartLabelRules {
+            criteria_rules,
+            ai_rules,
+        })
     })
     .await
 }
@@ -322,37 +349,7 @@ pub(crate) async fn load_enabled_rules_for_ai(
     db: &DbState,
     account_id: &str,
 ) -> Result<Vec<EnabledSmartLabelRule>, String> {
-    let account_id = account_id.to_string();
-    db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT label_id, ai_description FROM smart_label_rules
-                 WHERE account_id = ?1 AND is_enabled = 1
-                 ORDER BY sort_order, created_at",
-            )
-            .map_err(|e| format!("prepare smart label ai query: {e}"))?;
-
-        let rows = stmt
-            .query_map(rusqlite::params![account_id], |row| {
-                let label_id: String = row.get(0)?;
-                let description: String = row.get(1)?;
-                Ok((label_id, description))
-            })
-            .map_err(|e| format!("query smart label ai rules: {e}"))?;
-
-        let mut rules = Vec::new();
-        for row in rows {
-            let (label_id, description) =
-                row.map_err(|e| format!("read smart label ai row: {e}"))?;
-            rules.push(EnabledSmartLabelRule {
-                label_id,
-                description,
-            });
-        }
-
-        Ok(rules)
-    })
-    .await
+    Ok(load_enabled_smart_label_rules(db, account_id).await?.ai_rules)
 }
 
 fn evaluate_criteria_matches(

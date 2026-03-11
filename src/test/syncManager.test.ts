@@ -243,22 +243,27 @@ describe("syncManager", () => {
       accountId: "acc-1",
       provider: "gmail_api",
       status: "done",
-      newInboxMessageIds: ["m1", "m2"],
-      affectedThreadIds: ["t1"],
-      criteriaSmartLabelMatches: [{ threadId: "t1", labelIds: ["label-1"] }],
-      notificationsToQueue: [
-        {
-          threadId: "t1",
-          fromName: "Alice",
-          fromAddress: "alice@example.com",
-          subject: "Hello",
-        },
-      ],
-      aiCategorizationCandidates: [{ threadId: "t1", subject: "Hello" }],
-      aiSmartLabelThreads: [{ threadId: "t1", subject: "Hello" }],
-      aiSmartLabelRules: [
-        { id: "rule-1", name: "VIP", instructions: "Mark VIP" },
-      ],
+      result: {
+        shouldSyncCalendar: false,
+        newInboxMessageIds: ["m1", "m2"],
+        affectedThreadIds: ["t1"],
+        criteriaSmartLabelMatches: [
+          { threadId: "t1", labelIds: ["label-1"] },
+        ],
+        notificationsToQueue: [
+          {
+            threadId: "t1",
+            fromName: "Alice",
+            fromAddress: "alice@example.com",
+            subject: "Hello",
+          },
+        ],
+        aiCategorizationCandidates: [{ threadId: "t1", subject: "Hello" }],
+        aiSmartLabelThreads: [{ threadId: "t1", subject: "Hello" }],
+        aiSmartLabelRules: [
+          { id: "rule-1", name: "VIP", instructions: "Mark VIP" },
+        ],
+      },
     });
 
     await flushAsyncWork();
@@ -322,9 +327,16 @@ describe("syncManager", () => {
       accountId: "acc-1",
       provider: "gmail_api",
       status: "done",
-      shouldSyncCalendar: true,
-      newInboxMessageIds: [],
-      affectedThreadIds: [],
+      result: {
+        shouldSyncCalendar: true,
+        newInboxMessageIds: [],
+        affectedThreadIds: [],
+        criteriaSmartLabelMatches: [],
+        notificationsToQueue: [],
+        aiCategorizationCandidates: [],
+        aiSmartLabelThreads: [],
+        aiSmartLabelRules: [],
+      },
     });
 
     await flushAsyncWork();

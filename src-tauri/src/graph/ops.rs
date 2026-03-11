@@ -4,7 +4,8 @@ use mail_parser::MimeHeaders;
 
 use crate::provider::ops::ProviderOps;
 use crate::provider::types::{
-    AttachmentData, ProviderCtx, ProviderFolder, ProviderProfile, ProviderTestResult, SyncResult,
+    AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation, ProviderProfile,
+    ProviderTestResult, SyncResult,
 };
 
 use super::client::GraphClient;
@@ -235,7 +236,7 @@ impl ProviderOps for GraphOps {
         })
     }
 
-    async fn list_folders(&self, ctx: &ProviderCtx<'_>) -> Result<Vec<ProviderFolder>, String> {
+    async fn list_folders(&self, ctx: &ProviderCtx<'_>) -> Result<Vec<ProviderFolderEntry>, String> {
         // Use cached folder map if it was synced less than 60 seconds ago
         let use_cache = if let Some(age) = self.client.folder_map_age().await {
             age < std::time::Duration::from_secs(60) && self.client.folder_map().await.is_some()
@@ -258,7 +259,7 @@ impl ProviderOps for GraphOps {
 
         let folders = folder_map
             .all_mappings()
-            .map(|m| ProviderFolder {
+            .map(|m| ProviderFolderEntry {
                 id: m.label_id.clone(),
                 name: m.label_name.clone(),
                 path: m.label_name.clone(),
@@ -285,7 +286,7 @@ impl ProviderOps for GraphOps {
         _parent_id: Option<&str>,
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
-    ) -> Result<ProviderFolder, String> {
+    ) -> Result<ProviderFolderMutation, String> {
         Err(
             "Folder creation is not supported for Graph accounts via the current provider API."
                 .to_string(),
@@ -299,7 +300,7 @@ impl ProviderOps for GraphOps {
         _new_name: &str,
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
-    ) -> Result<ProviderFolder, String> {
+    ) -> Result<ProviderFolderMutation, String> {
         Err(
             "Folder rename is not supported for Graph accounts via the current provider API."
                 .to_string(),

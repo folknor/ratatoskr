@@ -18,18 +18,23 @@ export interface EmailFolder {
   unreadCount: number;
 }
 
-export interface ProviderFolderResult {
+interface ProviderFolderBase {
   id: string;
   name: string;
   path: string;
   folderType: string;
   specialUse?: string | null;
   delimiter?: string | null;
-  messageCount?: number | null;
-  unreadCount?: number | null;
   colorBg?: string | null;
   colorFg?: string | null;
 }
+
+export interface ProviderFolderListResult extends ProviderFolderBase {
+  messageCount?: number | null;
+  unreadCount?: number | null;
+}
+
+export interface ProviderFolderMutationResult extends ProviderFolderBase {}
 
 export interface ProviderTestResult {
   success: boolean;

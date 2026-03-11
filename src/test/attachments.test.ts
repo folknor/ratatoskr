@@ -10,7 +10,7 @@ import {
   getAttachmentsForAccount,
   getAttachmentsForMessage,
   upsertAttachment,
-} from "./attachments";
+} from "@/services/db/attachments";
 
 const mockInvoke = vi.mocked(invoke);
 

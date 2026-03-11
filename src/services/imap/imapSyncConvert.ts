@@ -46,7 +46,7 @@ export function imapMessageToParsedMessage(
     filename: att.filename,
     mimeType: att.mime_type,
     size: att.size,
-    gmailAttachmentId: att.part_id, // reuse field for IMAP part ID
+    attachmentId: att.part_id,
     contentId: att.content_id,
     isInline: att.is_inline,
   }));

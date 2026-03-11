@@ -7,7 +7,7 @@ import {
   updateLabelSortOrder,
   upsertLabel,
 } from "@/core/labels";
-import type { ProviderFolderResult } from "@/services/email/types";
+import type { ProviderFolderMutationResult } from "@/services/email/types";
 
 export interface Label {
   id: string;
@@ -95,7 +95,7 @@ export const useLabelStore: UseBoundStore<StoreApi<LabelState>> =
       name: string,
       color?: { textColor: string; backgroundColor: string },
     ) => {
-      const folder = await invoke<ProviderFolderResult>(
+      const folder = await invoke<ProviderFolderMutationResult>(
         "provider_create_folder",
         {
           accountId,
@@ -128,7 +128,7 @@ export const useLabelStore: UseBoundStore<StoreApi<LabelState>> =
       if (!newName) {
         throw new Error("Cannot rename folder without a name.");
       }
-      const folder = await invoke<ProviderFolderResult>(
+      const folder = await invoke<ProviderFolderMutationResult>(
         "provider_rename_folder",
         {
           accountId,

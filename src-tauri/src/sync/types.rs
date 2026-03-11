@@ -48,19 +48,26 @@ pub enum SyncStatus {
 /// Generic sync lifecycle event emitted for queued/manual sync runs.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SyncStatusDonePayload {
+    pub should_sync_calendar: bool,
+    pub new_inbox_message_ids: Vec<String>,
+    pub affected_thread_ids: Vec<String>,
+    pub criteria_smart_label_matches: Vec<AppliedSmartLabelMatch>,
+    pub notifications_to_queue: Vec<NotificationCandidate>,
+    pub ai_categorization_candidates: Vec<AICategorizationCandidate>,
+    pub ai_smart_label_threads: Vec<SmartLabelAIThread>,
+    pub ai_smart_label_rules: Vec<SmartLabelAIRule>,
+}
+
+/// Generic sync lifecycle event emitted for queued/manual sync runs.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SyncStatusEvent {
     pub account_id: String,
     pub provider: String,
     pub status: SyncStatus,
     pub error: Option<String>,
-    pub should_sync_calendar: Option<bool>,
-    pub new_inbox_message_ids: Option<Vec<String>>,
-    pub affected_thread_ids: Option<Vec<String>>,
-    pub criteria_smart_label_matches: Option<Vec<AppliedSmartLabelMatch>>,
-    pub notifications_to_queue: Option<Vec<NotificationCandidate>>,
-    pub ai_categorization_candidates: Option<Vec<AICategorizationCandidate>>,
-    pub ai_smart_label_threads: Option<Vec<SmartLabelAIThread>>,
-    pub ai_smart_label_rules: Option<Vec<SmartLabelAIRule>>,
+    pub result: Option<SyncStatusDonePayload>,
 }
 
 #[derive(Debug, Clone, Serialize)]

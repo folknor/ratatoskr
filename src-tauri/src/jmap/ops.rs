@@ -4,7 +4,8 @@ use jmap_client::mailbox::Role;
 
 use crate::provider::ops::ProviderOps;
 use crate::provider::types::{
-    AttachmentData, ProviderCtx, ProviderFolder, ProviderProfile, ProviderTestResult, SyncResult,
+    AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation, ProviderProfile,
+    ProviderTestResult, SyncResult,
 };
 
 use super::client::JmapClient;
@@ -370,7 +371,7 @@ impl ProviderOps for JmapOps {
         })
     }
 
-    async fn list_folders(&self, _ctx: &ProviderCtx<'_>) -> Result<Vec<ProviderFolder>, String> {
+    async fn list_folders(&self, _ctx: &ProviderCtx<'_>) -> Result<Vec<ProviderFolderEntry>, String> {
         let mailboxes = super::sync::fetch_all_mailboxes(&self.client).await?;
 
         let mut folders = Vec::new();
@@ -385,7 +386,7 @@ impl ProviderOps for JmapOps {
             };
             let mapping = map_mailbox_to_label(role_str, id, name);
 
-            folders.push(ProviderFolder {
+            folders.push(ProviderFolderEntry {
                 id: mapping.label_id,
                 name: mapping.label_name,
                 path: name.to_string(),
@@ -408,7 +409,7 @@ impl ProviderOps for JmapOps {
         parent_id: Option<&str>,
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
-    ) -> Result<ProviderFolder, String> {
+    ) -> Result<ProviderFolderMutation, String> {
         let mut mb = self
             .client
             .inner()
@@ -417,15 +418,13 @@ impl ProviderOps for JmapOps {
             .map_err(|e| format!("Mailbox/set create: {e}"))?;
 
         let id = mb.take_id();
-        Ok(ProviderFolder {
+        Ok(ProviderFolderMutation {
             id: format!("jmap-{id}"),
             name: name.to_string(),
             path: name.to_string(),
             folder_type: "user".to_string(),
             special_use: None,
             delimiter: Some("/".to_string()),
-            message_count: None,
-            unread_count: None,
             color_bg: None,
             color_fg: None,
         })
@@ -438,7 +437,7 @@ impl ProviderOps for JmapOps {
         new_name: &str,
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
-    ) -> Result<ProviderFolder, String> {
+    ) -> Result<ProviderFolderMutation, String> {
         let mailbox_id = resolve_mailbox_id(&self.client, folder_id).await?;
         self.client
             .inner()
@@ -446,15 +445,13 @@ impl ProviderOps for JmapOps {
             .await
             .map_err(|e| format!("Mailbox/set rename: {e}"))?;
 
-        Ok(ProviderFolder {
+        Ok(ProviderFolderMutation {
             id: folder_id.to_string(),
             name: new_name.to_string(),
             path: new_name.to_string(),
             folder_type: "user".to_string(),
             special_use: None,
             delimiter: Some("/".to_string()),
-            message_count: None,
-            unread_count: None,
             color_bg: None,
             color_fg: None,
         })

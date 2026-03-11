@@ -114,21 +114,21 @@ interface SyncStatusEvent {
   provider: string;
   status: "syncing" | "done" | "error";
   error?: string | null;
-  shouldSyncCalendar?: boolean | null;
-  newInboxMessageIds?: string[] | null;
-  affectedThreadIds?: string[] | null;
-  criteriaSmartLabelMatches?: { threadId: string; labelIds: string[] }[] | null;
-  notificationsToQueue?:
-    | {
-        threadId: string;
-        fromName?: string | null;
-        fromAddress?: string | null;
-        subject?: string | null;
-      }[]
-    | null;
-  aiCategorizationCandidates?: CategorizationCandidate[] | null;
-  aiSmartLabelThreads?: SmartLabelAIThread[] | null;
-  aiSmartLabelRules?: SmartLabelAIRule[] | null;
+  result?: {
+    shouldSyncCalendar: boolean;
+    newInboxMessageIds: string[];
+    affectedThreadIds: string[];
+    criteriaSmartLabelMatches: { threadId: string; labelIds: string[] }[];
+    notificationsToQueue: {
+      threadId: string;
+      fromName?: string | null;
+      fromAddress?: string | null;
+      subject?: string | null;
+    }[];
+    aiCategorizationCandidates: CategorizationCandidate[];
+    aiSmartLabelThreads: SmartLabelAIThread[];
+    aiSmartLabelRules: SmartLabelAIRule[];
+  } | null;
 }
 
 let syncListenersPromise: Promise<void> | null = null;
@@ -220,21 +220,32 @@ async function handleSyncStatusEvent(event: SyncStatusEvent): Promise<void> {
     return;
   }
 
+  const result = event.result ?? {
+    shouldSyncCalendar: false,
+    newInboxMessageIds: [],
+    affectedThreadIds: [],
+    criteriaSmartLabelMatches: [],
+    notificationsToQueue: [],
+    aiCategorizationCandidates: [],
+    aiSmartLabelThreads: [],
+    aiSmartLabelRules: [],
+  };
+
   await runPostSyncHooks({
     accountId: event.accountId,
     provider: event.provider,
-    newInboxEmailIds: event.newInboxMessageIds ?? [],
-    affectedThreadIds: event.affectedThreadIds ?? [],
-    criteriaSmartLabelMatches: event.criteriaSmartLabelMatches ?? [],
-    notificationsToQueue: event.notificationsToQueue ?? [],
-    aiCategorizationCandidates: event.aiCategorizationCandidates ?? [],
-    aiSmartLabelThreads: event.aiSmartLabelThreads ?? [],
-    aiSmartLabelRules: event.aiSmartLabelRules ?? [],
+    newInboxEmailIds: result.newInboxMessageIds,
+    affectedThreadIds: result.affectedThreadIds,
+    criteriaSmartLabelMatches: result.criteriaSmartLabelMatches,
+    notificationsToQueue: result.notificationsToQueue,
+    aiCategorizationCandidates: result.aiCategorizationCandidates,
+    aiSmartLabelThreads: result.aiSmartLabelThreads,
+    aiSmartLabelRules: result.aiSmartLabelRules,
   });
 
   statusCallback?.(event.accountId, "done");
 
-  if (event.shouldSyncCalendar === true) {
+  if (result.shouldSyncCalendar) {
     syncCalendarForAccount(event.accountId).catch((err) => {
       console.warn(
         `[syncManager] Calendar sync error for ${event.accountId}:`,

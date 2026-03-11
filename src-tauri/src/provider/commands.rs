@@ -11,11 +11,49 @@ use crate::jmap::client::JmapState;
 use crate::search::SearchState;
 use crate::sync::{self, SyncState};
 
+use super::ops::ProviderOps;
 use super::router::{get_ops, get_provider_type};
 use super::types::{
-    AttachmentData, AutoSyncResult, ProviderCtx, ProviderFolder, ProviderParsedMessage,
-    ProviderProfile, ProviderTestResult, SyncResult,
+    AttachmentData, AutoSyncResult, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
+    ProviderParsedMessage, ProviderProfile, ProviderTestResult, SyncResult,
 };
+
+#[allow(clippy::too_many_arguments)]
+async fn resolve_provider_command<'a>(
+    provider: Option<&str>,
+    account_id: &'a str,
+    db: &'a DbState,
+    gmail: &'a GmailState,
+    jmap: &'a JmapState,
+    graph: &'a GraphState,
+    body_store: &'a BodyStoreState,
+    inline_images: &'a InlineImageStoreState,
+    search: &'a SearchState,
+    app_handle: &'a AppHandle,
+) -> Result<(Box<dyn ProviderOps>, ProviderCtx<'a>), String> {
+    let provider = match provider {
+        Some(provider) => provider.to_string(),
+        None => get_provider_type(db, account_id).await?,
+    };
+    let ops = get_ops(
+        &provider,
+        account_id,
+        gmail,
+        jmap,
+        graph,
+        *gmail.encryption_key(),
+    )
+    .await?;
+    let ctx = ProviderCtx {
+        account_id,
+        db,
+        body_store,
+        inline_images,
+        search,
+        app_handle,
+    };
+    Ok((ops, ctx))
+}
 
 // ── Sync ────────────────────────────────────────────────────
 
@@ -34,23 +72,19 @@ pub(crate) async fn provider_sync_auto_for_provider(
     search: &SearchState,
     app_handle: &AppHandle,
 ) -> Result<AutoSyncResult, String> {
-    let ops = get_ops(
-        provider,
+    let (ops, ctx) = resolve_provider_command(
+        Some(provider),
         account_id,
+        db,
         gmail,
         jmap,
         graph,
-        *gmail.encryption_key(),
-    )
-    .await?;
-    let ctx = ProviderCtx {
-        account_id,
-        db,
         body_store,
         inline_images,
         search,
         app_handle,
-    };
+    )
+    .await?;
 
     let fallback_marker = if provider == "gmail_api" {
         Some("HISTORY_EXPIRED")
@@ -149,24 +183,19 @@ pub async fn provider_sync_initial(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.sync_initial(&ctx, days_back.unwrap_or(365)).await
 }
 
@@ -183,24 +212,19 @@ pub async fn provider_sync_delta(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<SyncResult, String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.sync_delta(&ctx, None).await
 }
 
@@ -260,24 +284,19 @@ pub async fn provider_archive(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.archive(&ctx, &thread_id).await
 }
 
@@ -295,24 +314,19 @@ pub async fn provider_trash(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.trash(&ctx, &thread_id).await
 }
 
@@ -330,24 +344,19 @@ pub async fn provider_permanent_delete(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.permanent_delete(&ctx, &thread_id).await
 }
 
@@ -366,24 +375,19 @@ pub async fn provider_mark_read(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.mark_read(&ctx, &thread_id, read).await
 }
 
@@ -402,24 +406,19 @@ pub async fn provider_star(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.star(&ctx, &thread_id, starred).await
 }
 
@@ -438,24 +437,19 @@ pub async fn provider_spam(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.spam(&ctx, &thread_id, is_spam).await
 }
 
@@ -474,24 +468,19 @@ pub async fn provider_move_to_folder(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.move_to_folder(&ctx, &thread_id, &folder_id).await
 }
 
@@ -510,24 +499,19 @@ pub async fn provider_add_tag(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.add_tag(&ctx, &thread_id, &tag_id).await
 }
 
@@ -546,24 +530,19 @@ pub async fn provider_remove_tag(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.remove_tag(&ctx, &thread_id, &tag_id).await
 }
 
@@ -584,24 +563,19 @@ pub async fn provider_send_email(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.send_email(&ctx, &raw_base64url, thread_id.as_deref())
         .await
 }
@@ -621,24 +595,19 @@ pub async fn provider_create_draft(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.create_draft(&ctx, &raw_base64url, thread_id.as_deref())
         .await
 }
@@ -659,24 +628,19 @@ pub async fn provider_update_draft(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.update_draft(&ctx, &draft_id, &raw_base64url, thread_id.as_deref())
         .await
 }
@@ -695,24 +659,19 @@ pub async fn provider_delete_draft(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.delete_draft(&ctx, &draft_id).await
 }
 
@@ -754,24 +713,19 @@ pub async fn provider_fetch_attachment(
     }
 
     // 3. Cache miss — fetch from provider
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     let result = ops
         .fetch_attachment(&ctx, &message_id, &attachment_id)
         .await?;
@@ -945,24 +899,19 @@ pub async fn provider_fetch_message(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<ProviderParsedMessage, String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.fetch_message(&ctx, &message_id).await
 }
 
@@ -980,24 +929,19 @@ pub async fn provider_fetch_raw_message(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.fetch_raw_message(&ctx, &message_id).await
 }
 
@@ -1016,24 +960,19 @@ pub async fn provider_test_connection(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<ProviderTestResult, String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     match ops.test_connection(&ctx).await {
         Ok(result) => Ok(result),
         Err(e) => Ok(ProviderTestResult {
@@ -1056,24 +995,19 @@ pub async fn provider_get_profile(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<ProviderProfile, String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.get_profile(&ctx).await
 }
 
@@ -1089,25 +1023,20 @@ pub async fn provider_list_folders(
     inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
-) -> Result<Vec<ProviderFolder>, String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+) -> Result<Vec<ProviderFolderEntry>, String> {
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.list_folders(&ctx).await
 }
 
@@ -1127,25 +1056,20 @@ pub async fn provider_create_folder(
     inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
-) -> Result<ProviderFolder, String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+) -> Result<ProviderFolderMutation, String> {
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.create_folder(
         &ctx,
         &name,
@@ -1172,25 +1096,20 @@ pub async fn provider_rename_folder(
     inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
     app_handle: AppHandle,
-) -> Result<ProviderFolder, String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+) -> Result<ProviderFolderMutation, String> {
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.rename_folder(
         &ctx,
         &folder_id,
@@ -1215,23 +1134,18 @@ pub async fn provider_delete_folder(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
-    let provider = get_provider_type(&db, &account_id).await?;
-    let ops = get_ops(
-        &provider,
+    let (ops, ctx) = resolve_provider_command(
+        None,
         &account_id,
+        &db,
         &gmail,
         &jmap,
         &graph,
-        *gmail.encryption_key(),
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
     )
     .await?;
-    let ctx = ProviderCtx {
-        account_id: &account_id,
-        db: &db,
-        body_store: &body_store,
-        inline_images: &inline_images,
-        search: &search,
-        app_handle: &app_handle,
-    };
     ops.delete_folder(&ctx, &folder_id).await
 }
