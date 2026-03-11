@@ -1,16 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ParsedMessage } from "../gmail/messageParser";
-import type { EmailFolder, EmailProvider, SyncResult } from "./types";
-
-interface ProviderTestResult {
-  success: boolean;
-  message: string;
-}
-
-interface ProviderProfile {
-  email: string;
-  name?: string;
-}
+import { RustBackedProviderBase } from "./rustBackedProvider";
+import type { EmailFolder, SyncResult } from "./types";
 
 interface ProviderAttachment {
   data: string;
@@ -31,19 +22,20 @@ interface ProviderFolder {
 /**
  * Thin IMAP adapter backed by unified Rust provider commands.
  */
-export class ImapSmtpProvider implements EmailProvider {
+export class ImapSmtpProvider extends RustBackedProviderBase {
   readonly accountId: string;
   readonly type = "imap" as const;
 
   constructor(accountId: string) {
+    super();
     this.accountId = accountId;
   }
 
-  clearConfigCache(): void {
+  override clearConfigCache(): void {
     // No-op: IMAP config loading now lives in Rust.
   }
 
-  async listFolders(): Promise<EmailFolder[]> {
+  override async listFolders(): Promise<EmailFolder[]> {
     const folders = await invoke<ProviderFolder[]>("provider_list_folders", {
       accountId: this.accountId,
     });
@@ -59,40 +51,7 @@ export class ImapSmtpProvider implements EmailProvider {
     }));
   }
 
-  async createFolder(name: string, parentPath?: string): Promise<EmailFolder> {
-    const folder = await invoke<ProviderFolder>("provider_create_folder", {
-      accountId: this.accountId,
-      name,
-      parentId: parentPath ?? null,
-    });
-    return {
-      id: folder.id,
-      name: folder.name,
-      path: folder.path,
-      type: folder.folderType === "system" ? "system" : "user",
-      specialUse: folder.specialUse ?? null,
-      delimiter: folder.delimiter ?? "/",
-      messageCount: folder.messageCount ?? 0,
-      unreadCount: folder.unreadCount ?? 0,
-    };
-  }
-
-  async deleteFolder(path: string): Promise<void> {
-    await invoke("provider_delete_folder", {
-      accountId: this.accountId,
-      folderId: path,
-    });
-  }
-
-  async renameFolder(path: string, newName: string): Promise<void> {
-    await invoke("provider_rename_folder", {
-      accountId: this.accountId,
-      folderId: path,
-      newName,
-    });
-  }
-
-  async initialSync(
+  override async initialSync(
     _daysBack: number,
     _onProgress?: (phase: string, current: number, total: number) => void,
   ): Promise<SyncResult> {
@@ -102,21 +61,21 @@ export class ImapSmtpProvider implements EmailProvider {
     );
   }
 
-  async deltaSync(_syncToken: string): Promise<SyncResult> {
+  override async deltaSync(_syncToken: string): Promise<SyncResult> {
     throw new Error(
       "IMAP sync is handled by the Rust sync engine via syncManager. " +
         "Do not call deltaSync() on ImapSmtpProvider directly.",
     );
   }
 
-  async fetchMessage(messageId: string): Promise<ParsedMessage> {
+  override async fetchMessage(messageId: string): Promise<ParsedMessage> {
     return invoke<ParsedMessage>("provider_fetch_message", {
       accountId: this.accountId,
       messageId,
     });
   }
 
-  async fetchAttachment(
+  override async fetchAttachment(
     messageId: string,
     attachmentId: string,
   ): Promise<{ data: string; size: number }> {
@@ -127,28 +86,31 @@ export class ImapSmtpProvider implements EmailProvider {
     });
   }
 
-  async fetchRawMessage(messageId: string): Promise<string> {
+  override async fetchRawMessage(messageId: string): Promise<string> {
     return invoke<string>("provider_fetch_raw_message", {
       accountId: this.accountId,
       messageId,
     });
   }
 
-  async archive(threadId: string, _messageIds: string[]): Promise<void> {
+  override async archive(
+    threadId: string,
+    _messageIds: string[],
+  ): Promise<void> {
     await invoke("provider_archive", {
       accountId: this.accountId,
       threadId,
     });
   }
 
-  async trash(threadId: string, _messageIds: string[]): Promise<void> {
+  override async trash(threadId: string, _messageIds: string[]): Promise<void> {
     await invoke("provider_trash", {
       accountId: this.accountId,
       threadId,
     });
   }
 
-  async permanentDelete(
+  override async permanentDelete(
     threadId: string,
     _messageIds: string[],
   ): Promise<void> {
@@ -158,7 +120,7 @@ export class ImapSmtpProvider implements EmailProvider {
     });
   }
 
-  async markRead(
+  override async markRead(
     threadId: string,
     _messageIds: string[],
     read: boolean,
@@ -170,7 +132,7 @@ export class ImapSmtpProvider implements EmailProvider {
     });
   }
 
-  async star(
+  override async star(
     threadId: string,
     _messageIds: string[],
     starred: boolean,
@@ -182,7 +144,7 @@ export class ImapSmtpProvider implements EmailProvider {
     });
   }
 
-  async spam(
+  override async spam(
     threadId: string,
     _messageIds: string[],
     isSpam: boolean,
@@ -194,7 +156,7 @@ export class ImapSmtpProvider implements EmailProvider {
     });
   }
 
-  async moveToFolder(
+  override async moveToFolder(
     threadId: string,
     _messageIds: string[],
     folderPath: string,
@@ -206,7 +168,7 @@ export class ImapSmtpProvider implements EmailProvider {
     });
   }
 
-  async addLabel(threadId: string, labelId: string): Promise<void> {
+  override async addLabel(threadId: string, labelId: string): Promise<void> {
     await invoke("provider_add_tag", {
       accountId: this.accountId,
       threadId,
@@ -214,7 +176,7 @@ export class ImapSmtpProvider implements EmailProvider {
     });
   }
 
-  async removeLabel(threadId: string, labelId: string): Promise<void> {
+  override async removeLabel(threadId: string, labelId: string): Promise<void> {
     await invoke("provider_remove_tag", {
       accountId: this.accountId,
       threadId,
@@ -222,7 +184,7 @@ export class ImapSmtpProvider implements EmailProvider {
     });
   }
 
-  async sendMessage(
+  override async sendMessage(
     rawBase64Url: string,
     threadId?: string,
   ): Promise<{ id: string }> {
@@ -234,7 +196,7 @@ export class ImapSmtpProvider implements EmailProvider {
     return { id };
   }
 
-  async createDraft(
+  override async createDraft(
     rawBase64Url: string,
     threadId?: string,
   ): Promise<{ draftId: string }> {
@@ -246,7 +208,7 @@ export class ImapSmtpProvider implements EmailProvider {
     return { draftId };
   }
 
-  async updateDraft(
+  override async updateDraft(
     draftId: string,
     rawBase64Url: string,
     threadId?: string,
@@ -260,22 +222,10 @@ export class ImapSmtpProvider implements EmailProvider {
     return { draftId: updatedDraftId };
   }
 
-  async deleteDraft(draftId: string): Promise<void> {
+  override async deleteDraft(draftId: string): Promise<void> {
     await invoke("provider_delete_draft", {
       accountId: this.accountId,
       draftId,
-    });
-  }
-
-  async testConnection(): Promise<{ success: boolean; message: string }> {
-    return invoke<ProviderTestResult>("provider_test_connection", {
-      accountId: this.accountId,
-    });
-  }
-
-  async getProfile(): Promise<{ email: string; name?: string | undefined }> {
-    return invoke<ProviderProfile>("provider_get_profile", {
-      accountId: this.accountId,
     });
   }
 }

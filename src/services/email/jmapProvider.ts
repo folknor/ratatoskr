@@ -1,11 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ParsedMessage } from "../gmail/messageParser";
-import type {
-  AccountProvider,
-  EmailFolder,
-  EmailProvider,
-  SyncResult,
-} from "./types";
+import { RustBackedProviderBase } from "./rustBackedProvider";
+import type { AccountProvider, EmailFolder, SyncResult } from "./types";
 
 interface JmapFolder {
   id: string;
@@ -17,39 +13,22 @@ interface JmapFolder {
   unreadCount: number;
 }
 
-interface ProviderFolderResult {
-  id: string;
-  name: string;
-  path: string;
-  folderType: string;
-  specialUse: string | null;
-}
-
-interface ProviderTestResult {
-  success: boolean;
-  message: string;
-}
-
-interface ProviderProfile {
-  email: string;
-  name?: string;
-}
-
 /**
  * EmailProvider adapter for JMAP accounts.
  * Delegates to Tauri jmap_* commands — Rust handles all protocol details.
  */
-export class JmapProvider implements EmailProvider {
+export class JmapProvider extends RustBackedProviderBase {
   readonly accountId: string;
   readonly type: AccountProvider = "jmap";
 
   constructor(accountId: string) {
+    super();
     this.accountId = accountId;
   }
 
   // ---- Folder/Label operations ----
 
-  async listFolders(): Promise<EmailFolder[]> {
+  override async listFolders(): Promise<EmailFolder[]> {
     const folders = await invoke<JmapFolder[]>("jmap_list_folders", {
       accountId: this.accountId,
     });
@@ -68,50 +47,9 @@ export class JmapProvider implements EmailProvider {
     }));
   }
 
-  async createFolder(name: string, parentPath?: string): Promise<EmailFolder> {
-    const folder = await invoke<ProviderFolderResult>(
-      "provider_create_folder",
-      {
-        accountId: this.accountId,
-        name,
-        parentId: parentPath ?? null,
-        textColor: null,
-        bgColor: null,
-      },
-    );
-
-    return {
-      id: folder.id,
-      name: folder.name,
-      path: folder.path,
-      type: folder.folderType === "system" ? "system" : "user",
-      specialUse: folder.specialUse,
-      delimiter: "/",
-      messageCount: 0,
-      unreadCount: 0,
-    };
-  }
-
-  async deleteFolder(path: string): Promise<void> {
-    await invoke("provider_delete_folder", {
-      accountId: this.accountId,
-      folderId: path,
-    });
-  }
-
-  async renameFolder(path: string, newName: string): Promise<void> {
-    await invoke("provider_rename_folder", {
-      accountId: this.accountId,
-      folderId: path,
-      newName,
-      textColor: null,
-      bgColor: null,
-    });
-  }
-
   // ---- Sync operations ----
 
-  async initialSync(
+  override async initialSync(
     daysBack: number,
     _onProgress?: (phase: string, current: number, total: number) => void,
   ): Promise<SyncResult> {
@@ -123,7 +61,7 @@ export class JmapProvider implements EmailProvider {
     return { messages: [] };
   }
 
-  async deltaSync(_syncToken: string): Promise<SyncResult> {
+  override async deltaSync(_syncToken: string): Promise<SyncResult> {
     const result = await invoke<{
       newInboxEmailIds: string[];
       affectedThreadIds: string[];
@@ -138,7 +76,7 @@ export class JmapProvider implements EmailProvider {
 
   // ---- Message operations ----
 
-  async fetchMessage(_messageId: string): Promise<ParsedMessage> {
+  override async fetchMessage(_messageId: string): Promise<ParsedMessage> {
     // JMAP sync writes bodies directly to the body store in Rust.
     // Per-message fetch is not needed; use body_store_get instead.
     throw new Error(
@@ -146,7 +84,7 @@ export class JmapProvider implements EmailProvider {
     );
   }
 
-  async fetchAttachment(
+  override async fetchAttachment(
     messageId: string,
     attachmentId: string,
   ): Promise<{ data: string; size: number }> {
@@ -157,23 +95,9 @@ export class JmapProvider implements EmailProvider {
     });
   }
 
-  async fetchRawMessage(_messageId: string): Promise<string> {
+  override async fetchRawMessage(_messageId: string): Promise<string> {
     throw new Error(
       "JMAP does not support raw message fetch in the current implementation.",
     );
-  }
-
-  // ---- Connection ----
-
-  async testConnection(): Promise<{ success: boolean; message: string }> {
-    return invoke<ProviderTestResult>("provider_test_connection", {
-      accountId: this.accountId,
-    });
-  }
-
-  async getProfile(): Promise<{ email: string; name?: string | undefined }> {
-    return invoke<ProviderProfile>("provider_get_profile", {
-      accountId: this.accountId,
-    });
   }
 }

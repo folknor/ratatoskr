@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ParsedMessage } from "../gmail/messageParser";
-import type { EmailFolder, EmailProvider, SyncResult } from "./types";
+import { RustBackedProviderBase } from "./rustBackedProvider";
+import type { EmailFolder, SyncResult } from "./types";
 
 /** Map Gmail system label IDs to IMAP special-use flags */
 const GMAIL_SPECIAL_USE: Record<string, string | null> = {
@@ -74,31 +75,25 @@ interface ProviderFolderResult {
   specialUse: string | null;
   colorBg: string | null;
   colorFg: string | null;
-}
-
-interface ProviderTestResult {
-  success: boolean;
-  message: string;
-}
-
-interface ProviderProfile {
-  email: string;
-  name?: string;
+  delimiter?: string | null;
+  messageCount?: number | null;
+  unreadCount?: number | null;
 }
 
 /**
  * EmailProvider adapter that delegates to Rust Gmail Tauri commands.
  * All operations invoke the corresponding `gmail_*` Tauri command.
  */
-export class GmailApiProvider implements EmailProvider {
+export class GmailApiProvider extends RustBackedProviderBase {
   readonly accountId: string;
   readonly type = "gmail_api" as const;
 
   constructor(accountId: string) {
+    super();
     this.accountId = accountId;
   }
 
-  async listFolders(): Promise<EmailFolder[]> {
+  override async listFolders(): Promise<EmailFolder[]> {
     const labels = await invoke<RustGmailLabel[]>("gmail_list_labels", {
       accountId: this.accountId,
     });
@@ -118,47 +113,7 @@ export class GmailApiProvider implements EmailProvider {
     }));
   }
 
-  async createFolder(name: string, _parentPath?: string): Promise<EmailFolder> {
-    const folder = await invoke<ProviderFolderResult>(
-      "provider_create_folder",
-      {
-        accountId: this.accountId,
-        name,
-        parentId: _parentPath ?? null,
-        textColor: null,
-        bgColor: null,
-      },
-    );
-    return {
-      id: folder.id,
-      name: folder.name,
-      path: folder.path,
-      type: folder.folderType === "system" ? "system" : "user",
-      specialUse: folder.specialUse,
-      delimiter: "/",
-      messageCount: 0,
-      unreadCount: 0,
-    };
-  }
-
-  async deleteFolder(path: string): Promise<void> {
-    await invoke<void>("provider_delete_folder", {
-      accountId: this.accountId,
-      folderId: path,
-    });
-  }
-
-  async renameFolder(path: string, newName: string): Promise<void> {
-    await invoke<ProviderFolderResult>("provider_rename_folder", {
-      accountId: this.accountId,
-      folderId: path,
-      newName,
-      textColor: null,
-      bgColor: null,
-    });
-  }
-
-  async initialSync(
+  override async initialSync(
     _daysBack: number,
     _onProgress?: (phase: string, current: number, total: number) => void,
   ): Promise<SyncResult> {
@@ -174,7 +129,7 @@ export class GmailApiProvider implements EmailProvider {
     };
   }
 
-  async deltaSync(syncToken: string): Promise<SyncResult> {
+  override async deltaSync(syncToken: string): Promise<SyncResult> {
     // Delta sync is handled by the existing sync.ts module.
     // This is a thin wrapper that returns the interface-compatible result.
     const allMessages: ParsedMessage[] = [];
@@ -215,14 +170,14 @@ export class GmailApiProvider implements EmailProvider {
     };
   }
 
-  async fetchMessage(messageId: string): Promise<ParsedMessage> {
+  override async fetchMessage(messageId: string): Promise<ParsedMessage> {
     return invoke<ParsedMessage>("gmail_get_parsed_message", {
       accountId: this.accountId,
       messageId,
     });
   }
 
-  async fetchAttachment(
+  override async fetchAttachment(
     messageId: string,
     attachmentId: string,
   ): Promise<{ data: string; size: number }> {
@@ -237,7 +192,7 @@ export class GmailApiProvider implements EmailProvider {
     return { data: resp.data, size: resp.size ?? 0 };
   }
 
-  async fetchRawMessage(messageId: string): Promise<string> {
+  override async fetchRawMessage(messageId: string): Promise<string> {
     // Gmail API with format=raw returns a { raw: string } field (base64url-encoded RFC822)
     const resp = await invoke<RustGmailMessage>("gmail_get_message", {
       accountId: this.accountId,
@@ -249,15 +204,16 @@ export class GmailApiProvider implements EmailProvider {
     return atob(base64);
   }
 
-  async testConnection(): Promise<{ success: boolean; message: string }> {
-    return invoke<ProviderTestResult>("provider_test_connection", {
-      accountId: this.accountId,
-    });
-  }
-
-  async getProfile(): Promise<{ email: string; name?: string | undefined }> {
-    return invoke<ProviderProfile>("provider_get_profile", {
-      accountId: this.accountId,
-    });
+  protected override mapFolder(folder: ProviderFolderResult): EmailFolder {
+    return {
+      id: folder.id,
+      name: folder.name,
+      path: folder.path,
+      type: folder.folderType === "system" ? "system" : "user",
+      specialUse: folder.specialUse,
+      delimiter: folder.delimiter ?? "/",
+      messageCount: folder.messageCount ?? 0,
+      unreadCount: folder.unreadCount ?? 0,
+    };
   }
 }
