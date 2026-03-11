@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { normalizeEmail } from "@/utils/emailUtils";
-import { getAllAccounts } from "../db/accounts";
+import { listAccountBasicInfo } from "../accounts/basicInfo";
 import { getSecureSetting, getSetting } from "../db/settings";
 
 /**
@@ -40,21 +40,19 @@ export async function getClientSecret(): Promise<string | undefined> {
  * Initialize Rust-side Gmail clients for all active Gmail API accounts on app startup.
  */
 export async function initializeClients(): Promise<void> {
-  const accounts = await getAllAccounts();
+  const accounts = await listAccountBasicInfo();
   const clientId = await getSetting("google_client_id");
   if (!clientId) return;
 
   for (const account of accounts) {
-    if (account.is_active && account.access_token && account.refresh_token) {
-      if (account.provider === "gmail_api") {
-        try {
-          await invoke<void>("gmail_init_client", { accountId: account.id });
-        } catch (err) {
-          console.error(
-            `Failed to init Rust Gmail client for ${account.id}:`,
-            err,
-          );
-        }
+    if (account.isActive && account.provider === "gmail_api") {
+      try {
+        await invoke<void>("gmail_init_client", { accountId: account.id });
+      } catch (err) {
+        console.error(
+          `Failed to init Rust Gmail client for ${account.id}:`,
+          err,
+        );
       }
     }
   }

@@ -1,9 +1,9 @@
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
+import { listAccountBasicInfo } from "../accounts/basicInfo";
 import {
   type BackgroundChecker,
   createBackgroundChecker,
 } from "../backgroundCheckers";
-import { getAllAccounts } from "../db/accounts";
 import {
   type DeliverySchedule,
   getBundleRules,
@@ -33,10 +33,10 @@ function isDeliveryTime(schedule: DeliverySchedule): boolean {
  * Check all delivery schedules and release held threads when delivery time arrives.
  */
 async function checkBundleDelivery(): Promise<void> {
-  const accounts = await getAllAccounts();
+  const accounts = await listAccountBasicInfo();
 
   for (const account of accounts) {
-    if (!account.is_active) continue;
+    if (!account.isActive) continue;
 
     const rules = await getBundleRules(account.id);
 

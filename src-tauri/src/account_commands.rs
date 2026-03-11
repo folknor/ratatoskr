@@ -127,6 +127,7 @@ pub struct CaldavConnectionInfo {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountBasicInfo {
+    pub id: String,
     pub email: String,
     pub provider: String,
     pub is_active: bool,
@@ -285,18 +286,42 @@ pub async fn account_get_basic_info(
 ) -> Result<Option<AccountBasicInfo>, String> {
     db.with_conn(move |conn| {
         conn.query_row(
-            "SELECT email, provider, is_active FROM accounts WHERE id = ?1",
+            "SELECT id, email, provider, is_active FROM accounts WHERE id = ?1",
             rusqlite::params![account_id],
             |row| {
                 Ok(AccountBasicInfo {
-                    email: row.get(0)?,
-                    provider: row.get(1)?,
-                    is_active: row.get::<_, i64>(2)? != 0,
+                    id: row.get(0)?,
+                    email: row.get(1)?,
+                    provider: row.get(2)?,
+                    is_active: row.get::<_, i64>(3)? != 0,
                 })
             },
         )
         .optional()
         .map_err(|e| format!("query account basic info: {e}"))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn account_list_basic_info(
+    db: State<'_, DbState>,
+) -> Result<Vec<AccountBasicInfo>, String> {
+    db.with_conn(move |conn| {
+        let mut stmt = conn
+            .prepare("SELECT id, email, provider, is_active FROM accounts ORDER BY created_at ASC")
+            .map_err(|e| format!("prepare account list: {e}"))?;
+        stmt.query_map([], |row| {
+            Ok(AccountBasicInfo {
+                id: row.get(0)?,
+                email: row.get(1)?,
+                provider: row.get(2)?,
+                is_active: row.get::<_, i64>(3)? != 0,
+            })
+        })
+        .map_err(|e| format!("query account list: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("collect account list: {e}"))
     })
     .await
 }
