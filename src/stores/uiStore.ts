@@ -72,7 +72,6 @@ interface UIState {
   markAsReadBehavior: "instant" | "2s" | "manual";
   sendAndArchive: boolean;
   inboxViewMode: "unified" | "split";
-  reduceMotion: boolean;
   showSyncStatusBar: boolean;
   setTheme: (theme: Theme) => void;
   setColorTheme: (theme: ColorThemeId) => void;
@@ -82,7 +81,6 @@ interface UIState {
   setMarkAsReadBehavior: (behavior: "instant" | "2s" | "manual") => void;
   setSendAndArchive: (enabled: boolean) => void;
   setInboxViewMode: (mode: "unified" | "split") => void;
-  setReduceMotion: (reduce: boolean) => void;
   setShowSyncStatusBar: (show: boolean) => void;
   // Sync state
   isOnline: boolean;

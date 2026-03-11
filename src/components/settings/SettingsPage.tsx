@@ -111,7 +111,6 @@ export function SettingsPage(): React.ReactNode {
   const [phishingSensitivity, setPhishingSensitivity] = useState<
     "low" | "default" | "high"
   >("default");
-  const [autostartEnabled, setAutostartEnabled] = useState(false);
   const [aiProvider, setAiProvider] = useState<
     "claude" | "openai" | "gemini" | "ollama" | "copilot"
   >("claude");
@@ -181,14 +180,6 @@ export function SettingsPage(): React.ReactNode {
         setPhishingSensitivity(snapshot.phishingSensitivity);
       }
       setSyncPeriodDays(snapshot.syncPeriodDays ?? "365");
-
-      // Load autostart state
-      try {
-        const { isEnabled } = await import("@tauri-apps/plugin-autostart");
-        setAutostartEnabled(await isEnabled());
-      } catch {
-        // autostart plugin may not be available in dev
-      }
 
       // Load AI settings
       const provider = snapshot.aiProvider;
@@ -341,20 +332,6 @@ export function SettingsPage(): React.ReactNode {
     }
   }, [accounts]);
 
-  const handleAutostartToggle = useCallback(async (): Promise<void> => {
-    try {
-      const { enable, disable } = await import("@tauri-apps/plugin-autostart");
-      if (autostartEnabled) {
-        await disable();
-      } else {
-        await enable();
-      }
-      setAutostartEnabled(!autostartEnabled);
-    } catch (err) {
-      console.error("Failed to toggle autostart:", err);
-    }
-  }, [autostartEnabled]);
-
   const handleRemoveAccount = useCallback(
     async (accountId: string): Promise<void> => {
       removeClient(accountId);
@@ -463,8 +440,6 @@ export function SettingsPage(): React.ReactNode {
                   setLanguageOverride={setLanguageOverride}
                   languageLoaded={languageLoaded}
                   systemLanguageName={systemLanguageName}
-                  autostartEnabled={autostartEnabled}
-                  handleAutostartToggle={handleAutostartToggle}
                   blockRemoteImages={blockRemoteImages}
                   setBlockRemoteImages={setBlockRemoteImages}
                   phishingDetectionEnabled={phishingDetectionEnabled}

@@ -566,14 +566,17 @@ pub async fn calendar_upsert_provider_events(
     events: Vec<CalendarEventInput>,
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
-        let calendar_id: Option<String> = conn
+        let calendar_id: String = conn
             .query_row(
                 "SELECT id FROM calendars WHERE account_id = ?1 AND remote_id = ?2",
                 params![account_id, calendar_remote_id],
                 |row| row.get(0),
             )
             .optional()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| {
+                format!("Calendar with remote_id '{calendar_remote_id}' not found for account '{account_id}'")
+            })?;
 
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
         for event in events {
@@ -982,25 +985,84 @@ async fn caldav_request_with_headers(
     Err(format!("CalDAV error: {status} {body}"))
 }
 
+/// Extract the namespace prefix (e.g. "d:", "D:", "ns0:") for a given namespace URI.
+/// Returns all matching prefixes plus "" (no prefix) as a fallback.
+fn xml_ns_prefixes_for<'a>(xml: &'a str, ns_uri: &str) -> Vec<std::borrow::Cow<'a, str>> {
+    let mut prefixes: Vec<std::borrow::Cow<'a, str>> = vec!["".into()];
+    let mut pos = 0;
+    while let Some(rel) = xml[pos..].find("xmlns") {
+        pos += rel + 5;
+        let rest = &xml[pos..];
+        // xmlns="NS" (default namespace) or xmlns:prefix="NS"
+        let (prefix_colon, value_start) = if rest.starts_with(':') {
+            let colon_end = rest[1..]
+                .find(['=', ' ', '\t', '\r', '\n', '>'])
+                .unwrap_or(rest.len());
+            let prefix = &rest[1..colon_end + 1];
+            let after = &rest[colon_end + 1..];
+            let after = after.trim_start_matches(['=', ' ', '\t']);
+            (Some(prefix), after)
+        } else if rest.starts_with('=') {
+            (None, &rest[1..])
+        } else {
+            continue;
+        };
+        let value_start = value_start.trim_start();
+        let (value, _) = if value_start.starts_with('"') {
+            let end = value_start[1..].find('"').unwrap_or(value_start.len());
+            (&value_start[1..end + 1], &value_start[end + 2..])
+        } else if value_start.starts_with('\'') {
+            let end = value_start[1..].find('\'').unwrap_or(value_start.len());
+            (&value_start[1..end + 1], &value_start[end + 2..])
+        } else {
+            continue;
+        };
+        if value == ns_uri {
+            if let Some(prefix) = prefix_colon {
+                prefixes.push(format!("{prefix}:").into());
+            }
+        }
+    }
+    prefixes
+}
+
 fn split_xml_responses(xml: &str) -> Vec<&str> {
+    // Find all namespace prefixes used for the DAV: namespace so we can match
+    // <response>, <d:response>, <D:response>, <ns0:response>, etc.
+    let dav_prefixes = xml_ns_prefixes_for(xml, "DAV:");
     let mut responses = Vec::new();
     let mut search_start = 0;
+    let xml_lower = xml.to_lowercase();
 
-    while let Some(start_rel) = xml[search_start..].find("<") {
+    while let Some(start_rel) = xml_lower[search_start..].find('<') {
         let start = search_start + start_rel;
-        if !(xml[start..].starts_with("<response") || xml[start..].starts_with("<d:response")) {
+        let after_lt = &xml_lower[start + 1..];
+
+        // Check if this tag is <PREFIX:response> or <response>
+        let matched_prefix: Option<&str> = dav_prefixes.iter().find_map(|prefix| {
+            let open = format!("{prefix}response");
+            if after_lt.starts_with(open.as_str()) {
+                let rest = &after_lt[open.len()..];
+                if matches!(rest.as_bytes().first(), Some(b'>') | Some(b' ') | Some(b'\t') | Some(b'\r') | Some(b'\n')) {
+                    Some(prefix.as_ref())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        });
+
+        let Some(prefix) = matched_prefix else {
             search_start = start + 1;
             continue;
-        }
-        let Some(end_rel) = xml[start..].find("</response>").or_else(|| xml[start..].find("</d:response>")) else {
+        };
+
+        let close = format!("</{prefix}response>");
+        let Some(end_rel) = xml_lower[start..].find(&close) else {
             break;
         };
-        let end = start + end_rel
-            + if xml[start + end_rel..].starts_with("</d:response>") {
-                "</d:response>".len()
-            } else {
-                "</response>".len()
-            };
+        let end = start + end_rel + close.len();
         responses.push(&xml[start..end]);
         search_start = end;
     }
@@ -1032,12 +1094,29 @@ fn extract_tag_value(xml: &str, tag_name: &str) -> Option<String> {
 }
 
 fn extract_first_element<'a>(xml: &'a str, tag_name: &str) -> Option<&'a str> {
-    for prefix in ["", "d:", "c:", "cs:", "cal:"] {
-        let open = format!("<{prefix}{tag_name}");
-        let close = format!("</{prefix}{tag_name}>");
-        if let Some(start) = xml.find(&open) {
-            let after_start = &xml[start..];
-            if let Some(end_rel) = after_start.find(&close) {
+    let xml_lower = xml.to_lowercase();
+    let tag_lower = tag_name.to_lowercase();
+    // Collect all namespace prefixes present in the document plus common fallbacks
+    let all_prefixes = {
+        let mut p: Vec<std::borrow::Cow<'_, str>> = Vec::new();
+        for ns in ["DAV:", "urn:ietf:params:xml:ns:caldav", "http://calendarserver.org/ns/", "http://apple.com/ns/ical/"] {
+            p.extend(xml_ns_prefixes_for(xml, ns));
+        }
+        // Deduplicate while preserving order
+        let mut seen = std::collections::HashSet::new();
+        p.retain(|x| seen.insert(x.to_string()));
+        p
+    };
+    for prefix in &all_prefixes {
+        let open = format!("<{prefix}{tag_lower}");
+        let close = format!("</{prefix}{tag_lower}>");
+        if let Some(start) = xml_lower.find(&open) {
+            // Verify the character after the tag name is a delimiter (not part of a longer name)
+            let after_name = &xml_lower[start + open.len()..];
+            if !matches!(after_name.as_bytes().first(), Some(b'>') | Some(b' ') | Some(b'\t') | Some(b'\r') | Some(b'\n')) {
+                continue;
+            }
+            if let Some(end_rel) = xml_lower[start..].find(&close) {
                 let end = start + end_rel + close.len();
                 return Some(&xml[start..end]);
             }
@@ -1466,7 +1545,6 @@ async fn google_calendar_execute_with_retry(
         }
 
         let response = request
-            .header("Authorization", format!("Bearer {access_token}"))
             .send()
             .await
             .map_err(|e| format!("Google Calendar request failed: {e}"))?;
@@ -1524,7 +1602,9 @@ fn map_google_event(event: GoogleCalendarEvent) -> Result<CalendarEventDto, Stri
             .map_err(|e| format!("Invalid Google Calendar start date: {e}"))?
             .and_hms_opt(0, 0, 0)
             .ok_or_else(|| "Invalid all-day start time".to_string())?
-            .and_utc()
+            .and_local_timezone(chrono::Local)
+            .single()
+            .ok_or_else(|| "Ambiguous all-day start time (DST transition)".to_string())?
             .timestamp()
     } else {
         return Err("Google Calendar event missing start".to_string());
@@ -1539,7 +1619,9 @@ fn map_google_event(event: GoogleCalendarEvent) -> Result<CalendarEventDto, Stri
             .map_err(|e| format!("Invalid Google Calendar end date: {e}"))?
             .and_hms_opt(23, 59, 59)
             .ok_or_else(|| "Invalid all-day end time".to_string())?
-            .and_utc()
+            .and_local_timezone(chrono::Local)
+            .single()
+            .ok_or_else(|| "Ambiguous all-day end time (DST transition)".to_string())?
             .timestamp()
     } else {
         return Err("Google Calendar event missing end".to_string());

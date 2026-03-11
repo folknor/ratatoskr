@@ -14,7 +14,6 @@ export interface UiBootstrapSnapshot {
   fontSize: string | null;
   colorTheme: string | null;
   inboxViewMode: string | null;
-  reduceMotion: boolean;
   showSyncStatus: boolean;
   taskSidebarVisible: boolean;
   sidebarNavConfig: string | null;

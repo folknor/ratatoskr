@@ -104,7 +104,6 @@ export default function App(): React.ReactNode {
   const theme = useUIPreferencesStore((s) => s.theme);
   const fontScale = useUIPreferencesStore((s) => s.fontScale);
   const colorTheme = useUIPreferencesStore((s) => s.colorTheme);
-  const reduceMotion = useUIPreferencesStore((s) => s.reduceMotion);
   const showSyncStatusBar = useUIPreferencesStore((s) => s.showSyncStatusBar);
   const sidebarCollapsed = useUILayoutStore((s) => s.sidebarCollapsed);
   const [showAddAccount, setShowAddAccount] = useState(false);
@@ -352,11 +351,6 @@ export default function App(): React.ReactNode {
           prefs.setInboxViewMode(savedViewMode);
         }
 
-        // Restore reduce motion preference
-        if (uiSnapshot.reduceMotion) {
-          prefs.setReduceMotion(true);
-        }
-
         // Restore show sync status bar preference
         if (!uiSnapshot.showSyncStatus) {
           prefs.setShowSyncStatusBar(false);
@@ -574,12 +568,6 @@ export default function App(): React.ReactNode {
     );
     root.classList.add(`font-scale-${fontScale}`);
   }, [fontScale]);
-
-  // Sync reduce-motion class to <html> element
-  useEffect((): void => {
-    const root = document.documentElement;
-    root.classList.toggle("reduce-motion", reduceMotion);
-  }, [reduceMotion]);
 
   // Apply color theme CSS custom properties to <html>
   useEffect((): (() => void) | undefined => {

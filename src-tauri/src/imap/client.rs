@@ -49,6 +49,15 @@ pub async fn list_folders(session: &mut ImapSession) -> Result<Vec<ImapFolder>, 
             .map(|(_, last)| last.to_string())
             .unwrap_or_else(|| path.clone());
 
+        // Skip non-selectable container folders (e.g. [Gmail], [Google Mail])
+        if name
+            .attributes()
+            .iter()
+            .any(|a| matches!(a, async_imap::types::NameAttribute::NoSelect))
+        {
+            continue;
+        }
+
         // Detect special-use from attributes (RFC 6154)
         let special_use = detect_special_use(name);
 

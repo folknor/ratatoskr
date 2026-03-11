@@ -14,6 +14,32 @@ use crate::smtp;
 use super::client as imap_client;
 use super::connection::connect;
 
+/// Map an IMAP folder path + special-use flag to a canonical label ID.
+///
+/// Mirrors the old TS `mapFolderToLabel` logic:
+/// system folders get well-known IDs (INBOX, SENT, …), user folders get `folder-{path}`.
+fn canonical_folder_id(path: &str, special_use: Option<&str>) -> String {
+    let canonical = match special_use {
+        Some("\\Inbox") => Some("INBOX"),
+        Some("\\Sent") => Some("SENT"),
+        Some("\\Trash") => Some("TRASH"),
+        Some("\\Drafts") => Some("DRAFT"),
+        Some("\\Junk") => Some("SPAM"),
+        Some("\\Archive") | Some("\\All") => Some("ARCHIVE"),
+        Some("\\Flagged") => Some("STARRED"),
+        _ => None,
+    };
+    // Also detect by well-known path name as a fallback
+    let by_name = match path.to_lowercase().as_str() {
+        "inbox" => Some("INBOX"),
+        _ => None,
+    };
+    canonical
+        .or(by_name)
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("folder-{path}"))
+}
+
 /// Generate a short random hex string for pseudo-IDs.
 fn random_hex8() -> String {
     let mut buf = [0u8; 4];
@@ -770,21 +796,25 @@ impl ProviderOps for ImapOps {
 
         Ok(folders
             .into_iter()
-            .map(|f| ProviderFolder {
-                id: f.path.clone(),
-                name: f.name,
-                path: f.path,
-                folder_type: if f.special_use.is_some() {
-                    "system".to_string()
-                } else {
-                    "user".to_string()
-                },
-                special_use: f.special_use,
-                delimiter: Some(f.delimiter),
-                message_count: Some(f.exists),
-                unread_count: Some(f.unseen),
-                color_bg: None,
-                color_fg: None,
+            .map(|f| {
+                let id = canonical_folder_id(&f.path, f.special_use.as_deref());
+                let special_use = f.special_use;
+                ProviderFolder {
+                    id,
+                    name: f.name,
+                    path: f.path,
+                    folder_type: if special_use.is_some() {
+                        "system".to_string()
+                    } else {
+                        "user".to_string()
+                    },
+                    special_use,
+                    delimiter: Some(f.delimiter),
+                    message_count: Some(f.exists),
+                    unread_count: Some(f.unseen),
+                    color_bg: None,
+                    color_fg: None,
+                }
             })
             .collect())
     }

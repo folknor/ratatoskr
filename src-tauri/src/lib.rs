@@ -4,7 +4,6 @@ use tauri::{
     menu::{Menu, MenuItem},
     tray::{TrayIconBuilder, TrayIconId},
 };
-use tauri_plugin_autostart::MacosLauncher;
 
 mod account_commands;
 mod ai_commands;
@@ -94,10 +93,6 @@ pub fn run() {
             // Forward args for deep linking
             _ = app.emit("single-instance-args", argv);
         }))
-        .plugin(tauri_plugin_autostart::init(
-            MacosLauncher::LaunchAgent,
-            Some(vec!["--hidden"]),
-        ))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
@@ -709,12 +704,10 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Minimize to tray on close instead of quitting (main window only)
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event
+            if let tauri::WindowEvent::CloseRequested { .. } = event
                 && window.label() == "main"
             {
-                _ = window.hide();
-                api.prevent_close();
+                window.app_handle().exit(0);
             }
         })
         .run(tauri::generate_context!())

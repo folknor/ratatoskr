@@ -118,6 +118,9 @@ async fn run_sync_queue(app: AppHandle) {
                 }
                 return;
             }
+            // Items were enqueued between take_pending_batch and finish_if_idle.
+            // Yield to avoid a tight spin while we wait for the next batch.
+            tokio::task::yield_now().await;
             continue;
         }
 

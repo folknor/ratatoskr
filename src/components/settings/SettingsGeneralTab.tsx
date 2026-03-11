@@ -21,8 +21,6 @@ export interface SettingsGeneralTabProps {
   setLanguageOverride: (val: string | null) => void;
   languageLoaded: boolean;
   systemLanguageName: string;
-  autostartEnabled: boolean;
-  handleAutostartToggle: () => Promise<void>;
   blockRemoteImages: boolean;
   setBlockRemoteImages: (val: boolean) => void;
   phishingDetectionEnabled: boolean;
@@ -42,8 +40,6 @@ export function SettingsGeneralTab({
   setLanguageOverride,
   languageLoaded,
   systemLanguageName,
-  autostartEnabled,
-  handleAutostartToggle,
   blockRemoteImages,
   setBlockRemoteImages,
   phishingDetectionEnabled,
@@ -76,9 +72,6 @@ export function SettingsGeneralTab({
   const setShowSyncStatusBar = useUIPreferencesStore(
     (s) => s.setShowSyncStatusBar,
   );
-  const reduceMotion = useUIPreferencesStore((s) => s.reduceMotion);
-  const setReduceMotion = useUIPreferencesStore((s) => s.setReduceMotion);
-
   return (
     <>
       <Section title={t("language")}>
@@ -226,24 +219,9 @@ export function SettingsGeneralTab({
           checked={showSyncStatusBar}
           onToggle={() => setShowSyncStatusBar(!showSyncStatusBar)}
         />
-        <ToggleRow
-          label={t("reduceMotion")}
-          description={t("reduceMotionDescription")}
-          checked={reduceMotion}
-          onToggle={() => setReduceMotion(!reduceMotion)}
-        />
       </Section>
 
       <SidebarNavEditor />
-
-      <Section title={t("startup")}>
-        <ToggleRow
-          label={t("launchAtLogin")}
-          description={t("launchAtLoginDescription")}
-          checked={autostartEnabled}
-          onToggle={handleAutostartToggle}
-        />
-      </Section>
 
       <Section title={t("privacySecurity")}>
         <ToggleRow

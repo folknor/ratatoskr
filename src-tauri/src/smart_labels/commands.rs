@@ -167,9 +167,13 @@ pub(crate) async fn smart_labels_prepare_ai_remainder_impl(
         return Ok((Vec::new(), Vec::new()));
     }
 
+    // Fetch thread snippets so AI gets ~100-char previews, not full body text
+    let thread_ids: Vec<String> = messages.iter().map(|m| m.thread_id.clone()).collect();
+    let snippets = load_thread_snippets(db, account_id, &thread_ids).await?;
+
     let pre_applied_matches = pre_applied_matches.to_vec();
     let prepared = tokio::task::spawn_blocking(move || {
-        prepare_ai_remainder(messages, rules, &pre_applied_matches)
+        prepare_ai_remainder(messages, rules, &pre_applied_matches, snippets)
     })
     .await
     .map_err(|e| format!("spawn_blocking: {e}"))?;
@@ -430,10 +434,60 @@ fn evaluate_criteria_matches(
         .collect()
 }
 
+async fn load_thread_snippets(
+    db: &DbState,
+    account_id: &str,
+    thread_ids: &[String],
+) -> Result<HashMap<String, String>, String> {
+    if thread_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let account_id = account_id.to_string();
+    let ids = thread_ids.to_vec();
+    db.with_conn(move |conn| {
+        let mut map = HashMap::new();
+        for chunk in ids.chunks(500) {
+            let placeholders: String = chunk
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("?{}", i + 2))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT id, snippet FROM threads WHERE account_id = ?1 AND id IN ({placeholders})"
+            );
+            let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+            let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+            params.push(Box::new(account_id.clone()));
+            for id in chunk {
+                params.push(Box::new(id.clone()));
+            }
+            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                params.iter().map(|p| p.as_ref()).collect();
+            let rows = stmt
+                .query_map(param_refs.as_slice(), |row| {
+                    let id: String = row.get(0)?;
+                    let snippet: Option<String> = row.get(1)?;
+                    Ok((id, snippet))
+                })
+                .map_err(|e| e.to_string())?;
+            for row in rows {
+                let (id, snippet) = row.map_err(|e| e.to_string())?;
+                if let Some(s) = snippet {
+                    map.insert(id, s);
+                }
+            }
+        }
+        Ok(map)
+    })
+    .await
+}
+
 fn prepare_ai_remainder(
     messages: Vec<FilterableMessage>,
     rules: Vec<EnabledSmartLabelRule>,
     pre_applied_matches: &[AppliedSmartLabelMatch],
+    thread_snippets: HashMap<String, String>,
 ) -> (Vec<SmartLabelAIThread>, Vec<SmartLabelAIRule>) {
     let mut thread_map: HashMap<String, FilterableMessage> = HashMap::new();
     for message in messages {
@@ -489,9 +543,12 @@ fn prepare_ai_remainder(
             }
 
             Some(SmartLabelAIThread {
-                id: thread_id,
+                id: thread_id.clone(),
                 subject: message.subject.unwrap_or_default(),
-                snippet: message.body_text.unwrap_or_default(),
+                snippet: thread_snippets
+                    .get(&thread_id)
+                    .cloned()
+                    .unwrap_or_default(),
                 from_address: message.from_address.unwrap_or_default(),
             })
         })

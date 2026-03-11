@@ -19,7 +19,6 @@ interface UIPreferencesState {
   markAsReadBehavior: MarkAsReadBehavior;
   sendAndArchive: boolean;
   inboxViewMode: InboxViewMode;
-  reduceMotion: boolean;
   showSyncStatusBar: boolean;
   setTheme: (theme: Theme) => void;
   setColorTheme: (theme: ColorThemeId) => void;
@@ -29,7 +28,6 @@ interface UIPreferencesState {
   setMarkAsReadBehavior: (behavior: MarkAsReadBehavior) => void;
   setSendAndArchive: (enabled: boolean) => void;
   setInboxViewMode: (mode: InboxViewMode) => void;
-  setReduceMotion: (reduce: boolean) => void;
   setShowSyncStatusBar: (show: boolean) => void;
 }
 
@@ -44,7 +42,6 @@ export const useUIPreferencesStore: UseBoundStore<
   markAsReadBehavior: "instant",
   sendAndArchive: false,
   inboxViewMode: "unified",
-  reduceMotion: false,
   showSyncStatusBar: true,
 
   setTheme: (theme: Theme) => set({ theme }),
@@ -75,10 +72,6 @@ export const useUIPreferencesStore: UseBoundStore<
   setInboxViewMode: (inboxViewMode: InboxViewMode) => {
     persistSetting("inbox_view_mode", inboxViewMode);
     set({ inboxViewMode });
-  },
-  setReduceMotion: (reduceMotion: boolean) => {
-    persistSetting("reduce_motion", String(reduceMotion));
-    set({ reduceMotion });
   },
   setShowSyncStatusBar: (showSyncStatusBar: boolean) => {
     persistSetting("show_sync_status", String(showSyncStatusBar));

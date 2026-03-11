@@ -226,14 +226,11 @@ export function Composer(): React.ReactNode {
 
     // Get undo send delay
     const delaySetting = await getSetting("undo_send_delay_seconds");
-    const delay = parseInt(delaySetting ?? "5", 10) * 1000;
+    const delaySeconds = parseInt(delaySetting ?? "5", 10);
+    const delay = delaySeconds * 1000;
     const currentDraftId = state.draftId;
 
-    // Show undo send UI (pass delay in seconds for the countdown animation)
-    const delaySeconds = parseInt(delaySetting ?? "5", 10);
-    state.setUndoSendVisible(true, delaySeconds);
-
-    const timer = setTimeout(async () => {
+    const doSend = async (): Promise<void> => {
       try {
         await sendEmail(activeAccountId, raw, state.threadId ?? undefined);
 
@@ -265,6 +262,19 @@ export function Composer(): React.ReactNode {
         useComposerStore.getState().setUndoSendVisible(false);
         sendingRef.current = false;
       }
+    };
+
+    if (delay === 0) {
+      closeComposer();
+      await doSend();
+      return;
+    }
+
+    // Show undo send UI (pass delay in seconds for the countdown animation)
+    state.setUndoSendVisible(true, delaySeconds);
+
+    const timer = setTimeout(() => {
+      void doSend();
     }, delay);
 
     state.setUndoSendTimer(timer);

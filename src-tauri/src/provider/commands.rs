@@ -95,7 +95,10 @@ pub(crate) async fn provider_sync_auto_impl(
                     fell_back_to_initial: false,
                 });
             }
-            Err(err) if should_fallback_to_initial(&err, fallback_marker) => {
+            Err(err)
+                if should_fallback_to_initial(&err, fallback_marker)
+                    || err == "JMAP_NO_STATE" =>
+            {
                 ops.sync_initial(&ctx, sync_days).await?;
                 return Ok(AutoSyncResult {
                     new_inbox_message_ids: Vec::new(),
@@ -109,9 +112,16 @@ pub(crate) async fn provider_sync_auto_impl(
     }
 
     ops.sync_initial(&ctx, sync_days).await?;
+    // IMAP initial sync triggers AI categorization via a sentinel ID,
+    // matching old TS behaviour where storedCount > 0 gated categorizeNewThreads.
+    let affected_thread_ids = if provider == "imap" {
+        vec!["_initial_sync_completed".to_string()]
+    } else {
+        Vec::new()
+    };
     Ok(AutoSyncResult {
         new_inbox_message_ids: Vec::new(),
-        affected_thread_ids: Vec::new(),
+        affected_thread_ids,
         was_delta: false,
         fell_back_to_initial: false,
     })

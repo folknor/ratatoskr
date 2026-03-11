@@ -36,9 +36,6 @@
   "inboxViewMode": "Inbox view mode",
   "viewModeUnified": "Unified",
   "viewModeSplit": "Split (Categories)",
-  "reduceMotion": "Reduce motion",
-  "reduceMotionDescription": "Disable animated background effects (fixes flickering on some GPUs)",
-
   "sidebar": "Sidebar",
   "moveUp": "Move up",
   "moveDown": "Move down",
@@ -46,10 +43,6 @@
   "hide": "Hide",
   "show": "Show",
   "resetToDefaults": "Reset to defaults",
-
-  "startup": "Startup",
-  "launchAtLogin": "Launch at login",
-  "launchAtLoginDescription": "Start Ratatoskr automatically when you log in (minimized to tray)",
 
   "privacySecurity": "Privacy & Security",
   "blockRemoteImages": "Block remote images",
@@ -86,6 +79,7 @@
 
   "sending": "Sending",
   "undoSendDelay": "Undo send delay",
+  "delayNone": "None (send immediately)",
   "delay5s": "5 seconds",
   "delay10s": "10 seconds",
   "delay30s": "30 seconds",

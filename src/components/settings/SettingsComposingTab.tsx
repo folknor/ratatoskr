@@ -37,6 +37,7 @@ export function SettingsComposingTab({
             }}
             className="w-48 bg-bg-tertiary text-text-primary text-sm px-3 py-1.5 rounded-md border border-border-primary focus:border-accent outline-none"
           >
+            <option value="0">{t("delayNone")}</option>
             <option value="5">{t("delay5s")}</option>
             <option value="10">{t("delay10s")}</option>
             <option value="30">{t("delay30s")}</option>
