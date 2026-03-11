@@ -1,16 +1,10 @@
+import { invoke } from "@tauri-apps/api/core";
 import { Calendar, Mail } from "lucide-react";
 import type React from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "@/components/ui/Modal";
-import {
-  getClientId,
-  getClientSecret,
-  insertAccount,
-  startOAuthFlow,
-} from "@/core/accounts";
 import { useAccountStore } from "@/stores/accountStore";
-import { getCurrentUnixTimestamp } from "@/utils/timestamp";
 import { AddCalDavAccount } from "./AddCalDavAccount";
 import { AddGraphAccount } from "./AddGraphAccount";
 import { AddImapAccount } from "./AddImapAccount";
@@ -19,6 +13,15 @@ import { SetupClientId } from "./SetupClientId";
 interface AddAccountProps {
   onClose: () => void;
   onSuccess: () => void;
+}
+
+interface GmailAccountResult {
+  id: string;
+  email: string;
+  displayName: string;
+  avatarUrl: string;
+  isActive: boolean;
+  provider: string;
 }
 
 type View = "select-provider" | "gmail" | "imap" | "caldav" | "graph";
@@ -41,31 +44,18 @@ export function AddAccount({
     setError(null);
 
     try {
-      const clientId = await getClientId();
-      const clientSecret = await getClientSecret();
       setStatus("authenticating");
-
-      const { tokens, userInfo } = await startOAuthFlow(clientId, clientSecret);
-
-      const accountId = crypto.randomUUID();
-      const expiresAt = getCurrentUnixTimestamp() + tokens.expires_in;
-
-      await insertAccount({
-        id: accountId,
-        email: userInfo.email,
-        displayName: userInfo.name,
-        avatarUrl: userInfo.picture,
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token ?? "",
-        tokenExpiresAt: expiresAt,
-      });
+      const account = await invoke<GmailAccountResult>(
+        "account_create_gmail_via_oauth",
+      );
 
       addAccount({
-        id: accountId,
-        email: userInfo.email,
-        displayName: userInfo.name,
-        avatarUrl: userInfo.picture,
-        isActive: true,
+        id: account.id,
+        email: account.email,
+        displayName: account.displayName,
+        avatarUrl: account.avatarUrl,
+        isActive: account.isActive,
+        provider: account.provider,
       });
 
       onSuccess();

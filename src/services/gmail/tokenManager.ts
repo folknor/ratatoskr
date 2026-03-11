@@ -1,13 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { normalizeEmail } from "@/utils/emailUtils";
-import { getCurrentUnixTimestamp } from "@/utils/timestamp";
-import {
-  getAccount,
-  getAllAccounts,
-  updateAccountAllTokens,
-} from "../db/accounts";
+import { getAllAccounts } from "../db/accounts";
 import { getSecureSetting, getSetting } from "../db/settings";
-import { startOAuthFlow } from "./auth";
 
 /**
  * Remove a client from cache (e.g., on account removal or re-auth).
@@ -74,43 +68,8 @@ export async function reauthorizeAccount(
   accountId: string,
   expectedEmail: string,
 ): Promise<void> {
-  const account = await getAccount(accountId);
-  if (!account) throw new Error(`Account ${accountId} not found`);
-
-  const clientId = await getClientId();
-  const clientSecret = await getClientSecret();
-
-  const { tokens, userInfo } = await startOAuthFlow(clientId, clientSecret);
-
-  if (normalizeEmail(userInfo.email) !== normalizeEmail(expectedEmail)) {
-    throw new Error(
-      `Signed in as ${userInfo.email}, but expected ${expectedEmail}. Please sign in with the correct account.`,
-    );
-  }
-
-  if (!tokens.refresh_token) {
-    throw new Error(
-      "Google did not return a refresh token. Please revoke app access at https://myaccount.google.com/permissions and try again.",
-    );
-  }
-
-  const expiresAt = getCurrentUnixTimestamp() + tokens.expires_in;
-  await updateAccountAllTokens(
+  await invoke("account_reauthorize_gmail", {
     accountId,
-    tokens.access_token,
-    tokens.refresh_token,
-    expiresAt,
-  );
-
-  // Re-init Rust-side client (reads fresh tokens from DB)
-  try {
-    await invoke<void>("gmail_remove_client", { accountId });
-  } catch {
-    // May not have been initialized yet
-  }
-  try {
-    await invoke<void>("gmail_init_client", { accountId });
-  } catch (err) {
-    console.error(`Failed to re-init Rust Gmail client for ${accountId}:`, err);
-  }
+    expectedEmail: normalizeEmail(expectedEmail),
+  });
 }

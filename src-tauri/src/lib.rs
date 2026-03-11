@@ -6,6 +6,7 @@ use tauri::{
 };
 use tauri_plugin_autostart::MacosLauncher;
 
+mod account_commands;
 mod attachment_cache;
 mod body_store;
 mod categorization;
@@ -105,6 +106,8 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_os::init())
         .invoke_handler(tauri::generate_handler![
+            account_commands::account_create_gmail_via_oauth,
+            account_commands::account_reauthorize_gmail,
             oauth::start_oauth_server,
             oauth::oauth_exchange_token,
             oauth::oauth_refresh_token,
