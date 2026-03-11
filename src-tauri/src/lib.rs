@@ -23,6 +23,7 @@ mod jmap;
 mod oauth;
 mod provider;
 mod search;
+mod smart_labels;
 mod smtp;
 mod sync;
 mod threading;
@@ -400,6 +401,7 @@ pub fn run() {
             // Filter engine (Phase 6)
             filters::commands::filters_evaluate,
             filters::commands::filters_apply_to_new_message_ids,
+            smart_labels::commands::smart_labels_apply_criteria_to_new_message_ids,
             // JWZ threading (Phase 6)
             threading::commands::threading_build_threads,
             threading::commands::threading_update_threads,

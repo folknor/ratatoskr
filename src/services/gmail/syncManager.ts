@@ -36,17 +36,30 @@ import { applySmartLabelsToNewMessageIds } from "@/services/smartLabels/smartLab
  * Called after every successful sync (Gmail, JMAP, Graph, IMAP).
  * Notifications are only dispatched on delta syncs (`isDelta = true`).
  */
-async function runPostSyncHooks(
-  accountId: string,
-  newInboxEmailIds: string[],
-  affectedThreadIds: string[],
-  isDelta: boolean,
-): Promise<void> {
+interface PostSyncHooksInput {
+  accountId: string;
+  newInboxEmailIds: string[];
+  affectedThreadIds: string[];
+  isDelta: boolean;
+  criteriaSmartLabelMatches?: { threadId: string; labelIds: string[] }[];
+}
+
+async function runPostSyncHooks(input: PostSyncHooksInput): Promise<void> {
+  const {
+    accountId,
+    newInboxEmailIds,
+    affectedThreadIds,
+    isDelta,
+    criteriaSmartLabelMatches = [],
+  } = input;
+
   if (newInboxEmailIds.length > 0) {
     // Smart labels (fire-and-forget)
-    applySmartLabelsToNewMessageIds(accountId, newInboxEmailIds).catch((err) =>
-      console.error("[syncManager] Smart label error:", err),
-    );
+    applySmartLabelsToNewMessageIds(
+      accountId,
+      newInboxEmailIds,
+      criteriaSmartLabelMatches,
+    ).catch((err) => console.error("[syncManager] Smart label error:", err));
 
     // Notifications — only on delta sync (not initial)
     if (isDelta) {
@@ -137,6 +150,7 @@ interface SyncStatusEvent {
   newInboxMessageIds?: string[] | null;
   affectedThreadIds?: string[] | null;
   isDelta?: boolean | null;
+  criteriaSmartLabelMatches?: { threadId: string; labelIds: string[] }[] | null;
 }
 
 let syncListenersPromise: Promise<void> | null = null;
@@ -232,12 +246,13 @@ async function handleSyncStatusEvent(event: SyncStatusEvent): Promise<void> {
     return;
   }
 
-  await runPostSyncHooks(
-    event.accountId,
-    event.newInboxMessageIds ?? [],
-    event.affectedThreadIds ?? [],
-    event.isDelta === true,
-  );
+  await runPostSyncHooks({
+    accountId: event.accountId,
+    newInboxEmailIds: event.newInboxMessageIds ?? [],
+    affectedThreadIds: event.affectedThreadIds ?? [],
+    isDelta: event.isDelta === true,
+    criteriaSmartLabelMatches: event.criteriaSmartLabelMatches ?? [],
+  });
 
   statusCallback?.(event.accountId, "done");
 

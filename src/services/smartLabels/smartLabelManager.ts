@@ -11,9 +11,14 @@ import { matchSmartLabels } from "./smartLabelService";
 export async function applySmartLabelsToMessages(
   accountId: string,
   messages: ParsedMessage[],
+  preAppliedMatches: { threadId: string; labelIds: string[] }[] = [],
 ): Promise<void> {
   try {
-    const matches = await matchSmartLabels(accountId, messages);
+    const matches = await matchSmartLabels(
+      accountId,
+      messages,
+      preAppliedMatches,
+    );
 
     await Promise.allSettled(
       matches.flatMap(({ threadId, labelIds }) =>
@@ -38,10 +43,11 @@ export async function applySmartLabelsToMessages(
 export async function applySmartLabelsToNewMessageIds(
   accountId: string,
   messageIds: string[],
+  preAppliedMatches: { threadId: string; labelIds: string[] }[] = [],
 ): Promise<void> {
   if (messageIds.length === 0) return;
   const rows = await getMessagesByIds(accountId, messageIds);
   if (rows.length === 0) return;
   const messages = rows.map(dbMessageToParsedMessage);
-  await applySmartLabelsToMessages(accountId, messages);
+  await applySmartLabelsToMessages(accountId, messages, preAppliedMatches);
 }

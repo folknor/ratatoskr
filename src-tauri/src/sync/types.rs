@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::smart_labels::AppliedSmartLabelMatch;
+
 /// Progress event emitted during sync.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,6 +48,7 @@ pub struct SyncStatusEvent {
     pub new_inbox_message_ids: Option<Vec<String>>,
     pub affected_thread_ids: Option<Vec<String>>,
     pub is_delta: Option<bool>,
+    pub criteria_smart_label_matches: Option<Vec<AppliedSmartLabelMatch>>,
 }
 
 /// Lightweight metadata kept in memory during sync for the threading pass.

@@ -9,6 +9,10 @@ export interface SmartLabelMatch {
   labelIds: string[];
 }
 
+function toPairKey(threadId: string, labelId: string): string {
+  return `${threadId}:${labelId}`;
+}
+
 /**
  * Match messages against smart label rules using two-phase matching:
  * 1. Fast path: traditional filter criteria (deterministic)
@@ -17,6 +21,7 @@ export interface SmartLabelMatch {
 export async function matchSmartLabels(
   accountId: string,
   messages: ParsedMessage[],
+  preAppliedMatches: SmartLabelMatch[] = [],
 ): Promise<SmartLabelMatch[]> {
   const rules = await getEnabledSmartLabelRules(accountId);
   if (rules.length === 0) return [];
@@ -30,9 +35,20 @@ export async function matchSmartLabels(
   }
 
   // Phase 1: Fast path — check criteria for rules that have them
-  const criteriaMatches = new Map<string, Set<string>>(); // threadId → labelIds
+  const knownMatches = new Map<string, Set<string>>(); // threadId → labelIds
+  const matchesToApply = new Map<string, Set<string>>(); // threadId → labelIds
   const rulesWithCriteria: { labelId: string; criteria: FilterCriteria }[] = [];
   const allRulesForAi: { labelId: string; description: string }[] = [];
+
+  const preAppliedPairs = new Set<string>();
+  for (const match of preAppliedMatches) {
+    const existing = knownMatches.get(match.threadId) ?? new Set<string>();
+    for (const labelId of match.labelIds) {
+      existing.add(labelId);
+      preAppliedPairs.add(toPairKey(match.threadId, labelId));
+    }
+    knownMatches.set(match.threadId, existing);
+  }
 
   for (const rule of rules) {
     allRulesForAi.push({
@@ -53,15 +69,21 @@ export async function matchSmartLabels(
   }
 
   // Track which threadId+labelId combos were matched by criteria
-  const criteriaMatchedPairs = new Set<string>();
+  const knownMatchedPairs = new Set<string>(preAppliedPairs);
 
   for (const [threadId, msg] of threadMap) {
     for (const { labelId, criteria } of rulesWithCriteria) {
+      if (preAppliedPairs.has(toPairKey(threadId, labelId))) continue;
       if (messageMatchesFilter(msg, criteria)) {
-        const existing = criteriaMatches.get(threadId) ?? new Set();
+        const existing = knownMatches.get(threadId) ?? new Set();
         existing.add(labelId);
-        criteriaMatches.set(threadId, existing);
-        criteriaMatchedPairs.add(`${threadId}:${labelId}`);
+        knownMatches.set(threadId, existing);
+
+        const applyExisting = matchesToApply.get(threadId) ?? new Set();
+        applyExisting.add(labelId);
+        matchesToApply.set(threadId, applyExisting);
+
+        knownMatchedPairs.add(toPairKey(threadId, labelId));
       }
     }
   }
@@ -76,7 +98,7 @@ export async function matchSmartLabels(
   }[] = [];
   for (const [threadId, msg] of threadMap) {
     // Include thread if any label rule hasn't been matched by criteria for this thread
-    const matchedLabels = criteriaMatches.get(threadId);
+    const matchedLabels = knownMatches.get(threadId);
     const allLabelsMatched = allRulesForAi.every((r) =>
       matchedLabels?.has(r.labelId),
     );
@@ -99,14 +121,20 @@ export async function matchSmartLabels(
 
       // Merge AI results (skip pairs already matched by criteria)
       for (const [threadId, labelIds] of aiResults) {
-        const existing = criteriaMatches.get(threadId) ?? new Set();
+        const existing = knownMatches.get(threadId) ?? new Set();
+        const applyExisting = matchesToApply.get(threadId) ?? new Set();
         for (const labelId of labelIds) {
-          if (!criteriaMatchedPairs.has(`${threadId}:${labelId}`)) {
+          if (!knownMatchedPairs.has(toPairKey(threadId, labelId))) {
             existing.add(labelId);
+            applyExisting.add(labelId);
+            knownMatchedPairs.add(toPairKey(threadId, labelId));
           }
         }
         if (existing.size > 0) {
-          criteriaMatches.set(threadId, existing);
+          knownMatches.set(threadId, existing);
+        }
+        if (applyExisting.size > 0) {
+          matchesToApply.set(threadId, applyExisting);
         }
       }
     } catch (err) {
@@ -117,7 +145,7 @@ export async function matchSmartLabels(
 
   // Convert to result array
   const results: SmartLabelMatch[] = [];
-  for (const [threadId, labelIds] of criteriaMatches) {
+  for (const [threadId, labelIds] of matchesToApply) {
     results.push({ threadId, labelIds: [...labelIds] });
   }
 

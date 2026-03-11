@@ -12,6 +12,7 @@ use crate::jmap::client::JmapState;
 use crate::provider::commands::provider_sync_auto_impl;
 use crate::provider::router::get_provider_type;
 use crate::search::SearchState;
+use crate::smart_labels::commands::smart_labels_apply_criteria_to_new_message_ids_impl;
 
 use super::{SyncQueueState, SyncState};
 use super::config;
@@ -161,6 +162,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                     new_inbox_message_ids: None,
                     affected_thread_ids: None,
                     is_delta: None,
+                    criteria_smart_label_matches: None,
                 },
             );
             return;
@@ -177,6 +179,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
             new_inbox_message_ids: None,
             affected_thread_ids: None,
             is_delta: None,
+            criteria_smart_label_matches: None,
         },
     );
 
@@ -191,6 +194,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 new_inbox_message_ids: Some(Vec::new()),
                 affected_thread_ids: Some(Vec::new()),
                 is_delta: Some(false),
+                criteria_smart_label_matches: Some(Vec::new()),
             },
         );
         return;
@@ -227,6 +231,30 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 log::warn!("Failed to run post-sync filters for {account_id}: {error}");
             }
 
+            let criteria_smart_label_matches =
+                match smart_labels_apply_criteria_to_new_message_ids_impl(
+                    account_id,
+                    &result.new_inbox_message_ids,
+                    &db,
+                    &gmail,
+                    &jmap,
+                    &graph,
+                    &body_store,
+                    &inline_images,
+                    &search,
+                    app,
+                )
+                .await
+                {
+                    Ok(matches) => matches,
+                    Err(error) => {
+                        log::warn!(
+                            "Failed to run smart label criteria matching for {account_id}: {error}"
+                        );
+                        Vec::new()
+                    }
+                };
+
             emit_sync_status(
                 app,
                 SyncStatusEvent {
@@ -237,6 +265,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                     new_inbox_message_ids: Some(result.new_inbox_message_ids),
                     affected_thread_ids: Some(result.affected_thread_ids),
                     is_delta: Some(result.was_delta && !result.fell_back_to_initial),
+                    criteria_smart_label_matches: Some(criteria_smart_label_matches),
                 },
             )
         }
@@ -250,6 +279,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 new_inbox_message_ids: None,
                 affected_thread_ids: None,
                 is_delta: None,
+                criteria_smart_label_matches: None,
             },
         ),
     }
