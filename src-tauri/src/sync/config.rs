@@ -32,8 +32,7 @@ pub fn calendar_provider_kind(account: &SyncAccount) -> Option<&'static str> {
         return Some("caldav");
     }
 
-    if account.provider == "gmail_api" || account.calendar_provider.as_deref() == Some("google_api")
-    {
+    if account.provider == "gmail_api" {
         return Some("google_api");
     }
 

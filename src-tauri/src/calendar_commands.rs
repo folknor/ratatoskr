@@ -13,6 +13,13 @@ const GOOGLE_CALENDAR_RETRY_CONFIG: RetryConfig = RetryConfig {
     initial_backoff_ms: 1000,
 };
 
+/// Shared HTTP client — creates a single connection pool for all CalDAV and
+/// Google Calendar requests, avoiding a fresh TLS handshake per command.
+fn shared_http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(reqwest::Client::new)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CalendarInfoInput {
@@ -198,7 +205,7 @@ pub async fn google_calendar_list_calendars(
     gmail: State<'_, GmailState>,
 ) -> Result<Vec<CalendarInfoDto>, String> {
     let client = gmail.get(&account_id).await?;
-    let http = reqwest::Client::new();
+    let http = shared_http_client();
     let url = format!("{GOOGLE_CALENDAR_API_BASE}/users/me/calendarList");
     let response: GoogleCalendarListResponse =
         google_calendar_request(&http, &client, &db, &url).await?;
@@ -224,7 +231,7 @@ pub async fn google_calendar_sync_events(
     gmail: State<'_, GmailState>,
 ) -> Result<CalendarSyncResultDto, String> {
     let client = gmail.get(&account_id).await?;
-    let http = reqwest::Client::new();
+    let http = shared_http_client();
     let encoded_id = urlencoding::encode(&calendar_remote_id);
     let mut created = Vec::new();
     let updated = Vec::new();
@@ -305,7 +312,7 @@ pub async fn caldav_list_calendars(
     gmail: State<'_, GmailState>,
 ) -> Result<Vec<CalendarInfoDto>, String> {
     let config = load_caldav_account_config(&db, gmail.encryption_key(), &account_id).await?;
-    let client = reqwest::Client::new();
+    let client = shared_http_client();
     let home_url = resolve_caldav_home_url(&client, &config).await?;
     list_caldav_calendars(&client, &config, &home_url).await
 }
@@ -320,7 +327,7 @@ pub async fn caldav_fetch_events(
     gmail: State<'_, GmailState>,
 ) -> Result<Vec<CalendarEventDto>, String> {
     let config = load_caldav_account_config(&db, gmail.encryption_key(), &account_id).await?;
-    let client = reqwest::Client::new();
+    let client = shared_http_client();
     fetch_caldav_events(&client, &config, &calendar_remote_id, &time_min, &time_max).await
 }
 
@@ -333,7 +340,7 @@ pub async fn caldav_sync_events(
     gmail: State<'_, GmailState>,
 ) -> Result<CalendarSyncResultDto, String> {
     let config = load_caldav_account_config(&db, gmail.encryption_key(), &account_id).await?;
-    let client = reqwest::Client::new();
+    let client = shared_http_client();
     let time_min = (chrono::Utc::now() - chrono::Duration::days(90)).to_rfc3339();
     let time_max = (chrono::Utc::now() + chrono::Duration::days(365)).to_rfc3339();
     let created =
@@ -354,7 +361,7 @@ pub async fn caldav_test_connection(
     gmail: State<'_, GmailState>,
 ) -> Result<serde_json::Value, String> {
     let config = load_caldav_account_config(&db, gmail.encryption_key(), &account_id).await?;
-    let client = reqwest::Client::new();
+    let client = shared_http_client();
     let result = match resolve_caldav_home_url(&client, &config).await {
         Ok(home_url) => list_caldav_calendars(&client, &config, &home_url).await,
         Err(error) => Err(error),
@@ -385,7 +392,7 @@ pub async fn caldav_create_event(
     gmail: State<'_, GmailState>,
 ) -> Result<CalendarEventDto, String> {
     let config = load_caldav_account_config(&db, gmail.encryption_key(), &account_id).await?;
-    let client = reqwest::Client::new();
+    let client = shared_http_client();
     let input = parse_caldav_event_input(event)?;
     let uid = uuid::Uuid::new_v4().to_string();
     let ical_data = build_caldav_ical_event(&input, Some(&uid));
@@ -416,7 +423,7 @@ pub async fn caldav_update_event(
     gmail: State<'_, GmailState>,
 ) -> Result<CalendarEventDto, String> {
     let config = load_caldav_account_config(&db, gmail.encryption_key(), &account_id).await?;
-    let client = reqwest::Client::new();
+    let client = shared_http_client();
     let input = parse_caldav_event_input(event)?;
     let existing = fetch_caldav_event_by_href(&client, &config, &remote_event_id).await?;
     let merged = merge_caldav_event_input(&existing, &input);
@@ -451,7 +458,7 @@ pub async fn caldav_delete_event(
     gmail: State<'_, GmailState>,
 ) -> Result<(), String> {
     let config = load_caldav_account_config(&db, gmail.encryption_key(), &account_id).await?;
-    let client = reqwest::Client::new();
+    let client = shared_http_client();
     let mut headers = Vec::new();
     if let Some(etag_value) = etag.as_deref() {
         headers.push(("If-Match", etag_value));
@@ -479,7 +486,7 @@ pub async fn google_calendar_fetch_events(
     gmail: State<'_, GmailState>,
 ) -> Result<Vec<CalendarEventDto>, String> {
     let client = gmail.get(&account_id).await?;
-    let http = reqwest::Client::new();
+    let http = shared_http_client();
     let encoded_id = urlencoding::encode(&calendar_remote_id);
     let query = [
         ("timeMin", time_min),
@@ -511,7 +518,7 @@ pub async fn google_calendar_create_event(
     gmail: State<'_, GmailState>,
 ) -> Result<CalendarEventDto, String> {
     let client = gmail.get(&account_id).await?;
-    let http = reqwest::Client::new();
+    let http = shared_http_client();
     let encoded_id = urlencoding::encode(&calendar_remote_id);
     let url = format!("{GOOGLE_CALENDAR_API_BASE}/calendars/{encoded_id}/events");
     let response: GoogleCalendarEvent =
@@ -529,7 +536,7 @@ pub async fn google_calendar_update_event(
     gmail: State<'_, GmailState>,
 ) -> Result<CalendarEventDto, String> {
     let client = gmail.get(&account_id).await?;
-    let http = reqwest::Client::new();
+    let http = shared_http_client();
     let encoded_cal_id = urlencoding::encode(&calendar_remote_id);
     let encoded_event_id = urlencoding::encode(&remote_event_id);
     let url = format!(
@@ -549,7 +556,7 @@ pub async fn google_calendar_delete_event(
     gmail: State<'_, GmailState>,
 ) -> Result<(), String> {
     let client = gmail.get(&account_id).await?;
-    let http = reqwest::Client::new();
+    let http = shared_http_client();
     let encoded_cal_id = urlencoding::encode(&calendar_remote_id);
     let encoded_event_id = urlencoding::encode(&remote_event_id);
     let url = format!(
@@ -580,37 +587,7 @@ pub async fn calendar_upsert_provider_events(
 
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
         for event in events {
-            let id = uuid::Uuid::new_v4().to_string();
-            tx.execute(
-                "INSERT INTO calendar_events (id, account_id, google_event_id, summary, description, location, start_time, end_time, is_all_day, status, organizer_email, attendees_json, html_link, calendar_id, remote_event_id, etag, ical_data, uid)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
-                 ON CONFLICT(account_id, google_event_id) DO UPDATE SET
-                   summary = ?4, description = ?5, location = ?6, start_time = ?7, end_time = ?8,
-                   is_all_day = ?9, status = ?10, organizer_email = ?11, attendees_json = ?12,
-                   html_link = ?13, calendar_id = ?14, remote_event_id = ?15, etag = ?16,
-                   ical_data = ?17, uid = ?18, updated_at = unixepoch()",
-                params![
-                    id,
-                    account_id,
-                    event.remote_event_id,
-                    event.summary,
-                    event.description,
-                    event.location,
-                    event.start_time,
-                    event.end_time,
-                    event.is_all_day as i64,
-                    event.status,
-                    event.organizer_email,
-                    event.attendees_json,
-                    event.html_link,
-                    calendar_id,
-                    event.remote_event_id,
-                    event.etag,
-                    event.ical_data,
-                    event.uid,
-                ],
-            )
-            .map_err(|e| e.to_string())?;
+            upsert_calendar_event(&tx, &account_id, &calendar_id, &event)?;
         }
         tx.commit().map_err(|e| e.to_string())?;
         Ok(())
@@ -641,37 +618,7 @@ pub async fn calendar_apply_sync_result(
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
 
         for event in created.into_iter().chain(updated) {
-            let id = uuid::Uuid::new_v4().to_string();
-            tx.execute(
-                "INSERT INTO calendar_events (id, account_id, google_event_id, summary, description, location, start_time, end_time, is_all_day, status, organizer_email, attendees_json, html_link, calendar_id, remote_event_id, etag, ical_data, uid)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
-                 ON CONFLICT(account_id, google_event_id) DO UPDATE SET
-                   summary = ?4, description = ?5, location = ?6, start_time = ?7, end_time = ?8,
-                   is_all_day = ?9, status = ?10, organizer_email = ?11, attendees_json = ?12,
-                   html_link = ?13, calendar_id = ?14, remote_event_id = ?15, etag = ?16,
-                   ical_data = ?17, uid = ?18, updated_at = unixepoch()",
-                params![
-                    id,
-                    account_id,
-                    event.remote_event_id,
-                    event.summary,
-                    event.description,
-                    event.location,
-                    event.start_time,
-                    event.end_time,
-                    event.is_all_day as i64,
-                    event.status,
-                    event.organizer_email,
-                    event.attendees_json,
-                    event.html_link,
-                    calendar_id,
-                    event.remote_event_id,
-                    event.etag,
-                    event.ical_data,
-                    event.uid,
-                ],
-            )
-            .map_err(|e| e.to_string())?;
+            upsert_calendar_event(&tx, &account_id, &calendar_id, &event)?;
         }
 
         for remote_event_id in deleted_remote_ids {
@@ -963,9 +910,15 @@ async fn caldav_request_with_headers(
         request = request.header("Depth", depth_value);
     }
     if let Some(body_value) = body {
-        request = request
-            .header("Content-Type", "application/xml; charset=utf-8")
-            .body(body_value.to_string());
+        // Only set a default Content-Type when the caller hasn't specified one.
+        // Callers like caldav_create_event pass "text/calendar" which takes precedence.
+        let caller_has_content_type = headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("content-type"));
+        if !caller_has_content_type {
+            request = request.header("Content-Type", "application/xml; charset=utf-8");
+        }
+        request = request.body(body_value.to_string());
     }
     for (name, value) in headers {
         request = request.header(*name, *value);
@@ -1157,8 +1110,10 @@ fn parse_caldav_ical_event(ical_data: &str, href: &str) -> Result<CalendarEventD
     let mut summary = None;
     let mut description = None;
     let mut location = None;
-    let mut dtstart = None;
-    let mut dtend = None;
+    let mut dtstart: Option<String> = None;
+    let mut dtstart_tzid: Option<String> = None;
+    let mut dtend: Option<String> = None;
+    let mut dtend_tzid: Option<String> = None;
     let mut status = "confirmed".to_string();
     let mut organizer_email = None;
     let mut is_all_day = false;
@@ -1179,11 +1134,15 @@ fn parse_caldav_ical_event(ical_data: &str, href: &str) -> Result<CalendarEventD
             "LOCATION" => location = Some(unescape_ical_text(value)),
             "DTSTART" => {
                 dtstart = Some(value.to_string());
+                dtstart_tzid = extract_param_value(name_with_params, "TZID");
                 if params.contains("VALUE=DATE") && !params.contains("VALUE=DATE-TIME") {
                     is_all_day = true;
                 }
             }
-            "DTEND" => dtend = Some(value.to_string()),
+            "DTEND" => {
+                dtend = Some(value.to_string());
+                dtend_tzid = extract_param_value(name_with_params, "TZID");
+            }
             "STATUS" => status = value.to_lowercase(),
             "ORGANIZER" => {
                 if let Some(email) = value.strip_prefix("mailto:").or_else(|| value.strip_prefix("MAILTO:")) {
@@ -1208,12 +1167,12 @@ fn parse_caldav_ical_event(ical_data: &str, href: &str) -> Result<CalendarEventD
 
     let start_time = dtstart
         .as_deref()
-        .map(|value| parse_ical_datetime(value, is_all_day))
+        .map(|value| parse_ical_datetime(value, is_all_day, dtstart_tzid.as_deref()))
         .transpose()?
         .unwrap_or(0);
     let end_time = dtend
         .as_deref()
-        .map(|value| parse_ical_datetime(value, is_all_day))
+        .map(|value| parse_ical_datetime(value, is_all_day, dtend_tzid.as_deref()))
         .transpose()?
         .unwrap_or(start_time + 3600);
 
@@ -1427,9 +1386,13 @@ fn join_url_path(base: &str, segment: &str) -> Result<String, String> {
 }
 
 fn unfold_ical_lines(ical_data: &str) -> Vec<String> {
+    // RFC 5545 uses CRLF + SP/TAB for folding. Some real-world servers emit
+    // bare LF + SP/TAB instead. Handle both before normalising line endings.
     ical_data
         .replace("\r\n ", "")
         .replace("\r\n\t", "")
+        .replace("\n ", "")
+        .replace("\n\t", "")
         .replace("\r\n", "\n")
         .replace('\r', "\n")
         .split('\n')
@@ -1459,7 +1422,7 @@ fn extract_param_value(name_with_params: &str, key: &str) -> Option<String> {
     None
 }
 
-fn parse_ical_datetime(value: &str, is_all_day: bool) -> Result<i64, String> {
+fn parse_ical_datetime(value: &str, is_all_day: bool, _tzid: Option<&str>) -> Result<i64, String> {
     if is_all_day {
         let date = chrono::NaiveDate::parse_from_str(value, "%Y%m%d")
             .map_err(|e| format!("invalid all-day CalDAV date {value}: {e}"))?;
@@ -1475,9 +1438,57 @@ fn parse_ical_datetime(value: &str, is_all_day: bool) -> Result<i64, String> {
             .map(|date_time| date_time.and_utc().timestamp());
     }
 
+    // Floating datetime or TZID-specified timezone. Without a timezone database
+    // we can't convert named TZID values, so we interpret as local time, which
+    // matches the JS `new Date()` behaviour for floating datetimes.
     chrono::NaiveDateTime::parse_from_str(value, "%Y%m%dT%H%M%S")
-        .map_err(|e| format!("invalid local CalDAV datetime {value}: {e}"))
-        .map(|date_time| date_time.and_utc().timestamp())
+        .map_err(|e| format!("invalid CalDAV datetime {value}: {e}"))
+        .map(|dt| {
+            dt.and_local_timezone(chrono::Local)
+                .single()
+                .map(|dt| dt.timestamp())
+                .unwrap_or_else(|| dt.and_utc().timestamp())
+        })
+}
+
+fn upsert_calendar_event(
+    tx: &rusqlite::Transaction<'_>,
+    account_id: &str,
+    calendar_id: &str,
+    event: &CalendarEventInput,
+) -> Result<(), String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    tx.execute(
+        "INSERT INTO calendar_events (id, account_id, google_event_id, summary, description, location, start_time, end_time, is_all_day, status, organizer_email, attendees_json, html_link, calendar_id, remote_event_id, etag, ical_data, uid)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+         ON CONFLICT(account_id, google_event_id) DO UPDATE SET
+           summary = ?4, description = ?5, location = ?6, start_time = ?7, end_time = ?8,
+           is_all_day = ?9, status = ?10, organizer_email = ?11, attendees_json = ?12,
+           html_link = ?13, calendar_id = ?14, remote_event_id = ?15, etag = ?16,
+           ical_data = ?17, uid = ?18, updated_at = unixepoch()",
+        params![
+            id,
+            account_id,
+            event.remote_event_id,
+            event.summary,
+            event.description,
+            event.location,
+            event.start_time,
+            event.end_time,
+            event.is_all_day as i64,
+            event.status,
+            event.organizer_email,
+            event.attendees_json,
+            event.html_link,
+            calendar_id,
+            event.remote_event_id,
+            event.etag,
+            event.ical_data,
+            event.uid,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 async fn google_calendar_request_with_body<T: serde::de::DeserializeOwned>(
@@ -1537,10 +1548,10 @@ async fn google_calendar_execute_with_retry(
             "DELETE" => http.delete(url),
             _ => return Err(format!("Unsupported Google Calendar HTTP method: {method}")),
         }
-        .header("Authorization", format!("Bearer {access_token}"))
-        .header("Content-Type", "application/json");
+        .header("Authorization", format!("Bearer {access_token}"));
 
         if let Some(payload) = body {
+            // .json() sets Content-Type: application/json automatically.
             request = request.json(payload);
         }
 
@@ -1563,7 +1574,7 @@ async fn google_calendar_execute_with_retry(
         tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
     }
 
-    last_response.ok_or_else(|| "No response received".to_string())
+    Err("Google Calendar rate limited (429): max retry attempts exceeded".to_string())
 }
 
 async fn google_calendar_parse_json_response<T: serde::de::DeserializeOwned>(

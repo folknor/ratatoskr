@@ -243,21 +243,21 @@
 
 ## Calendar
 
-- [ ] **`parse_ical_datetime` treats floating datetimes as UTC and ignores TZID** — Last branch handles datetimes without `Z` suffix but does `.and_utc().timestamp()`. Also, `DTSTART;TZID=America/New_York:20260311T140000` — the `TZID` parameter is completely ignored. *(MED)*
+- [x] **`parse_ical_datetime` treats floating datetimes as UTC and ignores TZID** — Last branch handles datetimes without `Z` suffix but does `.and_utc().timestamp()`. Also, `DTSTART;TZID=America/New_York:20260311T140000` — the `TZID` parameter is completely ignored. *(MED)*
 
-- [ ] **`unfold_ical_lines` doesn't handle LF-only continuation lines** — RFC 5545 folds with CRLF+SPACE/TAB but some real-world servers emit LF-only (`\n ` or `\n\t`). Long property values from such servers will appear split. *(MED)*
+- [x] **`unfold_ical_lines` doesn't handle LF-only continuation lines** — RFC 5545 folds with CRLF+SPACE/TAB but some real-world servers emit LF-only (`\n ` or `\n\t`). Long property values from such servers will appear split. *(MED)*
 
-- [ ] **`caldav_request_with_headers` sets Content-Type twice** — When `body` is `Some(...)`, it unconditionally sets `Content-Type: application/xml`. Callers like `caldav_create_event` also pass `Content-Type: text/calendar` in the headers slice. Server sees duplicate Content-Type headers with different values. *(MED)*
+- [x] **`caldav_request_with_headers` sets Content-Type twice** — When `body` is `Some(...)`, it unconditionally sets `Content-Type: application/xml`. Callers like `caldav_create_event` also pass `Content-Type: text/calendar` in the headers slice. Server sees duplicate Content-Type headers with different values. *(MED)*
 
-- [ ] **New `reqwest::Client::new()` on every CalDAV command** — Each of the 7 commands creates a fresh client with no connection pooling. Old TS cached `DAVClient` in `this.client`. Means a fresh TLS handshake per CalDAV operation. Google Calendar commands reuse a client via `GmailState`; CalDAV should do similar. *(MED)*
+- [x] **New `reqwest::Client::new()` on every CalDAV command** — Each of the 7 commands creates a fresh client with no connection pooling. Old TS cached `DAVClient` in `this.client`. Means a fresh TLS handshake per CalDAV operation. Google Calendar commands reuse a client via `GmailState`; CalDAV should do similar. *(MED)*
 
-- [ ] **`Content-Type: application/json` set unconditionally for all Google Calendar requests** — Applied to GET/DELETE (no body). Also redundant for POST/PATCH where `request.json()` sets it. *(MED)*
+- [x] **`Content-Type: application/json` set unconditionally for all Google Calendar requests** — Applied to GET/DELETE (no body). Also redundant for POST/PATCH where `request.json()` sets it. *(MED)*
 
-- [ ] **429 response returned as `Ok` after exhausting retries** — `google_calendar_execute_with_retry` returns the 429 response after max attempts. Should explicitly error. *(MED)*
+- [x] **429 response returned as `Ok` after exhausting retries** — `google_calendar_execute_with_retry` returns the 429 response after max attempts. Should explicitly error. *(MED)*
 
-- [ ] **18-column calendar event INSERT/ON CONFLICT duplicated** — Same SQL in `calendar_upsert_provider_events` and `calendar_apply_sync_result`. Extract to constant or helper. *(MED)*
+- [x] **18-column calendar event INSERT/ON CONFLICT duplicated** — Same SQL in `calendar_upsert_provider_events` and `calendar_apply_sync_result`. Extract to constant or helper. *(MED)*
 
-- [ ] **`Rust adds `calendar_provider == "google_api"` case not in old TS** — `should_sync_calendar` returns `true` for `google_api` calendar provider, but old `hasCalendarSupport` didn't have this case. Behavioral change for accounts with `calendar_provider = "google_api"` that aren't `gmail_api`. *(MED)*
+- [x] **`Rust adds `calendar_provider == "google_api"` case not in old TS** — `should_sync_calendar` returns `true` for `google_api` calendar provider, but old `hasCalendarSupport` didn't have this case. Behavioral change for accounts with `calendar_provider = "google_api"` that aren't `gmail_api`. *(MED)*
 
 - [ ] **App-specific password help links** — Providers like iCloud require app-specific passwords. Add a `help_url` field to `ProtocolOption` in `discovery/types.rs`, populate it for iCloud and similar providers, surface it in the account setup UI when present. *(LOW)*
 
