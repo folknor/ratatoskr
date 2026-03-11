@@ -33,7 +33,11 @@ impl ProviderOps for JmapOps {
         .await
     }
 
-    async fn sync_delta(&self, ctx: &ProviderCtx<'_>) -> Result<SyncResult, String> {
+    async fn sync_delta(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        _days_back: Option<i64>,
+    ) -> Result<SyncResult, String> {
         let result = super::sync::jmap_delta_sync(
             &self.client,
             ctx.account_id,

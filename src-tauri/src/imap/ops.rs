@@ -277,15 +277,16 @@ impl ProviderOps for ImapOps {
         Ok(())
     }
 
-    async fn sync_delta(&self, ctx: &ProviderCtx<'_>) -> Result<SyncResult, String> {
+    async fn sync_delta(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        days_back: Option<i64>,
+    ) -> Result<SyncResult, String> {
         let account_id = ctx.account_id.to_string();
         let imap_config =
             crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
                 .await?;
-        let days_back = ctx
-            .db
-            .with_conn(|conn| Ok(crate::sync::config::get_sync_period_days(conn)))
-            .await?;
+        let days_back = days_back.unwrap_or(365);
 
         let result = crate::sync::imap_delta::imap_delta_sync(
             ctx.app_handle,

@@ -15,6 +15,7 @@ import {
  */
 export async function applySmartLabelsToMessages(
   accountId: string,
+  provider: string,
   messages: ParsedMessage[],
   preAppliedMatches: { threadId: string; labelIds: string[] }[] = [],
   aiRemainder?: {
@@ -34,6 +35,7 @@ export async function applySmartLabelsToMessages(
 
     await invoke("smart_labels_apply_matches", {
       accountId,
+      provider,
       matches,
     });
   } catch (err) {
@@ -46,6 +48,7 @@ export async function applySmartLabelsToMessages(
  */
 export async function applySmartLabelsToNewMessageIds(
   accountId: string,
+  provider: string,
   messageIds: string[],
   preAppliedMatches: { threadId: string; labelIds: string[] }[] = [],
   aiRemainder?: {
@@ -56,6 +59,7 @@ export async function applySmartLabelsToNewMessageIds(
   if (aiRemainder != null) {
     await applySmartLabelsToMessages(
       accountId,
+      provider,
       [],
       preAppliedMatches,
       aiRemainder,
@@ -67,5 +71,10 @@ export async function applySmartLabelsToNewMessageIds(
   const rows = await getMessagesByIds(accountId, messageIds);
   if (rows.length === 0) return;
   const messages = rows.map(dbMessageToParsedMessage);
-  await applySmartLabelsToMessages(accountId, messages, preAppliedMatches);
+  await applySmartLabelsToMessages(
+    accountId,
+    provider,
+    messages,
+    preAppliedMatches,
+  );
 }

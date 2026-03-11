@@ -15,7 +15,8 @@ pub trait ProviderOps: Send + Sync {
     // ── Sync ────────────────────────────────────────────────────
 
     async fn sync_initial(&self, ctx: &ProviderCtx<'_>, days_back: i64) -> Result<(), String>;
-    async fn sync_delta(&self, ctx: &ProviderCtx<'_>) -> Result<SyncResult, String>;
+    async fn sync_delta(&self, ctx: &ProviderCtx<'_>, days_back: Option<i64>)
+        -> Result<SyncResult, String>;
 
     // ── Actions (thread-level) ──────────────────────────────────
 

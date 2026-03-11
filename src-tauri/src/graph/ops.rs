@@ -22,7 +22,11 @@ impl ProviderOps for GraphOps {
         super::sync::graph_initial_sync(&self.client, ctx, days_back).await
     }
 
-    async fn sync_delta(&self, ctx: &ProviderCtx<'_>) -> Result<SyncResult, String> {
+    async fn sync_delta(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        _days_back: Option<i64>,
+    ) -> Result<SyncResult, String> {
         super::sync::graph_delta_sync(&self.client, ctx).await
     }
 

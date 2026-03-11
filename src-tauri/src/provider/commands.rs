@@ -63,7 +63,7 @@ pub(crate) async fn provider_sync_auto_for_provider(
     };
 
     if has_history {
-        match ops.sync_delta(&ctx).await {
+        match ops.sync_delta(&ctx, Some(sync_days)).await {
             Ok(result) => {
                 return Ok(AutoSyncResult {
                     new_inbox_message_ids: result.new_inbox_message_ids,
@@ -201,7 +201,7 @@ pub async fn provider_sync_delta(
         search: &search,
         app_handle: &app_handle,
     };
-    ops.sync_delta(&ctx).await
+    ops.sync_delta(&ctx, None).await
 }
 
 #[allow(clippy::too_many_arguments)]

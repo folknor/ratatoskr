@@ -25,10 +25,9 @@ const BATCH_SIZE: usize = 50;
 struct GraphSyncProgress {
     account_id: String,
     phase: String,
-    folder_name: String,
-    current_folder: u64,
-    total_folders: u64,
-    messages_processed: u64,
+    current: u64,
+    total: u64,
+    folder: Option<String>,
 }
 
 /// Internal context bundle for sync.
@@ -1293,10 +1292,13 @@ fn emit_progress(
         GraphSyncProgress {
             account_id: sctx.account_id.to_string(),
             phase: phase.to_string(),
-            folder_name: folder_name.to_string(),
-            current_folder,
-            total_folders,
-            messages_processed,
+            current: if phase == "messages" {
+                messages_processed
+            } else {
+                current_folder
+            },
+            total: total_folders,
+            folder: (!folder_name.is_empty()).then(|| folder_name.to_string()),
         },
     ) {
         log::warn!(

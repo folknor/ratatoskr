@@ -29,6 +29,7 @@ import type {
  */
 interface PostSyncHooksInput {
   accountId: string;
+  provider: string;
   newInboxEmailIds: string[];
   affectedThreadIds: string[];
   criteriaSmartLabelMatches?: { threadId: string; labelIds: string[] }[];
@@ -46,6 +47,7 @@ interface PostSyncHooksInput {
 async function runPostSyncHooks(input: PostSyncHooksInput): Promise<void> {
   const {
     accountId,
+    provider,
     newInboxEmailIds,
     affectedThreadIds,
     criteriaSmartLabelMatches = [],
@@ -59,6 +61,7 @@ async function runPostSyncHooks(input: PostSyncHooksInput): Promise<void> {
     // Smart labels (fire-and-forget)
     applySmartLabelsToNewMessageIds(
       accountId,
+      provider,
       newInboxEmailIds,
       criteriaSmartLabelMatches,
       { threads: aiSmartLabelThreads, rules: aiSmartLabelRules },
@@ -98,18 +101,7 @@ function mapImapPhase(
   return phase as "labels" | "threads" | "messages" | "done";
 }
 
-function mapProviderSyncProgress(
-  provider: string,
-  payload: Record<string, unknown>,
-): SyncProgress {
-  if (provider === "graph") {
-    return {
-      phase: "messages",
-      current: Number(payload.messagesProcessed ?? 0),
-      total: Number(payload.totalFolders ?? 0),
-    };
-  }
-
+function mapProviderSyncProgress(payload: Record<string, unknown>): SyncProgress {
   return {
     phase: mapImapPhase(String(payload.phase ?? "")),
     current: Number(payload.current ?? 0),
@@ -174,7 +166,7 @@ async function ensureSyncListeners(): Promise<void> {
       { provider: "graph", eventName: "graph-sync-progress" },
     ] as const;
 
-    for (const { provider, eventName } of progressEvents) {
+    for (const { eventName } of progressEvents) {
       try {
         const unlisten = await listen<Record<string, unknown>>(
           eventName,
@@ -184,7 +176,7 @@ async function ensureSyncListeners(): Promise<void> {
             statusCallback?.(
               accountId,
               "syncing",
-              mapProviderSyncProgress(provider, event.payload),
+              mapProviderSyncProgress(event.payload),
             );
           },
         );
@@ -234,10 +226,11 @@ async function handleSyncStatusEvent(event: SyncStatusEvent): Promise<void> {
     return;
   }
 
-  await runPostSyncHooks({
-    accountId: event.accountId,
-    newInboxEmailIds: event.newInboxMessageIds ?? [],
-    affectedThreadIds: event.affectedThreadIds ?? [],
+    await runPostSyncHooks({
+      accountId: event.accountId,
+      provider: event.provider,
+      newInboxEmailIds: event.newInboxMessageIds ?? [],
+      affectedThreadIds: event.affectedThreadIds ?? [],
     criteriaSmartLabelMatches: event.criteriaSmartLabelMatches ?? [],
     notificationsToQueue: event.notificationsToQueue ?? [],
     aiCategorizationCandidates: event.aiCategorizationCandidates ?? [],

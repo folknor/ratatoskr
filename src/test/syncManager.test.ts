@@ -232,6 +232,7 @@ describe("syncManager", () => {
 
     expect(mockApplySmartLabelsToNewMessageIds).toHaveBeenCalledWith(
       "acc-1",
+      "gmail_api",
       ["m1", "m2"],
       [{ threadId: "t1", labelIds: ["label-1"] }],
       {

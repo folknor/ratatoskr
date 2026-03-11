@@ -26,7 +26,11 @@ impl ProviderOps for GmailOps {
         .await
     }
 
-    async fn sync_delta(&self, ctx: &ProviderCtx<'_>) -> Result<SyncResult, String> {
+    async fn sync_delta(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        _days_back: Option<i64>,
+    ) -> Result<SyncResult, String> {
         let result = super::sync::gmail_delta_sync(
             &self.client,
             ctx.account_id,

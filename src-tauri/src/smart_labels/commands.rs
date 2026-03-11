@@ -98,6 +98,7 @@ pub(crate) async fn smart_labels_apply_criteria_to_new_message_ids_impl(
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn smart_labels_apply_matches_impl(
     account_id: &str,
+    provider: &str,
     matches: &[AppliedSmartLabelMatch],
     db: &DbState,
     gmail: &GmailState,
@@ -112,9 +113,8 @@ pub(crate) async fn smart_labels_apply_matches_impl(
         return Ok(());
     }
 
-    let provider = get_provider_type(db, account_id).await?;
     let ops = get_ops(
-        &provider,
+        provider,
         account_id,
         gmail,
         jmap,
@@ -215,6 +215,7 @@ pub async fn smart_labels_apply_criteria_to_new_message_ids(
 #[tauri::command]
 pub async fn smart_labels_apply_matches(
     account_id: String,
+    provider: String,
     matches: Vec<AppliedSmartLabelMatch>,
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
@@ -227,6 +228,7 @@ pub async fn smart_labels_apply_matches(
 ) -> Result<(), String> {
     smart_labels_apply_matches_impl(
         &account_id,
+        &provider,
         &matches,
         &db,
         &gmail,

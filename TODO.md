@@ -40,19 +40,13 @@
 
 ## Sync Engine
 
-- [ ] **`sync_prepare_account_resync` doesn't clean up `bodies.db`** — Deletes threads/messages from main DB but orphans their zstd-compressed bodies in the separate body store. Add `body_store.delete()` for the account's message IDs before deleting from main tables. *(MED)*
-
 - [ ] **`has_history` gate has fragile provider semantics** — `history_id` column means different things per provider (Google history ID, JMAP state token, Graph delta link, IMAP synthetic marker). Using `IS NOT NULL` as initial-vs-delta gate breaks if any provider sets it before completing initial sync. *(MED)*
 
 - [ ] **IMAP `storedCount` proxy for "things changed" is lost** — `sync_initial` returns `Result<(), String>` — no data about what was stored. If anything beyond categorization depends on knowing whether initial sync stored messages, it's now blind. *(MED)*
 
 - [ ] **Provider-agnostic commands in IMAP-specific module** — `sync_prepare_full_sync` and `sync_prepare_account_resync` are provider-agnostic but live in `sync/commands.rs`. Consider moving to `provider/commands.rs`. *(LOW)*
 
-- [ ] **`sync_days` read redundantly for IMAP delta** — `provider_sync_auto` reads `sync_period_days`, then `ImapOps::sync_delta` reads it again internally. *(LOW)*
-
 - [ ] **No "falling back to initial" progress event** — When delta sync fails and falls back to initial, the UI may show confusing progress. No event signals the fallback. *(LOW)*
-
-- [ ] **Graph progress event payload shape is asymmetric** — `mapProviderSyncProgress` for Graph reads `messagesProcessed`/`totalFolders` while others use `phase`/`current`/`total`. Fragile if Graph sync events change shape. *(LOW)*
 
 - [ ] **`SyncStatusEvent.status` is stringly typed in Rust** — Uses `String` for "syncing"/"done"/"error" rather than an enum. *(LOW)*
 
@@ -71,8 +65,6 @@
 > **Systemic issue**: Filters and smart labels now share one `load_filterable_messages` helper, but notifications still loads message rows separately and the hooks still re-load overlapping data in the same sync cycle. `get_provider_type` is still called independently by multiple hook paths. These should be extracted further and the loaded data passed between hooks.
 
 - [ ] **Redundant message loading across post-sync hooks** — Filters, smart labels (criteria), smart labels (AI prep), and notifications each call `load_filterable_messages` independently for the same message IDs in the same sync cycle. Pass loaded messages between hooks or use a shared cache. *(MED)*
-
-- [ ] **Redundant provider lookup for AI smart-label apply** — `smart_labels_apply_matches` still resolves the provider again after sync already emitted it to TS. Pass the provider through that final apply step or keep the whole phase in Rust. *(LOW)*
 
 - [ ] **Filter and smart label actions applied sequentially instead of in parallel** — Old TS used `Promise.allSettled` for concurrent per-thread application. Rust iterates sequentially. Could use `tokio::task::JoinSet`. *(MED)*
 
