@@ -1,5 +1,8 @@
 # Dependencies
 node_modules/
+research
+iced-proto/thunderbird.sqlite
+iced-proto/target
 
 # Build outputs
 dist/

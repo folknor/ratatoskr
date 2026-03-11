@@ -1,0 +1,11 @@
+[package]
+name = "ratatoskr-iced-proto"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+iced = { version = "0.14", features = ["tokio", "canvas"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+chrono = "0.4"
+dirs = "6"
