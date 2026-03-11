@@ -4,15 +4,16 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
-import { type DbAccount, updateAccountCalDav } from "@/core/accounts";
+import { updateAccountCalDav } from "@/core/accounts";
 import {
   discoverCalDavSettings,
   removeCalendarProvider,
   testCalDavConnection,
 } from "@/core/calendar";
+import type { AccountCaldavSettingsInfo } from "@/services/accounts/basicInfo";
 
 interface CalDavSettingsProps {
-  account: DbAccount;
+  account: AccountCaldavSettingsInfo;
   onSaved: () => void;
 }
 
@@ -21,11 +22,11 @@ export function CalDavSettings({
   onSaved,
 }: CalDavSettingsProps): React.ReactNode {
   const { t } = useTranslation("settings");
-  const [caldavUrl, setCaldavUrl] = useState(account.caldav_url ?? "");
+  const [caldavUrl, setCaldavUrl] = useState(account.caldavUrl ?? "");
   const [username, setUsername] = useState(
-    account.caldav_username ?? account.email,
+    account.caldavUsername ?? account.email,
   );
-  const [password, setPassword] = useState(account.caldav_password ?? "");
+  const [password, setPassword] = useState(account.caldavPassword ?? "");
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{
     success: boolean;
@@ -36,7 +37,7 @@ export function CalDavSettings({
 
   // Auto-discover on mount if not already configured
   useEffect(() => {
-    if (!(account.caldav_url || discovered)) {
+    if (!(account.caldavUrl || discovered)) {
       setDiscovered(true);
       void discoverCalDavSettings(account.email).then((result) => {
         if (result.caldavUrl) {
@@ -44,7 +45,7 @@ export function CalDavSettings({
         }
       });
     }
-  }, [account.email, account.caldav_url, discovered]);
+  }, [account.email, account.caldavUrl, discovered]);
 
   const handleTest = useCallback(async (): Promise<void> => {
     setTesting(true);
@@ -92,7 +93,7 @@ export function CalDavSettings({
     }
   }, [account.id, account.email, onSaved]);
 
-  const isConfigured = Boolean(account.caldav_url);
+  const isConfigured = Boolean(account.caldavUrl);
 
   return (
     <div className="space-y-4">

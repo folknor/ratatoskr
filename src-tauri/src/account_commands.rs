@@ -135,6 +135,17 @@ pub struct AccountBasicInfo {
     pub is_active: bool,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountCaldavSettingsInfo {
+    pub id: String,
+    pub email: String,
+    pub caldav_url: Option<String>,
+    pub caldav_username: Option<String>,
+    pub caldav_password: Option<String>,
+    pub calendar_provider: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct GoogleTokenResponse {
     access_token: String,
@@ -331,6 +342,44 @@ pub async fn account_list_basic_info(
         .map_err(|e| format!("query account list: {e}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("collect account list: {e}"))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn account_get_caldav_settings_info(
+    db: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
+    account_id: String,
+) -> Result<Option<AccountCaldavSettingsInfo>, String> {
+    let encryption_key = *gmail.encryption_key();
+    db.with_conn(move |conn| {
+        conn.query_row(
+            "SELECT id, email, caldav_url, caldav_username, caldav_password, calendar_provider \
+             FROM accounts WHERE id = ?1",
+            rusqlite::params![account_id],
+            |row| {
+                let password_raw: Option<String> = row.get(4)?;
+                let caldav_password = password_raw.map(|raw| {
+                    if is_encrypted(&raw) {
+                        decrypt_value(&encryption_key, &raw).unwrap_or(raw)
+                    } else {
+                        raw
+                    }
+                });
+
+                Ok(AccountCaldavSettingsInfo {
+                    id: row.get(0)?,
+                    email: row.get(1)?,
+                    caldav_url: row.get(2)?,
+                    caldav_username: row.get(3)?,
+                    caldav_password,
+                    calendar_provider: row.get(5)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|e| format!("query account caldav settings info: {e}"))
     })
     .await
 }

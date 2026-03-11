@@ -11,6 +11,10 @@ import {
   setDefaultAlias,
 } from "@/core/composer";
 import { setSetting } from "@/core/settings";
+import {
+  type AccountCaldavSettingsInfo,
+  getAccountCaldavSettingsInfo,
+} from "@/services/accounts/basicInfo";
 import { useAccountStore } from "@/stores/accountStore";
 import { Section, SettingRow } from "./SettingsShared";
 
@@ -502,15 +506,13 @@ function ImapCalDavSection(): React.ReactNode {
   const { t } = useTranslation("settings");
   const accounts = useAccountStore((s) => s.accounts);
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
-  const [account, setAccount] = useState<
-    import("@/services/db/accounts").DbAccount | null
-  >(null);
+  const [account, setAccount] = useState<AccountCaldavSettingsInfo | null>(
+    null,
+  );
 
   useEffect(() => {
     if (!activeAccountId) return;
-    void import("@/services/db/accounts").then(({ getAccount }) =>
-      getAccount(activeAccountId).then(setAccount),
-    );
+    void getAccountCaldavSettingsInfo(activeAccountId).then(setAccount);
   }, [activeAccountId]);
 
   const activeUiAccount = accounts.find((a) => a.id === activeAccountId);
@@ -523,10 +525,7 @@ function ImapCalDavSection(): React.ReactNode {
       <CalDavSettingsInline
         account={account}
         onSaved={(): void => {
-          // Reload account
-          void import("@/services/db/accounts").then(({ getAccount }) =>
-            getAccount(account.id).then(setAccount),
-          );
+          void getAccountCaldavSettingsInfo(account.id).then(setAccount);
         }}
       />
     </Section>
@@ -537,7 +536,7 @@ function CalDavSettingsInline({
   account,
   onSaved,
 }: {
-  account: import("@/services/db/accounts").DbAccount;
+  account: AccountCaldavSettingsInfo;
   onSaved: () => void;
 }): React.ReactNode {
   const { t } = useTranslation("settings");

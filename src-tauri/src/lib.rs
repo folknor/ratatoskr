@@ -118,6 +118,7 @@ pub fn run() {
             account_commands::account_authorize_oauth_provider,
             account_commands::account_create_imap_oauth,
             account_commands::account_get_basic_info,
+            account_commands::account_get_caldav_settings_info,
             account_commands::account_list_basic_info,
             account_commands::account_get_caldav_connection_info,
             account_commands::account_get_calendar_provider_info,
