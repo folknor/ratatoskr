@@ -84,6 +84,7 @@ pub async fn jmap_sync_initial(
     days_back: Option<i64>,
     db: State<'_, DbState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, crate::inline_image_store::InlineImageStoreState>,
     search: State<'_, SearchState>,
     jmap: State<'_, JmapState>,
     app_handle: AppHandle,
@@ -96,6 +97,7 @@ pub async fn jmap_sync_initial(
         days,
         &db,
         &body_store,
+        &inline_images,
         &search,
         &app_handle,
     )
@@ -107,12 +109,22 @@ pub async fn jmap_sync_delta(
     account_id: String,
     db: State<'_, DbState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, crate::inline_image_store::InlineImageStoreState>,
     search: State<'_, SearchState>,
     jmap: State<'_, JmapState>,
     app_handle: AppHandle,
 ) -> Result<JmapSyncResult, String> {
     let client = jmap.get(&account_id).await?;
-    jmap_delta_sync(&client, &account_id, &db, &body_store, &search, &app_handle).await
+    jmap_delta_sync(
+        &client,
+        &account_id,
+        &db,
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
+    )
+    .await
 }
 
 // ---------------------------------------------------------------------------

@@ -6,8 +6,10 @@ use jmap_client::mailbox::Role;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
+use crate::attachment_cache::hash_bytes;
 use crate::body_store::{BodyStoreState, MessageBody};
 use crate::db::DbState;
+use crate::inline_image_store::{InlineImage, InlineImageStoreState, MAX_INLINE_SIZE};
 use crate::search::{SearchDocument, SearchState};
 
 use super::client::JmapClient;
@@ -44,6 +46,7 @@ struct SyncCtx<'a> {
     account_id: &'a str,
     db: &'a DbState,
     body_store: &'a BodyStoreState,
+    inline_images: &'a InlineImageStoreState,
     search: &'a SearchState,
     app_handle: &'a AppHandle,
 }
@@ -60,6 +63,7 @@ pub async fn jmap_initial_sync(
     days_back: i64,
     db: &DbState,
     body_store: &BodyStoreState,
+    inline_images: &InlineImageStoreState,
     search: &SearchState,
     app_handle: &AppHandle,
 ) -> Result<(), String> {
@@ -68,6 +72,7 @@ pub async fn jmap_initial_sync(
         account_id,
         db,
         body_store,
+        inline_images,
         search,
         app_handle,
     };
@@ -172,6 +177,7 @@ pub async fn jmap_delta_sync(
     account_id: &str,
     db: &DbState,
     body_store: &BodyStoreState,
+    inline_images: &InlineImageStoreState,
     search: &SearchState,
     app_handle: &AppHandle,
 ) -> Result<JmapSyncResult, String> {
@@ -180,6 +186,7 @@ pub async fn jmap_delta_sync(
         account_id,
         db,
         body_store,
+        inline_images,
         search,
         app_handle,
     };
@@ -530,6 +537,9 @@ async fn persist_messages(
 
     // 2. Body store writes
     store_bodies(ctx.body_store, messages).await;
+
+    // 2.5. Inline image cache writes
+    store_inline_images(ctx, messages).await;
 
     // 3. Search index writes
     index_messages(ctx.search, ctx.account_id, messages).await;
@@ -990,6 +1000,98 @@ async fn store_bodies(body_store: &BodyStoreState, messages: &[ParsedJmapMessage
 
     if let Err(e) = body_store.put_batch(bodies).await {
         log::warn!("Failed to store JMAP bodies: {e}");
+    }
+}
+
+async fn store_inline_images(ctx: &SyncCtx<'_>, messages: &[ParsedJmapMessage]) {
+    let eligible: Vec<(String, String, String)> = messages
+        .iter()
+        .flat_map(|msg| {
+            msg.attachments.iter().filter_map(|att| {
+                if !att.is_inline
+                    || !att.mime_type.starts_with("image/")
+                    || att.size <= 0
+                    || usize::try_from(att.size)
+                        .ok()
+                        .is_none_or(|size| size > MAX_INLINE_SIZE)
+                {
+                    return None;
+                }
+
+                Some((
+                    format!("{}_{}", msg.id, att.blob_id),
+                    att.blob_id.clone(),
+                    att.mime_type.clone(),
+                ))
+            })
+        })
+        .collect();
+
+    if eligible.is_empty() {
+        return;
+    }
+
+    let mut blob_cache: HashMap<String, (String, Vec<u8>, String)> = HashMap::new();
+    let mut updates = Vec::new();
+
+    for (attachment_row_id, blob_id, mime_type) in eligible {
+        if !blob_cache.contains_key(&blob_id) {
+            match ctx.client.inner().download(&blob_id).await {
+                Ok(data) if data.len() <= MAX_INLINE_SIZE => {
+                    let content_hash = hash_bytes(&data);
+                    blob_cache.insert(blob_id.clone(), (content_hash, data, mime_type.clone()));
+                }
+                Ok(_) => continue,
+                Err(error) => {
+                    log::warn!("Failed to download JMAP inline blob {blob_id}: {error}");
+                    continue;
+                }
+            }
+        }
+
+        if let Some((content_hash, _, _)) = blob_cache.get(&blob_id) {
+            updates.push((attachment_row_id, content_hash.clone()));
+        }
+    }
+
+    if blob_cache.is_empty() {
+        return;
+    }
+
+    let images: Vec<InlineImage> = blob_cache
+        .into_values()
+        .map(|(content_hash, data, mime_type)| InlineImage {
+            content_hash,
+            data,
+            mime_type,
+        })
+        .collect();
+
+    if let Err(error) = ctx.inline_images.put_batch(images).await {
+        log::warn!("Failed to store JMAP inline images: {error}");
+        return;
+    }
+
+    if let Err(error) = ctx
+        .db
+        .with_conn(move |conn| {
+            let tx = conn
+                .unchecked_transaction()
+                .map_err(|e| format!("jmap inline image update tx: {e}"))?;
+            for (attachment_row_id, content_hash) in updates {
+                tx.execute(
+                    "UPDATE attachments SET content_hash = ?1 WHERE id = ?2",
+                    rusqlite::params![content_hash, attachment_row_id],
+                )
+                .map_err(|e| format!("update JMAP inline image hash: {e}"))?;
+            }
+            tx.commit()
+                .map_err(|e| format!("commit JMAP inline image hashes: {e}"))?;
+            Ok(())
+        })
+        .await
+    {
+        log::warn!("Failed to persist JMAP inline image hashes: {error}");
     }
 }
 

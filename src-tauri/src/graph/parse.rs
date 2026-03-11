@@ -9,6 +9,8 @@ pub struct ParsedGraphAttachment {
     pub mime_type: Option<String>,
     pub size: Option<i64>,
     pub is_inline: bool,
+    pub content_hash: Option<String>,
+    pub inline_data: Option<Vec<u8>>,
     pub content_id: Option<String>,
 }
 
@@ -120,13 +122,27 @@ pub fn parse_graph_message(
         .as_deref()
         .unwrap_or(&[])
         .iter()
-        .map(|a| ParsedGraphAttachment {
-            id: a.id.clone(),
-            filename: a.name.clone(),
-            mime_type: a.content_type.clone(),
-            size: a.size,
-            is_inline: a.is_inline.unwrap_or(false),
-            content_id: a.content_id.clone(),
+        .map(|a| {
+            let is_inline = a.is_inline.unwrap_or(false);
+            let mime_type = a.content_type.clone();
+            let inline_data = if is_inline && mime_type.as_deref().is_some_and(|v| v.starts_with("image/")) {
+                a.content_bytes.as_deref().and_then(decode_inline_bytes)
+            } else {
+                None
+            };
+
+            ParsedGraphAttachment {
+                content_hash: inline_data
+                    .as_deref()
+                    .map(crate::attachment_cache::hash_bytes),
+                inline_data,
+                id: a.id.clone(),
+                filename: a.name.clone(),
+                mime_type,
+                size: a.size,
+                is_inline,
+                content_id: a.content_id.clone(),
+            }
         })
         .collect();
 
@@ -207,6 +223,16 @@ fn format_recipients(recipients: Option<&[GraphRecipient]>) -> Option<String> {
         })
         .collect();
     Some(formatted.join(", "))
+}
+
+fn decode_inline_bytes(data: &str) -> Option<Vec<u8>> {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+
+    let decoded = STANDARD.decode(data).ok()?;
+    if decoded.len() > crate::inline_image_store::MAX_INLINE_SIZE {
+        return None;
+    }
+    Some(decoded)
 }
 
 /// Parse an ISO 8601 date string to epoch milliseconds.

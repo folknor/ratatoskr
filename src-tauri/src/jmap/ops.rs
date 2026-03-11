@@ -32,6 +32,7 @@ impl ProviderOps for JmapOps {
             days_back,
             ctx.db,
             ctx.body_store,
+            ctx.inline_images,
             ctx.search,
             ctx.app_handle,
         )
@@ -49,6 +50,7 @@ impl ProviderOps for JmapOps {
             ctx.account_id,
             ctx.db,
             ctx.body_store,
+            ctx.inline_images,
             ctx.search,
             ctx.app_handle,
         )

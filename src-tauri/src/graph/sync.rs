@@ -5,6 +5,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::body_store::{BodyStoreState, MessageBody};
 use crate::db::DbState;
+use crate::inline_image_store::{InlineImage, InlineImageStoreState};
 use crate::provider::types::{ProviderCtx, SyncResult};
 use crate::search::{SearchDocument, SearchState};
 
@@ -36,6 +37,7 @@ struct SyncCtx<'a> {
     account_id: &'a str,
     db: &'a DbState,
     body_store: &'a BodyStoreState,
+    inline_images: &'a InlineImageStoreState,
     search: &'a SearchState,
     app_handle: &'a AppHandle,
 }
@@ -55,6 +57,7 @@ pub(crate) async fn graph_initial_sync(
         account_id: ctx.account_id,
         db: ctx.db,
         body_store: ctx.body_store,
+        inline_images: ctx.inline_images,
         search: ctx.search,
         app_handle: ctx.app_handle,
     };
@@ -175,6 +178,7 @@ pub(crate) async fn graph_delta_sync(
         account_id: ctx.account_id,
         db: ctx.db,
         body_store: ctx.body_store,
+        inline_images: ctx.inline_images,
         search: ctx.search,
         app_handle: ctx.app_handle,
     };
@@ -443,7 +447,7 @@ async fn fetch_folder_messages(
         "/me/mailFolders/{enc_folder_id}/messages\
          ?$filter=receivedDateTime ge {since_iso}\
          &$select={MESSAGE_SELECT}\
-         &$expand=attachments($select=id,name,contentType,size,isInline,contentId)\
+         &$expand=attachments($select=id,name,contentType,size,isInline,contentId,contentBytes)\
          &$top={BATCH_SIZE}\
          &$orderby=receivedDateTime desc"
     );
@@ -771,6 +775,9 @@ async fn persist_messages(
 
     // 2. Body store writes
     store_bodies(sctx.body_store, messages).await;
+
+    // 2.5. Inline image cache writes
+    store_inline_images(sctx.inline_images, messages).await;
 
     // 3. Search index writes
     index_messages(sctx.search, sctx.account_id, messages).await;
@@ -1193,11 +1200,11 @@ fn upsert_attachments(
             tx.execute(
                 "INSERT INTO attachments \
                  (id, message_id, account_id, filename, mime_type, size, \
-                  gmail_attachment_id, content_id, is_inline) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
+                  gmail_attachment_id, content_hash, content_id, is_inline) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
                  ON CONFLICT(id) DO UPDATE SET \
                    filename = ?4, mime_type = ?5, size = ?6, \
-                   gmail_attachment_id = ?7, content_id = ?8, is_inline = ?9",
+                   gmail_attachment_id = ?7, content_hash = ?8, content_id = ?9, is_inline = ?10",
                 rusqlite::params![
                     att_id,
                     msg.id,
@@ -1206,6 +1213,7 @@ fn upsert_attachments(
                     att.mime_type,
                     att.size,
                     att.id,
+                    att.content_hash,
                     att.content_id,
                     att.is_inline,
                 ],
@@ -1237,6 +1245,34 @@ async fn store_bodies(body_store: &BodyStoreState, messages: &[ParsedGraphMessag
 
     if let Err(e) = body_store.put_batch(bodies).await {
         log::warn!("Failed to store Graph bodies: {e}");
+    }
+}
+
+async fn store_inline_images(
+    inline_images: &InlineImageStoreState,
+    messages: &[ParsedGraphMessage],
+) {
+    let images: Vec<InlineImage> = messages
+        .iter()
+        .flat_map(|m| &m.attachments)
+        .filter_map(|att| {
+            let data = att.inline_data.as_ref()?;
+            let hash = att.content_hash.as_ref()?;
+            let mime = att.mime_type.as_ref()?;
+            Some(InlineImage {
+                content_hash: hash.clone(),
+                data: data.clone(),
+                mime_type: mime.clone(),
+            })
+        })
+        .collect();
+
+    if images.is_empty() {
+        return;
+    }
+
+    if let Err(e) = inline_images.put_batch(images).await {
+        log::warn!("Failed to store Graph inline images: {e}");
     }
 }
 

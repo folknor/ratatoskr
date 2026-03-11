@@ -42,8 +42,6 @@
 
 ## Cache & Inline Images
 
-- [ ] **JMAP/Graph don't get inline images during sync** — IMAP and Gmail now store small inline images proactively at sync time. JMAP/Graph still store them reactively on first fetch via `cache_after_fetch`. First render of every email with inline images is still slow for those providers.
-
 ---
 
 ## Settings
