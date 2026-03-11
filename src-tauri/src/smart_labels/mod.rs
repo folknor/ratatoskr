@@ -1,8 +1,8 @@
 pub mod commands;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppliedSmartLabelMatch {
     pub thread_id: String,

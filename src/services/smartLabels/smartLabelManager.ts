@@ -1,5 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
 import { getMessagesByIds } from "@/services/db/messages";
-import { addThreadLabel } from "@/services/emailActions";
 import { dbMessageToParsedMessage } from "@/services/filters/filterEngine";
 import type { ParsedMessage } from "@/services/gmail/messageParser";
 import {
@@ -30,19 +30,12 @@ export async function applySmartLabelsToMessages(
             aiRemainder.rules,
           )
         : await matchSmartLabels(accountId, messages, preAppliedMatches);
+    if (matches.length === 0) return;
 
-    await Promise.allSettled(
-      matches.flatMap(({ threadId, labelIds }) =>
-        labelIds.map((labelId) =>
-          addThreadLabel(accountId, threadId, labelId).catch((err) => {
-            console.error(
-              `Failed to apply smart label ${labelId} to thread ${threadId}:`,
-              err,
-            );
-          }),
-        ),
-      ),
-    );
+    await invoke("smart_labels_apply_matches", {
+      accountId,
+      matches,
+    });
   } catch (err) {
     console.error("Smart label application failed:", err);
   }

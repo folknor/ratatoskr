@@ -95,6 +95,56 @@ pub(crate) async fn smart_labels_apply_criteria_to_new_message_ids_impl(
     Ok(applied_matches)
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn smart_labels_apply_matches_impl(
+    account_id: &str,
+    matches: &[AppliedSmartLabelMatch],
+    db: &DbState,
+    gmail: &GmailState,
+    jmap: &JmapState,
+    graph: &GraphState,
+    body_store: &BodyStoreState,
+    inline_images: &InlineImageStoreState,
+    search: &SearchState,
+    app_handle: &AppHandle,
+) -> Result<(), String> {
+    if matches.is_empty() {
+        return Ok(());
+    }
+
+    let provider = get_provider_type(db, account_id).await?;
+    let ops = get_ops(
+        &provider,
+        account_id,
+        gmail,
+        jmap,
+        graph,
+        *gmail.encryption_key(),
+    )
+    .await?;
+    let ctx = ProviderCtx {
+        account_id,
+        db,
+        body_store,
+        inline_images,
+        search,
+        app_handle,
+    };
+
+    for applied in matches {
+        for label_id in &applied.label_ids {
+            if let Err(error) = ops.add_tag(&ctx, &applied.thread_id, label_id).await {
+                log::warn!(
+                    "Failed to apply smart label {label_id} to thread {}: {error}",
+                    applied.thread_id
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub(crate) async fn smart_labels_prepare_ai_remainder_impl(
     account_id: &str,
     message_ids: &[String],
@@ -144,6 +194,35 @@ pub async fn smart_labels_apply_criteria_to_new_message_ids(
     smart_labels_apply_criteria_to_new_message_ids_impl(
         &account_id,
         &message_ids,
+        &db,
+        &gmail,
+        &jmap,
+        &graph,
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn smart_labels_apply_matches(
+    account_id: String,
+    matches: Vec<AppliedSmartLabelMatch>,
+    db: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
+    jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
+    body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
+    search: State<'_, SearchState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    smart_labels_apply_matches_impl(
+        &account_id,
+        &matches,
         &db,
         &gmail,
         &jmap,
