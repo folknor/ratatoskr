@@ -1,38 +1,5 @@
 # TODO
 
-## Bugs (High Priority)
-
-
-- [x] **App not killed when main window is closed** — Fixed: `on_window_event` now calls `app_handle().exit(0)` instead of hiding to tray.
-
-- [x] **Remove "launch at login" feature** — Removed UI toggle, `tauri-plugin-autostart` dep, Cargo entry, and capability permissions.
-
-- [x] **Remove "reduce motion" setting** — Removed UI toggle, store state, App.tsx effect, Rust bootstrap field, and i18n keys.
-
-- [x] **"Undo send" delay needs a disable option** — Added "None (send immediately)" option; Composer skips undo UI when delay is 0.
-
-- [x] **`JMAP_NO_STATE` fallback dropped** — Added `|| err == "JMAP_NO_STATE"` to the delta-sync fallback guard in `provider_sync_auto_impl`.
-
-- [x] **IMAP initial sync no longer triggers AI categorization** — IMAP initial sync now returns `["_initial_sync_completed"]` as `affected_thread_ids` to trigger post-sync hooks.
-
-- [x] **`snippet` populated from `body_text` instead of thread snippet** — `prepare_ai_remainder` now queries thread snippets from `threads` table and uses them instead of `body_text`.
-
-- [x] **`calendar_upsert_provider_events` silently uses NULL `calendar_id` when calendar not found** — Now returns an error if the calendar is not found, consistent with `calendar_apply_sync_result`.
-
-- [x] **Duplicate `Authorization` header in `google_calendar_execute_with_retry`** — Removed the duplicate `.header("Authorization", ...)` call before `.send()`.
-
-- [x] **All-day event timestamps use UTC instead of local timezone** — Now uses `.and_local_timezone(chrono::Local).single()` to match old TS `new Date()` behaviour.
-
-- [x] **Hand-rolled CalDAV XML parser doesn't handle arbitrary namespace prefixes** — `split_xml_responses` and `extract_first_element` now extract namespace prefix→URI mappings from the XML document itself (`xml_ns_prefixes_for`), handling `<D:response>`, `<ns0:response>`, and any other prefixes dynamically. *(BUG)*
-
-- [x] **`listFolders` lost `getSyncableFolders` filtering** — `list_folders` in `imap/client.rs` now skips `\Noselect` folders (including `[Gmail]`, `[Google Mail]` container folders).
-
-- [x] **`listFolders` lost `mapFolderToLabel` ID mapping** — Added `canonical_folder_id()` in `imap/ops.rs` that maps special-use flags to well-known IDs (`SENT`, `TRASH`, etc.) and user folders to `folder-{path}`.
-
-- [x] **Busy-wait spin loop in `run_sync_queue`** — Added `tokio::task::yield_now().await` before `continue` to yield the scheduler instead of spinning.
-
----
-
 ## Security & Data Safety
 
 - [ ] **Decryption failure fallback returns plaintext** — `src/services/db/accounts.ts:40-81` — When decryption fails, code falls back to the raw (potentially plaintext) value with only `console.warn`. Credentials stored before encryption was enabled remain accessible in plaintext indefinitely. *(LOW)*
@@ -44,18 +11,6 @@
 ---
 
 ## OAuth & Account Creation
-
-- [x] **OAuth port fallback mismatch** — Fixed: `bind_oauth_listener` binds first and returns the actual port; both `perform_google_oauth` and `perform_provider_oauth` build `redirect_uri` from the actual bound port. All flows now use `127.0.0.1` consistently. *(BUG)*
-
-- [x] **Empty email on account creation** — Fixed: `fetch_provider_userinfo` and `parse_microsoft_userinfo` now return `Err` if email is empty or missing; the redundant empty-email check in `account_create_graph_via_oauth` was removed. *(BUG)*
-
-- [x] **No rollback if Graph client init or profile fetch fails** — Fixed: client init and profile fetch wrapped in an async block; on failure the inserted account row is deleted before returning the error. *(MED)*
-
-- [x] **No token refresh concurrency protection for IMAP** — Fixed: added `IMAP_REFRESH_LOCKS` static (per-account `tokio::sync::Mutex`) in `imap/account_config.rs`; `ensure_oauth_access_token` acquires the lock before refreshing and re-reads from DB after acquiring (double-check pattern). *(MED)*
-
-- [x] **No duplicate account check on Gmail creation** — Fixed: `account_create_gmail_via_oauth` queries for an existing account with the same email and provider before inserting. *(MED)*
-
-- [x] **`oauth_token_endpoint` hardcoded to 3 providers** — Fixed: added migration 26 (`oauth_token_url` column), `CreateImapOAuthAccountRequest` now carries `oauth_token_url`, the stored URL takes precedence in `oauth_token_endpoint`, and `AddImapAccount.tsx` passes the provider's `tokenUrl` at account creation time. *(MED)*
 
 - [ ] **Plaintext tokens round-trip through IPC** — `account_authorize_oauth_provider` returns raw `access_token`/`refresh_token` to TS, which passes them back to `account_create_imap_oauth` for encryption. The Gmail flow avoids this by handling everything in a single Rust command. Consider merging or documenting why the split is needed. *(MED)*
 
@@ -107,15 +62,7 @@
 
 ## Provider Operations
 
-- [x] **`testConnection` error handling regression** — Fixed: `provider_test_connection` now catches `Err` from `ops.test_connection()` and returns `Ok(ProviderTestResult { success: false, message })` instead of propagating as an unhandled TS rejection. *(MED)*
-
 - [ ] **Thread-level vs message-level semantics change** — All action methods (`archive`, `trash`, `markRead`, `star`, etc.) now pass `threadId` to Rust commands and ignore `_messageIds`. If any caller passes specific message IDs (e.g., marking individual messages as read), the entire thread is affected instead. *(MED)*
-
-- [x] **`sendMessage` lost non-fatal Sent folder copy handling** — Already handled: IMAP `send_email` uses `if let Err(e) = async { ... }.await { log::error!(...) }` — Sent-copy failure is non-fatal and logged. *(MED)*
-
-- [x] **`thread_id` always empty for fetched IMAP messages** — Fixed: `fetch_message` queries the DB for the stored `thread_id` after fetching body; falls back to empty string if message isn't indexed yet. *(MED)*
-
-- [x] **Verify `msg.date` unit before `* 1000`** — Confirmed: `ImapMessage.date` is in seconds (comment in `sync/convert.rs`). `* 1000` in `imap_message_to_provider_message` is correct. Not a bug. *(MED)*
 
 - [ ] **Duplicated TS interfaces for provider results** — `ProviderFolderResult`, `ProviderTestResult`, `ProviderProfile` are defined independently in `gmailProvider.ts`, `jmapProvider.ts`, `imapSmtpProvider.ts`, and `labelStore.ts`. Move to a shared location (e.g., `services/email/types.ts`). *(LOW)*
 
@@ -199,11 +146,7 @@
 
 - [ ] **`has_attachments` hardcoded to `false` in `load_filterable_messages`** — Any filter with `has_attachment: true` will never match. The `messages` table has a `has_attachments` column — use it. *(MED)*
 
-- [x] **`apply_filter_result` early-returns on first provider error within a thread** — If `add_tag` fails for one label, remaining labels and `mark_read`/`star` for that thread are skipped. Should collect errors and continue. *(MED)*
-
 - [ ] **Filter and smart label actions applied sequentially instead of in parallel** — Old TS used `Promise.allSettled` for concurrent per-thread application. Rust iterates sequentially. Could use `tokio::task::JoinSet`. *(MED)*
-
-- [x] **`muted_thread_ids` loads ALL muted threads for the account** — `SELECT id FROM threads WHERE account_id = ?1 AND is_muted = 1` could return thousands of IDs when only a handful (from new inbox messages) are relevant. Filter to relevant thread IDs with `IN (...)`. *(MED)*
 
 - [ ] **Criteria matching re-evaluated redundantly in `prepare_ai_remainder`** — Re-runs `message_matches_filter` for all rules even though results are already in `pre_applied_matches`. *(MED)*
 
@@ -237,27 +180,9 @@
 
 - [ ] **CalDAV "done" emitted before calendar sync completes** — Old code: sync calendar → emit "done". New code: emit "done" → sync calendar. UI shows completion before calendar data arrives. *(LOW)*
 
-- [x] **`categorization_apply_ai_results` duplicates `db_set_thread_categories_batch`** — Identical SQL and logic. Old command still registered. *(MED)*
-
 ---
 
 ## Calendar
-
-- [x] **`parse_ical_datetime` treats floating datetimes as UTC and ignores TZID** — Last branch handles datetimes without `Z` suffix but does `.and_utc().timestamp()`. Also, `DTSTART;TZID=America/New_York:20260311T140000` — the `TZID` parameter is completely ignored. *(MED)*
-
-- [x] **`unfold_ical_lines` doesn't handle LF-only continuation lines** — RFC 5545 folds with CRLF+SPACE/TAB but some real-world servers emit LF-only (`\n ` or `\n\t`). Long property values from such servers will appear split. *(MED)*
-
-- [x] **`caldav_request_with_headers` sets Content-Type twice** — When `body` is `Some(...)`, it unconditionally sets `Content-Type: application/xml`. Callers like `caldav_create_event` also pass `Content-Type: text/calendar` in the headers slice. Server sees duplicate Content-Type headers with different values. *(MED)*
-
-- [x] **New `reqwest::Client::new()` on every CalDAV command** — Each of the 7 commands creates a fresh client with no connection pooling. Old TS cached `DAVClient` in `this.client`. Means a fresh TLS handshake per CalDAV operation. Google Calendar commands reuse a client via `GmailState`; CalDAV should do similar. *(MED)*
-
-- [x] **`Content-Type: application/json` set unconditionally for all Google Calendar requests** — Applied to GET/DELETE (no body). Also redundant for POST/PATCH where `request.json()` sets it. *(MED)*
-
-- [x] **429 response returned as `Ok` after exhausting retries** — `google_calendar_execute_with_retry` returns the 429 response after max attempts. Should explicitly error. *(MED)*
-
-- [x] **18-column calendar event INSERT/ON CONFLICT duplicated** — Same SQL in `calendar_upsert_provider_events` and `calendar_apply_sync_result`. Extract to constant or helper. *(MED)*
-
-- [x] **`Rust adds `calendar_provider == "google_api"` case not in old TS** — `should_sync_calendar` returns `true` for `google_api` calendar provider, but old `hasCalendarSupport` didn't have this case. Behavioral change for accounts with `calendar_provider = "google_api"` that aren't `gmail_api`. *(MED)*
 
 - [ ] **App-specific password help links** — Providers like iCloud require app-specific passwords. Add a `help_url` field to `ProtocolOption` in `discovery/types.rs`, populate it for iCloud and similar providers, surface it in the account setup UI when present. *(LOW)*
 
