@@ -10,7 +10,7 @@ use crate::db::DbState;
 use crate::gmail::client::{GmailClient, GmailState};
 use crate::graph::client::{GraphClient, GraphState};
 use crate::graph::types::GraphProfile;
-use crate::provider::crypto::{decrypt_value, encrypt_value, is_encrypted};
+use crate::provider::crypto::{AppCryptoState, decrypt_value, encrypt_value, is_encrypted};
 use crate::sync::config;
 
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -82,7 +82,6 @@ pub struct OAuthProviderAuthorizationResult {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateImapOAuthAccountRequest {
-    pub id: String,
     pub email: String,
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
@@ -424,52 +423,68 @@ pub async fn account_authorize_oauth_provider(
 pub async fn account_create_imap_oauth(
     request: CreateImapOAuthAccountRequest,
     db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-) -> Result<(), String> {
-    let access_token = encrypt_value(gmail.encryption_key(), &request.access_token)?;
-    let refresh_token = encrypt_value(gmail.encryption_key(), &request.refresh_token)?;
+    crypto: State<'_, AppCryptoState>,
+) -> Result<AccountResult, String> {
+    let account_id = uuid::Uuid::new_v4().to_string();
+    let access_token = encrypt_value(crypto.encryption_key(), &request.access_token)?;
+    let refresh_token = encrypt_value(crypto.encryption_key(), &request.refresh_token)?;
     let oauth_client_secret = request
         .oauth_client_secret
         .as_deref()
         .filter(|secret| !secret.is_empty())
-        .map(|secret| encrypt_value(gmail.encryption_key(), secret))
+        .map(|secret| encrypt_value(crypto.encryption_key(), secret))
         .transpose()?;
 
-    db.with_conn(move |conn| {
-        conn.execute(
-            "INSERT INTO accounts (id, email, display_name, avatar_url, access_token, \
-             refresh_token, token_expires_at, provider, auth_method, imap_host, imap_port, \
-             imap_security, smtp_host, smtp_port, smtp_security, oauth_provider, \
-             oauth_client_id, oauth_client_secret, oauth_token_url, imap_username, \
-             accept_invalid_certs) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'imap', 'oauth2', ?8, ?9, ?10, ?11, ?12, \
-             ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
-            rusqlite::params![
-                request.id,
-                request.email,
-                request.display_name,
-                request.avatar_url,
-                access_token,
-                refresh_token,
-                request.token_expires_at,
-                request.imap_host,
-                request.imap_port,
-                request.imap_security,
-                request.smtp_host,
-                request.smtp_port,
-                request.smtp_security,
-                request.oauth_provider,
-                request.oauth_client_id,
-                oauth_client_secret,
-                request.oauth_token_url,
-                request.imap_username,
-                if request.accept_invalid_certs { 1 } else { 0 },
-            ],
-        )
-        .map_err(|e| format!("Failed to insert OAuth IMAP account: {e}"))?;
-        Ok(())
+    db.with_conn({
+        let account_id = account_id.clone();
+        let email = request.email.clone();
+        let display_name = request.display_name.clone();
+        let avatar_url = request.avatar_url.clone();
+        move |conn| {
+            conn.execute(
+                "INSERT INTO accounts (id, email, display_name, avatar_url, access_token, \
+                 refresh_token, token_expires_at, provider, auth_method, imap_host, imap_port, \
+                 imap_security, smtp_host, smtp_port, smtp_security, oauth_provider, \
+                 oauth_client_id, oauth_client_secret, oauth_token_url, imap_username, \
+                 accept_invalid_certs) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'imap', 'oauth2', ?8, ?9, ?10, ?11, ?12, \
+                 ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+                rusqlite::params![
+                    account_id,
+                    email,
+                    display_name,
+                    avatar_url,
+                    access_token,
+                    refresh_token,
+                    request.token_expires_at,
+                    request.imap_host,
+                    request.imap_port,
+                    request.imap_security,
+                    request.smtp_host,
+                    request.smtp_port,
+                    request.smtp_security,
+                    request.oauth_provider,
+                    request.oauth_client_id,
+                    oauth_client_secret,
+                    request.oauth_token_url,
+                    request.imap_username,
+                    if request.accept_invalid_certs { 1 } else { 0 },
+                ],
+            )
+            .map_err(|e| format!("Failed to insert OAuth IMAP account: {e}"))?;
+            Ok(())
+        }
     })
-    .await
+    .await?;
+
+    Ok(AccountResult {
+        id: account_id,
+        email: request.email,
+        display_name: request.display_name.unwrap_or_default(),
+        avatar_url: request.avatar_url,
+        is_active: true,
+        provider: "imap".to_string(),
+    })
 }
 
 #[tauri::command]

@@ -573,6 +573,7 @@ pub fn run() {
                         );
                         [0u8; 32]
                     });
+                app.manage(provider::crypto::AppCryptoState::new(encryption_key));
                 app.manage(gmail::client::GmailState::new(encryption_key));
 
                 // JMAP provider state — shares the same encryption key

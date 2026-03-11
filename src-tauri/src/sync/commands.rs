@@ -13,6 +13,7 @@ use crate::gmail::client::GmailState;
 use crate::graph::client::GraphState;
 use crate::inline_image_store::InlineImageStoreState;
 use crate::jmap::client::JmapState;
+use crate::provider::crypto::AppCryptoState;
 use crate::provider::commands::provider_sync_auto_for_provider;
 use crate::search::SearchState;
 use crate::smart_labels::commands::load_enabled_criteria_rules;
@@ -640,7 +641,7 @@ fn emit_sync_status(app: &AppHandle, event: SyncStatusEvent) {
 pub async fn sync_imap_initial(
     app: AppHandle,
     db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
+    crypto: State<'_, AppCryptoState>,
     body_store: State<'_, BodyStoreState>,
     inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
@@ -668,7 +669,7 @@ pub async fn sync_imap_initial(
             .await?
         };
         let imap_config =
-            crate::imap::account_config::load_imap_config(&db, &account_id, gmail.encryption_key())
+            crate::imap::account_config::load_imap_config(&db, &account_id, crypto.encryption_key())
                 .await?;
 
         let days = days_back.unwrap_or(actual_days_back);
@@ -704,7 +705,7 @@ pub async fn sync_imap_initial(
 pub async fn sync_imap_delta(
     app: AppHandle,
     db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
+    crypto: State<'_, AppCryptoState>,
     body_store: State<'_, BodyStoreState>,
     inline_images: State<'_, InlineImageStoreState>,
     search: State<'_, SearchState>,
@@ -729,7 +730,7 @@ pub async fn sync_imap_delta(
             }).await?
         };
         let imap_config =
-            crate::imap::account_config::load_imap_config(&db, &account_id, gmail.encryption_key())
+            crate::imap::account_config::load_imap_config(&db, &account_id, crypto.encryption_key())
                 .await?;
 
         let days = days_back.unwrap_or(actual_days_back);

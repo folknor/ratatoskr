@@ -14,10 +14,6 @@
 
 - [ ] **Plaintext tokens round-trip through IPC** — `account_authorize_oauth_provider` returns raw `access_token`/`refresh_token` to TS, which passes them back to `account_create_imap_oauth` for encryption. The Gmail flow avoids this by handling everything in a single Rust command. Consider merging or documenting why the split is needed. *(MED)*
 
-- [ ] **`GmailState` used as encryption key source for non-Gmail code** — `account_create_imap_oauth` and `sync/commands.rs` (`sync_imap_initial`, `sync_imap_delta`) still depend on `GmailState` solely for the encryption key. The key is app-wide. Rename to `AppCryptoState` or similar. *(LOW)*
-
-- [ ] **Account ID generated TS-side for IMAP, Rust-side for Gmail** — Inconsistent ownership of ID generation between the two flows. *(LOW)*
-
 ---
 
 ## Provider Operations

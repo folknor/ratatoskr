@@ -2,6 +2,21 @@ use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::Aead};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use std::path::Path;
 
+/// App-wide encryption key state shared by commands that don't own provider clients.
+pub struct AppCryptoState {
+    encryption_key: [u8; 32],
+}
+
+impl AppCryptoState {
+    pub fn new(encryption_key: [u8; 32]) -> Self {
+        Self { encryption_key }
+    }
+
+    pub fn encryption_key(&self) -> &[u8; 32] {
+        &self.encryption_key
+    }
+}
+
 /// Load the AES-256-GCM encryption key from the key file.
 ///
 /// Tries `ratatoskr.key` first, falls back to legacy `velo.key`.

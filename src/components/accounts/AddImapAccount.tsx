@@ -326,16 +326,22 @@ export function AddImapAccount({
     setSaving(true);
     setSaveError(null);
     try {
-      const accountId = crypto.randomUUID();
       const email = (isOAuth ? form.oauthEmail : null) ?? form.email.trim();
 
       const imapUsername = form.imapUsername.trim() || null;
+      let accountId: string;
+      let avatarUrl: string | null = isOAuth ? form.oauthPicture : null;
 
       if (isOAuth) {
-        const avatarUrl = form.oauthPicture;
-        await invoke("account_create_imap_oauth", {
+        const account = await invoke<{
+          id: string;
+          email: string;
+          displayName: string;
+          avatarUrl: string | null;
+          isActive: boolean;
+          provider: string;
+        }>("account_create_imap_oauth", {
           request: {
-            id: accountId,
             email,
             displayName: form.displayName.trim() || null,
             avatarUrl,
@@ -357,7 +363,10 @@ export function AddImapAccount({
             acceptInvalidCerts: form.acceptInvalidCerts,
           },
         });
+        accountId = account.id;
+        avatarUrl = account.avatarUrl;
       } else {
+        accountId = crypto.randomUUID();
         await insertImapAccount({
           id: accountId,
           email,
@@ -380,7 +389,7 @@ export function AddImapAccount({
         id: accountId,
         email,
         displayName: form.displayName.trim() || null,
-        avatarUrl: isOAuth ? form.oauthPicture : null,
+        avatarUrl,
         isActive: true,
         provider: "imap",
       });
