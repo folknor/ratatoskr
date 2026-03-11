@@ -16,8 +16,10 @@ use crate::sync::config;
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const GOOGLE_USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v2/userinfo";
-const MICROSOFT_GRAPH_AUTH_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
-const MICROSOFT_GRAPH_TOKEN_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+const MICROSOFT_GRAPH_AUTH_URL: &str =
+    "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
+const MICROSOFT_GRAPH_TOKEN_URL: &str =
+    "https://login.microsoftonline.com/common/oauth2/v2.0/token";
 const OAUTH_CALLBACK_PORT: u16 = 17248;
 const GOOGLE_SCOPES: &str = concat!(
     "https://www.googleapis.com/auth/gmail.readonly ",
@@ -29,33 +31,23 @@ const GOOGLE_SCOPES: &str = concat!(
     "https://www.googleapis.com/auth/calendar.readonly ",
     "https://www.googleapis.com/auth/calendar.events"
 );
-const MICROSOFT_GRAPH_SCOPES: [&str; 6] = [
+const MICROSOFT_GRAPH_SCOPES: [&str; 7] = [
     "Mail.ReadWrite",
     "Mail.Send",
     "MailboxSettings.ReadWrite",
     "offline_access",
     "openid",
     "profile",
+    "User.Read",
 ];
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GmailAccountResult {
+pub struct AccountResult {
     pub id: String,
     pub email: String,
     pub display_name: String,
-    pub avatar_url: String,
-    pub is_active: bool,
-    pub provider: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GraphAccountResult {
-    pub id: String,
-    pub email: String,
-    pub display_name: String,
-    pub avatar_url: String,
+    pub avatar_url: Option<String>,
     pub is_active: bool,
     pub provider: String,
 }
@@ -155,11 +147,10 @@ struct GoogleTokenResponse {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct GoogleUserInfo {
     email: String,
     name: String,
-    picture: String,
+    picture: Option<String>,
 }
 
 #[derive(Debug)]
@@ -174,7 +165,7 @@ pub async fn account_create_gmail_via_oauth(
     app: AppHandle,
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
-) -> Result<GmailAccountResult, String> {
+) -> Result<AccountResult, String> {
     let oauth = perform_google_oauth(&app, &db, gmail.encryption_key()).await?;
 
     let email_for_check = oauth.user_info.email.clone();
@@ -237,7 +228,7 @@ pub async fn account_create_gmail_via_oauth(
     let client = GmailClient::from_account(&db, &account_id, *gmail.encryption_key()).await?;
     gmail.insert(account_id.clone(), client).await;
 
-    Ok(GmailAccountResult {
+    Ok(AccountResult {
         id: account_id,
         email: oauth.user_info.email,
         display_name: oauth.user_info.name,
@@ -254,9 +245,11 @@ pub async fn account_get_calendar_provider_info(
 ) -> Result<Option<CalendarProviderInfo>, String> {
     db.with_conn(move |conn| {
         let account = config::get_account(conn, &account_id)?;
-        Ok(config::calendar_provider_kind(&account).map(|provider| CalendarProviderInfo {
-            provider: provider.to_string(),
-        }))
+        Ok(
+            config::calendar_provider_kind(&account).map(|provider| CalendarProviderInfo {
+                provider: provider.to_string(),
+            }),
+        )
     })
     .await
 }
@@ -483,7 +476,7 @@ pub async fn account_create_graph_via_oauth(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
     graph: State<'_, GraphState>,
-) -> Result<GraphAccountResult, String> {
+) -> Result<AccountResult, String> {
     let client_id = read_setting(&db, "microsoft_client_id", gmail.encryption_key())
         .await?
         .ok_or("Microsoft Client ID not configured. Go to Settings to set it up.")?;
@@ -543,8 +536,7 @@ pub async fn account_create_graph_via_oauth(
     .await?;
 
     let init_result = async {
-        let client =
-            GraphClient::from_account(&db, &account_id, *graph.encryption_key()).await?;
+        let client = GraphClient::from_account(&db, &account_id, *graph.encryption_key()).await?;
         let profile: GraphProfile = client
             .get_json("/me?$select=displayName,mail,userPrincipalName", &db)
             .await?;
@@ -597,11 +589,11 @@ pub async fn account_create_graph_via_oauth(
     })
     .await?;
 
-    Ok(GraphAccountResult {
+    Ok(AccountResult {
         id: account_id,
         email,
         display_name,
-        avatar_url: String::new(),
+        avatar_url: None,
         is_active: true,
         provider: "graph".to_string(),
     })
@@ -745,7 +737,11 @@ async fn perform_provider_oauth(
         request.auth_url,
         params
             .into_iter()
-            .map(|(key, value)| format!("{}={}", urlencoding::encode(&key), urlencoding::encode(&value)))
+            .map(|(key, value)| format!(
+                "{}={}",
+                urlencoding::encode(&key),
+                urlencoding::encode(&value)
+            ))
             .collect::<Vec<_>>()
             .join("&")
     );
@@ -760,7 +756,7 @@ async fn perform_provider_oauth(
         result.code,
         request.client_id.clone(),
         redirect_uri,
-        code_verifier.filter(|_| request.use_pkce),
+        code_verifier,
         request.client_secret.clone(),
         if request.provider_id == "microsoft" || request.provider_id == "microsoft_graph" {
             Some(request.scopes.join(" "))

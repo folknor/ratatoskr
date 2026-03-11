@@ -19,7 +19,7 @@ interface GmailAccountResult {
   id: string;
   email: string;
   displayName: string;
-  avatarUrl: string;
+  avatarUrl: string | null;
   isActive: boolean;
   provider: string;
 }

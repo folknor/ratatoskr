@@ -544,12 +544,11 @@ impl ProviderOps for ImapOps {
         _thread_id: Option<&str>,
     ) -> Result<String, String> {
         let account_id = ctx.account_id.to_string();
-        let smtp_config =
-            crate::imap::account_config::load_smtp_config(ctx.db, &account_id, &self.encryption_key)
+        let configs =
+            crate::imap::account_config::load_both_configs(ctx.db, &account_id, &self.encryption_key)
                 .await?;
-        let imap_config =
-            crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
-                .await?;
+        let smtp_config = configs.smtp;
+        let imap_config = configs.imap;
 
         let sent_folder = ctx
             .db

@@ -18,35 +18,13 @@
 
 - [ ] **No `access_type=offline` for non-Google/non-Microsoft providers** — `perform_provider_oauth` doesn't request offline access for generic OIDC providers. Some may not return a refresh token without it. *(MED)*
 
-- [ ] **Microsoft scopes missing `User.Read`** — `MICROSOFT_GRAPH_SCOPES` includes `Mail.*` and `MailboxSettings.*` but not `User.Read`. Some tenant admin policies may require it explicitly. *(MED)*
-
-- [ ] **Double DB read + potential double token refresh on `send_email`** — `ops.rs` `send_email` calls `load_smtp_config` then `load_imap_config` sequentially. Each does a full DB query and potentially a token refresh. Should have a `load_both_configs` or accept a pre-loaded record. *(MED)*
-
-- [ ] **`GoogleUserInfo.picture` required but may be absent** — `src-tauri/src/account_commands.rs` — Google accounts without a profile picture may omit the `picture` field, failing deserialization. Make it `Option<String>`. *(MED)*
-
 - [ ] **`GmailState` used as encryption key source for non-Gmail code** — `account_create_imap_oauth`, `sync/commands.rs` (`sync_imap_initial`, `sync_imap_delta`), and `account_create_graph_via_oauth` (partially) all depend on `GmailState` solely for the encryption key. The key is app-wide. Rename to `AppCryptoState` or similar. *(LOW)*
 
 - [ ] **Microsoft ID token parsed without signature verification** — `parse_microsoft_userinfo` base64-decodes the JWT payload without verifying the signature. Fine for display info but add a comment noting it's intentional, to prevent someone later using it for auth decisions. *(LOW)*
 
-- [ ] **`code_verifier.filter(|_| request.use_pkce)` is redundant** — `code_verifier` is already `None` when `use_pkce` is false. The `.filter()` is dead logic. *(LOW)*
-
-- [ ] **`picture` field available but not used for IMAP accounts** — `OAuthProviderAuthorizationResult` returns `picture` from Rust but the TS `OAuthAuthorizationResult` interface doesn't include it. Account created with `avatarUrl: null` even when a picture URL is available. *(LOW)*
-
 - [ ] **Account ID generated TS-side for IMAP, Rust-side for Gmail** — Inconsistent ownership of ID generation between the two flows. *(LOW)*
 
-- [ ] **`#[serde(rename_all = "camelCase")]` on `GoogleUserInfo` is misleading** — All fields are single-word so the rename is a no-op, but adding `given_name`/`family_name` later would silently break deserialization. Remove the attribute. *(LOW)*
-
-- [ ] **`GraphAccountResult` duplicates `GmailAccountResult`** — Both structs have identical fields. Could be a single `AccountResult` type. *(LOW)*
-
-- [ ] **`avatar_url` always empty string instead of `Option`** — `GraphAccountResult` returns `avatar_url: String::new()`. Should be `Option<String>` / `None` to match the TS `Account.avatarUrl: string | null` type. *(LOW)*
-
-- [ ] **`setStatus` calls are vestigial in `AddGraphAccount.tsx`** — `setStatus("authenticating")` then `setStatus("testing")` fire back-to-back with no work between them. Collapse to a single status. *(LOW)*
-
 - [ ] **`start_oauth_server` is both a Tauri command and called internally** — Two code paths can trigger OAuth. If the old TS path is no longer needed, remove it from the invoke handler. *(LOW)*
-
-- [ ] **Dead imports in `tokenManager.ts`** — `getSecureSetting` and `getSetting` may be unused after `getClientId`/`getClientSecret` were removed. Verify and clean up. *(LOW)*
-
-- [ ] **`provider` field inconsistently passed to `addAccount`** — `AddAccount.tsx:55` now passes `provider: account.provider`. Other account creation paths (IMAP, Graph, JMAP) should also set it. *(LOW)*
 
 - [ ] **`reqwest::Client::new()` on every token refresh** — `account_config.rs` creates a new HTTP client per refresh. Should reuse a shared client. *(LOW)*
 
@@ -196,8 +174,6 @@
 
 - [ ] **`calendar_apply_sync_result` may clear existing `ctag` when only `sync_token` is provided** — Sets both `sync_token` and `ctag` unconditionally. `None` for one clears the column. *(LOW)*
 
-- [ ] **`let mut` with dead `let _ =` suppression in Google Calendar** — `time_min`/`time_max` don't need `mut`. Remove `mut` instead of suppressing. *(LOW)*
-
 - [ ] **`updated` vec always empty in `google_calendar_sync_events`** — Initialized but never populated. *(LOW)*
 
 - [ ] **`google_calendar_request_with_body` body parameter serves double duty** — Used for both initial request and 401 retry via `body.as_ref()`. Correct but fragile if refactored. *(LOW)*
@@ -213,8 +189,6 @@
 - [ ] **`load_ai_config` makes multiple sequential DB reads** — Provider name, model, and API key each go through separate `with_conn` round-trips. Could fetch all AI-related settings in a single query. *(LOW)*
 
 - [ ] **Duplicate `callAi` wrapper in two services** — Both `aiService.ts` and `writingStyleService.ts` define identical `callAi(systemPrompt, userContent)` wrappers. Callers could use `completeAi` directly or share a single wrapper. *(LOW)*
-
-- [ ] **`read_plain_setting` clones the key string twice** — `key_name` and `key_label` are both `.to_string()` of `key`. Only one is needed. *(LOW)*
 
 ---
 

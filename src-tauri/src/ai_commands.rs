@@ -38,9 +38,7 @@ struct AiConfig {
 }
 
 #[tauri::command]
-pub async fn ai_get_provider_name(
-    db: State<'_, DbState>,
-) -> Result<String, String> {
+pub async fn ai_get_provider_name(db: State<'_, DbState>) -> Result<String, String> {
     Ok(read_plain_setting(&db, "ai_provider")
         .await?
         .as_deref()
@@ -83,7 +81,10 @@ pub async fn ai_test_connection(
         user_content: "Say hi".to_string(),
         max_tokens: Some(16),
     };
-    complete_with_config(&config, &request).await.map(|_| true).or(Ok(false))
+    complete_with_config(&config, &request)
+        .await
+        .map(|_| true)
+        .or(Ok(false))
 }
 
 #[tauri::command]
@@ -162,7 +163,6 @@ fn normalize_provider_name(value: &str) -> &'static str {
 
 async fn read_plain_setting(db: &DbState, key: &str) -> Result<Option<String>, String> {
     let key_name = key.to_string();
-    let key_label = key.to_string();
     db.with_conn(move |conn| {
         conn.query_row(
             "SELECT value FROM settings WHERE key = ?1",
@@ -170,9 +170,10 @@ async fn read_plain_setting(db: &DbState, key: &str) -> Result<Option<String>, S
             |row| row.get::<_, String>(0),
         )
         .optional()
-        .map_err(|e| format!("Failed to read setting {key_label}: {e}"))
+        .map_err(|e| e.to_string())
     })
     .await
+    .map_err(|e| format!("Failed to read setting {key}: {e}"))
 }
 
 async fn read_secure_setting(
@@ -189,25 +190,32 @@ async fn read_secure_setting(
     }))
 }
 
-async fn complete_with_config(config: &AiConfig, request: &AiCompleteRequest) -> Result<String, String> {
+async fn complete_with_config(
+    config: &AiConfig,
+    request: &AiCompleteRequest,
+) -> Result<String, String> {
     match config.provider {
         AiProviderKind::Claude => complete_claude(config, request).await,
-        AiProviderKind::OpenAi => complete_openai_like(
-            "https://api.openai.com/v1/chat/completions",
-            config,
-            request,
-            None,
-            true,
-        )
-        .await,
-        AiProviderKind::Copilot => complete_openai_like(
-            "https://models.github.ai/inference/chat/completions",
-            config,
-            request,
-            Some(("X-GitHub-Api-Version", "2022-11-28")),
-            true,
-        )
-        .await,
+        AiProviderKind::OpenAi => {
+            complete_openai_like(
+                "https://api.openai.com/v1/chat/completions",
+                config,
+                request,
+                None,
+                true,
+            )
+            .await
+        }
+        AiProviderKind::Copilot => {
+            complete_openai_like(
+                "https://models.github.ai/inference/chat/completions",
+                config,
+                request,
+                Some(("X-GitHub-Api-Version", "2022-11-28")),
+                true,
+            )
+            .await
+        }
         AiProviderKind::Ollama => {
             let base = config
                 .server_url
@@ -228,12 +236,12 @@ async fn complete_openai_like(
     require_api_key: bool,
 ) -> Result<String, String> {
     let api_key = if require_api_key {
-        Some(
-            config
-                .api_key
-                .as_deref()
-                .ok_or_else(|| format!("NOT_CONFIGURED: {} API key not configured", provider_label(config.provider)))?,
-        )
+        Some(config.api_key.as_deref().ok_or_else(|| {
+            format!(
+                "NOT_CONFIGURED: {} API key not configured",
+                provider_label(config.provider)
+            )
+        })?)
     } else {
         None
     };
@@ -276,8 +284,8 @@ async fn complete_openai_like(
         return Err(map_http_error(status.as_u16(), &text));
     }
 
-    let json: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| format!("NETWORK_ERROR: parse AI response: {e}"))?;
+    let json: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("NETWORK_ERROR: parse AI response: {e}"))?;
     Ok(json["choices"][0]["message"]["content"]
         .as_str()
         .unwrap_or_default()
@@ -318,8 +326,8 @@ async fn complete_claude(config: &AiConfig, request: &AiCompleteRequest) -> Resu
         return Err(map_http_error(status.as_u16(), &text));
     }
 
-    let json: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| format!("NETWORK_ERROR: parse AI response: {e}"))?;
+    let json: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("NETWORK_ERROR: parse AI response: {e}"))?;
     Ok(json["content"]
         .as_array()
         .and_then(|blocks| {
@@ -368,8 +376,8 @@ async fn complete_gemini(config: &AiConfig, request: &AiCompleteRequest) -> Resu
         return Err(map_http_error(status.as_u16(), &text));
     }
 
-    let json: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| format!("NETWORK_ERROR: parse AI response: {e}"))?;
+    let json: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("NETWORK_ERROR: parse AI response: {e}"))?;
     let result = json["candidates"][0]["content"]["parts"]
         .as_array()
         .map(|parts| {

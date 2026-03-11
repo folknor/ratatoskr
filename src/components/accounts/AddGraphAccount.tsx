@@ -15,7 +15,7 @@ interface GraphAccountResult {
   id: string;
   email: string;
   displayName: string;
-  avatarUrl: string;
+  avatarUrl: string | null;
   isActive: boolean;
   provider: string;
 }
@@ -27,7 +27,7 @@ export function AddGraphAccount({
 }: AddGraphAccountProps): React.ReactNode {
   const { t } = useTranslation("accounts");
   const [status, setStatus] = useState<
-    "idle" | "checking" | "authenticating" | "testing" | "error"
+    "idle" | "checking" | "authenticating" | "error"
   >("idle");
   const [error, setError] = useState<string | null>(null);
   const addAccount = useAccountStore((s) => s.addAccount);
@@ -38,8 +38,6 @@ export function AddGraphAccount({
 
     try {
       setStatus("authenticating");
-
-      setStatus("testing");
 
       const account = await invoke<GraphAccountResult>(
         "account_create_graph_via_oauth",
@@ -96,13 +94,6 @@ export function AddGraphAccount({
             </div>
           </div>
         )}
-
-        {status === "testing" && (
-          <div className="text-center py-4 text-text-secondary text-sm">
-            {t("testingConnection", "Testing connection...")}
-          </div>
-        )}
-
         <div className="flex gap-3 justify-between">
           <button
             type="button"
@@ -124,16 +115,12 @@ export function AddGraphAccount({
             <button
               type="button"
               onClick={handleSignIn}
-              disabled={
-                status === "authenticating" ||
-                status === "checking" ||
-                status === "testing"
-              }
+              disabled={status === "authenticating" || status === "checking"}
               className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {status === "authenticating"
                 ? t("common:waiting", "Waiting...")
-                : status === "checking" || status === "testing"
+                : status === "checking"
                   ? t("common:checking", "Checking...")
                   : t("signInWithMicrosoft", "Sign in with Microsoft")}
             </button>

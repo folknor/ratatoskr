@@ -92,6 +92,7 @@ export function AddCalDavAccount({
         displayName: displayName || null,
         avatarUrl: null,
         isActive: true,
+        provider: "caldav",
       });
 
       setStep("done");

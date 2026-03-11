@@ -244,12 +244,11 @@ pub async fn google_calendar_sync_events(
         if let Some(token) = sync_token.as_ref() {
             params.push(("syncToken", token.clone()));
         } else {
-            let mut time_min = chrono::Utc::now() - chrono::Duration::days(90);
-            let mut time_max = chrono::Utc::now() + chrono::Duration::days(365);
+            let time_min = chrono::Utc::now() - chrono::Duration::days(90);
+            let time_max = chrono::Utc::now() + chrono::Duration::days(365);
             params.push(("timeMin", time_min.to_rfc3339()));
             params.push(("timeMax", time_max.to_rfc3339()));
             params.push(("singleEvents", "true".to_string()));
-            let _ = (&mut time_min, &mut time_max);
         }
         if let Some(token) = page_token.as_ref() {
             params.push(("pageToken", token.clone()));
@@ -262,21 +261,24 @@ pub async fn google_calendar_sync_events(
             .join("&");
         let url = format!("{GOOGLE_CALENDAR_API_BASE}/calendars/{encoded_id}/events?{query}");
 
-        let response = match google_calendar_request::<GoogleEventListResponse>(&http, &client, &db, &url).await {
-            Ok(value) => value,
-            Err(error) => {
-                if error.contains("410") || error.to_lowercase().contains("sync token") {
-                    return Ok(CalendarSyncResultDto {
-                        created: Vec::new(),
-                        updated: Vec::new(),
-                        deleted_remote_ids: Vec::new(),
-                        new_sync_token: None,
-                        new_ctag: None,
-                    });
+        let response =
+            match google_calendar_request::<GoogleEventListResponse>(&http, &client, &db, &url)
+                .await
+            {
+                Ok(value) => value,
+                Err(error) => {
+                    if error.contains("410") || error.to_lowercase().contains("sync token") {
+                        return Ok(CalendarSyncResultDto {
+                            created: Vec::new(),
+                            updated: Vec::new(),
+                            deleted_remote_ids: Vec::new(),
+                            new_sync_token: None,
+                            new_ctag: None,
+                        });
+                    }
+                    return Err(error);
                 }
-                return Err(error);
-            }
-        };
+            };
 
         for item in response.items {
             if item.status.as_deref() == Some("cancelled") {
@@ -500,13 +502,10 @@ pub async fn google_calendar_fetch_events(
     .collect::<Vec<_>>()
     .join("&");
     let url = format!("{GOOGLE_CALENDAR_API_BASE}/calendars/{encoded_id}/events?{query}");
-    let response: GoogleEventListResponse = google_calendar_request(&http, &client, &db, &url).await?;
+    let response: GoogleEventListResponse =
+        google_calendar_request(&http, &client, &db, &url).await?;
 
-    response
-        .items
-        .into_iter()
-        .map(map_google_event)
-        .collect()
+    response.items.into_iter().map(map_google_event).collect()
 }
 
 #[tauri::command]
@@ -539,9 +538,8 @@ pub async fn google_calendar_update_event(
     let http = shared_http_client();
     let encoded_cal_id = urlencoding::encode(&calendar_remote_id);
     let encoded_event_id = urlencoding::encode(&remote_event_id);
-    let url = format!(
-        "{GOOGLE_CALENDAR_API_BASE}/calendars/{encoded_cal_id}/events/{encoded_event_id}"
-    );
+    let url =
+        format!("{GOOGLE_CALENDAR_API_BASE}/calendars/{encoded_cal_id}/events/{encoded_event_id}");
     let response: GoogleCalendarEvent =
         google_calendar_request_with_body(&http, &client, &db, "PATCH", &url, Some(event)).await?;
     map_google_event(response)
@@ -559,9 +557,8 @@ pub async fn google_calendar_delete_event(
     let http = shared_http_client();
     let encoded_cal_id = urlencoding::encode(&calendar_remote_id);
     let encoded_event_id = urlencoding::encode(&remote_event_id);
-    let url = format!(
-        "{GOOGLE_CALENDAR_API_BASE}/calendars/{encoded_cal_id}/events/{encoded_event_id}"
-    );
+    let url =
+        format!("{GOOGLE_CALENDAR_API_BASE}/calendars/{encoded_cal_id}/events/{encoded_event_id}");
     google_calendar_request_empty(&http, &client, &db, "DELETE", &url).await
 }
 
@@ -752,10 +749,22 @@ async fn resolve_caldav_home_url(
     <d:current-user-principal />
   </d:prop>
 </d:propfind>"#;
-        let response = caldav_request(client, config, "PROPFIND", &config.server_url, Some(body), Some("0")).await?;
-        let xml = response.text().await.map_err(|e| format!("read principal response: {e}"))?;
-        let href = extract_first_href_for_property(&xml, &["current-user-principal"])
-            .ok_or_else(|| "CalDAV discovery failed: current-user-principal not found".to_string())?;
+        let response = caldav_request(
+            client,
+            config,
+            "PROPFIND",
+            &config.server_url,
+            Some(body),
+            Some("0"),
+        )
+        .await?;
+        let xml = response
+            .text()
+            .await
+            .map_err(|e| format!("read principal response: {e}"))?;
+        let href = extract_first_href_for_property(&xml, &["current-user-principal"]).ok_or_else(
+            || "CalDAV discovery failed: current-user-principal not found".to_string(),
+        )?;
         resolve_href(&config.server_url, &href)?
     };
 
@@ -767,8 +776,19 @@ async fn resolve_caldav_home_url(
   </d:prop>
 </d:propfind>"#
     );
-    let response = caldav_request(client, config, "PROPFIND", &principal_url, Some(&body), Some("0")).await?;
-    let xml = response.text().await.map_err(|e| format!("read home response: {e}"))?;
+    let response = caldav_request(
+        client,
+        config,
+        "PROPFIND",
+        &principal_url,
+        Some(&body),
+        Some("0"),
+    )
+    .await?;
+    let xml = response
+        .text()
+        .await
+        .map_err(|e| format!("read home response: {e}"))?;
     let href = extract_first_href_for_property(&xml, &["calendar-home-set"])
         .ok_or_else(|| "CalDAV discovery failed: calendar-home-set not found".to_string())?;
     resolve_href(&principal_url, &href)
@@ -789,8 +809,12 @@ async fn list_caldav_calendars(
   </d:prop>
 </d:propfind>"#
     );
-    let response = caldav_request(client, config, "PROPFIND", home_url, Some(&body), Some("1")).await?;
-    let xml = response.text().await.map_err(|e| format!("read calendars response: {e}"))?;
+    let response =
+        caldav_request(client, config, "PROPFIND", home_url, Some(&body), Some("1")).await?;
+    let xml = response
+        .text()
+        .await
+        .map_err(|e| format!("read calendars response: {e}"))?;
     let responses = split_xml_responses(&xml);
     let mut calendars = Vec::new();
 
@@ -856,9 +880,19 @@ async fn fetch_caldav_events(
   </c:filter>
 </c:calendar-query>"#
     );
-    let response =
-        caldav_request(client, config, "REPORT", calendar_remote_id, Some(&body), Some("1")).await?;
-    let xml = response.text().await.map_err(|e| format!("read events response: {e}"))?;
+    let response = caldav_request(
+        client,
+        config,
+        "REPORT",
+        calendar_remote_id,
+        Some(&body),
+        Some("1"),
+    )
+    .await?;
+    let xml = response
+        .text()
+        .await
+        .map_err(|e| format!("read events response: {e}"))?;
     let responses = split_xml_responses(&xml);
     let mut events = Vec::new();
 
@@ -996,7 +1030,10 @@ fn split_xml_responses(xml: &str) -> Vec<&str> {
             let open = format!("{prefix}response");
             if after_lt.starts_with(open.as_str()) {
                 let rest = &after_lt[open.len()..];
-                if matches!(rest.as_bytes().first(), Some(b'>') | Some(b' ') | Some(b'\t') | Some(b'\r') | Some(b'\n')) {
+                if matches!(
+                    rest.as_bytes().first(),
+                    Some(b'>') | Some(b' ') | Some(b'\t') | Some(b'\r') | Some(b'\n')
+                ) {
                     Some(prefix.as_ref())
                 } else {
                     None
@@ -1035,7 +1072,9 @@ fn extract_first_href_for_property(xml: &str, property_names: &[&str]) -> Option
 }
 
 fn extract_first_tag_value(xml: &str, tag_names: &[&str]) -> Option<String> {
-    tag_names.iter().find_map(|tag_name| extract_tag_value(xml, tag_name))
+    tag_names
+        .iter()
+        .find_map(|tag_name| extract_tag_value(xml, tag_name))
 }
 
 fn extract_tag_value(xml: &str, tag_name: &str) -> Option<String> {
@@ -1052,7 +1091,12 @@ fn extract_first_element<'a>(xml: &'a str, tag_name: &str) -> Option<&'a str> {
     // Collect all namespace prefixes present in the document plus common fallbacks
     let all_prefixes = {
         let mut p: Vec<std::borrow::Cow<'_, str>> = Vec::new();
-        for ns in ["DAV:", "urn:ietf:params:xml:ns:caldav", "http://calendarserver.org/ns/", "http://apple.com/ns/ical/"] {
+        for ns in [
+            "DAV:",
+            "urn:ietf:params:xml:ns:caldav",
+            "http://calendarserver.org/ns/",
+            "http://apple.com/ns/ical/",
+        ] {
             p.extend(xml_ns_prefixes_for(xml, ns));
         }
         // Deduplicate while preserving order
@@ -1066,7 +1110,10 @@ fn extract_first_element<'a>(xml: &'a str, tag_name: &str) -> Option<&'a str> {
         if let Some(start) = xml_lower.find(&open) {
             // Verify the character after the tag name is a delimiter (not part of a longer name)
             let after_name = &xml_lower[start + open.len()..];
-            if !matches!(after_name.as_bytes().first(), Some(b'>') | Some(b' ') | Some(b'\t') | Some(b'\r') | Some(b'\n')) {
+            if !matches!(
+                after_name.as_bytes().first(),
+                Some(b'>') | Some(b' ') | Some(b'\t') | Some(b'\r') | Some(b'\n')
+            ) {
                 continue;
             }
             if let Some(end_rel) = xml_lower[start..].find(&close) {
@@ -1121,7 +1168,9 @@ fn parse_caldav_ical_event(ical_data: &str, href: &str) -> Result<CalendarEventD
 
     for line in lines {
         let mut parts = line.splitn(2, ':');
-        let Some(name_with_params) = parts.next() else { continue };
+        let Some(name_with_params) = parts.next() else {
+            continue;
+        };
         let value = parts.next().unwrap_or_default();
         let mut name_parts = name_with_params.split(';');
         let prop_name = name_parts.next().unwrap_or_default().to_uppercase();
@@ -1145,12 +1194,18 @@ fn parse_caldav_ical_event(ical_data: &str, href: &str) -> Result<CalendarEventD
             }
             "STATUS" => status = value.to_lowercase(),
             "ORGANIZER" => {
-                if let Some(email) = value.strip_prefix("mailto:").or_else(|| value.strip_prefix("MAILTO:")) {
+                if let Some(email) = value
+                    .strip_prefix("mailto:")
+                    .or_else(|| value.strip_prefix("MAILTO:"))
+                {
                     organizer_email = Some(email.to_string());
                 }
             }
             "ATTENDEE" => {
-                if let Some(email) = value.strip_prefix("mailto:").or_else(|| value.strip_prefix("MAILTO:")) {
+                if let Some(email) = value
+                    .strip_prefix("mailto:")
+                    .or_else(|| value.strip_prefix("MAILTO:"))
+                {
                     let display_name = extract_param_value(name_with_params, "CN");
                     let response_status = extract_param_value(name_with_params, "PARTSTAT")
                         .map(|value| value.to_lowercase());
@@ -1201,7 +1256,9 @@ fn parse_caldav_ical_event(ical_data: &str, href: &str) -> Result<CalendarEventD
     })
 }
 
-fn parse_caldav_event_input(value: serde_json::Value) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+fn parse_caldav_event_input(
+    value: serde_json::Value,
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
     value
         .as_object()
         .cloned()
@@ -1229,7 +1286,10 @@ fn merge_caldav_event_input(
         .map(ToString::to_string)
         .or_else(|| existing.description.clone())
     {
-        merged.insert("description".to_string(), serde_json::Value::String(description));
+        merged.insert(
+            "description".to_string(),
+            serde_json::Value::String(description),
+        );
     }
     if let Some(location) = updates
         .get("location")
@@ -1308,10 +1368,7 @@ fn build_caldav_ical_event(
         .unwrap_or(false);
     if let (Some(start), Some(end)) = (start_time, end_time) {
         if is_all_day {
-            lines.push(format!(
-                "DTSTART;VALUE=DATE:{}",
-                format_ical_date(start)
-            ));
+            lines.push(format!("DTSTART;VALUE=DATE:{}", format_ical_date(start)));
             lines.push(format!("DTEND;VALUE=DATE:{}", format_ical_date(end)));
         } else {
             lines.push(format!("DTSTART:{}", format_ical_datetime(start)));
@@ -1348,14 +1405,21 @@ fn escape_ical_text(value: &str) -> String {
 
 fn format_ical_datetime(value: &str) -> String {
     chrono::DateTime::parse_from_rfc3339(value)
-        .map(|date| date.with_timezone(&chrono::Utc).format("%Y%m%dT%H%M%SZ").to_string())
+        .map(|date| {
+            date.with_timezone(&chrono::Utc)
+                .format("%Y%m%dT%H%M%SZ")
+                .to_string()
+        })
         .unwrap_or_else(|_| value.to_string())
 }
 
 fn format_ical_date(value: &str) -> String {
     chrono::DateTime::parse_from_rfc3339(value)
         .map(|date| date.format("%Y%m%d").to_string())
-        .or_else(|_| chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").map(|date| date.format("%Y%m%d").to_string()))
+        .or_else(|_| {
+            chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+                .map(|date| date.format("%Y%m%d").to_string())
+        })
         .unwrap_or_else(|_| value.replace('-', ""))
 }
 
@@ -1364,13 +1428,18 @@ async fn fetch_caldav_event_by_href(
     config: &CaldavAccountConfig,
     remote_event_id: &str,
 ) -> Result<CalendarEventDto, String> {
-    let response = caldav_request_with_headers(client, config, "GET", remote_event_id, None, None, &[]).await?;
+    let response =
+        caldav_request_with_headers(client, config, "GET", remote_event_id, None, None, &[])
+            .await?;
     let etag = response
         .headers()
         .get("ETag")
         .and_then(|value| value.to_str().ok())
         .map(ToString::to_string);
-    let ical_data = response.text().await.map_err(|e| format!("read CalDAV event: {e}"))?;
+    let ical_data = response
+        .text()
+        .await
+        .map_err(|e| format!("read CalDAV event: {e}"))?;
     let mut event = parse_caldav_ical_event(&ical_data, remote_event_id)?;
     event.etag = etag;
     Ok(event)
@@ -1505,7 +1574,9 @@ async fn google_calendar_request_with_body<T: serde::de::DeserializeOwned>(
 
     if response.status().as_u16() == 401 {
         let refreshed = client.force_refresh_token(db).await?;
-        let retry = google_calendar_execute_with_retry(http, method, url, body.as_ref(), &refreshed).await?;
+        let retry =
+            google_calendar_execute_with_retry(http, method, url, body.as_ref(), &refreshed)
+                .await?;
         return google_calendar_parse_json_response(retry).await;
     }
 
@@ -1520,7 +1591,8 @@ async fn google_calendar_request_empty(
     url: &str,
 ) -> Result<(), String> {
     let access_token = client.get_access_token(db).await?;
-    let response = google_calendar_execute_with_retry(http, method, url, None, &access_token).await?;
+    let response =
+        google_calendar_execute_with_retry(http, method, url, None, &access_token).await?;
 
     if response.status().as_u16() == 401 {
         let refreshed = client.force_refresh_token(db).await?;
@@ -1569,8 +1641,11 @@ async fn google_calendar_execute_with_retry(
             break;
         }
 
-        let delay_ms =
-            http::compute_retry_delay(last_response.as_ref(), attempt, &GOOGLE_CALENDAR_RETRY_CONFIG);
+        let delay_ms = http::compute_retry_delay(
+            last_response.as_ref(),
+            attempt,
+            &GOOGLE_CALENDAR_RETRY_CONFIG,
+        );
         tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
     }
 

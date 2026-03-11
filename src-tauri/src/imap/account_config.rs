@@ -38,12 +38,16 @@ struct AccountConfigRecord {
     auth_method: String,
     accept_invalid_certs: bool,
     access_token: Option<String>,
-    refresh_token: Option<String>,
     token_expires_at: Option<i64>,
     oauth_provider: Option<String>,
     oauth_client_id: Option<String>,
     oauth_client_secret: Option<String>,
     oauth_token_url: Option<String>,
+}
+
+pub struct ImapAndSmtpConfig {
+    pub imap: ImapConfig,
+    pub smtp: SmtpConfig,
 }
 
 fn map_security(security: Option<&str>) -> String {
@@ -89,7 +93,7 @@ async fn load_account_record(db: &DbState, account_id: &str) -> Result<AccountCo
         conn.query_row(
             "SELECT email, imap_host, imap_port, imap_security, smtp_host, smtp_port, \
              smtp_security, imap_username, imap_password, auth_method, accept_invalid_certs, \
-             access_token, refresh_token, token_expires_at, oauth_provider, oauth_client_id, \
+             access_token, token_expires_at, oauth_provider, oauth_client_id, \
              oauth_client_secret, oauth_token_url FROM accounts WHERE id = ?1",
             rusqlite::params![aid],
             |row| {
@@ -107,12 +111,11 @@ async fn load_account_record(db: &DbState, account_id: &str) -> Result<AccountCo
                     auth_method: row.get::<_, Option<String>>(9)?.unwrap_or_else(|| "password".to_string()),
                     accept_invalid_certs: accept_invalid_certs.unwrap_or(0) != 0,
                     access_token: row.get(11)?,
-                    refresh_token: row.get(12)?,
-                    token_expires_at: row.get(13)?,
-                    oauth_provider: row.get(14)?,
-                    oauth_client_id: row.get(15)?,
-                    oauth_client_secret: row.get(16)?,
-                    oauth_token_url: row.get(17)?,
+                    token_expires_at: row.get(12)?,
+                    oauth_provider: row.get(13)?,
+                    oauth_client_id: row.get(14)?,
+                    oauth_client_secret: row.get(15)?,
+                    oauth_token_url: row.get(16)?,
                 })
             },
         )
@@ -205,37 +208,82 @@ async fn ensure_oauth_access_token(
     Ok(refreshed.access_token)
 }
 
-pub async fn load_imap_config(
+async fn resolve_account_password(
     db: &DbState,
     account_id: &str,
     encryption_key: &[u8; 32],
-) -> Result<ImapConfig, String> {
-    let record = load_account_record(db, account_id).await?;
-    let username = record
+    record: &AccountConfigRecord,
+) -> Result<String, String> {
+    if record.auth_method == "oauth2" {
+        ensure_oauth_access_token(db, account_id, encryption_key, record).await
+    } else {
+        Ok(decrypt_if_needed(encryption_key, record.imap_password.clone()).unwrap_or_default())
+    }
+}
+
+fn username_for_record(record: &AccountConfigRecord) -> String {
+    record
         .imap_username
         .clone()
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| record.email.clone());
+        .unwrap_or_else(|| record.email.clone())
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn imap_config_from_record(
+    account_id: &str,
+    record: &AccountConfigRecord,
+    username: String,
+    password: String,
+) -> Result<ImapConfig, String> {
     let host = record
         .imap_host
         .clone()
         .ok_or_else(|| format!("Account {account_id} has no IMAP host configured"))?;
-    let password = if record.auth_method == "oauth2" {
-        ensure_oauth_access_token(db, account_id, encryption_key, &record).await?
-    } else {
-        decrypt_if_needed(encryption_key, record.imap_password).unwrap_or_default()
-    };
 
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     Ok(ImapConfig {
         host,
         port: record.imap_port.unwrap_or(993) as u16,
         security: map_security(record.imap_security.as_deref()),
         username,
         password,
-        auth_method: record.auth_method,
+        auth_method: record.auth_method.clone(),
         accept_invalid_certs: record.accept_invalid_certs,
     })
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn smtp_config_from_record(
+    account_id: &str,
+    record: &AccountConfigRecord,
+    username: String,
+    password: String,
+) -> Result<SmtpConfig, String> {
+    let host = record
+        .smtp_host
+        .clone()
+        .ok_or_else(|| format!("Account {account_id} has no SMTP host configured"))?;
+
+    Ok(SmtpConfig {
+        host,
+        port: record.smtp_port.unwrap_or(587) as u16,
+        security: map_security(record.smtp_security.as_deref()),
+        username,
+        password,
+        auth_method: record.auth_method.clone(),
+        accept_invalid_certs: record.accept_invalid_certs,
+    })
+}
+
+pub async fn load_imap_config(
+    db: &DbState,
+    account_id: &str,
+    encryption_key: &[u8; 32],
+) -> Result<ImapConfig, String> {
+    let record = load_account_record(db, account_id).await?;
+    let username = username_for_record(&record);
+    let password = resolve_account_password(db, account_id, encryption_key, &record).await?;
+    imap_config_from_record(account_id, &record, username, password)
 }
 
 pub async fn load_smtp_config(
@@ -244,29 +292,20 @@ pub async fn load_smtp_config(
     encryption_key: &[u8; 32],
 ) -> Result<SmtpConfig, String> {
     let record = load_account_record(db, account_id).await?;
-    let username = record
-        .imap_username
-        .clone()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| record.email.clone());
-    let host = record
-        .smtp_host
-        .clone()
-        .ok_or_else(|| format!("Account {account_id} has no SMTP host configured"))?;
-    let password = if record.auth_method == "oauth2" {
-        ensure_oauth_access_token(db, account_id, encryption_key, &record).await?
-    } else {
-        decrypt_if_needed(encryption_key, record.imap_password).unwrap_or_default()
-    };
+    let username = username_for_record(&record);
+    let password = resolve_account_password(db, account_id, encryption_key, &record).await?;
+    smtp_config_from_record(account_id, &record, username, password)
+}
 
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    Ok(SmtpConfig {
-        host,
-        port: record.smtp_port.unwrap_or(587) as u16,
-        security: map_security(record.smtp_security.as_deref()),
-        username,
-        password,
-        auth_method: record.auth_method,
-        accept_invalid_certs: record.accept_invalid_certs,
-    })
+pub async fn load_both_configs(
+    db: &DbState,
+    account_id: &str,
+    encryption_key: &[u8; 32],
+) -> Result<ImapAndSmtpConfig, String> {
+    let record = load_account_record(db, account_id).await?;
+    let username = username_for_record(&record);
+    let password = resolve_account_password(db, account_id, encryption_key, &record).await?;
+    let imap = imap_config_from_record(account_id, &record, username.clone(), password.clone())?;
+    let smtp = smtp_config_from_record(account_id, &record, username, password)?;
+    Ok(ImapAndSmtpConfig { imap, smtp })
 }

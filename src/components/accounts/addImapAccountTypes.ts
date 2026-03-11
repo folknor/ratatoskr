@@ -26,6 +26,7 @@ export interface FormState {
   oauthRefreshToken: string | null;
   oauthExpiresAt: number | null;
   oauthEmail: string | null;
+  oauthPicture: string | null;
 }
 
 export const initialFormState: FormState = {
@@ -50,6 +51,7 @@ export const initialFormState: FormState = {
   oauthRefreshToken: null,
   oauthExpiresAt: null,
   oauthEmail: null,
+  oauthPicture: null,
 };
 
 export interface TestStatus {

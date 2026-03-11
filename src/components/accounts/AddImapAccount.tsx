@@ -45,6 +45,7 @@ interface OAuthAuthorizationResult {
   expiresIn: number;
   email: string;
   name: string;
+  picture?: string | null;
 }
 
 const steps: Step[] = ["basic", "imap", "smtp", "test"];
@@ -247,6 +248,7 @@ export function AddImapAccount({
         oauthRefreshToken: result.refreshToken ?? null,
         oauthExpiresAt: expiresAt,
         oauthEmail: result.email,
+        oauthPicture: result.picture ?? null,
         email: result.email || prev.email,
         displayName: result.name || prev.displayName,
         oauthProvider: providerId,
@@ -330,12 +332,13 @@ export function AddImapAccount({
       const imapUsername = form.imapUsername.trim() || null;
 
       if (isOAuth) {
+        const avatarUrl = form.oauthPicture;
         await invoke("account_create_imap_oauth", {
           request: {
             id: accountId,
             email,
             displayName: form.displayName.trim() || null,
-            avatarUrl: null,
+            avatarUrl,
             imapHost: form.imapHost.trim(),
             imapPort: form.imapPort,
             imapSecurity: form.imapSecurity,
@@ -377,8 +380,9 @@ export function AddImapAccount({
         id: accountId,
         email,
         displayName: form.displayName.trim() || null,
-        avatarUrl: null,
+        avatarUrl: isOAuth ? form.oauthPicture : null,
         isActive: true,
+        provider: "imap",
       });
 
       onSuccess();
