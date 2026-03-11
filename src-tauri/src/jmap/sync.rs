@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use jmap_client::email;
+use jmap_client::core::query::QueryResponse;
 use jmap_client::mailbox::Role;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -86,51 +87,28 @@ pub async fn jmap_initial_sync(
     let since = chrono::Utc::now() - chrono::Duration::days(days_back);
     let since_ts = since.timestamp();
 
-    // Get total count for progress
-    let filter: jmap_client::core::query::Filter<email::query::Filter> =
-        email::query::Filter::after(since_ts).into();
-    let total = client
-        .inner()
-        .email_query(Some(filter), None::<Vec<_>>)
-        .await
-        .map_err(|e| format!("Email/query count: {e}"))?
-        .total()
-        .unwrap_or(0);
-
-    #[allow(clippy::cast_possible_truncation)]
-    let total_u64 = total as u64;
+    let mut total_u64: u64 = 0;
     let mut fetched: u64 = 0;
     let mut position: usize = 0;
 
     loop {
         emit_progress(&ctx, "messages", fetched, total_u64);
 
-        let page_filter: jmap_client::core::query::Filter<email::query::Filter> =
-            email::query::Filter::after(since_ts).into();
-        let query_result = client
-            .inner()
-            .email_query(
-                Some(page_filter),
-                Some([email::query::Comparator::received_at()]),
-            )
-            .await
-            .map_err(|e| format!("Email/query: {e}"))?;
+        let query_result = query_email_page(client, since_ts, position, position == 0).await?;
+
+        if position == 0 {
+            #[allow(clippy::cast_possible_truncation)]
+            {
+                total_u64 = query_result.total().unwrap_or(0) as u64;
+            }
+        }
 
         let ids = query_result.ids();
         if ids.is_empty() {
             break;
         }
 
-        // Skip to the right position and take a batch
-        let batch_ids: Vec<&str> = ids
-            .iter()
-            .skip(position)
-            .take(BATCH_SIZE)
-            .map(String::as_str)
-            .collect();
-        if batch_ids.is_empty() {
-            break;
-        }
+        let batch_ids: Vec<&str> = ids.iter().map(String::as_str).collect();
 
         let emails = fetch_email_batch(client, &batch_ids).await?;
         let parsed = parse_email_batch(&emails, &mailbox_map)?;
@@ -141,8 +119,8 @@ pub async fn jmap_initial_sync(
         {
             fetched += parsed.len() as u64;
         }
-        position += BATCH_SIZE;
-        if position >= total {
+        position += ids.len();
+        if ids.len() < BATCH_SIZE {
             break;
         }
     }
@@ -157,6 +135,28 @@ pub async fn jmap_initial_sync(
     emit_progress(&ctx, "done", fetched, total_u64);
 
     Ok(())
+}
+
+async fn query_email_page(
+    client: &JmapClient,
+    since_ts: i64,
+    position: usize,
+    calculate_total: bool,
+) -> Result<QueryResponse, String> {
+    let mut request = client.inner().build();
+    let query_request = request.query_email();
+    query_request.filter(email::query::Filter::after(since_ts));
+    query_request.sort([email::query::Comparator::received_at()]);
+    #[allow(clippy::cast_possible_wrap)]
+    {
+        query_request.position(position as i32);
+    }
+    query_request.limit(BATCH_SIZE);
+    query_request.calculate_total(calculate_total);
+    request
+        .send_single::<QueryResponse>()
+        .await
+        .map_err(|e| format!("Email/query: {e}"))
 }
 
 // ---------------------------------------------------------------------------

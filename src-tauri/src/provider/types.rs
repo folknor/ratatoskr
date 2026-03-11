@@ -7,7 +7,7 @@ use crate::inline_image_store::InlineImageStoreState;
 use crate::search::SearchState;
 
 /// Standardized sync result across all providers.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncResult {
     pub new_inbox_message_ids: Vec<String>,

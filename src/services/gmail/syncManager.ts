@@ -5,7 +5,7 @@ import {
 import { getCalendarProvider } from "../calendar/providerFactory";
 import { getVisibleCalendars } from "../db/calendars";
 export interface SyncProgress {
-  phase: "labels" | "threads" | "messages" | "done";
+  phase: "labels" | "threads" | "messages" | "fallback" | "done";
   current: number;
   total: number;
 }
@@ -93,12 +93,13 @@ async function runPostSyncHooks(input: PostSyncHooksInput): Promise<void> {
 /** Map IMAP sync phases to the SyncProgress phases the UI understands. */
 function mapImapPhase(
   phase: string,
-): "labels" | "threads" | "messages" | "done" {
+) : "labels" | "threads" | "messages" | "fallback" | "done" {
   if (phase === "folders") return "labels";
   if (phase === "threading" || phase === "storing_threads") return "threads";
   if (phase === "messages") return "messages";
+  if (phase === "fallback") return "fallback";
   if (phase === "done") return "done";
-  return phase as "labels" | "threads" | "messages" | "done";
+  return phase as "labels" | "threads" | "messages" | "fallback" | "done";
 }
 
 function mapProviderSyncProgress(payload: Record<string, unknown>): SyncProgress {
@@ -432,7 +433,7 @@ export async function triggerSync(accountIds: string[]): Promise<void> {
  * This re-downloads all threads from scratch.
  */
 export async function forceFullSync(accountIds: string[]): Promise<void> {
-  await invoke("sync_prepare_full_sync", { accountIds });
+  await invoke("provider_prepare_full_sync", { accountIds });
   await runSync(accountIds);
 }
 
@@ -442,6 +443,6 @@ export async function forceFullSync(accountIds: string[]): Promise<void> {
  * then runs a fresh initial sync.
  */
 export async function resyncAccount(accountId: string): Promise<void> {
-  await invoke("sync_prepare_account_resync", { accountId });
+  await invoke("provider_prepare_account_resync", { accountId });
   await runSync([accountId]);
 }

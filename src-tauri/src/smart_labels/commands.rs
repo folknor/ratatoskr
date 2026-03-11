@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use futures::stream::{self, StreamExt};
 use tauri::{AppHandle, State};
 
 use crate::body_store::BodyStoreState;
@@ -17,6 +18,8 @@ use crate::provider::types::ProviderCtx;
 use crate::search::SearchState;
 
 use super::{AppliedSmartLabelMatch, SmartLabelAIRule, SmartLabelAIThread};
+
+const POST_SYNC_ACTION_CONCURRENCY: usize = 8;
 
 struct LoadedSmartLabelRules {
     criteria_rules: Vec<(String, FilterCriteria)>,
@@ -315,26 +318,37 @@ pub(crate) async fn smart_labels_apply_criteria_to_messages_impl(
         search,
         app_handle,
     };
+    let ops = &*ops;
+    let ctx = &ctx;
 
-    let mut applied_matches = Vec::new();
-    for (thread_id, label_ids) in matches {
-        let mut applied_label_ids = Vec::new();
-        for label_id in label_ids {
-            match ops.add_tag(&ctx, &thread_id, &label_id).await {
-                Ok(()) => applied_label_ids.push(label_id),
-                Err(error) => log::warn!(
-                    "Failed to apply smart label {label_id} to thread {thread_id}: {error}"
-                ),
+    let applied_matches = stream::iter(matches)
+        .map(move |(thread_id, label_ids)| {
+            let ops = ops;
+            let ctx = ctx;
+            async move {
+            let mut applied_label_ids = Vec::new();
+            for label_id in label_ids {
+                match ops.add_tag(ctx, &thread_id, &label_id).await {
+                    Ok(()) => applied_label_ids.push(label_id),
+                    Err(error) => log::warn!(
+                        "Failed to apply smart label {label_id} to thread {thread_id}: {error}"
+                    ),
+                }
             }
-        }
 
-        if !applied_label_ids.is_empty() {
-            applied_matches.push(AppliedSmartLabelMatch {
-                thread_id,
-                label_ids: applied_label_ids,
-            });
-        }
-    }
+            if applied_label_ids.is_empty() {
+                None
+            } else {
+                Some(AppliedSmartLabelMatch {
+                    thread_id,
+                    label_ids: applied_label_ids,
+                })
+            }
+        }})
+        .buffer_unordered(POST_SYNC_ACTION_CONCURRENCY)
+        .filter_map(async move |item| item)
+        .collect()
+        .await;
 
     Ok(applied_matches)
 }

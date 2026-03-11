@@ -254,7 +254,11 @@ macro_rules! with_session {
 impl ProviderOps for ImapOps {
     // ── Sync (delegated to existing Rust IMAP sync engine) ──────────────
 
-    async fn sync_initial(&self, ctx: &ProviderCtx<'_>, days_back: i64) -> Result<(), String> {
+    async fn sync_initial(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        days_back: i64,
+    ) -> Result<SyncResult, String> {
         // IMAP sync is handled by the dedicated sync module (sync_imap_initial).
         // This trait method is not the primary entry point for IMAP sync, but we
         // wire it through for consistency with the provider abstraction.
@@ -263,7 +267,7 @@ impl ProviderOps for ImapOps {
             crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
                 .await?;
 
-        crate::sync::imap_initial::imap_initial_sync(
+        let result = crate::sync::imap_initial::imap_initial_sync(
             ctx.app_handle,
             ctx.db,
             ctx.body_store,
@@ -275,7 +279,10 @@ impl ProviderOps for ImapOps {
         )
         .await?;
 
-        Ok(())
+        Ok(SyncResult {
+            new_inbox_message_ids: result.new_inbox_message_ids,
+            affected_thread_ids: result.affected_thread_ids,
+        })
     }
 
     async fn sync_delta(

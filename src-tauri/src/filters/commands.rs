@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use futures::stream::{self, StreamExt};
 use tauri::{AppHandle, State};
 
 use crate::body_store::BodyStoreState;
@@ -15,6 +16,8 @@ use crate::provider::types::ProviderCtx;
 use crate::search::SearchState;
 
 use super::{FilterActions, FilterCriteria, FilterResult, FilterableMessage, evaluate_filters};
+
+const POST_SYNC_ACTION_CONCURRENCY: usize = 8;
 
 /// Evaluate enabled filters for an account against a set of messages.
 /// Reads filter rules from DB, runs matching in Rust, returns per-thread actions.
@@ -283,10 +286,18 @@ pub(crate) async fn filters_apply_to_messages_impl(
         search,
         app_handle,
     };
+    let ops = &*ops;
+    let ctx = &ctx;
 
-    for (thread_id, result) in thread_actions {
-        apply_filter_result(&*ops, &ctx, &thread_id, &result).await;
-    }
+    stream::iter(thread_actions)
+        .for_each_concurrent(POST_SYNC_ACTION_CONCURRENCY, move |(thread_id, result)| {
+            let ops = ops;
+            let ctx = ctx;
+            async move {
+                apply_filter_result(ops, ctx, &thread_id, &result).await;
+            }
+        })
+        .await;
 
     Ok(())
 }

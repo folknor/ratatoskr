@@ -31,25 +31,15 @@
 ## Sync Engine
 
 
-- [ ] **IMAP `storedCount` proxy for "things changed" is lost** — `sync_initial` returns `Result<(), String>` — no data about what was stored. If anything beyond categorization depends on knowing whether initial sync stored messages, it's now blind. *(MED)*
 
-- [ ] **Provider-agnostic commands in IMAP-specific module** — `sync_prepare_full_sync` and `sync_prepare_account_resync` are provider-agnostic but live in `sync/commands.rs`. Consider moving to `provider/commands.rs`. *(LOW)*
-
-- [ ] **No "falling back to initial" progress event** — When delta sync fails and falls back to initial, the UI may show confusing progress. No event signals the fallback. *(LOW)*
 
 - [ ] **Gmail sync still fully in TS** — `src/services/gmail/syncManager.ts:80-112` — `syncGmailAccount()` uses Gmail REST API via TS HTTP calls, not the Rust sync engine. Porting is a large effort with minimal benefit since HTTP overhead dominates. *(LOW)*
-
-- [ ] **No per-operation timeout on Rust IMAP fetches** — `src-tauri/src/sync/imap_initial.rs` — No operation-level timeout on individual FETCH commands. A folder with 50K+ messages could hang indefinitely. Fix: wrap in `tokio::time::timeout()`. *(LOW)*
-
-- [ ] **JMAP initial sync re-queries entire result set every batch** — `src-tauri/src/jmap/sync.rs:108-146` — O(n²) server calls. Fix: use JMAP `position` + `limit` for server-side pagination, or cache IDs from first query. *(LOW)*
 
 ---
 
 ## Post-Sync Hooks
 
 > **Systemic issue**: Rust sync now shares one post-sync message load across filters, criteria smart labels, AI prep, and notifications, but later TS-side AI matching still re-queries message data and post-sync actions still duplicate some provider/setup work. The remaining debt is mostly across the Rust/TS boundary.
-
-- [ ] **Filter and smart label actions applied sequentially instead of in parallel** — Old TS used `Promise.allSettled` for concurrent per-thread application. Rust iterates sequentially. Could use `tokio::task::JoinSet`. *(MED)*
 
 - [ ] **Filter body hydration loads all bodies before evaluation** — When any filter has a body criterion, `body_store.get_batch` is called for all message IDs upfront. Could defer to only messages passing non-body criteria first. *(LOW)*
 

@@ -30,61 +30,6 @@ use super::types::{
 const SYNC_INTERVAL_MS: u64 = 60_000;
 
 #[tauri::command]
-pub async fn sync_prepare_full_sync(
-    db: State<'_, DbState>,
-    account_ids: Vec<String>,
-) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        for account_id in account_ids {
-            super::pipeline::clear_account_history_id(conn, &account_id)?;
-        }
-        Ok(())
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn sync_prepare_account_resync(
-    db: State<'_, DbState>,
-    body_store: State<'_, BodyStoreState>,
-    account_id: String,
-) -> Result<(), String> {
-    let message_ids = db
-        .with_conn({
-            let account_id = account_id.clone();
-            move |conn| {
-                let mut stmt = conn
-                    .prepare("SELECT id FROM messages WHERE account_id = ?1")
-                    .map_err(|e| format!("prepare resync message query: {e}"))?;
-                stmt.query_map(rusqlite::params![account_id], |row| row.get::<_, String>(0))
-                    .map_err(|e| format!("query resync message ids: {e}"))?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| format!("collect resync message ids: {e}"))
-            }
-        })
-        .await?;
-
-    body_store.delete(message_ids).await?;
-
-    db.with_conn(move |conn| {
-        let tx = conn
-            .unchecked_transaction()
-            .map_err(|e| format!("begin resync transaction: {e}"))?;
-        tx.execute(
-            "DELETE FROM threads WHERE account_id = ?1",
-            rusqlite::params![account_id],
-        )
-        .map_err(|e| format!("delete threads for account: {e}"))?;
-        super::pipeline::clear_account_history_id(&tx, &account_id)?;
-        super::pipeline::clear_all_folder_sync_states(&tx, &account_id)?;
-        tx.commit()
-            .map_err(|e| format!("commit resync transaction: {e}"))?;
-        Ok(())
-    })
-    .await
-}
-
-#[tauri::command]
 pub async fn sync_run_accounts(
     app: AppHandle,
     queue: State<'_, SyncQueueState>,

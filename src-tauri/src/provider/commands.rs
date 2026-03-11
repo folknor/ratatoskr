@@ -1,6 +1,6 @@
 #![allow(clippy::let_underscore_must_use)]
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
@@ -17,6 +17,7 @@ use super::types::{
     AttachmentData, AutoSyncResult, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
     ProviderParsedMessage, ProviderProfile, ProviderTestResult, SyncResult,
 };
+use crate::sync::types::SyncProgressEvent;
 
 #[allow(clippy::too_many_arguments)]
 async fn resolve_provider_command<'a>(
@@ -110,10 +111,11 @@ pub(crate) async fn provider_sync_auto_for_provider(
                 if should_fallback_to_initial(&err, fallback_marker)
                     || err == "JMAP_NO_STATE" =>
             {
-                ops.sync_initial(&ctx, sync_days).await?;
+                emit_fallback_progress(app_handle, provider, account_id);
+                let result = ops.sync_initial(&ctx, sync_days).await?;
                 return Ok(AutoSyncResult {
-                    new_inbox_message_ids: Vec::new(),
-                    affected_thread_ids: vec!["_resync".to_string()],
+                    new_inbox_message_ids: result.new_inbox_message_ids,
+                    affected_thread_ids: result.affected_thread_ids,
                     was_delta: true,
                     fell_back_to_initial: true,
                 });
@@ -122,18 +124,35 @@ pub(crate) async fn provider_sync_auto_for_provider(
         }
     }
 
-    ops.sync_initial(&ctx, sync_days).await?;
-    let affected_thread_ids = if provider == "imap" {
-        vec!["_initial_sync_completed".to_string()]
-    } else {
-        Vec::new()
-    };
+    let result = ops.sync_initial(&ctx, sync_days).await?;
     Ok(AutoSyncResult {
-        new_inbox_message_ids: Vec::new(),
-        affected_thread_ids,
+        new_inbox_message_ids: result.new_inbox_message_ids,
+        affected_thread_ids: result.affected_thread_ids,
         was_delta: false,
         fell_back_to_initial: false,
     })
+}
+
+fn emit_fallback_progress(app: &AppHandle, provider: &str, account_id: &str) {
+    let event_name = match provider {
+        "gmail_api" => "gmail-sync-progress",
+        "imap" => "imap-sync-progress",
+        "jmap" => "jmap-sync-progress",
+        "graph" => "graph-sync-progress",
+        _ => return,
+    };
+
+    let event = SyncProgressEvent {
+        account_id: account_id.to_string(),
+        phase: "fallback".to_string(),
+        current: 0,
+        total: 1,
+        folder: None,
+    };
+
+    if let Err(error) = app.emit(event_name, &event) {
+        log::warn!("Failed to emit {event_name} fallback progress: {error}");
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -169,6 +188,61 @@ pub(crate) async fn provider_sync_auto_impl(
     .await
 }
 
+#[tauri::command]
+pub async fn provider_prepare_full_sync(
+    db: State<'_, DbState>,
+    account_ids: Vec<String>,
+) -> Result<(), String> {
+    db.with_conn(move |conn| {
+        for account_id in account_ids {
+            crate::sync::pipeline::clear_account_history_id(conn, &account_id)?;
+        }
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn provider_prepare_account_resync(
+    db: State<'_, DbState>,
+    body_store: State<'_, BodyStoreState>,
+    account_id: String,
+) -> Result<(), String> {
+    let message_ids = db
+        .with_conn({
+            let account_id = account_id.clone();
+            move |conn| {
+                let mut stmt = conn
+                    .prepare("SELECT id FROM messages WHERE account_id = ?1")
+                    .map_err(|e| format!("prepare resync message query: {e}"))?;
+                stmt.query_map(rusqlite::params![account_id], |row| row.get::<_, String>(0))
+                    .map_err(|e| format!("query resync message ids: {e}"))?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| format!("collect resync message ids: {e}"))
+            }
+        })
+        .await?;
+
+    body_store.delete(message_ids).await?;
+
+    db.with_conn(move |conn| {
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| format!("begin resync transaction: {e}"))?;
+        tx.execute(
+            "DELETE FROM threads WHERE account_id = ?1",
+            rusqlite::params![account_id],
+        )
+        .map_err(|e| format!("delete threads for account: {e}"))?;
+        crate::sync::pipeline::clear_account_history_id(&tx, &account_id)?;
+        crate::sync::pipeline::clear_all_folder_sync_states(&tx, &account_id)?;
+        tx.commit()
+            .map_err(|e| format!("commit resync transaction: {e}"))?;
+        Ok(())
+    })
+    .await
+}
+
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn provider_sync_initial(
@@ -196,7 +270,8 @@ pub async fn provider_sync_initial(
         &app_handle,
     )
     .await?;
-    ops.sync_initial(&ctx, days_back.unwrap_or(365)).await
+    let _ = ops.sync_initial(&ctx, days_back.unwrap_or(365)).await?;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

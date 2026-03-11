@@ -160,7 +160,7 @@ describe("syncManager", () => {
 
     await forceFullSync(["acc-1", "acc-2"]);
 
-    expect(mockInvoke).toHaveBeenNthCalledWith(1, "sync_prepare_full_sync", {
+    expect(mockInvoke).toHaveBeenNthCalledWith(1, "provider_prepare_full_sync", {
       accountIds: ["acc-1", "acc-2"],
     });
     expect(mockInvoke).toHaveBeenNthCalledWith(2, "sync_run_accounts", {
@@ -175,7 +175,7 @@ describe("syncManager", () => {
 
     expect(mockInvoke).toHaveBeenNthCalledWith(
       1,
-      "sync_prepare_account_resync",
+      "provider_prepare_account_resync",
       {
         accountId: "acc-1",
       },
@@ -203,6 +203,29 @@ describe("syncManager", () => {
       phase: "labels",
       current: 2,
       total: 5,
+    });
+
+    unsubscribe();
+  });
+
+  it("maps fallback progress events to ui sync progress", async () => {
+    const { onSyncStatus } = await loadSyncManager();
+    const callback = vi.fn();
+
+    const unsubscribe = onSyncStatus(callback);
+    await flushListenerSetup();
+
+    emitEvent("jmap-sync-progress", {
+      accountId: "acc-1",
+      phase: "fallback",
+      current: 0,
+      total: 1,
+    });
+
+    expect(callback).toHaveBeenCalledWith("acc-1", "syncing", {
+      phase: "fallback",
+      current: 0,
+      total: 1,
     });
 
     unsubscribe();

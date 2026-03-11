@@ -14,7 +14,11 @@ pub struct GmailOps {
 
 #[async_trait]
 impl ProviderOps for GmailOps {
-    async fn sync_initial(&self, ctx: &ProviderCtx<'_>, days_back: i64) -> Result<(), String> {
+    async fn sync_initial(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        days_back: i64,
+    ) -> Result<SyncResult, String> {
         super::sync::gmail_initial_sync(
             &self.client,
             ctx.account_id,
@@ -24,7 +28,8 @@ impl ProviderOps for GmailOps {
             ctx.search,
             ctx.app_handle,
         )
-        .await
+        .await?;
+        Ok(SyncResult::default())
     }
 
     async fn sync_delta(

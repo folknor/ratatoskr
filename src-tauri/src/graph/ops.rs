@@ -22,8 +22,13 @@ pub struct GraphOps {
 
 #[async_trait]
 impl ProviderOps for GraphOps {
-    async fn sync_initial(&self, ctx: &ProviderCtx<'_>, days_back: i64) -> Result<(), String> {
-        super::sync::graph_initial_sync(&self.client, ctx, days_back).await
+    async fn sync_initial(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        days_back: i64,
+    ) -> Result<SyncResult, String> {
+        super::sync::graph_initial_sync(&self.client, ctx, days_back).await?;
+        Ok(SyncResult::default())
     }
 
     async fn sync_delta(
