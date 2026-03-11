@@ -48,6 +48,37 @@ fn dynamic_update(
     Ok(())
 }
 
+pub fn load_recent_rule_categorized_threads(
+    conn: &Connection,
+    account_id: &str,
+    limit: i64,
+) -> Result<Vec<ThreadInfoRow>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT t.id, t.subject, t.snippet, m.from_address
+             FROM threads t
+             INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
+             INNER JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
+             LEFT JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id
+               AND m.date = (SELECT MAX(m2.date) FROM messages m2 WHERE m2.account_id = t.account_id AND m2.thread_id = t.id)
+             WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND tc.is_manual = 0
+             ORDER BY t.last_message_at DESC
+             LIMIT ?2",
+        )
+        .map_err(|e| e.to_string())?;
+    stmt.query_map(params![account_id, limit], |row| {
+        Ok(ThreadInfoRow {
+            id: row.get(0)?,
+            subject: row.get(1)?,
+            snippet: row.get(2)?,
+            from_address: row.get(3)?,
+        })
+    })
+    .map_err(|e| e.to_string())?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())
+}
+
 // ── Row mappers ─────────────────────────────────────────────
 
 fn row_to_filter(row: &Row<'_>) -> rusqlite::Result<DbFilterRule> {
@@ -4084,30 +4115,7 @@ pub async fn db_get_recent_rule_categorized_thread_ids(
     state
         .with_conn(move |conn| {
             let lim = limit.unwrap_or(20);
-            let mut stmt = conn
-                .prepare(
-                    "SELECT t.id, t.subject, t.snippet, m.from_address
-                     FROM threads t
-                     INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-                     INNER JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
-                     LEFT JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id
-                       AND m.date = (SELECT MAX(m2.date) FROM messages m2 WHERE m2.account_id = t.account_id AND m2.thread_id = t.id)
-                     WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND tc.is_manual = 0
-                     ORDER BY t.last_message_at DESC
-                     LIMIT ?2",
-                )
-                .map_err(|e| e.to_string())?;
-            stmt.query_map(params![account_id, lim], |row| {
-                Ok(ThreadInfoRow {
-                    id: row.get(0)?,
-                    subject: row.get(1)?,
-                    snippet: row.get(2)?,
-                    from_address: row.get(3)?,
-                })
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())
+            load_recent_rule_categorized_threads(conn, &account_id, lim)
         })
         .await
 }

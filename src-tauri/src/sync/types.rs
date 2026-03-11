@@ -48,7 +48,6 @@ pub struct SyncStatusEvent {
     pub should_sync_calendar: Option<bool>,
     pub new_inbox_message_ids: Option<Vec<String>>,
     pub affected_thread_ids: Option<Vec<String>>,
-    pub is_delta: Option<bool>,
     pub criteria_smart_label_matches: Option<Vec<AppliedSmartLabelMatch>>,
     pub notifications_to_queue: Option<Vec<NotificationCandidate>>,
     pub ai_categorization_candidates: Option<Vec<AICategorizationCandidate>>,

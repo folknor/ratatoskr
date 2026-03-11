@@ -5,6 +5,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
 use crate::db::queries::row_to_message;
+use crate::db::queries_extra::load_recent_rule_categorized_threads;
 use crate::filters::commands::filters_apply_to_new_message_ids_impl;
 use crate::gmail::client::GmailState;
 use crate::graph::client::GraphState;
@@ -61,7 +62,6 @@ pub async fn sync_prepare_account_resync(
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn sync_run_accounts(
     app: AppHandle,
@@ -169,7 +169,6 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                     should_sync_calendar: None,
                     new_inbox_message_ids: None,
                     affected_thread_ids: None,
-                    is_delta: None,
                     criteria_smart_label_matches: None,
                     notifications_to_queue: None,
                     ai_categorization_candidates: None,
@@ -191,7 +190,6 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
             should_sync_calendar: None,
             new_inbox_message_ids: None,
             affected_thread_ids: None,
-            is_delta: None,
             criteria_smart_label_matches: None,
             notifications_to_queue: None,
             ai_categorization_candidates: None,
@@ -211,7 +209,6 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 should_sync_calendar: Some(true),
                 new_inbox_message_ids: Some(Vec::new()),
                 affected_thread_ids: Some(Vec::new()),
-                is_delta: Some(false),
                 criteria_smart_label_matches: Some(Vec::new()),
                 notifications_to_queue: Some(Vec::new()),
                 ai_categorization_candidates: Some(Vec::new()),
@@ -330,7 +327,9 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                     }
                 };
 
-            let ai_categorization_candidates =
+            let ai_categorization_candidates = if result.affected_thread_ids.is_empty() {
+                Vec::new()
+            } else {
                 match get_ai_categorization_candidates(&db, account_id).await {
                     Ok(candidates) => candidates,
                     Err(error) => {
@@ -339,7 +338,8 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                         );
                         Vec::new()
                     }
-                };
+                }
+            };
 
             emit_sync_status(
                 app,
@@ -351,7 +351,6 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                     should_sync_calendar: Some(should_sync_calendar),
                     new_inbox_message_ids: Some(result.new_inbox_message_ids),
                     affected_thread_ids: Some(result.affected_thread_ids),
-                    is_delta: Some(result.was_delta && !result.fell_back_to_initial),
                     criteria_smart_label_matches: Some(criteria_smart_label_matches),
                     notifications_to_queue: Some(notifications_to_queue),
                     ai_categorization_candidates: Some(ai_categorization_candidates),
@@ -370,7 +369,6 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 should_sync_calendar: None,
                 new_inbox_message_ids: None,
                 affected_thread_ids: None,
-                is_delta: None,
                 criteria_smart_label_matches: None,
                 notifications_to_queue: None,
                 ai_categorization_candidates: None,
@@ -398,30 +396,17 @@ async fn get_ai_categorization_candidates(
             return Ok(Vec::new());
         }
 
-        let mut stmt = conn
-            .prepare(
-                "SELECT t.id, t.subject, t.snippet, m.from_address
-                 FROM threads t
-                 INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-                 INNER JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
-                 LEFT JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id
-                   AND m.date = (SELECT MAX(m2.date) FROM messages m2 WHERE m2.account_id = t.account_id AND m2.thread_id = t.id)
-                 WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND tc.is_manual = 0
-                 ORDER BY t.last_message_at DESC
-                 LIMIT 20",
-            )
-            .map_err(|e| e.to_string())?;
-        stmt.query_map(rusqlite::params![account_id], |row| {
-            Ok(AICategorizationCandidate {
-                id: row.get(0)?,
-                subject: row.get(1)?,
-                snippet: row.get(2)?,
-                from_address: row.get(3)?,
-            })
+        load_recent_rule_categorized_threads(conn, &account_id, 20).map(|threads| {
+            threads
+                .into_iter()
+                .map(|thread| AICategorizationCandidate {
+                    id: thread.id,
+                    subject: thread.subject,
+                    snippet: thread.snippet,
+                    from_address: thread.from_address,
+                })
+                .collect()
         })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
     })
     .await
 }
@@ -482,7 +467,7 @@ async fn evaluate_notifications(
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| e.to_string())?
                 .into_iter()
-                .map(|email| email.to_lowercase().trim().to_string())
+                .map(|email| email.trim().to_lowercase())
                 .collect()
         };
 
@@ -584,7 +569,7 @@ async fn evaluate_notifications(
             let from_address_normalized = msg
                 .from_address
                 .as_ref()
-                .map(|email| email.to_lowercase().trim().to_string());
+                .map(|email| email.trim().to_lowercase());
             let should_notify = if !smart_notifications {
                 true
             } else if let Some(from_address) = from_address_normalized.as_ref() {

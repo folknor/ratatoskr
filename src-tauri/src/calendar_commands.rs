@@ -712,7 +712,7 @@ async fn load_caldav_account_config(
             .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| "CalDAV credentials not configured".to_string())?;
         let password = if crate::provider::crypto::is_encrypted(&password_raw) {
-            crate::provider::crypto::decrypt_value(&key, &password_raw)?
+            crate::provider::crypto::decrypt_value(&key, &password_raw).unwrap_or(password_raw)
         } else {
             password_raw
         };

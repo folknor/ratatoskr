@@ -319,8 +319,17 @@ export function startBackgroundSync(
   skipImmediateSync: boolean = false,
 ): void {
   stopBackgroundSync();
-  void ensureSyncListeners();
-  void invoke("sync_start_background", { accountIds, skipImmediateSync });
+  void Promise.resolve(ensureSyncListeners()).catch((error) => {
+    console.warn("[syncManager] Failed to initialize sync listeners:", error);
+  });
+  void Promise.resolve(
+    invoke("sync_start_background", {
+      accountIds,
+      skipImmediateSync,
+    }),
+  ).catch((error) => {
+    console.warn("[syncManager] Failed to start background sync:", error);
+  });
 }
 
 /**

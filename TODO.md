@@ -14,13 +14,9 @@
 
 - [ ] **Plaintext tokens round-trip through IPC** — `account_authorize_oauth_provider` returns raw `access_token`/`refresh_token` to TS, which passes them back to `account_create_imap_oauth` for encryption. The Gmail flow avoids this by handling everything in a single Rust command. Consider merging or documenting why the split is needed. *(MED)*
 
-- [ ] **No `access_type=offline` for non-Google/non-Microsoft providers** — `perform_provider_oauth` doesn't request offline access for generic OIDC providers. Some may not return a refresh token without it. *(MED)*
-
 - [ ] **`GmailState` used as encryption key source for non-Gmail code** — `account_create_imap_oauth` and `sync/commands.rs` (`sync_imap_initial`, `sync_imap_delta`) still depend on `GmailState` solely for the encryption key. The key is app-wide. Rename to `AppCryptoState` or similar. *(LOW)*
 
 - [ ] **Account ID generated TS-side for IMAP, Rust-side for Gmail** — Inconsistent ownership of ID generation between the two flows. *(LOW)*
-
-- [ ] **CalDAV password decryption error now propagated instead of fallback** — Old TS silently fell back to raw value. New Rust propagates error via `?`, failing the operation. Could break CalDAV for accounts with corrupted encrypted passwords. *(LOW)*
 
 ---
 
@@ -28,23 +24,11 @@
 
 - [ ] **Thread-level vs message-level semantics change** — All action methods (`archive`, `trash`, `markRead`, `star`, etc.) now pass `threadId` to Rust commands and ignore `_messageIds`. If any caller passes specific message IDs (e.g., marking individual messages as read), the entire thread is affected instead. *(MED)*
 
-- [ ] **Duplicated TS interfaces for provider results** — `ProviderFolderResult`, `ProviderTestResult`, `ProviderProfile` are defined independently in `gmailProvider.ts`, `jmapProvider.ts`, `imapSmtpProvider.ts`, and `labelStore.ts`. Move to a shared location (e.g., `services/email/types.ts`). *(LOW)*
-
-- [ ] **`rename_folder` fallback sends empty name** — `src/stores/labelStore.ts:140` — `newName: updates.name ?? existing?.name ?? ""` sends `""` if neither is available. Should bail early or throw. *(LOW)*
-
 - [ ] **Boilerplate `ProviderCtx` construction in `commands.rs`** — Every provider command repeats the same ~15-line block (`get_provider_type` → `get_ops` → build `ProviderCtx`). Extract a helper like `with_provider_ops(account_id, states, |ops, ctx| ...)`. *(LOW)*
 
 - [ ] **Graph folder CRUD returns "not supported"** — `create_folder`, `rename_folder`, `delete_folder` are stubbed in `src-tauri/src/graph/ops.rs`. Graph API actually supports folder CRUD via `/me/mailFolders`. *(LOW)*
 
-- [ ] **IMAP folder CRUD calls will always fail** — `createFolder`, `deleteFolder`, `renameFolder` invoke Rust IMAP ops that return `Err("not supported")`. Not a regression from old `throw new Error(...)`, but unnecessary IPC round-trips. *(LOW)*
-
-- [ ] **Base class action methods throw instead of delegating to Rust** — `RustBackedProviderBase` default implementations for `archive`, `trash`, `markRead`, etc. throw "not supported". Safe only because those providers route actions through `emailActions.ts` directly. Add a comment documenting this assumption. *(LOW)*
-
-- [ ] **Gmail and JMAP still use provider-specific `listFolders`** — `GmailApiProvider` calls `gmail_list_labels`, `JmapProvider` calls `jmap_list_folders`. Only IMAP uses the unified `provider_list_folders`. *(LOW)*
-
 - [ ] **No Graph provider class** — Graph throws in `providerFactory.ts`. `RustBackedProviderBase` is a natural fit for a `GraphProvider`. *(LOW)*
-
-- [ ] **`GmailApiProvider.mapFolder` override is identical to base** — Can be removed. *(LOW)*
 
 - [ ] **`gmail_attachment_id` field name in `ProviderParsedAttachment`** — Set to `att.part_id` for IMAP. Name is provider-specific but the struct is provider-agnostic. Should be renamed when the TS interface is cleaned up. *(LOW)*
 
@@ -59,8 +43,6 @@
 - [ ] **Double `get_provider_type` DB query per sync in queue** — `run_sync_account` calls `get_provider_type` for status events, then `provider_sync_auto_impl` calls it again internally. *(MED)*
 
 - [ ] **No per-account concurrency guard in queue-based sync path** — `run_sync_account` doesn't use `SyncState::try_lock_account`. The queue serializes within itself, but the still-registered `provider_sync_auto` command bypasses the queue entirely and could race. Either remove the direct command or add the per-account lock. *(MED)*
-
-- [ ] **`sync_start_background` errors silently swallowed** — TS calls `void invoke("sync_start_background", ...)` fire-and-forget. If the command fails, no error reaches the UI. *(MED)*
 
 - [ ] **`sync_prepare_account_resync` doesn't clean up `bodies.db`** — Deletes threads/messages from main DB but orphans their zstd-compressed bodies in the separate body store. Add `body_store.delete()` for the account's message IDs before deleting from main tables. *(MED)*
 
@@ -87,8 +69,6 @@
 - [ ] **`SyncStatusEvent.status` is stringly typed in Rust** — Uses `String` for "syncing"/"done"/"error" rather than an enum. *(LOW)*
 
 - [ ] **CalDAV accounts processed redundantly in Rust and TS** — Rust's `run_sync_account` does a DB lookup and emits events for CalDAV accounts, then TS's `handleSyncStatusEvent` re-checks `provider === "caldav"` and does the actual calendar sync. The Rust side contributes nothing for CalDAV. *(LOW)*
-
-- [ ] **Unnecessary `#[allow(clippy::too_many_arguments)]` on `sync_run_accounts`** — Command only has 3 parameters. Likely copy-pasted. *(LOW)*
 
 - [ ] **Gmail sync still fully in TS** — `src/services/gmail/syncManager.ts:80-112` — `syncGmailAccount()` uses Gmail REST API via TS HTTP calls, not the Rust sync engine. Porting is a large effort with minimal benefit since HTTP overhead dominates. *(LOW)*
 
@@ -124,12 +104,6 @@
 
 - [ ] **Entire `evaluate_notifications` runs inside `with_conn`** — Holds a DB connection for settings queries + VIP lookup + muted threads + message loading + category lookup + filtering. Long-running closure over synchronous SQLite. *(LOW)*
 
-- [ ] **`from_address` normalization double-allocates** — `.to_lowercase().trim().to_string()` allocates twice. Use `email.trim().to_lowercase()` instead. *(LOW)*
-
-- [ ] **`get_ai_categorization_candidates` runs unconditionally** — Runs settings check + thread query even when `affected_thread_ids` is empty (initial syncs). Results are discarded by TS gate. Check `result.affected_thread_ids.is_empty()` before calling. *(LOW)*
-
-- [ ] **Duplicate SQL query for AI categorization candidates** — `get_ai_categorization_candidates` is identical to `db_get_recent_rule_categorized_thread_ids` in `queries_extra.rs`. Old command still registered. Extract to shared query or reuse. *(LOW)*
-
 - [ ] **Correlated subquery for latest message per thread** — `AND m.date = (SELECT MAX(m2.date) ...)` runs per-thread. Fine with LIMIT 20 but inherited technical debt. *(LOW)*
 
 - [ ] **`load_enabled_rules_for_ai` overlaps with `load_enabled_criteria_rules`** — Both query same table for same account. Could be a single query. *(LOW)*
@@ -139,8 +113,6 @@
 - [ ] **`smart_labels_apply_matches` only callable via IPC** — Label application after AI classification still crosses the IPC boundary. Could be called directly in Rust once AI classification moves too. *(LOW)*
 
 - [ ] **TS re-queries all messages for AI matching phase** — `applySmartLabelsToNewMessageIds` calls `getMessagesByIds` to get messages the Rust side already loaded. *(LOW)*
-
-- [ ] **`is_delta` field dead on the TS side** — Still emitted from Rust, no longer read by TS. Remove from both sides or document if kept for future use. *(LOW)*
 
 - [ ] **CalDAV "done" emitted before calendar sync completes** — Old code: sync calendar → emit "done". New code: emit "done" → sync calendar. UI shows completion before calendar data arrives. *(LOW)*
 
@@ -195,8 +167,6 @@
 - [ ] **`read_setting_map` decrypts all settings unconditionally** — Every value goes through `decode_setting_value`/`is_encrypted`. Most settings aren't encrypted (only API keys). Wasteful when reused by the UI bootstrap snapshot which has no encrypted fields. *(LOW)*
 
 - [ ] **API keys bundled with non-sensitive settings in one snapshot** — All 4 API keys returned alongside UI settings like `notifications_enabled`. Callers other than `SettingsPage` would receive API keys unnecessarily. *(LOW)*
-
-- [ ] **Two boolean-parsing conventions without explanation** — Some fields use `.is_some_and(|v| v == "true")` (opt-in: missing = `false`), others use `get_bool(key, true)` with `value != "false"` (opt-out: missing = `true`). Both match old TS semantics but look inconsistent. A comment distinguishing opt-in vs opt-out defaults would help. *(LOW)*
 
 ---
 

@@ -290,7 +290,7 @@ pub async fn account_get_caldav_connection_info(
             .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| "CalDAV credentials not configured".to_string())?;
         let password = if is_encrypted(&password_raw) {
-            decrypt_value(&encryption_key, &password_raw)?
+            decrypt_value(&encryption_key, &password_raw).unwrap_or(password_raw)
         } else {
             password_raw
         };
@@ -731,6 +731,8 @@ async fn perform_provider_oauth(
     if request.provider_id == "microsoft" || request.provider_id == "microsoft_graph" {
         params.push(("prompt".to_string(), "consent".to_string()));
         params.push(("response_mode".to_string(), "query".to_string()));
+    } else {
+        params.push(("access_type".to_string(), "offline".to_string()));
     }
 
     let auth_url = format!(

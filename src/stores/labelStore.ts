@@ -7,6 +7,7 @@ import {
   updateLabelSortOrder,
   upsertLabel,
 } from "@/core/labels";
+import type { ProviderFolderResult } from "@/services/email/types";
 
 export interface Label {
   id: string;
@@ -16,16 +17,6 @@ export interface Label {
   colorBg: string | null;
   colorFg: string | null;
   sortOrder: number;
-}
-
-interface ProviderFolderResult {
-  id: string;
-  name: string;
-  path: string;
-  folderType: string;
-  specialUse: string | null;
-  colorBg: string | null;
-  colorFg: string | null;
 }
 
 // System labels that are already shown as nav items in the sidebar
@@ -118,8 +109,8 @@ export const useLabelStore: UseBoundStore<StoreApi<LabelState>> =
         accountId,
         name: folder.name,
         type: folder.folderType,
-        colorBg: folder.colorBg,
-        colorFg: folder.colorFg,
+        colorBg: folder.colorBg ?? null,
+        colorFg: folder.colorFg ?? null,
       });
       await get().loadLabels(accountId);
     },
@@ -133,12 +124,16 @@ export const useLabelStore: UseBoundStore<StoreApi<LabelState>> =
       },
     ) => {
       const existing = get().labels.find((label) => label.id === labelId);
+      const newName = updates.name ?? existing?.name;
+      if (!newName) {
+        throw new Error("Cannot rename folder without a name.");
+      }
       const folder = await invoke<ProviderFolderResult>(
         "provider_rename_folder",
         {
           accountId,
           folderId: labelId,
-          newName: updates.name ?? existing?.name ?? "",
+          newName,
           textColor: updates.color?.textColor,
           bgColor: updates.color?.backgroundColor,
         },
@@ -148,8 +143,8 @@ export const useLabelStore: UseBoundStore<StoreApi<LabelState>> =
         accountId,
         name: folder.name,
         type: folder.folderType,
-        colorBg: folder.colorBg,
-        colorFg: folder.colorFg,
+        colorBg: folder.colorBg ?? null,
+        colorFg: folder.colorFg ?? null,
       });
       await get().loadLabels(accountId);
     },

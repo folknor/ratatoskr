@@ -1,27 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ParsedMessage } from "../gmail/messageParser";
-import type { EmailFolder, EmailProvider, SyncResult } from "./types";
-
-interface ProviderFolderResult {
-  id: string;
-  name: string;
-  path: string;
-  folderType: string;
-  specialUse?: string | null;
-  delimiter?: string | null;
-  messageCount?: number | null;
-  unreadCount?: number | null;
-}
-
-interface ProviderTestResult {
-  success: boolean;
-  message: string;
-}
-
-interface ProviderProfile {
-  email: string;
-  name?: string;
-}
+import type {
+  EmailFolder,
+  EmailProvider,
+  ProviderFolderResult,
+  ProviderProfile,
+  ProviderTestResult,
+  SyncResult,
+} from "./types";
 
 export abstract class RustBackedProviderBase implements EmailProvider {
   abstract readonly accountId: string;
@@ -42,6 +28,8 @@ export abstract class RustBackedProviderBase implements EmailProvider {
 
   clearConfigCache(): void {}
 
+  // Thread actions for Rust-backed providers are routed through `emailActions.ts`
+  // rather than these defaults, so these throw-only fallbacks act as guard rails.
   async archive(_threadId: string, _messageIds: string[]): Promise<void> {
     throw new Error("Archive is not supported for this provider.");
   }

@@ -18,6 +18,29 @@ export interface EmailFolder {
   unreadCount: number;
 }
 
+export interface ProviderFolderResult {
+  id: string;
+  name: string;
+  path: string;
+  folderType: string;
+  specialUse?: string | null;
+  delimiter?: string | null;
+  messageCount?: number | null;
+  unreadCount?: number | null;
+  colorBg?: string | null;
+  colorFg?: string | null;
+}
+
+export interface ProviderTestResult {
+  success: boolean;
+  message: string;
+}
+
+export interface ProviderProfile {
+  email: string;
+  name?: string;
+}
+
 export interface SyncResult {
   messages: ParsedMessage[];
   folderStatus?: {

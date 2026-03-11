@@ -1,22 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ParsedMessage } from "../gmail/messageParser";
 import { RustBackedProviderBase } from "./rustBackedProvider";
-import type { EmailFolder, SyncResult } from "./types";
+import type { EmailFolder, ProviderFolderResult, SyncResult } from "./types";
 
 interface ProviderAttachment {
   data: string;
   size: number;
-}
-
-interface ProviderFolder {
-  id: string;
-  name: string;
-  path: string;
-  folderType: string;
-  specialUse?: string | null;
-  delimiter?: string | null;
-  messageCount?: number | null;
-  unreadCount?: number | null;
 }
 
 /**
@@ -36,19 +25,13 @@ export class ImapSmtpProvider extends RustBackedProviderBase {
   }
 
   override async listFolders(): Promise<EmailFolder[]> {
-    const folders = await invoke<ProviderFolder[]>("provider_list_folders", {
-      accountId: this.accountId,
-    });
-    return folders.map((folder) => ({
-      id: folder.id,
-      name: folder.name,
-      path: folder.path,
-      type: folder.folderType === "system" ? "system" : "user",
-      specialUse: folder.specialUse ?? null,
-      delimiter: folder.delimiter ?? "/",
-      messageCount: folder.messageCount ?? 0,
-      unreadCount: folder.unreadCount ?? 0,
-    }));
+    const folders = await invoke<ProviderFolderResult[]>(
+      "provider_list_folders",
+      {
+        accountId: this.accountId,
+      },
+    );
+    return folders.map((folder) => this.mapFolder(folder));
   }
 
   override async initialSync(
@@ -194,6 +177,21 @@ export class ImapSmtpProvider extends RustBackedProviderBase {
       threadId: threadId ?? null,
     });
     return { id };
+  }
+
+  override async createFolder(
+    _name: string,
+    _parentPath?: string,
+  ): Promise<EmailFolder> {
+    throw new Error("Folder creation is not supported for IMAP accounts.");
+  }
+
+  override async deleteFolder(_path: string): Promise<void> {
+    throw new Error("Folder deletion is not supported for IMAP accounts.");
+  }
+
+  override async renameFolder(_path: string, _newName: string): Promise<void> {
+    throw new Error("Folder rename is not supported for IMAP accounts.");
   }
 
   override async createDraft(

@@ -1,17 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ParsedMessage } from "../gmail/messageParser";
 import { RustBackedProviderBase } from "./rustBackedProvider";
-import type { AccountProvider, EmailFolder, SyncResult } from "./types";
-
-interface JmapFolder {
-  id: string;
-  name: string;
-  path: string;
-  folderType: string;
-  specialUse: string | null;
-  messageCount: number;
-  unreadCount: number;
-}
+import type {
+  AccountProvider,
+  EmailFolder,
+  ProviderFolderResult,
+  SyncResult,
+} from "./types";
 
 /**
  * EmailProvider adapter for JMAP accounts.
@@ -29,22 +24,13 @@ export class JmapProvider extends RustBackedProviderBase {
   // ---- Folder/Label operations ----
 
   override async listFolders(): Promise<EmailFolder[]> {
-    const folders = await invoke<JmapFolder[]>("jmap_list_folders", {
-      accountId: this.accountId,
-    });
-
-    return folders.map((f) => ({
-      id: f.id,
-      name: f.name,
-      path: f.path,
-      type: (f.folderType === "system" ? "system" : "user") as
-        | "system"
-        | "user",
-      specialUse: f.specialUse,
-      delimiter: "/",
-      messageCount: f.messageCount,
-      unreadCount: f.unreadCount,
-    }));
+    const folders = await invoke<ProviderFolderResult[]>(
+      "provider_list_folders",
+      {
+        accountId: this.accountId,
+      },
+    );
+    return folders.map((folder) => this.mapFolder(folder));
   }
 
   // ---- Sync operations ----

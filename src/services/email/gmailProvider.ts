@@ -1,34 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ParsedMessage } from "../gmail/messageParser";
 import { RustBackedProviderBase } from "./rustBackedProvider";
-import type { EmailFolder, SyncResult } from "./types";
-
-/** Map Gmail system label IDs to IMAP special-use flags */
-const GMAIL_SPECIAL_USE: Record<string, string | null> = {
-  INBOX: null,
-  SENT: "\\Sent",
-  TRASH: "\\Trash",
-  DRAFT: "\\Drafts",
-  SPAM: "\\Junk",
-  STARRED: null,
-  IMPORTANT: null,
-  CATEGORY_PERSONAL: null,
-  CATEGORY_SOCIAL: null,
-  CATEGORY_PROMOTIONS: null,
-  CATEGORY_UPDATES: null,
-  CATEGORY_FORUMS: null,
-  UNREAD: null,
-  CHAT: null,
-};
-
-/** Shape returned by the Rust gmail_list_labels command */
-interface RustGmailLabel {
-  id: string;
-  name: string;
-  labelType: string | null;
-  messagesTotal: number | null;
-  messagesUnread: number | null;
-}
+import type { EmailFolder, ProviderFolderResult, SyncResult } from "./types";
 
 /** Shape returned by the Rust gmail_test_connection command */
 interface RustGmailProfile {
@@ -67,19 +40,6 @@ interface RustGmailAttachmentData {
   data: string;
 }
 
-interface ProviderFolderResult {
-  id: string;
-  name: string;
-  path: string;
-  folderType: string;
-  specialUse: string | null;
-  colorBg: string | null;
-  colorFg: string | null;
-  delimiter?: string | null;
-  messageCount?: number | null;
-  unreadCount?: number | null;
-}
-
 /**
  * EmailProvider adapter that delegates to Rust Gmail Tauri commands.
  * All operations invoke the corresponding `gmail_*` Tauri command.
@@ -94,23 +54,13 @@ export class GmailApiProvider extends RustBackedProviderBase {
   }
 
   override async listFolders(): Promise<EmailFolder[]> {
-    const labels = await invoke<RustGmailLabel[]>("gmail_list_labels", {
-      accountId: this.accountId,
-    });
-    return labels.map((label) => ({
-      id: label.id,
-      name: label.name,
-      path: label.id,
-      type:
-        label.labelType === "system" ? ("system" as const) : ("user" as const),
-      specialUse:
-        label.labelType === "system"
-          ? (GMAIL_SPECIAL_USE[label.id] ?? null)
-          : null,
-      delimiter: "/",
-      messageCount: label.messagesTotal ?? 0,
-      unreadCount: label.messagesUnread ?? 0,
-    }));
+    const folders = await invoke<ProviderFolderResult[]>(
+      "provider_list_folders",
+      {
+        accountId: this.accountId,
+      },
+    );
+    return folders.map((folder) => this.mapFolder(folder));
   }
 
   override async initialSync(
@@ -202,18 +152,5 @@ export class GmailApiProvider extends RustBackedProviderBase {
     const raw = resp.raw ?? "";
     const base64 = raw.replace(/-/g, "+").replace(/_/g, "/");
     return atob(base64);
-  }
-
-  protected override mapFolder(folder: ProviderFolderResult): EmailFolder {
-    return {
-      id: folder.id,
-      name: folder.name,
-      path: folder.path,
-      type: folder.folderType === "system" ? "system" : "user",
-      specialUse: folder.specialUse,
-      delimiter: folder.delimiter ?? "/",
-      messageCount: folder.messageCount ?? 0,
-      unreadCount: folder.unreadCount ?? 0,
-    };
   }
 }
