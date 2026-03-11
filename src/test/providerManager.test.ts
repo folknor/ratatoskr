@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AiError } from "@/services/ai/errors";
 
 const { mockInvoke } = vi.hoisted(() => ({
   mockInvoke: vi.fn(),
@@ -11,7 +10,6 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import {
   clearProviderClients,
-  getActiveProvider,
   getActiveProviderName,
   isAiAvailable,
 } from "@/services/ai/providerManager";
@@ -27,48 +25,6 @@ describe("providerManager", () => {
 
       expect(await getActiveProviderName()).toBe("openai");
       expect(mockInvoke).toHaveBeenCalledWith("ai_get_provider_name");
-    });
-  });
-
-  describe("getActiveProvider", () => {
-    it("returns a provider that delegates completions to rust", async () => {
-      mockInvoke.mockResolvedValue("result");
-
-      const provider = await getActiveProvider();
-      const result = await provider.complete({
-        systemPrompt: "system",
-        userContent: "user",
-      });
-
-      expect(result).toBe("result");
-      expect(mockInvoke).toHaveBeenLastCalledWith("ai_complete", {
-        request: {
-          systemPrompt: "system",
-          userContent: "user",
-        },
-      });
-    });
-
-    it("maps typed rust errors on completion", async () => {
-      mockInvoke.mockRejectedValue("AUTH_ERROR: Invalid API key");
-
-      const provider = await getActiveProvider();
-
-      await expect(
-        provider.complete({
-          systemPrompt: "system",
-          userContent: "user",
-        }),
-      ).rejects.toEqual(new AiError("AUTH_ERROR", "Invalid API key"));
-    });
-
-    it("delegates connection tests to rust", async () => {
-      mockInvoke.mockResolvedValue(true);
-
-      const provider = await getActiveProvider();
-
-      expect(await provider.testConnection()).toBe(true);
-      expect(mockInvoke).toHaveBeenCalledWith("ai_test_connection");
     });
   });
 

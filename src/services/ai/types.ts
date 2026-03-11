@@ -6,11 +6,6 @@ export interface AiCompletionRequest {
   maxTokens?: number;
 }
 
-export interface AiProviderClient {
-  complete(req: AiCompletionRequest): Promise<string>;
-  testConnection(): Promise<boolean>;
-}
-
 export const DEFAULT_MODELS: Record<AiProvider, string> = {
   claude: "claude-haiku-4-5-20251001",
   openai: "gpt-4o-mini",
