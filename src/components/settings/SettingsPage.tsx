@@ -16,12 +16,7 @@ import type React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { deleteAccount } from "@/core/accounts";
-import {
-  getSecureSetting,
-  getSetting,
-  setSecureSetting,
-  setSetting,
-} from "@/core/settings";
+import { setSecureSetting, setSetting } from "@/core/settings";
 import {
   forceFullSync,
   reauthorizeAccount,
@@ -31,6 +26,7 @@ import {
 } from "@/core/sync";
 import { getPersistedLanguage, getSystemLanguageName } from "@/i18n";
 import { navigateToLabel, navigateToSettings } from "@/router/navigate";
+import { getSettingsBootstrapSnapshot } from "@/services/settings/bootstrapSnapshot";
 import { useAccountStore } from "@/stores/accountStore";
 import { SettingsAboutTab } from "./SettingsAboutTab";
 import { SettingsAccountsTab } from "./SettingsAccountsTab";
@@ -169,25 +165,22 @@ export function SettingsPage(): React.ReactNode {
   // Load settings from DB
   useEffect(() => {
     async function load(): Promise<void> {
-      const notif = await getSetting("notifications_enabled");
-      setNotificationsEnabled(notif !== "false");
-      const delay = await getSetting("undo_send_delay_seconds");
-      setUndoSendDelay(delay ?? "5");
-      const id = await getSetting("google_client_id");
-      setClientId(id ?? "");
-      const secret = await getSecureSetting("google_client_secret");
-      setClientSecret(secret ?? "");
-      const msClientId = await getSetting("microsoft_client_id");
-      setMicrosoftClientId(msClientId ?? "");
-      const blockImg = await getSetting("block_remote_images");
-      setBlockRemoteImages(blockImg !== "false");
-      const phishingEnabled = await getSetting("phishing_detection_enabled");
-      setPhishingDetectionEnabled(phishingEnabled !== "false");
-      const phishingSens = await getSetting("phishing_sensitivity");
-      if (phishingSens === "low" || phishingSens === "high")
-        setPhishingSensitivity(phishingSens);
-      const syncDays = await getSetting("sync_period_days");
-      setSyncPeriodDays(syncDays ?? "365");
+      const snapshot = await getSettingsBootstrapSnapshot();
+
+      setNotificationsEnabled(snapshot.notificationsEnabled);
+      setUndoSendDelay(snapshot.undoSendDelaySeconds ?? "5");
+      setClientId(snapshot.googleClientId ?? "");
+      setClientSecret(snapshot.googleClientSecret ?? "");
+      setMicrosoftClientId(snapshot.microsoftClientId ?? "");
+      setBlockRemoteImages(snapshot.blockRemoteImages);
+      setPhishingDetectionEnabled(snapshot.phishingDetectionEnabled);
+      if (
+        snapshot.phishingSensitivity === "low" ||
+        snapshot.phishingSensitivity === "high"
+      ) {
+        setPhishingSensitivity(snapshot.phishingSensitivity);
+      }
+      setSyncPeriodDays(snapshot.syncPeriodDays ?? "365");
 
       // Load autostart state
       try {
@@ -198,7 +191,7 @@ export function SettingsPage(): React.ReactNode {
       }
 
       // Load AI settings
-      const provider = await getSetting("ai_provider");
+      const provider = snapshot.aiProvider;
       if (
         provider === "openai" ||
         provider === "gemini" ||
@@ -206,39 +199,34 @@ export function SettingsPage(): React.ReactNode {
         provider === "copilot"
       )
         setAiProvider(provider);
-      const ollamaUrl = await getSetting("ollama_server_url");
+      const ollamaUrl = snapshot.ollamaServerUrl;
       if (ollamaUrl) setOllamaServerUrl(ollamaUrl);
-      const ollamaModelVal = await getSetting("ollama_model");
+      const ollamaModelVal = snapshot.ollamaModel;
       if (ollamaModelVal) setOllamaModel(ollamaModelVal);
-      const claudeModelVal = await getSetting("claude_model");
+      const claudeModelVal = snapshot.claudeModel;
       if (claudeModelVal) setClaudeModel(claudeModelVal);
-      const openaiModelVal = await getSetting("openai_model");
+      const openaiModelVal = snapshot.openaiModel;
       if (openaiModelVal) setOpenaiModel(openaiModelVal);
-      const geminiModelVal = await getSetting("gemini_model");
+      const geminiModelVal = snapshot.geminiModel;
       if (geminiModelVal) setGeminiModel(geminiModelVal);
-      const aiKey = await getSecureSetting("claude_api_key");
+      const aiKey = snapshot.claudeApiKey;
       setClaudeApiKey(aiKey ?? "");
-      const oaiKey = await getSecureSetting("openai_api_key");
+      const oaiKey = snapshot.openaiApiKey;
       setOpenaiApiKey(oaiKey ?? "");
-      const gemKey = await getSecureSetting("gemini_api_key");
+      const gemKey = snapshot.geminiApiKey;
       setGeminiApiKey(gemKey ?? "");
-      const copKey = await getSecureSetting("copilot_api_key");
+      const copKey = snapshot.copilotApiKey;
       setCopilotApiKey(copKey ?? "");
-      const copilotModelVal = await getSetting("copilot_model");
+      const copilotModelVal = snapshot.copilotModel;
       if (copilotModelVal) setCopilotModel(copilotModelVal);
-      const aiEn = await getSetting("ai_enabled");
-      setAiEnabled(aiEn !== "false");
-      const aiCat = await getSetting("ai_auto_categorize");
-      setAiAutoCategorize(aiCat !== "false");
-      const aiSum = await getSetting("ai_auto_summarize");
-      setAiAutoSummarize(aiSum !== "false");
-      const aiDraft = await getSetting("ai_auto_draft_enabled");
-      setAiAutoDraftEnabled(aiDraft !== "false");
-      const aiStyle = await getSetting("ai_writing_style_enabled");
-      setAiWritingStyleEnabled(aiStyle !== "false");
+      setAiEnabled(snapshot.aiEnabled);
+      setAiAutoCategorize(snapshot.aiAutoCategorize);
+      setAiAutoSummarize(snapshot.aiAutoSummarize);
+      setAiAutoDraftEnabled(snapshot.aiAutoDraftEnabled);
+      setAiWritingStyleEnabled(snapshot.aiWritingStyleEnabled);
 
       // Load auto-archive categories
-      const autoArchive = await getSetting("auto_archive_categories");
+      const autoArchive = snapshot.autoArchiveCategories;
       if (autoArchive) {
         setAutoArchiveCategories(
           new Set(
@@ -251,9 +239,8 @@ export function SettingsPage(): React.ReactNode {
       }
 
       // Load smart notification settings
-      const smartNotif = await getSetting("smart_notifications");
-      setSmartNotifications(smartNotif !== "false");
-      const notifCats = await getSetting("notify_categories");
+      setSmartNotifications(snapshot.smartNotifications);
+      const notifCats = snapshot.notifyCategories;
       if (notifCats) {
         setNotifyCategories(
           new Set(
@@ -283,7 +270,7 @@ export function SettingsPage(): React.ReactNode {
       }
 
       // Load cache settings
-      const cacheMax = await getSetting("attachment_cache_max_mb");
+      const cacheMax = snapshot.attachmentCacheMaxMb;
       setCacheMaxMb(cacheMax ?? "500");
       try {
         const { getCacheSize } = await import(

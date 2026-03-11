@@ -110,6 +110,67 @@ fn row_to_attachment(row: &Row<'_>) -> rusqlite::Result<DbAttachment> {
     })
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsBootstrapSnapshot {
+    pub notifications_enabled: bool,
+    pub undo_send_delay_seconds: Option<String>,
+    pub google_client_id: Option<String>,
+    pub google_client_secret: Option<String>,
+    pub microsoft_client_id: Option<String>,
+    pub block_remote_images: bool,
+    pub phishing_detection_enabled: bool,
+    pub phishing_sensitivity: Option<String>,
+    pub sync_period_days: Option<String>,
+    pub ai_provider: Option<String>,
+    pub ollama_server_url: Option<String>,
+    pub ollama_model: Option<String>,
+    pub claude_model: Option<String>,
+    pub openai_model: Option<String>,
+    pub gemini_model: Option<String>,
+    pub claude_api_key: Option<String>,
+    pub openai_api_key: Option<String>,
+    pub gemini_api_key: Option<String>,
+    pub copilot_api_key: Option<String>,
+    pub copilot_model: Option<String>,
+    pub ai_enabled: bool,
+    pub ai_auto_categorize: bool,
+    pub ai_auto_summarize: bool,
+    pub ai_auto_draft_enabled: bool,
+    pub ai_writing_style_enabled: bool,
+    pub auto_archive_categories: Option<String>,
+    pub smart_notifications: bool,
+    pub notify_categories: Option<String>,
+    pub attachment_cache_max_mb: Option<String>,
+}
+
+fn decode_setting_value(raw: String, encryption_key: &[u8; 32]) -> String {
+    if is_encrypted(&raw) {
+        decrypt_value(encryption_key, &raw).unwrap_or(raw)
+    } else {
+        raw
+    }
+}
+
+fn read_setting_map(
+    conn: &rusqlite::Connection,
+    encryption_key: &[u8; 32],
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT key, value FROM settings")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(key, raw)| (key, decode_setting_value(raw, encryption_key)))
+        .collect())
+}
+
 // ── Thread queries ───────────────────────────────────────────
 
 #[tauri::command]
@@ -416,6 +477,55 @@ pub async fn db_get_secure_setting(
                     raw
                 }
             }))
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn settings_get_bootstrap_snapshot(
+    state: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
+) -> Result<SettingsBootstrapSnapshot, String> {
+    let encryption_key = *gmail.encryption_key();
+    state
+        .with_conn(move |conn| {
+            let settings = read_setting_map(conn, &encryption_key)?;
+            let get = |key: &str| settings.get(key).cloned();
+            let get_bool = |key: &str, default: bool| {
+                get(key).map_or(default, |value| value != "false")
+            };
+
+            Ok(SettingsBootstrapSnapshot {
+                notifications_enabled: get_bool("notifications_enabled", true),
+                undo_send_delay_seconds: get("undo_send_delay_seconds"),
+                google_client_id: get("google_client_id"),
+                google_client_secret: get("google_client_secret"),
+                microsoft_client_id: get("microsoft_client_id"),
+                block_remote_images: get_bool("block_remote_images", true),
+                phishing_detection_enabled: get_bool("phishing_detection_enabled", true),
+                phishing_sensitivity: get("phishing_sensitivity"),
+                sync_period_days: get("sync_period_days"),
+                ai_provider: get("ai_provider"),
+                ollama_server_url: get("ollama_server_url"),
+                ollama_model: get("ollama_model"),
+                claude_model: get("claude_model"),
+                openai_model: get("openai_model"),
+                gemini_model: get("gemini_model"),
+                claude_api_key: get("claude_api_key"),
+                openai_api_key: get("openai_api_key"),
+                gemini_api_key: get("gemini_api_key"),
+                copilot_api_key: get("copilot_api_key"),
+                copilot_model: get("copilot_model"),
+                ai_enabled: get_bool("ai_enabled", true),
+                ai_auto_categorize: get_bool("ai_auto_categorize", true),
+                ai_auto_summarize: get_bool("ai_auto_summarize", true),
+                ai_auto_draft_enabled: get_bool("ai_auto_draft_enabled", true),
+                ai_writing_style_enabled: get_bool("ai_writing_style_enabled", true),
+                auto_archive_categories: get("auto_archive_categories"),
+                smart_notifications: get_bool("smart_notifications", true),
+                notify_categories: get("notify_categories"),
+                attachment_cache_max_mb: get("attachment_cache_max_mb"),
+            })
         })
         .await
 }
