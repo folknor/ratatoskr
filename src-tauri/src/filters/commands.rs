@@ -6,7 +6,6 @@ use tauri::{AppHandle, State};
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
-use crate::db::queries::row_to_message;
 use crate::gmail::client::GmailState;
 use crate::graph::client::GraphState;
 use crate::inline_image_store::InlineImageStoreState;
@@ -46,6 +45,7 @@ pub async fn filters_evaluate(
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn filters_apply_to_new_message_ids_impl(
     account_id: &str,
+    provider: &str,
     message_ids: &[String],
     db: &DbState,
     gmail: &GmailState,
@@ -78,9 +78,8 @@ pub(crate) async fn filters_apply_to_new_message_ids_impl(
         return Ok(());
     }
 
-    let provider = get_provider_type(db, account_id).await?;
     let ops = get_ops(
-        &provider,
+        provider,
         account_id,
         gmail,
         jmap,
@@ -120,6 +119,7 @@ pub async fn filters_apply_to_new_message_ids(
 ) -> Result<(), String> {
     filters_apply_to_new_message_ids_impl(
         &account_id,
+        &get_provider_type(&db, &account_id).await?,
         &message_ids,
         &db,
         &gmail,
@@ -176,7 +176,13 @@ async fn load_enabled_filters(
         .await
 }
 
-async fn load_filterable_messages(
+#[derive(Debug)]
+struct FilterableMessageRow {
+    id: String,
+    message: FilterableMessage,
+}
+
+pub(crate) async fn load_filterable_messages(
     db: &DbState,
     body_store: &BodyStoreState,
     account_id: &str,
@@ -196,7 +202,8 @@ async fn load_filterable_messages(
                     .collect::<Vec<_>>()
                     .join(", ");
                 let sql = format!(
-                    "SELECT * FROM messages WHERE account_id = ?1 AND id IN ({placeholders})"
+                    "SELECT id, thread_id, from_name, from_address, to_addresses, subject, has_attachments
+                     FROM messages WHERE account_id = ?1 AND id IN ({placeholders})"
                 );
                 let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
                 let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -207,7 +214,21 @@ async fn load_filterable_messages(
                 let param_refs: Vec<&dyn rusqlite::types::ToSql> =
                     param_values.iter().map(AsRef::as_ref).collect();
                 let rows = stmt
-                    .query_map(param_refs.as_slice(), row_to_message)
+                    .query_map(param_refs.as_slice(), |row| {
+                        Ok(FilterableMessageRow {
+                            id: row.get("id")?,
+                            message: FilterableMessage {
+                                thread_id: row.get("thread_id")?,
+                                from_name: row.get("from_name")?,
+                                from_address: row.get("from_address")?,
+                                to_addresses: row.get("to_addresses")?,
+                                subject: row.get("subject")?,
+                                body_text: None,
+                                body_html: None,
+                                has_attachments: row.get::<_, i64>("has_attachments")? != 0,
+                            },
+                        })
+                    })
                     .map_err(|e| e.to_string())?
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|e| e.to_string())?;
@@ -218,7 +239,8 @@ async fn load_filterable_messages(
         .await?;
 
     if needs_body {
-        let bodies = body_store.get_batch(message_ids.to_vec()).await?;
+        let body_ids: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
+        let bodies = body_store.get_batch(body_ids).await?;
         let body_map: HashMap<String, crate::body_store::MessageBody> = bodies
             .into_iter()
             .map(|body| (body.message_id.clone(), body))
@@ -226,25 +248,13 @@ async fn load_filterable_messages(
 
         for row in &mut rows {
             if let Some(body) = body_map.get(&row.id) {
-                row.body_html = body.body_html.clone();
-                row.body_text = body.body_text.clone();
+                row.message.body_html = body.body_html.clone();
+                row.message.body_text = body.body_text.clone();
             }
         }
     }
 
-    Ok(rows
-        .into_iter()
-        .map(|row| FilterableMessage {
-            thread_id: row.thread_id,
-            from_name: row.from_name,
-            from_address: row.from_address,
-            to_addresses: row.to_addresses,
-            subject: row.subject,
-            body_text: row.body_text,
-            body_html: row.body_html,
-            has_attachments: false,
-        })
-        .collect())
+    Ok(rows.into_iter().map(|row| row.message).collect())
 }
 
 async fn apply_filter_result(

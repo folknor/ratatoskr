@@ -9,6 +9,7 @@ use crate::graph::client::GraphState;
 use crate::inline_image_store::InlineImageStoreState;
 use crate::jmap::client::JmapState;
 use crate::search::SearchState;
+use crate::sync::{self, SyncState};
 
 use super::router::{get_ops, get_provider_type};
 use super::types::{
@@ -19,8 +20,11 @@ use super::types::{
 // ── Sync ────────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn provider_sync_auto_impl(
+pub(crate) async fn provider_sync_auto_for_provider(
     account_id: &str,
+    provider: &str,
+    has_history: bool,
+    sync_days: i64,
     db: &DbState,
     gmail: &GmailState,
     jmap: &JmapState,
@@ -30,35 +34,8 @@ pub(crate) async fn provider_sync_auto_impl(
     search: &SearchState,
     app_handle: &AppHandle,
 ) -> Result<AutoSyncResult, String> {
-    let provider = get_provider_type(db, account_id).await?;
-    let has_history = {
-        let aid = account_id.to_string();
-        db.with_conn(move |conn| {
-            conn.query_row(
-                "SELECT history_id FROM accounts WHERE id = ?1",
-                rusqlite::params![aid],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .map(|history_id| history_id.is_some())
-            .map_err(|e| format!("Failed to read sync state for account: {e}"))
-        })
-        .await?
-    };
-    let sync_days = db
-        .with_conn(|conn| {
-            let value: Option<String> = conn
-                .query_row(
-                    "SELECT value FROM settings WHERE key = 'sync_period_days'",
-                    [],
-                    |row| row.get(0),
-                )
-                .ok();
-            Ok(value.and_then(|v| v.parse::<i64>().ok()).unwrap_or(365))
-        })
-        .await?;
-
     let ops = get_ops(
-        &provider,
+        provider,
         account_id,
         gmail,
         jmap,
@@ -112,8 +89,6 @@ pub(crate) async fn provider_sync_auto_impl(
     }
 
     ops.sync_initial(&ctx, sync_days).await?;
-    // IMAP initial sync triggers AI categorization via a sentinel ID,
-    // matching old TS behaviour where storedCount > 0 gated categorizeNewThreads.
     let affected_thread_ids = if provider == "imap" {
         vec!["_initial_sync_completed".to_string()]
     } else {
@@ -125,6 +100,39 @@ pub(crate) async fn provider_sync_auto_impl(
         was_delta: false,
         fell_back_to_initial: false,
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn provider_sync_auto_impl(
+    account_id: &str,
+    db: &DbState,
+    gmail: &GmailState,
+    jmap: &JmapState,
+    graph: &GraphState,
+    body_store: &BodyStoreState,
+    inline_images: &InlineImageStoreState,
+    search: &SearchState,
+    app_handle: &AppHandle,
+) -> Result<AutoSyncResult, String> {
+    let account_id_owned = account_id.to_string();
+    let sync_config = db
+        .with_conn(move |conn| sync::config::get_auto_sync_config(conn, &account_id_owned))
+        .await?;
+    provider_sync_auto_for_provider(
+        account_id,
+        &sync_config.provider,
+        sync_config.has_history,
+        sync_config.sync_period_days,
+        db,
+        gmail,
+        jmap,
+        graph,
+        body_store,
+        inline_images,
+        search,
+        app_handle,
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -200,6 +208,7 @@ pub async fn provider_sync_delta(
 #[tauri::command]
 pub async fn provider_sync_auto(
     account_id: String,
+    sync_state: State<'_, SyncState>,
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
     jmap: State<'_, JmapState>,
@@ -209,7 +218,11 @@ pub async fn provider_sync_auto(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<AutoSyncResult, String> {
-    provider_sync_auto_impl(
+    if !sync_state.try_lock_account(&account_id) {
+        return Err("Sync already in progress for this account".to_string());
+    }
+
+    let result = provider_sync_auto_impl(
         &account_id,
         &db,
         &gmail,
@@ -220,7 +233,9 @@ pub async fn provider_sync_auto(
         &search,
         &app_handle,
     )
-    .await
+    .await;
+    sync_state.unlock_account(&account_id);
+    result
 }
 
 fn should_fallback_to_initial(err: &str, fallback_marker: Option<&str>) -> bool {

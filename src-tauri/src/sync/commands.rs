@@ -11,8 +11,7 @@ use crate::gmail::client::GmailState;
 use crate::graph::client::GraphState;
 use crate::inline_image_store::InlineImageStoreState;
 use crate::jmap::client::JmapState;
-use crate::provider::commands::provider_sync_auto_impl;
-use crate::provider::router::get_provider_type;
+use crate::provider::commands::provider_sync_auto_for_provider;
 use crate::search::SearchState;
 use crate::smart_labels::commands::smart_labels_apply_criteria_to_new_message_ids_impl;
 use crate::smart_labels::commands::smart_labels_prepare_ai_remainder_impl;
@@ -45,18 +44,16 @@ pub async fn sync_prepare_account_resync(
     account_id: String,
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
-        conn.execute(
+        let tx = conn.unchecked_transaction().map_err(|e| format!("begin resync transaction: {e}"))?;
+        tx.execute(
             "DELETE FROM threads WHERE account_id = ?1",
             rusqlite::params![account_id],
         )
         .map_err(|e| format!("delete threads for account: {e}"))?;
-        conn.execute(
-            "DELETE FROM messages WHERE account_id = ?1",
-            rusqlite::params![account_id],
-        )
-        .map_err(|e| format!("delete messages for account: {e}"))?;
-        super::pipeline::clear_account_history_id(conn, &account_id)?;
-        super::pipeline::clear_all_folder_sync_states(conn, &account_id)?;
+        super::pipeline::clear_account_history_id(&tx, &account_id)?;
+        super::pipeline::clear_all_folder_sync_states(&tx, &account_id)?;
+        tx.commit()
+            .map_err(|e| format!("commit resync transaction: {e}"))?;
         Ok(())
     })
     .await
@@ -85,13 +82,15 @@ pub async fn sync_start_background(
     let task = tokio::spawn(async move {
         if !skip_immediate {
             let queue: tauri::State<'_, SyncQueueState> = app_handle.state();
-            let _ = queue_sync_accounts(&app_handle, &queue, &ids).await;
+            let account_ids = load_background_account_ids(&app_handle, &ids).await;
+            let _ = queue_sync_accounts(&app_handle, &queue, &account_ids).await;
         }
 
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(SYNC_INTERVAL_MS)).await;
             let queue: tauri::State<'_, SyncQueueState> = app_handle.state();
-            let _ = queue_sync_accounts(&app_handle, &queue, &ids).await;
+            let account_ids = load_background_account_ids(&app_handle, &ids).await;
+            let _ = queue_sync_accounts(&app_handle, &queue, &account_ids).await;
         }
     });
 
@@ -135,6 +134,10 @@ async fn queue_sync_accounts(
     queue: &SyncQueueState,
     account_ids: &[String],
 ) -> Result<(), String> {
+    if account_ids.is_empty() {
+        return Ok(());
+    }
+
     let (should_spawn, rx) = queue.enqueue(account_ids);
     if should_spawn {
         let app_handle = app.clone();
@@ -147,6 +150,20 @@ async fn queue_sync_accounts(
         .map_err(|_| "Sync queue worker stopped unexpectedly".to_string())
 }
 
+async fn load_background_account_ids(
+    app: &AppHandle,
+    fallback_ids: &[String],
+) -> Vec<String> {
+    let db: tauri::State<'_, DbState> = app.state();
+    match db.with_conn(config::get_active_account_ids).await {
+        Ok(account_ids) => account_ids,
+        Err(error) => {
+            log::warn!("Failed to refresh background sync account list: {error}");
+            fallback_ids.to_vec()
+        }
+    }
+}
+
 async fn run_sync_account(app: &AppHandle, account_id: &str) {
     let db: tauri::State<'_, DbState> = app.state();
     let gmail: tauri::State<'_, GmailState> = app.state();
@@ -156,8 +173,14 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
     let inline_images: tauri::State<'_, InlineImageStoreState> = app.state();
     let search: tauri::State<'_, SearchState> = app.state();
 
-    let provider = match get_provider_type(&db, account_id).await {
-        Ok(provider) => provider,
+    let sync_config = match db
+        .with_conn({
+            let account_id = account_id.to_string();
+            move |conn| config::get_auto_sync_config(conn, &account_id)
+        })
+        .await
+    {
+        Ok(sync_config) => sync_config,
         Err(error) => {
             emit_sync_status(
                 app,
@@ -179,6 +202,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
             return;
         }
     };
+    let provider = sync_config.provider.clone();
 
     emit_sync_status(
         app,
@@ -219,8 +243,11 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
         return;
     }
 
-    match provider_sync_auto_impl(
+    match provider_sync_auto_for_provider(
         account_id,
+        &sync_config.provider,
+        sync_config.has_history,
+        sync_config.sync_period_days,
         &db,
         &gmail,
         &jmap,
@@ -254,6 +281,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
 
             if let Err(error) = filters_apply_to_new_message_ids_impl(
                 account_id,
+                &provider,
                 &result.new_inbox_message_ids,
                 &db,
                 &gmail,
@@ -272,6 +300,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
             let criteria_smart_label_matches =
                 match smart_labels_apply_criteria_to_new_message_ids_impl(
                     account_id,
+                    &provider,
                     &result.new_inbox_message_ids,
                     &db,
                     &gmail,

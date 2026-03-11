@@ -6,7 +6,7 @@ use tauri::{AppHandle, State};
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
-use crate::db::queries::row_to_message;
+use crate::filters::commands::load_filterable_messages;
 use crate::filters::{FilterCriteria, FilterableMessage, message_matches_filter};
 use crate::gmail::client::GmailState;
 use crate::graph::client::GraphState;
@@ -21,6 +21,7 @@ use super::{AppliedSmartLabelMatch, SmartLabelAIRule, SmartLabelAIThread};
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn smart_labels_apply_criteria_to_new_message_ids_impl(
     account_id: &str,
+    provider: &str,
     message_ids: &[String],
     db: &DbState,
     gmail: &GmailState,
@@ -53,9 +54,8 @@ pub(crate) async fn smart_labels_apply_criteria_to_new_message_ids_impl(
         return Ok(Vec::new());
     }
 
-    let provider = get_provider_type(db, account_id).await?;
     let ops = get_ops(
-        &provider,
+        provider,
         account_id,
         gmail,
         jmap,
@@ -197,6 +197,7 @@ pub async fn smart_labels_apply_criteria_to_new_message_ids(
 ) -> Result<Vec<AppliedSmartLabelMatch>, String> {
     smart_labels_apply_criteria_to_new_message_ids_impl(
         &account_id,
+        &get_provider_type(&db, &account_id).await?,
         &message_ids,
         &db,
         &gmail,
@@ -334,77 +335,6 @@ async fn load_enabled_rules_for_ai(
     .await
 }
 
-async fn load_filterable_messages(
-    db: &DbState,
-    body_store: &BodyStoreState,
-    account_id: &str,
-    message_ids: &[String],
-    needs_body: bool,
-) -> Result<Vec<FilterableMessage>, String> {
-    let account_id = account_id.to_string();
-    let ids = message_ids.to_vec();
-    let mut rows = db
-        .with_conn(move |conn| {
-            let mut all_results = Vec::new();
-            for chunk in ids.chunks(500) {
-                let placeholders: String = chunk
-                    .iter()
-                    .enumerate()
-                    .map(|(i, _)| format!("?{}", i + 2))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let sql = format!(
-                    "SELECT * FROM messages WHERE account_id = ?1 AND id IN ({placeholders})"
-                );
-                let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-                let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-                param_values.push(Box::new(account_id.clone()));
-                for id in chunk {
-                    param_values.push(Box::new(id.clone()));
-                }
-                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                    param_values.iter().map(AsRef::as_ref).collect();
-                let rows = stmt
-                    .query_map(param_refs.as_slice(), row_to_message)
-                    .map_err(|e| e.to_string())?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| e.to_string())?;
-                all_results.extend(rows);
-            }
-            Ok(all_results)
-        })
-        .await?;
-
-    if needs_body {
-        let bodies = body_store.get_batch(message_ids.to_vec()).await?;
-        let body_map: HashMap<String, crate::body_store::MessageBody> = bodies
-            .into_iter()
-            .map(|body| (body.message_id.clone(), body))
-            .collect();
-
-        for row in &mut rows {
-            if let Some(body) = body_map.get(&row.id) {
-                row.body_html = body.body_html.clone();
-                row.body_text = body.body_text.clone();
-            }
-        }
-    }
-
-    Ok(rows
-        .into_iter()
-        .map(|row| FilterableMessage {
-            thread_id: row.thread_id,
-            from_name: row.from_name,
-            from_address: row.from_address,
-            to_addresses: row.to_addresses,
-            subject: row.subject,
-            body_text: row.body_text,
-            body_html: row.body_html,
-            has_attachments: false,
-        })
-        .collect())
-}
-
 fn evaluate_criteria_matches(
     rules: &[(String, FilterCriteria)],
     messages: &[FilterableMessage],
@@ -428,10 +358,16 @@ fn evaluate_criteria_matches(
         }
     }
 
-    matches
+    let mut ordered_matches: Vec<(String, Vec<String>)> = matches
         .into_iter()
-        .map(|(thread_id, label_ids)| (thread_id, label_ids.into_iter().collect()))
-        .collect()
+        .map(|(thread_id, label_ids)| {
+            let mut label_ids: Vec<String> = label_ids.into_iter().collect();
+            label_ids.sort();
+            (thread_id, label_ids)
+        })
+        .collect();
+    ordered_matches.sort_by(|left, right| left.0.cmp(&right.0));
+    ordered_matches
 }
 
 async fn load_thread_snippets(

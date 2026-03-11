@@ -40,25 +40,13 @@
 
 ## Sync Engine
 
-- [ ] **Double `get_provider_type` DB query per sync in queue** — `run_sync_account` calls `get_provider_type` for status events, then `provider_sync_auto_impl` calls it again internally. *(MED)*
-
-- [ ] **No per-account concurrency guard in queue-based sync path** — `run_sync_account` doesn't use `SyncState::try_lock_account`. The queue serializes within itself, but the still-registered `provider_sync_auto` command bypasses the queue entirely and could race. Either remove the direct command or add the per-account lock. *(MED)*
-
 - [ ] **`sync_prepare_account_resync` doesn't clean up `bodies.db`** — Deletes threads/messages from main DB but orphans their zstd-compressed bodies in the separate body store. Add `body_store.delete()` for the account's message IDs before deleting from main tables. *(MED)*
 
 - [ ] **`has_history` gate has fragile provider semantics** — `history_id` column means different things per provider (Google history ID, JMAP state token, Graph delta link, IMAP synthetic marker). Using `IS NOT NULL` as initial-vs-delta gate breaks if any provider sets it before completing initial sync. *(MED)*
 
 - [ ] **IMAP `storedCount` proxy for "things changed" is lost** — `sync_initial` returns `Result<(), String>` — no data about what was stored. If anything beyond categorization depends on knowing whether initial sync stored messages, it's now blind. *(MED)*
 
-- [ ] **Background sync captures fixed account ID list** — `sync_start_background` loops forever with the account list provided at start time. Added/removed accounts won't be picked up until restart. *(LOW)*
-
-- [ ] **No transaction wrapping in `sync_prepare_account_resync`** — Four sequential statements (delete threads, delete messages, clear history_id, clear folder_sync_states) without explicit transaction. Partial failure leaves account in inconsistent state. *(LOW)*
-
-- [ ] **Redundant `DELETE FROM messages` in resync** — Schema has `ON DELETE CASCADE` from threads→messages, so `DELETE FROM threads WHERE account_id = ?1` already removes all messages. The explicit messages DELETE is a no-op. *(LOW)*
-
 - [ ] **Provider-agnostic commands in IMAP-specific module** — `sync_prepare_full_sync` and `sync_prepare_account_resync` are provider-agnostic but live in `sync/commands.rs`. Consider moving to `provider/commands.rs`. *(LOW)*
-
-- [ ] **Two separate DB queries where one would suffice** — `provider_sync_auto` runs two sequential `with_conn` calls (one for `history_id`, one for `sync_period_days`). Could be combined. *(LOW)*
 
 - [ ] **`sync_days` read redundantly for IMAP delta** — `provider_sync_auto` reads `sync_period_days`, then `ImapOps::sync_delta` reads it again internally. *(LOW)*
 
@@ -80,25 +68,17 @@
 
 ## Post-Sync Hooks
 
-> **Systemic issue**: `load_filterable_messages` is duplicated verbatim in `filters/commands.rs`, `smart_labels/commands.rs`, and `notifications/` (3 copies). Filters, smart labels, and notifications each independently load the same message rows from DB in the same sync cycle (up to 4× redundant loads). `get_provider_type` is called independently by each hook, accumulating to 5 calls per sync cycle for the same account. These should be extracted into shared helpers and the loaded data passed between hooks.
-
-- [ ] **Consolidate `load_filterable_messages` duplicates** — 3 identical copies across filters, smart labels, and notifications modules. Any fix to `has_attachments` or `SELECT *` issues must currently be applied in multiple places. *(MED)*
+> **Systemic issue**: Filters and smart labels now share one `load_filterable_messages` helper, but notifications still loads message rows separately and the hooks still re-load overlapping data in the same sync cycle. `get_provider_type` is still called independently by multiple hook paths. These should be extracted further and the loaded data passed between hooks.
 
 - [ ] **Redundant message loading across post-sync hooks** — Filters, smart labels (criteria), smart labels (AI prep), and notifications each call `load_filterable_messages` independently for the same message IDs in the same sync cycle. Pass loaded messages between hooks or use a shared cache. *(MED)*
 
-- [ ] **Redundant `get_provider_type` calls per sync cycle** — Now 5 independent calls: `run_sync_account`, `provider_sync_auto_impl`, `filters_apply`, `smart_labels_apply_criteria`, and `smart_labels_apply_matches`. Pass the provider string down instead. *(MED)*
-
-- [ ] **`has_attachments` hardcoded to `false` in `load_filterable_messages`** — Any filter with `has_attachment: true` will never match. The `messages` table has a `has_attachments` column — use it. *(MED)*
+- [ ] **Redundant provider lookup for AI smart-label apply** — `smart_labels_apply_matches` still resolves the provider again after sync already emitted it to TS. Pass the provider through that final apply step or keep the whole phase in Rust. *(LOW)*
 
 - [ ] **Filter and smart label actions applied sequentially instead of in parallel** — Old TS used `Promise.allSettled` for concurrent per-thread application. Rust iterates sequentially. Could use `tokio::task::JoinSet`. *(MED)*
 
 - [ ] **Criteria matching re-evaluated redundantly in `prepare_ai_remainder`** — Re-runs `message_matches_filter` for all rules even though results are already in `pre_applied_matches`. *(MED)*
 
-- [ ] **`load_filterable_messages` uses `SELECT *` instead of needed columns** — Fetches full message rows but only uses 7 fields. Wastes memory on large batches. *(LOW)*
-
 - [ ] **Filter body hydration loads all bodies before evaluation** — When any filter has a body criterion, `body_store.get_batch` is called for all message IDs upfront. Could defer to only messages passing non-body criteria first. *(LOW)*
-
-- [ ] **`evaluate_criteria_matches` returns non-deterministic order** — Results from `HashMap::into_iter()` have arbitrary ordering. Not a correctness issue but makes event payload unpredictable. *(LOW)*
 
 - [ ] **`SyncStatusEvent` has grown to 13 fields** — Accumulated across post-sync hook additions. Most fields are `Option<...>` set to `None` in non-success paths. Consider a nested result type or separate event types for post-sync hook results. *(LOW)*
 
