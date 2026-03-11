@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use jmap_client::email;
 use jmap_client::core::query::QueryResponse;
+use jmap_client::email;
 use jmap_client::mailbox::Role;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};

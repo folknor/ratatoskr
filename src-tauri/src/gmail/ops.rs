@@ -227,7 +227,10 @@ impl ProviderOps for GmailOps {
         })
     }
 
-    async fn list_folders(&self, ctx: &ProviderCtx<'_>) -> Result<Vec<ProviderFolderEntry>, String> {
+    async fn list_folders(
+        &self,
+        ctx: &ProviderCtx<'_>,
+    ) -> Result<Vec<ProviderFolderEntry>, String> {
         let labels = self.client.list_labels(ctx.db).await?;
         Ok(labels
             .into_iter()

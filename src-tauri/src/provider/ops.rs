@@ -19,8 +19,11 @@ pub trait ProviderOps: Send + Sync {
         ctx: &ProviderCtx<'_>,
         days_back: i64,
     ) -> Result<SyncResult, String>;
-    async fn sync_delta(&self, ctx: &ProviderCtx<'_>, days_back: Option<i64>)
-        -> Result<SyncResult, String>;
+    async fn sync_delta(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        days_back: Option<i64>,
+    ) -> Result<SyncResult, String>;
 
     // ── Actions (thread-level) ──────────────────────────────────
 
@@ -120,7 +123,8 @@ pub trait ProviderOps: Send + Sync {
 
     // ── Folders ─────────────────────────────────────────────────
 
-    async fn list_folders(&self, ctx: &ProviderCtx<'_>) -> Result<Vec<ProviderFolderEntry>, String>;
+    async fn list_folders(&self, ctx: &ProviderCtx<'_>)
+    -> Result<Vec<ProviderFolderEntry>, String>;
     async fn create_folder(
         &self,
         ctx: &ProviderCtx<'_>,

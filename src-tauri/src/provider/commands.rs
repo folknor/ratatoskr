@@ -108,8 +108,7 @@ pub(crate) async fn provider_sync_auto_for_provider(
                 });
             }
             Err(err)
-                if should_fallback_to_initial(&err, fallback_marker)
-                    || err == "JMAP_NO_STATE" =>
+                if should_fallback_to_initial(&err, fallback_marker) || err == "JMAP_NO_STATE" =>
             {
                 emit_fallback_progress(app_handle, provider, account_id);
                 let result = ops.sync_initial(&ctx, sync_days).await?;

@@ -163,10 +163,14 @@ fn imap_message_to_provider_message(
         bcc_addresses: msg.bcc_addresses.clone(),
         reply_to: msg.reply_to.clone(),
         subject: msg.subject.clone(),
-        snippet: msg
-            .snippet
-            .clone()
-            .unwrap_or_else(|| msg.body_text.clone().unwrap_or_default().chars().take(200).collect()),
+        snippet: msg.snippet.clone().unwrap_or_else(|| {
+            msg.body_text
+                .clone()
+                .unwrap_or_default()
+                .chars()
+                .take(200)
+                .collect()
+        }),
         date: msg.date * 1000,
         is_read: msg.is_read,
         is_starred: msg.is_starred,
@@ -263,9 +267,12 @@ impl ProviderOps for ImapOps {
         // This trait method is not the primary entry point for IMAP sync, but we
         // wire it through for consistency with the provider abstraction.
         let account_id = ctx.account_id.to_string();
-        let imap_config =
-            crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
-                .await?;
+        let imap_config = crate::imap::account_config::load_imap_config(
+            ctx.db,
+            &account_id,
+            &self.encryption_key,
+        )
+        .await?;
 
         let result = crate::sync::imap_initial::imap_initial_sync(
             ctx.app_handle,
@@ -291,9 +298,12 @@ impl ProviderOps for ImapOps {
         days_back: Option<i64>,
     ) -> Result<SyncResult, String> {
         let account_id = ctx.account_id.to_string();
-        let imap_config =
-            crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
-                .await?;
+        let imap_config = crate::imap::account_config::load_imap_config(
+            ctx.db,
+            &account_id,
+            &self.encryption_key,
+        )
+        .await?;
         let days_back = days_back.unwrap_or(365);
 
         let result = crate::sync::imap_delta::imap_delta_sync(
@@ -319,9 +329,12 @@ impl ProviderOps for ImapOps {
     async fn archive(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
-        let config =
-            crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
-                .await?;
+        let config = crate::imap::account_config::load_imap_config(
+            ctx.db,
+            &account_id,
+            &self.encryption_key,
+        )
+        .await?;
 
         let (refs, archive_folder) = ctx
             .db
@@ -349,9 +362,12 @@ impl ProviderOps for ImapOps {
     async fn trash(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
-        let config =
-            crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
-                .await?;
+        let config = crate::imap::account_config::load_imap_config(
+            ctx.db,
+            &account_id,
+            &self.encryption_key,
+        )
+        .await?;
 
         let (refs, trash_folder) = ctx
             .db
@@ -379,9 +395,12 @@ impl ProviderOps for ImapOps {
     async fn permanent_delete(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
-        let config =
-            crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
-                .await?;
+        let config = crate::imap::account_config::load_imap_config(
+            ctx.db,
+            &account_id,
+            &self.encryption_key,
+        )
+        .await?;
 
         let refs = ctx
             .db
@@ -406,9 +425,12 @@ impl ProviderOps for ImapOps {
     ) -> Result<(), String> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
-        let config =
-            crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
-                .await?;
+        let config = crate::imap::account_config::load_imap_config(
+            ctx.db,
+            &account_id,
+            &self.encryption_key,
+        )
+        .await?;
 
         let refs = ctx
             .db
@@ -434,9 +456,12 @@ impl ProviderOps for ImapOps {
     ) -> Result<(), String> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
-        let config =
-            crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
-                .await?;
+        let config = crate::imap::account_config::load_imap_config(
+            ctx.db,
+            &account_id,
+            &self.encryption_key,
+        )
+        .await?;
 
         let refs = ctx
             .db
@@ -462,9 +487,12 @@ impl ProviderOps for ImapOps {
     ) -> Result<(), String> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
-        let config =
-            crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
-                .await?;
+        let config = crate::imap::account_config::load_imap_config(
+            ctx.db,
+            &account_id,
+            &self.encryption_key,
+        )
+        .await?;
 
         let (refs, junk_folder) = ctx
             .db
@@ -499,9 +527,12 @@ impl ProviderOps for ImapOps {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
         let dest = folder_id.to_string();
-        let config =
-            crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
-                .await?;
+        let config = crate::imap::account_config::load_imap_config(
+            ctx.db,
+            &account_id,
+            &self.encryption_key,
+        )
+        .await?;
 
         let refs = ctx
             .db
@@ -553,17 +584,18 @@ impl ProviderOps for ImapOps {
         _thread_id: Option<&str>,
     ) -> Result<String, String> {
         let account_id = ctx.account_id.to_string();
-        let configs =
-            crate::imap::account_config::load_both_configs(ctx.db, &account_id, &self.encryption_key)
-                .await?;
+        let configs = crate::imap::account_config::load_both_configs(
+            ctx.db,
+            &account_id,
+            &self.encryption_key,
+        )
+        .await?;
         let smtp_config = configs.smtp;
         let imap_config = configs.imap;
 
         let sent_folder = ctx
             .db
-            .with_conn(move |conn| {
-                find_special_folder(conn, &account_id, "\\Sent")
-            })
+            .with_conn(move |conn| find_special_folder(conn, &account_id, "\\Sent"))
             .await?
             .unwrap_or_else(|| "Sent".to_string());
 
@@ -605,15 +637,16 @@ impl ProviderOps for ImapOps {
         _thread_id: Option<&str>,
     ) -> Result<String, String> {
         let account_id = ctx.account_id.to_string();
-        let config =
-            crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
-                .await?;
+        let config = crate::imap::account_config::load_imap_config(
+            ctx.db,
+            &account_id,
+            &self.encryption_key,
+        )
+        .await?;
 
         let drafts_folder = ctx
             .db
-            .with_conn(move |conn| {
-                find_special_folder(conn, &account_id, "\\Drafts")
-            })
+            .with_conn(move |conn| find_special_folder(conn, &account_id, "\\Drafts"))
             .await?
             .unwrap_or_else(|| "Drafts".to_string());
 
@@ -668,9 +701,12 @@ impl ProviderOps for ImapOps {
         let account_id = ctx.account_id.to_string();
         let folder_owned = folder.to_string();
 
-        let config =
-            crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
-                .await?;
+        let config = crate::imap::account_config::load_imap_config(
+            ctx.db,
+            &account_id,
+            &self.encryption_key,
+        )
+        .await?;
 
         with_session!(&config, session => {
             imap_client::delete_messages(&mut session, &folder_owned, &uid.to_string()).await
@@ -703,9 +739,12 @@ impl ProviderOps for ImapOps {
         let folder_owned = folder.to_string();
         let part_id = attachment_id.to_string();
 
-        let config =
-            crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
-                .await?;
+        let config = crate::imap::account_config::load_imap_config(
+            ctx.db,
+            &account_id,
+            &self.encryption_key,
+        )
+        .await?;
 
         let data = with_session!(&config, session => {
             imap_client::fetch_attachment(&mut session, &folder_owned, uid, &part_id).await
@@ -745,9 +784,12 @@ impl ProviderOps for ImapOps {
 
         let account_id = ctx.account_id.to_string();
         let folder_owned = folder.to_string();
-        let config =
-            crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
-                .await?;
+        let config = crate::imap::account_config::load_imap_config(
+            ctx.db,
+            &account_id,
+            &self.encryption_key,
+        )
+        .await?;
 
         let message = with_session!(&config, session => {
             imap_client::fetch_message_body(&mut session, &folder_owned, uid).await
@@ -796,9 +838,12 @@ impl ProviderOps for ImapOps {
 
         let account_id = ctx.account_id.to_string();
         let folder_owned = folder.to_string();
-        let config =
-            crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
-                .await?;
+        let config = crate::imap::account_config::load_imap_config(
+            ctx.db,
+            &account_id,
+            &self.encryption_key,
+        )
+        .await?;
 
         with_session!(&config, session => {
             imap_client::fetch_raw_message(&mut session, &folder_owned, uid).await
@@ -807,11 +852,17 @@ impl ProviderOps for ImapOps {
 
     // ── Folders ─────────────────────────────────────────────────────────
 
-    async fn list_folders(&self, ctx: &ProviderCtx<'_>) -> Result<Vec<ProviderFolderEntry>, String> {
+    async fn list_folders(
+        &self,
+        ctx: &ProviderCtx<'_>,
+    ) -> Result<Vec<ProviderFolderEntry>, String> {
         let account_id = ctx.account_id.to_string();
-        let config =
-            crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
-                .await?;
+        let config = crate::imap::account_config::load_imap_config(
+            ctx.db,
+            &account_id,
+            &self.encryption_key,
+        )
+        .await?;
 
         let folders = with_session!(&config, session => {
             imap_client::list_folders(&mut session).await
@@ -879,12 +930,18 @@ impl ProviderOps for ImapOps {
 
     async fn test_connection(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, String> {
         let account_id = ctx.account_id.to_string();
-        let imap_config =
-            crate::imap::account_config::load_imap_config(ctx.db, &account_id, &self.encryption_key)
-                .await?;
-        let smtp_config =
-            crate::imap::account_config::load_smtp_config(ctx.db, &account_id, &self.encryption_key)
-                .await?;
+        let imap_config = crate::imap::account_config::load_imap_config(
+            ctx.db,
+            &account_id,
+            &self.encryption_key,
+        )
+        .await?;
+        let smtp_config = crate::imap::account_config::load_smtp_config(
+            ctx.db,
+            &account_id,
+            &self.encryption_key,
+        )
+        .await?;
 
         let imap_result = imap_client::test_connection(&imap_config).await?;
         let smtp_result = smtp::client::test_connection(&smtp_config).await?;

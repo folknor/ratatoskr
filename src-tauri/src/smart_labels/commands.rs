@@ -156,8 +156,8 @@ pub(crate) async fn smart_labels_classify_and_apply_remainder_impl(
     search: &SearchState,
     app_handle: &AppHandle,
 ) -> Result<Vec<AppliedSmartLabelMatch>, String> {
-    let matches = classify_smart_label_remainder(db, crypto, threads, rules, pre_applied_matches)
-        .await?;
+    let matches =
+        classify_smart_label_remainder(db, crypto, threads, rules, pre_applied_matches).await?;
     if matches.is_empty() {
         return Ok(Vec::new());
     }
@@ -388,25 +388,26 @@ pub(crate) async fn smart_labels_apply_criteria_to_messages_impl(
             let ops = ops;
             let ctx = ctx;
             async move {
-            let mut applied_label_ids = Vec::new();
-            for label_id in label_ids {
-                match ops.add_tag(ctx, &thread_id, &label_id).await {
-                    Ok(()) => applied_label_ids.push(label_id),
-                    Err(error) => log::warn!(
-                        "Failed to apply smart label {label_id} to thread {thread_id}: {error}"
-                    ),
+                let mut applied_label_ids = Vec::new();
+                for label_id in label_ids {
+                    match ops.add_tag(ctx, &thread_id, &label_id).await {
+                        Ok(()) => applied_label_ids.push(label_id),
+                        Err(error) => log::warn!(
+                            "Failed to apply smart label {label_id} to thread {thread_id}: {error}"
+                        ),
+                    }
+                }
+
+                if applied_label_ids.is_empty() {
+                    None
+                } else {
+                    Some(AppliedSmartLabelMatch {
+                        thread_id,
+                        label_ids: applied_label_ids,
+                    })
                 }
             }
-
-            if applied_label_ids.is_empty() {
-                None
-            } else {
-                Some(AppliedSmartLabelMatch {
-                    thread_id,
-                    label_ids: applied_label_ids,
-                })
-            }
-        }})
+        })
         .buffer_unordered(POST_SYNC_ACTION_CONCURRENCY)
         .filter_map(async move |item| item)
         .collect()
@@ -425,7 +426,9 @@ pub(crate) async fn load_enabled_rules_for_ai(
     db: &DbState,
     account_id: &str,
 ) -> Result<Vec<EnabledSmartLabelRule>, String> {
-    Ok(load_enabled_smart_label_rules(db, account_id).await?.ai_rules)
+    Ok(load_enabled_smart_label_rules(db, account_id)
+        .await?
+        .ai_rules)
 }
 
 fn evaluate_criteria_matches(
@@ -619,7 +622,9 @@ fn prepare_ai_remainder(
 ) -> (Vec<SmartLabelAIThread>, Vec<SmartLabelAIRule>) {
     let mut thread_map: HashMap<String, FilterableMessage> = HashMap::new();
     for message in messages {
-        thread_map.entry(message.thread_id.clone()).or_insert(message);
+        thread_map
+            .entry(message.thread_id.clone())
+            .or_insert(message);
     }
 
     let mut matched_labels: HashMap<String, HashSet<String>> = HashMap::new();
@@ -653,10 +658,7 @@ fn prepare_ai_remainder(
             Some(SmartLabelAIThread {
                 id: thread_id.clone(),
                 subject: message.subject.unwrap_or_default(),
-                snippet: thread_snippets
-                    .get(&thread_id)
-                    .cloned()
-                    .unwrap_or_default(),
+                snippet: thread_snippets.get(&thread_id).cloned().unwrap_or_default(),
                 from_address: message.from_address.unwrap_or_default(),
             })
         })

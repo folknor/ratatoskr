@@ -181,7 +181,9 @@ fn read_setting_map(
         .prepare("SELECT key, value FROM settings")
         .map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
@@ -549,9 +551,8 @@ pub async fn settings_get_bootstrap_snapshot(
             let get = |key: &str| settings.get(key).cloned();
             // Some UI settings are opt-out for historical reasons: missing means enabled
             // unless the stored value is explicitly "false".
-            let get_bool = |key: &str, default: bool| {
-                get(key).map_or(default, |value| value != "false")
-            };
+            let get_bool =
+                |key: &str, default: bool| get(key).map_or(default, |value| value != "false");
 
             Ok(SettingsBootstrapSnapshot {
                 notifications_enabled: get_bool("notifications_enabled", true),
@@ -600,9 +601,8 @@ pub async fn settings_get_ui_bootstrap_snapshot(
             let get = |key: &str| settings.get(key).cloned();
             // `get_bool` handles opt-out defaults, while `.is_some_and(|v| v == "true")`
             // is used for opt-in flags where a missing setting should stay false.
-            let get_bool = |key: &str, default: bool| {
-                get(key).map_or(default, |value| value != "false")
-            };
+            let get_bool =
+                |key: &str, default: bool| get(key).map_or(default, |value| value != "false");
 
             Ok(UiBootstrapSnapshot {
                 theme: get("theme"),

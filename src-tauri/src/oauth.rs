@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::Duration;
 use std::sync::OnceLock;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -43,7 +43,10 @@ pub async fn bind_oauth_listener(port: u16) -> Result<(TcpListener, u16), String
 
 /// Wait for a single OAuth callback on an already-bound listener. Validates the
 /// CSRF state, sends a success page, and returns the auth code.
-pub async fn await_oauth_callback(listener: TcpListener, state: &str) -> Result<OAuthResult, String> {
+pub async fn await_oauth_callback(
+    listener: TcpListener,
+    state: &str,
+) -> Result<OAuthResult, String> {
     let actual_port = listener
         .local_addr()
         .map_err(|e| format!("Failed to get OAuth listener addr: {e}"))?

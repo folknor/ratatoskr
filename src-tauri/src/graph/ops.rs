@@ -11,8 +11,8 @@ use crate::provider::types::{
 use super::client::GraphClient;
 use super::folder_mapper::FolderMap;
 use super::types::{
-    GraphAttachment, GraphCreateFolderRequest, GraphFlagInput, GraphMailFolder,
-    GraphMessagePatch, GraphMoveRequest, GraphRenameFolderRequest,
+    GraphAttachment, GraphCreateFolderRequest, GraphFlagInput, GraphMailFolder, GraphMessagePatch,
+    GraphMoveRequest, GraphRenameFolderRequest,
 };
 
 /// Graph implementation of the provider operations trait.
@@ -244,7 +244,10 @@ impl ProviderOps for GraphOps {
         })
     }
 
-    async fn list_folders(&self, ctx: &ProviderCtx<'_>) -> Result<Vec<ProviderFolderEntry>, String> {
+    async fn list_folders(
+        &self,
+        ctx: &ProviderCtx<'_>,
+    ) -> Result<Vec<ProviderFolderEntry>, String> {
         // Use cached folder map if it was synced less than 60 seconds ago
         let use_cache = if let Some(age) = self.client.folder_map_age().await {
             age < std::time::Duration::from_secs(60) && self.client.folder_map().await.is_some()
@@ -296,7 +299,9 @@ impl ProviderOps for GraphOps {
         _bg_color: Option<&str>,
     ) -> Result<ProviderFolderMutation, String> {
         let parent_graph_id = match parent_id {
-            Some(parent_id) => Some(resolve_graph_folder_id(&self.client, ctx, parent_id, false).await?),
+            Some(parent_id) => {
+                Some(resolve_graph_folder_id(&self.client, ctx, parent_id, false).await?)
+            }
             None => None,
         };
         let body = GraphCreateFolderRequest {
@@ -305,7 +310,11 @@ impl ProviderOps for GraphOps {
         let created: GraphMailFolder = if let Some(parent_graph_id) = parent_graph_id {
             let enc_parent_id = urlencoding::encode(&parent_graph_id);
             self.client
-                .post(&format!("/me/mailFolders/{enc_parent_id}/childFolders"), &body, ctx.db)
+                .post(
+                    &format!("/me/mailFolders/{enc_parent_id}/childFolders"),
+                    &body,
+                    ctx.db,
+                )
                 .await?
         } else {
             self.client.post("/me/mailFolders", &body, ctx.db).await?
@@ -406,7 +415,10 @@ async fn get_folder_map(client: &GraphClient, ctx: &ProviderCtx<'_>) -> Result<F
     refresh_folder_map(client, ctx).await
 }
 
-async fn refresh_folder_map(client: &GraphClient, ctx: &ProviderCtx<'_>) -> Result<FolderMap, String> {
+async fn refresh_folder_map(
+    client: &GraphClient,
+    ctx: &ProviderCtx<'_>,
+) -> Result<FolderMap, String> {
     let map = super::sync::sync_folders_public(client, ctx).await?;
     client.set_folder_map(map.clone()).await;
     client.set_folder_map_synced().await;
@@ -428,7 +440,9 @@ async fn resolve_graph_folder_id(
     if require_user_folder {
         if let Some(mapping) = folder_map.get_by_folder_id(&graph_folder_id) {
             if mapping.label_type == "system" {
-                return Err("System folders cannot be renamed or deleted for Graph accounts.".to_string());
+                return Err(
+                    "System folders cannot be renamed or deleted for Graph accounts.".to_string(),
+                );
             }
         }
     }

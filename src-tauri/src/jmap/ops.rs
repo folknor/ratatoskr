@@ -376,7 +376,10 @@ impl ProviderOps for JmapOps {
         })
     }
 
-    async fn list_folders(&self, _ctx: &ProviderCtx<'_>) -> Result<Vec<ProviderFolderEntry>, String> {
+    async fn list_folders(
+        &self,
+        _ctx: &ProviderCtx<'_>,
+    ) -> Result<Vec<ProviderFolderEntry>, String> {
         let mailboxes = super::sync::fetch_all_mailboxes(&self.client).await?;
 
         let mut folders = Vec::new();

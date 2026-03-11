@@ -72,12 +72,7 @@ pub fn get_auto_sync_config(conn: &Connection, account_id: &str) -> Result<AutoS
         .query_row(
             "SELECT provider, initial_sync_completed FROM accounts WHERE id = ?1",
             rusqlite::params![account_id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)? != 0,
-                ))
-            },
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? != 0)),
         )
         .map_err(|e| format!("Failed to read sync state for account {account_id}: {e}"))?;
 

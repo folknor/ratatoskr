@@ -93,11 +93,16 @@ fn oauth_token_endpoint<'a>(
     match provider_id {
         "microsoft" | "microsoft_graph" => Ok(std::borrow::Cow::Borrowed(MICROSOFT_TOKEN_URL)),
         "yahoo" => Ok(std::borrow::Cow::Borrowed(YAHOO_TOKEN_URL)),
-        other => Err(format!("Unsupported OAuth provider for IMAP account: {other}. Set oauth_token_url in the account record.")),
+        other => Err(format!(
+            "Unsupported OAuth provider for IMAP account: {other}. Set oauth_token_url in the account record."
+        )),
     }
 }
 
-async fn load_account_record(db: &DbState, account_id: &str) -> Result<AccountConfigRecord, String> {
+async fn load_account_record(
+    db: &DbState,
+    account_id: &str,
+) -> Result<AccountConfigRecord, String> {
     let aid = account_id.to_string();
     let account_id_for_error = account_id.to_string();
     db.with_conn(move |conn| {
@@ -119,7 +124,9 @@ async fn load_account_record(db: &DbState, account_id: &str) -> Result<AccountCo
                     smtp_security: row.get(6)?,
                     imap_username: row.get(7)?,
                     imap_password: row.get(8)?,
-                    auth_method: row.get::<_, Option<String>>(9)?.unwrap_or_else(|| "password".to_string()),
+                    auth_method: row
+                        .get::<_, Option<String>>(9)?
+                        .unwrap_or_else(|| "password".to_string()),
                     accept_invalid_certs: accept_invalid_certs.unwrap_or(0) != 0,
                     access_token: row.get(11)?,
                     token_expires_at: row.get(12)?,
@@ -228,10 +235,7 @@ async fn resolve_account_password(
     if record.auth_method == "oauth2" {
         ensure_oauth_access_token(db, account_id, encryption_key, record).await
     } else {
-        Ok(
-            decrypt_if_needed(encryption_key, record.imap_password.clone())?
-                .unwrap_or_default(),
-        )
+        Ok(decrypt_if_needed(encryption_key, record.imap_password.clone())?.unwrap_or_default())
     }
 }
 
