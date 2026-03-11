@@ -24,19 +24,29 @@ pub fn get_account(conn: &Connection, account_id: &str) -> Result<SyncAccount, S
 }
 
 pub fn should_sync_calendar(account: &SyncAccount) -> bool {
-    if account.provider == "caldav" || account.provider == "gmail_api" {
-        return true;
+    calendar_provider_kind(account).is_some()
+}
+
+pub fn calendar_provider_kind(account: &SyncAccount) -> Option<&'static str> {
+    if account.provider == "caldav" {
+        return Some("caldav");
     }
 
-    if account.calendar_provider.as_deref() == Some("google_api") {
-        return true;
+    if account.provider == "gmail_api" || account.calendar_provider.as_deref() == Some("google_api")
+    {
+        return Some("google_api");
     }
 
-    account.calendar_provider.as_deref() == Some("caldav")
+    if account.calendar_provider.as_deref() == Some("caldav")
         && account
             .caldav_url
             .as_ref()
             .is_some_and(|url| !url.trim().is_empty())
+    {
+        return Some("caldav");
+    }
+
+    None
 }
 
 /// Read the `sync_period_days` setting from DB, defaulting to 365.

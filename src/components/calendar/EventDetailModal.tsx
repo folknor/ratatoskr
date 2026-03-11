@@ -8,8 +8,9 @@ import { TextField } from "@/components/ui/TextField";
 import {
   type DbCalendar,
   type DbCalendarEvent,
-  deleteCalendarEvent as deleteCalendarEventDb,
+  deleteProviderEvent,
   getCalendarProvider,
+  upsertProviderEvents,
 } from "@/core/calendar";
 
 interface EventDetailModalProps {
@@ -51,7 +52,7 @@ export function EventDetailModal({
       const calendarRemoteId = calendar?.remote_id ?? "primary";
       const remoteEventId = event.remote_event_id ?? event.google_event_id;
 
-      await provider.updateEvent(
+      const updated = await provider.updateEvent(
         calendarRemoteId,
         remoteEventId,
         {
@@ -63,6 +64,8 @@ export function EventDetailModal({
         },
         event.etag ?? undefined,
       );
+
+      await upsertProviderEvents(accountId, calendarRemoteId, [updated]);
 
       onUpdated();
     } catch (err) {
@@ -95,8 +98,7 @@ export function EventDetailModal({
         event.etag ?? undefined,
       );
 
-      // Remove from local DB
-      await deleteCalendarEventDb(event.id);
+      await deleteProviderEvent(accountId, calendarRemoteId, remoteEventId);
 
       onUpdated();
     } catch (err) {

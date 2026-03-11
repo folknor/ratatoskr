@@ -1,12 +1,29 @@
-import { getAccount } from "@/services/db/accounts";
+import { invoke } from "@tauri-apps/api/core";
 import { CalDAVProvider } from "./caldavProvider";
 import { GoogleCalendarProvider } from "./googleCalendarProvider";
 import type { CalendarProvider } from "./types";
+
+type CalendarProviderKind = "google_api" | "caldav";
+
+interface CalendarProviderInfo {
+  provider: CalendarProviderKind;
+}
 
 const providerCache: Map<string, CalendarProvider> = new Map<
   string,
   CalendarProvider
 >();
+
+async function getCalendarProviderInfo(
+  accountId: string,
+): Promise<CalendarProviderInfo | null> {
+  return invoke<CalendarProviderInfo | null>(
+    "account_get_calendar_provider_info",
+    {
+      accountId,
+    },
+  );
+}
 
 /**
  * Get a CalendarProvider for the given account.
@@ -18,24 +35,12 @@ export async function getCalendarProvider(
   const cached = providerCache.get(accountId);
   if (cached) return cached;
 
-  const account = await getAccount(accountId);
-  if (!account) throw new Error(`Account ${accountId} not found`);
-
   let provider: CalendarProvider;
+  const info = await getCalendarProviderInfo(accountId);
 
-  // Standalone CalDAV account
-  if (account.provider === "caldav") {
+  if (info?.provider === "caldav") {
     provider = new CalDAVProvider(accountId);
-  }
-  // IMAP account with CalDAV configured
-  else if (account.calendar_provider === "caldav" && account.caldav_url) {
-    provider = new CalDAVProvider(accountId);
-  }
-  // Gmail API account
-  else if (
-    account.provider === "gmail_api" ||
-    account.calendar_provider === "google_api"
-  ) {
+  } else if (info?.provider === "google_api") {
     provider = new GoogleCalendarProvider(accountId);
   } else {
     throw new Error(`No calendar provider configured for account ${accountId}`);
@@ -49,13 +54,8 @@ export async function getCalendarProvider(
  * Check if an account has calendar support configured.
  */
 export async function hasCalendarSupport(accountId: string): Promise<boolean> {
-  const account = await getAccount(accountId);
-  if (!account) return false;
-
-  if (account.provider === "caldav") return true;
-  if (account.provider === "gmail_api") return true;
-  if (account.calendar_provider === "caldav" && account.caldav_url) return true;
-  return false;
+  const info = await getCalendarProviderInfo(accountId);
+  return info !== null;
 }
 
 export function removeCalendarProvider(accountId: string): void {

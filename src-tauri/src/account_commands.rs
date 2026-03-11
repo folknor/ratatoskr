@@ -11,6 +11,7 @@ use crate::gmail::client::{GmailClient, GmailState};
 use crate::graph::client::{GraphClient, GraphState};
 use crate::graph::types::GraphProfile;
 use crate::provider::crypto::{decrypt_value, encrypt_value, is_encrypted};
+use crate::sync::config;
 
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
@@ -109,6 +110,12 @@ pub struct CreateImapOAuthAccountRequest {
     pub accept_invalid_certs: bool,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarProviderInfo {
+    pub provider: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct GoogleTokenResponse {
     access_token: String,
@@ -187,6 +194,20 @@ pub async fn account_create_gmail_via_oauth(
         is_active: true,
         provider: "gmail_api".to_string(),
     })
+}
+
+#[tauri::command]
+pub async fn account_get_calendar_provider_info(
+    db: State<'_, DbState>,
+    account_id: String,
+) -> Result<Option<CalendarProviderInfo>, String> {
+    db.with_conn(move |conn| {
+        let account = config::get_account(conn, &account_id)?;
+        Ok(config::calendar_provider_kind(&account).map(|provider| CalendarProviderInfo {
+            provider: provider.to_string(),
+        }))
+    })
+    .await
 }
 
 #[tauri::command]

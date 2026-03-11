@@ -4,11 +4,18 @@
  */
 
 // CalDAV auto-discovery
+// biome-ignore lint/performance/noBarrelFile: this core facade is the intended UI import boundary.
 export {
   type CalDavDiscoveryResult,
   discoverCalDavSettings,
   testCalDavConnection,
 } from "@/services/calendar/autoDiscovery";
+export {
+  applyCalendarSyncResult,
+  deleteProviderEvent,
+  upsertDiscoveredCalendars,
+  upsertProviderEvents,
+} from "@/services/calendar/persistence";
 // Calendar provider
 export {
   clearAllCalendarProviders,
@@ -28,7 +35,6 @@ export {
   type DbCalendarEvent,
   deleteCalendarEvent,
   getCalendarEventsInRangeMulti,
-  upsertCalendarEvent,
 } from "@/services/db/calendarEvents";
 
 // Calendars DB
@@ -36,5 +42,4 @@ export {
   type DbCalendar,
   getCalendarsForAccount,
   getVisibleCalendars,
-  upsertCalendar,
 } from "@/services/db/calendars";

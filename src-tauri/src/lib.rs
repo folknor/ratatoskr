@@ -9,6 +9,7 @@ use tauri_plugin_autostart::MacosLauncher;
 mod account_commands;
 mod attachment_cache;
 mod body_store;
+mod calendar_commands;
 mod categorization;
 mod commands;
 mod db;
@@ -111,6 +112,7 @@ pub fn run() {
             account_commands::account_create_graph_via_oauth,
             account_commands::account_authorize_oauth_provider,
             account_commands::account_create_imap_oauth,
+            account_commands::account_get_calendar_provider_info,
             account_commands::account_reauthorize_gmail,
             oauth::start_oauth_server,
             oauth::oauth_exchange_token,
@@ -358,6 +360,10 @@ pub fn run() {
             body_store::commands::body_store_delete,
             body_store::commands::body_store_stats,
             body_store::commands::body_store_migrate,
+            calendar_commands::calendar_upsert_discovered_calendars,
+            calendar_commands::calendar_upsert_provider_events,
+            calendar_commands::calendar_apply_sync_result,
+            calendar_commands::calendar_delete_provider_event,
             // Inline image store (content-addressed blob store)
             inline_image_store::commands::inline_image_get,
             inline_image_store::commands::inline_image_stats,
@@ -409,6 +415,7 @@ pub fn run() {
             // Categorization rule engine (Phase 6)
             categorization::commands::categorize_thread_by_rules,
             categorization::commands::categorize_threads_by_rules,
+            categorization::commands::categorization_apply_ai_results,
             // IMAP sync engine (Phase 4)
             sync::commands::sync_run_accounts,
             sync::commands::sync_start_background,

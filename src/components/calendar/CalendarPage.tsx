@@ -2,7 +2,6 @@ import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  type CalendarEventData,
   type CreateEventInput,
   type DbCalendar,
   type DbCalendarEvent,
@@ -11,8 +10,8 @@ import {
   getCalendarsForAccount,
   getVisibleCalendars,
   hasCalendarSupport,
-  upsertCalendar,
-  upsertCalendarEvent,
+  upsertDiscoveredCalendars,
+  upsertProviderEvents,
 } from "@/core/calendar";
 import { useAccountStore } from "@/stores/accountStore";
 import { CalendarList } from "./CalendarList";
@@ -119,16 +118,11 @@ export function CalendarPage(): React.ReactNode {
 
       // Discover/update calendars
       const providerCalendars = await provider.listCalendars();
-      for (const cal of providerCalendars) {
-        await upsertCalendar({
-          accountId: activeAccountId,
-          provider: provider.type,
-          remoteId: cal.remoteId,
-          displayName: cal.displayName,
-          color: cal.color,
-          isPrimary: cal.isPrimary,
-        });
-      }
+      await upsertDiscoveredCalendars(
+        activeAccountId,
+        provider.type,
+        providerCalendars,
+      );
 
       // Reload calendars from DB
       const allCals = await getCalendarsForAccount(activeAccountId);
@@ -142,10 +136,7 @@ export function CalendarPage(): React.ReactNode {
           start.toISOString(),
           end.toISOString(),
         );
-
-        for (const event of apiEvents) {
-          await upsertCalendarEventFromProvider(activeAccountId, cal.id, event);
-        }
+        await upsertProviderEvents(activeAccountId, cal.remote_id, apiEvents);
       }
 
       // Reload events from DB
@@ -225,12 +216,10 @@ export function CalendarPage(): React.ReactNode {
 
         // Find the target calendar
         let calendarRemoteId: string | undefined;
-        let calendarDbId: string | undefined;
         if (eventData.calendarId) {
           const cal = calendars.find((c) => c.id === eventData.calendarId);
           if (cal) {
             calendarRemoteId = cal.remote_id;
-            calendarDbId = cal.id;
           }
         }
 
@@ -239,7 +228,6 @@ export function CalendarPage(): React.ReactNode {
           const primary = calendars.find((c) => c.is_primary) ?? calendars[0];
           if (primary) {
             calendarRemoteId = primary.remote_id;
-            calendarDbId = primary.id;
           }
         }
 
@@ -259,11 +247,9 @@ export function CalendarPage(): React.ReactNode {
         const created = await provider.createEvent(calendarRemoteId, input);
 
         // Save to local DB
-        await upsertCalendarEventFromProvider(
-          activeAccountId,
-          calendarDbId ?? null,
+        await upsertProviderEvents(activeAccountId, calendarRemoteId, [
           created,
-        );
+        ]);
 
         setShowCreate(false);
         void loadEvents();
@@ -406,30 +392,4 @@ export function CalendarPage(): React.ReactNode {
       )}
     </div>
   );
-}
-
-async function upsertCalendarEventFromProvider(
-  accountId: string,
-  calendarId: string | null,
-  event: CalendarEventData,
-): Promise<void> {
-  await upsertCalendarEvent({
-    accountId,
-    googleEventId: event.remoteEventId,
-    summary: event.summary,
-    description: event.description,
-    location: event.location,
-    startTime: event.startTime,
-    endTime: event.endTime,
-    isAllDay: event.isAllDay,
-    status: event.status,
-    organizerEmail: event.organizerEmail,
-    attendeesJson: event.attendeesJson,
-    htmlLink: event.htmlLink,
-    calendarId,
-    remoteEventId: event.remoteEventId,
-    etag: event.etag,
-    icalData: event.icalData,
-    uid: event.uid,
-  });
 }

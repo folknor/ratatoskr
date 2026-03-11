@@ -1,4 +1,4 @@
-import { setThreadCategoriesBatch } from "@/services/db/threadCategories";
+import { invoke } from "@tauri-apps/api/core";
 import { categorizeThreads } from "./aiService";
 import { isAiAvailable } from "./providerManager";
 
@@ -30,8 +30,10 @@ export async function categorizeNewThreads(
 
     if (categories.size === 0) return;
 
-    // Store results (setThreadCategoriesBatch respects manual overrides)
-    await setThreadCategoriesBatch(accountId, categories);
+    await invoke("categorization_apply_ai_results", {
+      accountId,
+      categories: Array.from(categories.entries()),
+    });
   } catch (err) {
     // Non-blocking — log and continue
     console.error("Auto-categorization failed:", err);

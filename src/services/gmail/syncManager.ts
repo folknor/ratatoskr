@@ -1,13 +1,9 @@
+import {
+  applyCalendarSyncResult,
+  upsertDiscoveredCalendars,
+} from "../calendar/persistence";
 import { getCalendarProvider } from "../calendar/providerFactory";
-import {
-  deleteEventByRemoteId,
-  upsertCalendarEvent,
-} from "../db/calendarEvents";
-import {
-  getVisibleCalendars,
-  updateCalendarSyncToken,
-  upsertCalendar,
-} from "../db/calendars";
+import { getVisibleCalendars } from "../db/calendars";
 export interface SyncProgress {
   phase: "labels" | "threads" | "messages" | "done";
   current: number;
@@ -271,16 +267,7 @@ async function syncCalendarForAccount(accountId: string): Promise<void> {
 
     // Discover/update calendars
     const calendarInfos = await provider.listCalendars();
-    for (const cal of calendarInfos) {
-      await upsertCalendar({
-        accountId,
-        provider: provider.type,
-        remoteId: cal.remoteId,
-        displayName: cal.displayName,
-        color: cal.color,
-        isPrimary: cal.isPrimary,
-      });
-    }
+    await upsertDiscoveredCalendars(accountId, provider.type, calendarInfos);
 
     // Sync events for each visible calendar
     const visibleCals = await getVisibleCalendars(accountId);
@@ -290,43 +277,7 @@ async function syncCalendarForAccount(accountId: string): Promise<void> {
           cal.remote_id,
           cal.sync_token ?? undefined,
         );
-
-        // Upsert created/updated events
-        for (const event of [...syncResult.created, ...syncResult.updated]) {
-          await upsertCalendarEvent({
-            accountId,
-            googleEventId: event.remoteEventId,
-            summary: event.summary,
-            description: event.description,
-            location: event.location,
-            startTime: event.startTime,
-            endTime: event.endTime,
-            isAllDay: event.isAllDay,
-            status: event.status,
-            organizerEmail: event.organizerEmail,
-            attendeesJson: event.attendeesJson,
-            htmlLink: event.htmlLink,
-            calendarId: cal.id,
-            remoteEventId: event.remoteEventId,
-            etag: event.etag,
-            icalData: event.icalData,
-            uid: event.uid,
-          });
-        }
-
-        // Delete removed events
-        for (const remoteId of syncResult.deletedRemoteIds) {
-          await deleteEventByRemoteId(cal.id, remoteId);
-        }
-
-        // Update sync token
-        if (syncResult.newSyncToken || syncResult.newCtag) {
-          await updateCalendarSyncToken(
-            cal.id,
-            syncResult.newSyncToken,
-            syncResult.newCtag,
-          );
-        }
+        await applyCalendarSyncResult(accountId, cal.remote_id, syncResult);
       } catch (err) {
         console.warn(
           `[syncManager] Calendar sync failed for ${cal.display_name ?? cal.remote_id}:`,
