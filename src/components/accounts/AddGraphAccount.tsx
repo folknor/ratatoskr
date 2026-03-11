@@ -3,19 +3,21 @@ import type React from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "@/components/ui/Modal";
-import {
-  getOAuthProvider,
-  insertGraphAccount,
-  startProviderOAuthFlow,
-} from "@/core/accounts";
-import { getSetting } from "@/services/db/settings";
 import { useAccountStore } from "@/stores/accountStore";
-import { getCurrentUnixTimestamp } from "@/utils/timestamp";
 
 interface AddGraphAccountProps {
   onClose: () => void;
   onSuccess: () => void;
   onBack: () => void;
+}
+
+interface GraphAccountResult {
+  id: string;
+  email: string;
+  displayName: string;
+  avatarUrl: string;
+  isActive: boolean;
+  provider: string;
 }
 
 export function AddGraphAccount({
@@ -35,79 +37,21 @@ export function AddGraphAccount({
     setError(null);
 
     try {
-      // Get Microsoft client ID from settings
-      const clientId = await getSetting("microsoft_client_id");
-      if (!clientId) {
-        setError(
-          "Microsoft Client ID not configured. Go to Settings to set it up.",
-        );
-        setStatus("error");
-        return;
-      }
-
-      const provider = getOAuthProvider("microsoft_graph");
-      if (!provider) {
-        setError("Microsoft Graph OAuth provider not found");
-        setStatus("error");
-        return;
-      }
-
       setStatus("authenticating");
-
-      const { tokens, userInfo } = await startProviderOAuthFlow(
-        provider,
-        clientId,
-      );
-
-      if (!userInfo.email) {
-        setError("Could not determine email address from Microsoft account");
-        setStatus("error");
-        return;
-      }
 
       setStatus("testing");
 
-      const accountId = crypto.randomUUID();
-      const expiresAt = getCurrentUnixTimestamp() + tokens.expires_in;
-
-      // Save account to DB
-      await insertGraphAccount({
-        id: accountId,
-        email: userInfo.email,
-        displayName: userInfo.name || null,
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token ?? "",
-        tokenExpiresAt: expiresAt,
-      });
-
-      // Initialize Rust Graph client
-      await invoke("graph_init_client", { accountId });
-
-      // Test connection
-      const testResult = await invoke<{ success: boolean; message: string }>(
-        "graph_test_connection",
-        { accountId },
+      const account = await invoke<GraphAccountResult>(
+        "account_create_graph_via_oauth",
       );
 
-      if (!testResult.success) {
-        // Clean up on failure
-        await invoke("graph_remove_client", { accountId }).catch(() => {});
-        // Delete the account from DB
-        const { deleteAccount } = await import("@/core/accounts");
-        await deleteAccount(accountId);
-        setError(`Connection test failed: ${testResult.message}`);
-        setStatus("error");
-        return;
-      }
-
-      // Add to store
       addAccount({
-        id: accountId,
-        email: userInfo.email,
-        displayName: userInfo.name || null,
-        avatarUrl: null,
-        isActive: true,
-        provider: "graph",
+        id: account.id,
+        email: account.email,
+        displayName: account.displayName || null,
+        avatarUrl: account.avatarUrl || null,
+        isActive: account.isActive,
+        provider: account.provider,
       });
 
       onSuccess();

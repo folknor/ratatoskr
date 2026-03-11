@@ -8,11 +8,15 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::db::DbState;
 use crate::gmail::client::{GmailClient, GmailState};
+use crate::graph::client::{GraphClient, GraphState};
+use crate::graph::types::GraphProfile;
 use crate::provider::crypto::{decrypt_value, encrypt_value, is_encrypted};
 
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const GOOGLE_USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v2/userinfo";
+const MICROSOFT_GRAPH_AUTH_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
+const MICROSOFT_GRAPH_TOKEN_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
 const OAUTH_CALLBACK_PORT: u16 = 17248;
 const GOOGLE_SCOPES: &str = concat!(
     "https://www.googleapis.com/auth/gmail.readonly ",
@@ -24,10 +28,29 @@ const GOOGLE_SCOPES: &str = concat!(
     "https://www.googleapis.com/auth/calendar.readonly ",
     "https://www.googleapis.com/auth/calendar.events"
 );
+const MICROSOFT_GRAPH_SCOPES: [&str; 6] = [
+    "Mail.ReadWrite",
+    "Mail.Send",
+    "MailboxSettings.ReadWrite",
+    "offline_access",
+    "openid",
+    "profile",
+];
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GmailAccountResult {
+    pub id: String,
+    pub email: String,
+    pub display_name: String,
+    pub avatar_url: String,
+    pub is_active: bool,
+    pub provider: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphAccountResult {
     pub id: String,
     pub email: String,
     pub display_name: String,
@@ -234,6 +257,117 @@ pub async fn account_create_imap_oauth(
         Ok(())
     })
     .await
+}
+
+#[tauri::command]
+pub async fn account_create_graph_via_oauth(
+    app: AppHandle,
+    db: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
+    graph: State<'_, GraphState>,
+) -> Result<GraphAccountResult, String> {
+    let client_id = read_setting(&db, "microsoft_client_id", gmail.encryption_key())
+        .await?
+        .ok_or("Microsoft Client ID not configured. Go to Settings to set it up.")?;
+
+    let oauth = perform_provider_oauth(
+        &app,
+        &OAuthProviderAuthorizationRequest {
+            provider_id: "microsoft_graph".to_string(),
+            auth_url: MICROSOFT_GRAPH_AUTH_URL.to_string(),
+            token_url: MICROSOFT_GRAPH_TOKEN_URL.to_string(),
+            scopes: MICROSOFT_GRAPH_SCOPES
+                .iter()
+                .map(|scope| (*scope).to_string())
+                .collect(),
+            user_info_url: None,
+            use_pkce: true,
+            client_id,
+            client_secret: None,
+        },
+    )
+    .await?;
+
+    if oauth.user_info.email.is_empty() {
+        return Err("Could not determine email address from Microsoft account".to_string());
+    }
+
+    let account_id = uuid::Uuid::new_v4().to_string();
+    let expires_at = chrono::Utc::now().timestamp() + oauth.tokens.expires_in as i64;
+    let access_token = encrypt_value(gmail.encryption_key(), &oauth.tokens.access_token)?;
+    let refresh_token = encrypt_value(
+        gmail.encryption_key(),
+        oauth
+            .tokens
+            .refresh_token
+            .as_deref()
+            .ok_or("Microsoft did not return a refresh token")?,
+    )?;
+
+    db.with_conn({
+        let id = account_id.clone();
+        let email = oauth.user_info.email.clone();
+        let display_name = oauth.user_info.name.clone();
+        move |conn| {
+            conn.execute(
+                "INSERT INTO accounts (id, email, display_name, avatar_url, access_token, \
+                 refresh_token, token_expires_at, provider, auth_method) \
+                 VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, 'graph', 'oauth2')",
+                rusqlite::params![
+                    id,
+                    email,
+                    display_name,
+                    access_token,
+                    refresh_token,
+                    expires_at
+                ],
+            )
+            .map_err(|e| format!("Failed to insert Graph account: {e}"))?;
+            Ok(())
+        }
+    })
+    .await?;
+
+    let client = GraphClient::from_account(&db, &account_id, *graph.encryption_key()).await?;
+    let profile: GraphProfile = client
+        .get_json("/me?$select=displayName,mail,userPrincipalName", &db)
+        .await?;
+    graph.insert(account_id.clone(), client).await;
+
+    let email = profile
+        .mail
+        .or(profile.user_principal_name)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(oauth.user_info.email);
+    let display_name = profile
+        .display_name
+        .filter(|value| !value.is_empty())
+        .unwrap_or(oauth.user_info.name);
+
+    db.with_conn({
+        let id = account_id.clone();
+        let email = email.clone();
+        let display_name = display_name.clone();
+        move |conn| {
+            conn.execute(
+                "UPDATE accounts SET email = ?1, display_name = ?2, updated_at = unixepoch() \
+                 WHERE id = ?3",
+                rusqlite::params![email, display_name, id],
+            )
+            .map_err(|e| format!("Failed to finalize Graph account profile: {e}"))?;
+            Ok(())
+        }
+    })
+    .await?;
+
+    Ok(GraphAccountResult {
+        id: account_id,
+        email,
+        display_name,
+        avatar_url: String::new(),
+        is_active: true,
+        provider: "graph".to_string(),
+    })
 }
 
 #[tauri::command]
