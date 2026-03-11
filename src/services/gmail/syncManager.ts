@@ -19,7 +19,10 @@ export interface SyncProgress {
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { categorizeNewThreads } from "@/services/ai/categorizationManager";
+import {
+  type CategorizationCandidate,
+  categorizeNewThreads,
+} from "@/services/ai/categorizationManager";
 import { queueNewEmailNotification } from "@/services/notifications/notificationManager";
 import { applySmartLabelsToNewMessageIds } from "@/services/smartLabels/smartLabelManager";
 
@@ -39,6 +42,7 @@ interface PostSyncHooksInput {
     fromAddress?: string | null;
     subject?: string | null;
   }[];
+  aiCategorizationCandidates?: CategorizationCandidate[];
 }
 
 async function runPostSyncHooks(input: PostSyncHooksInput): Promise<void> {
@@ -48,6 +52,7 @@ async function runPostSyncHooks(input: PostSyncHooksInput): Promise<void> {
     affectedThreadIds,
     criteriaSmartLabelMatches = [],
     notificationsToQueue = [],
+    aiCategorizationCandidates = [],
   } = input;
 
   if (newInboxEmailIds.length > 0) {
@@ -74,8 +79,8 @@ async function runPostSyncHooks(input: PostSyncHooksInput): Promise<void> {
   }
 
   // AI categorization (fire-and-forget)
-  if (affectedThreadIds.length > 0) {
-    categorizeNewThreads(accountId).catch((err) =>
+  if (affectedThreadIds.length > 0 && aiCategorizationCandidates.length > 0) {
+    categorizeNewThreads(accountId, aiCategorizationCandidates).catch((err) =>
       console.error("[syncManager] Categorization error:", err),
     );
   }
@@ -128,6 +133,7 @@ interface SyncStatusEvent {
         subject?: string | null;
       }[]
     | null;
+  aiCategorizationCandidates?: CategorizationCandidate[] | null;
 }
 
 let syncListenersPromise: Promise<void> | null = null;
@@ -229,6 +235,7 @@ async function handleSyncStatusEvent(event: SyncStatusEvent): Promise<void> {
     affectedThreadIds: event.affectedThreadIds ?? [],
     criteriaSmartLabelMatches: event.criteriaSmartLabelMatches ?? [],
     notificationsToQueue: event.notificationsToQueue ?? [],
+    aiCategorizationCandidates: event.aiCategorizationCandidates ?? [],
   });
 
   statusCallback?.(event.accountId, "done");

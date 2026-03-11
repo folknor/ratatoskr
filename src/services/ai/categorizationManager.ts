@@ -1,27 +1,26 @@
-import { getSetting } from "@/services/db/settings";
-import {
-  getRecentRuleCategorizedThreadIds,
-  setThreadCategoriesBatch,
-} from "@/services/db/threadCategories";
+import { setThreadCategoriesBatch } from "@/services/db/threadCategories";
 import { categorizeThreads } from "./aiService";
 import { isAiAvailable } from "./providerManager";
 
-export async function categorizeNewThreads(accountId: string): Promise<void> {
+export interface CategorizationCandidate {
+  id: string;
+  subject?: string | null;
+  snippet?: string | null;
+  fromAddress?: string | null;
+}
+
+export async function categorizeNewThreads(
+  accountId: string,
+  candidates: CategorizationCandidate[],
+): Promise<void> {
   try {
-    // Check if AI and auto-categorize are enabled
     const aiAvail = await isAiAvailable();
     if (!aiAvail) return;
-
-    const autoCat = await getSetting("ai_auto_categorize");
-    if (autoCat === "false") return;
-
-    // Get recently rule-categorized inbox threads (AI refines, not replaces)
-    const threads = await getRecentRuleCategorizedThreadIds(accountId, 20);
-    if (threads.length === 0) return;
+    if (candidates.length === 0) return;
 
     // Categorize via AI (refines rule-based results)
     const categories = await categorizeThreads(
-      threads.map((t) => ({
+      candidates.map((t) => ({
         id: t.id,
         subject: t.subject ?? "",
         snippet: t.snippet ?? "",

@@ -50,6 +50,7 @@ pub struct SyncStatusEvent {
     pub is_delta: Option<bool>,
     pub criteria_smart_label_matches: Option<Vec<AppliedSmartLabelMatch>>,
     pub notifications_to_queue: Option<Vec<NotificationCandidate>>,
+    pub ai_categorization_candidates: Option<Vec<AICategorizationCandidate>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -59,6 +60,15 @@ pub struct NotificationCandidate {
     pub from_name: Option<String>,
     pub from_address: Option<String>,
     pub subject: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AICategorizationCandidate {
+    pub id: String,
+    pub subject: Option<String>,
+    pub snippet: Option<String>,
+    pub from_address: Option<String>,
 }
 
 /// Lightweight metadata kept in memory during sync for the threading pass.

@@ -17,7 +17,9 @@ use crate::smart_labels::commands::smart_labels_apply_criteria_to_new_message_id
 
 use super::{SyncQueueState, SyncState};
 use super::config;
-use super::types::{ImapSyncResult, NotificationCandidate, SyncStatusEvent};
+use super::types::{
+    AICategorizationCandidate, ImapSyncResult, NotificationCandidate, SyncStatusEvent,
+};
 
 const SYNC_INTERVAL_MS: u64 = 60_000;
 
@@ -165,6 +167,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                     is_delta: None,
                     criteria_smart_label_matches: None,
                     notifications_to_queue: None,
+                    ai_categorization_candidates: None,
                 },
             );
             return;
@@ -183,6 +186,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
             is_delta: None,
             criteria_smart_label_matches: None,
             notifications_to_queue: None,
+            ai_categorization_candidates: None,
         },
     );
 
@@ -199,6 +203,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 is_delta: Some(false),
                 criteria_smart_label_matches: Some(Vec::new()),
                 notifications_to_queue: Some(Vec::new()),
+                ai_categorization_candidates: Some(Vec::new()),
             },
         );
         return;
@@ -274,6 +279,17 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 }
             };
 
+            let ai_categorization_candidates =
+                match get_ai_categorization_candidates(&db, account_id).await {
+                    Ok(candidates) => candidates,
+                    Err(error) => {
+                        log::warn!(
+                            "Failed to load AI categorization candidates for {account_id}: {error}"
+                        );
+                        Vec::new()
+                    }
+                };
+
             emit_sync_status(
                 app,
                 SyncStatusEvent {
@@ -286,6 +302,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                     is_delta: Some(result.was_delta && !result.fell_back_to_initial),
                     criteria_smart_label_matches: Some(criteria_smart_label_matches),
                     notifications_to_queue: Some(notifications_to_queue),
+                    ai_categorization_candidates: Some(ai_categorization_candidates),
                 },
             )
         }
@@ -301,9 +318,55 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 is_delta: None,
                 criteria_smart_label_matches: None,
                 notifications_to_queue: None,
+                ai_categorization_candidates: None,
             },
         ),
     }
+}
+
+async fn get_ai_categorization_candidates(
+    db: &DbState,
+    account_id: &str,
+) -> Result<Vec<AICategorizationCandidate>, String> {
+    let account_id = account_id.to_string();
+    db.with_conn(move |conn| {
+        let auto_categorize = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'ai_auto_categorize'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .ok();
+        if auto_categorize.as_deref() == Some("false") {
+            return Ok(Vec::new());
+        }
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT t.id, t.subject, t.snippet, m.from_address
+                 FROM threads t
+                 INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
+                 INNER JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
+                 LEFT JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id
+                   AND m.date = (SELECT MAX(m2.date) FROM messages m2 WHERE m2.account_id = t.account_id AND m2.thread_id = t.id)
+                 WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND tc.is_manual = 0
+                 ORDER BY t.last_message_at DESC
+                 LIMIT 20",
+            )
+            .map_err(|e| e.to_string())?;
+        stmt.query_map(rusqlite::params![account_id], |row| {
+            Ok(AICategorizationCandidate {
+                id: row.get(0)?,
+                subject: row.get(1)?,
+                snippet: row.get(2)?,
+                from_address: row.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 async fn evaluate_notifications(
