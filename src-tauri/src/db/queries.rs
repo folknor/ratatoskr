@@ -9,6 +9,8 @@ use super::types::{
     CategoryCount, DbAttachment, DbContact, DbLabel, DbMessage, DbThread, SettingRow,
     ThreadCategoryRow,
 };
+use crate::gmail::client::GmailState;
+use crate::provider::crypto::{decrypt_value, is_encrypted};
 
 // ── Row mappers ──────────────────────────────────────────────
 
@@ -386,6 +388,34 @@ pub async fn db_get_all_settings(state: State<'_, DbState>) -> Result<Vec<Settin
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn db_get_secure_setting(
+    state: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
+    key: String,
+) -> Result<Option<String>, String> {
+    let encryption_key = *gmail.encryption_key();
+    state
+        .with_conn(move |conn| {
+            let result = conn
+                .query_row(
+                    "SELECT value FROM settings WHERE key = ?1",
+                    params![key],
+                    |row| row.get::<_, String>(0),
+                )
+                .ok();
+
+            Ok(result.map(|raw| {
+                if is_encrypted(&raw) {
+                    decrypt_value(&encryption_key, &raw).unwrap_or(raw)
+                } else {
+                    raw
+                }
+            }))
         })
         .await
 }

@@ -1,142 +1,62 @@
-import { getSecureSetting, getSetting } from "@/services/db/settings";
-import { AiError } from "./errors";
-import {
-  clearClaudeProvider,
-  createClaudeProvider,
-} from "./providers/claudeProvider";
-import {
-  clearCopilotProvider,
-  createCopilotProvider,
-} from "./providers/copilotProvider";
-import {
-  clearGeminiProvider,
-  createGeminiProvider,
-} from "./providers/geminiProvider";
-import {
-  clearOllamaProvider,
-  createOllamaProvider,
-} from "./providers/ollamaProvider";
-import {
-  clearOpenAIProvider,
-  createOpenAIProvider,
-} from "./providers/openaiProvider";
-import type { AiProvider, AiProviderClient } from "./types";
-import { DEFAULT_MODELS, MODEL_SETTINGS } from "./types";
+import { invoke } from "@tauri-apps/api/core";
+import { AiError, type AiErrorCode } from "./errors";
+import type {
+  AiCompletionRequest,
+  AiProvider,
+  AiProviderClient,
+} from "./types";
 
-const API_KEY_SETTINGS: Record<Exclude<AiProvider, "ollama">, string> = {
-  claude: "claude_api_key",
-  openai: "openai_api_key",
-  gemini: "gemini_api_key",
-  copilot: "copilot_api_key",
+function toAiError(error: unknown): AiError {
+  if (error instanceof AiError) return error;
+
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(
+    /^(NOT_CONFIGURED|AUTH_ERROR|RATE_LIMITED|NETWORK_ERROR):\s*(.*)$/s,
+  );
+
+  if (match) {
+    const code = match[1];
+    const detail = match[2];
+    if (code) {
+      return new AiError(code as AiErrorCode, detail || code);
+    }
+  }
+
+  return new AiError("NETWORK_ERROR", message);
+}
+
+const rustBackedProvider: AiProviderClient = {
+  async complete(req: AiCompletionRequest): Promise<string> {
+    try {
+      return await invoke<string>("ai_complete", { request: req });
+    } catch (error) {
+      throw toAiError(error);
+    }
+  },
+
+  async testConnection(): Promise<boolean> {
+    try {
+      return await invoke<boolean>("ai_test_connection");
+    } catch (error) {
+      throw toAiError(error);
+    }
+  },
 };
 
-let cachedProvider: {
-  name: AiProvider;
-  key: string;
-  client: AiProviderClient;
-} | null = null;
-
 export async function getActiveProviderName(): Promise<AiProvider> {
-  const setting = await getSetting("ai_provider");
-  if (
-    setting === "openai" ||
-    setting === "gemini" ||
-    setting === "ollama" ||
-    setting === "copilot"
-  )
-    return setting;
-  return "claude";
+  return invoke<AiProvider>("ai_get_provider_name");
 }
 
 export async function getActiveProvider(): Promise<AiProviderClient> {
-  const providerName = await getActiveProviderName();
-
-  if (providerName === "ollama") {
-    const serverUrl =
-      (await getSetting("ollama_server_url")) ?? "http://localhost:11434";
-    const model = (await getSetting("ollama_model")) ?? "llama3.2";
-    const cacheKey = `${serverUrl}|${model}`;
-
-    if (
-      cachedProvider &&
-      cachedProvider.name === "ollama" &&
-      cachedProvider.key === cacheKey
-    ) {
-      return cachedProvider.client;
-    }
-
-    const client = createOllamaProvider(serverUrl, model);
-    cachedProvider = { name: "ollama", key: cacheKey, client };
-    return client;
-  }
-
-  const keySetting = API_KEY_SETTINGS[providerName];
-  const apiKey = await getSecureSetting(keySetting);
-
-  if (!apiKey) {
-    throw new AiError(
-      "NOT_CONFIGURED",
-      `${providerName} API key not configured`,
-    );
-  }
-
-  const model =
-    (await getSetting(MODEL_SETTINGS[providerName])) ??
-    DEFAULT_MODELS[providerName];
-  const cacheKey = `${apiKey}|${model}`;
-
-  if (
-    cachedProvider &&
-    cachedProvider.name === providerName &&
-    cachedProvider.key === cacheKey
-  ) {
-    return cachedProvider.client;
-  }
-
-  let client: AiProviderClient;
-  switch (providerName) {
-    case "claude":
-      client = createClaudeProvider(apiKey, model);
-      break;
-    case "openai":
-      client = createOpenAIProvider(apiKey, model);
-      break;
-    case "gemini":
-      client = createGeminiProvider(apiKey, model);
-      break;
-    case "copilot":
-      client = createCopilotProvider(apiKey, model);
-      break;
-  }
-
-  cachedProvider = { name: providerName, key: cacheKey, client };
-  return client;
+  return rustBackedProvider;
 }
 
 export async function isAiAvailable(): Promise<boolean> {
   try {
-    const enabled = await getSetting("ai_enabled");
-    if (enabled === "false") return false;
-    const providerName = await getActiveProviderName();
-
-    if (providerName === "ollama") {
-      const serverUrl = await getSetting("ollama_server_url");
-      return Boolean(serverUrl);
-    }
-
-    const keySetting = API_KEY_SETTINGS[providerName];
-    const key = await getSecureSetting(keySetting);
-    return Boolean(key);
+    return await invoke<boolean>("ai_is_available");
   } catch {
     return false;
   }
 }
 
-export function clearProviderClients(): void {
-  cachedProvider = null;
-  clearClaudeProvider();
-  clearOpenAIProvider();
-  clearGeminiProvider();
-  clearOllamaProvider();
-  clearCopilotProvider();
-}
+export function clearProviderClients(): void {}

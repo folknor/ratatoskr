@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { decryptValue, encryptValue, isEncrypted } from "@/utils/crypto";
+import { encryptValue } from "@/utils/crypto";
 
 interface SettingRow {
   key: string;
@@ -20,22 +20,10 @@ export async function getAllSettings(): Promise<Record<string, string>> {
 }
 
 /**
- * Get a setting that is stored encrypted. Transparently decrypts the value.
- * Falls back to returning the raw value if decryption fails (e.g. not yet encrypted).
+ * Get a setting that is stored encrypted. Decryption happens in Rust.
  */
 export async function getSecureSetting(key: string): Promise<string | null> {
-  const raw = await getSetting(key);
-  if (!raw) return null;
-
-  if (isEncrypted(raw)) {
-    try {
-      return await decryptValue(raw);
-    } catch {
-      // If decryption fails, the value may be plaintext (pre-encryption migration)
-      return raw;
-    }
-  }
-  return raw;
+  return invoke<string | null>("db_get_secure_setting", { key });
 }
 
 /**

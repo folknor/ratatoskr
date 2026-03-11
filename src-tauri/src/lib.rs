@@ -7,6 +7,7 @@ use tauri::{
 use tauri_plugin_autostart::MacosLauncher;
 
 mod account_commands;
+mod ai_commands;
 mod attachment_cache;
 mod body_store;
 mod calendar_commands;
@@ -108,6 +109,10 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_os::init())
         .invoke_handler(tauri::generate_handler![
+            ai_commands::ai_complete,
+            ai_commands::ai_get_provider_name,
+            ai_commands::ai_is_available,
+            ai_commands::ai_test_connection,
             account_commands::account_create_gmail_via_oauth,
             account_commands::account_create_graph_via_oauth,
             account_commands::account_authorize_oauth_provider,
@@ -150,6 +155,7 @@ pub fn run() {
             db::queries::db_get_messages_for_thread,
             db::queries::db_get_labels,
             db::queries::db_get_setting,
+            db::queries::db_get_secure_setting,
             db::queries::db_get_all_settings,
             db::queries::db_set_setting,
             db::queries::db_get_category_unread_counts,
