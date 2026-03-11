@@ -67,40 +67,21 @@ pub(crate) async fn filters_apply_to_new_message_ids_impl(
 
     let needs_body = filters.iter().any(|(criteria, _)| criteria.body.is_some());
     let messages = load_filterable_messages(db, body_store, account_id, message_ids, needs_body).await?;
-    if messages.is_empty() {
-        return Ok(());
-    }
-
-    let thread_actions = tokio::task::spawn_blocking(move || evaluate_filters(&filters, &messages))
-        .await
-        .map_err(|e| format!("spawn_blocking: {e}"))?;
-    if thread_actions.is_empty() {
-        return Ok(());
-    }
-
-    let ops = get_ops(
-        provider,
+    filters_apply_to_messages_impl(
         account_id,
+        provider,
+        &filters,
+        &messages,
+        db,
         gmail,
         jmap,
         graph,
-        *gmail.encryption_key(),
-    )
-    .await?;
-    let ctx = ProviderCtx {
-        account_id,
-        db,
         body_store,
         inline_images,
         search,
         app_handle,
-    };
-
-    for (thread_id, result) in thread_actions {
-        apply_filter_result(&*ops, &ctx, &thread_id, &result).await;
-    }
-
-    Ok(())
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -133,7 +114,7 @@ pub async fn filters_apply_to_new_message_ids(
     .await
 }
 
-async fn load_enabled_filters(
+pub(crate) async fn load_enabled_filters(
     state: &DbState,
     account_id: &str,
 ) -> Result<Vec<(FilterCriteria, FilterActions)>, String> {
@@ -255,6 +236,59 @@ pub(crate) async fn load_filterable_messages(
     }
 
     Ok(rows.into_iter().map(|row| row.message).collect())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn filters_apply_to_messages_impl(
+    account_id: &str,
+    provider: &str,
+    filters: &[(FilterCriteria, FilterActions)],
+    messages: &[FilterableMessage],
+    db: &DbState,
+    gmail: &GmailState,
+    jmap: &JmapState,
+    graph: &GraphState,
+    body_store: &BodyStoreState,
+    inline_images: &InlineImageStoreState,
+    search: &SearchState,
+    app_handle: &AppHandle,
+) -> Result<(), String> {
+    if filters.is_empty() || messages.is_empty() {
+        return Ok(());
+    }
+
+    let filters = filters.to_vec();
+    let messages = messages.to_vec();
+    let thread_actions = tokio::task::spawn_blocking(move || evaluate_filters(&filters, &messages))
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?;
+    if thread_actions.is_empty() {
+        return Ok(());
+    }
+
+    let ops = get_ops(
+        provider,
+        account_id,
+        gmail,
+        jmap,
+        graph,
+        *gmail.encryption_key(),
+    )
+    .await?;
+    let ctx = ProviderCtx {
+        account_id,
+        db,
+        body_store,
+        inline_images,
+        search,
+        app_handle,
+    };
+
+    for (thread_id, result) in thread_actions {
+        apply_filter_result(&*ops, &ctx, &thread_id, &result).await;
+    }
+
+    Ok(())
 }
 
 async fn apply_filter_result(

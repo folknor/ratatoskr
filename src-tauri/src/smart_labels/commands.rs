@@ -43,56 +43,21 @@ pub(crate) async fn smart_labels_apply_criteria_to_new_message_ids_impl(
 
     let needs_body = rules.iter().any(|(_, criteria)| criteria.body.is_some());
     let messages = load_filterable_messages(db, body_store, account_id, message_ids, needs_body).await?;
-    if messages.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let matches = tokio::task::spawn_blocking(move || evaluate_criteria_matches(&rules, &messages))
-        .await
-        .map_err(|e| format!("spawn_blocking: {e}"))?;
-    if matches.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let ops = get_ops(
-        provider,
+    smart_labels_apply_criteria_to_messages_impl(
         account_id,
+        provider,
+        &rules,
+        &messages,
+        db,
         gmail,
         jmap,
         graph,
-        *gmail.encryption_key(),
-    )
-    .await?;
-    let ctx = ProviderCtx {
-        account_id,
-        db,
         body_store,
         inline_images,
         search,
         app_handle,
-    };
-
-    let mut applied_matches = Vec::new();
-    for (thread_id, label_ids) in matches {
-        let mut applied_label_ids = Vec::new();
-        for label_id in label_ids {
-            match ops.add_tag(&ctx, &thread_id, &label_id).await {
-                Ok(()) => applied_label_ids.push(label_id),
-                Err(error) => log::warn!(
-                    "Failed to apply smart label {label_id} to thread {thread_id}: {error}"
-                ),
-            }
-        }
-
-        if !applied_label_ids.is_empty() {
-            applied_matches.push(AppliedSmartLabelMatch {
-                thread_id,
-                label_ids: applied_label_ids,
-            });
-        }
-    }
-
-    Ok(applied_matches)
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -145,24 +110,13 @@ pub(crate) async fn smart_labels_apply_matches_impl(
     Ok(())
 }
 
-pub(crate) async fn smart_labels_prepare_ai_remainder_impl(
+pub(crate) async fn smart_labels_prepare_ai_remainder_for_messages(
     account_id: &str,
-    message_ids: &[String],
+    messages: &[FilterableMessage],
     db: &DbState,
-    body_store: &BodyStoreState,
     pre_applied_matches: &[AppliedSmartLabelMatch],
+    rules: Vec<EnabledSmartLabelRule>,
 ) -> Result<(Vec<SmartLabelAIThread>, Vec<SmartLabelAIRule>), String> {
-    if message_ids.is_empty() {
-        return Ok((Vec::new(), Vec::new()));
-    }
-
-    let rules = load_enabled_rules_for_ai(db, account_id).await?;
-    if rules.is_empty() {
-        return Ok((Vec::new(), Vec::new()));
-    }
-
-    let needs_body = rules.iter().any(|rule| rule.criteria.as_ref().and_then(|c| c.body.as_ref()).is_some());
-    let messages = load_filterable_messages(db, body_store, account_id, message_ids, needs_body).await?;
     if messages.is_empty() {
         return Ok((Vec::new(), Vec::new()));
     }
@@ -171,6 +125,7 @@ pub(crate) async fn smart_labels_prepare_ai_remainder_impl(
     let thread_ids: Vec<String> = messages.iter().map(|m| m.thread_id.clone()).collect();
     let snippets = load_thread_snippets(db, account_id, &thread_ids).await?;
 
+    let messages = messages.to_vec();
     let pre_applied_matches = pre_applied_matches.to_vec();
     let prepared = tokio::task::spawn_blocking(move || {
         prepare_ai_remainder(messages, rules, &pre_applied_matches, snippets)
@@ -242,7 +197,7 @@ pub async fn smart_labels_apply_matches(
     .await
 }
 
-async fn load_enabled_criteria_rules(
+pub(crate) async fn load_enabled_criteria_rules(
     db: &DbState,
     account_id: &str,
 ) -> Result<Vec<(String, FilterCriteria)>, String> {
@@ -288,14 +243,82 @@ async fn load_enabled_criteria_rules(
     .await
 }
 
-#[derive(Debug)]
-struct EnabledSmartLabelRule {
-    label_id: String,
-    description: String,
-    criteria: Option<FilterCriteria>,
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn smart_labels_apply_criteria_to_messages_impl(
+    account_id: &str,
+    provider: &str,
+    rules: &[(String, FilterCriteria)],
+    messages: &[FilterableMessage],
+    db: &DbState,
+    gmail: &GmailState,
+    jmap: &JmapState,
+    graph: &GraphState,
+    body_store: &BodyStoreState,
+    inline_images: &InlineImageStoreState,
+    search: &SearchState,
+    app_handle: &AppHandle,
+) -> Result<Vec<AppliedSmartLabelMatch>, String> {
+    if rules.is_empty() || messages.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let rules = rules.to_vec();
+    let messages = messages.to_vec();
+    let matches = tokio::task::spawn_blocking(move || evaluate_criteria_matches(&rules, &messages))
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?;
+    if matches.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let ops = get_ops(
+        provider,
+        account_id,
+        gmail,
+        jmap,
+        graph,
+        *gmail.encryption_key(),
+    )
+    .await?;
+    let ctx = ProviderCtx {
+        account_id,
+        db,
+        body_store,
+        inline_images,
+        search,
+        app_handle,
+    };
+
+    let mut applied_matches = Vec::new();
+    for (thread_id, label_ids) in matches {
+        let mut applied_label_ids = Vec::new();
+        for label_id in label_ids {
+            match ops.add_tag(&ctx, &thread_id, &label_id).await {
+                Ok(()) => applied_label_ids.push(label_id),
+                Err(error) => log::warn!(
+                    "Failed to apply smart label {label_id} to thread {thread_id}: {error}"
+                ),
+            }
+        }
+
+        if !applied_label_ids.is_empty() {
+            applied_matches.push(AppliedSmartLabelMatch {
+                thread_id,
+                label_ids: applied_label_ids,
+            });
+        }
+    }
+
+    Ok(applied_matches)
 }
 
-async fn load_enabled_rules_for_ai(
+#[derive(Debug)]
+pub(crate) struct EnabledSmartLabelRule {
+    label_id: String,
+    description: String,
+}
+
+pub(crate) async fn load_enabled_rules_for_ai(
     db: &DbState,
     account_id: &str,
 ) -> Result<Vec<EnabledSmartLabelRule>, String> {
@@ -303,7 +326,7 @@ async fn load_enabled_rules_for_ai(
     db.with_conn(move |conn| {
         let mut stmt = conn
             .prepare(
-                "SELECT label_id, ai_description, criteria_json FROM smart_label_rules
+                "SELECT label_id, ai_description FROM smart_label_rules
                  WHERE account_id = ?1 AND is_enabled = 1
                  ORDER BY sort_order, created_at",
             )
@@ -313,22 +336,17 @@ async fn load_enabled_rules_for_ai(
             .query_map(rusqlite::params![account_id], |row| {
                 let label_id: String = row.get(0)?;
                 let description: String = row.get(1)?;
-                let criteria_json: Option<String> = row.get(2)?;
-                Ok((label_id, description, criteria_json))
+                Ok((label_id, description))
             })
             .map_err(|e| format!("query smart label ai rules: {e}"))?;
 
         let mut rules = Vec::new();
         for row in rows {
-            let (label_id, description, criteria_json) =
+            let (label_id, description) =
                 row.map_err(|e| format!("read smart label ai row: {e}"))?;
-            let criteria = criteria_json
-                .as_deref()
-                .and_then(|json| serde_json::from_str::<FilterCriteria>(json).ok());
             rules.push(EnabledSmartLabelRule {
                 label_id,
                 description,
-                criteria,
             });
         }
 
@@ -437,26 +455,6 @@ fn prepare_ai_remainder(
         let existing = matched_labels.entry(applied.thread_id.clone()).or_default();
         for label_id in &applied.label_ids {
             existing.insert(label_id.clone());
-        }
-    }
-
-    for (thread_id, message) in &thread_map {
-        for rule in &rules {
-            if matched_labels
-                .get(thread_id)
-                .is_some_and(|labels| labels.contains(&rule.label_id))
-            {
-                continue;
-            }
-
-            if let Some(criteria) = rule.criteria.as_ref() {
-                if message_matches_filter(message, criteria) {
-                    matched_labels
-                        .entry(thread_id.clone())
-                        .or_default()
-                        .insert(rule.label_id.clone());
-                }
-            }
         }
     }
 

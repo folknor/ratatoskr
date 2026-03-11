@@ -58,19 +58,13 @@
 
 ## Post-Sync Hooks
 
-> **Systemic issue**: Filters and smart labels now share one `load_filterable_messages` helper, but notifications still loads message rows separately and the hooks still re-load overlapping data in the same sync cycle. `get_provider_type` is still called independently by multiple hook paths. These should be extracted further and the loaded data passed between hooks.
-
-- [ ] **Redundant message loading across post-sync hooks** — Filters, smart labels (criteria), smart labels (AI prep), and notifications each call `load_filterable_messages` independently for the same message IDs in the same sync cycle. Pass loaded messages between hooks or use a shared cache. *(MED)*
+> **Systemic issue**: Rust sync now shares one post-sync message load across filters, criteria smart labels, AI prep, and notifications, but later TS-side AI matching still re-queries message data and post-sync actions still duplicate some provider/setup work. The remaining debt is mostly across the Rust/TS boundary.
 
 - [ ] **Filter and smart label actions applied sequentially instead of in parallel** — Old TS used `Promise.allSettled` for concurrent per-thread application. Rust iterates sequentially. Could use `tokio::task::JoinSet`. *(MED)*
-
-- [ ] **Criteria matching re-evaluated redundantly in `prepare_ai_remainder`** — Re-runs `message_matches_filter` for all rules even though results are already in `pre_applied_matches`. *(MED)*
 
 - [ ] **Filter body hydration loads all bodies before evaluation** — When any filter has a body criterion, `body_store.get_batch` is called for all message IDs upfront. Could defer to only messages passing non-body criteria first. *(LOW)*
 
 - [ ] **`SyncStatusEvent` has grown to 13 fields** — Accumulated across post-sync hook additions. Most fields are `Option<...>` set to `None` in non-success paths. Consider a nested result type or separate event types for post-sync hook results. *(LOW)*
-
-- [ ] **Entire `evaluate_notifications` runs inside `with_conn`** — Holds a DB connection for settings queries + VIP lookup + muted threads + message loading + category lookup + filtering. Long-running closure over synchronous SQLite. *(LOW)*
 
 - [ ] **Correlated subquery for latest message per thread** — `AND m.date = (SELECT MAX(m2.date) ...)` runs per-thread. Fine with LIMIT 20 but inherited technical debt. *(LOW)*
 

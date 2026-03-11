@@ -4,17 +4,21 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
-use crate::db::queries::row_to_message;
 use crate::db::queries_extra::load_recent_rule_categorized_threads;
-use crate::filters::commands::filters_apply_to_new_message_ids_impl;
+use crate::filters::FilterableMessage;
+use crate::filters::commands::load_filterable_messages;
+use crate::filters::commands::load_enabled_filters;
+use crate::filters::commands::filters_apply_to_messages_impl;
 use crate::gmail::client::GmailState;
 use crate::graph::client::GraphState;
 use crate::inline_image_store::InlineImageStoreState;
 use crate::jmap::client::JmapState;
 use crate::provider::commands::provider_sync_auto_for_provider;
 use crate::search::SearchState;
-use crate::smart_labels::commands::smart_labels_apply_criteria_to_new_message_ids_impl;
-use crate::smart_labels::commands::smart_labels_prepare_ai_remainder_impl;
+use crate::smart_labels::commands::load_enabled_criteria_rules;
+use crate::smart_labels::commands::load_enabled_rules_for_ai;
+use crate::smart_labels::commands::smart_labels_apply_criteria_to_messages_impl;
+use crate::smart_labels::commands::smart_labels_prepare_ai_remainder_for_messages;
 
 use super::{SyncQueueState, SyncState};
 use super::config;
@@ -300,10 +304,44 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 }
             };
 
-            if let Err(error) = filters_apply_to_new_message_ids_impl(
+            let filters = match load_enabled_filters(&db, account_id).await {
+                Ok(filters) => filters,
+                Err(error) => {
+                    log::warn!("Failed to load filters for {account_id}: {error}");
+                    Vec::new()
+                }
+            };
+            let criteria_rules = match load_enabled_criteria_rules(&db, account_id).await {
+                Ok(rules) => rules,
+                Err(error) => {
+                    log::warn!(
+                        "Failed to load smart label criteria rules for {account_id}: {error}"
+                    );
+                    Vec::new()
+                }
+            };
+            let loaded_messages = match load_post_sync_messages(
+                &db,
+                &body_store,
+                account_id,
+                &result.new_inbox_message_ids,
+                &filters,
+                &criteria_rules,
+            )
+            .await
+            {
+                Ok(messages) => messages,
+                Err(error) => {
+                    log::warn!("Failed to load post-sync messages for {account_id}: {error}");
+                    Vec::new()
+                }
+            };
+
+            if let Err(error) = filters_apply_to_messages_impl(
                 account_id,
                 &provider,
-                &result.new_inbox_message_ids,
+                &filters,
+                &loaded_messages,
                 &db,
                 &gmail,
                 &jmap,
@@ -318,35 +356,35 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 log::warn!("Failed to run post-sync filters for {account_id}: {error}");
             }
 
-            let criteria_smart_label_matches =
-                match smart_labels_apply_criteria_to_new_message_ids_impl(
-                    account_id,
-                    &provider,
-                    &result.new_inbox_message_ids,
-                    &db,
-                    &gmail,
-                    &jmap,
-                    &graph,
-                    &body_store,
-                    &inline_images,
-                    &search,
-                    app,
-                )
-                .await
-                {
-                    Ok(matches) => matches,
-                    Err(error) => {
-                        log::warn!(
-                            "Failed to run smart label criteria matching for {account_id}: {error}"
-                        );
-                        Vec::new()
-                    }
-                };
+            let criteria_smart_label_matches = match smart_labels_apply_criteria_to_messages_impl(
+                account_id,
+                &provider,
+                &criteria_rules,
+                &loaded_messages,
+                &db,
+                &gmail,
+                &jmap,
+                &graph,
+                &body_store,
+                &inline_images,
+                &search,
+                app,
+            )
+            .await
+            {
+                Ok(matches) => matches,
+                Err(error) => {
+                    log::warn!(
+                        "Failed to run smart label criteria matching for {account_id}: {error}"
+                    );
+                    Vec::new()
+                }
+            };
 
             let notifications_to_queue = match evaluate_notifications(
                 &db,
                 account_id,
-                &result.new_inbox_message_ids,
+                &loaded_messages,
                 result.was_delta && !result.fell_back_to_initial,
             )
             .await
@@ -359,12 +397,20 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
             };
 
             let (ai_smart_label_threads, ai_smart_label_rules) =
-                match smart_labels_prepare_ai_remainder_impl(
+                match smart_labels_prepare_ai_remainder_for_messages(
                     account_id,
-                    &result.new_inbox_message_ids,
+                    &loaded_messages,
                     &db,
-                    &body_store,
                     &criteria_smart_label_matches,
+                    match load_enabled_rules_for_ai(&db, account_id).await {
+                        Ok(rules) => rules,
+                        Err(error) => {
+                            log::warn!(
+                                "Failed to load smart label AI rules for {account_id}: {error}"
+                            );
+                            Vec::new()
+                        }
+                    },
                 )
                 .await
                 {
@@ -464,15 +510,16 @@ async fn get_ai_categorization_candidates(
 async fn evaluate_notifications(
     db: &DbState,
     account_id: &str,
-    message_ids: &[String],
+    messages: &[FilterableMessage],
     is_delta: bool,
 ) -> Result<Vec<NotificationCandidate>, String> {
-    if !is_delta || message_ids.is_empty() {
+    if !is_delta || messages.is_empty() {
         return Ok(Vec::new());
     }
 
     let account_id = account_id.to_string();
-    let message_ids_vec = message_ids.to_vec();
+    let messages = messages.to_vec();
+    let thread_ids: Vec<String> = messages.iter().map(|msg| msg.thread_id.clone()).collect();
     db.with_conn(move |conn| {
         let notifications_enabled: Option<String> = conn
             .query_row(
@@ -520,34 +567,6 @@ async fn evaluate_notifications(
                 .map(|email| email.trim().to_lowercase())
                 .collect()
         };
-
-        let mut messages = Vec::new();
-        for chunk in message_ids_vec.chunks(500) {
-            let placeholders: String = chunk
-                .iter()
-                .enumerate()
-                .map(|(i, _)| format!("?{}", i + 2))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let sql =
-                format!("SELECT * FROM messages WHERE account_id = ?1 AND id IN ({placeholders})");
-            let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-            param_values.push(Box::new(account_id.clone()));
-            for id in chunk {
-                param_values.push(Box::new(id.clone()));
-            }
-            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                param_values.iter().map(AsRef::as_ref).collect();
-            let rows = stmt
-                .query_map(param_refs.as_slice(), row_to_message)
-                .map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?;
-            messages.extend(rows);
-        }
-
-        let thread_ids: Vec<String> = messages.iter().map(|msg| msg.thread_id.clone()).collect();
 
         // Only check muted status for the relevant thread IDs, not every muted thread in the account.
         let muted_thread_ids: std::collections::HashSet<String> = if thread_ids.is_empty() {
@@ -616,10 +635,8 @@ async fn evaluate_notifications(
             if muted_thread_ids.contains(&msg.thread_id) {
                 continue;
             }
-            let from_address_normalized = msg
-                .from_address
-                .as_ref()
-                .map(|email| email.trim().to_lowercase());
+            let from_address_normalized =
+                msg.from_address.as_ref().map(|email| email.trim().to_lowercase());
             let should_notify = if !smart_notifications {
                 true
             } else if let Some(from_address) = from_address_normalized.as_ref() {
@@ -653,6 +670,26 @@ async fn evaluate_notifications(
         Ok(candidates)
     })
     .await
+}
+
+async fn load_post_sync_messages(
+    db: &DbState,
+    body_store: &BodyStoreState,
+    account_id: &str,
+    message_ids: &[String],
+    filters: &[(crate::filters::FilterCriteria, crate::filters::FilterActions)],
+    criteria_rules: &[(String, crate::filters::FilterCriteria)],
+) -> Result<Vec<FilterableMessage>, String> {
+    if message_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let needs_body = filters.iter().any(|(criteria, _)| criteria.body.is_some())
+        || criteria_rules
+            .iter()
+            .any(|(_, criteria)| criteria.body.is_some());
+
+    load_filterable_messages(db, body_store, account_id, message_ids, needs_body).await
 }
 
 fn emit_sync_status(app: &AppHandle, event: SyncStatusEvent) {

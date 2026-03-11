@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 // Types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct FilterCriteria {
     pub from: Option<String>,
     pub to: Option<String>,
@@ -17,7 +17,7 @@ pub struct FilterCriteria {
     pub has_attachment: Option<bool>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct FilterActions {
     #[serde(rename = "applyLabel")]
     pub apply_label: Option<String>,
@@ -29,7 +29,7 @@ pub struct FilterActions {
 }
 
 /// Simplified message representation for filter matching.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct FilterableMessage {
     pub thread_id: String,
     pub from_name: Option<String>,
