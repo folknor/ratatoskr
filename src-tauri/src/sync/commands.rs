@@ -486,18 +486,6 @@ async fn evaluate_notifications(
                 .collect()
         };
 
-        let muted_thread_ids: std::collections::HashSet<String> = {
-            let mut stmt = conn
-                .prepare("SELECT id FROM threads WHERE account_id = ?1 AND is_muted = 1")
-                .map_err(|e| e.to_string())?;
-            stmt.query_map(rusqlite::params![account_id], |row| row.get::<_, String>(0))
-                .map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?
-                .into_iter()
-                .collect()
-        };
-
         let mut messages = Vec::new();
         for chunk in message_ids_vec.chunks(500) {
             let placeholders: String = chunk
@@ -525,6 +513,36 @@ async fn evaluate_notifications(
         }
 
         let thread_ids: Vec<String> = messages.iter().map(|msg| msg.thread_id.clone()).collect();
+
+        // Only check muted status for the relevant thread IDs, not every muted thread in the account.
+        let muted_thread_ids: std::collections::HashSet<String> = if thread_ids.is_empty() {
+            std::collections::HashSet::new()
+        } else {
+            let placeholders: String = thread_ids
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("?{}", i + 2))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT id FROM threads WHERE account_id = ?1 AND is_muted = 1 AND id IN ({placeholders})"
+            );
+            let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
+                vec![Box::new(account_id.clone())];
+            for id in &thread_ids {
+                param_values.push(Box::new(id.clone()));
+            }
+            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                param_values.iter().map(AsRef::as_ref).collect();
+            stmt.query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .collect()
+        };
+
         let mut category_by_thread: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         for chunk in thread_ids.chunks(100) {

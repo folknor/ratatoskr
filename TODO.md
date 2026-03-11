@@ -199,11 +199,11 @@
 
 - [ ] **`has_attachments` hardcoded to `false` in `load_filterable_messages`** — Any filter with `has_attachment: true` will never match. The `messages` table has a `has_attachments` column — use it. *(MED)*
 
-- [ ] **`apply_filter_result` early-returns on first provider error within a thread** — If `add_tag` fails for one label, remaining labels and `mark_read`/`star` for that thread are skipped. Should collect errors and continue. *(MED)*
+- [x] **`apply_filter_result` early-returns on first provider error within a thread** — If `add_tag` fails for one label, remaining labels and `mark_read`/`star` for that thread are skipped. Should collect errors and continue. *(MED)*
 
 - [ ] **Filter and smart label actions applied sequentially instead of in parallel** — Old TS used `Promise.allSettled` for concurrent per-thread application. Rust iterates sequentially. Could use `tokio::task::JoinSet`. *(MED)*
 
-- [ ] **`muted_thread_ids` loads ALL muted threads for the account** — `SELECT id FROM threads WHERE account_id = ?1 AND is_muted = 1` could return thousands of IDs when only a handful (from new inbox messages) are relevant. Filter to relevant thread IDs with `IN (...)`. *(MED)*
+- [x] **`muted_thread_ids` loads ALL muted threads for the account** — `SELECT id FROM threads WHERE account_id = ?1 AND is_muted = 1` could return thousands of IDs when only a handful (from new inbox messages) are relevant. Filter to relevant thread IDs with `IN (...)`. *(MED)*
 
 - [ ] **Criteria matching re-evaluated redundantly in `prepare_ai_remainder`** — Re-runs `message_matches_filter` for all rules even though results are already in `pre_applied_matches`. *(MED)*
 
@@ -237,7 +237,7 @@
 
 - [ ] **CalDAV "done" emitted before calendar sync completes** — Old code: sync calendar → emit "done". New code: emit "done" → sync calendar. UI shows completion before calendar data arrives. *(LOW)*
 
-- [ ] **`categorization_apply_ai_results` duplicates `db_set_thread_categories_batch`** — Identical SQL and logic. Old command still registered. *(MED)*
+- [x] **`categorization_apply_ai_results` duplicates `db_set_thread_categories_batch`** — Identical SQL and logic. Old command still registered. *(MED)*
 
 ---
 

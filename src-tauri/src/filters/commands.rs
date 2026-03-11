@@ -98,9 +98,7 @@ pub(crate) async fn filters_apply_to_new_message_ids_impl(
     };
 
     for (thread_id, result) in thread_actions {
-        if let Err(error) = apply_filter_result(&*ops, &ctx, &thread_id, &result).await {
-            log::warn!("Failed to apply filters to thread {thread_id}: {error}");
-        }
+        apply_filter_result(&*ops, &ctx, &thread_id, &result).await;
     }
 
     Ok(())
@@ -254,22 +252,28 @@ async fn apply_filter_result(
     ctx: &ProviderCtx<'_>,
     thread_id: &str,
     result: &FilterResult,
-) -> Result<(), String> {
+) {
     for label_id in &result.add_label_ids {
-        ops.add_tag(ctx, thread_id, label_id).await?;
+        if let Err(e) = ops.add_tag(ctx, thread_id, label_id).await {
+            log::warn!("Filter: add_tag {label_id} on {thread_id} failed: {e}");
+        }
     }
 
     for label_id in &result.remove_label_ids {
-        ops.remove_tag(ctx, thread_id, label_id).await?;
+        if let Err(e) = ops.remove_tag(ctx, thread_id, label_id).await {
+            log::warn!("Filter: remove_tag {label_id} on {thread_id} failed: {e}");
+        }
     }
 
     if result.mark_read {
-        ops.mark_read(ctx, thread_id, true).await?;
+        if let Err(e) = ops.mark_read(ctx, thread_id, true).await {
+            log::warn!("Filter: mark_read on {thread_id} failed: {e}");
+        }
     }
 
     if result.star {
-        ops.star(ctx, thread_id, true).await?;
+        if let Err(e) = ops.star(ctx, thread_id, true).await {
+            log::warn!("Filter: star on {thread_id} failed: {e}");
+        }
     }
-
-    Ok(())
 }

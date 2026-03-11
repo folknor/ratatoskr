@@ -435,7 +435,6 @@ pub fn run() {
             // Categorization rule engine (Phase 6)
             categorization::commands::categorize_thread_by_rules,
             categorization::commands::categorize_threads_by_rules,
-            categorization::commands::categorization_apply_ai_results,
             // IMAP sync engine (Phase 4)
             sync::commands::sync_run_accounts,
             sync::commands::sync_start_background,

@@ -30,7 +30,7 @@ export async function categorizeNewThreads(
 
     if (categories.size === 0) return;
 
-    await invoke("categorization_apply_ai_results", {
+    await invoke("db_set_thread_categories_batch", {
       accountId,
       categories: Array.from(categories.entries()),
     });
