@@ -408,6 +408,8 @@ pub fn run() {
             // IMAP sync engine (Phase 4)
             sync::commands::sync_imap_initial,
             sync::commands::sync_imap_delta,
+            sync::commands::sync_prepare_full_sync,
+            sync::commands::sync_prepare_account_resync,
             // Gmail API provider (Rust)
             gmail::commands::gmail_init_client,
             gmail::commands::gmail_get_access_token,

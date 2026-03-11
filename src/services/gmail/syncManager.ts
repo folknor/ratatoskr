@@ -2,7 +2,7 @@ import {
   getCalendarProvider,
   hasCalendarSupport,
 } from "../calendar/providerFactory";
-import { clearAccountHistoryId, getAccount } from "../db/accounts";
+import { getAccount } from "../db/accounts";
 import {
   deleteEventByRemoteId,
   upsertCalendarEvent,
@@ -12,10 +12,7 @@ import {
   updateCalendarSyncToken,
   upsertCalendar,
 } from "../db/calendars";
-import { clearAllFolderSyncStates } from "../db/folderSyncState";
-import { deleteAllMessagesForAccount } from "../db/messages";
 import { getSetting } from "../db/settings";
-import { deleteAllThreadsForAccount } from "../db/threads";
 export interface SyncProgress {
   phase: "labels" | "threads" | "messages" | "done";
   current: number;
@@ -437,9 +434,7 @@ export async function triggerSync(accountIds: string[]): Promise<void> {
  * This re-downloads all threads from scratch.
  */
 export async function forceFullSync(accountIds: string[]): Promise<void> {
-  for (const id of accountIds) {
-    await clearAccountHistoryId(id);
-  }
+  await invoke("sync_prepare_full_sync", { accountIds });
   await runSync(accountIds);
 }
 
@@ -449,9 +444,6 @@ export async function forceFullSync(accountIds: string[]): Promise<void> {
  * then runs a fresh initial sync.
  */
 export async function resyncAccount(accountId: string): Promise<void> {
-  await deleteAllThreadsForAccount(accountId);
-  await deleteAllMessagesForAccount(accountId);
-  await clearAccountHistoryId(accountId);
-  await clearAllFolderSyncStates(accountId);
+  await invoke("sync_prepare_account_resync", { accountId });
   await runSync([accountId]);
 }

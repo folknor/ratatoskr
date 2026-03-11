@@ -12,6 +12,43 @@ use super::SyncState;
 use super::config;
 use super::types::ImapSyncResult;
 
+#[tauri::command]
+pub async fn sync_prepare_full_sync(
+    db: State<'_, DbState>,
+    account_ids: Vec<String>,
+) -> Result<(), String> {
+    db.with_conn(move |conn| {
+        for account_id in account_ids {
+            super::pipeline::clear_account_history_id(conn, &account_id)?;
+        }
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn sync_prepare_account_resync(
+    db: State<'_, DbState>,
+    account_id: String,
+) -> Result<(), String> {
+    db.with_conn(move |conn| {
+        conn.execute(
+            "DELETE FROM threads WHERE account_id = ?1",
+            rusqlite::params![account_id],
+        )
+        .map_err(|e| format!("delete threads for account: {e}"))?;
+        conn.execute(
+            "DELETE FROM messages WHERE account_id = ?1",
+            rusqlite::params![account_id],
+        )
+        .map_err(|e| format!("delete messages for account: {e}"))?;
+        super::pipeline::clear_account_history_id(conn, &account_id)?;
+        super::pipeline::clear_all_folder_sync_states(conn, &account_id)?;
+        Ok(())
+    })
+    .await
+}
+
 /// Run initial IMAP sync for an account.
 ///
 /// Called from TS when an IMAP account has no history_id (first sync).
