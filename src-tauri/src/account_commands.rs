@@ -68,12 +68,9 @@ pub struct OAuthProviderAuthorizationRequest {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OAuthProviderAuthorizationResult {
+    pub authorization_id: String,
     pub access_token: String,
-    pub refresh_token: Option<String>,
     pub expires_in: u64,
-    pub token_type: String,
-    pub scope: Option<String>,
-    pub id_token: Option<String>,
     pub email: String,
     pub name: String,
     pub picture: Option<String>,
@@ -91,9 +88,7 @@ pub struct CreateImapOAuthAccountRequest {
     pub smtp_host: String,
     pub smtp_port: i64,
     pub smtp_security: String,
-    pub access_token: String,
-    pub refresh_token: String,
-    pub token_expires_at: i64,
+    pub authorization_id: String,
     pub oauth_provider: String,
     pub oauth_client_id: String,
     pub oauth_client_secret: Option<String>,
@@ -403,16 +398,26 @@ pub async fn account_get_caldav_settings_info(
 pub async fn account_authorize_oauth_provider(
     app: AppHandle,
     request: OAuthProviderAuthorizationRequest,
+    pending_oauth: State<'_, PendingOAuthAuthorizations>,
 ) -> Result<OAuthProviderAuthorizationResult, String> {
     let oauth = perform_provider_oauth(&app, &request).await?;
+    let access_token = oauth.tokens.access_token.clone();
+    let expires_in = oauth.tokens.expires_in;
+    let authorization_id = uuid::Uuid::new_v4().to_string();
+    pending_oauth
+        .lock()
+        .map_err(|_| "Pending OAuth store is poisoned".to_string())?
+        .insert(
+            authorization_id.clone(),
+            PendingOAuthAuthorization {
+                tokens: oauth.tokens,
+            },
+        );
 
     Ok(OAuthProviderAuthorizationResult {
-        access_token: oauth.tokens.access_token,
-        refresh_token: oauth.tokens.refresh_token,
-        expires_in: oauth.tokens.expires_in,
-        token_type: oauth.tokens.token_type,
-        scope: oauth.tokens.scope,
-        id_token: oauth.tokens.id_token,
+        authorization_id,
+        access_token,
+        expires_in,
         email: oauth.user_info.email,
         name: oauth.user_info.name,
         picture: oauth.user_info.picture,
@@ -424,10 +429,23 @@ pub async fn account_create_imap_oauth(
     request: CreateImapOAuthAccountRequest,
     db: State<'_, DbState>,
     crypto: State<'_, AppCryptoState>,
+    pending_oauth: State<'_, PendingOAuthAuthorizations>,
 ) -> Result<AccountResult, String> {
+    let authorization = pending_oauth
+        .lock()
+        .map_err(|_| "Pending OAuth store is poisoned".to_string())?
+        .remove(&request.authorization_id)
+        .ok_or_else(|| "OAuth authorization has expired or is invalid".to_string())?;
     let account_id = uuid::Uuid::new_v4().to_string();
-    let access_token = encrypt_value(crypto.encryption_key(), &request.access_token)?;
-    let refresh_token = encrypt_value(crypto.encryption_key(), &request.refresh_token)?;
+    let access_token = encrypt_value(crypto.encryption_key(), &authorization.tokens.access_token)?;
+    let refresh_token = encrypt_value(
+        crypto.encryption_key(),
+        authorization
+            .tokens
+            .refresh_token
+            .as_deref()
+            .ok_or_else(|| "OAuth provider did not return a refresh token".to_string())?,
+    )?;
     let oauth_client_secret = request
         .oauth_client_secret
         .as_deref()
@@ -456,7 +474,12 @@ pub async fn account_create_imap_oauth(
                     avatar_url,
                     access_token,
                     refresh_token,
-                    request.token_expires_at,
+                    i64::try_from(authorization.tokens.expires_in)
+                        .ok()
+                        .and_then(|expires_in| chrono::Utc::now()
+                            .timestamp()
+                            .checked_add(expires_in))
+                        .unwrap_or_else(|| chrono::Utc::now().timestamp()),
                     request.imap_host,
                     request.imap_port,
                     request.imap_security,
@@ -668,6 +691,13 @@ struct OAuthProviderBundle {
     tokens: crate::oauth::TokenExchangeResult,
     user_info: OAuthProviderUserInfo,
 }
+
+pub(crate) struct PendingOAuthAuthorization {
+    tokens: crate::oauth::TokenExchangeResult,
+}
+
+pub(crate) type PendingOAuthAuthorizations =
+    std::sync::Mutex<std::collections::HashMap<String, PendingOAuthAuthorization>>;
 
 async fn perform_google_oauth(
     app: &AppHandle,

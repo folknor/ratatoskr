@@ -20,10 +20,10 @@ export interface FormState {
   // OAuth2 fields
   authMode: AuthMode;
   oauthProvider: string | null;
+  oauthAuthorizationId: string | null;
   oauthClientId: string;
   oauthClientSecret: string;
   oauthAccessToken: string | null;
-  oauthRefreshToken: string | null;
   oauthExpiresAt: number | null;
   oauthEmail: string | null;
   oauthPicture: string | null;
@@ -45,10 +45,10 @@ export const initialFormState: FormState = {
   acceptInvalidCerts: false,
   authMode: "password",
   oauthProvider: null,
+  oauthAuthorizationId: null,
   oauthClientId: "",
   oauthClientSecret: "",
   oauthAccessToken: null,
-  oauthRefreshToken: null,
   oauthExpiresAt: null,
   oauthEmail: null,
   oauthPicture: null,

@@ -40,8 +40,8 @@ interface AddImapAccountProps {
 }
 
 interface OAuthAuthorizationResult {
+  authorizationId: string;
   accessToken: string;
-  refreshToken?: string | null;
   expiresIn: number;
   email: string;
   name: string;
@@ -158,7 +158,7 @@ export function AddImapAccount({
 
   const isOAuth = form.authMode === "oauth2";
   const hasOAuthTokens = Boolean(
-    form.oauthAccessToken && form.oauthRefreshToken,
+    form.oauthAccessToken && form.oauthAuthorizationId,
   );
 
   const canAdvanceFromBasic =
@@ -244,8 +244,9 @@ export function AddImapAccount({
 
       setForm((prev) => ({
         ...prev,
+        oauthAuthorizationId: result.authorizationId,
         oauthAccessToken: result.accessToken,
-        oauthRefreshToken: result.refreshToken ?? null,
+        oauthRefreshToken: null,
         oauthExpiresAt: expiresAt,
         oauthEmail: result.email,
         oauthPicture: result.picture ?? null,
@@ -351,9 +352,7 @@ export function AddImapAccount({
             smtpHost: form.smtpHost.trim(),
             smtpPort: form.smtpPort,
             smtpSecurity: form.smtpSecurity,
-            accessToken: form.oauthAccessToken ?? "",
-            refreshToken: form.oauthRefreshToken ?? "",
-            tokenExpiresAt: form.oauthExpiresAt ?? 0,
+            authorizationId: form.oauthAuthorizationId ?? "",
             oauthProvider: form.oauthProvider ?? "",
             oauthClientId: form.oauthClientId.trim(),
             oauthClientSecret: form.oauthClientSecret.trim() || null,

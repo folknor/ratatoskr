@@ -12,8 +12,6 @@
 
 ## OAuth & Account Creation
 
-- [ ] **Plaintext tokens round-trip through IPC** — `account_authorize_oauth_provider` returns raw `access_token`/`refresh_token` to TS, which passes them back to `account_create_imap_oauth` for encryption. The Gmail flow avoids this by handling everything in a single Rust command. Consider merging or documenting why the split is needed. *(MED)*
-
 ---
 
 ## Provider Operations

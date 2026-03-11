@@ -562,6 +562,7 @@ pub fn run() {
                 app.manage(sync::SyncState::new());
                 app.manage(sync::SyncQueueState::new());
                 app.manage(sync::BackgroundSyncState::new());
+                app.manage(account_commands::PendingOAuthAuthorizations::default());
 
                 // Gmail provider state — load encryption key for token decryption
                 let encryption_key = provider::crypto::load_encryption_key(&app_data_dir)
