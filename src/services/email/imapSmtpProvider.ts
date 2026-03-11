@@ -2,21 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { type DbAccount, getAccount } from "../db/accounts";
 import type { ParsedMessage } from "../gmail/messageParser";
 import { getSyncableFolders, mapFolderToLabel } from "../imap/folderMapper";
-import { buildImapConfig, buildSmtpConfig } from "../imap/imapConfigBuilder";
+import { buildImapConfig } from "../imap/imapConfigBuilder";
 import { imapMessageToParsedMessage } from "../imap/imapSyncConvert";
-import { findSpecialFolder } from "../imap/messageHelper";
 import {
   type ImapConfig,
-  imapAppendMessage,
-  imapDeleteMessages,
-  imapFetchAttachment,
   imapFetchMessageBody,
   imapFetchRawMessage,
   imapListFolders,
-  imapMoveMessages,
-  imapSetFlags,
-  type SmtpConfig,
-  smtpSendEmail,
 } from "../imap/tauriCommands";
 import { ensureFreshToken } from "../oauth/oauthTokenManager";
 import type { EmailFolder, EmailProvider, SyncResult } from "./types";
@@ -31,16 +23,29 @@ interface ProviderProfile {
   name?: string;
 }
 
+interface ProviderAttachment {
+  data: string;
+  size: number;
+}
+
+interface ProviderFolder {
+  id: string;
+  name: string;
+  path: string;
+  folderType: string;
+  specialUse?: string | null;
+}
+
 /**
- * EmailProvider adapter for IMAP/SMTP accounts.
- * Delegates to Tauri IMAP/SMTP commands via the imapSync engine.
+ * Thin IMAP adapter.
+ * Remaining direct IMAP calls are limited to folder listing and on-demand
+ * message/raw fetch until the unified provider DTOs cover those cases.
  */
 export class ImapSmtpProvider implements EmailProvider {
   readonly accountId: string;
   readonly type = "imap" as const;
 
-  private _imapConfig: ImapConfig | null = null;
-  private _smtpConfig: SmtpConfig | null = null;
+  private imapConfig: ImapConfig | null = null;
 
   constructor(accountId: string) {
     this.accountId = accountId;
@@ -54,86 +59,74 @@ export class ImapSmtpProvider implements EmailProvider {
     return account;
   }
 
-  private async getImapConfig(): Promise<ImapConfig> {
+  private async getLegacyImapConfig(): Promise<ImapConfig> {
     const account = await this.getAccount();
     if (account.auth_method === "oauth2") {
-      // OAuth accounts need a fresh token every time
       const token = await ensureFreshToken(account);
       return buildImapConfig(account, token);
     }
-    if (!this._imapConfig) {
-      this._imapConfig = buildImapConfig(account);
+    if (!this.imapConfig) {
+      this.imapConfig = buildImapConfig(account);
     }
-    return this._imapConfig;
+    return this.imapConfig;
   }
 
-  private async getSmtpConfig(): Promise<SmtpConfig> {
-    const account = await this.getAccount();
-    if (account.auth_method === "oauth2") {
-      const token = await ensureFreshToken(account);
-      return buildSmtpConfig(account, token);
-    }
-    if (!this._smtpConfig) {
-      this._smtpConfig = buildSmtpConfig(account);
-    }
-    return this._smtpConfig;
-  }
-
-  /**
-   * Invalidate cached configs (e.g., after password change).
-   */
   clearConfigCache(): void {
-    this._imapConfig = null;
-    this._smtpConfig = null;
+    this.imapConfig = null;
   }
-
-  // ---- Folder/Label operations ----
 
   async listFolders(): Promise<EmailFolder[]> {
-    const config = await this.getImapConfig();
+    const config = await this.getLegacyImapConfig();
     const imapFolders = await imapListFolders(config);
     const syncable = getSyncableFolders(imapFolders);
 
-    return syncable.map((f) => {
-      const mapping = mapFolderToLabel(f);
+    return syncable.map((folder) => {
+      const mapping = mapFolderToLabel(folder);
       return {
         id: mapping.labelId,
         name: mapping.labelName,
-        path: f.path,
+        path: folder.path,
         type: mapping.type as "system" | "user",
-        specialUse: f.special_use,
-        delimiter: f.delimiter,
-        messageCount: f.exists,
-        unreadCount: f.unseen,
+        specialUse: folder.special_use,
+        delimiter: folder.delimiter,
+        messageCount: folder.exists,
+        unreadCount: folder.unseen,
       };
     });
   }
 
-  async createFolder(
-    _name: string,
-    _parentPath?: string,
-  ): Promise<EmailFolder> {
-    throw new Error(
-      "Creating folders is not supported for IMAP accounts via the current command set. " +
-        "Please create the folder directly on the mail server.",
-    );
+  async createFolder(name: string, parentPath?: string): Promise<EmailFolder> {
+    const folder = await invoke<ProviderFolder>("provider_create_folder", {
+      accountId: this.accountId,
+      name,
+      parentId: parentPath ?? null,
+    });
+    return {
+      id: folder.id,
+      name: folder.name,
+      path: folder.path,
+      type: folder.folderType === "system" ? "system" : "user",
+      specialUse: folder.specialUse ?? null,
+      delimiter: "/",
+      messageCount: 0,
+      unreadCount: 0,
+    };
   }
 
-  async deleteFolder(_path: string): Promise<void> {
-    throw new Error(
-      "Deleting folders is not supported for IMAP accounts via the current command set. " +
-        "Please delete the folder directly on the mail server.",
-    );
+  async deleteFolder(path: string): Promise<void> {
+    await invoke("provider_delete_folder", {
+      accountId: this.accountId,
+      folderId: path,
+    });
   }
 
-  async renameFolder(_path: string, _newName: string): Promise<void> {
-    throw new Error(
-      "Renaming folders is not supported for IMAP accounts via the current command set. " +
-        "Please rename the folder directly on the mail server.",
-    );
+  async renameFolder(path: string, newName: string): Promise<void> {
+    await invoke("provider_rename_folder", {
+      accountId: this.accountId,
+      folderId: path,
+      newName,
+    });
   }
-
-  // ---- Sync operations ----
 
   async initialSync(
     _daysBack: number,
@@ -152,25 +145,20 @@ export class ImapSmtpProvider implements EmailProvider {
     );
   }
 
-  // ---- Message operations ----
-
   async fetchMessage(messageId: string): Promise<ParsedMessage> {
     const { folder, uid } = this.parseImapMessageId(messageId);
-
     if (uid === null || !folder) {
       throw new Error(`Invalid IMAP message ID format: ${messageId}`);
     }
 
-    const config = await this.getImapConfig();
+    const config = await this.getLegacyImapConfig();
     const imapMsg = await imapFetchMessageBody(config, folder, uid);
-
     const { parsed } = imapMessageToParsedMessage(
       imapMsg,
       this.accountId,
       folder,
     );
     parsed.id = messageId;
-
     return parsed;
   }
 
@@ -178,225 +166,155 @@ export class ImapSmtpProvider implements EmailProvider {
     messageId: string,
     attachmentId: string,
   ): Promise<{ data: string; size: number }> {
-    const { folder, uid } = this.parseImapMessageId(messageId);
-
-    if (uid === null || !folder) {
-      throw new Error(`Invalid IMAP message ID format: ${messageId}`);
-    }
-
-    const config = await this.getImapConfig();
-    const data = await imapFetchAttachment(config, folder, uid, attachmentId);
-    // data is base64-encoded, so data.length overestimates the real byte size
-    // by ~33%. Compute actual size accounting for padding characters.
-    const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
-    const size = Math.ceil((data.length * 3) / 4) - padding;
-    return { data, size };
+    return invoke<ProviderAttachment>("provider_fetch_attachment", {
+      accountId: this.accountId,
+      messageId,
+      attachmentId,
+    });
   }
 
   async fetchRawMessage(messageId: string): Promise<string> {
     const { folder, uid } = this.parseImapMessageId(messageId);
-
     if (uid === null || !folder) {
       throw new Error(`Invalid IMAP message ID format: ${messageId}`);
     }
 
-    const config = await this.getImapConfig();
+    const config = await this.getLegacyImapConfig();
     return imapFetchRawMessage(config, folder, uid);
   }
 
-  // ---- Actions ----
-
-  async archive(_threadId: string, _messageIds: string[]): Promise<void> {
-    const config = await this.getImapConfig();
-    const grouped = this.groupByFolder(_messageIds);
-    const archiveFolder =
-      (await findSpecialFolder(this.accountId, "\\Archive")) ?? "Archive";
-
-    for (const [folder, uids] of grouped) {
-      if (folder === archiveFolder) continue;
-      await imapMoveMessages(config, folder, uids, archiveFolder);
-    }
+  async archive(threadId: string, _messageIds: string[]): Promise<void> {
+    await invoke("provider_archive", {
+      accountId: this.accountId,
+      threadId,
+    });
   }
 
-  async trash(_threadId: string, _messageIds: string[]): Promise<void> {
-    const config = await this.getImapConfig();
-    const grouped = this.groupByFolder(_messageIds);
-    const trashFolder =
-      (await findSpecialFolder(this.accountId, "\\Trash")) ?? "Trash";
-
-    for (const [folder, uids] of grouped) {
-      if (folder === trashFolder) continue;
-      await imapMoveMessages(config, folder, uids, trashFolder);
-    }
+  async trash(threadId: string, _messageIds: string[]): Promise<void> {
+    await invoke("provider_trash", {
+      accountId: this.accountId,
+      threadId,
+    });
   }
 
   async permanentDelete(
-    _threadId: string,
+    threadId: string,
     _messageIds: string[],
   ): Promise<void> {
-    const config = await this.getImapConfig();
-    const grouped = this.groupByFolder(_messageIds);
-
-    for (const [folder, uids] of grouped) {
-      await imapDeleteMessages(config, folder, uids);
-    }
+    await invoke("provider_permanent_delete", {
+      accountId: this.accountId,
+      threadId,
+    });
   }
 
   async markRead(
-    _threadId: string,
+    threadId: string,
     _messageIds: string[],
     read: boolean,
   ): Promise<void> {
-    const config = await this.getImapConfig();
-    const grouped = this.groupByFolder(_messageIds);
-
-    for (const [folder, uids] of grouped) {
-      await imapSetFlags(config, folder, uids, ["Seen"], read);
-    }
+    await invoke("provider_mark_read", {
+      accountId: this.accountId,
+      threadId,
+      read,
+    });
   }
 
   async star(
-    _threadId: string,
+    threadId: string,
     _messageIds: string[],
     starred: boolean,
   ): Promise<void> {
-    const config = await this.getImapConfig();
-    const grouped = this.groupByFolder(_messageIds);
-
-    for (const [folder, uids] of grouped) {
-      await imapSetFlags(config, folder, uids, ["Flagged"], starred);
-    }
+    await invoke("provider_star", {
+      accountId: this.accountId,
+      threadId,
+      starred,
+    });
   }
 
   async spam(
-    _threadId: string,
+    threadId: string,
     _messageIds: string[],
     isSpam: boolean,
   ): Promise<void> {
-    const config = await this.getImapConfig();
-    const grouped = this.groupByFolder(_messageIds);
-    const junkFolder =
-      (await findSpecialFolder(this.accountId, "\\Junk")) ?? "Junk";
-    const destination = isSpam ? junkFolder : "INBOX";
-
-    for (const [folder, uids] of grouped) {
-      if (folder === destination) continue;
-      await imapMoveMessages(config, folder, uids, destination);
-    }
+    await invoke("provider_spam", {
+      accountId: this.accountId,
+      threadId,
+      isSpam,
+    });
   }
 
   async moveToFolder(
-    _threadId: string,
+    threadId: string,
     _messageIds: string[],
     folderPath: string,
   ): Promise<void> {
-    const config = await this.getImapConfig();
-    const grouped = this.groupByFolder(_messageIds);
-
-    for (const [folder, uids] of grouped) {
-      if (folder === folderPath) continue;
-      await imapMoveMessages(config, folder, uids, folderPath);
-    }
+    await invoke("provider_move_to_folder", {
+      accountId: this.accountId,
+      threadId,
+      folderId: folderPath,
+    });
   }
 
-  async addLabel(_threadId: string, _labelId: string): Promise<void> {
-    // IMAP doesn't have native labels — this would require COPY to another folder
-    // or using IMAP keywords (if server supports them).
-    // For now, this is a no-op with a warning.
-    console.warn(
-      "IMAP does not natively support labels. " +
-        "Use moveToFolder() to move messages between folders instead.",
-    );
+  async addLabel(threadId: string, labelId: string): Promise<void> {
+    await invoke("provider_add_tag", {
+      accountId: this.accountId,
+      threadId,
+      tagId: labelId,
+    });
   }
 
-  async removeLabel(_threadId: string, _labelId: string): Promise<void> {
-    // IMAP doesn't have native labels.
-    console.warn(
-      "IMAP does not natively support labels. " +
-        "Use moveToFolder() to move messages between folders instead.",
-    );
+  async removeLabel(threadId: string, labelId: string): Promise<void> {
+    await invoke("provider_remove_tag", {
+      accountId: this.accountId,
+      threadId,
+      tagId: labelId,
+    });
   }
-
-  // ---- Send/Draft operations ----
 
   async sendMessage(
     rawBase64Url: string,
-    _threadId?: string,
+    threadId?: string,
   ): Promise<{ id: string }> {
-    const smtpConfig = await this.getSmtpConfig();
-    const result = await smtpSendEmail(smtpConfig, rawBase64Url);
-    if (!result.success) {
-      throw new Error(`SMTP send failed: ${result.message}`);
-    }
-
-    const messageId = `imap-sent-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
-    // Copy sent message to Sent folder on IMAP server.
-    // The message will appear locally after the next delta sync (≤60s).
-    try {
-      const imapConfig = await this.getImapConfig();
-      const sentFolder =
-        (await findSpecialFolder(this.accountId, "\\Sent")) ?? "Sent";
-      await imapAppendMessage(imapConfig, sentFolder, rawBase64Url, "(\\Seen)");
-    } catch (err) {
-      // Non-fatal: message was sent successfully, just not copied to server Sent folder
-      console.error(
-        "[IMAP] Failed to copy sent message to Sent folder on server:",
-        err,
-      );
-    }
-
-    return { id: messageId };
+    const id = await invoke<string>("provider_send_email", {
+      accountId: this.accountId,
+      rawBase64url: rawBase64Url,
+      threadId: threadId ?? null,
+    });
+    return { id };
   }
 
   async createDraft(
     rawBase64Url: string,
-    _threadId?: string,
+    threadId?: string,
   ): Promise<{ draftId: string }> {
-    const config = await this.getImapConfig();
-    const draftsFolder =
-      (await findSpecialFolder(this.accountId, "\\Drafts")) ?? "Drafts";
-
-    await imapAppendMessage(config, draftsFolder, rawBase64Url, "(\\Draft)");
-
-    // IMAP APPEND does not return the new UID, so generate a pseudo draft ID
-    const draftId = `imap-draft-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const draftId = await invoke<string>("provider_create_draft", {
+      accountId: this.accountId,
+      rawBase64url: rawBase64Url,
+      threadId: threadId ?? null,
+    });
     return { draftId };
   }
 
   async updateDraft(
     draftId: string,
     rawBase64Url: string,
-    _threadId?: string,
+    threadId?: string,
   ): Promise<{ draftId: string }> {
-    // Delete the old draft first, then create a new one
-    try {
-      await this.deleteDraft(draftId);
-    } catch {
-      // Old draft may already be gone; continue with creating the new one
-    }
-
-    return this.createDraft(rawBase64Url, _threadId);
+    const updatedDraftId = await invoke<string>("provider_update_draft", {
+      accountId: this.accountId,
+      draftId,
+      rawBase64url: rawBase64Url,
+      threadId: threadId ?? null,
+    });
+    return { draftId: updatedDraftId };
   }
 
   async deleteDraft(draftId: string): Promise<void> {
-    // Try to parse draft ID to get folder + UID info
-    // Draft IDs from IMAP are in message ID format: imap-{accountId}-{folder}-{uid}
-    const { folder, uid } = this.parseImapMessageId(draftId);
-
-    if (uid !== null && folder) {
-      const config = await this.getImapConfig();
-      await imapDeleteMessages(config, folder, [uid]);
-    } else {
-      // Generated draft IDs (imap-draft-...) can't be mapped back to a server UID
-      console.warn(
-        `Draft ${draftId} has a generated ID and cannot be deleted from server. ` +
-          "It will be cleaned up on next sync.",
-      );
-    }
+    await invoke("provider_delete_draft", {
+      accountId: this.accountId,
+      draftId,
+    });
   }
-
-  // ---- Connection ----
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
     return invoke<ProviderTestResult>("provider_test_connection", {
@@ -410,53 +328,16 @@ export class ImapSmtpProvider implements EmailProvider {
     });
   }
 
-  // ---- Helpers ----
-
-  /**
-   * Parse IMAP message IDs and group UIDs by folder.
-   * Message ID format: imap-{accountId}-{folder}-{uid}
-   * Since accountId can contain hyphens, we strip the known prefix
-   * "imap-{this.accountId}-" and then parse the remaining "{folder}-{uid}".
-   */
-  private groupByFolder(messageIds: string[]): Map<string, number[]> {
-    const grouped = new Map<string, number[]>();
+  private parseImapMessageId(messageId: string): {
+    folder: string | null;
+    uid: number | null;
+  } {
     const prefix = `imap-${this.accountId}-`;
-
-    for (const messageId of messageIds) {
-      const { folder, uid } = this.parseImapMessageId(messageId, prefix);
-
-      if (uid === null || !folder) {
-        console.warn(`Skipping invalid IMAP message ID: ${messageId}`);
-        continue;
-      }
-
-      const existing = grouped.get(folder);
-      if (existing) {
-        existing.push(uid);
-      } else {
-        grouped.set(folder, [uid]);
-      }
-    }
-
-    return grouped;
-  }
-
-  /**
-   * Parse an IMAP message ID into folder and uid.
-   * Returns { folder, uid } or { folder: null, uid: null } if invalid.
-   */
-  private parseImapMessageId(
-    messageId: string,
-    prefix?: string,
-  ): { folder: string | null; uid: number | null } {
-    const p = prefix ?? `imap-${this.accountId}-`;
-
-    if (!messageId.startsWith(p)) {
+    if (!messageId.startsWith(prefix)) {
       return { folder: null, uid: null };
     }
 
-    // After stripping prefix, remainder is "{folder}-{uid}"
-    const remainder = messageId.slice(p.length);
+    const remainder = messageId.slice(prefix.length);
     const lastDash = remainder.lastIndexOf("-");
     if (lastDash === -1) {
       return { folder: null, uid: null };
@@ -464,7 +345,6 @@ export class ImapSmtpProvider implements EmailProvider {
 
     const folder = remainder.slice(0, lastDash);
     const uid = parseInt(remainder.slice(lastDash + 1), 10);
-
     if (!folder || Number.isNaN(uid)) {
       return { folder: null, uid: null };
     }
