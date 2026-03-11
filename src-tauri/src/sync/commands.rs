@@ -4,6 +4,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
+use crate::db::queries::row_to_message;
 use crate::filters::commands::filters_apply_to_new_message_ids_impl;
 use crate::gmail::client::GmailState;
 use crate::graph::client::GraphState;
@@ -16,7 +17,7 @@ use crate::smart_labels::commands::smart_labels_apply_criteria_to_new_message_id
 
 use super::{SyncQueueState, SyncState};
 use super::config;
-use super::types::{ImapSyncResult, SyncStatusEvent};
+use super::types::{ImapSyncResult, NotificationCandidate, SyncStatusEvent};
 
 const SYNC_INTERVAL_MS: u64 = 60_000;
 
@@ -163,6 +164,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                     affected_thread_ids: None,
                     is_delta: None,
                     criteria_smart_label_matches: None,
+                    notifications_to_queue: None,
                 },
             );
             return;
@@ -180,6 +182,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
             affected_thread_ids: None,
             is_delta: None,
             criteria_smart_label_matches: None,
+            notifications_to_queue: None,
         },
     );
 
@@ -195,6 +198,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 affected_thread_ids: Some(Vec::new()),
                 is_delta: Some(false),
                 criteria_smart_label_matches: Some(Vec::new()),
+                notifications_to_queue: Some(Vec::new()),
             },
         );
         return;
@@ -255,6 +259,21 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                     }
                 };
 
+            let notifications_to_queue = match evaluate_notifications(
+                &db,
+                account_id,
+                &result.new_inbox_message_ids,
+                result.was_delta && !result.fell_back_to_initial,
+            )
+            .await
+            {
+                Ok(candidates) => candidates,
+                Err(error) => {
+                    log::warn!("Failed to evaluate notifications for {account_id}: {error}");
+                    Vec::new()
+                }
+            };
+
             emit_sync_status(
                 app,
                 SyncStatusEvent {
@@ -266,6 +285,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                     affected_thread_ids: Some(result.affected_thread_ids),
                     is_delta: Some(result.was_delta && !result.fell_back_to_initial),
                     criteria_smart_label_matches: Some(criteria_smart_label_matches),
+                    notifications_to_queue: Some(notifications_to_queue),
                 },
             )
         }
@@ -280,9 +300,186 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 affected_thread_ids: None,
                 is_delta: None,
                 criteria_smart_label_matches: None,
+                notifications_to_queue: None,
             },
         ),
     }
+}
+
+async fn evaluate_notifications(
+    db: &DbState,
+    account_id: &str,
+    message_ids: &[String],
+    is_delta: bool,
+) -> Result<Vec<NotificationCandidate>, String> {
+    if !is_delta || message_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let account_id = account_id.to_string();
+    let message_ids_vec = message_ids.to_vec();
+    db.with_conn(move |conn| {
+        let notifications_enabled: Option<String> = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'notifications_enabled'",
+                [],
+                |row| row.get(0),
+            )
+            .ok();
+        if notifications_enabled.as_deref() == Some("false") {
+            return Ok(Vec::new());
+        }
+
+        let smart_notifications = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'smart_notifications'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+            .unwrap_or_else(|| "true".to_string())
+            == "true";
+        let notify_categories = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'notify_categories'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+            .unwrap_or_else(|| "Primary".to_string());
+        let allowed_categories: std::collections::HashSet<String> = notify_categories
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        let vip_senders: std::collections::HashSet<String> = {
+            let mut stmt = conn
+                .prepare("SELECT email_address FROM notification_vips WHERE account_id = ?1")
+                .map_err(|e| e.to_string())?;
+            stmt.query_map(rusqlite::params![account_id], |row| row.get::<_, String>(0))
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|email| email.to_lowercase().trim().to_string())
+                .collect()
+        };
+
+        let muted_thread_ids: std::collections::HashSet<String> = {
+            let mut stmt = conn
+                .prepare("SELECT id FROM threads WHERE account_id = ?1 AND is_muted = 1")
+                .map_err(|e| e.to_string())?;
+            stmt.query_map(rusqlite::params![account_id], |row| row.get::<_, String>(0))
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .collect()
+        };
+
+        let mut messages = Vec::new();
+        for chunk in message_ids_vec.chunks(500) {
+            let placeholders: String = chunk
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("?{}", i + 2))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql =
+                format!("SELECT * FROM messages WHERE account_id = ?1 AND id IN ({placeholders})");
+            let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+            param_values.push(Box::new(account_id.clone()));
+            for id in chunk {
+                param_values.push(Box::new(id.clone()));
+            }
+            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                param_values.iter().map(AsRef::as_ref).collect();
+            let rows = stmt
+                .query_map(param_refs.as_slice(), row_to_message)
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            messages.extend(rows);
+        }
+
+        let thread_ids: Vec<String> = messages.iter().map(|msg| msg.thread_id.clone()).collect();
+        let mut category_by_thread: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for chunk in thread_ids.chunks(100) {
+            if chunk.is_empty() {
+                continue;
+            }
+            let placeholders: String = chunk
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("?{}", i + 2))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT thread_id, category FROM thread_categories WHERE account_id = ?1 AND thread_id IN ({placeholders})"
+            );
+            let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+            param_values.push(Box::new(account_id.clone()));
+            for id in chunk {
+                param_values.push(Box::new(id.clone()));
+            }
+            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                param_values.iter().map(AsRef::as_ref).collect();
+            let rows = stmt
+                .query_map(param_refs.as_slice(), |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            category_by_thread.extend(rows);
+        }
+
+        let mut candidates = Vec::new();
+        for msg in messages {
+            if muted_thread_ids.contains(&msg.thread_id) {
+                continue;
+            }
+            let from_address_normalized = msg
+                .from_address
+                .as_ref()
+                .map(|email| email.to_lowercase().trim().to_string());
+            let should_notify = if !smart_notifications {
+                true
+            } else if let Some(from_address) = from_address_normalized.as_ref() {
+                if vip_senders.contains(from_address) {
+                    true
+                } else {
+                    let category = category_by_thread
+                        .get(&msg.thread_id)
+                        .map(String::as_str)
+                        .unwrap_or("Primary");
+                    allowed_categories.contains(category)
+                }
+            } else {
+                let category = category_by_thread
+                    .get(&msg.thread_id)
+                    .map(String::as_str)
+                    .unwrap_or("Primary");
+                allowed_categories.contains(category)
+            };
+
+            if should_notify {
+                candidates.push(NotificationCandidate {
+                    thread_id: msg.thread_id,
+                    from_name: msg.from_name,
+                    from_address: msg.from_address,
+                    subject: msg.subject,
+                });
+            }
+        }
+
+        Ok(candidates)
+    })
+    .await
 }
 
 fn emit_sync_status(app: &AppHandle, event: SyncStatusEvent) {

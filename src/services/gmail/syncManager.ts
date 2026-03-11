@@ -11,7 +11,6 @@ import {
   updateCalendarSyncToken,
   upsertCalendar,
 } from "../db/calendars";
-import { getSetting } from "../db/settings";
 export interface SyncProgress {
   phase: "labels" | "threads" | "messages" | "done";
   current: number;
@@ -21,14 +20,7 @@ export interface SyncProgress {
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { categorizeNewThreads } from "@/services/ai/categorizationManager";
-import { getMessagesByIds } from "@/services/db/messages";
-import { getVipSenders } from "@/services/db/notificationVips";
-import { getThreadCategory } from "@/services/db/threadCategories";
-import { getMutedThreadIds } from "@/services/db/threads";
-import {
-  queueNewEmailNotification,
-  shouldNotifyForMessage,
-} from "@/services/notifications/notificationManager";
+import { queueNewEmailNotification } from "@/services/notifications/notificationManager";
 import { applySmartLabelsToNewMessageIds } from "@/services/smartLabels/smartLabelManager";
 
 /**
@@ -40,8 +32,13 @@ interface PostSyncHooksInput {
   accountId: string;
   newInboxEmailIds: string[];
   affectedThreadIds: string[];
-  isDelta: boolean;
   criteriaSmartLabelMatches?: { threadId: string; labelIds: string[] }[];
+  notificationsToQueue?: {
+    threadId: string;
+    fromName?: string | null;
+    fromAddress?: string | null;
+    subject?: string | null;
+  }[];
 }
 
 async function runPostSyncHooks(input: PostSyncHooksInput): Promise<void> {
@@ -49,8 +46,8 @@ async function runPostSyncHooks(input: PostSyncHooksInput): Promise<void> {
     accountId,
     newInboxEmailIds,
     affectedThreadIds,
-    isDelta,
     criteriaSmartLabelMatches = [],
+    notificationsToQueue = [],
   } = input;
 
   if (newInboxEmailIds.length > 0) {
@@ -61,46 +58,18 @@ async function runPostSyncHooks(input: PostSyncHooksInput): Promise<void> {
       criteriaSmartLabelMatches,
     ).catch((err) => console.error("[syncManager] Smart label error:", err));
 
-    // Notifications — only on delta sync (not initial)
-    if (isDelta) {
-      try {
-        const smartNotifSetting = await getSetting("smart_notifications");
-        const smartEnabled = smartNotifSetting === "true";
-        const notifCatSetting =
-          (await getSetting("notify_categories")) ?? "Primary";
-        const allowedCategories = new Set(
-          notifCatSetting.split(",").map((s) => s.trim()),
+    try {
+      for (const candidate of notificationsToQueue) {
+        queueNewEmailNotification(
+          candidate.fromName ?? candidate.fromAddress ?? "Unknown",
+          candidate.subject ?? "",
+          candidate.threadId,
+          accountId,
+          candidate.fromAddress ?? undefined,
         );
-        const vipSenders = smartEnabled
-          ? await getVipSenders(accountId)
-          : new Set<string>();
-        const mutedThreadIds = await getMutedThreadIds(accountId);
-
-        const newMsgs = await getMessagesByIds(accountId, newInboxEmailIds);
-        for (const msg of newMsgs) {
-          if (mutedThreadIds.has(msg.thread_id)) continue;
-          const category = await getThreadCategory(accountId, msg.thread_id);
-          if (
-            shouldNotifyForMessage(
-              smartEnabled,
-              allowedCategories,
-              vipSenders,
-              category,
-              msg.from_address ?? undefined,
-            )
-          ) {
-            queueNewEmailNotification(
-              msg.from_name ?? msg.from_address ?? "Unknown",
-              msg.subject ?? "",
-              msg.thread_id,
-              accountId,
-              msg.from_address ?? undefined,
-            );
-          }
-        }
-      } catch (err) {
-        console.error("[syncManager] Notification dispatch failed:", err);
       }
+    } catch (err) {
+      console.error("[syncManager] Notification dispatch failed:", err);
     }
   }
 
@@ -151,6 +120,14 @@ interface SyncStatusEvent {
   affectedThreadIds?: string[] | null;
   isDelta?: boolean | null;
   criteriaSmartLabelMatches?: { threadId: string; labelIds: string[] }[] | null;
+  notificationsToQueue?:
+    | {
+        threadId: string;
+        fromName?: string | null;
+        fromAddress?: string | null;
+        subject?: string | null;
+      }[]
+    | null;
 }
 
 let syncListenersPromise: Promise<void> | null = null;
@@ -250,8 +227,8 @@ async function handleSyncStatusEvent(event: SyncStatusEvent): Promise<void> {
     accountId: event.accountId,
     newInboxEmailIds: event.newInboxMessageIds ?? [],
     affectedThreadIds: event.affectedThreadIds ?? [],
-    isDelta: event.isDelta === true,
     criteriaSmartLabelMatches: event.criteriaSmartLabelMatches ?? [],
+    notificationsToQueue: event.notificationsToQueue ?? [],
   });
 
   statusCallback?.(event.accountId, "done");
