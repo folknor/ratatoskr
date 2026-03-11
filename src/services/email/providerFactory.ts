@@ -1,5 +1,6 @@
 import { getAccountBasicInfo } from "../accounts/basicInfo";
 import { GmailApiProvider } from "./gmailProvider";
+import { GraphProvider } from "./graphProvider";
 import { ImapSmtpProvider } from "./imapSmtpProvider";
 import { JmapProvider } from "./jmapProvider";
 import { RustBackedProviderBase } from "./rustBackedProvider";
@@ -10,6 +11,7 @@ const providerConstructors = {
   gmail_api: GmailApiProvider,
   imap: ImapSmtpProvider,
   jmap: JmapProvider,
+  graph: GraphProvider,
 } as const;
 
 /**
@@ -24,9 +26,6 @@ export async function getEmailProvider(
 
   const account = await getAccountBasicInfo(accountId);
   if (!account) throw new Error(`Account ${accountId} not found`);
-  if (account.provider === "graph") {
-    throw new Error("Graph accounts use Rust provider commands directly");
-  }
   const ProviderCtor =
     providerConstructors[
       account.provider as keyof typeof providerConstructors

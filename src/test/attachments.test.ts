@@ -87,7 +87,7 @@ describe("attachments DB service", () => {
         filename: "test.pdf",
         mimeType: "application/pdf",
         size: 1024,
-        gmailAttachmentId: "gid-1",
+        attachmentId: "gid-1",
         contentId: null,
         isInline: false,
       });
@@ -99,7 +99,7 @@ describe("attachments DB service", () => {
         filename: "test.pdf",
         mimeType: "application/pdf",
         size: 1024,
-        gmailAttachmentId: "gid-1",
+        attachmentId: "gid-1",
         contentId: null,
         isInline: false,
       });

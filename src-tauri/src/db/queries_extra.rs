@@ -2717,7 +2717,7 @@ pub async fn db_upsert_attachment(
     filename: Option<String>,
     mime_type: Option<String>,
     size: Option<i64>,
-    gmail_attachment_id: Option<String>,
+    attachment_id: Option<String>,
     content_id: Option<String>,
     is_inline: bool,
 ) -> Result<(), String> {
@@ -2731,7 +2731,7 @@ pub async fn db_upsert_attachment(
                    gmail_attachment_id = ?7, content_id = ?8, is_inline = ?9",
                 params![
                     id, message_id, account_id, filename, mime_type, size,
-                    gmail_attachment_id, content_id, i64::from(is_inline),
+                    attachment_id, content_id, i64::from(is_inline),
                 ],
             )
             .map_err(|e| e.to_string())?;

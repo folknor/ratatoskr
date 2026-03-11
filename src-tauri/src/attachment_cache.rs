@@ -59,25 +59,29 @@ pub fn encode_base64(data: &[u8]) -> String {
 
 // ── DB helpers (run inside with_conn closures) ──────────────
 
-/// Look up an attachment's cache info by message + provider attachment ID.
+/// Look up an attachment's cache info by message + provider-agnostic remote attachment ID.
+///
+/// The attachments table still carries legacy per-provider columns, so this
+/// helper checks both the Gmail and IMAP ID slots under the hood.
 pub fn find_cache_info(
     conn: &rusqlite::Connection,
     account_id: &str,
     message_id: &str,
-    provider_att_id: &str,
+    remote_attachment_id: &str,
 ) -> Result<Option<CacheInfo>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT id, content_hash, mime_type \
              FROM attachments \
-             WHERE account_id = ?1 AND message_id = ?2 AND gmail_attachment_id = ?3 \
+             WHERE account_id = ?1 AND message_id = ?2 \
+               AND (gmail_attachment_id = ?3 OR imap_part_id = ?3) \
              LIMIT 1",
         )
         .map_err(|e| format!("prepare cache lookup: {e}"))?;
 
     let mut rows = stmt
         .query_map(
-            rusqlite::params![account_id, message_id, provider_att_id],
+            rusqlite::params![account_id, message_id, remote_attachment_id],
             |row| {
                 Ok(CacheInfo {
                     id: row.get(0)?,

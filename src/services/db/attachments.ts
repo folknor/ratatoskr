@@ -21,7 +21,7 @@ export async function upsertAttachment(att: {
   filename: string | null;
   mimeType: string | null;
   size: number | null;
-  gmailAttachmentId: string | null;
+  attachmentId: string | null;
   contentId: string | null;
   isInline: boolean;
 }): Promise<void> {
@@ -32,7 +32,7 @@ export async function upsertAttachment(att: {
     filename: att.filename,
     mimeType: att.mimeType,
     size: att.size,
-    gmailAttachmentId: att.gmailAttachmentId,
+    attachmentId: att.attachmentId,
     contentId: att.contentId,
     isInline: att.isInline,
   });
