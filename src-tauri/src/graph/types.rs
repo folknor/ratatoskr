@@ -75,6 +75,18 @@ pub struct GraphMailFolder {
     pub child_folder_count: Option<i32>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphCreateFolderRequest {
+    pub display_name: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphRenameFolderRequest {
+    pub display_name: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphAttachment {

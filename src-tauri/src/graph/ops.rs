@@ -10,7 +10,10 @@ use crate::provider::types::{
 
 use super::client::GraphClient;
 use super::folder_mapper::FolderMap;
-use super::types::{GraphAttachment, GraphFlagInput, GraphMessagePatch, GraphMoveRequest};
+use super::types::{
+    GraphAttachment, GraphCreateFolderRequest, GraphFlagInput, GraphMailFolder,
+    GraphMessagePatch, GraphMoveRequest, GraphRenameFolderRequest,
+};
 
 /// Graph implementation of the provider operations trait.
 pub struct GraphOps {
@@ -281,37 +284,71 @@ impl ProviderOps for GraphOps {
 
     async fn create_folder(
         &self,
-        _ctx: &ProviderCtx<'_>,
-        _name: &str,
-        _parent_id: Option<&str>,
+        ctx: &ProviderCtx<'_>,
+        name: &str,
+        parent_id: Option<&str>,
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
     ) -> Result<ProviderFolderMutation, String> {
-        Err(
-            "Folder creation is not supported for Graph accounts via the current provider API."
-                .to_string(),
-        )
+        let parent_graph_id = match parent_id {
+            Some(parent_id) => Some(resolve_graph_folder_id(&self.client, ctx, parent_id, false).await?),
+            None => None,
+        };
+        let body = GraphCreateFolderRequest {
+            display_name: name.to_string(),
+        };
+        let created: GraphMailFolder = if let Some(parent_graph_id) = parent_graph_id {
+            let enc_parent_id = urlencoding::encode(&parent_graph_id);
+            self.client
+                .post(&format!("/me/mailFolders/{enc_parent_id}/childFolders"), &body, ctx.db)
+                .await?
+        } else {
+            self.client.post("/me/mailFolders", &body, ctx.db).await?
+        };
+
+        refresh_folder_map(&self.client, ctx).await?;
+        Ok(graph_folder_to_mutation(&created))
     }
 
     async fn rename_folder(
         &self,
-        _ctx: &ProviderCtx<'_>,
-        _folder_id: &str,
-        _new_name: &str,
+        ctx: &ProviderCtx<'_>,
+        folder_id: &str,
+        new_name: &str,
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
     ) -> Result<ProviderFolderMutation, String> {
-        Err(
-            "Folder rename is not supported for Graph accounts via the current provider API."
-                .to_string(),
-        )
+        let graph_folder_id = resolve_graph_folder_id(&self.client, ctx, folder_id, true).await?;
+        let enc_folder_id = urlencoding::encode(&graph_folder_id);
+        let body = GraphRenameFolderRequest {
+            display_name: new_name.to_string(),
+        };
+        self.client
+            .patch(&format!("/me/mailFolders/{enc_folder_id}"), &body, ctx.db)
+            .await?;
+
+        refresh_folder_map(&self.client, ctx).await?;
+        Ok(ProviderFolderMutation {
+            id: folder_id.to_string(),
+            name: new_name.to_string(),
+            path: new_name.to_string(),
+            folder_type: "user".to_string(),
+            special_use: None,
+            delimiter: Some("/".to_string()),
+            color_bg: None,
+            color_fg: None,
+        })
     }
 
-    async fn delete_folder(&self, _ctx: &ProviderCtx<'_>, _folder_id: &str) -> Result<(), String> {
-        Err(
-            "Folder deletion is not supported for Graph accounts via the current provider API."
-                .to_string(),
-        )
+    async fn delete_folder(&self, ctx: &ProviderCtx<'_>, folder_id: &str) -> Result<(), String> {
+        let graph_folder_id = resolve_graph_folder_id(&self.client, ctx, folder_id, true).await?;
+        let enc_folder_id = urlencoding::encode(&graph_folder_id);
+        self.client
+            .delete(&format!("/me/mailFolders/{enc_folder_id}"), ctx.db)
+            .await?;
+        delete_folder_delta_token(ctx, &graph_folder_id).await?;
+        refresh_folder_map(&self.client, ctx).await?;
+        Ok(())
     }
 
     async fn test_connection(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, String> {
@@ -355,6 +392,71 @@ async fn require_folder_map(client: &GraphClient) -> Result<FolderMap, String> {
         .folder_map()
         .await
         .ok_or_else(|| "Folder map not initialized — run sync first".to_string())
+}
+
+async fn get_folder_map(client: &GraphClient, ctx: &ProviderCtx<'_>) -> Result<FolderMap, String> {
+    if let Some(map) = client.folder_map().await {
+        return Ok(map);
+    }
+    refresh_folder_map(client, ctx).await
+}
+
+async fn refresh_folder_map(client: &GraphClient, ctx: &ProviderCtx<'_>) -> Result<FolderMap, String> {
+    let map = super::sync::sync_folders_public(client, ctx).await?;
+    client.set_folder_map(map.clone()).await;
+    client.set_folder_map_synced().await;
+    Ok(map)
+}
+
+async fn resolve_graph_folder_id(
+    client: &GraphClient,
+    ctx: &ProviderCtx<'_>,
+    folder_id: &str,
+    require_user_folder: bool,
+) -> Result<String, String> {
+    let folder_map = get_folder_map(client, ctx).await?;
+    let graph_folder_id = folder_map
+        .resolve_folder_id(folder_id)
+        .unwrap_or(folder_id)
+        .to_string();
+
+    if require_user_folder {
+        if let Some(mapping) = folder_map.get_by_folder_id(&graph_folder_id) {
+            if mapping.label_type == "system" {
+                return Err("System folders cannot be renamed or deleted for Graph accounts.".to_string());
+            }
+        }
+    }
+
+    Ok(graph_folder_id)
+}
+
+fn graph_folder_to_mutation(folder: &GraphMailFolder) -> ProviderFolderMutation {
+    ProviderFolderMutation {
+        id: format!("graph-{}", folder.id),
+        name: folder.display_name.clone(),
+        path: folder.display_name.clone(),
+        folder_type: "user".to_string(),
+        special_use: None,
+        delimiter: Some("/".to_string()),
+        color_bg: None,
+        color_fg: None,
+    }
+}
+
+async fn delete_folder_delta_token(ctx: &ProviderCtx<'_>, folder_id: &str) -> Result<(), String> {
+    let account_id = ctx.account_id.to_string();
+    let folder_id = folder_id.to_string();
+    ctx.db
+        .with_conn(move |conn| {
+            conn.execute(
+                "DELETE FROM graph_folder_delta_tokens WHERE account_id = ?1 AND folder_id = ?2",
+                rusqlite::params![account_id, folder_id],
+            )
+            .map_err(|e| format!("delete graph folder delta token: {e}"))?;
+            Ok(())
+        })
+        .await
 }
 
 /// Query local DB for message IDs belonging to a thread.
