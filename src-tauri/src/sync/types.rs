@@ -45,6 +45,7 @@ pub struct SyncStatusEvent {
     /// "syncing" | "done" | "error"
     pub status: String,
     pub error: Option<String>,
+    pub should_sync_calendar: Option<bool>,
     pub new_inbox_message_ids: Option<Vec<String>>,
     pub affected_thread_ids: Option<Vec<String>>,
     pub is_delta: Option<bool>,

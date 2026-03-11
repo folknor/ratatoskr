@@ -163,6 +163,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                     provider: "unknown".to_string(),
                     status: "error".to_string(),
                     error: Some(error),
+                    should_sync_calendar: None,
                     new_inbox_message_ids: None,
                     affected_thread_ids: None,
                     is_delta: None,
@@ -184,6 +185,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
             provider: provider.clone(),
             status: "syncing".to_string(),
             error: None,
+            should_sync_calendar: None,
             new_inbox_message_ids: None,
             affected_thread_ids: None,
             is_delta: None,
@@ -203,6 +205,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 provider,
                 status: "done".to_string(),
                 error: None,
+                should_sync_calendar: Some(true),
                 new_inbox_message_ids: Some(Vec::new()),
                 affected_thread_ids: Some(Vec::new()),
                 is_delta: Some(false),
@@ -230,6 +233,25 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
     .await
     {
         Ok(result) => {
+            let should_sync_calendar = match db
+                .with_conn({
+                    let account_id = account_id.to_string();
+                    move |conn| {
+                        let account = config::get_account(conn, &account_id)?;
+                        Ok(config::should_sync_calendar(&account))
+                    }
+                })
+                .await
+            {
+                Ok(value) => value,
+                Err(error) => {
+                    log::warn!(
+                        "Failed to determine calendar follow-up for {account_id}: {error}"
+                    );
+                    false
+                }
+            };
+
             if let Err(error) = filters_apply_to_new_message_ids_impl(
                 account_id,
                 &result.new_inbox_message_ids,
@@ -323,6 +345,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                     provider,
                     status: "done".to_string(),
                     error: None,
+                    should_sync_calendar: Some(should_sync_calendar),
                     new_inbox_message_ids: Some(result.new_inbox_message_ids),
                     affected_thread_ids: Some(result.affected_thread_ids),
                     is_delta: Some(result.was_delta && !result.fell_back_to_initial),
@@ -341,6 +364,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 provider,
                 status: "error".to_string(),
                 error: Some(error),
+                should_sync_calendar: None,
                 new_inbox_message_ids: None,
                 affected_thread_ids: None,
                 is_delta: None,

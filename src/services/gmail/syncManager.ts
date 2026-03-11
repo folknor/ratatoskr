@@ -1,7 +1,4 @@
-import {
-  getCalendarProvider,
-  hasCalendarSupport,
-} from "../calendar/providerFactory";
+import { getCalendarProvider } from "../calendar/providerFactory";
 import {
   deleteEventByRemoteId,
   upsertCalendarEvent,
@@ -33,7 +30,6 @@ import type {
 /**
  * Shared post-sync hooks: apply filters, smart labels, notifications, and AI categorization.
  * Called after every successful sync (Gmail, JMAP, Graph, IMAP).
- * Notifications are only dispatched on delta syncs (`isDelta = true`).
  */
 interface PostSyncHooksInput {
   accountId: string;
@@ -130,9 +126,9 @@ interface SyncStatusEvent {
   provider: string;
   status: "syncing" | "done" | "error";
   error?: string | null;
+  shouldSyncCalendar?: boolean | null;
   newInboxMessageIds?: string[] | null;
   affectedThreadIds?: string[] | null;
-  isDelta?: boolean | null;
   criteriaSmartLabelMatches?: { threadId: string; labelIds: string[] }[] | null;
   notificationsToQueue?:
     | {
@@ -235,8 +231,10 @@ async function handleSyncStatusEvent(event: SyncStatusEvent): Promise<void> {
   }
 
   if (event.provider === "caldav") {
-    await syncCalendarForAccount(event.accountId);
     statusCallback?.(event.accountId, "done");
+    if (event.shouldSyncCalendar === true) {
+      await syncCalendarForAccount(event.accountId);
+    }
     return;
   }
 
@@ -253,12 +251,14 @@ async function handleSyncStatusEvent(event: SyncStatusEvent): Promise<void> {
 
   statusCallback?.(event.accountId, "done");
 
-  syncCalendarForAccount(event.accountId).catch((err) => {
-    console.warn(
-      `[syncManager] Calendar sync error for ${event.accountId}:`,
-      err,
-    );
-  });
+  if (event.shouldSyncCalendar === true) {
+    syncCalendarForAccount(event.accountId).catch((err) => {
+      console.warn(
+        `[syncManager] Calendar sync error for ${event.accountId}:`,
+        err,
+      );
+    });
+  }
 }
 
 /**
@@ -267,9 +267,6 @@ async function handleSyncStatusEvent(event: SyncStatusEvent): Promise<void> {
  */
 async function syncCalendarForAccount(accountId: string): Promise<void> {
   try {
-    const supported = await hasCalendarSupport(accountId);
-    if (!supported) return;
-
     const provider = await getCalendarProvider(accountId);
 
     // Discover/update calendars
