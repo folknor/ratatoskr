@@ -483,10 +483,6 @@ pub async fn account_create_graph_via_oauth(
     )
     .await?;
 
-    if oauth.user_info.email.is_empty() {
-        return Err("Could not determine email address from Microsoft account".to_string());
-    }
-
     let account_id = uuid::Uuid::new_v4().to_string();
     let expires_at = chrono::Utc::now().timestamp() + oauth.tokens.expires_in as i64;
     let access_token = encrypt_value(gmail.encryption_key(), &oauth.tokens.access_token)?;
@@ -634,7 +630,9 @@ async fn perform_google_oauth(
     let code_verifier = random_base64url(32)?;
     let code_challenge = sha256_base64url(code_verifier.as_bytes());
     let state = random_base64url(32)?;
-    let redirect_uri = format!("http://127.0.0.1:{OAUTH_CALLBACK_PORT}");
+
+    let (listener, actual_port) = crate::oauth::bind_oauth_listener(OAUTH_CALLBACK_PORT).await?;
+    let redirect_uri = format!("http://127.0.0.1:{actual_port}");
     let auth_url = format!(
         "{GOOGLE_AUTH_URL}?client_id={}&redirect_uri={}&response_type=code&scope={}&code_challenge={}&code_challenge_method=S256&access_type=offline&prompt=consent&state={}",
         urlencoding::encode(&client_id),
@@ -644,11 +642,10 @@ async fn perform_google_oauth(
         urlencoding::encode(&state),
     );
 
-    let server = crate::oauth::start_oauth_server(OAUTH_CALLBACK_PORT, state);
     app.opener()
         .open_url(auth_url, None::<&str>)
         .map_err(|e| format!("Failed to open browser for OAuth: {e}"))?;
-    let result = server.await?;
+    let result = crate::oauth::await_oauth_callback(listener, &state).await?;
 
     let tokens = exchange_google_code(
         &result.code,
@@ -676,7 +673,9 @@ async fn perform_provider_oauth(
         .as_deref()
         .map(|verifier| sha256_base64url(verifier.as_bytes()));
     let state = random_base64url(32)?;
-    let redirect_uri = format!("http://localhost:{OAUTH_CALLBACK_PORT}");
+
+    let (listener, actual_port) = crate::oauth::bind_oauth_listener(OAUTH_CALLBACK_PORT).await?;
+    let redirect_uri = format!("http://127.0.0.1:{actual_port}");
     let mut params = vec![
         ("client_id".to_string(), request.client_id.clone()),
         ("redirect_uri".to_string(), redirect_uri.clone()),
@@ -705,11 +704,10 @@ async fn perform_provider_oauth(
             .join("&")
     );
 
-    let server = crate::oauth::start_oauth_server(OAUTH_CALLBACK_PORT, state);
     app.opener()
         .open_url(auth_url, None::<&str>)
         .map_err(|e| format!("Failed to open browser for OAuth: {e}"))?;
-    let result = server.await?;
+    let result = crate::oauth::await_oauth_callback(listener, &state).await?;
 
     let tokens = crate::oauth::oauth_exchange_token(
         request.token_url.clone(),
@@ -843,12 +841,20 @@ async fn fetch_provider_userinfo(
         .await
         .map_err(|e| format!("Failed to parse provider user info: {e}"))?;
 
+    let email = data
+        .get("email")
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            format!(
+                "Provider {} did not return an email address",
+                request.provider_id
+            )
+        })?
+        .to_string();
+
     Ok(OAuthProviderUserInfo {
-        email: data
-            .get("email")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
+        email,
         name: data
             .get("name")
             .and_then(serde_json::Value::as_str)
@@ -879,17 +885,20 @@ fn parse_microsoft_userinfo(
     let claims = serde_json::from_slice::<serde_json::Value>(&decoded)
         .map_err(|e| format!("Failed to parse ID token payload: {e}"))?;
 
+    let email = claims
+        .get("email")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            claims
+                .get("preferred_username")
+                .and_then(serde_json::Value::as_str)
+        })
+        .filter(|s| !s.is_empty())
+        .ok_or("Microsoft ID token did not contain an email or preferred_username claim")?
+        .to_string();
+
     Ok(OAuthProviderUserInfo {
-        email: claims
-            .get("email")
-            .and_then(serde_json::Value::as_str)
-            .or_else(|| {
-                claims
-                    .get("preferred_username")
-                    .and_then(serde_json::Value::as_str)
-            })
-            .unwrap_or_default()
-            .to_string(),
+        email,
         name: claims
             .get("name")
             .and_then(serde_json::Value::as_str)

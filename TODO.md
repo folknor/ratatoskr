@@ -2,7 +2,6 @@
 
 ## Bugs (High Priority)
 
-- [ ] **Auto-updater should check local permissions** — Don't show update prompts if the user lacks write access to the app installation directory (e.g., installed system-wide without admin rights). The update would fail anyway — detect this upfront and either hide the prompt or show a helpful message. *(not started)*
 
 - [x] **App not killed when main window is closed** — Fixed: `on_window_event` now calls `app_handle().exit(0)` instead of hiding to tray.
 
@@ -46,9 +45,9 @@
 
 ## OAuth & Account Creation
 
-- [ ] **OAuth port fallback mismatch** — `src-tauri/src/account_commands.rs` and `perform_provider_oauth` — All three OAuth flows (Gmail, IMAP, Graph) hardcode `redirect_uri` as port 17248, but `start_oauth_server` falls back to 17249–17251 if 17248 is taken. Token exchange will fail with `redirect_uri_mismatch` on fallback. Additionally, Gmail uses `127.0.0.1` while IMAP/Graph use `localhost` — some providers treat these differently. The server should return the actual bound port, and all flows should use a consistent host. *(BUG)*
+- [x] **OAuth port fallback mismatch** — Fixed: `bind_oauth_listener` binds first and returns the actual port; both `perform_google_oauth` and `perform_provider_oauth` build `redirect_uri` from the actual bound port. All flows now use `127.0.0.1` consistently. *(BUG)*
 
-- [ ] **Empty email on account creation** — `fetch_provider_userinfo` and `parse_microsoft_userinfo` use `.unwrap_or_default()` for email. If the provider doesn't return an email, the account is created with `email: ""`. Should be an error instead. *(BUG)*
+- [x] **Empty email on account creation** — Fixed: `fetch_provider_userinfo` and `parse_microsoft_userinfo` now return `Err` if email is empty or missing; the redundant empty-email check in `account_create_graph_via_oauth` was removed. *(BUG)*
 
 - [ ] **No rollback if Graph client init or profile fetch fails** — `account_create_graph_via_oauth` inserts the account row first, then calls `GraphClient::from_account` and `get_json("/me")`. If either fails, the account row remains orphaned in the DB. Should delete the account on post-insert failure. *(MED)*
 

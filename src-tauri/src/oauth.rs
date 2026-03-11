@@ -8,16 +8,15 @@ use tokio::net::TcpListener;
 pub struct OAuthResult {
     pub code: String,
     pub state: String,
+    pub actual_port: u16,
 }
 
-/// Binds to a localhost port for OAuth callback. Tries the given port first,
-/// falls back to nearby ports if taken.
-#[tauri::command]
-pub async fn start_oauth_server(port: u16, state: String) -> Result<OAuthResult, String> {
-    // Try the requested port, then a few alternatives
+/// Bind to a localhost port for an OAuth callback. Tries the given port first,
+/// falls back to nearby ports if taken. Returns the listener and the port it bound to.
+pub async fn bind_oauth_listener(port: u16) -> Result<(TcpListener, u16), String> {
     let mut listener = None;
     for p in [port, port + 1, port + 2, port + 3] {
-        match TcpListener::bind(format!("localhost:{p}")).await {
+        match TcpListener::bind(format!("127.0.0.1:{p}")).await {
             Ok(l) => {
                 listener = Some(l);
                 break;
@@ -26,37 +25,42 @@ pub async fn start_oauth_server(port: u16, state: String) -> Result<OAuthResult,
         }
     }
 
-    let listener = listener.ok_or("Failed to bind to any port")?;
+    let listener = listener.ok_or("Failed to bind to any port for OAuth callback")?;
     let actual_port = listener
         .local_addr()
-        .map_err(|e| format!("Failed to get addr: {e}"))?
+        .map_err(|e| format!("Failed to get OAuth listener addr: {e}"))?
         .port();
 
     log::info!("OAuth callback server listening on port {actual_port}");
+    Ok((listener, actual_port))
+}
 
-    // Wait for exactly one connection (the redirect from Google) with 5-minute timeout
+/// Wait for a single OAuth callback on an already-bound listener. Validates the
+/// CSRF state, sends a success page, and returns the auth code.
+pub async fn await_oauth_callback(listener: TcpListener, state: &str) -> Result<OAuthResult, String> {
+    let actual_port = listener
+        .local_addr()
+        .map_err(|e| format!("Failed to get OAuth listener addr: {e}"))?
+        .port();
+
     let (mut stream, _) = tokio::time::timeout(Duration::from_secs(300), listener.accept())
         .await
         .map_err(|_| "OAuth timed out — please try again".to_string())?
-        .map_err(|e| format!("Failed to accept: {e}"))?;
+        .map_err(|e| format!("Failed to accept OAuth connection: {e}"))?;
 
-    // Read the HTTP request
     let mut buf = vec![0u8; 4096];
     let n = stream
         .read(&mut buf)
         .await
-        .map_err(|e| format!("Failed to read: {e}"))?;
+        .map_err(|e| format!("Failed to read OAuth request: {e}"))?;
     let request = String::from_utf8_lossy(&buf[..n]);
 
-    // Extract query string from GET request line
     let (code, returned_state) = parse_auth_code_and_state(&request)?;
 
-    // Validate state parameter (CSRF protection)
     if returned_state != state {
         return Err("OAuth state mismatch — possible CSRF attack".to_string());
     }
 
-    // Send a success response to the browser
     let html = r#"<!DOCTYPE html>
 <html>
 <head><title>Ratatoskr</title></head>
@@ -76,12 +80,19 @@ pub async fn start_oauth_server(port: u16, state: String) -> Result<OAuthResult,
     _ = stream.write_all(response.as_bytes()).await;
     _ = stream.flush().await;
 
-    drop(listener);
-
     Ok(OAuthResult {
         code,
         state: returned_state,
+        actual_port,
     })
+}
+
+/// Binds to a localhost port for OAuth callback. Tries the given port first,
+/// falls back to nearby ports if taken.
+#[tauri::command]
+pub async fn start_oauth_server(port: u16, state: String) -> Result<OAuthResult, String> {
+    let (listener, _) = bind_oauth_listener(port).await?;
+    await_oauth_callback(listener, &state).await
 }
 
 fn parse_auth_code_and_state(request: &str) -> Result<(String, String), String> {
