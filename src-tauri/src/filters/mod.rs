@@ -56,6 +56,30 @@ pub struct FilterResult {
 
 /// Check if a message matches the given filter criteria (AND logic, case-insensitive substring).
 pub fn message_matches_filter(message: &FilterableMessage, criteria: &FilterCriteria) -> bool {
+    if !message_matches_filter_without_body(message, criteria) {
+        return false;
+    }
+
+    if let Some(ref body) = criteria.body {
+        let body_str = format!(
+            "{} {}",
+            message.body_text.as_deref().unwrap_or(""),
+            message.body_html.as_deref().unwrap_or("")
+        )
+        .to_lowercase();
+        if !body_str.contains(&body.to_lowercase()) {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Check whether a message matches the non-body parts of a filter.
+pub fn message_matches_filter_without_body(
+    message: &FilterableMessage,
+    criteria: &FilterCriteria,
+) -> bool {
     if let Some(ref from) = criteria.from {
         let from_str = format!(
             "{} {}",
@@ -78,18 +102,6 @@ pub fn message_matches_filter(message: &FilterableMessage, criteria: &FilterCrit
     if let Some(ref subject) = criteria.subject {
         let subject_str = message.subject.as_deref().unwrap_or("").to_lowercase();
         if !subject_str.contains(&subject.to_lowercase()) {
-            return false;
-        }
-    }
-
-    if let Some(ref body) = criteria.body {
-        let body_str = format!(
-            "{} {}",
-            message.body_text.as_deref().unwrap_or(""),
-            message.body_html.as_deref().unwrap_or("")
-        )
-        .to_lowercase();
-        if !body_str.contains(&body.to_lowercase()) {
             return false;
         }
     }
@@ -266,6 +278,20 @@ mod tests {
             has_attachment: None,
         };
         assert!(message_matches_filter(&msg, &criteria));
+    }
+
+    #[test]
+    fn matches_non_body_parts_without_hydration() {
+        let msg = make_msg();
+        let criteria = FilterCriteria {
+            from: Some("alice".to_string()),
+            to: None,
+            subject: Some("project".to_string()),
+            body: Some("missing".to_string()),
+            has_attachment: None,
+        };
+        assert!(message_matches_filter_without_body(&msg, &criteria));
+        assert!(!message_matches_filter(&msg, &criteria));
     }
 
     #[test]

@@ -15,7 +15,10 @@ use crate::provider::router::{get_ops, get_provider_type};
 use crate::provider::types::ProviderCtx;
 use crate::search::SearchState;
 
-use super::{FilterActions, FilterCriteria, FilterResult, FilterableMessage, evaluate_filters};
+use super::{
+    FilterActions, FilterCriteria, FilterResult, FilterableMessage, evaluate_filters,
+    message_matches_filter_without_body,
+};
 
 const POST_SYNC_ACTION_CONCURRENCY: usize = 8;
 
@@ -68,8 +71,12 @@ pub(crate) async fn filters_apply_to_new_message_ids_impl(
         return Ok(());
     }
 
-    let needs_body = filters.iter().any(|(criteria, _)| criteria.body.is_some());
-    let messages = load_filterable_messages(db, body_store, account_id, message_ids, needs_body).await?;
+    let body_criteria: Vec<FilterCriteria> = filters
+        .iter()
+        .filter_map(|(criteria, _)| criteria.body.as_ref().map(|_| criteria.clone()))
+        .collect();
+    let messages =
+        load_filterable_messages(db, body_store, account_id, message_ids, &body_criteria).await?;
     filters_apply_to_messages_impl(
         account_id,
         provider,
@@ -171,7 +178,7 @@ pub(crate) async fn load_filterable_messages(
     body_store: &BodyStoreState,
     account_id: &str,
     message_ids: &[String],
-    needs_body: bool,
+    body_criteria: &[FilterCriteria],
 ) -> Result<Vec<FilterableMessage>, String> {
     let account_id = account_id.to_string();
     let ids = message_ids.to_vec();
@@ -222,8 +229,16 @@ pub(crate) async fn load_filterable_messages(
         })
         .await?;
 
-    if needs_body {
-        let body_ids: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
+    if !body_criteria.is_empty() {
+        let body_ids: Vec<String> = rows
+            .iter()
+            .filter(|row| {
+                body_criteria
+                    .iter()
+                    .any(|criteria| message_matches_filter_without_body(&row.message, criteria))
+            })
+            .map(|row| row.id.clone())
+            .collect();
         let bodies = body_store.get_batch(body_ids).await?;
         let body_map: HashMap<String, crate::body_store::MessageBody> = bodies
             .into_iter()

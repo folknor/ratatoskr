@@ -49,8 +49,12 @@ pub(crate) async fn smart_labels_apply_criteria_to_new_message_ids_impl(
         return Ok(Vec::new());
     }
 
-    let needs_body = rules.iter().any(|(_, criteria)| criteria.body.is_some());
-    let messages = load_filterable_messages(db, body_store, account_id, message_ids, needs_body).await?;
+    let body_criteria: Vec<FilterCriteria> = rules
+        .iter()
+        .filter_map(|(_, criteria)| criteria.body.as_ref().map(|_| criteria.clone()))
+        .collect();
+    let messages =
+        load_filterable_messages(db, body_store, account_id, message_ids, &body_criteria).await?;
     smart_labels_apply_criteria_to_messages_impl(
         account_id,
         provider,

@@ -612,12 +612,17 @@ async fn load_post_sync_messages(
         return Ok(Vec::new());
     }
 
-    let needs_body = filters.iter().any(|(criteria, _)| criteria.body.is_some())
-        || criteria_rules
-            .iter()
-            .any(|(_, criteria)| criteria.body.is_some());
+    let body_criteria: Vec<crate::filters::FilterCriteria> = filters
+        .iter()
+        .filter_map(|(criteria, _)| criteria.body.as_ref().map(|_| criteria.clone()))
+        .chain(
+            criteria_rules
+                .iter()
+                .filter_map(|(_, criteria)| criteria.body.as_ref().map(|_| criteria.clone())),
+        )
+        .collect();
 
-    load_filterable_messages(db, body_store, account_id, message_ids, needs_body).await
+    load_filterable_messages(db, body_store, account_id, message_ids, &body_criteria).await
 }
 
 fn emit_sync_status(app: &AppHandle, event: SyncStatusEvent) {
