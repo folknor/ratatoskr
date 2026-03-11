@@ -25,6 +25,7 @@ impl ProviderOps for GmailOps {
             days_back,
             ctx.db,
             ctx.body_store,
+            ctx.inline_images,
             ctx.search,
             ctx.app_handle,
         )
@@ -42,6 +43,7 @@ impl ProviderOps for GmailOps {
             ctx.account_id,
             ctx.db,
             ctx.body_store,
+            ctx.inline_images,
             ctx.search,
             ctx.app_handle,
         )

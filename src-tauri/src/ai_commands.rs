@@ -12,6 +12,11 @@ const DEFAULT_GEMINI_MODEL: &str = "gemini-2.5-flash-preview-05-20";
 const DEFAULT_OLLAMA_MODEL: &str = "llama3.2";
 const DEFAULT_COPILOT_MODEL: &str = "openai/gpt-4o-mini";
 
+fn shared_ai_http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(reqwest::Client::new)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiCompleteRequest {
@@ -112,57 +117,92 @@ pub(crate) async fn complete_ai_impl(
 }
 
 async fn load_ai_config(db: &DbState, encryption_key: &[u8; 32]) -> Result<AiConfig, String> {
-    let provider_name = read_plain_setting(db, "ai_provider")
-        .await?
+    let settings = load_ai_settings_map(db).await?;
+    let provider_name = settings
+        .get("ai_provider")
+        .cloned()
         .unwrap_or_else(|| "claude".to_string());
     let provider_name = normalize_provider_name(&provider_name).to_string();
+    let plain_setting = |key: &str| settings.get(key).cloned();
+    let secure_setting = |key: &str| {
+        settings.get(key).map(|raw| {
+            if is_encrypted(raw) {
+                decrypt_value(encryption_key, raw).unwrap_or_else(|_| raw.clone())
+            } else {
+                raw.clone()
+            }
+        })
+    };
 
     match provider_name.as_str() {
         "openai" => Ok(AiConfig {
             provider: AiProviderKind::OpenAi,
-            model: read_plain_setting(db, "openai_model")
-                .await?
-                .unwrap_or_else(|| DEFAULT_OPENAI_MODEL.to_string()),
-            api_key: read_secure_setting(db, "openai_api_key", encryption_key).await?,
+            model: plain_setting("openai_model").unwrap_or_else(|| DEFAULT_OPENAI_MODEL.to_string()),
+            api_key: secure_setting("openai_api_key"),
             server_url: None,
         }),
         "gemini" => Ok(AiConfig {
             provider: AiProviderKind::Gemini,
-            model: read_plain_setting(db, "gemini_model")
-                .await?
-                .unwrap_or_else(|| DEFAULT_GEMINI_MODEL.to_string()),
-            api_key: read_secure_setting(db, "gemini_api_key", encryption_key).await?,
+            model: plain_setting("gemini_model").unwrap_or_else(|| DEFAULT_GEMINI_MODEL.to_string()),
+            api_key: secure_setting("gemini_api_key"),
             server_url: None,
         }),
         "ollama" => Ok(AiConfig {
             provider: AiProviderKind::Ollama,
-            model: read_plain_setting(db, "ollama_model")
-                .await?
-                .unwrap_or_else(|| DEFAULT_OLLAMA_MODEL.to_string()),
+            model: plain_setting("ollama_model").unwrap_or_else(|| DEFAULT_OLLAMA_MODEL.to_string()),
             api_key: None,
             server_url: Some(
-                read_plain_setting(db, "ollama_server_url")
-                    .await?
+                plain_setting("ollama_server_url")
                     .unwrap_or_else(|| "http://localhost:11434".to_string()),
             ),
         }),
         "copilot" => Ok(AiConfig {
             provider: AiProviderKind::Copilot,
-            model: read_plain_setting(db, "copilot_model")
-                .await?
+            model: plain_setting("copilot_model")
                 .unwrap_or_else(|| DEFAULT_COPILOT_MODEL.to_string()),
-            api_key: read_secure_setting(db, "copilot_api_key", encryption_key).await?,
+            api_key: secure_setting("copilot_api_key"),
             server_url: None,
         }),
         _ => Ok(AiConfig {
             provider: AiProviderKind::Claude,
-            model: read_plain_setting(db, "claude_model")
-                .await?
-                .unwrap_or_else(|| DEFAULT_CLAUDE_MODEL.to_string()),
-            api_key: read_secure_setting(db, "claude_api_key", encryption_key).await?,
+            model: plain_setting("claude_model").unwrap_or_else(|| DEFAULT_CLAUDE_MODEL.to_string()),
+            api_key: secure_setting("claude_api_key"),
             server_url: None,
         }),
     }
+}
+
+async fn load_ai_settings_map(
+    db: &DbState,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    db.with_conn(|conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT key, value
+                 FROM settings
+                 WHERE key IN (
+                   'ai_provider',
+                   'claude_model',
+                   'claude_api_key',
+                   'openai_model',
+                   'openai_api_key',
+                   'gemini_model',
+                   'gemini_api_key',
+                   'ollama_model',
+                   'ollama_server_url',
+                   'copilot_model',
+                   'copilot_api_key'
+                 )",
+            )
+            .map_err(|e| format!("prepare AI settings query: {e}"))?;
+        stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| format!("query AI settings: {e}"))?
+        .collect::<Result<std::collections::HashMap<_, _>, _>>()
+        .map_err(|e| format!("collect AI settings: {e}"))
+    })
+    .await
 }
 
 fn normalize_provider_name(value: &str) -> &'static str {
@@ -188,20 +228,6 @@ async fn read_plain_setting(db: &DbState, key: &str) -> Result<Option<String>, S
     })
     .await
     .map_err(|e| format!("Failed to read setting {key}: {e}"))
-}
-
-async fn read_secure_setting(
-    db: &DbState,
-    key: &str,
-    encryption_key: &[u8; 32],
-) -> Result<Option<String>, String> {
-    Ok(read_plain_setting(db, key).await?.map(|raw| {
-        if is_encrypted(&raw) {
-            decrypt_value(encryption_key, &raw).unwrap_or(raw)
-        } else {
-            raw
-        }
-    }))
 }
 
 async fn complete_with_config(
@@ -285,7 +311,7 @@ async fn complete_openai_like(
         ]
     });
 
-    let response = reqwest::Client::new()
+    let response = shared_ai_http_client()
         .post(url)
         .headers(headers)
         .json(&body)
@@ -327,7 +353,7 @@ async fn complete_claude(config: &AiConfig, request: &AiCompleteRequest) -> Resu
         "messages": [{ "role": "user", "content": request.user_content }],
     });
 
-    let response = reqwest::Client::new()
+    let response = shared_ai_http_client()
         .post("https://api.anthropic.com/v1/messages")
         .headers(headers)
         .json(&body)
@@ -377,7 +403,7 @@ async fn complete_gemini(config: &AiConfig, request: &AiCompleteRequest) -> Resu
         }
     });
 
-    let response = reqwest::Client::new()
+    let response = shared_ai_http_client()
         .post(&url)
         .header(CONTENT_TYPE, "application/json")
         .json(&body)
@@ -420,10 +446,20 @@ fn map_reqwest_error(error: reqwest::Error) -> String {
 }
 
 fn map_http_error(status: u16, body: &str) -> String {
-    if status == 401 || body.to_lowercase().contains("authentication") {
+    let lower = body.to_lowercase();
+    if status == 401
+        || status == 403
+        || lower.contains("invalid api key")
+        || lower.contains("unauthorized")
+        || lower.contains("authentication")
+    {
         return "AUTH_ERROR: Invalid API key".to_string();
     }
-    if status == 429 || body.to_lowercase().contains("rate") {
+    if status == 429
+        || lower.contains("rate limit")
+        || lower.contains("too many requests")
+        || lower.contains("resource exhausted")
+    {
         return "RATE_LIMITED: Rate limited — please try again shortly".to_string();
     }
     format!("NETWORK_ERROR: HTTP {status} {body}")

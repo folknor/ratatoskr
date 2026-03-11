@@ -10,8 +10,11 @@ use crate::db::DbState;
 use crate::gmail::client::{GmailClient, GmailState};
 use crate::graph::client::{GraphClient, GraphState};
 use crate::graph::types::GraphProfile;
+use crate::inline_image_store::InlineImageStoreState;
+use crate::jmap::client::JmapState;
 use crate::provider::crypto::{AppCryptoState, decrypt_value, encrypt_value, is_encrypted};
 use crate::sync::config;
+use crate::{attachment_cache, body_store::BodyStoreState};
 
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
@@ -354,6 +357,114 @@ pub async fn account_list_basic_info(
         .map_err(|e| format!("collect account list: {e}"))
     })
     .await
+}
+
+#[tauri::command]
+pub async fn account_delete(
+    app_handle: AppHandle,
+    db: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
+    jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
+    body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
+    account_id: String,
+) -> Result<(), String> {
+    let (message_ids, cached_files, inline_hashes) = db
+        .with_conn({
+            let account_id = account_id.clone();
+            move |conn| {
+                let message_ids = {
+                    let mut stmt = conn
+                        .prepare("SELECT id FROM messages WHERE account_id = ?1")
+                        .map_err(|e| format!("prepare account message query: {e}"))?;
+                    stmt.query_map(rusqlite::params![&account_id], |row| row.get::<_, String>(0))
+                        .map_err(|e| format!("query account message ids: {e}"))?
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|e| format!("collect account message ids: {e}"))?
+                };
+
+                let cached_files = {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT DISTINCT local_path, content_hash
+                             FROM attachments
+                             WHERE account_id = ?1
+                               AND cached_at IS NOT NULL
+                               AND local_path IS NOT NULL
+                               AND content_hash IS NOT NULL",
+                        )
+                        .map_err(|e| format!("prepare account cached attachment query: {e}"))?;
+                    stmt.query_map(rusqlite::params![&account_id], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })
+                    .map_err(|e| format!("query account cached attachments: {e}"))?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| format!("collect account cached attachments: {e}"))?
+                };
+
+                let inline_hashes = {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT DISTINCT content_hash
+                             FROM attachments
+                             WHERE account_id = ?1
+                               AND is_inline = 1
+                               AND content_hash IS NOT NULL",
+                        )
+                        .map_err(|e| format!("prepare account inline hash query: {e}"))?;
+                    stmt.query_map(rusqlite::params![&account_id], |row| row.get::<_, String>(0))
+                        .map_err(|e| format!("query account inline hashes: {e}"))?
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|e| format!("collect account inline hashes: {e}"))?
+                };
+
+                Ok((message_ids, cached_files, inline_hashes))
+            }
+        })
+        .await?;
+
+    body_store.delete(message_ids).await?;
+
+    db.with_conn({
+        let account_id = account_id.clone();
+        move |conn| {
+            conn.execute(
+                "DELETE FROM accounts WHERE id = ?1",
+                rusqlite::params![account_id],
+            )
+            .map_err(|e| format!("delete account: {e}"))?;
+            Ok(())
+        }
+    })
+    .await?;
+
+    for (local_path, content_hash) in cached_files {
+        let remaining_refs: i64 = db
+            .with_conn({
+                let content_hash = content_hash.clone();
+                move |conn| {
+                    conn.query_row(
+                        "SELECT COUNT(*) FROM attachments
+                         WHERE content_hash = ?1 AND cached_at IS NOT NULL",
+                        rusqlite::params![content_hash],
+                        |row| row.get(0),
+                    )
+                    .map_err(|e| format!("count remaining cached attachment refs: {e}"))
+                }
+            })
+            .await?;
+        if remaining_refs == 0 {
+            let _ = attachment_cache::remove_cached_relative(&app_handle, &local_path);
+        }
+    }
+
+    inline_images.delete_unreferenced(&db, inline_hashes).await?;
+
+    gmail.remove(&account_id).await;
+    jmap.remove(&account_id).await;
+    graph.remove(&account_id).await;
+    Ok(())
 }
 
 #[tauri::command]

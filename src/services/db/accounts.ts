@@ -165,7 +165,7 @@ export async function updateAccountAllTokens(
 }
 
 export async function deleteAccount(id: string): Promise<void> {
-  return invoke("db_delete_account", { id });
+  return invoke("account_delete", { accountId: id });
 }
 
 export async function insertImapAccount(account: {

@@ -8,6 +8,8 @@ use rusqlite::{Connection, params};
 /// Max size for inline images stored in the SQLite blob store (256 KB).
 /// Anything larger falls through to the file-based cache.
 pub const MAX_INLINE_SIZE: usize = 256 * 1024;
+/// Cap the inline image store so signature/logo blobs do not grow forever.
+pub const MAX_INLINE_STORE_BYTES: u64 = 128 * 1024 * 1024;
 
 /// Separate SQLite database for small inline images (signatures, logos).
 ///
@@ -96,7 +98,9 @@ impl InlineImageStoreState {
             .map_err(|e| format!("inline image put: {e}"))?;
             Ok(())
         })
-        .await
+        .await?;
+        self.prune_to_size(MAX_INLINE_STORE_BYTES).await?;
+        Ok(())
     }
 
     /// Store a batch of inline images in a single transaction.
@@ -130,7 +134,9 @@ impl InlineImageStoreState {
                 .map_err(|e| format!("inline image commit: {e}"))?;
             Ok(())
         })
-        .await
+        .await?;
+        self.prune_to_size(MAX_INLINE_STORE_BYTES).await?;
+        Ok(())
     }
 
     /// Retrieve an inline image by content hash.
@@ -185,6 +191,132 @@ impl InlineImageStoreState {
             Ok(deleted as u64)
         })
         .await
+    }
+
+    /// Delete specific inline image blobs by content hash.
+    pub async fn delete_hashes(&self, content_hashes: Vec<String>) -> Result<u64, String> {
+        if content_hashes.is_empty() {
+            return Ok(0);
+        }
+
+        self.with_conn(move |conn| {
+            let tx = conn
+                .unchecked_transaction()
+                .map_err(|e| format!("inline image delete tx: {e}"))?;
+            let mut deleted = 0u64;
+
+            for hash in content_hashes {
+                let count = tx
+                    .execute(
+                        "DELETE FROM inline_images WHERE content_hash = ?1",
+                        params![hash],
+                    )
+                    .map_err(|e| format!("delete inline image: {e}"))?;
+                #[allow(clippy::cast_sign_loss)]
+                {
+                    deleted += count as u64;
+                }
+            }
+
+            tx.commit()
+                .map_err(|e| format!("inline image delete commit: {e}"))?;
+            Ok(deleted)
+        })
+        .await
+    }
+
+    /// Evict oldest inline image blobs until the store fits under `max_bytes`.
+    pub async fn prune_to_size(&self, max_bytes: u64) -> Result<u64, String> {
+        self.with_conn(move |conn| {
+            let total_bytes: i64 = conn
+                .query_row(
+                    "SELECT COALESCE(SUM(size), 0) FROM inline_images",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|e| format!("inline image total size: {e}"))?;
+
+            #[allow(clippy::cast_possible_wrap)]
+            let max_bytes_i64 = max_bytes as i64;
+            if total_bytes <= max_bytes_i64 {
+                return Ok(0);
+            }
+
+            let excess = total_bytes - max_bytes_i64;
+            let mut stmt = conn
+                .prepare(
+                    "SELECT content_hash, size
+                     FROM inline_images
+                     ORDER BY created_at ASC
+                     LIMIT 512",
+                )
+                .map_err(|e| format!("prepare inline image prune query: {e}"))?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })
+                .map_err(|e| format!("query inline images for pruning: {e}"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("collect inline images for pruning: {e}"))?;
+
+            let tx = conn
+                .unchecked_transaction()
+                .map_err(|e| format!("inline image prune tx: {e}"))?;
+            let mut freed = 0i64;
+            let mut deleted = 0u64;
+            for (content_hash, size) in rows {
+                if freed >= excess {
+                    break;
+                }
+                let count = tx
+                    .execute(
+                        "DELETE FROM inline_images WHERE content_hash = ?1",
+                        params![content_hash],
+                    )
+                    .map_err(|e| format!("delete inline image during prune: {e}"))?;
+                freed += size.max(0);
+                #[allow(clippy::cast_sign_loss)]
+                {
+                    deleted += count as u64;
+                }
+            }
+            tx.commit()
+                .map_err(|e| format!("inline image prune commit: {e}"))?;
+            Ok(deleted)
+        })
+        .await
+    }
+
+    /// Delete inline image blobs that are no longer referenced by any attachment row.
+    pub async fn delete_unreferenced(
+        &self,
+        db: &crate::db::DbState,
+        content_hashes: Vec<String>,
+    ) -> Result<u64, String> {
+        if content_hashes.is_empty() {
+            return Ok(0);
+        }
+
+        let mut orphaned = Vec::new();
+        for content_hash in content_hashes {
+            let hash_for_query = content_hash.clone();
+            let remaining_refs: i64 = db
+                .with_conn(move |conn| {
+                    conn.query_row(
+                        "SELECT COUNT(*) FROM attachments
+                         WHERE is_inline = 1 AND content_hash = ?1",
+                        params![hash_for_query],
+                        |row| row.get(0),
+                    )
+                    .map_err(|e| format!("count inline image refs: {e}"))
+                })
+                .await?;
+            if remaining_refs == 0 {
+                orphaned.push(content_hash);
+            }
+        }
+
+        self.delete_hashes(orphaned).await
     }
 }
 

@@ -7,6 +7,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::body_store::{BodyStoreState, MessageBody};
 use crate::db::DbState;
+use crate::inline_image_store::{InlineImage, InlineImageStoreState};
 use crate::search::{SearchDocument, SearchState};
 
 use super::client::GmailClient;
@@ -41,6 +42,7 @@ struct SyncCtx<'a> {
     account_id: &'a str,
     db: &'a DbState,
     body_store: &'a BodyStoreState,
+    inline_images: &'a InlineImageStoreState,
     search: &'a SearchState,
     app_handle: &'a AppHandle,
 }
@@ -57,6 +59,7 @@ pub async fn gmail_initial_sync(
     days_back: i64,
     db: &DbState,
     body_store: &BodyStoreState,
+    inline_images: &InlineImageStoreState,
     search: &SearchState,
     app_handle: &AppHandle,
 ) -> Result<(), String> {
@@ -65,6 +68,7 @@ pub async fn gmail_initial_sync(
         account_id,
         db,
         body_store,
+        inline_images,
         search,
         app_handle,
     };
@@ -107,6 +111,7 @@ pub async fn gmail_delta_sync(
     account_id: &str,
     db: &DbState,
     body_store: &BodyStoreState,
+    inline_images: &InlineImageStoreState,
     search: &SearchState,
     app_handle: &AppHandle,
 ) -> Result<GmailSyncResult, String> {
@@ -115,6 +120,7 @@ pub async fn gmail_delta_sync(
         account_id,
         db,
         body_store,
+        inline_images,
         search,
         app_handle,
     };
@@ -298,6 +304,7 @@ async fn run_fetch_worker(
             ctx.account_id,
             ctx.db,
             ctx.body_store,
+            ctx.inline_images,
             ctx.search,
         )
         .await
@@ -315,6 +322,7 @@ async fn process_single_thread(
     account_id: &str,
     db: &DbState,
     body_store: &BodyStoreState,
+    inline_images: &InlineImageStoreState,
     search: &SearchState,
 ) -> Result<String, String> {
     let thread = client.get_thread(thread_id, "full", db).await?;
@@ -336,6 +344,9 @@ async fn process_single_thread(
 
     // Body store writes
     store_bodies(body_store, &parsed).await;
+
+    // Inline image cache writes
+    store_inline_images(inline_images, &parsed).await;
 
     // Search index writes
     index_messages(search, account_id, &parsed).await;
@@ -600,11 +611,11 @@ fn upsert_attachments(
             tx.execute(
                 "INSERT INTO attachments \
                  (id, message_id, account_id, filename, mime_type, size, \
-                  gmail_attachment_id, content_id, is_inline) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
+                  gmail_attachment_id, content_hash, content_id, is_inline) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
                  ON CONFLICT(id) DO UPDATE SET \
                    filename = ?4, mime_type = ?5, size = ?6, \
-                   gmail_attachment_id = ?7, content_id = ?8, is_inline = ?9",
+                   gmail_attachment_id = ?7, content_hash = ?8, content_id = ?9, is_inline = ?10",
                 rusqlite::params![
                     att_id,
                     msg.id,
@@ -613,6 +624,7 @@ fn upsert_attachments(
                     att.mime_type,
                     att.size,
                     att.gmail_attachment_id,
+                    att.content_hash,
                     att.content_id,
                     att.is_inline,
                 ],
@@ -644,6 +656,33 @@ async fn store_bodies(body_store: &BodyStoreState, messages: &[ParsedGmailMessag
 
     if let Err(e) = body_store.put_batch(bodies).await {
         log::warn!("Failed to store Gmail bodies: {e}");
+    }
+}
+
+async fn store_inline_images(
+    inline_images: &InlineImageStoreState,
+    messages: &[ParsedGmailMessage],
+) {
+    let images: Vec<InlineImage> = messages
+        .iter()
+        .flat_map(|m| &m.attachments)
+        .filter_map(|att| {
+            let data = att.inline_data.as_ref()?;
+            let hash = att.content_hash.as_ref()?;
+            Some(InlineImage {
+                content_hash: hash.clone(),
+                data: data.clone(),
+                mime_type: att.mime_type.clone(),
+            })
+        })
+        .collect();
+
+    if images.is_empty() {
+        return;
+    }
+
+    if let Err(e) = inline_images.put_batch(images).await {
+        log::warn!("Failed to store Gmail inline images: {e}");
     }
 }
 

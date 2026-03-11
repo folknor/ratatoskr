@@ -23,7 +23,7 @@ import {
   insertImapAccount,
   updateAccountSyncState,
   updateAccountTokens,
-} from "./accounts";
+} from "@/services/db/accounts";
 
 describe("accounts", () => {
   beforeEach(() => {
@@ -235,8 +235,8 @@ describe("accounts", () => {
 
       await deleteAccount("acc-1");
 
-      expect(mockInvoke).toHaveBeenCalledWith("db_delete_account", {
-        id: "acc-1",
+      expect(mockInvoke).toHaveBeenCalledWith("account_delete", {
+        accountId: "acc-1",
       });
     });
   });

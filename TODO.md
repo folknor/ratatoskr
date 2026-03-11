@@ -36,23 +36,13 @@
 
 ## AI Service
 
-- [ ] **`reqwest::Client::new()` on every AI completion call** — Each `complete_*` function creates a fresh client. AI is called frequently during post-sync hooks, meaning repeated TLS handshakes to the same API endpoints. *(MED)*
-
-- [ ] **`map_http_error` rate limit detection is overly broad** — `body.to_lowercase().contains("rate")` matches any response body mentioning "rate" in any context. Will misclassify unrelated errors as `RATE_LIMITED`. *(MED)*
-
-- [ ] **`load_ai_config` makes multiple sequential DB reads** — Provider name, model, and API key each go through separate `with_conn` round-trips. Could fetch all AI-related settings in a single query. *(LOW)*
-
 - [ ] **Duplicate `callAi` wrapper in two services** — Both `aiService.ts` and `writingStyleService.ts` define identical `callAi(systemPrompt, userContent)` wrappers. Callers could use `completeAi` directly or share a single wrapper. *(LOW)*
 
 ---
 
 ## Cache & Inline Images
 
-- [ ] **Cache eviction not implemented** — `remove_cached` and `count_by_hash` in `attachment_cache.rs` exist but nothing calls them. The UI has a cache size setting but no code enforces it. Old cached attachments accumulate forever on disk.
-
-- [ ] **Inline image store has no size limit** — `inline_images.db` grows unbounded. No eviction, no cap. Heavy users with lots of signature images will see this grow indefinitely.
-
-- [ ] **Non-IMAP providers don't get inline images during sync** — IMAP stores inline images proactively at sync time. Gmail/JMAP/Graph only store them reactively on first fetch via `cache_after_fetch`. First render of every email with inline images is slow for those providers.
+- [ ] **JMAP/Graph don't get inline images during sync** — IMAP and Gmail now store small inline images proactively at sync time. JMAP/Graph still store them reactively on first fetch via `cache_after_fetch`. First render of every email with inline images is still slow for those providers.
 
 ---
 

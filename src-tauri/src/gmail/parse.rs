@@ -12,6 +12,9 @@ pub struct ParsedAttachment {
     pub mime_type: String,
     pub size: i64,
     pub gmail_attachment_id: String,
+    pub content_hash: Option<String>,
+    #[serde(skip_serializing)]
+    pub inline_data: Option<Vec<u8>>,
     pub content_id: Option<String>,
     pub is_inline: bool,
 }
@@ -187,6 +190,10 @@ fn dedup_by_attachment_id(attachments: Vec<ParsedAttachment>) -> Vec<ParsedAttac
                 if att.is_inline {
                     existing.is_inline = true;
                 }
+                if existing.inline_data.is_none() && att.inline_data.is_some() {
+                    existing.inline_data.clone_from(&att.inline_data);
+                    existing.content_hash.clone_from(&att.content_hash);
+                }
             })
             .or_insert(att);
     }
@@ -215,6 +222,17 @@ fn collect_attachments(part: &GmailPayload, results: &mut Vec<ParsedAttachment>)
         if has_filename || has_cid {
             let cid = content_id_header
                 .map(|h| h.value.trim_matches(|c| c == '<' || c == '>').to_string());
+            let inline_data = if is_inline && !has_filename && part.mime_type.starts_with("image/") {
+                body.data
+                    .as_deref()
+                    .and_then(decode_base64url_bytes)
+                    .filter(|data| data.len() <= crate::inline_image_store::MAX_INLINE_SIZE)
+            } else {
+                None
+            };
+            let content_hash = inline_data
+                .as_deref()
+                .map(crate::attachment_cache::hash_bytes);
 
             let filename = if has_filename {
                 part.filename.clone()
@@ -227,6 +245,8 @@ fn collect_attachments(part: &GmailPayload, results: &mut Vec<ParsedAttachment>)
                 mime_type: part.mime_type.clone(),
                 size: body.size,
                 gmail_attachment_id: attachment_id.clone(),
+                content_hash,
+                inline_data,
                 content_id: cid,
                 is_inline: is_inline && !has_filename,
             });
@@ -240,6 +260,10 @@ fn collect_attachments(part: &GmailPayload, results: &mut Vec<ParsedAttachment>)
 
 /// Decode Gmail's base64url-encoded body data to a UTF-8 string.
 fn decode_base64url(data: &str) -> Option<String> {
-    let bytes = URL_SAFE_NO_PAD.decode(data).ok()?;
+    let bytes = decode_base64url_bytes(data)?;
     String::from_utf8(bytes).ok()
+}
+
+fn decode_base64url_bytes(data: &str) -> Option<Vec<u8>> {
+    URL_SAFE_NO_PAD.decode(data).ok()
 }

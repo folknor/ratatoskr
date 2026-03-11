@@ -1,8 +1,11 @@
 use std::path::PathBuf;
 
 use base64::{Engine, engine::general_purpose::STANDARD};
+use rusqlite::OptionalExtension;
 use tauri::Manager;
 use xxhash_rust::xxh3::xxh3_64;
+
+use crate::db::DbState;
 
 const CACHE_DIR: &str = "attachment_cache";
 
@@ -42,6 +45,27 @@ pub fn write_cached(
         std::fs::write(&path, data).map_err(|e| format!("write cache file: {e}"))?;
     }
     Ok(format!("{CACHE_DIR}/{content_hash}"))
+}
+
+/// Delete a cached attachment file by its DB-relative path.
+pub fn remove_cached_relative(
+    app_handle: &tauri::AppHandle,
+    relative_path: &str,
+) -> Result<(), String> {
+    if !relative_path.starts_with(&format!("{CACHE_DIR}/")) {
+        return Err(format!("invalid attachment cache path: {relative_path}"));
+    }
+
+    let base = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("resolve app data dir: {e}"))?;
+    let path = base.join(relative_path);
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("remove cache file: {error}")),
+    }
 }
 
 /// Decode base64 (standard or URL-safe) to raw bytes.
@@ -122,4 +146,114 @@ pub struct CacheInfo {
     pub id: String,
     pub content_hash: Option<String>,
     pub mime_type: Option<String>,
+}
+
+#[derive(Debug)]
+struct CachedAttachmentRow {
+    id: String,
+    local_path: String,
+    content_hash: Option<String>,
+}
+
+async fn attachment_cache_max_bytes(db: &DbState) -> Result<i64, String> {
+    db.with_conn(|conn| {
+        let raw: Option<String> = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'attachment_cache_max_mb'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| format!("query attachment cache limit: {e}"))?;
+        let max_mb = raw
+            .as_deref()
+            .unwrap_or("500")
+            .parse::<i64>()
+            .unwrap_or(500);
+        Ok(max_mb.saturating_mul(1024 * 1024))
+    })
+    .await
+}
+
+/// Enforce the configured attachment cache size limit by evicting oldest entries.
+pub async fn enforce_cache_limit(db: &DbState, app_handle: &tauri::AppHandle) -> Result<(), String> {
+    let max_bytes = attachment_cache_max_bytes(db).await?;
+    if max_bytes <= 0 {
+        return Ok(());
+    }
+
+    loop {
+        let current_size: i64 = db
+            .with_conn(|conn| {
+                conn.query_row(
+                    "SELECT COALESCE(SUM(cache_size), 0) FROM attachments WHERE cached_at IS NOT NULL",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|e| format!("query attachment cache size: {e}"))
+            })
+            .await?;
+        if current_size <= max_bytes {
+            return Ok(());
+        }
+
+        let oldest: Option<CachedAttachmentRow> = db
+            .with_conn(|conn| {
+                conn.query_row(
+                    "SELECT id, local_path, content_hash
+                     FROM attachments
+                     WHERE cached_at IS NOT NULL
+                     ORDER BY cached_at ASC
+                     LIMIT 1",
+                    [],
+                    |row| {
+                        Ok(CachedAttachmentRow {
+                            id: row.get(0)?,
+                            local_path: row.get(1)?,
+                            content_hash: row.get(2)?,
+                        })
+                    },
+                )
+                .optional()
+                .map_err(|e| format!("query oldest cached attachment: {e}"))
+            })
+            .await?;
+
+        let Some(row) = oldest else {
+            return Ok(());
+        };
+
+        let remaining_refs: i64 = db
+            .with_conn({
+                let attachment_id = row.id.clone();
+                let content_hash = row.content_hash.clone();
+                move |conn| {
+                    conn.execute(
+                        "UPDATE attachments
+                         SET local_path = NULL, cached_at = NULL, cache_size = NULL
+                         WHERE id = ?1",
+                        rusqlite::params![attachment_id],
+                    )
+                    .map_err(|e| format!("clear attachment cache entry: {e}"))?;
+
+                    if let Some(hash) = content_hash {
+                        return conn
+                            .query_row(
+                                "SELECT COUNT(*) FROM attachments
+                                 WHERE content_hash = ?1 AND cached_at IS NOT NULL",
+                                rusqlite::params![hash],
+                                |db_row| db_row.get(0),
+                            )
+                            .map_err(|e| format!("count remaining cache refs: {e}"));
+                    }
+
+                    Ok(0)
+                }
+            })
+            .await?;
+
+        if remaining_refs == 0 {
+            remove_cached_relative(app_handle, &row.local_path)?;
+        }
+    }
 }

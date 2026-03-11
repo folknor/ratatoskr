@@ -895,7 +895,8 @@ fn cache_after_fetch(
     base64_data: &str,
 ) {
     use crate::attachment_cache::{
-        decode_base64, find_cache_info, hash_bytes, update_cache_fields, write_cached,
+        decode_base64, enforce_cache_limit, find_cache_info, hash_bytes, update_cache_fields,
+        write_cached,
     };
     use crate::inline_image_store::{InlineImageStoreState, MAX_INLINE_SIZE};
     use tauri::Manager;
@@ -949,7 +950,9 @@ fn cache_after_fetch(
                 }
                 Ok(())
             })
-            .await
+            .await?;
+
+            enforce_cache_limit(&db, &app).await
         }
         .await;
 
