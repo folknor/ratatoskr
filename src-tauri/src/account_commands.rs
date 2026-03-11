@@ -37,6 +37,56 @@ pub struct GmailAccountResult {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthProviderAuthorizationRequest {
+    pub provider_id: String,
+    pub auth_url: String,
+    pub token_url: String,
+    pub scopes: Vec<String>,
+    pub user_info_url: Option<String>,
+    pub use_pkce: bool,
+    pub client_id: String,
+    pub client_secret: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthProviderAuthorizationResult {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub expires_in: u64,
+    pub token_type: String,
+    pub scope: Option<String>,
+    pub id_token: Option<String>,
+    pub email: String,
+    pub name: String,
+    pub picture: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateImapOAuthAccountRequest {
+    pub id: String,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub imap_host: String,
+    pub imap_port: i64,
+    pub imap_security: String,
+    pub smtp_host: String,
+    pub smtp_port: i64,
+    pub smtp_security: String,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub token_expires_at: i64,
+    pub oauth_provider: String,
+    pub oauth_client_id: String,
+    pub oauth_client_secret: Option<String>,
+    pub imap_username: Option<String>,
+    pub accept_invalid_certs: bool,
+}
+
+#[derive(Debug, Deserialize)]
 struct GoogleTokenResponse {
     access_token: String,
     refresh_token: Option<String>,
@@ -49,6 +99,13 @@ struct GoogleUserInfo {
     email: String,
     name: String,
     picture: String,
+}
+
+#[derive(Debug)]
+struct OAuthProviderUserInfo {
+    email: String,
+    name: String,
+    picture: Option<String>,
 }
 
 #[tauri::command]
@@ -110,6 +167,76 @@ pub async fn account_create_gmail_via_oauth(
 }
 
 #[tauri::command]
+pub async fn account_authorize_oauth_provider(
+    app: AppHandle,
+    request: OAuthProviderAuthorizationRequest,
+) -> Result<OAuthProviderAuthorizationResult, String> {
+    let oauth = perform_provider_oauth(&app, &request).await?;
+
+    Ok(OAuthProviderAuthorizationResult {
+        access_token: oauth.tokens.access_token,
+        refresh_token: oauth.tokens.refresh_token,
+        expires_in: oauth.tokens.expires_in,
+        token_type: oauth.tokens.token_type,
+        scope: oauth.tokens.scope,
+        id_token: oauth.tokens.id_token,
+        email: oauth.user_info.email,
+        name: oauth.user_info.name,
+        picture: oauth.user_info.picture,
+    })
+}
+
+#[tauri::command]
+pub async fn account_create_imap_oauth(
+    request: CreateImapOAuthAccountRequest,
+    db: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
+) -> Result<(), String> {
+    let access_token = encrypt_value(gmail.encryption_key(), &request.access_token)?;
+    let refresh_token = encrypt_value(gmail.encryption_key(), &request.refresh_token)?;
+    let oauth_client_secret = request
+        .oauth_client_secret
+        .as_deref()
+        .filter(|secret| !secret.is_empty())
+        .map(|secret| encrypt_value(gmail.encryption_key(), secret))
+        .transpose()?;
+
+    db.with_conn(move |conn| {
+        conn.execute(
+            "INSERT INTO accounts (id, email, display_name, avatar_url, access_token, \
+             refresh_token, token_expires_at, provider, auth_method, imap_host, imap_port, \
+             imap_security, smtp_host, smtp_port, smtp_security, oauth_provider, \
+             oauth_client_id, oauth_client_secret, imap_username, accept_invalid_certs) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'imap', 'oauth2', ?8, ?9, ?10, ?11, ?12, \
+             ?13, ?14, ?15, ?16, ?17, ?18)",
+            rusqlite::params![
+                request.id,
+                request.email,
+                request.display_name,
+                request.avatar_url,
+                access_token,
+                refresh_token,
+                request.token_expires_at,
+                request.imap_host,
+                request.imap_port,
+                request.imap_security,
+                request.smtp_host,
+                request.smtp_port,
+                request.smtp_security,
+                request.oauth_provider,
+                request.oauth_client_id,
+                oauth_client_secret,
+                request.imap_username,
+                if request.accept_invalid_certs { 1 } else { 0 },
+            ],
+        )
+        .map_err(|e| format!("Failed to insert OAuth IMAP account: {e}"))?;
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn account_reauthorize_gmail(
     app: AppHandle,
     account_id: String,
@@ -158,6 +285,11 @@ struct GoogleOAuthBundle {
     user_info: GoogleUserInfo,
 }
 
+struct OAuthProviderBundle {
+    tokens: crate::oauth::TokenExchangeResult,
+    user_info: OAuthProviderUserInfo,
+}
+
 async fn perform_google_oauth(
     app: &AppHandle,
     db: &DbState,
@@ -200,6 +332,73 @@ async fn perform_google_oauth(
     let user_info = fetch_google_userinfo(&tokens.access_token).await?;
 
     Ok(GoogleOAuthBundle { tokens, user_info })
+}
+
+async fn perform_provider_oauth(
+    app: &AppHandle,
+    request: &OAuthProviderAuthorizationRequest,
+) -> Result<OAuthProviderBundle, String> {
+    let code_verifier = if request.use_pkce {
+        Some(random_base64url(32)?)
+    } else {
+        None
+    };
+    let code_challenge = code_verifier
+        .as_deref()
+        .map(|verifier| sha256_base64url(verifier.as_bytes()));
+    let state = random_base64url(32)?;
+    let redirect_uri = format!("http://localhost:{OAUTH_CALLBACK_PORT}");
+    let mut params = vec![
+        ("client_id".to_string(), request.client_id.clone()),
+        ("redirect_uri".to_string(), redirect_uri.clone()),
+        ("response_type".to_string(), "code".to_string()),
+        ("scope".to_string(), request.scopes.join(" ")),
+        ("state".to_string(), state.clone()),
+    ];
+
+    if let Some(challenge) = code_challenge {
+        params.push(("code_challenge".to_string(), challenge));
+        params.push(("code_challenge_method".to_string(), "S256".to_string()));
+    }
+
+    if request.provider_id == "microsoft" || request.provider_id == "microsoft_graph" {
+        params.push(("prompt".to_string(), "consent".to_string()));
+        params.push(("response_mode".to_string(), "query".to_string()));
+    }
+
+    let auth_url = format!(
+        "{}?{}",
+        request.auth_url,
+        params
+            .into_iter()
+            .map(|(key, value)| format!("{}={}", urlencoding::encode(&key), urlencoding::encode(&value)))
+            .collect::<Vec<_>>()
+            .join("&")
+    );
+
+    let server = crate::oauth::start_oauth_server(OAUTH_CALLBACK_PORT, state);
+    app.opener()
+        .open_url(auth_url, None::<&str>)
+        .map_err(|e| format!("Failed to open browser for OAuth: {e}"))?;
+    let result = server.await?;
+
+    let tokens = crate::oauth::oauth_exchange_token(
+        request.token_url.clone(),
+        result.code,
+        request.client_id.clone(),
+        redirect_uri,
+        code_verifier.filter(|_| request.use_pkce),
+        request.client_secret.clone(),
+        if request.provider_id == "microsoft" || request.provider_id == "microsoft_graph" {
+            Some(request.scopes.join(" "))
+        } else {
+            None
+        },
+    )
+    .await?;
+    let user_info = fetch_provider_userinfo(request, &tokens).await?;
+
+    Ok(OAuthProviderBundle { tokens, user_info })
 }
 
 async fn read_setting(
@@ -281,6 +480,94 @@ async fn fetch_google_userinfo(access_token: &str) -> Result<GoogleUserInfo, Str
         .json::<GoogleUserInfo>()
         .await
         .map_err(|e| format!("Failed to parse Google user info: {e}"))
+}
+
+async fn fetch_provider_userinfo(
+    request: &OAuthProviderAuthorizationRequest,
+    tokens: &crate::oauth::TokenExchangeResult,
+) -> Result<OAuthProviderUserInfo, String> {
+    if request.provider_id == "microsoft" || request.provider_id == "microsoft_graph" {
+        return parse_microsoft_userinfo(tokens);
+    }
+
+    let user_info_url = request
+        .user_info_url
+        .as_deref()
+        .ok_or_else(|| format!("Provider {} has no user info endpoint", request.provider_id))?;
+    let response = reqwest::Client::new()
+        .get(user_info_url)
+        .header(AUTHORIZATION, format!("Bearer {}", tokens.access_token))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch provider user info: {e}"))?;
+
+    if !response.status().is_success() {
+        let error = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Failed to fetch provider user info: {error}"));
+    }
+
+    let data = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| format!("Failed to parse provider user info: {e}"))?;
+
+    Ok(OAuthProviderUserInfo {
+        email: data
+            .get("email")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        name: data
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| data.get("nickname").and_then(serde_json::Value::as_str))
+            .unwrap_or_default()
+            .to_string(),
+        picture: data
+            .get("picture")
+            .and_then(serde_json::Value::as_str)
+            .map(ToString::to_string),
+    })
+}
+
+fn parse_microsoft_userinfo(
+    tokens: &crate::oauth::TokenExchangeResult,
+) -> Result<OAuthProviderUserInfo, String> {
+    let id_token = tokens
+        .id_token
+        .as_deref()
+        .ok_or("Microsoft OAuth response did not include an ID token")?;
+    let payload = id_token
+        .split('.')
+        .nth(1)
+        .ok_or("Invalid ID token format")?;
+    let decoded = URL_SAFE_NO_PAD
+        .decode(payload)
+        .map_err(|e| format!("Failed to decode ID token payload: {e}"))?;
+    let claims = serde_json::from_slice::<serde_json::Value>(&decoded)
+        .map_err(|e| format!("Failed to parse ID token payload: {e}"))?;
+
+    Ok(OAuthProviderUserInfo {
+        email: claims
+            .get("email")
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| {
+                claims
+                    .get("preferred_username")
+                    .and_then(serde_json::Value::as_str)
+            })
+            .unwrap_or_default()
+            .to_string(),
+        name: claims
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        picture: None,
+    })
 }
 
 fn random_base64url(size: usize) -> Result<String, String> {

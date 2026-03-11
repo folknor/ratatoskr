@@ -17,9 +17,7 @@ import {
   getDefaultSmtpPort,
   getOAuthProvider,
   insertImapAccount,
-  insertOAuthImapAccount,
   type SecurityType,
-  startProviderOAuthFlow,
 } from "@/core/accounts";
 import { useAccountStore } from "@/stores/accountStore";
 import { AddImapAccountBasicStep } from "./AddImapAccountBasicStep";
@@ -39,6 +37,14 @@ interface AddImapAccountProps {
   onClose: () => void;
   onSuccess: () => void;
   onBack: () => void;
+}
+
+interface OAuthAuthorizationResult {
+  accessToken: string;
+  refreshToken?: string | null;
+  expiresIn: number;
+  email: string;
+  name: string;
 }
 
 const steps: Step[] = ["basic", "imap", "smtp", "test"];
@@ -217,22 +223,32 @@ export function AddImapAccount({
     setOauthError(null);
 
     try {
-      const { tokens, userInfo } = await startProviderOAuthFlow(
-        provider,
-        form.oauthClientId.trim(),
-        form.oauthClientSecret.trim() || undefined,
+      const result = await invoke<OAuthAuthorizationResult>(
+        "account_authorize_oauth_provider",
+        {
+          request: {
+            providerId: provider.id,
+            authUrl: provider.authUrl,
+            tokenUrl: provider.tokenUrl,
+            scopes: provider.scopes,
+            userInfoUrl: provider.userInfoUrl ?? null,
+            usePkce: provider.usePkce,
+            clientId: form.oauthClientId.trim(),
+            clientSecret: form.oauthClientSecret.trim() || null,
+          },
+        },
       );
 
-      const expiresAt = Math.floor(Date.now() / 1000) + tokens.expires_in;
+      const expiresAt = Math.floor(Date.now() / 1000) + result.expiresIn;
 
       setForm((prev) => ({
         ...prev,
-        oauthAccessToken: tokens.access_token,
-        oauthRefreshToken: tokens.refresh_token ?? null,
+        oauthAccessToken: result.accessToken,
+        oauthRefreshToken: result.refreshToken ?? null,
         oauthExpiresAt: expiresAt,
-        oauthEmail: userInfo.email,
-        email: userInfo.email || prev.email,
-        displayName: userInfo.name || prev.displayName,
+        oauthEmail: result.email,
+        email: result.email || prev.email,
+        displayName: result.name || prev.displayName,
         oauthProvider: providerId,
       }));
     } catch (err) {
@@ -314,25 +330,27 @@ export function AddImapAccount({
       const imapUsername = form.imapUsername.trim() || null;
 
       if (isOAuth) {
-        await insertOAuthImapAccount({
-          id: accountId,
-          email,
-          displayName: form.displayName.trim() || null,
-          avatarUrl: null,
-          imapHost: form.imapHost.trim(),
-          imapPort: form.imapPort,
-          imapSecurity: form.imapSecurity,
-          smtpHost: form.smtpHost.trim(),
-          smtpPort: form.smtpPort,
-          smtpSecurity: form.smtpSecurity,
-          accessToken: form.oauthAccessToken ?? "",
-          refreshToken: form.oauthRefreshToken ?? "",
-          tokenExpiresAt: form.oauthExpiresAt ?? 0,
-          oauthProvider: form.oauthProvider ?? "",
-          oauthClientId: form.oauthClientId.trim(),
-          oauthClientSecret: form.oauthClientSecret.trim() || null,
-          imapUsername,
-          acceptInvalidCerts: form.acceptInvalidCerts,
+        await invoke("account_create_imap_oauth", {
+          request: {
+            id: accountId,
+            email,
+            displayName: form.displayName.trim() || null,
+            avatarUrl: null,
+            imapHost: form.imapHost.trim(),
+            imapPort: form.imapPort,
+            imapSecurity: form.imapSecurity,
+            smtpHost: form.smtpHost.trim(),
+            smtpPort: form.smtpPort,
+            smtpSecurity: form.smtpSecurity,
+            accessToken: form.oauthAccessToken ?? "",
+            refreshToken: form.oauthRefreshToken ?? "",
+            tokenExpiresAt: form.oauthExpiresAt ?? 0,
+            oauthProvider: form.oauthProvider ?? "",
+            oauthClientId: form.oauthClientId.trim(),
+            oauthClientSecret: form.oauthClientSecret.trim() || null,
+            imapUsername,
+            acceptInvalidCerts: form.acceptInvalidCerts,
+          },
         });
       } else {
         await insertImapAccount({

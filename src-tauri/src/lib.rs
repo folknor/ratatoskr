@@ -107,6 +107,8 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .invoke_handler(tauri::generate_handler![
             account_commands::account_create_gmail_via_oauth,
+            account_commands::account_authorize_oauth_provider,
+            account_commands::account_create_imap_oauth,
             account_commands::account_reauthorize_gmail,
             oauth::start_oauth_server,
             oauth::oauth_exchange_token,
