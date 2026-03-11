@@ -369,6 +369,7 @@ pub fn run() {
             calendar_commands::calendar_upsert_discovered_calendars,
             calendar_commands::calendar_upsert_provider_events,
             calendar_commands::calendar_apply_sync_result,
+            calendar_commands::calendar_sync_account,
             calendar_commands::caldav_fetch_events,
             calendar_commands::caldav_list_calendars,
             calendar_commands::caldav_create_event,

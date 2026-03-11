@@ -1,4 +1,5 @@
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   isPermissionGranted,
   onAction,
@@ -14,12 +15,25 @@ import { getSetting } from "../db/settings";
 
 let initialized = false;
 let notificationsEnabled = true;
+let syncNotificationUnlisten: UnlistenFn | null = null;
 
 interface NotificationContext {
   threadId?: string | undefined;
   accountId?: string | undefined;
   fromAddress?: string | undefined;
   subject?: string | undefined;
+}
+
+interface SyncNotificationCandidate {
+  threadId: string;
+  fromName?: string | null;
+  fromAddress?: string | null;
+  subject?: string | null;
+}
+
+interface SyncNotificationsEvent {
+  accountId: string;
+  notifications: SyncNotificationCandidate[];
 }
 
 let lastNotificationContext: NotificationContext | null = null;
@@ -114,6 +128,28 @@ export async function initNotifications(): Promise<void> {
   } catch {
     // registerActionTypes/onAction not available on this platform (e.g. Windows)
   }
+
+  if (syncNotificationUnlisten === null) {
+    try {
+      syncNotificationUnlisten = await listen<SyncNotificationsEvent>(
+        "sync-notifications",
+        (event) => {
+          const { accountId, notifications } = event.payload;
+          for (const candidate of notifications) {
+            enqueueNewEmailNotification(
+              candidate.fromName ?? candidate.fromAddress ?? "Unknown",
+              candidate.subject ?? "",
+              candidate.threadId,
+              accountId,
+              candidate.fromAddress ?? undefined,
+            );
+          }
+        },
+      );
+    } catch {
+      // Non-fatal: sync still works without desktop notification delivery.
+    }
+  }
 }
 
 /**
@@ -123,8 +159,7 @@ export async function initNotifications(): Promise<void> {
 let pendingCount = 0;
 let notifyTimer: ReturnType<typeof setTimeout> | null = null;
 
-// biome-ignore lint/complexity/useMaxParams: notification context requires multiple independent fields
-export function queueNewEmailNotification(
+function enqueueNewEmailNotification(
   from: string,
   subject: string,
   threadId?: string,

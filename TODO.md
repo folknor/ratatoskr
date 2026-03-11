@@ -32,7 +32,7 @@
 
 ## Post-Sync Hooks
 
-> **Systemic issue**: Rust sync now owns filters, smart labels, notification evaluation, and AI categorization preparation/application, but sync completion still crosses into TS for desktop notification dispatch and calendar follow-up. The remaining debt is mostly at that Rust/TS boundary.
+> **Systemic issue**: Rust sync now owns filters, smart labels, calendar follow-up, notification evaluation, and AI categorization preparation/application. The remaining Rust/TS boundary is mainly desktop notification display/action handling via the notification service.
 
 ---
 

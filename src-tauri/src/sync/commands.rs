@@ -3,6 +3,7 @@
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::body_store::BodyStoreState;
+use crate::calendar_commands::calendar_sync_account_impl;
 use crate::categorization::AiCategorizationCandidate;
 use crate::categorization::commands::categorize_threads_with_ai_impl;
 use crate::db::DbState;
@@ -26,7 +27,8 @@ use crate::smart_labels::commands::smart_labels_prepare_ai_remainder_for_message
 
 use super::config;
 use super::types::{
-    ImapSyncResult, NotificationCandidate, SyncStatus, SyncStatusDonePayload, SyncStatusEvent,
+    ImapSyncResult, NotificationCandidate, SyncNotificationsEvent, SyncStatus,
+    SyncStatusDonePayload, SyncStatusEvent,
 };
 use super::{SyncQueueState, SyncState};
 
@@ -187,11 +189,9 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 status: SyncStatus::Done,
                 error: None,
                 result: Some(SyncStatusDonePayload {
-                    should_sync_calendar: true,
                     new_inbox_message_ids: Vec::new(),
                     affected_thread_ids: Vec::new(),
                     criteria_smart_label_matches: Vec::new(),
-                    notifications_to_queue: Vec::new(),
                 }),
             },
         );
@@ -425,6 +425,22 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 });
             }
 
+            if !notifications_to_queue.is_empty() {
+                emit_sync_notifications(
+                    app,
+                    SyncNotificationsEvent {
+                        account_id: account_id.to_string(),
+                        notifications: notifications_to_queue.clone(),
+                    },
+                );
+            }
+
+            if should_sync_calendar
+                && let Err(error) = calendar_sync_account_impl(account_id, &db, &gmail).await
+            {
+                log::warn!("Failed to run calendar follow-up for {account_id}: {error}");
+            }
+
             emit_sync_status(
                 app,
                 SyncStatusEvent {
@@ -433,11 +449,9 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                     status: SyncStatus::Done,
                     error: None,
                     result: Some(SyncStatusDonePayload {
-                        should_sync_calendar,
                         new_inbox_message_ids: result.new_inbox_message_ids,
                         affected_thread_ids: result.affected_thread_ids,
                         criteria_smart_label_matches,
-                        notifications_to_queue,
                     }),
                 },
             )
@@ -683,6 +697,12 @@ async fn load_post_sync_messages(
 fn emit_sync_status(app: &AppHandle, event: SyncStatusEvent) {
     if let Err(error) = app.emit("sync-status", &event) {
         log::warn!("Failed to emit sync-status event: {error}");
+    }
+}
+
+fn emit_sync_notifications(app: &AppHandle, event: SyncNotificationsEvent) {
+    if let Err(error) = app.emit("sync-notifications", &event) {
+        log::warn!("Failed to emit sync-notifications event: {error}");
     }
 }
 

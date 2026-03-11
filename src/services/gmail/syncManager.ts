@@ -1,9 +1,3 @@
-import {
-  applyCalendarSyncResult,
-  upsertDiscoveredCalendars,
-} from "../calendar/persistence";
-import { getCalendarProvider } from "../calendar/providerFactory";
-import { getVisibleCalendars } from "../db/calendars";
 export interface SyncProgress {
   phase: "labels" | "threads" | "messages" | "fallback" | "done";
   current: number;
@@ -13,47 +7,6 @@ export interface SyncProgress {
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { listAccountBasicInfo } from "@/services/accounts/basicInfo";
-import { queueNewEmailNotification } from "@/services/notifications/notificationManager";
-
-/**
- * Shared post-sync hooks: apply filters, smart labels, notifications, and AI categorization.
- * Called after every successful sync (Gmail, JMAP, Graph, IMAP).
- */
-interface PostSyncHooksInput {
-  accountId: string;
-  newInboxEmailIds: string[];
-  notificationsToQueue?: {
-    threadId: string;
-    fromName?: string | null;
-    fromAddress?: string | null;
-    subject?: string | null;
-  }[];
-}
-
-async function runPostSyncHooks(input: PostSyncHooksInput): Promise<void> {
-  const {
-    accountId,
-    newInboxEmailIds,
-    notificationsToQueue = [],
-  } = input;
-
-  if (newInboxEmailIds.length > 0) {
-    try {
-      for (const candidate of notificationsToQueue) {
-        queueNewEmailNotification(
-          candidate.fromName ?? candidate.fromAddress ?? "Unknown",
-          candidate.subject ?? "",
-          candidate.threadId,
-          accountId,
-          candidate.fromAddress ?? undefined,
-        );
-      }
-    } catch (err) {
-      console.error("[syncManager] Notification dispatch failed:", err);
-    }
-  }
-
-}
 
 /** Map IMAP sync phases to the SyncProgress phases the UI understands. */
 function mapImapPhase(
@@ -81,16 +34,9 @@ interface SyncStatusEvent {
   status: "syncing" | "done" | "error";
   error?: string | null;
   result?: {
-    shouldSyncCalendar: boolean;
     newInboxMessageIds: string[];
     affectedThreadIds: string[];
     criteriaSmartLabelMatches: { threadId: string; labelIds: string[] }[];
-    notificationsToQueue: {
-      threadId: string;
-      fromName?: string | null;
-      fromAddress?: string | null;
-      subject?: string | null;
-    }[];
   } | null;
 }
 
@@ -183,30 +129,7 @@ async function handleSyncStatusEvent(event: SyncStatusEvent): Promise<void> {
     return;
   }
 
-  const result = event.result ?? {
-    shouldSyncCalendar: false,
-    newInboxMessageIds: [],
-    affectedThreadIds: [],
-    criteriaSmartLabelMatches: [],
-    notificationsToQueue: [],
-  };
-
-  await runPostSyncHooks({
-    accountId: event.accountId,
-    newInboxEmailIds: result.newInboxMessageIds,
-    notificationsToQueue: result.notificationsToQueue,
-  });
-
   statusCallback?.(event.accountId, "done");
-
-  if (result.shouldSyncCalendar) {
-    syncCalendarForAccount(event.accountId).catch((err) => {
-      console.warn(
-        `[syncManager] Calendar sync error for ${event.accountId}:`,
-        err,
-      );
-    });
-  }
 }
 
 async function partitionSyncAccountIds(accountIds: string[]): Promise<{
@@ -284,29 +207,7 @@ function startCaldavBackgroundSync(
  * Discovers calendars, syncs events for each visible calendar, stores results in DB.
  */
 async function syncCalendarForAccount(accountId: string): Promise<void> {
-  const provider = await getCalendarProvider(accountId);
-
-  // Discover/update calendars
-  const calendarInfos = await provider.listCalendars();
-  await upsertDiscoveredCalendars(accountId, provider.type, calendarInfos);
-
-  // Sync events for each visible calendar
-  const visibleCals = await getVisibleCalendars(accountId);
-  for (const cal of visibleCals) {
-    try {
-      const syncResult = await provider.syncEvents(
-        cal.remote_id,
-        cal.sync_token ?? undefined,
-      );
-      await applyCalendarSyncResult(accountId, cal.remote_id, syncResult);
-    } catch (err) {
-      console.warn(
-        `[syncManager] Calendar sync failed for ${cal.display_name ?? cal.remote_id}:`,
-        err,
-      );
-      throw err;
-    }
-  }
+  await invoke("calendar_sync_account", { accountId });
 
   // Emit event for UI update
   window.dispatchEvent(new CustomEvent("ratatoskr-calendar-sync-done"));

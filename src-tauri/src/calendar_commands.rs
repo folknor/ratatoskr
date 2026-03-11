@@ -1,8 +1,9 @@
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::db::DbState;
+use crate::db::types::DbCalendar;
 use crate::gmail::client::GmailState;
 use crate::provider::http::{self, RetryConfig};
 
@@ -165,6 +166,69 @@ struct CaldavAccountConfig {
 }
 
 #[tauri::command]
+pub async fn calendar_sync_account(
+    account_id: String,
+    db: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
+) -> Result<(), String> {
+    calendar_sync_account_impl(&account_id, &db, &gmail).await
+}
+
+pub(crate) async fn calendar_sync_account_impl(
+    account_id: &str,
+    db: &DbState,
+    gmail: &GmailState,
+) -> Result<(), String> {
+    let provider = db
+        .with_conn({
+            let account_id = account_id.to_string();
+            move |conn| {
+                conn.query_row(
+                    "SELECT provider, calendar_provider, caldav_url FROM accounts WHERE id = ?1",
+                    params![account_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                        ))
+                    },
+                )
+                .optional()
+                .map_err(|e| e.to_string())
+                .and_then(|row| {
+                    let Some((provider, calendar_provider, caldav_url)) = row else {
+                        return Ok(None);
+                    };
+
+                    if calendar_provider.as_deref() == Some("google_api") || provider == "gmail_api"
+                    {
+                        Ok(Some("google_api"))
+                    } else if calendar_provider.as_deref() == Some("caldav")
+                        || (provider == "caldav"
+                            && caldav_url
+                                .as_deref()
+                                .is_some_and(|value| !value.trim().is_empty()))
+                    {
+                        Ok(Some("caldav"))
+                    } else {
+                        Ok(None)
+                    }
+                })
+            }
+        })
+        .await?;
+
+    match provider.as_deref() {
+        Some("google_api") => sync_google_calendar_account(account_id, db, gmail).await,
+        Some("caldav") => sync_caldav_calendar_account(account_id, db, gmail).await,
+        _ => Err(format!(
+            "No calendar provider configured for account {account_id}"
+        )),
+    }
+}
+
+#[tauri::command]
 pub async fn calendar_upsert_discovered_calendars(
     db: State<'_, DbState>,
     account_id: String,
@@ -204,11 +268,19 @@ pub async fn google_calendar_list_calendars(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
 ) -> Result<Vec<CalendarInfoDto>, String> {
-    let client = gmail.get(&account_id).await?;
+    google_calendar_list_calendars_impl(&account_id, &db, &gmail).await
+}
+
+async fn google_calendar_list_calendars_impl(
+    account_id: &str,
+    db: &DbState,
+    gmail: &GmailState,
+) -> Result<Vec<CalendarInfoDto>, String> {
+    let client = gmail.get(account_id).await?;
     let http = shared_http_client();
     let url = format!("{GOOGLE_CALENDAR_API_BASE}/users/me/calendarList");
     let response: GoogleCalendarListResponse =
-        google_calendar_request(&http, &client, &db, &url).await?;
+        google_calendar_request(&http, &client, db, &url).await?;
 
     Ok(response
         .items
@@ -222,6 +294,30 @@ pub async fn google_calendar_list_calendars(
         .collect())
 }
 
+async fn sync_google_calendar_account(
+    account_id: &str,
+    db: &DbState,
+    gmail: &GmailState,
+) -> Result<(), String> {
+    let calendars = google_calendar_list_calendars_impl(account_id, db, gmail).await?;
+    upsert_discovered_calendars_impl(db, account_id, "google", calendars).await?;
+    let visible_calendars = load_visible_calendars(db, account_id).await?;
+
+    for calendar in visible_calendars {
+        let sync_result = google_calendar_sync_events_impl(
+            account_id,
+            &calendar.remote_id,
+            calendar.sync_token,
+            db,
+            gmail,
+        )
+        .await?;
+        apply_calendar_sync_result_impl(db, account_id, &calendar.remote_id, sync_result).await?;
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn google_calendar_sync_events(
     account_id: String,
@@ -230,9 +326,20 @@ pub async fn google_calendar_sync_events(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
 ) -> Result<CalendarSyncResultDto, String> {
-    let client = gmail.get(&account_id).await?;
+    google_calendar_sync_events_impl(&account_id, &calendar_remote_id, sync_token, &db, &gmail)
+        .await
+}
+
+async fn google_calendar_sync_events_impl(
+    account_id: &str,
+    calendar_remote_id: &str,
+    sync_token: Option<String>,
+    db: &DbState,
+    gmail: &GmailState,
+) -> Result<CalendarSyncResultDto, String> {
+    let client = gmail.get(account_id).await?;
     let http = shared_http_client();
-    let encoded_id = urlencoding::encode(&calendar_remote_id);
+    let encoded_id = urlencoding::encode(calendar_remote_id);
     let mut created = Vec::new();
     let updated = Vec::new();
     let mut deleted_remote_ids = Vec::new();
@@ -313,7 +420,15 @@ pub async fn caldav_list_calendars(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
 ) -> Result<Vec<CalendarInfoDto>, String> {
-    let config = load_caldav_account_config(&db, gmail.encryption_key(), &account_id).await?;
+    caldav_list_calendars_impl(&account_id, &db, &gmail).await
+}
+
+async fn caldav_list_calendars_impl(
+    account_id: &str,
+    db: &DbState,
+    gmail: &GmailState,
+) -> Result<Vec<CalendarInfoDto>, String> {
+    let config = load_caldav_account_config(db, gmail.encryption_key(), account_id).await?;
     let client = shared_http_client();
     let home_url = resolve_caldav_home_url(&client, &config).await?;
     list_caldav_calendars(&client, &config, &home_url).await
@@ -341,12 +456,21 @@ pub async fn caldav_sync_events(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
 ) -> Result<CalendarSyncResultDto, String> {
-    let config = load_caldav_account_config(&db, gmail.encryption_key(), &account_id).await?;
+    caldav_sync_events_impl(&account_id, &calendar_remote_id, &db, &gmail).await
+}
+
+async fn caldav_sync_events_impl(
+    account_id: &str,
+    calendar_remote_id: &str,
+    db: &DbState,
+    gmail: &GmailState,
+) -> Result<CalendarSyncResultDto, String> {
+    let config = load_caldav_account_config(db, gmail.encryption_key(), account_id).await?;
     let client = shared_http_client();
     let time_min = (chrono::Utc::now() - chrono::Duration::days(90)).to_rfc3339();
     let time_max = (chrono::Utc::now() + chrono::Duration::days(365)).to_rfc3339();
     let created =
-        fetch_caldav_events(&client, &config, &calendar_remote_id, &time_min, &time_max).await?;
+        fetch_caldav_events(&client, &config, calendar_remote_id, &time_min, &time_max).await?;
     Ok(CalendarSyncResultDto {
         created,
         updated: Vec::new(),
@@ -603,6 +727,29 @@ pub async fn calendar_apply_sync_result(
     new_sync_token: Option<String>,
     new_ctag: Option<String>,
 ) -> Result<(), String> {
+    apply_calendar_sync_result_impl(
+        &db,
+        &account_id,
+        &calendar_remote_id,
+        CalendarSyncResultDto {
+            created: created.into_iter().map(calendar_input_to_dto).collect(),
+            updated: updated.into_iter().map(calendar_input_to_dto).collect(),
+            deleted_remote_ids,
+            new_sync_token,
+            new_ctag,
+        },
+    )
+    .await
+}
+
+async fn apply_calendar_sync_result_impl(
+    db: &DbState,
+    account_id: &str,
+    calendar_remote_id: &str,
+    sync_result: CalendarSyncResultDto,
+) -> Result<(), String> {
+    let account_id = account_id.to_string();
+    let calendar_remote_id = calendar_remote_id.to_string();
     db.with_conn(move |conn| {
         let calendar_id: String = conn
             .query_row(
@@ -614,11 +761,12 @@ pub async fn calendar_apply_sync_result(
 
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
 
-        for event in created.into_iter().chain(updated) {
+        for event in sync_result.created.into_iter().chain(sync_result.updated) {
+            let event = calendar_dto_to_input(event);
             upsert_calendar_event(&tx, &account_id, &calendar_id, &event)?;
         }
 
-        for remote_event_id in deleted_remote_ids {
+        for remote_event_id in sync_result.deleted_remote_ids {
             tx.execute(
                 "DELETE FROM calendar_events WHERE calendar_id = ?1 AND remote_event_id = ?2",
                 params![calendar_id, remote_event_id],
@@ -626,10 +774,10 @@ pub async fn calendar_apply_sync_result(
             .map_err(|e| e.to_string())?;
         }
 
-        if new_sync_token.is_some() || new_ctag.is_some() {
+        if sync_result.new_sync_token.is_some() || sync_result.new_ctag.is_some() {
             tx.execute(
                 "UPDATE calendars SET sync_token = ?1, ctag = ?2, updated_at = unixepoch() WHERE id = ?3",
-                params![new_sync_token, new_ctag, calendar_id],
+                params![sync_result.new_sync_token, sync_result.new_ctag, calendar_id],
             )
             .map_err(|e| e.to_string())?;
         }
@@ -638,6 +786,131 @@ pub async fn calendar_apply_sync_result(
         Ok(())
     })
     .await
+}
+
+async fn upsert_discovered_calendars_impl(
+    db: &DbState,
+    account_id: &str,
+    provider: &str,
+    calendars: Vec<CalendarInfoDto>,
+) -> Result<(), String> {
+    let account_id = account_id.to_string();
+    let provider = provider.to_string();
+    db.with_conn(move |conn| {
+        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        for calendar in calendars {
+            let id = uuid::Uuid::new_v4().to_string();
+            tx.execute(
+                "INSERT INTO calendars (id, account_id, provider, remote_id, display_name, color, is_primary)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(account_id, remote_id) DO UPDATE SET
+                   display_name = ?5, color = ?6, is_primary = ?7, updated_at = unixepoch()",
+                params![
+                    id,
+                    account_id,
+                    provider,
+                    calendar.remote_id,
+                    calendar.display_name,
+                    calendar.color,
+                    calendar.is_primary as i64,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+}
+
+async fn load_visible_calendars(db: &DbState, account_id: &str) -> Result<Vec<DbCalendar>, String> {
+    let account_id = account_id.to_string();
+    db.with_conn(move |conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT * FROM calendars WHERE account_id = ?1 AND is_visible = 1
+                 ORDER BY is_primary DESC, display_name ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        stmt.query_map(params![account_id], row_to_db_calendar)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+fn row_to_db_calendar(row: &Row<'_>) -> rusqlite::Result<DbCalendar> {
+    Ok(DbCalendar {
+        id: row.get("id")?,
+        account_id: row.get("account_id")?,
+        provider: row.get("provider")?,
+        remote_id: row.get("remote_id")?,
+        display_name: row.get("display_name")?,
+        color: row.get("color")?,
+        is_primary: row.get("is_primary")?,
+        is_visible: row.get("is_visible")?,
+        sync_token: row.get("sync_token")?,
+        ctag: row.get("ctag")?,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+fn calendar_input_to_dto(event: CalendarEventInput) -> CalendarEventDto {
+    CalendarEventDto {
+        remote_event_id: event.remote_event_id,
+        uid: event.uid,
+        etag: event.etag,
+        summary: event.summary,
+        description: event.description,
+        location: event.location,
+        start_time: event.start_time,
+        end_time: event.end_time,
+        is_all_day: event.is_all_day,
+        status: event.status,
+        organizer_email: event.organizer_email,
+        attendees_json: event.attendees_json,
+        html_link: event.html_link,
+        ical_data: event.ical_data,
+    }
+}
+
+fn calendar_dto_to_input(event: CalendarEventDto) -> CalendarEventInput {
+    CalendarEventInput {
+        remote_event_id: event.remote_event_id,
+        uid: event.uid,
+        etag: event.etag,
+        summary: event.summary,
+        description: event.description,
+        location: event.location,
+        start_time: event.start_time,
+        end_time: event.end_time,
+        is_all_day: event.is_all_day,
+        status: event.status,
+        organizer_email: event.organizer_email,
+        attendees_json: event.attendees_json,
+        html_link: event.html_link,
+        ical_data: event.ical_data,
+    }
+}
+
+async fn sync_caldav_calendar_account(
+    account_id: &str,
+    db: &DbState,
+    gmail: &GmailState,
+) -> Result<(), String> {
+    let calendars = caldav_list_calendars_impl(account_id, db, gmail).await?;
+    upsert_discovered_calendars_impl(db, account_id, "caldav", calendars).await?;
+    let visible_calendars = load_visible_calendars(db, account_id).await?;
+
+    for calendar in visible_calendars {
+        let sync_result =
+            caldav_sync_events_impl(account_id, &calendar.remote_id, db, gmail).await?;
+        apply_calendar_sync_result_impl(db, account_id, &calendar.remote_id, sync_result).await?;
+    }
+
+    Ok(())
 }
 
 #[tauri::command]

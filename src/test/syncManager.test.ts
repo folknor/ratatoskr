@@ -5,21 +5,11 @@ const {
   mockInvoke,
   mockListen,
   mockListAccountBasicInfo,
-  mockApplyCalendarSyncResult,
-  mockUpsertDiscoveredCalendars,
-  mockGetCalendarProvider,
-  mockGetVisibleCalendars,
-  mockQueueNewEmailNotification,
 } = vi.hoisted(() => ({
   eventHandlers: new Map<string, (event: { payload: unknown }) => void>(),
   mockInvoke: vi.fn(),
   mockListen: vi.fn(),
   mockListAccountBasicInfo: vi.fn(),
-  mockApplyCalendarSyncResult: vi.fn(),
-  mockUpsertDiscoveredCalendars: vi.fn(),
-  mockGetCalendarProvider: vi.fn(),
-  mockGetVisibleCalendars: vi.fn(),
-  mockQueueNewEmailNotification: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -30,25 +20,8 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: mockListen,
 }));
 
-vi.mock("@/services/notifications/notificationManager", () => ({
-  queueNewEmailNotification: mockQueueNewEmailNotification,
-}));
-
 vi.mock("@/services/accounts/basicInfo", () => ({
   listAccountBasicInfo: mockListAccountBasicInfo,
-}));
-
-vi.mock("@/services/calendar/providerFactory", () => ({
-  getCalendarProvider: mockGetCalendarProvider,
-}));
-
-vi.mock("@/services/calendar/persistence", () => ({
-  applyCalendarSyncResult: mockApplyCalendarSyncResult,
-  upsertDiscoveredCalendars: mockUpsertDiscoveredCalendars,
-}));
-
-vi.mock("@/services/db/calendars", () => ({
-  getVisibleCalendars: mockGetVisibleCalendars,
 }));
 
 async function loadSyncManager() {
@@ -115,7 +88,6 @@ describe("syncManager", () => {
         };
       },
     );
-    mockGetVisibleCalendars.mockResolvedValue([]);
   });
 
   it("syncs one account through the rust queue command", async () => {
@@ -253,63 +225,19 @@ describe("syncManager", () => {
       provider: "gmail_api",
       status: "done",
       result: {
-        shouldSyncCalendar: false,
         newInboxMessageIds: ["m1", "m2"],
         affectedThreadIds: ["t1"],
-        criteriaSmartLabelMatches: [
-          { threadId: "t1", labelIds: ["label-1"] },
-        ],
-        notificationsToQueue: [
-          {
-            threadId: "t1",
-            fromName: "Alice",
-            fromAddress: "alice@example.com",
-            subject: "Hello",
-          },
-        ],
+        criteriaSmartLabelMatches: [{ threadId: "t1", labelIds: ["label-1"] }],
       },
     });
 
     await flushAsyncWork();
-    expect(mockQueueNewEmailNotification).toHaveBeenCalledWith(
-      "Alice",
-      "Hello",
-      "t1",
-      "acc-1",
-      "alice@example.com",
-    );
     expect(callback).toHaveBeenCalledWith("acc-1", "done");
   });
 
-  it("runs calendar sync when rust marks it as needed", async () => {
+  it("marks sync done without ts calendar follow-up work", async () => {
     const { onSyncStatus } = await loadSyncManager();
     const callback = vi.fn();
-    const provider = {
-      type: "google",
-      listCalendars: vi.fn().mockResolvedValue([
-        {
-          remoteId: "cal-1",
-          displayName: "Primary",
-          color: null,
-          isPrimary: true,
-        },
-      ]),
-      syncEvents: vi.fn().mockResolvedValue({
-        calendars: [],
-        events: [],
-        deletedRemoteIds: [],
-        nextSyncToken: "next-token",
-      }),
-    };
-
-    mockGetCalendarProvider.mockResolvedValue(provider);
-    mockGetVisibleCalendars.mockResolvedValue([
-      {
-        remote_id: "cal-1",
-        display_name: "Primary",
-        sync_token: "old-token",
-      },
-    ]);
 
     onSyncStatus(callback);
     await flushListenerSetup();
@@ -319,91 +247,38 @@ describe("syncManager", () => {
       provider: "gmail_api",
       status: "done",
       result: {
-        shouldSyncCalendar: true,
         newInboxMessageIds: [],
         affectedThreadIds: [],
         criteriaSmartLabelMatches: [],
-        notificationsToQueue: [],
       },
     });
 
     await flushAsyncWork();
-    await flushAsyncWork();
-
-    expect(mockGetCalendarProvider).toHaveBeenCalledWith("acc-1");
-    expect(mockUpsertDiscoveredCalendars).toHaveBeenCalledWith(
-      "acc-1",
-      "google",
-      [
-        {
-          remoteId: "cal-1",
-          displayName: "Primary",
-          color: null,
-          isPrimary: true,
-        },
-      ],
-    );
-    expect(provider.syncEvents).toHaveBeenCalledWith("cal-1", "old-token");
-    expect(mockApplyCalendarSyncResult).toHaveBeenCalledWith("acc-1", "cal-1", {
-      calendars: [],
-      events: [],
-      deletedRemoteIds: [],
-      nextSyncToken: "next-token",
-    });
+    expect(callback).toHaveBeenCalledWith("acc-1", "done");
   });
 
   it("syncs standalone caldav accounts directly in ts", async () => {
     const { onSyncStatus, syncAccount } = await loadSyncManager();
     const callback = vi.fn();
-    const provider = {
-      type: "caldav",
-      listCalendars: vi.fn().mockResolvedValue([
-        {
-          remoteId: "cal-1",
-          displayName: "Personal",
-          color: null,
-          isPrimary: false,
-        },
-      ]),
-      syncEvents: vi.fn().mockResolvedValue({
-        calendars: [],
-        events: [],
-        deletedRemoteIds: [],
-        nextSyncToken: "next-token",
-      }),
-    };
-
-    mockGetCalendarProvider.mockResolvedValue(provider);
-    mockGetVisibleCalendars.mockResolvedValue([
-      {
-        remote_id: "cal-1",
-        display_name: "Personal",
-        sync_token: null,
-      },
-    ]);
 
     onSyncStatus(callback);
     await syncAccount("acc-caldav");
 
-    expect(mockGetCalendarProvider).toHaveBeenCalledWith("acc-caldav");
-    expect(provider.syncEvents).toHaveBeenCalledWith("cal-1", undefined);
-    expect(mockApplyCalendarSyncResult).toHaveBeenCalledWith(
-      "acc-caldav",
-      "cal-1",
-      {
-        calendars: [],
-        events: [],
-        deletedRemoteIds: [],
-        nextSyncToken: "next-token",
-      },
-    );
+    expect(mockInvoke).toHaveBeenCalledWith("calendar_sync_account", {
+      accountId: "acc-caldav",
+    });
     expect(callback).toHaveBeenCalledWith("acc-caldav", "done");
     expect(mockInvoke).not.toHaveBeenCalledWith("sync_run_accounts", {
       accountIds: ["acc-caldav"],
     });
 
-    const applyOrder = mockApplyCalendarSyncResult.mock.invocationCallOrder[0];
+    const applyIndex = mockInvoke.mock.calls.findIndex(
+      ([command]) => command === "calendar_sync_account",
+    );
+    const applyOrder =
+      applyIndex >= 0 ? mockInvoke.mock.invocationCallOrder[applyIndex] : -1;
     const doneOrder = callback.mock.invocationCallOrder.at(-1);
+    expect(applyOrder).toBeGreaterThanOrEqual(0);
     expect(applyOrder).toBeLessThan(doneOrder ?? 0);
   });
 });

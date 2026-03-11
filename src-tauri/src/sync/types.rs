@@ -49,11 +49,9 @@ pub enum SyncStatus {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncStatusDonePayload {
-    pub should_sync_calendar: bool,
     pub new_inbox_message_ids: Vec<String>,
     pub affected_thread_ids: Vec<String>,
     pub criteria_smart_label_matches: Vec<AppliedSmartLabelMatch>,
-    pub notifications_to_queue: Vec<NotificationCandidate>,
 }
 
 /// Generic sync lifecycle event emitted for queued/manual sync runs.
@@ -74,6 +72,13 @@ pub struct NotificationCandidate {
     pub from_name: Option<String>,
     pub from_address: Option<String>,
     pub subject: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncNotificationsEvent {
+    pub account_id: String,
+    pub notifications: Vec<NotificationCandidate>,
 }
 
 /// Lightweight metadata kept in memory during sync for the threading pass.
