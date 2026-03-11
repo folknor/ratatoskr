@@ -7,7 +7,6 @@ import {
   updateLabelSortOrder,
   upsertLabel,
 } from "@/core/labels";
-import { useAccountStore } from "@/stores/accountStore";
 
 export interface Label {
   id: string;
@@ -17,6 +16,16 @@ export interface Label {
   colorBg: string | null;
   colorFg: string | null;
   sortOrder: number;
+}
+
+interface ProviderFolderResult {
+  id: string;
+  name: string;
+  path: string;
+  folderType: string;
+  specialUse: string | null;
+  colorBg: string | null;
+  colorFg: string | null;
 }
 
 // System labels that are already shown as nav items in the sidebar
@@ -95,37 +104,22 @@ export const useLabelStore: UseBoundStore<StoreApi<LabelState>> =
       name: string,
       color?: { textColor: string; backgroundColor: string },
     ) => {
-      const account = useAccountStore
-        .getState()
-        .accounts.find((a) => a.id === accountId);
-      const provider = account?.provider ?? "gmail_api";
-
-      if (provider !== "gmail_api") {
-        // TODO: implement provider-agnostic folder creation for IMAP/JMAP/Graph
-        console.error(
-          `createLabel not supported for provider "${provider}". Only Gmail API is currently supported.`,
-        );
-        return;
-      }
-
-      const gmailLabel = await invoke<{
-        id: string;
-        name: string;
-        type: string;
-        color?: { textColor: string; backgroundColor: string };
-      }>("gmail_create_label", {
-        accountId,
-        name,
-        textColor: color?.textColor,
-        bgColor: color?.backgroundColor,
-      });
+      const folder = await invoke<ProviderFolderResult>(
+        "provider_create_folder",
+        {
+          accountId,
+          name,
+          textColor: color?.textColor,
+          bgColor: color?.backgroundColor,
+        },
+      );
       await upsertLabel({
-        id: gmailLabel.id,
+        id: folder.id,
         accountId,
-        name: gmailLabel.name,
-        type: gmailLabel.type,
-        colorBg: gmailLabel.color?.backgroundColor ?? null,
-        colorFg: gmailLabel.color?.textColor ?? null,
+        name: folder.name,
+        type: folder.folderType,
+        colorBg: folder.colorBg,
+        colorFg: folder.colorFg,
       });
       await get().loadLabels(accountId);
     },
@@ -138,57 +132,30 @@ export const useLabelStore: UseBoundStore<StoreApi<LabelState>> =
         color?: { textColor: string; backgroundColor: string } | null;
       },
     ) => {
-      const account = useAccountStore
-        .getState()
-        .accounts.find((a) => a.id === accountId);
-      const provider = account?.provider ?? "gmail_api";
-
-      if (provider !== "gmail_api") {
-        // TODO: implement provider-agnostic folder rename for IMAP/JMAP/Graph
-        console.error(
-          `updateLabel not supported for provider "${provider}". Only Gmail API is currently supported.`,
-        );
-        return;
-      }
-
-      const gmailLabel = await invoke<{
-        id: string;
-        name: string;
-        type: string;
-        color?: { textColor: string; backgroundColor: string };
-      }>("gmail_update_label", {
-        accountId,
-        labelId,
-        name: updates.name,
-        textColor: updates.color?.textColor,
-        bgColor: updates.color?.backgroundColor,
-      });
+      const existing = get().labels.find((label) => label.id === labelId);
+      const folder = await invoke<ProviderFolderResult>(
+        "provider_rename_folder",
+        {
+          accountId,
+          folderId: labelId,
+          newName: updates.name ?? existing?.name ?? "",
+          textColor: updates.color?.textColor,
+          bgColor: updates.color?.backgroundColor,
+        },
+      );
       await upsertLabel({
-        id: gmailLabel.id,
+        id: folder.id,
         accountId,
-        name: gmailLabel.name,
-        type: gmailLabel.type,
-        colorBg: gmailLabel.color?.backgroundColor ?? null,
-        colorFg: gmailLabel.color?.textColor ?? null,
+        name: folder.name,
+        type: folder.folderType,
+        colorBg: folder.colorBg,
+        colorFg: folder.colorFg,
       });
       await get().loadLabels(accountId);
     },
 
     deleteLabel: async (accountId: string, labelId: string) => {
-      const account = useAccountStore
-        .getState()
-        .accounts.find((a) => a.id === accountId);
-      const provider = account?.provider ?? "gmail_api";
-
-      if (provider !== "gmail_api") {
-        // TODO: implement provider-agnostic folder deletion for IMAP/JMAP/Graph
-        console.error(
-          `deleteLabel not supported for provider "${provider}". Only Gmail API is currently supported.`,
-        );
-        return;
-      }
-
-      await invoke("gmail_delete_label", { accountId, labelId });
+      await invoke("provider_delete_folder", { accountId, folderId: labelId });
       await dbDeleteLabel(accountId, labelId);
       await get().loadLabels(accountId);
     },

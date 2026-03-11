@@ -1,7 +1,8 @@
-use async_trait::async_trait;
-
 use crate::provider::ops::ProviderOps;
-use crate::provider::types::{AttachmentData, ProviderCtx, ProviderFolder, SyncResult};
+use crate::provider::types::{
+    AttachmentData, ProviderCtx, ProviderFolder, ProviderProfile, ProviderTestResult, SyncResult,
+};
+use async_trait::async_trait;
 
 use super::client::GmailClient;
 
@@ -233,9 +234,92 @@ impl ProviderOps for GmailOps {
                     id: l.id.clone(),
                     name: l.name.clone(),
                     path: l.name,
+                    folder_type: if l.label_type.as_deref() == Some("system") {
+                        "system".to_string()
+                    } else {
+                        "user".to_string()
+                    },
                     special_use: special.map(String::from),
+                    color_bg: l.color.as_ref().map(|c| c.background_color.clone()),
+                    color_fg: l.color.as_ref().map(|c| c.text_color.clone()),
                 }
             })
             .collect())
+    }
+
+    async fn create_folder(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        name: &str,
+        parent_id: Option<&str>,
+        text_color: Option<&str>,
+        bg_color: Option<&str>,
+    ) -> Result<ProviderFolder, String> {
+        let full_name = parent_id.map_or_else(|| name.to_string(), |p| format!("{p}/{name}"));
+        let color = match (text_color, bg_color) {
+            (Some(tc), Some(bc)) => Some((tc, bc)),
+            _ => None,
+        };
+        let label = self.client.create_label(&full_name, color, ctx.db).await?;
+        Ok(ProviderFolder {
+            id: label.id,
+            name: label.name.clone(),
+            path: label.name,
+            folder_type: "user".to_string(),
+            special_use: None,
+            color_bg: label.color.as_ref().map(|c| c.background_color.clone()),
+            color_fg: label.color.as_ref().map(|c| c.text_color.clone()),
+        })
+    }
+
+    async fn rename_folder(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        folder_id: &str,
+        new_name: &str,
+        text_color: Option<&str>,
+        bg_color: Option<&str>,
+    ) -> Result<ProviderFolder, String> {
+        let color = match (text_color, bg_color) {
+            (Some(tc), Some(bc)) => Some(Some((tc, bc))),
+            _ => None,
+        };
+        let label = self
+            .client
+            .update_label(folder_id, Some(new_name), color, ctx.db)
+            .await?;
+        Ok(ProviderFolder {
+            id: label.id,
+            name: label.name.clone(),
+            path: label.name,
+            folder_type: if label.label_type.as_deref() == Some("system") {
+                "system".to_string()
+            } else {
+                "user".to_string()
+            },
+            special_use: None,
+            color_bg: label.color.as_ref().map(|c| c.background_color.clone()),
+            color_fg: label.color.as_ref().map(|c| c.text_color.clone()),
+        })
+    }
+
+    async fn delete_folder(&self, ctx: &ProviderCtx<'_>, folder_id: &str) -> Result<(), String> {
+        self.client.delete_label(folder_id, ctx.db).await
+    }
+
+    async fn test_connection(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, String> {
+        let profile = self.client.get_profile(ctx.db).await?;
+        Ok(ProviderTestResult {
+            success: true,
+            message: format!("Connected as {}", profile.email_address),
+        })
+    }
+
+    async fn get_profile(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, String> {
+        let profile = self.client.get_profile(ctx.db).await?;
+        Ok(ProviderProfile {
+            email: profile.email_address,
+            name: None,
+        })
     }
 }

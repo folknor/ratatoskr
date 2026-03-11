@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 
-use super::types::{AttachmentData, ProviderCtx, ProviderFolder, SyncResult};
+use super::types::{
+    AttachmentData, ProviderCtx, ProviderFolder, ProviderProfile, ProviderTestResult, SyncResult,
+};
 
 /// Common operations that every email provider must support.
 ///
@@ -97,4 +99,26 @@ pub trait ProviderOps: Send + Sync {
     // ── Folders ─────────────────────────────────────────────────
 
     async fn list_folders(&self, ctx: &ProviderCtx<'_>) -> Result<Vec<ProviderFolder>, String>;
+    async fn create_folder(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        name: &str,
+        parent_id: Option<&str>,
+        text_color: Option<&str>,
+        bg_color: Option<&str>,
+    ) -> Result<ProviderFolder, String>;
+    async fn rename_folder(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        folder_id: &str,
+        new_name: &str,
+        text_color: Option<&str>,
+        bg_color: Option<&str>,
+    ) -> Result<ProviderFolder, String>;
+    async fn delete_folder(&self, ctx: &ProviderCtx<'_>, folder_id: &str) -> Result<(), String>;
+
+    // ── Connection / Profile ────────────────────────────────────
+
+    async fn test_connection(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, String>;
+    async fn get_profile(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, String>;
 }

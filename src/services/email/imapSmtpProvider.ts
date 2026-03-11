@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { type DbAccount, getAccount } from "../db/accounts";
 import type { ParsedMessage } from "../gmail/messageParser";
 import { getSyncableFolders, mapFolderToLabel } from "../imap/folderMapper";
@@ -14,13 +15,21 @@ import {
   imapListFolders,
   imapMoveMessages,
   imapSetFlags,
-  imapTestConnection,
   type SmtpConfig,
   smtpSendEmail,
-  smtpTestConnection,
 } from "../imap/tauriCommands";
 import { ensureFreshToken } from "../oauth/oauthTokenManager";
 import type { EmailFolder, EmailProvider, SyncResult } from "./types";
+
+interface ProviderTestResult {
+  success: boolean;
+  message: string;
+}
+
+interface ProviderProfile {
+  email: string;
+  name?: string;
+}
 
 /**
  * EmailProvider adapter for IMAP/SMTP accounts.
@@ -390,42 +399,15 @@ export class ImapSmtpProvider implements EmailProvider {
   // ---- Connection ----
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
-    try {
-      const imapConfig = await this.getImapConfig();
-      const imapResult = await imapTestConnection(imapConfig);
-
-      // Also test SMTP connectivity
-      try {
-        const smtpConfig = await this.getSmtpConfig();
-        const smtpResult = await smtpTestConnection(smtpConfig);
-        if (!smtpResult.success) {
-          return {
-            success: false,
-            message: `IMAP OK, but SMTP failed: ${smtpResult.message}`,
-          };
-        }
-      } catch (err) {
-        return {
-          success: false,
-          message: `IMAP OK, but SMTP failed: ${err instanceof Error ? err.message : String(err)}`,
-        };
-      }
-
-      return { success: true, message: `Connected: ${imapResult}` };
-    } catch (err) {
-      return {
-        success: false,
-        message: `IMAP connection failed: ${err instanceof Error ? err.message : String(err)}`,
-      };
-    }
+    return invoke<ProviderTestResult>("provider_test_connection", {
+      accountId: this.accountId,
+    });
   }
 
   async getProfile(): Promise<{ email: string; name?: string | undefined }> {
-    const account = await this.getAccount();
-    return {
-      email: account.email,
-      name: account.display_name ?? undefined,
-    };
+    return invoke<ProviderProfile>("provider_get_profile", {
+      accountId: this.accountId,
+    });
   }
 
   // ---- Helpers ----

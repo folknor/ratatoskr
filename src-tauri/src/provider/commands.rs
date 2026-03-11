@@ -11,7 +11,9 @@ use crate::jmap::client::JmapState;
 use crate::search::SearchState;
 
 use super::router::{get_ops, get_provider_type};
-use super::types::{AttachmentData, ProviderCtx, ProviderFolder, SyncResult};
+use super::types::{
+    AttachmentData, ProviderCtx, ProviderFolder, ProviderProfile, ProviderTestResult, SyncResult,
+};
 
 // ── Sync ────────────────────────────────────────────────────
 
@@ -574,12 +576,22 @@ pub async fn provider_fetch_attachment(
     app_handle: AppHandle,
 ) -> Result<AttachmentData, String> {
     // 1. Check inline image store (fast SQLite lookup for small images)
-    if let Some(hit) = try_inline_image_hit(&db, &inline_images, &account_id, &message_id, &attachment_id).await? {
+    if let Some(hit) = try_inline_image_hit(
+        &db,
+        &inline_images,
+        &account_id,
+        &message_id,
+        &attachment_id,
+    )
+    .await?
+    {
         return Ok(hit);
     }
 
     // 2. Check file-based cache
-    if let Some(hit) = try_cache_hit(&db, &app_handle, &account_id, &message_id, &attachment_id).await? {
+    if let Some(hit) =
+        try_cache_hit(&db, &app_handle, &account_id, &message_id, &attachment_id).await?
+    {
         return Ok(hit);
     }
 
@@ -607,7 +619,14 @@ pub async fn provider_fetch_attachment(
         .await?;
 
     // 4. Cache the result (fire-and-forget — don't delay response)
-    cache_after_fetch(&db, &app_handle, &account_id, &message_id, &attachment_id, &result.data);
+    cache_after_fetch(
+        &db,
+        &app_handle,
+        &account_id,
+        &message_id,
+        &attachment_id,
+        &result.data,
+    );
 
     Ok(result)
 }
@@ -740,9 +759,7 @@ fn cache_after_fetch(
             db.with_conn(move |conn| {
                 let info = find_cache_info(conn, &acct, &msg, &att)?;
                 if let Some(info) = info {
-                    update_cache_fields(
-                        conn, &info.id, &local_path, cache_size, &content_hash,
-                    )?;
+                    update_cache_fields(conn, &info.id, &local_path, cache_size, &content_hash)?;
                 }
                 Ok(())
             })
@@ -757,6 +774,74 @@ fn cache_after_fetch(
 }
 
 // ── Folders ─────────────────────────────────────────────────
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn provider_test_connection(
+    account_id: String,
+    db: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
+    jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
+    body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
+    search: State<'_, SearchState>,
+    app_handle: AppHandle,
+) -> Result<ProviderTestResult, String> {
+    let provider = get_provider_type(&db, &account_id).await?;
+    let ops = get_ops(
+        &provider,
+        &account_id,
+        &gmail,
+        &jmap,
+        &graph,
+        *gmail.encryption_key(),
+    )
+    .await?;
+    let ctx = ProviderCtx {
+        account_id: &account_id,
+        db: &db,
+        body_store: &body_store,
+        inline_images: &inline_images,
+        search: &search,
+        app_handle: &app_handle,
+    };
+    ops.test_connection(&ctx).await
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn provider_get_profile(
+    account_id: String,
+    db: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
+    jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
+    body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
+    search: State<'_, SearchState>,
+    app_handle: AppHandle,
+) -> Result<ProviderProfile, String> {
+    let provider = get_provider_type(&db, &account_id).await?;
+    let ops = get_ops(
+        &provider,
+        &account_id,
+        &gmail,
+        &jmap,
+        &graph,
+        *gmail.encryption_key(),
+    )
+    .await?;
+    let ctx = ProviderCtx {
+        account_id: &account_id,
+        db: &db,
+        body_store: &body_store,
+        inline_images: &inline_images,
+        search: &search,
+        app_handle: &app_handle,
+    };
+    ops.get_profile(&ctx).await
+}
 
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
@@ -790,4 +875,129 @@ pub async fn provider_list_folders(
         app_handle: &app_handle,
     };
     ops.list_folders(&ctx).await
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn provider_create_folder(
+    account_id: String,
+    name: String,
+    parent_id: Option<String>,
+    text_color: Option<String>,
+    bg_color: Option<String>,
+    db: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
+    jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
+    body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
+    search: State<'_, SearchState>,
+    app_handle: AppHandle,
+) -> Result<ProviderFolder, String> {
+    let provider = get_provider_type(&db, &account_id).await?;
+    let ops = get_ops(
+        &provider,
+        &account_id,
+        &gmail,
+        &jmap,
+        &graph,
+        *gmail.encryption_key(),
+    )
+    .await?;
+    let ctx = ProviderCtx {
+        account_id: &account_id,
+        db: &db,
+        body_store: &body_store,
+        inline_images: &inline_images,
+        search: &search,
+        app_handle: &app_handle,
+    };
+    ops.create_folder(
+        &ctx,
+        &name,
+        parent_id.as_deref(),
+        text_color.as_deref(),
+        bg_color.as_deref(),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn provider_rename_folder(
+    account_id: String,
+    folder_id: String,
+    new_name: String,
+    text_color: Option<String>,
+    bg_color: Option<String>,
+    db: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
+    jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
+    body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
+    search: State<'_, SearchState>,
+    app_handle: AppHandle,
+) -> Result<ProviderFolder, String> {
+    let provider = get_provider_type(&db, &account_id).await?;
+    let ops = get_ops(
+        &provider,
+        &account_id,
+        &gmail,
+        &jmap,
+        &graph,
+        *gmail.encryption_key(),
+    )
+    .await?;
+    let ctx = ProviderCtx {
+        account_id: &account_id,
+        db: &db,
+        body_store: &body_store,
+        inline_images: &inline_images,
+        search: &search,
+        app_handle: &app_handle,
+    };
+    ops.rename_folder(
+        &ctx,
+        &folder_id,
+        &new_name,
+        text_color.as_deref(),
+        bg_color.as_deref(),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn provider_delete_folder(
+    account_id: String,
+    folder_id: String,
+    db: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
+    jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
+    body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
+    search: State<'_, SearchState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let provider = get_provider_type(&db, &account_id).await?;
+    let ops = get_ops(
+        &provider,
+        &account_id,
+        &gmail,
+        &jmap,
+        &graph,
+        *gmail.encryption_key(),
+    )
+    .await?;
+    let ctx = ProviderCtx {
+        account_id: &account_id,
+        db: &db,
+        body_store: &body_store,
+        inline_images: &inline_images,
+        search: &search,
+        app_handle: &app_handle,
+    };
+    ops.delete_folder(&ctx, &folder_id).await
 }

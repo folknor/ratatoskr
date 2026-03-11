@@ -66,6 +66,26 @@ interface RustGmailAttachmentData {
   data: string;
 }
 
+interface ProviderFolderResult {
+  id: string;
+  name: string;
+  path: string;
+  folderType: string;
+  specialUse: string | null;
+  colorBg: string | null;
+  colorFg: string | null;
+}
+
+interface ProviderTestResult {
+  success: boolean;
+  message: string;
+}
+
+interface ProviderProfile {
+  email: string;
+  name?: string;
+}
+
 /**
  * EmailProvider adapter that delegates to Rust Gmail Tauri commands.
  * All operations invoke the corresponding `gmail_*` Tauri command.
@@ -99,17 +119,22 @@ export class GmailApiProvider implements EmailProvider {
   }
 
   async createFolder(name: string, _parentPath?: string): Promise<EmailFolder> {
-    const fullName = _parentPath ? `${_parentPath}/${name}` : name;
-    const label = await invoke<RustGmailLabel>("gmail_create_label", {
-      accountId: this.accountId,
-      name: fullName,
-    });
+    const folder = await invoke<ProviderFolderResult>(
+      "provider_create_folder",
+      {
+        accountId: this.accountId,
+        name,
+        parentId: _parentPath ?? null,
+        textColor: null,
+        bgColor: null,
+      },
+    );
     return {
-      id: label.id,
-      name: label.name,
-      path: label.id,
-      type: "user",
-      specialUse: null,
+      id: folder.id,
+      name: folder.name,
+      path: folder.path,
+      type: folder.folderType === "system" ? "system" : "user",
+      specialUse: folder.specialUse,
       delimiter: "/",
       messageCount: 0,
       unreadCount: 0,
@@ -117,18 +142,19 @@ export class GmailApiProvider implements EmailProvider {
   }
 
   async deleteFolder(path: string): Promise<void> {
-    // In Gmail, path is the label ID for deletion
-    await invoke<void>("gmail_delete_label", {
+    await invoke<void>("provider_delete_folder", {
       accountId: this.accountId,
-      labelId: path,
+      folderId: path,
     });
   }
 
   async renameFolder(path: string, newName: string): Promise<void> {
-    await invoke<RustGmailLabel>("gmail_update_label", {
+    await invoke<ProviderFolderResult>("provider_rename_folder", {
       accountId: this.accountId,
-      labelId: path,
-      name: newName,
+      folderId: path,
+      newName,
+      textColor: null,
+      bgColor: null,
     });
   }
 
@@ -224,26 +250,14 @@ export class GmailApiProvider implements EmailProvider {
   }
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
-    try {
-      const profile = await invoke<RustGmailProfile>("gmail_test_connection", {
-        accountId: this.accountId,
-      });
-      return {
-        success: true,
-        message: `Connected as ${profile.emailAddress}`,
-      };
-    } catch (err) {
-      return {
-        success: false,
-        message: err instanceof Error ? err.message : String(err),
-      };
-    }
+    return invoke<ProviderTestResult>("provider_test_connection", {
+      accountId: this.accountId,
+    });
   }
 
   async getProfile(): Promise<{ email: string; name?: string | undefined }> {
-    const profile = await invoke<RustGmailProfile>("gmail_test_connection", {
+    return invoke<ProviderProfile>("provider_get_profile", {
       accountId: this.accountId,
     });
-    return { email: profile.emailAddress };
   }
 }

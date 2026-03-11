@@ -463,7 +463,12 @@ pub fn run() {
             provider::commands::provider_update_draft,
             provider::commands::provider_delete_draft,
             provider::commands::provider_fetch_attachment,
+            provider::commands::provider_test_connection,
+            provider::commands::provider_get_profile,
             provider::commands::provider_list_folders,
+            provider::commands::provider_create_folder,
+            provider::commands::provider_rename_folder,
+            provider::commands::provider_delete_folder,
             // Discovery
             discovery::commands::discover_email_config,
         ])
@@ -499,10 +504,14 @@ pub fn run() {
                     })?;
                 app.manage(body_store_state);
 
-                let inline_image_store_state =
-                    inline_image_store::InlineImageStoreState::init(&app_data_dir).map_err(
-                        |e| Box::new(std::io::Error::other(format!("inline image store init: {e}"))),
-                    )?;
+                let inline_image_store_state = inline_image_store::InlineImageStoreState::init(
+                    &app_data_dir,
+                )
+                .map_err(|e| {
+                    Box::new(std::io::Error::other(format!(
+                        "inline image store init: {e}"
+                    )))
+                })?;
                 app.manage(inline_image_store_state);
 
                 let search_state = search::SearchState::init(&app_data_dir)

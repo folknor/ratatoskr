@@ -32,7 +32,10 @@ pub struct ProviderFolder {
     pub id: String,
     pub name: String,
     pub path: String,
+    pub folder_type: String,
     pub special_use: Option<String>,
+    pub color_bg: Option<String>,
+    pub color_fg: Option<String>,
 }
 
 /// Provider-agnostic attachment data (base64-encoded).
@@ -41,4 +44,20 @@ pub struct ProviderFolder {
 pub struct AttachmentData {
     pub data: String,
     pub size: usize,
+}
+
+/// Provider-agnostic connection test result.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderTestResult {
+    pub success: bool,
+    pub message: String,
+}
+
+/// Provider-agnostic account profile.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderProfile {
+    pub email: String,
+    pub name: Option<String>,
 }

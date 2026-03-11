@@ -6,7 +6,9 @@ use rusqlite::Connection;
 
 use crate::provider::crypto::{decrypt_value, is_encrypted};
 use crate::provider::ops::ProviderOps;
-use crate::provider::types::{AttachmentData, ProviderCtx, ProviderFolder, SyncResult};
+use crate::provider::types::{
+    AttachmentData, ProviderCtx, ProviderFolder, ProviderProfile, ProviderTestResult, SyncResult,
+};
 use crate::smtp;
 
 use super::client as imap_client;
@@ -827,8 +829,97 @@ impl ProviderOps for ImapOps {
                 id: f.path.clone(),
                 name: f.name,
                 path: f.path,
+                folder_type: if f.special_use.is_some() {
+                    "system".to_string()
+                } else {
+                    "user".to_string()
+                },
                 special_use: f.special_use,
+                color_bg: None,
+                color_fg: None,
             })
             .collect())
+    }
+
+    async fn create_folder(
+        &self,
+        _ctx: &ProviderCtx<'_>,
+        _name: &str,
+        _parent_id: Option<&str>,
+        _text_color: Option<&str>,
+        _bg_color: Option<&str>,
+    ) -> Result<ProviderFolder, String> {
+        Err(
+            "Creating folders is not supported for IMAP accounts via the current provider API."
+                .to_string(),
+        )
+    }
+
+    async fn rename_folder(
+        &self,
+        _ctx: &ProviderCtx<'_>,
+        _folder_id: &str,
+        _new_name: &str,
+        _text_color: Option<&str>,
+        _bg_color: Option<&str>,
+    ) -> Result<ProviderFolder, String> {
+        Err(
+            "Renaming folders is not supported for IMAP accounts via the current provider API."
+                .to_string(),
+        )
+    }
+
+    async fn delete_folder(&self, _ctx: &ProviderCtx<'_>, _folder_id: &str) -> Result<(), String> {
+        Err(
+            "Deleting folders is not supported for IMAP accounts via the current provider API."
+                .to_string(),
+        )
+    }
+
+    async fn test_connection(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, String> {
+        let account_id = ctx.account_id.to_string();
+        let key = self.encryption_key;
+        let (imap_config, smtp_config) = ctx
+            .db
+            .with_conn(move |conn| {
+                Ok((
+                    build_imap_config(conn, &account_id, &key)?,
+                    build_smtp_config(conn, &account_id, &key)?,
+                ))
+            })
+            .await?;
+
+        let imap_result = imap_client::test_connection(&imap_config).await?;
+        let smtp_result = smtp::client::test_connection(&smtp_config).await?;
+        if !smtp_result.success {
+            return Ok(ProviderTestResult {
+                success: false,
+                message: format!("IMAP OK, but SMTP failed: {}", smtp_result.message),
+            });
+        }
+
+        Ok(ProviderTestResult {
+            success: true,
+            message: format!("Connected: {imap_result}"),
+        })
+    }
+
+    async fn get_profile(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, String> {
+        let account_id = ctx.account_id.to_string();
+        ctx.db
+            .with_conn(move |conn| {
+                conn.query_row(
+                    "SELECT email, display_name FROM accounts WHERE id = ?1",
+                    rusqlite::params![account_id],
+                    |row| {
+                        Ok(ProviderProfile {
+                            email: row.get(0)?,
+                            name: row.get(1)?,
+                        })
+                    },
+                )
+                .map_err(|e| format!("Failed to read account profile: {e}"))
+            })
+            .await
     }
 }

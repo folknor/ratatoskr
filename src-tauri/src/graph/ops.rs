@@ -3,7 +3,9 @@ use base64::{Engine, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use mail_parser::MimeHeaders;
 
 use crate::provider::ops::ProviderOps;
-use crate::provider::types::{AttachmentData, ProviderCtx, ProviderFolder, SyncResult};
+use crate::provider::types::{
+    AttachmentData, ProviderCtx, ProviderFolder, ProviderProfile, ProviderTestResult, SyncResult,
+};
 
 use super::client::GraphClient;
 use super::folder_mapper::FolderMap;
@@ -256,14 +258,84 @@ impl ProviderOps for GraphOps {
                 id: m.label_id.clone(),
                 name: m.label_name.clone(),
                 path: m.label_name.clone(),
+                folder_type: m.label_type.to_string(),
                 special_use: if m.label_type == "system" {
                     Some(m.label_id.clone())
                 } else {
                     None
                 },
+                color_bg: None,
+                color_fg: None,
             })
             .collect();
         Ok(folders)
+    }
+
+    async fn create_folder(
+        &self,
+        _ctx: &ProviderCtx<'_>,
+        _name: &str,
+        _parent_id: Option<&str>,
+        _text_color: Option<&str>,
+        _bg_color: Option<&str>,
+    ) -> Result<ProviderFolder, String> {
+        Err(
+            "Folder creation is not supported for Graph accounts via the current provider API."
+                .to_string(),
+        )
+    }
+
+    async fn rename_folder(
+        &self,
+        _ctx: &ProviderCtx<'_>,
+        _folder_id: &str,
+        _new_name: &str,
+        _text_color: Option<&str>,
+        _bg_color: Option<&str>,
+    ) -> Result<ProviderFolder, String> {
+        Err(
+            "Folder rename is not supported for Graph accounts via the current provider API."
+                .to_string(),
+        )
+    }
+
+    async fn delete_folder(&self, _ctx: &ProviderCtx<'_>, _folder_id: &str) -> Result<(), String> {
+        Err(
+            "Folder deletion is not supported for Graph accounts via the current provider API."
+                .to_string(),
+        )
+    }
+
+    async fn test_connection(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, String> {
+        let profile: super::types::GraphProfile = self
+            .client
+            .get_json("/me?$select=displayName,mail,userPrincipalName", ctx.db)
+            .await?;
+        let display = profile
+            .mail
+            .clone()
+            .or(profile.user_principal_name.clone())
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        Ok(ProviderTestResult {
+            success: true,
+            message: format!("Connected as {display}"),
+        })
+    }
+
+    async fn get_profile(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, String> {
+        let profile: super::types::GraphProfile = self
+            .client
+            .get_json("/me?$select=displayName,mail,userPrincipalName", ctx.db)
+            .await?;
+
+        Ok(ProviderProfile {
+            email: profile
+                .mail
+                .or(profile.user_principal_name)
+                .unwrap_or_default(),
+            name: profile.display_name,
+        })
     }
 }
 

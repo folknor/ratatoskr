@@ -3,7 +3,9 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use jmap_client::mailbox::Role;
 
 use crate::provider::ops::ProviderOps;
-use crate::provider::types::{AttachmentData, ProviderCtx, ProviderFolder, SyncResult};
+use crate::provider::types::{
+    AttachmentData, ProviderCtx, ProviderFolder, ProviderProfile, ProviderTestResult, SyncResult,
+};
 
 use super::client::JmapClient;
 use super::commands::{
@@ -383,9 +385,91 @@ impl ProviderOps for JmapOps {
                 id: mapping.label_id,
                 name: mapping.label_name,
                 path: name.to_string(),
+                folder_type: mapping.label_type.to_string(),
                 special_use: role_str.map(String::from),
+                color_bg: None,
+                color_fg: None,
             });
         }
         Ok(folders)
+    }
+
+    async fn create_folder(
+        &self,
+        _ctx: &ProviderCtx<'_>,
+        name: &str,
+        parent_id: Option<&str>,
+        _text_color: Option<&str>,
+        _bg_color: Option<&str>,
+    ) -> Result<ProviderFolder, String> {
+        let mut mb = self
+            .client
+            .inner()
+            .mailbox_create(name, parent_id.map(ToOwned::to_owned), Role::None)
+            .await
+            .map_err(|e| format!("Mailbox/set create: {e}"))?;
+
+        let id = mb.take_id();
+        Ok(ProviderFolder {
+            id: format!("jmap-{id}"),
+            name: name.to_string(),
+            path: name.to_string(),
+            folder_type: "user".to_string(),
+            special_use: None,
+            color_bg: None,
+            color_fg: None,
+        })
+    }
+
+    async fn rename_folder(
+        &self,
+        _ctx: &ProviderCtx<'_>,
+        folder_id: &str,
+        new_name: &str,
+        _text_color: Option<&str>,
+        _bg_color: Option<&str>,
+    ) -> Result<ProviderFolder, String> {
+        let mailbox_id = resolve_mailbox_id(&self.client, folder_id).await?;
+        self.client
+            .inner()
+            .mailbox_rename(&mailbox_id, new_name)
+            .await
+            .map_err(|e| format!("Mailbox/set rename: {e}"))?;
+
+        Ok(ProviderFolder {
+            id: folder_id.to_string(),
+            name: new_name.to_string(),
+            path: new_name.to_string(),
+            folder_type: "user".to_string(),
+            special_use: None,
+            color_bg: None,
+            color_fg: None,
+        })
+    }
+
+    async fn delete_folder(&self, _ctx: &ProviderCtx<'_>, folder_id: &str) -> Result<(), String> {
+        let mailbox_id = resolve_mailbox_id(&self.client, folder_id).await?;
+        self.client
+            .inner()
+            .mailbox_destroy(&mailbox_id, true)
+            .await
+            .map_err(|e| format!("Mailbox/set destroy: {e}"))?;
+        Ok(())
+    }
+
+    async fn test_connection(&self, _ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, String> {
+        let session = self.client.inner().session();
+        Ok(ProviderTestResult {
+            success: true,
+            message: format!("Connected as {}", session.username()),
+        })
+    }
+
+    async fn get_profile(&self, _ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, String> {
+        let session = self.client.inner().session();
+        Ok(ProviderProfile {
+            email: session.username().to_string(),
+            name: None,
+        })
     }
 }

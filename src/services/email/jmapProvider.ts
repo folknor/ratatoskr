@@ -17,6 +17,24 @@ interface JmapFolder {
   unreadCount: number;
 }
 
+interface ProviderFolderResult {
+  id: string;
+  name: string;
+  path: string;
+  folderType: string;
+  specialUse: string | null;
+}
+
+interface ProviderTestResult {
+  success: boolean;
+  message: string;
+}
+
+interface ProviderProfile {
+  email: string;
+  name?: string;
+}
+
 /**
  * EmailProvider adapter for JMAP accounts.
  * Delegates to Tauri jmap_* commands — Rust handles all protocol details.
@@ -51,38 +69,43 @@ export class JmapProvider implements EmailProvider {
   }
 
   async createFolder(name: string, parentPath?: string): Promise<EmailFolder> {
-    const folder = await invoke<JmapFolder>("jmap_create_folder", {
-      accountId: this.accountId,
-      name,
-      parentId: parentPath,
-    });
+    const folder = await invoke<ProviderFolderResult>(
+      "provider_create_folder",
+      {
+        accountId: this.accountId,
+        name,
+        parentId: parentPath ?? null,
+        textColor: null,
+        bgColor: null,
+      },
+    );
 
     return {
       id: folder.id,
       name: folder.name,
       path: folder.path,
-      type: (folder.folderType === "system" ? "system" : "user") as
-        | "system"
-        | "user",
+      type: folder.folderType === "system" ? "system" : "user",
       specialUse: folder.specialUse,
       delimiter: "/",
-      messageCount: folder.messageCount,
-      unreadCount: folder.unreadCount,
+      messageCount: 0,
+      unreadCount: 0,
     };
   }
 
   async deleteFolder(path: string): Promise<void> {
-    await invoke("jmap_delete_folder", {
+    await invoke("provider_delete_folder", {
       accountId: this.accountId,
       folderId: path,
     });
   }
 
   async renameFolder(path: string, newName: string): Promise<void> {
-    await invoke("jmap_rename_folder", {
+    await invoke("provider_rename_folder", {
       accountId: this.accountId,
       folderId: path,
       newName,
+      textColor: null,
+      bgColor: null,
     });
   }
 
@@ -143,16 +166,13 @@ export class JmapProvider implements EmailProvider {
   // ---- Connection ----
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
-    return invoke<{ success: boolean; message: string }>(
-      "jmap_test_connection",
-      {
-        accountId: this.accountId,
-      },
-    );
+    return invoke<ProviderTestResult>("provider_test_connection", {
+      accountId: this.accountId,
+    });
   }
 
   async getProfile(): Promise<{ email: string; name?: string | undefined }> {
-    return invoke<{ email: string; name?: string }>("jmap_get_profile", {
+    return invoke<ProviderProfile>("provider_get_profile", {
       accountId: this.accountId,
     });
   }
