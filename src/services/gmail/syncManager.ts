@@ -25,6 +25,10 @@ import {
 } from "@/services/ai/categorizationManager";
 import { queueNewEmailNotification } from "@/services/notifications/notificationManager";
 import { applySmartLabelsToNewMessageIds } from "@/services/smartLabels/smartLabelManager";
+import type {
+  SmartLabelAIRule,
+  SmartLabelAIThread,
+} from "@/services/smartLabels/smartLabelService";
 
 /**
  * Shared post-sync hooks: apply filters, smart labels, notifications, and AI categorization.
@@ -43,6 +47,8 @@ interface PostSyncHooksInput {
     subject?: string | null;
   }[];
   aiCategorizationCandidates?: CategorizationCandidate[];
+  aiSmartLabelThreads?: SmartLabelAIThread[];
+  aiSmartLabelRules?: SmartLabelAIRule[];
 }
 
 async function runPostSyncHooks(input: PostSyncHooksInput): Promise<void> {
@@ -53,6 +59,8 @@ async function runPostSyncHooks(input: PostSyncHooksInput): Promise<void> {
     criteriaSmartLabelMatches = [],
     notificationsToQueue = [],
     aiCategorizationCandidates = [],
+    aiSmartLabelThreads = [],
+    aiSmartLabelRules = [],
   } = input;
 
   if (newInboxEmailIds.length > 0) {
@@ -61,6 +69,7 @@ async function runPostSyncHooks(input: PostSyncHooksInput): Promise<void> {
       accountId,
       newInboxEmailIds,
       criteriaSmartLabelMatches,
+      { threads: aiSmartLabelThreads, rules: aiSmartLabelRules },
     ).catch((err) => console.error("[syncManager] Smart label error:", err));
 
     try {
@@ -134,6 +143,8 @@ interface SyncStatusEvent {
       }[]
     | null;
   aiCategorizationCandidates?: CategorizationCandidate[] | null;
+  aiSmartLabelThreads?: SmartLabelAIThread[] | null;
+  aiSmartLabelRules?: SmartLabelAIRule[] | null;
 }
 
 let syncListenersPromise: Promise<void> | null = null;
@@ -236,6 +247,8 @@ async function handleSyncStatusEvent(event: SyncStatusEvent): Promise<void> {
     criteriaSmartLabelMatches: event.criteriaSmartLabelMatches ?? [],
     notificationsToQueue: event.notificationsToQueue ?? [],
     aiCategorizationCandidates: event.aiCategorizationCandidates ?? [],
+    aiSmartLabelThreads: event.aiSmartLabelThreads ?? [],
+    aiSmartLabelRules: event.aiSmartLabelRules ?? [],
   });
 
   statusCallback?.(event.accountId, "done");

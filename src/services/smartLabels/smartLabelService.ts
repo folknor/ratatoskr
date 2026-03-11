@@ -9,6 +9,18 @@ export interface SmartLabelMatch {
   labelIds: string[];
 }
 
+export interface SmartLabelAIThread {
+  id: string;
+  subject: string;
+  snippet: string;
+  fromAddress: string;
+}
+
+export interface SmartLabelAIRule {
+  labelId: string;
+  description: string;
+}
+
 function toPairKey(threadId: string, labelId: string): string {
   return `${threadId}:${labelId}`;
 }
@@ -149,5 +161,23 @@ export async function matchSmartLabels(
     results.push({ threadId, labelIds: [...labelIds] });
   }
 
+  return results;
+}
+
+export async function classifySmartLabelRemainder(
+  threads: SmartLabelAIThread[],
+  rules: SmartLabelAIRule[],
+): Promise<SmartLabelMatch[]> {
+  if (threads.length === 0 || rules.length === 0) {
+    return [];
+  }
+
+  const aiResults = await classifyThreadsBySmartLabels(threads, rules);
+  const results: SmartLabelMatch[] = [];
+  for (const [threadId, labelIds] of aiResults) {
+    if (labelIds.length > 0) {
+      results.push({ threadId, labelIds });
+    }
+  }
   return results;
 }

@@ -14,6 +14,7 @@ use crate::provider::commands::provider_sync_auto_impl;
 use crate::provider::router::get_provider_type;
 use crate::search::SearchState;
 use crate::smart_labels::commands::smart_labels_apply_criteria_to_new_message_ids_impl;
+use crate::smart_labels::commands::smart_labels_prepare_ai_remainder_impl;
 
 use super::{SyncQueueState, SyncState};
 use super::config;
@@ -168,6 +169,8 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                     criteria_smart_label_matches: None,
                     notifications_to_queue: None,
                     ai_categorization_candidates: None,
+                    ai_smart_label_threads: None,
+                    ai_smart_label_rules: None,
                 },
             );
             return;
@@ -187,6 +190,8 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
             criteria_smart_label_matches: None,
             notifications_to_queue: None,
             ai_categorization_candidates: None,
+            ai_smart_label_threads: None,
+            ai_smart_label_rules: None,
         },
     );
 
@@ -204,6 +209,8 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 criteria_smart_label_matches: Some(Vec::new()),
                 notifications_to_queue: Some(Vec::new()),
                 ai_categorization_candidates: Some(Vec::new()),
+                ai_smart_label_threads: Some(Vec::new()),
+                ai_smart_label_rules: Some(Vec::new()),
             },
         );
         return;
@@ -279,6 +286,25 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 }
             };
 
+            let (ai_smart_label_threads, ai_smart_label_rules) =
+                match smart_labels_prepare_ai_remainder_impl(
+                    account_id,
+                    &result.new_inbox_message_ids,
+                    &db,
+                    &body_store,
+                    &criteria_smart_label_matches,
+                )
+                .await
+                {
+                    Ok(payload) => payload,
+                    Err(error) => {
+                        log::warn!(
+                            "Failed to prepare smart label AI remainder for {account_id}: {error}"
+                        );
+                        (Vec::new(), Vec::new())
+                    }
+                };
+
             let ai_categorization_candidates =
                 match get_ai_categorization_candidates(&db, account_id).await {
                     Ok(candidates) => candidates,
@@ -303,6 +329,8 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                     criteria_smart_label_matches: Some(criteria_smart_label_matches),
                     notifications_to_queue: Some(notifications_to_queue),
                     ai_categorization_candidates: Some(ai_categorization_candidates),
+                    ai_smart_label_threads: Some(ai_smart_label_threads),
+                    ai_smart_label_rules: Some(ai_smart_label_rules),
                 },
             )
         }
@@ -319,6 +347,8 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 criteria_smart_label_matches: None,
                 notifications_to_queue: None,
                 ai_categorization_candidates: None,
+                ai_smart_label_threads: None,
+                ai_smart_label_rules: None,
             },
         ),
     }
