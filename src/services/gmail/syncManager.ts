@@ -12,6 +12,7 @@ export interface SyncProgress {
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listAccountBasicInfo } from "@/services/accounts/basicInfo";
 import {
   type CategorizationCandidate,
   categorizeNewThreads,
@@ -132,6 +133,8 @@ interface SyncStatusEvent {
 }
 
 let syncListenersPromise: Promise<void> | null = null;
+let caldavBackgroundTimer: number | null = null;
+const BACKGROUND_SYNC_INTERVAL_MS = 60_000;
 
 export type SyncStatusCallback = (
   accountId: string,
@@ -160,10 +163,10 @@ async function ensureSyncListeners(): Promise<void> {
     const unlisteners: UnlistenFn[] = [];
 
     const progressEvents = [
-      { provider: "gmail_api", eventName: "gmail-sync-progress" },
-      { provider: "imap", eventName: "imap-sync-progress" },
-      { provider: "jmap", eventName: "jmap-sync-progress" },
-      { provider: "graph", eventName: "graph-sync-progress" },
+      { eventName: "gmail-sync-progress" },
+      { eventName: "imap-sync-progress" },
+      { eventName: "jmap-sync-progress" },
+      { eventName: "graph-sync-progress" },
     ] as const;
 
     for (const { eventName } of progressEvents) {
@@ -218,19 +221,11 @@ async function handleSyncStatusEvent(event: SyncStatusEvent): Promise<void> {
     return;
   }
 
-  if (event.provider === "caldav") {
-    statusCallback?.(event.accountId, "done");
-    if (event.shouldSyncCalendar === true) {
-      await syncCalendarForAccount(event.accountId);
-    }
-    return;
-  }
-
-    await runPostSyncHooks({
-      accountId: event.accountId,
-      provider: event.provider,
-      newInboxEmailIds: event.newInboxMessageIds ?? [],
-      affectedThreadIds: event.affectedThreadIds ?? [],
+  await runPostSyncHooks({
+    accountId: event.accountId,
+    provider: event.provider,
+    newInboxEmailIds: event.newInboxMessageIds ?? [],
+    affectedThreadIds: event.affectedThreadIds ?? [],
     criteriaSmartLabelMatches: event.criteriaSmartLabelMatches ?? [],
     notificationsToQueue: event.notificationsToQueue ?? [],
     aiCategorizationCandidates: event.aiCategorizationCandidates ?? [],
@@ -250,48 +245,119 @@ async function handleSyncStatusEvent(event: SyncStatusEvent): Promise<void> {
   }
 }
 
+async function partitionSyncAccountIds(accountIds: string[]): Promise<{
+  caldavIds: string[];
+  emailIds: string[];
+}> {
+  if (accountIds.length === 0) {
+    return { caldavIds: [], emailIds: [] };
+  }
+
+  const allAccounts = await listAccountBasicInfo();
+  const accountMap = new Map(allAccounts.map((account) => [account.id, account]));
+  const caldavIds: string[] = [];
+  const emailIds: string[] = [];
+
+  for (const accountId of accountIds) {
+    const account = accountMap.get(accountId);
+    if (account?.provider === "caldav") {
+      caldavIds.push(accountId);
+    } else {
+      emailIds.push(accountId);
+    }
+  }
+
+  return { caldavIds, emailIds };
+}
+
+async function syncStandaloneCaldavAccount(accountId: string): Promise<void> {
+  statusCallback?.(accountId, "syncing");
+  try {
+    await syncCalendarForAccount(accountId);
+    statusCallback?.(accountId, "done");
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Calendar sync failed";
+    console.error(`[syncManager] CalDAV sync failed for ${accountId}:`, error);
+    statusCallback?.(accountId, "error", undefined, message);
+  }
+}
+
+async function syncStandaloneCaldavAccounts(
+  accountIds: string[],
+): Promise<void> {
+  await Promise.all(
+    accountIds.map((accountId) => syncStandaloneCaldavAccount(accountId)),
+  );
+}
+
+function startCaldavBackgroundSync(
+  accountIds: string[],
+  skipImmediateSync: boolean,
+): void {
+  if (caldavBackgroundTimer !== null) {
+    window.clearInterval(caldavBackgroundTimer);
+    caldavBackgroundTimer = null;
+  }
+
+  if (accountIds.length === 0) {
+    return;
+  }
+
+  const run = () => {
+    void syncStandaloneCaldavAccounts(accountIds);
+  };
+
+  if (!skipImmediateSync) {
+    run();
+  }
+
+  caldavBackgroundTimer = window.setInterval(run, BACKGROUND_SYNC_INTERVAL_MS);
+}
+
 /**
  * Sync calendars for a single account via the CalendarProvider abstraction.
  * Discovers calendars, syncs events for each visible calendar, stores results in DB.
  */
 async function syncCalendarForAccount(accountId: string): Promise<void> {
-  try {
-    const provider = await getCalendarProvider(accountId);
+  const provider = await getCalendarProvider(accountId);
 
-    // Discover/update calendars
-    const calendarInfos = await provider.listCalendars();
-    await upsertDiscoveredCalendars(accountId, provider.type, calendarInfos);
+  // Discover/update calendars
+  const calendarInfos = await provider.listCalendars();
+  await upsertDiscoveredCalendars(accountId, provider.type, calendarInfos);
 
-    // Sync events for each visible calendar
-    const visibleCals = await getVisibleCalendars(accountId);
-    for (const cal of visibleCals) {
-      try {
-        const syncResult = await provider.syncEvents(
-          cal.remote_id,
-          cal.sync_token ?? undefined,
-        );
-        await applyCalendarSyncResult(accountId, cal.remote_id, syncResult);
-      } catch (err) {
-        console.warn(
-          `[syncManager] Calendar sync failed for ${cal.display_name ?? cal.remote_id}:`,
-          err,
-        );
-      }
+  // Sync events for each visible calendar
+  const visibleCals = await getVisibleCalendars(accountId);
+  for (const cal of visibleCals) {
+    try {
+      const syncResult = await provider.syncEvents(
+        cal.remote_id,
+        cal.sync_token ?? undefined,
+      );
+      await applyCalendarSyncResult(accountId, cal.remote_id, syncResult);
+    } catch (err) {
+      console.warn(
+        `[syncManager] Calendar sync failed for ${cal.display_name ?? cal.remote_id}:`,
+        err,
+      );
+      throw err;
     }
-
-    // Emit event for UI update
-    window.dispatchEvent(new CustomEvent("ratatoskr-calendar-sync-done"));
-  } catch (err) {
-    console.warn(
-      `[syncManager] Calendar sync failed for account ${accountId}:`,
-      err,
-    );
   }
+
+  // Emit event for UI update
+  window.dispatchEvent(new CustomEvent("ratatoskr-calendar-sync-done"));
 }
 
 async function runSync(accountIds: string[]): Promise<void> {
   await ensureSyncListeners();
-  await invoke("sync_run_accounts", { accountIds });
+  const { caldavIds, emailIds } = await partitionSyncAccountIds(accountIds);
+
+  await Promise.all([
+    syncStandaloneCaldavAccounts(caldavIds),
+    emailIds.length > 0
+      ? invoke("sync_run_accounts", { accountIds: emailIds })
+      : Promise.resolve(),
+  ]);
 }
 
 /**
@@ -315,20 +381,31 @@ export function startBackgroundSync(
   void Promise.resolve(ensureSyncListeners()).catch((error) => {
     console.warn("[syncManager] Failed to initialize sync listeners:", error);
   });
-  void Promise.resolve(
-    invoke("sync_start_background", {
-      accountIds,
-      skipImmediateSync,
-    }),
-  ).catch((error) => {
-    console.warn("[syncManager] Failed to start background sync:", error);
-  });
+  void partitionSyncAccountIds(accountIds)
+    .then(({ caldavIds, emailIds }) => {
+      startCaldavBackgroundSync(caldavIds, skipImmediateSync);
+      if (emailIds.length === 0) {
+        return;
+      }
+
+      return invoke("sync_start_background", {
+        accountIds: emailIds,
+        skipImmediateSync,
+      });
+    })
+    .catch((error) => {
+      console.warn("[syncManager] Failed to start background sync:", error);
+    });
 }
 
 /**
  * Stop the background sync timer.
  */
 export function stopBackgroundSync(): void {
+  if (caldavBackgroundTimer !== null) {
+    window.clearInterval(caldavBackgroundTimer);
+    caldavBackgroundTimer = null;
+  }
   void invoke("sync_stop_background");
 }
 

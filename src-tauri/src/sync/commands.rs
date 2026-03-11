@@ -19,7 +19,8 @@ use crate::smart_labels::commands::smart_labels_prepare_ai_remainder_impl;
 use super::{SyncQueueState, SyncState};
 use super::config;
 use super::types::{
-    AICategorizationCandidate, ImapSyncResult, NotificationCandidate, SyncStatusEvent,
+    AICategorizationCandidate, ImapSyncResult, NotificationCandidate, SyncStatus,
+    SyncStatusEvent,
 };
 
 const SYNC_INTERVAL_MS: u64 = 60_000;
@@ -207,7 +208,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 SyncStatusEvent {
                     account_id: account_id.to_string(),
                     provider: "unknown".to_string(),
-                    status: "error".to_string(),
+                    status: SyncStatus::Error,
                     error: Some(error),
                     should_sync_calendar: None,
                     new_inbox_message_ids: None,
@@ -229,7 +230,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
         SyncStatusEvent {
             account_id: account_id.to_string(),
             provider: provider.clone(),
-            status: "syncing".to_string(),
+            status: SyncStatus::Syncing,
             error: None,
             should_sync_calendar: None,
             new_inbox_message_ids: None,
@@ -248,7 +249,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
             SyncStatusEvent {
                 account_id: account_id.to_string(),
                 provider,
-                status: "done".to_string(),
+                status: SyncStatus::Done,
                 error: None,
                 should_sync_calendar: Some(true),
                 new_inbox_message_ids: Some(Vec::new()),
@@ -395,7 +396,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 SyncStatusEvent {
                     account_id: account_id.to_string(),
                     provider,
-                    status: "done".to_string(),
+                    status: SyncStatus::Done,
                     error: None,
                     should_sync_calendar: Some(should_sync_calendar),
                     new_inbox_message_ids: Some(result.new_inbox_message_ids),
@@ -413,7 +414,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
             SyncStatusEvent {
                 account_id: account_id.to_string(),
                 provider,
-                status: "error".to_string(),
+                status: SyncStatus::Error,
                 error: Some(error),
                 should_sync_calendar: None,
                 new_inbox_message_ids: None,

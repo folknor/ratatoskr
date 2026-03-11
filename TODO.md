@@ -48,10 +48,6 @@
 
 - [ ] **No "falling back to initial" progress event** — When delta sync fails and falls back to initial, the UI may show confusing progress. No event signals the fallback. *(LOW)*
 
-- [ ] **`SyncStatusEvent.status` is stringly typed in Rust** — Uses `String` for "syncing"/"done"/"error" rather than an enum. *(LOW)*
-
-- [ ] **CalDAV accounts processed redundantly in Rust and TS** — Rust's `run_sync_account` does a DB lookup and emits events for CalDAV accounts, then TS's `handleSyncStatusEvent` re-checks `provider === "caldav"` and does the actual calendar sync. The Rust side contributes nothing for CalDAV. *(LOW)*
-
 - [ ] **Gmail sync still fully in TS** — `src/services/gmail/syncManager.ts:80-112` — `syncGmailAccount()` uses Gmail REST API via TS HTTP calls, not the Rust sync engine. Porting is a large effort with minimal benefit since HTTP overhead dominates. *(LOW)*
 
 - [ ] **No per-operation timeout on Rust IMAP fetches** — `src-tauri/src/sync/imap_initial.rs` — No operation-level timeout on individual FETCH commands. A folder with 50K+ messages could hang indefinitely. Fix: wrap in `tokio::time::timeout()`. *(LOW)*
@@ -85,8 +81,6 @@
 - [ ] **`smart_labels_apply_matches` only callable via IPC** — Label application after AI classification still crosses the IPC boundary. Could be called directly in Rust once AI classification moves too. *(LOW)*
 
 - [ ] **TS re-queries all messages for AI matching phase** — `applySmartLabelsToNewMessageIds` calls `getMessagesByIds` to get messages the Rust side already loaded. *(LOW)*
-
-- [ ] **CalDAV "done" emitted before calendar sync completes** — Old code: sync calendar → emit "done". New code: emit "done" → sync calendar. UI shows completion before calendar data arrives. *(LOW)*
 
 ---
 
@@ -165,7 +159,3 @@
 ## Testing
 
 - [ ] **`flushListenerSetup` uses magic 8-iteration microtick loop** — `for (let index = 0; index < 8; index += 1) { await Promise.resolve(); }` is brittle and unexplained. If `ensureSyncListeners` gains more async steps, tests will silently break. *(LOW)*
-
-- [ ] **No test for the CalDAV provider special path** — `handleSyncStatusEvent` has a branch `if (event.provider === "caldav")` that emits "done" and runs calendar sync without post-sync hooks. Tests only cover `gmail_api`. *(LOW)*
-
-- [ ] **No test for `null` sync token → `undefined` conversion** — `syncCalendarForAccount` passes `cal.sync_token ?? undefined` to `provider.syncEvents`. The `null` → `undefined` coercion path is untested. *(LOW)*

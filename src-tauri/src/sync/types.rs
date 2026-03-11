@@ -38,12 +38,20 @@ pub struct SyncErrorEvent {
 
 /// Generic sync lifecycle event emitted for queued/manual sync runs.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SyncStatus {
+    Syncing,
+    Done,
+    Error,
+}
+
+/// Generic sync lifecycle event emitted for queued/manual sync runs.
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncStatusEvent {
     pub account_id: String,
     pub provider: String,
-    /// "syncing" | "done" | "error"
-    pub status: String,
+    pub status: SyncStatus,
     pub error: Option<String>,
     pub should_sync_calendar: Option<bool>,
     pub new_inbox_message_ids: Option<Vec<String>>,

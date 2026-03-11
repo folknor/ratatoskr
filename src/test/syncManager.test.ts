@@ -4,6 +4,7 @@ const {
   eventHandlers,
   mockInvoke,
   mockListen,
+  mockListAccountBasicInfo,
   mockApplyCalendarSyncResult,
   mockUpsertDiscoveredCalendars,
   mockGetCalendarProvider,
@@ -15,6 +16,7 @@ const {
   eventHandlers: new Map<string, (event: { payload: unknown }) => void>(),
   mockInvoke: vi.fn(),
   mockListen: vi.fn(),
+  mockListAccountBasicInfo: vi.fn(),
   mockApplyCalendarSyncResult: vi.fn(),
   mockUpsertDiscoveredCalendars: vi.fn(),
   mockGetCalendarProvider: vi.fn(),
@@ -34,6 +36,10 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 vi.mock("@/services/notifications/notificationManager", () => ({
   queueNewEmailNotification: mockQueueNewEmailNotification,
+}));
+
+vi.mock("@/services/accounts/basicInfo", () => ({
+  listAccountBasicInfo: mockListAccountBasicInfo,
 }));
 
 vi.mock("@/services/smartLabels/smartLabelManager", () => ({
@@ -86,6 +92,32 @@ describe("syncManager", () => {
     eventHandlers.clear();
     mockApplySmartLabelsToNewMessageIds.mockResolvedValue(undefined);
     mockCategorizeNewThreads.mockResolvedValue(undefined);
+    mockListAccountBasicInfo.mockResolvedValue([
+      {
+        id: "acc-1",
+        email: "user1@example.com",
+        displayName: "User One",
+        avatarUrl: null,
+        provider: "gmail_api",
+        isActive: true,
+      },
+      {
+        id: "acc-2",
+        email: "user2@example.com",
+        displayName: "User Two",
+        avatarUrl: null,
+        provider: "imap",
+        isActive: true,
+      },
+      {
+        id: "acc-caldav",
+        email: "cal@example.com",
+        displayName: "Calendar",
+        avatarUrl: null,
+        provider: "caldav",
+        isActive: true,
+      },
+    ]);
     mockListen.mockImplementation(
       async (
         eventName: string,
@@ -114,6 +146,7 @@ describe("syncManager", () => {
     const { startBackgroundSync } = await loadSyncManager();
 
     startBackgroundSync(["acc-1", "acc-2"], true);
+    await flushAsyncWork();
 
     expect(mockInvoke).toHaveBeenNthCalledWith(1, "sync_stop_background");
     expect(mockInvoke).toHaveBeenNthCalledWith(2, "sync_start_background", {
@@ -318,5 +351,60 @@ describe("syncManager", () => {
       deletedRemoteIds: [],
       nextSyncToken: "next-token",
     });
+  });
+
+  it("syncs standalone caldav accounts directly in ts", async () => {
+    const { onSyncStatus, syncAccount } = await loadSyncManager();
+    const callback = vi.fn();
+    const provider = {
+      type: "caldav",
+      listCalendars: vi.fn().mockResolvedValue([
+        {
+          remoteId: "cal-1",
+          displayName: "Personal",
+          color: null,
+          isPrimary: false,
+        },
+      ]),
+      syncEvents: vi.fn().mockResolvedValue({
+        calendars: [],
+        events: [],
+        deletedRemoteIds: [],
+        nextSyncToken: "next-token",
+      }),
+    };
+
+    mockGetCalendarProvider.mockResolvedValue(provider);
+    mockGetVisibleCalendars.mockResolvedValue([
+      {
+        remote_id: "cal-1",
+        display_name: "Personal",
+        sync_token: null,
+      },
+    ]);
+
+    onSyncStatus(callback);
+    await syncAccount("acc-caldav");
+
+    expect(mockGetCalendarProvider).toHaveBeenCalledWith("acc-caldav");
+    expect(provider.syncEvents).toHaveBeenCalledWith("cal-1", undefined);
+    expect(mockApplyCalendarSyncResult).toHaveBeenCalledWith(
+      "acc-caldav",
+      "cal-1",
+      {
+        calendars: [],
+        events: [],
+        deletedRemoteIds: [],
+        nextSyncToken: "next-token",
+      },
+    );
+    expect(callback).toHaveBeenCalledWith("acc-caldav", "done");
+    expect(mockInvoke).not.toHaveBeenCalledWith("sync_run_accounts", {
+      accountIds: ["acc-caldav"],
+    });
+
+    const applyOrder = mockApplyCalendarSyncResult.mock.invocationCallOrder[0];
+    const doneOrder = callback.mock.invocationCallOrder.at(-1);
+    expect(applyOrder).toBeLessThan(doneOrder ?? 0);
   });
 });
