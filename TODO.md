@@ -206,7 +206,7 @@
 
 ### BUG (verify)
 
-- [ ] **`provider_add_tag`/`provider_remove_tag` may not exist** — `imapSmtpProvider.ts` calls `provider_add_tag` and `provider_remove_tag`, but previous commits only registered `provider_archive`, `provider_trash`, `provider_star`, etc. If these commands aren't in `lib.rs`, the calls fail at runtime. Verify registration.
+- [x] **`provider_add_tag`/`provider_remove_tag` may not exist** — Verified: both commands are now registered in `lib.rs` and implemented in `provider/commands.rs`.
 
 ### Medium
 
@@ -473,3 +473,21 @@
 ## Trim Account Summaries and AI Settings Cleanup (`a7a01f7`)
 
 - [ ] **Account-to-store mapping duplicated 4 times** — `App.tsx` (twice), `ComposerWindow.tsx`, and `ThreadWindow.tsx` all have identical `dbAccounts.map(a => ({ id, email, displayName, avatarUrl, isActive, provider }))`. Could be a shared helper since the mapping is now trivial. *(Low)*
+
+## Add Rust Settings Bootstrap Snapshot (`56e8280`)
+
+- [ ] **`read_setting_map` decrypts all settings unconditionally** — Every value goes through `decode_setting_value`/`is_encrypted`. Most settings aren't encrypted (only API keys). Not a bug but wasteful when reused by the UI bootstrap snapshot (`a08c8c9`) which has no encrypted fields. *(Low)*
+
+- [ ] **API keys bundled with non-sensitive settings in one snapshot** — All 4 API keys returned alongside UI settings like `notifications_enabled`. Not a new security boundary (old code fetched them individually over same IPC), but callers other than `SettingsPage` would receive API keys unnecessarily. *(Low)*
+
+## Add UI Settings Bootstrap Snapshot (`a08c8c9`)
+
+- [ ] **Two boolean-parsing conventions interleaved without explanation** — Some fields use `.is_some_and(|v| v == "true")` (opt-in: missing = `false`), others use `get_bool(key, true)` with `value != "false"` (opt-out: missing = `true`). Both match old TS semantics but look like inconsistent coding. A comment distinguishing opt-in vs opt-out defaults would help. *(Low)*
+
+## Rewrite syncManager Tests (uncommitted)
+
+- [ ] **`flushListenerSetup` uses magic 8-iteration microtick loop** — `for (let index = 0; index < 8; index += 1) { await Promise.resolve(); }` is brittle and unexplained. If `ensureSyncListeners` gains more async steps, tests will silently break. Consider awaiting the actual listener setup promise or using a more robust flush. *(Low)*
+
+- [ ] **No test for the CalDAV provider special path** — `handleSyncStatusEvent` has a branch `if (event.provider === "caldav")` that emits "done" and runs calendar sync *without* post-sync hooks. Tests only cover `gmail_api`. *(Low)*
+
+- [ ] **No test for `null` sync token → `undefined` conversion** — `syncCalendarForAccount` passes `cal.sync_token ?? undefined` to `provider.syncEvents`. Test always provides a non-null token. The `null` → `undefined` coercion path is untested. *(Low)*

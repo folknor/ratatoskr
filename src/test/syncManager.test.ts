@@ -1,346 +1,321 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock all dependencies before importing the module under test
-vi.mock("./sync", () => ({
-  // SyncProgress type is imported as a type-only import, no mock needed
+const {
+  eventHandlers,
+  mockInvoke,
+  mockListen,
+  mockApplyCalendarSyncResult,
+  mockUpsertDiscoveredCalendars,
+  mockGetCalendarProvider,
+  mockGetVisibleCalendars,
+  mockQueueNewEmailNotification,
+  mockApplySmartLabelsToNewMessageIds,
+  mockCategorizeNewThreads,
+} = vi.hoisted(() => ({
+  eventHandlers: new Map<string, (event: { payload: unknown }) => void>(),
+  mockInvoke: vi.fn(),
+  mockListen: vi.fn(),
+  mockApplyCalendarSyncResult: vi.fn(),
+  mockUpsertDiscoveredCalendars: vi.fn(),
+  mockGetCalendarProvider: vi.fn(),
+  mockGetVisibleCalendars: vi.fn(),
+  mockQueueNewEmailNotification: vi.fn(),
+  mockApplySmartLabelsToNewMessageIds: vi.fn(),
+  mockCategorizeNewThreads: vi.fn(),
 }));
-vi.mock("../db/accounts", () => ({
-  getAccount: vi.fn(),
-  clearAccountHistoryId: vi.fn(),
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: mockInvoke,
 }));
-vi.mock("../db/settings", () => ({
-  getSetting: vi.fn().mockResolvedValue("365"),
-}));
-vi.mock("../db/threads", () => ({
-  getThreadCountForAccount: vi.fn(),
-  deleteAllThreadsForAccount: vi.fn(),
-  getMutedThreadIds: vi.fn().mockResolvedValue(new Set()),
-}));
-vi.mock("../db/messages", () => ({
-  deleteAllMessagesForAccount: vi.fn(),
-  getMessagesByIds: vi.fn().mockResolvedValue([]),
-}));
-vi.mock("../imap/imapSync", () => ({
-  imapInitialSync: vi.fn(),
-  imapDeltaSync: vi.fn(),
-}));
-vi.mock("../db/folderSyncState", () => ({
-  clearAllFolderSyncStates: vi.fn(),
-}));
-vi.mock("../oauth/oauthTokenManager", () => ({
-  ensureFreshToken: vi.fn(),
-}));
-vi.mock("../calendar/providerFactory", () => ({
-  hasCalendarSupport: vi.fn().mockResolvedValue(false),
-  getCalendarProvider: vi.fn(),
-}));
-vi.mock("../db/calendars", () => ({
-  getVisibleCalendars: vi.fn().mockResolvedValue([]),
-  upsertCalendar: vi.fn(),
-  updateCalendarSyncToken: vi.fn(),
-}));
-vi.mock("../db/calendarEvents", () => ({
-  upsertCalendarEvent: vi.fn(),
-  deleteEventByRemoteId: vi.fn(),
-}));
-vi.mock("@/core/rustDb", () => ({
-  syncImapInitial: vi.fn().mockResolvedValue({
-    storedCount: 0,
-    threadCount: 0,
-    newInboxMessageIds: [],
-    affectedThreadIds: [],
-  }),
-  syncImapDelta: vi.fn().mockResolvedValue({
-    storedCount: 0,
-    threadCount: 0,
-    newInboxMessageIds: [],
-    affectedThreadIds: [],
-  }),
-  syncGmailInitial: vi.fn().mockResolvedValue(undefined),
-  syncGmailDelta: vi
-    .fn()
-    .mockResolvedValue({ newInboxMessageIds: [], affectedThreadIds: [] }),
-}));
-vi.mock("@/services/filters/filterEngine", () => ({
-  applyFiltersToNewMessageIds: vi.fn(),
-}));
-vi.mock("@/services/smartLabels/smartLabelManager", () => ({
-  applySmartLabelsToNewMessageIds: vi.fn().mockResolvedValue(undefined),
-}));
-vi.mock("@/services/ai/categorizationManager", () => ({
-  categorizeNewThreads: vi.fn().mockResolvedValue(undefined),
-}));
-vi.mock("@/services/db/threadCategories", () => ({
-  getThreadCategory: vi.fn(),
-}));
-vi.mock("@/services/db/notificationVips", () => ({
-  getVipSenders: vi.fn().mockResolvedValue(new Set()),
-}));
-vi.mock("@/services/notifications/notificationManager", () => ({
-  queueNewEmailNotification: vi.fn(),
-  shouldNotifyForMessage: vi.fn().mockReturnValue(false),
-}));
+
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn().mockResolvedValue(vi.fn()),
+  listen: mockListen,
 }));
 
-import { syncGmailDelta, syncGmailInitial } from "@/core/rustDb";
-import { getAccount } from "../db/accounts";
-// Import after mocks
-import {
-  onSyncStatus,
-  startBackgroundSync,
-  stopBackgroundSync,
-  syncAccount,
-  triggerSync,
-} from "./syncManager";
+vi.mock("@/services/notifications/notificationManager", () => ({
+  queueNewEmailNotification: mockQueueNewEmailNotification,
+}));
 
-const mockGetAccount = vi.mocked(getAccount);
-const mockSyncGmailInitial = vi.mocked(syncGmailInitial);
-const mockSyncGmailDelta = vi.mocked(syncGmailDelta);
+vi.mock("@/services/smartLabels/smartLabelManager", () => ({
+  applySmartLabelsToNewMessageIds: mockApplySmartLabelsToNewMessageIds,
+}));
 
-const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+vi.mock("@/services/ai/categorizationManager", () => ({
+  categorizeNewThreads: mockCategorizeNewThreads,
+}));
 
-function makeGmailAccount(id: string, historyId: string | null = null) {
-  return {
-    id,
-    email: `${id}@gmail.com`,
-    display_name: id,
-    avatar_url: null,
-    is_active: 1,
-    provider: "gmail_api" as const,
-    history_id: historyId,
-    refresh_token: "tok",
-    access_token: "tok",
-    token_expiry: Date.now() + 60_000,
-    client_id: "cid",
-    client_secret: null,
-    created_at: new Date().toISOString(),
-    imap_host: null,
-    imap_port: null,
-    imap_security: null,
-    smtp_host: null,
-    smtp_port: null,
-    smtp_security: null,
-    auth_method: null,
-    imap_password: null,
-    imap_username: null,
-  };
+vi.mock("@/services/calendar/providerFactory", () => ({
+  getCalendarProvider: mockGetCalendarProvider,
+}));
+
+vi.mock("@/services/calendar/persistence", () => ({
+  applyCalendarSyncResult: mockApplyCalendarSyncResult,
+  upsertDiscoveredCalendars: mockUpsertDiscoveredCalendars,
+}));
+
+vi.mock("@/services/db/calendars", () => ({
+  getVisibleCalendars: mockGetVisibleCalendars,
+}));
+
+async function loadSyncManager() {
+  return import("@/services/gmail/syncManager");
+}
+
+async function flushListenerSetup(): Promise<void> {
+  for (let index = 0; index < 8; index += 1) {
+    await Promise.resolve();
+  }
+}
+
+async function flushAsyncWork(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function emitEvent(eventName: string, payload: unknown): void {
+  const handler = eventHandlers.get(eventName);
+  if (handler === undefined) {
+    throw new Error(`No handler registered for ${eventName}`);
+  }
+  handler({ payload });
 }
 
 describe("syncManager", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    stopBackgroundSync();
-    mockSyncGmailInitial.mockResolvedValue(undefined);
-    mockSyncGmailDelta.mockResolvedValue({
+    vi.resetModules();
+    eventHandlers.clear();
+    mockApplySmartLabelsToNewMessageIds.mockResolvedValue(undefined);
+    mockCategorizeNewThreads.mockResolvedValue(undefined);
+    mockListen.mockImplementation(
+      async (
+        eventName: string,
+        handler: (event: { payload: unknown }) => void,
+      ) => {
+        eventHandlers.set(eventName, handler);
+        return () => {
+          eventHandlers.delete(eventName);
+        };
+      },
+    );
+    mockGetVisibleCalendars.mockResolvedValue([]);
+  });
+
+  it("syncs one account through the rust queue command", async () => {
+    const { syncAccount } = await loadSyncManager();
+
+    await syncAccount("acc-1");
+
+    expect(mockInvoke).toHaveBeenCalledWith("sync_run_accounts", {
+      accountIds: ["acc-1"],
+    });
+  });
+
+  it("starts background sync through rust and honors skipImmediateSync", async () => {
+    const { startBackgroundSync } = await loadSyncManager();
+
+    startBackgroundSync(["acc-1", "acc-2"], true);
+
+    expect(mockInvoke).toHaveBeenNthCalledWith(1, "sync_stop_background");
+    expect(mockInvoke).toHaveBeenNthCalledWith(2, "sync_start_background", {
+      accountIds: ["acc-1", "acc-2"],
+      skipImmediateSync: true,
+    });
+  });
+
+  it("prepares full sync before running accounts", async () => {
+    const { forceFullSync } = await loadSyncManager();
+
+    await forceFullSync(["acc-1", "acc-2"]);
+
+    expect(mockInvoke).toHaveBeenNthCalledWith(1, "sync_prepare_full_sync", {
+      accountIds: ["acc-1", "acc-2"],
+    });
+    expect(mockInvoke).toHaveBeenNthCalledWith(2, "sync_run_accounts", {
+      accountIds: ["acc-1", "acc-2"],
+    });
+  });
+
+  it("prepares account resync before re-running that account", async () => {
+    const { resyncAccount } = await loadSyncManager();
+
+    await resyncAccount("acc-1");
+
+    expect(mockInvoke).toHaveBeenNthCalledWith(
+      1,
+      "sync_prepare_account_resync",
+      {
+        accountId: "acc-1",
+      },
+    );
+    expect(mockInvoke).toHaveBeenNthCalledWith(2, "sync_run_accounts", {
+      accountIds: ["acc-1"],
+    });
+  });
+
+  it("maps provider progress events to ui sync progress", async () => {
+    const { onSyncStatus } = await loadSyncManager();
+    const callback = vi.fn();
+
+    const unsubscribe = onSyncStatus(callback);
+    await flushListenerSetup();
+
+    emitEvent("imap-sync-progress", {
+      accountId: "acc-1",
+      phase: "folders",
+      current: 2,
+      total: 5,
+    });
+
+    expect(callback).toHaveBeenCalledWith("acc-1", "syncing", {
+      phase: "labels",
+      current: 2,
+      total: 5,
+    });
+
+    unsubscribe();
+  });
+
+  it("propagates sync-status errors including plain string errors", async () => {
+    const { onSyncStatus } = await loadSyncManager();
+    const callback = vi.fn();
+
+    onSyncStatus(callback);
+    await flushListenerSetup();
+
+    emitEvent("sync-status", {
+      accountId: "acc-1",
+      provider: "gmail_api",
+      status: "error",
+      error: "authentication failed for user@test.com",
+    });
+
+    await Promise.resolve();
+
+    expect(callback).toHaveBeenCalledWith(
+      "acc-1",
+      "error",
+      undefined,
+      "authentication failed for user@test.com",
+    );
+  });
+
+  it("runs post-sync hooks from rust-provided completion data", async () => {
+    const { onSyncStatus } = await loadSyncManager();
+    const callback = vi.fn();
+
+    onSyncStatus(callback);
+    await flushListenerSetup();
+
+    emitEvent("sync-status", {
+      accountId: "acc-1",
+      provider: "gmail_api",
+      status: "done",
+      newInboxMessageIds: ["m1", "m2"],
+      affectedThreadIds: ["t1"],
+      criteriaSmartLabelMatches: [{ threadId: "t1", labelIds: ["label-1"] }],
+      notificationsToQueue: [
+        {
+          threadId: "t1",
+          fromName: "Alice",
+          fromAddress: "alice@example.com",
+          subject: "Hello",
+        },
+      ],
+      aiCategorizationCandidates: [{ threadId: "t1", subject: "Hello" }],
+      aiSmartLabelThreads: [{ threadId: "t1", subject: "Hello" }],
+      aiSmartLabelRules: [
+        { id: "rule-1", name: "VIP", instructions: "Mark VIP" },
+      ],
+    });
+
+    await flushAsyncWork();
+
+    expect(mockApplySmartLabelsToNewMessageIds).toHaveBeenCalledWith(
+      "acc-1",
+      ["m1", "m2"],
+      [{ threadId: "t1", labelIds: ["label-1"] }],
+      {
+        threads: [{ threadId: "t1", subject: "Hello" }],
+        rules: [{ id: "rule-1", name: "VIP", instructions: "Mark VIP" }],
+      },
+    );
+    expect(mockQueueNewEmailNotification).toHaveBeenCalledWith(
+      "Alice",
+      "Hello",
+      "t1",
+      "acc-1",
+      "alice@example.com",
+    );
+    expect(mockCategorizeNewThreads).toHaveBeenCalledWith("acc-1", [
+      { threadId: "t1", subject: "Hello" },
+    ]);
+    expect(callback).toHaveBeenCalledWith("acc-1", "done");
+  });
+
+  it("runs calendar sync when rust marks it as needed", async () => {
+    const { onSyncStatus } = await loadSyncManager();
+    const callback = vi.fn();
+    const provider = {
+      type: "google",
+      listCalendars: vi.fn().mockResolvedValue([
+        {
+          remoteId: "cal-1",
+          displayName: "Primary",
+          color: null,
+          isPrimary: true,
+        },
+      ]),
+      syncEvents: vi.fn().mockResolvedValue({
+        calendars: [],
+        events: [],
+        deletedRemoteIds: [],
+        nextSyncToken: "next-token",
+      }),
+    };
+
+    mockGetCalendarProvider.mockResolvedValue(provider);
+    mockGetVisibleCalendars.mockResolvedValue([
+      {
+        remote_id: "cal-1",
+        display_name: "Primary",
+        sync_token: "old-token",
+      },
+    ]);
+
+    onSyncStatus(callback);
+    await flushListenerSetup();
+
+    emitEvent("sync-status", {
+      accountId: "acc-1",
+      provider: "gmail_api",
+      status: "done",
+      shouldSyncCalendar: true,
       newInboxMessageIds: [],
       affectedThreadIds: [],
     });
-  });
 
-  afterEach(() => {
-    stopBackgroundSync();
-  });
+    await flushAsyncWork();
+    await flushAsyncWork();
 
-  describe("syncAccount", () => {
-    it("runs initial sync for an account without history_id", async () => {
-      mockGetAccount.mockResolvedValue(makeGmailAccount("a1"));
-
-      await syncAccount("a1");
-
-      expect(mockSyncGmailInitial).toHaveBeenCalledTimes(1);
-      expect(mockSyncGmailInitial).toHaveBeenCalledWith("a1", 365);
-      expect(mockSyncGmailDelta).not.toHaveBeenCalled();
-    });
-
-    it("runs delta sync for an account with history_id", async () => {
-      mockGetAccount.mockResolvedValue(makeGmailAccount("a1", "12345"));
-
-      await syncAccount("a1");
-
-      expect(mockSyncGmailDelta).toHaveBeenCalledTimes(1);
-      expect(mockSyncGmailDelta).toHaveBeenCalledWith("a1");
-      expect(mockSyncGmailInitial).not.toHaveBeenCalled();
-    });
-
-    it("queues a second account while sync is in progress", async () => {
-      const a1 = makeGmailAccount("a1", "100");
-      const a2 = makeGmailAccount("a2", "200");
-
-      mockGetAccount.mockImplementation(async (id: string) => {
-        if (id === "a1") return a1;
-        if (id === "a2") return a2;
-        return null;
-      });
-
-      // Make first sync slow
-      const barrier = new Promise<void>((r) => {
-        // Resolve after 50ms
-        setTimeout(r, 50);
-      });
-      let firstCall = true;
-      mockSyncGmailDelta.mockImplementation(() => {
-        if (firstCall) {
-          firstCall = false;
-          return barrier.then(() => ({
-            newInboxMessageIds: [],
-            affectedThreadIds: [],
-          }));
-        }
-        return Promise.resolve({
-          newInboxMessageIds: [],
-          affectedThreadIds: [],
-        });
-      });
-
-      const first = syncAccount("a1");
-      // a2 will be queued since a1 is in progress
-      const second = syncAccount("a2");
-
-      await first;
-      await second;
-
-      // Both accounts synced (a1 directly, a2 via queue drain)
-      expect(mockSyncGmailDelta).toHaveBeenCalledTimes(2);
-    });
-  });
-
-  describe("startBackgroundSync", () => {
-    it("triggers an immediate sync by default", async () => {
-      mockGetAccount.mockResolvedValue(makeGmailAccount("a1", "100"));
-
-      startBackgroundSync(["a1"]);
-
-      // Wait for async sync chain to complete
-      await wait(50);
-
-      expect(mockSyncGmailDelta).toHaveBeenCalledTimes(1);
-    });
-
-    it("skips immediate sync when skipImmediateSync is true", async () => {
-      mockGetAccount.mockResolvedValue(makeGmailAccount("a1", "100"));
-
-      startBackgroundSync(["a1"], true);
-
-      // Wait — no sync should have fired (next interval is 15s away)
-      await wait(50);
-
-      expect(mockSyncGmailDelta).not.toHaveBeenCalled();
-      expect(mockGetAccount).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("new account sync priority", () => {
-    it("new account syncs immediately when background sync skips immediate run", async () => {
-      const existingAccount = makeGmailAccount("existing", "100");
-      const newAccount = makeGmailAccount("new-acc");
-
-      mockGetAccount.mockImplementation(async (id: string) => {
-        if (id === "existing") return existingAccount;
-        if (id === "new-acc") return newAccount;
-        return null;
-      });
-
-      // Simulate the fix: sync new account first, then start background with skipImmediate
-      const syncPromise = syncAccount("new-acc");
-      startBackgroundSync(["existing", "new-acc"], true);
-
-      await syncPromise;
-
-      // The new account got an initial sync immediately
-      expect(mockSyncGmailInitial).toHaveBeenCalledTimes(1);
-      // No delta sync ran (background timer hasn't fired)
-      expect(mockSyncGmailDelta).not.toHaveBeenCalled();
-    });
-
-    it("without the fix, new account sync would be blocked by existing account sync", async () => {
-      const existingAccount = makeGmailAccount("existing", "100");
-      const newAccount = makeGmailAccount("new-acc");
-
-      // Track the order of sync calls
-      const syncOrder: string[] = [];
-
-      mockGetAccount.mockImplementation(async (id: string) => {
-        if (id === "existing") return existingAccount;
-        if (id === "new-acc") return newAccount;
-        return null;
-      });
-
-      mockSyncGmailDelta.mockImplementation(async () => {
-        syncOrder.push("delta-existing");
-        return { newInboxMessageIds: [], affectedThreadIds: [] };
-      });
-      mockSyncGmailInitial.mockImplementation(async () => {
-        syncOrder.push("initial-new");
-      });
-
-      // Old behavior: startBackgroundSync first (with immediate sync), then syncAccount
-      // This would queue new-acc behind existing account's delta sync
-      startBackgroundSync(["existing", "new-acc"]);
-
-      // Wait for both to complete
-      await wait(50);
-
-      // existing account's delta sync ran BEFORE new account's initial sync
-      expect(syncOrder).toEqual(["delta-existing", "initial-new"]);
-    });
-  });
-
-  describe("triggerSync", () => {
-    it("syncs all provided accounts", async () => {
-      const a1 = makeGmailAccount("a1", "100");
-      const a2 = makeGmailAccount("a2", "200");
-
-      mockGetAccount.mockImplementation(async (id: string) => {
-        if (id === "a1") return a1;
-        if (id === "a2") return a2;
-        return null;
-      });
-
-      await triggerSync(["a1", "a2"]);
-
-      expect(mockSyncGmailDelta).toHaveBeenCalledTimes(2);
-    });
-  });
-
-  describe("error coercion", () => {
-    it("propagates plain string errors from Tauri IPC (not 'Unknown error')", async () => {
-      const account = makeGmailAccount("a1", "100");
-      mockGetAccount.mockResolvedValue(account);
-      // Tauri IPC rejects with a plain string, not an Error instance
-      mockSyncGmailDelta.mockRejectedValue(
-        "authentication failed for user@test.com",
-      );
-
-      const errors: string[] = [];
-      const unsub = onSyncStatus((_id, status, _progress, error) => {
-        if (status === "error" && error) errors.push(error);
-      });
-
-      await syncAccount("a1");
-      unsub();
-
-      expect(errors).toHaveLength(1);
-      expect(errors[0]).toBe("authentication failed for user@test.com");
-      expect(errors[0]).not.toBe("Unknown error");
-    });
-
-    it("handles null/undefined errors gracefully", async () => {
-      const account = makeGmailAccount("a1", "100");
-      mockGetAccount.mockResolvedValue(account);
-      mockSyncGmailDelta.mockRejectedValue(null);
-
-      const errors: string[] = [];
-      const unsub = onSyncStatus((_id, status, _progress, error) => {
-        if (status === "error" && error) errors.push(error);
-      });
-
-      await syncAccount("a1");
-      unsub();
-
-      expect(errors).toHaveLength(1);
-      expect(errors[0]).toBe("Unknown error");
+    expect(mockGetCalendarProvider).toHaveBeenCalledWith("acc-1");
+    expect(mockUpsertDiscoveredCalendars).toHaveBeenCalledWith(
+      "acc-1",
+      "google",
+      [
+        {
+          remoteId: "cal-1",
+          displayName: "Primary",
+          color: null,
+          isPrimary: true,
+        },
+      ],
+    );
+    expect(provider.syncEvents).toHaveBeenCalledWith("cal-1", "old-token");
+    expect(mockApplyCalendarSyncResult).toHaveBeenCalledWith("acc-1", "cal-1", {
+      calendars: [],
+      events: [],
+      deletedRemoteIds: [],
+      nextSyncToken: "next-token",
     });
   });
 });

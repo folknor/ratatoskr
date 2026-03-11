@@ -415,6 +415,7 @@ Label/folder UI can remain unchanged while the backend becomes the sole owner of
 - Phase 3: IMAP semantics migration
 - Phase 4: provider normalization cleanup
 - Phase 5: sync orchestration migration
+- most settings/account bootstrap snapshot work
 - Phase 7: folder/label cleanup
 
 ### Partially complete
@@ -439,46 +440,13 @@ Rust now owns most of:
 TypeScript still owns a much smaller set of business logic:
 
 - actual AI inference calls and prompt/result shaping
-- some settings-loading orchestration
-- a few rich account-detail editor flows
 - desktop notification display
+- a few remaining settings/account compatibility reads
+- some legacy compatibility wrappers and tests
 
 ## Concrete Remaining Work
 
-### 1. Replace full account-row reads used only for UI/editor metadata
-
-Current remaining hotspots:
-
-- `src/components/settings/SettingsAccountsTab.tsx`
-
-This file still loads full `DbAccount` rows because the inline CalDAV editor uses richer account fields than the current basic-info DTO exposes.
-
-Concrete next step:
-
-- add a Rust-backed account details DTO specifically for settings/editor use
-- move `SettingsAccountsTab` off `getAccount()` where possible
-
-### 2. Add a Rust-backed settings snapshot for Settings UI bootstrap
-
-Current hotspot:
-
-- `src/components/settings/SettingsPage.tsx`
-
-The settings page still performs many individual `getSetting()` / `getSecureSetting()` calls from TS during initial load.
-
-Concrete next step:
-
-- add one Rust command returning a typed settings snapshot for:
-  - Google/Microsoft OAuth settings
-  - AI settings
-  - notification settings
-  - sync settings
-  - UI preference defaults that are currently fetched one-by-one
-- keep TS-side writes unchanged initially
-
-This is mostly cleanup, but it also moves more "application config shape" knowledge into Rust.
-
-### 3. Decide whether actual AI inference calls should move to Rust
+### 1. Decide whether actual AI inference calls should move to Rust
 
 Current state:
 
@@ -515,7 +483,7 @@ If yes, define explicit commands such as:
 - `ai_extract_task`
 - `ai_generate_auto_draft`
 
-### 4. Finish post-sync automation boundary
+### 2. Finish post-sync automation boundary
 
 Current TS-owned remainder:
 
@@ -536,29 +504,39 @@ Concrete next step:
 - and move:
   - any remaining policy decisions still embedded in TS
 
-### 5. Trim legacy account/settings wrappers that are now mostly compatibility code
+### 3. Audit remaining settings/account compatibility reads
+
+Most of the high-value settings/account work is now done:
+
+- settings bootstrap snapshot exists
+- UI bootstrap snapshot exists
+- account summary DTOs cover most app/window use
+- CalDAV settings now use a narrow Rust-backed DTO
+
+The remaining work here is a sweep, not a major migration phase.
 
 Current likely targets:
 
 - `src/services/db/accounts.ts`
 - `src/services/db/settings.ts`
 - parts of `src/services/gmail/tokenManager.ts`
+- any remaining one-off `getAccount()` or `getSetting()` reads outside the new snapshot paths
 
 Concrete next step:
 
-- audit which exports are still used by app code versus only tests
-- replace generic DB-shaped helpers with narrower Rust-backed app-facing helpers
+- leave broad compatibility modules alone unless they still influence app architecture
+- continue replacing app-facing full-row/settings reads with narrow Rust DTOs when they show up
+- prefer targeted cleanup over broad TS beautification
 
-### 6. Strengthen regression coverage around migrated sync behavior
+### 4. Strengthen regression coverage around migrated sync behavior
 
 Current gap:
 
 - architecture moved faster than broad regression coverage
-- targeted tests were updated, but end-to-end sync coverage remains thinner than ideal
+- `syncManager` regression coverage is repaired, but broader migrated flows are still thinner than ideal
 
 Concrete next step:
 
-- repair and expand `src/test/syncManager.test.ts`
 - add focused tests for:
   - sync status event handling
   - background sync start/stop behavior
@@ -567,29 +545,29 @@ Concrete next step:
 
 ## Likely Remaining Files to Shrink
 
-- `src/components/settings/SettingsPage.tsx`
-- `src/components/settings/SettingsAccountsTab.tsx`
 - `src/services/gmail/syncManager.ts`
 - `src/services/db/accounts.ts`
 - `src/services/db/settings.ts`
 - `src/services/gmail/tokenManager.ts`
+- AI task-specific services that still assemble prompts client-side
 
 ## Current Risks
 
-- `SettingsAccountsTab` still depends on richer account data than the new summary DTOs expose.
 - The remaining TS-side AI call layer is now the largest intentionally un-migrated business-logic seam.
-- Sync behavior is user-visible, and although ownership moved successfully, broader regression coverage should catch up.
+- Sync behavior is user-visible, and although ownership moved successfully, broader regression coverage should keep catching up.
+- Some TS compatibility wrappers still exist, which can hide stale call paths if they are not periodically audited.
 
 ## Updated Recommended Execution Order
 
-1. Add Rust-backed settings/account-detail snapshot commands for settings UI
-2. Trim remaining TS full-account reads and generic wrappers
-3. Decide the final boundary for AI task execution
-4. If desired, move AI task execution into Rust with typed commands
-5. Expand sync regression coverage and remove any leftover compatibility glue
+1. Decide the final boundary for AI task execution
+2. Finish the post-sync boundary intentionally, keeping only the UI-owned pieces in TS
+3. Continue small sweeps for remaining full-account/settings compatibility reads
+4. Expand regression coverage around migrated sync/bootstrap paths
+5. Remove leftover compatibility glue opportunistically as those areas are touched
 
 ## Progress Log
 
 - 2026-03-11: Initial migration plan written based on current repo structure and command surface.
 - 2026-03-11: Major migration progress completed across account/auth, provider unification, IMAP semantics, sync orchestration, post-sync hooks, calendar providers, and AI runtime.
 - 2026-03-11: Plan updated to reflect current status and concrete remaining work instead of the original broad migration phases.
+- 2026-03-11: Settings/account snapshot work and syncManager regression coverage updated; remaining work narrowed to AI boundary decisions, post-sync finishing, compatibility sweeps, and broader regression coverage.
