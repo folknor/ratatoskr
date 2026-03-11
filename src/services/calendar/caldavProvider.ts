@@ -1,5 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
 import { type DAVCalendar, DAVClient, type DAVObject } from "tsdav";
-import { getAccount } from "@/services/db/accounts";
 import { generateVEvent, parseVEvent } from "./icalHelper";
 import type {
   CalendarEventData,
@@ -20,19 +20,20 @@ export class CalDAVProvider implements CalendarProvider {
     this.accountId = accountId;
   }
 
+  private async getConnectionInfo(): Promise<{
+    serverUrl: string;
+    username: string;
+    password: string;
+  }> {
+    return invoke("account_get_caldav_connection_info", {
+      accountId: this.accountId,
+    });
+  }
+
   private async getClient(): Promise<DAVClient> {
     if (this.client) return this.client;
 
-    const account = await getAccount(this.accountId);
-    if (!account) throw new Error("Account not found");
-
-    const serverUrl = account.caldav_url;
-    const username = account.caldav_username ?? account.email;
-    const password = account.caldav_password;
-
-    if (!(serverUrl && password)) {
-      throw new Error("CalDAV credentials not configured");
-    }
+    const { serverUrl, username, password } = await this.getConnectionInfo();
 
     this.client = new DAVClient({
       serverUrl,

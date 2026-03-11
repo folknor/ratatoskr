@@ -1,10 +1,10 @@
 import { sendEmail } from "@/services/emailActions";
 import { buildRawEmail, type EmailAttachment } from "@/utils/emailBuilder";
+import { getAccountBasicInfo } from "../accounts/basicInfo";
 import {
   type BackgroundChecker,
   createBackgroundChecker,
 } from "../backgroundCheckers";
-import { getAccount } from "../db/accounts";
 import {
   getPendingScheduledEmails,
   updateScheduledEmailStatus,
@@ -18,7 +18,7 @@ async function checkScheduledEmails(): Promise<void> {
 
   for (const email of pending) {
     try {
-      const account = await getAccount(email.account_id);
+      const account = await getAccountBasicInfo(email.account_id);
       if (!account) {
         await updateScheduledEmailStatus(email.id, "failed");
         continue;

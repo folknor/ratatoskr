@@ -1,4 +1,4 @@
-import { getAccount } from "@/services/db/accounts";
+import { getAccountBasicInfo } from "@/services/accounts/basicInfo";
 import { deleteAiCache, getAiCache, setAiCache } from "@/services/db/aiCache";
 import { type DbMessage, getRecentSentMessages } from "@/services/db/messages";
 import { getSetting } from "@/services/db/settings";
@@ -67,7 +67,7 @@ export async function getOrCreateStyleProfile(
   if (existing) return existing.profile_text;
 
   // Get account email for matching sent messages
-  const account = await getAccount(accountId);
+  const account = await getAccountBasicInfo(accountId);
   if (!account) return null;
 
   // Fetch recent sent messages

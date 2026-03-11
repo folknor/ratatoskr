@@ -1,4 +1,4 @@
-import { getAccount } from "../db/accounts";
+import { getAccountBasicInfo } from "../accounts/basicInfo";
 import { GmailApiProvider } from "./gmailProvider";
 import { ImapSmtpProvider } from "./imapSmtpProvider";
 import { JmapProvider } from "./jmapProvider";
@@ -22,7 +22,7 @@ export async function getEmailProvider(
   const existing = providers.get(accountId);
   if (existing) return existing;
 
-  const account = await getAccount(accountId);
+  const account = await getAccountBasicInfo(accountId);
   if (!account) throw new Error(`Account ${accountId} not found`);
   if (account.provider === "graph") {
     throw new Error("Graph accounts use Rust provider commands directly");

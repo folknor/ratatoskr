@@ -116,6 +116,22 @@ pub struct CalendarProviderInfo {
     pub provider: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaldavConnectionInfo {
+    pub server_url: String,
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountBasicInfo {
+    pub email: String,
+    pub provider: String,
+    pub is_active: bool,
+}
+
 #[derive(Debug, Deserialize)]
 struct GoogleTokenResponse {
     access_token: String,
@@ -206,6 +222,81 @@ pub async fn account_get_calendar_provider_info(
         Ok(config::calendar_provider_kind(&account).map(|provider| CalendarProviderInfo {
             provider: provider.to_string(),
         }))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn account_get_caldav_connection_info(
+    db: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
+    account_id: String,
+) -> Result<CaldavConnectionInfo, String> {
+    let encryption_key = *gmail.encryption_key();
+    db.with_conn(move |conn| {
+        let row = conn
+            .query_row(
+                "SELECT email, caldav_url, caldav_username, caldav_password FROM accounts WHERE id = ?1",
+                rusqlite::params![account_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|e| format!("query caldav account: {e}"))?
+            .ok_or_else(|| "Account not found".to_string())?;
+
+        let server_url = row
+            .1
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "CalDAV credentials not configured".to_string())?;
+        let password_raw = row
+            .3
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "CalDAV credentials not configured".to_string())?;
+        let password = if is_encrypted(&password_raw) {
+            decrypt_value(&encryption_key, &password_raw)?
+        } else {
+            password_raw
+        };
+        let username = row
+            .2
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(row.0);
+
+        Ok(CaldavConnectionInfo {
+            server_url,
+            username,
+            password,
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn account_get_basic_info(
+    db: State<'_, DbState>,
+    account_id: String,
+) -> Result<Option<AccountBasicInfo>, String> {
+    db.with_conn(move |conn| {
+        conn.query_row(
+            "SELECT email, provider, is_active FROM accounts WHERE id = ?1",
+            rusqlite::params![account_id],
+            |row| {
+                Ok(AccountBasicInfo {
+                    email: row.get(0)?,
+                    provider: row.get(1)?,
+                    is_active: row.get::<_, i64>(2)? != 0,
+                })
+            },
+        )
+        .optional()
+        .map_err(|e| format!("query account basic info: {e}"))
     })
     .await
 }

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { fetch } from "@tauri-apps/plugin-http";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { getAccountBasicInfo } from "@/services/accounts/basicInfo";
 import { normalizeEmail } from "@/utils/emailUtils";
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
 
@@ -86,8 +87,7 @@ export async function executeUnsubscribe(
         ? decodeURIComponent(subjectMatch[1] ?? "")
         : "unsubscribe";
 
-      const { getAccount } = await import("../db/accounts");
-      const account = await getAccount(accountId);
+      const account = await getAccountBasicInfo(accountId);
       const { buildRawEmail } = await import("../../utils/emailBuilder");
       const raw = buildRawEmail({
         from: account?.email ?? "",
