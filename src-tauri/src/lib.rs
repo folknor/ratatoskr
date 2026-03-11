@@ -364,6 +364,12 @@ pub fn run() {
             calendar_commands::calendar_upsert_provider_events,
             calendar_commands::calendar_apply_sync_result,
             calendar_commands::calendar_delete_provider_event,
+            calendar_commands::google_calendar_create_event,
+            calendar_commands::google_calendar_delete_event,
+            calendar_commands::google_calendar_fetch_events,
+            calendar_commands::google_calendar_list_calendars,
+            calendar_commands::google_calendar_sync_events,
+            calendar_commands::google_calendar_update_event,
             // Inline image store (content-addressed blob store)
             inline_image_store::commands::inline_image_get,
             inline_image_store::commands::inline_image_stats,
