@@ -67,14 +67,20 @@ fn map_security(security: Option<&str>) -> String {
     }
 }
 
-fn decrypt_if_needed(encryption_key: &[u8; 32], value: Option<String>) -> Option<String> {
-    value.map(|raw| {
-        if is_encrypted(&raw) {
-            decrypt_value(encryption_key, &raw).unwrap_or(raw)
-        } else {
-            raw
-        }
-    })
+fn decrypt_if_needed(
+    encryption_key: &[u8; 32],
+    value: Option<String>,
+) -> Result<Option<String>, String> {
+    value
+        .map(|raw| {
+            if is_encrypted(&raw) {
+                decrypt_value(encryption_key, &raw)
+                    .map_err(|e| format!("decrypt stored account credential: {e}"))
+            } else {
+                Ok(raw)
+            }
+        })
+        .transpose()
 }
 
 fn oauth_token_endpoint<'a>(
@@ -146,7 +152,7 @@ async fn ensure_oauth_access_token(
         .as_deref()
         .filter(|value| !value.is_empty())
         .ok_or_else(|| format!("OAuth IMAP account {account_id} has no client ID"))?;
-    let access_token = decrypt_if_needed(encryption_key, record.access_token.clone())
+    let access_token = decrypt_if_needed(encryption_key, record.access_token.clone())?
         .filter(|value| !value.is_empty())
         .ok_or_else(|| format!("OAuth IMAP account {account_id} has no access token"))?;
     let expires_at = record.token_expires_at.unwrap_or_default();
@@ -179,15 +185,15 @@ async fn ensure_oauth_access_token(
         .await?;
 
     if fresh_expires.unwrap_or_default() - chrono::Utc::now().timestamp() >= 300 {
-        return decrypt_if_needed(encryption_key, fresh_access)
+        return decrypt_if_needed(encryption_key, fresh_access)?
             .filter(|v| !v.is_empty())
             .ok_or_else(|| format!("IMAP token re-check: missing access token for {account_id}"));
     }
 
-    let refresh_token = decrypt_if_needed(encryption_key, fresh_refresh)
+    let refresh_token = decrypt_if_needed(encryption_key, fresh_refresh)?
         .filter(|value| !value.is_empty())
         .ok_or_else(|| format!("OAuth IMAP account {account_id} has no refresh token"))?;
-    let client_secret = decrypt_if_needed(encryption_key, record.oauth_client_secret.clone());
+    let client_secret = decrypt_if_needed(encryption_key, record.oauth_client_secret.clone())?;
     let token_url = oauth_token_endpoint(oauth_provider, record.oauth_token_url.as_deref())?;
     let refreshed = refresh_oauth_token(
         shared_http_client(),
@@ -222,7 +228,10 @@ async fn resolve_account_password(
     if record.auth_method == "oauth2" {
         ensure_oauth_access_token(db, account_id, encryption_key, record).await
     } else {
-        Ok(decrypt_if_needed(encryption_key, record.imap_password.clone()).unwrap_or_default())
+        Ok(
+            decrypt_if_needed(encryption_key, record.imap_password.clone())?
+                .unwrap_or_default(),
+        )
     }
 }
 
@@ -264,6 +273,8 @@ fn smtp_config_from_record(
     username: String,
     password: String,
 ) -> Result<SmtpConfig, String> {
+    // The schema stores a single password/token for both IMAP and SMTP auth.
+    // Until separate SMTP credentials exist, SMTP deliberately reuses `imap_password`.
     let host = record
         .smtp_host
         .clone()

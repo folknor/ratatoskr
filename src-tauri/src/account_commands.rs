@@ -476,10 +476,9 @@ pub async fn account_create_imap_oauth(
 pub async fn account_create_graph_via_oauth(
     app: AppHandle,
     db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
     graph: State<'_, GraphState>,
 ) -> Result<AccountResult, String> {
-    let client_id = read_setting(&db, "microsoft_client_id", gmail.encryption_key())
+    let client_id = read_setting(&db, "microsoft_client_id", graph.encryption_key())
         .await?
         .ok_or("Microsoft Client ID not configured. Go to Settings to set it up.")?;
 
@@ -503,9 +502,9 @@ pub async fn account_create_graph_via_oauth(
 
     let account_id = uuid::Uuid::new_v4().to_string();
     let expires_at = chrono::Utc::now().timestamp() + oauth.tokens.expires_in as i64;
-    let access_token = encrypt_value(gmail.encryption_key(), &oauth.tokens.access_token)?;
+    let access_token = encrypt_value(graph.encryption_key(), &oauth.tokens.access_token)?;
     let refresh_token = encrypt_value(
-        gmail.encryption_key(),
+        graph.encryption_key(),
         oauth
             .tokens
             .refresh_token

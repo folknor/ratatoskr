@@ -14,15 +14,11 @@
 
 - [ ] **Plaintext tokens round-trip through IPC** — `account_authorize_oauth_provider` returns raw `access_token`/`refresh_token` to TS, which passes them back to `account_create_imap_oauth` for encryption. The Gmail flow avoids this by handling everything in a single Rust command. Consider merging or documenting why the split is needed. *(MED)*
 
-- [ ] **Mixed encryption key sources in Graph OAuth** — `account_create_graph_via_oauth` uses `gmail.encryption_key()` to encrypt tokens but `graph.encryption_key()` to init the client. Presumably the same key, but if they ever diverge, the client can't decrypt its own tokens. Use one consistently. *(MED)*
-
 - [ ] **No `access_type=offline` for non-Google/non-Microsoft providers** — `perform_provider_oauth` doesn't request offline access for generic OIDC providers. Some may not return a refresh token without it. *(MED)*
 
-- [ ] **`GmailState` used as encryption key source for non-Gmail code** — `account_create_imap_oauth`, `sync/commands.rs` (`sync_imap_initial`, `sync_imap_delta`), and `account_create_graph_via_oauth` (partially) all depend on `GmailState` solely for the encryption key. The key is app-wide. Rename to `AppCryptoState` or similar. *(LOW)*
+- [ ] **`GmailState` used as encryption key source for non-Gmail code** — `account_create_imap_oauth` and `sync/commands.rs` (`sync_imap_initial`, `sync_imap_delta`) still depend on `GmailState` solely for the encryption key. The key is app-wide. Rename to `AppCryptoState` or similar. *(LOW)*
 
 - [ ] **Account ID generated TS-side for IMAP, Rust-side for Gmail** — Inconsistent ownership of ID generation between the two flows. *(LOW)*
-
-- [ ] **`load_smtp_config` uses `imap_password` for SMTP auth** — `account_config.rs:213` — SMTP password comes from `record.imap_password`. No `smtp_password` column exists. Pre-existing design (same credentials for both), but the new code carries this assumption forward without comment. *(LOW)*
 
 - [ ] **CalDAV password decryption error now propagated instead of fallback** — Old TS silently fell back to raw value. New Rust propagates error via `?`, failing the operation. Could break CalDAV for accounts with corrupted encrypted passwords. *(LOW)*
 
@@ -191,8 +187,6 @@
 - [ ] **Non-IMAP providers don't get inline images during sync** — IMAP stores inline images proactively at sync time. Gmail/JMAP/Graph only store them reactively on first fetch via `cache_after_fetch`. First render of every email with inline images is slow for those providers.
 
 - [ ] **`gmail_attachment_id` column naming** — `find_cache_info` in `attachment_cache.rs` queries `gmail_attachment_id` for all providers. For IMAP, the `part_id` is stored in that column. Works, but the name is misleading.
-
-- [ ] **`CacheInfo.local_path` fetched but never read** — `try_cache_hit` in `provider/commands.rs` uses `content_hash` → `read_cached` (which resolves the path itself), so the stored `local_path` in `CacheInfo` is redundant.
 
 ---
 

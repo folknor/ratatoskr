@@ -44,17 +44,6 @@ pub fn write_cached(
     Ok(format!("{CACHE_DIR}/{content_hash}"))
 }
 
-/// Remove a cached file by content hash.
-pub fn remove_cached(app_handle: &tauri::AppHandle, content_hash: &str) -> Result<(), String> {
-    let path = cache_dir(app_handle).ok().map(|d| d.join(content_hash));
-    if let Some(path) = path {
-        if path.exists() {
-            std::fs::remove_file(&path).map_err(|e| format!("remove cache file: {e}"))?;
-        }
-    }
-    Ok(())
-}
-
 /// Decode base64 (standard or URL-safe) to raw bytes.
 pub fn decode_base64(data: &str) -> Result<Vec<u8>, String> {
     let normalized = data.replace('-', "+").replace('_', "/");
@@ -79,7 +68,7 @@ pub fn find_cache_info(
 ) -> Result<Option<CacheInfo>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, content_hash, local_path, mime_type \
+            "SELECT id, content_hash, mime_type \
              FROM attachments \
              WHERE account_id = ?1 AND message_id = ?2 AND gmail_attachment_id = ?3 \
              LIMIT 1",
@@ -93,8 +82,7 @@ pub fn find_cache_info(
                 Ok(CacheInfo {
                     id: row.get(0)?,
                     content_hash: row.get(1)?,
-                    local_path: row.get(2)?,
-                    mime_type: row.get(3)?,
+                    mime_type: row.get(2)?,
                 })
             },
         )
@@ -125,20 +113,9 @@ pub fn update_cache_fields(
     Ok(())
 }
 
-/// Count how many attachment rows share the same content_hash.
-pub fn count_by_hash(conn: &rusqlite::Connection, content_hash: &str) -> Result<i64, String> {
-    conn.query_row(
-        "SELECT COUNT(*) FROM attachments WHERE content_hash = ?1 AND cached_at IS NOT NULL",
-        rusqlite::params![content_hash],
-        |row| row.get(0),
-    )
-    .map_err(|e| format!("count attachments by hash: {e}"))
-}
-
 /// Cache info for a single attachment row.
 pub struct CacheInfo {
     pub id: String,
     pub content_hash: Option<String>,
-    pub local_path: Option<String>,
     pub mime_type: Option<String>,
 }

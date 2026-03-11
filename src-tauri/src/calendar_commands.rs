@@ -1610,8 +1610,6 @@ async fn google_calendar_execute_with_retry(
     body: Option<&serde_json::Value>,
     access_token: &str,
 ) -> Result<reqwest::Response, String> {
-    let mut last_response = None;
-
     for attempt in 0..GOOGLE_CALENDAR_RETRY_CONFIG.max_attempts {
         let mut request = match method {
             "GET" => http.get(url),
@@ -1636,16 +1634,12 @@ async fn google_calendar_execute_with_retry(
             return Ok(response);
         }
 
-        last_response = Some(response);
         if attempt == GOOGLE_CALENDAR_RETRY_CONFIG.max_attempts - 1 {
             break;
         }
 
-        let delay_ms = http::compute_retry_delay(
-            last_response.as_ref(),
-            attempt,
-            &GOOGLE_CALENDAR_RETRY_CONFIG,
-        );
+        let delay_ms =
+            http::compute_retry_delay(Some(&response), attempt, &GOOGLE_CALENDAR_RETRY_CONFIG);
         tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
     }
 
