@@ -107,15 +107,15 @@
 
 ## Provider Operations
 
-- [ ] **`testConnection` error handling regression** — Gmail/JMAP/Graph `test_connection` impls propagate `Err(...)` instead of returning `ProviderTestResult { success: false }`. The old TS `gmailProvider.ts` had a try/catch converting errors to `{ success: false }` — removed but not replaced. Errors now surface as unhandled rejections. *(MED)*
+- [x] **`testConnection` error handling regression** — Fixed: `provider_test_connection` now catches `Err` from `ops.test_connection()` and returns `Ok(ProviderTestResult { success: false, message })` instead of propagating as an unhandled TS rejection. *(MED)*
 
 - [ ] **Thread-level vs message-level semantics change** — All action methods (`archive`, `trash`, `markRead`, `star`, etc.) now pass `threadId` to Rust commands and ignore `_messageIds`. If any caller passes specific message IDs (e.g., marking individual messages as read), the entire thread is affected instead. *(MED)*
 
-- [ ] **`sendMessage` lost non-fatal Sent folder copy handling** — Old code caught Sent folder append failures as non-fatal (message was sent, just not copied to Sent). The Rust `provider_send_email` command may propagate that error, making the whole send appear to fail. *(MED)*
+- [x] **`sendMessage` lost non-fatal Sent folder copy handling** — Already handled: IMAP `send_email` uses `if let Err(e) = async { ... }.await { log::error!(...) }` — Sent-copy failure is non-fatal and logged. *(MED)*
 
-- [ ] **`thread_id` always empty for fetched IMAP messages** — `imap_message_to_provider_message` sets `thread_id: String::new()`. Anything downstream relying on `threadId` for thread view linking will break. *(MED)*
+- [x] **`thread_id` always empty for fetched IMAP messages** — Fixed: `fetch_message` queries the DB for the stored `thread_id` after fetching body; falls back to empty string if message isn't indexed yet. *(MED)*
 
-- [ ] **Verify `msg.date` unit before `* 1000`** — `imap_message_to_provider_message` does `date: msg.date * 1000` assuming seconds-to-millis. If `msg.date` is already in milliseconds, dates will be wrong. *(MED)*
+- [x] **Verify `msg.date` unit before `* 1000`** — Confirmed: `ImapMessage.date` is in seconds (comment in `sync/convert.rs`). `* 1000` in `imap_message_to_provider_message` is correct. Not a bug. *(MED)*
 
 - [ ] **Duplicated TS interfaces for provider results** — `ProviderFolderResult`, `ProviderTestResult`, `ProviderProfile` are defined independently in `gmailProvider.ts`, `jmapProvider.ts`, `imapSmtpProvider.ts`, and `labelStore.ts`. Move to a shared location (e.g., `services/email/types.ts`). *(LOW)*
 

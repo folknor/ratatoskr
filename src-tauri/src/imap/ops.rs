@@ -745,11 +745,26 @@ impl ProviderOps for ImapOps {
             imap_client::fetch_message_body(&mut session, &folder_owned, uid).await
         })?;
 
-        Ok(imap_message_to_provider_message(
-            &account_id,
-            &folder_owned,
-            &message,
-        ))
+        let mut parsed = imap_message_to_provider_message(&account_id, &folder_owned, &message);
+
+        // Look up the thread_id stored during sync; empty string if message isn't indexed yet.
+        let msg_id = message_id.to_string();
+        if let Ok(thread_id) = ctx
+            .db
+            .with_conn(move |conn| {
+                conn.query_row(
+                    "SELECT thread_id FROM messages WHERE id = ?1",
+                    rusqlite::params![msg_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(|e| format!("thread_id lookup: {e}"))
+            })
+            .await
+        {
+            parsed.thread_id = thread_id;
+        }
+
+        Ok(parsed)
     }
 
     async fn fetch_raw_message(

@@ -1019,7 +1019,13 @@ pub async fn provider_test_connection(
         search: &search,
         app_handle: &app_handle,
     };
-    ops.test_connection(&ctx).await
+    match ops.test_connection(&ctx).await {
+        Ok(result) => Ok(result),
+        Err(e) => Ok(ProviderTestResult {
+            success: false,
+            message: e,
+        }),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
