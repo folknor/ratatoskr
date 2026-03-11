@@ -3,18 +3,20 @@
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::body_store::BodyStoreState;
+use crate::categorization::AiCategorizationCandidate;
+use crate::categorization::commands::categorize_threads_with_ai_impl;
 use crate::db::DbState;
 use crate::db::queries_extra::load_recent_rule_categorized_threads;
 use crate::filters::FilterableMessage;
-use crate::filters::commands::load_filterable_messages;
-use crate::filters::commands::load_enabled_filters;
 use crate::filters::commands::filters_apply_to_messages_impl;
+use crate::filters::commands::load_enabled_filters;
+use crate::filters::commands::load_filterable_messages;
 use crate::gmail::client::GmailState;
 use crate::graph::client::GraphState;
 use crate::inline_image_store::InlineImageStoreState;
 use crate::jmap::client::JmapState;
-use crate::provider::crypto::AppCryptoState;
 use crate::provider::commands::provider_sync_auto_for_provider;
+use crate::provider::crypto::AppCryptoState;
 use crate::search::SearchState;
 use crate::smart_labels::commands::load_enabled_criteria_rules;
 use crate::smart_labels::commands::load_enabled_rules_for_ai;
@@ -22,12 +24,11 @@ use crate::smart_labels::commands::smart_labels_apply_criteria_to_messages_impl;
 use crate::smart_labels::commands::smart_labels_classify_and_apply_remainder_impl;
 use crate::smart_labels::commands::smart_labels_prepare_ai_remainder_for_messages;
 
-use super::{SyncQueueState, SyncState};
 use super::config;
 use super::types::{
-    AICategorizationCandidate, ImapSyncResult, NotificationCandidate, SyncStatus,
-    SyncStatusDonePayload, SyncStatusEvent,
+    ImapSyncResult, NotificationCandidate, SyncStatus, SyncStatusDonePayload, SyncStatusEvent,
 };
+use super::{SyncQueueState, SyncState};
 
 const SYNC_INTERVAL_MS: u64 = 60_000;
 
@@ -122,10 +123,7 @@ async fn queue_sync_accounts(
         .map_err(|_| "Sync queue worker stopped unexpectedly".to_string())
 }
 
-async fn load_background_account_ids(
-    app: &AppHandle,
-    fallback_ids: &[String],
-) -> Vec<String> {
+async fn load_background_account_ids(app: &AppHandle, fallback_ids: &[String]) -> Vec<String> {
     let db: tauri::State<'_, DbState> = app.state();
     match db.with_conn(config::get_active_account_ids).await {
         Ok(account_ids) => account_ids,
@@ -194,7 +192,6 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                     affected_thread_ids: Vec::new(),
                     criteria_smart_label_matches: Vec::new(),
                     notifications_to_queue: Vec::new(),
-                    ai_categorization_candidates: Vec::new(),
                 }),
             },
         );
@@ -230,9 +227,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
             {
                 Ok(value) => value,
                 Err(error) => {
-                    log::warn!(
-                        "Failed to determine calendar follow-up for {account_id}: {error}"
-                    );
+                    log::warn!("Failed to determine calendar follow-up for {account_id}: {error}");
                     false
                 }
             };
@@ -396,19 +391,39 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 });
             }
 
-            let ai_categorization_candidates = if result.affected_thread_ids.is_empty() {
-                Vec::new()
-            } else {
-                match get_ai_categorization_candidates(&db, account_id).await {
-                    Ok(candidates) => candidates,
-                    Err(error) => {
+            if !result.affected_thread_ids.is_empty() {
+                let app_handle = app.clone();
+                let account_id_for_ai = account_id.to_string();
+                tauri::async_runtime::spawn(async move {
+                    let db: tauri::State<'_, DbState> = app_handle.state();
+                    let crypto: tauri::State<'_, AppCryptoState> = app_handle.state();
+
+                    let candidates = match get_ai_categorization_candidates(&db, &account_id_for_ai)
+                        .await
+                    {
+                        Ok(candidates) => candidates,
+                        Err(error) => {
+                            log::warn!(
+                                "Failed to load AI categorization candidates for {account_id_for_ai}: {error}"
+                            );
+                            return;
+                        }
+                    };
+
+                    if let Err(error) = categorize_threads_with_ai_impl(
+                        &account_id_for_ai,
+                        &candidates,
+                        &db,
+                        &crypto,
+                    )
+                    .await
+                    {
                         log::warn!(
-                            "Failed to load AI categorization candidates for {account_id}: {error}"
+                            "Failed to categorize AI thread remainder for {account_id_for_ai}: {error}"
                         );
-                        Vec::new()
                     }
-                }
-            };
+                });
+            }
 
             emit_sync_status(
                 app,
@@ -423,7 +438,6 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                         affected_thread_ids: result.affected_thread_ids,
                         criteria_smart_label_matches,
                         notifications_to_queue,
-                        ai_categorization_candidates,
                     }),
                 },
             )
@@ -444,7 +458,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
 async fn get_ai_categorization_candidates(
     db: &DbState,
     account_id: &str,
-) -> Result<Vec<AICategorizationCandidate>, String> {
+) -> Result<Vec<AiCategorizationCandidate>, String> {
     let account_id = account_id.to_string();
     db.with_conn(move |conn| {
         let auto_categorize = conn
@@ -461,7 +475,7 @@ async fn get_ai_categorization_candidates(
         load_recent_rule_categorized_threads(conn, &account_id, 20).map(|threads| {
             threads
                 .into_iter()
-                .map(|thread| AICategorizationCandidate {
+                .map(|thread| AiCategorizationCandidate {
                     id: thread.id,
                     subject: thread.subject,
                     snippet: thread.snippet,
@@ -643,7 +657,10 @@ async fn load_post_sync_messages(
     body_store: &BodyStoreState,
     account_id: &str,
     message_ids: &[String],
-    filters: &[(crate::filters::FilterCriteria, crate::filters::FilterActions)],
+    filters: &[(
+        crate::filters::FilterCriteria,
+        crate::filters::FilterActions,
+    )],
     criteria_rules: &[(String, crate::filters::FilterCriteria)],
 ) -> Result<Vec<FilterableMessage>, String> {
     if message_ids.is_empty() {
@@ -705,9 +722,12 @@ pub async fn sync_imap_initial(
             })
             .await?
         };
-        let imap_config =
-            crate::imap::account_config::load_imap_config(&db, &account_id, crypto.encryption_key())
-                .await?;
+        let imap_config = crate::imap::account_config::load_imap_config(
+            &db,
+            &account_id,
+            crypto.encryption_key(),
+        )
+        .await?;
 
         let days = days_back.unwrap_or(actual_days_back);
 

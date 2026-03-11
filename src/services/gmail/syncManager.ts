@@ -13,10 +13,6 @@ export interface SyncProgress {
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { listAccountBasicInfo } from "@/services/accounts/basicInfo";
-import {
-  type CategorizationCandidate,
-  categorizeNewThreads,
-} from "@/services/ai/categorizationManager";
 import { queueNewEmailNotification } from "@/services/notifications/notificationManager";
 
 /**
@@ -26,23 +22,19 @@ import { queueNewEmailNotification } from "@/services/notifications/notification
 interface PostSyncHooksInput {
   accountId: string;
   newInboxEmailIds: string[];
-  affectedThreadIds: string[];
   notificationsToQueue?: {
     threadId: string;
     fromName?: string | null;
     fromAddress?: string | null;
     subject?: string | null;
   }[];
-  aiCategorizationCandidates?: CategorizationCandidate[];
 }
 
 async function runPostSyncHooks(input: PostSyncHooksInput): Promise<void> {
   const {
     accountId,
     newInboxEmailIds,
-    affectedThreadIds,
     notificationsToQueue = [],
-    aiCategorizationCandidates = [],
   } = input;
 
   if (newInboxEmailIds.length > 0) {
@@ -61,12 +53,6 @@ async function runPostSyncHooks(input: PostSyncHooksInput): Promise<void> {
     }
   }
 
-  // AI categorization (fire-and-forget)
-  if (affectedThreadIds.length > 0 && aiCategorizationCandidates.length > 0) {
-    categorizeNewThreads(accountId, aiCategorizationCandidates).catch((err) =>
-      console.error("[syncManager] Categorization error:", err),
-    );
-  }
 }
 
 /** Map IMAP sync phases to the SyncProgress phases the UI understands. */
@@ -105,7 +91,6 @@ interface SyncStatusEvent {
       fromAddress?: string | null;
       subject?: string | null;
     }[];
-    aiCategorizationCandidates: CategorizationCandidate[];
   } | null;
 }
 
@@ -204,15 +189,12 @@ async function handleSyncStatusEvent(event: SyncStatusEvent): Promise<void> {
     affectedThreadIds: [],
     criteriaSmartLabelMatches: [],
     notificationsToQueue: [],
-    aiCategorizationCandidates: [],
   };
 
   await runPostSyncHooks({
     accountId: event.accountId,
     newInboxEmailIds: result.newInboxMessageIds,
-    affectedThreadIds: result.affectedThreadIds,
     notificationsToQueue: result.notificationsToQueue,
-    aiCategorizationCandidates: result.aiCategorizationCandidates,
   });
 
   statusCallback?.(event.accountId, "done");

@@ -32,7 +32,7 @@
 
 ## Post-Sync Hooks
 
-> **Systemic issue**: Rust sync now shares one post-sync message load across filters, criteria smart labels, AI prep, and notifications, but later TS-side AI matching still re-queries message data and post-sync actions still duplicate some provider/setup work. The remaining debt is mostly across the Rust/TS boundary.
+> **Systemic issue**: Rust sync now owns filters, smart labels, notification evaluation, and AI categorization preparation/application, but sync completion still crosses into TS for desktop notification dispatch and calendar follow-up. The remaining debt is mostly at that Rust/TS boundary.
 
 ---
 

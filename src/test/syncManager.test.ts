@@ -10,7 +10,6 @@ const {
   mockGetCalendarProvider,
   mockGetVisibleCalendars,
   mockQueueNewEmailNotification,
-  mockCategorizeNewThreads,
 } = vi.hoisted(() => ({
   eventHandlers: new Map<string, (event: { payload: unknown }) => void>(),
   mockInvoke: vi.fn(),
@@ -21,7 +20,6 @@ const {
   mockGetCalendarProvider: vi.fn(),
   mockGetVisibleCalendars: vi.fn(),
   mockQueueNewEmailNotification: vi.fn(),
-  mockCategorizeNewThreads: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -38,10 +36,6 @@ vi.mock("@/services/notifications/notificationManager", () => ({
 
 vi.mock("@/services/accounts/basicInfo", () => ({
   listAccountBasicInfo: mockListAccountBasicInfo,
-}));
-
-vi.mock("@/services/ai/categorizationManager", () => ({
-  categorizeNewThreads: mockCategorizeNewThreads,
 }));
 
 vi.mock("@/services/calendar/providerFactory", () => ({
@@ -84,7 +78,6 @@ describe("syncManager", () => {
     vi.clearAllMocks();
     vi.resetModules();
     eventHandlers.clear();
-    mockCategorizeNewThreads.mockResolvedValue(undefined);
     mockListAccountBasicInfo.mockResolvedValue([
       {
         id: "acc-1",
@@ -274,7 +267,6 @@ describe("syncManager", () => {
             subject: "Hello",
           },
         ],
-        aiCategorizationCandidates: [{ threadId: "t1", subject: "Hello" }],
       },
     });
 
@@ -286,9 +278,6 @@ describe("syncManager", () => {
       "acc-1",
       "alice@example.com",
     );
-    expect(mockCategorizeNewThreads).toHaveBeenCalledWith("acc-1", [
-      { threadId: "t1", subject: "Hello" },
-    ]);
     expect(callback).toHaveBeenCalledWith("acc-1", "done");
   });
 
@@ -335,7 +324,6 @@ describe("syncManager", () => {
         affectedThreadIds: [],
         criteriaSmartLabelMatches: [],
         notificationsToQueue: [],
-        aiCategorizationCandidates: [],
       },
     });
 
