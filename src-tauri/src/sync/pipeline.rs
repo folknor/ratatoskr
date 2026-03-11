@@ -535,10 +535,20 @@ pub fn update_account_sync_state(
     history_id: &str,
 ) -> Result<(), String> {
     conn.execute(
-        "UPDATE accounts SET history_id = ?1 WHERE id = ?2",
+        "UPDATE accounts SET history_id = ?1, initial_sync_completed = 1 WHERE id = ?2",
         rusqlite::params![history_id, account_id],
     )
     .map_err(|e| format!("update account sync state: {e}"))?;
+    Ok(())
+}
+
+/// Mark initial sync as completed for providers whose delta state is stored elsewhere.
+pub fn mark_initial_sync_completed(conn: &Connection, account_id: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE accounts SET initial_sync_completed = 1, updated_at = unixepoch() WHERE id = ?1",
+        rusqlite::params![account_id],
+    )
+    .map_err(|e| format!("mark initial sync completed: {e}"))?;
     Ok(())
 }
 
@@ -628,7 +638,7 @@ pub fn get_thread_count(conn: &Connection, account_id: &str) -> Result<i64, Stri
 /// Clear account history_id (forces next sync to be initial).
 pub fn clear_account_history_id(conn: &Connection, account_id: &str) -> Result<(), String> {
     conn.execute(
-        "UPDATE accounts SET history_id = NULL, updated_at = unixepoch() WHERE id = ?1",
+        "UPDATE accounts SET history_id = NULL, initial_sync_completed = 0, updated_at = unixepoch() WHERE id = ?1",
         rusqlite::params![account_id],
     )
     .map_err(|e| format!("clear account history_id: {e}"))?;

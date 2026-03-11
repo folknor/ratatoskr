@@ -9,7 +9,7 @@ pub struct SyncAccount {
 
 pub struct AutoSyncConfig {
     pub provider: String,
-    pub has_history: bool,
+    pub initial_sync_completed: bool,
     pub sync_period_days: i64,
 }
 
@@ -70,12 +70,12 @@ pub fn get_sync_period_days(conn: &Connection) -> i64 {
 pub fn get_auto_sync_config(conn: &Connection, account_id: &str) -> Result<AutoSyncConfig, String> {
     let provider = conn
         .query_row(
-            "SELECT provider, history_id FROM accounts WHERE id = ?1",
+            "SELECT provider, initial_sync_completed FROM accounts WHERE id = ?1",
             rusqlite::params![account_id],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?.is_some(),
+                    row.get::<_, i64>(1)? != 0,
                 ))
             },
         )
@@ -83,7 +83,7 @@ pub fn get_auto_sync_config(conn: &Connection, account_id: &str) -> Result<AutoS
 
     Ok(AutoSyncConfig {
         provider: provider.0,
-        has_history: provider.1,
+        initial_sync_completed: provider.1,
         sync_period_days: get_sync_period_days(conn),
     })
 }

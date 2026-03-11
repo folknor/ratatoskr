@@ -61,7 +61,7 @@ async fn resolve_provider_command<'a>(
 pub(crate) async fn provider_sync_auto_for_provider(
     account_id: &str,
     provider: &str,
-    has_history: bool,
+    initial_sync_completed: bool,
     sync_days: i64,
     db: &DbState,
     gmail: &GmailState,
@@ -96,7 +96,7 @@ pub(crate) async fn provider_sync_auto_for_provider(
         None
     };
 
-    if has_history {
+    if initial_sync_completed {
         match ops.sync_delta(&ctx, Some(sync_days)).await {
             Ok(result) => {
                 return Ok(AutoSyncResult {
@@ -155,7 +155,7 @@ pub(crate) async fn provider_sync_auto_impl(
     provider_sync_auto_for_provider(
         account_id,
         &sync_config.provider,
-        sync_config.has_history,
+        sync_config.initial_sync_completed,
         sync_config.sync_period_days,
         db,
         gmail,

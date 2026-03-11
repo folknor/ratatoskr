@@ -723,6 +723,40 @@ static MIGRATIONS: &[Migration] = &[
         description: "Store OAuth token URL with IMAP accounts",
         sql: "ALTER TABLE accounts ADD COLUMN oauth_token_url TEXT;",
     },
+    Migration {
+        version: 28,
+        description: "Track initial sync completion explicitly",
+        sql: r#"
+            ALTER TABLE accounts ADD COLUMN initial_sync_completed INTEGER NOT NULL DEFAULT 0;
+
+            UPDATE accounts
+            SET initial_sync_completed = 1
+            WHERE
+                (provider = 'gmail_api' AND history_id IS NOT NULL)
+                OR (
+                    provider = 'imap'
+                    AND (
+                        history_id IS NOT NULL
+                        OR EXISTS (
+                            SELECT 1 FROM folder_sync_state f WHERE f.account_id = accounts.id
+                        )
+                    )
+                )
+                OR (
+                    provider = 'jmap'
+                    AND EXISTS (
+                        SELECT 1 FROM jmap_sync_state s
+                        WHERE s.account_id = accounts.id AND s.type = 'Email'
+                    )
+                )
+                OR (
+                    provider = 'graph'
+                    AND EXISTS (
+                        SELECT 1 FROM graph_folder_delta_tokens g WHERE g.account_id = accounts.id
+                    )
+                );
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -962,6 +996,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))
             .expect("query");
-        assert_eq!(max_ver, 24);
+        assert_eq!(max_ver, 28);
     }
 }

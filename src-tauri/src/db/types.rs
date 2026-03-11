@@ -12,6 +12,7 @@ pub struct DbAccount {
     pub refresh_token: Option<String>,
     pub token_expires_at: Option<i64>,
     pub history_id: Option<String>,
+    pub initial_sync_completed: i64,
     pub last_sync_at: Option<i64>,
     pub is_active: i64,
     pub created_at: i64,

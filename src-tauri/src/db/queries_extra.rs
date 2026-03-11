@@ -2858,6 +2858,7 @@ fn row_to_account(row: &Row<'_>) -> rusqlite::Result<DbAccount> {
         refresh_token: row.get("refresh_token")?,
         token_expires_at: row.get("token_expires_at")?,
         history_id: row.get("history_id")?,
+        initial_sync_completed: row.get("initial_sync_completed")?,
         last_sync_at: row.get("last_sync_at")?,
         is_active: row.get("is_active")?,
         created_at: row.get("created_at")?,
@@ -3071,7 +3072,7 @@ pub async fn db_update_account_sync_state(
     state
         .with_conn(move |conn| {
             conn.execute(
-                "UPDATE accounts SET history_id = ?1, last_sync_at = unixepoch(), \
+                "UPDATE accounts SET history_id = ?1, initial_sync_completed = 1, last_sync_at = unixepoch(), \
                  updated_at = unixepoch() WHERE id = ?2",
                 params![history_id, id],
             )
@@ -3089,7 +3090,7 @@ pub async fn db_clear_account_history_id(
     state
         .with_conn(move |conn| {
             conn.execute(
-                "UPDATE accounts SET history_id = NULL, updated_at = unixepoch() WHERE id = ?1",
+                "UPDATE accounts SET history_id = NULL, initial_sync_completed = 0, updated_at = unixepoch() WHERE id = ?1",
                 params![id],
             )
             .map_err(|e| e.to_string())?;

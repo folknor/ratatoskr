@@ -4,7 +4,7 @@ mod convert;
 mod folder_mapper;
 pub(crate) mod imap_delta;
 pub(crate) mod imap_initial;
-mod pipeline;
+pub(crate) mod pipeline;
 pub(crate) mod types;
 
 use std::collections::HashSet;

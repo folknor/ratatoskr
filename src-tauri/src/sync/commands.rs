@@ -259,7 +259,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
     match provider_sync_auto_for_provider(
         account_id,
         &sync_config.provider,
-        sync_config.has_history,
+        sync_config.initial_sync_completed,
         sync_config.sync_period_days,
         &db,
         &gmail,

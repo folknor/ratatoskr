@@ -135,6 +135,11 @@ pub(crate) async fn graph_initial_sync(
         );
     }
 
+    let aid = ctx.account_id.to_string();
+    ctx.db
+        .with_conn(move |conn| crate::sync::pipeline::mark_initial_sync_completed(conn, &aid))
+        .await?;
+
     emit_progress(
         &sctx,
         "done",

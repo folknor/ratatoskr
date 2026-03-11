@@ -150,6 +150,9 @@ pub async fn jmap_initial_sync(
     // Save email state
     let email_state = get_email_state(client).await?;
     save_sync_state(db, account_id, "Email", &email_state).await?;
+    let aid = account_id.to_string();
+    db.with_conn(move |conn| crate::sync::pipeline::mark_initial_sync_completed(conn, &aid))
+        .await?;
 
     emit_progress(&ctx, "done", fetched, total_u64);
 

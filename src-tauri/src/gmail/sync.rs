@@ -812,7 +812,7 @@ fn update_account_history_id(
     history_id: &str,
 ) -> Result<(), String> {
     conn.execute(
-        "UPDATE accounts SET history_id = ?1 WHERE id = ?2",
+        "UPDATE accounts SET history_id = ?1, initial_sync_completed = 1 WHERE id = ?2",
         rusqlite::params![history_id, account_id],
     )
     .map_err(|e| format!("update history_id: {e}"))?;
