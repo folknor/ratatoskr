@@ -28,6 +28,7 @@ pub async fn probe(domain: &str) -> Option<ProtocolOption> {
             alternatives: Vec::new(),
         },
         provider_name: None,
+        help_url: None,
         source: DiscoverySource::JmapWellKnown,
     })
 }

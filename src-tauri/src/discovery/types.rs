@@ -24,6 +24,8 @@ pub struct ProtocolOption {
     pub auth: AuthConfig,
     /// Display name for the provider (e.g., "Fastmail").
     pub provider_name: Option<String>,
+    /// Optional provider help page, e.g. app-specific password instructions.
+    pub help_url: Option<String>,
     /// Where this option came from.
     pub source: DiscoverySource,
 }

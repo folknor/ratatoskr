@@ -34,26 +34,6 @@
 
 ---
 
-## Calendar
-
-- [ ] **App-specific password help links** — Providers like iCloud require app-specific passwords. Add a `help_url` field to `ProtocolOption` in `discovery/types.rs`, populate it for iCloud and similar providers, surface it in the account setup UI when present. *(LOW)*
-
-- [ ] **`html_unescape` is incomplete** — Only handles `&lt;`, `&gt;`, `&amp;`. Missing `&quot;`, `&apos;`, and numeric character references. Calendar display names with quotes or special chars will show raw entities. *(LOW)*
-
-- [ ] **`extract_tag_value` returns nested elements as content** — Uses first `>` to last `<` to extract text. If element contains nested elements, returns the inner markup instead of text. *(LOW)*
-
-- [ ] **`CALDAV_NS` constant gives false sense of namespace correctness** — Used in XML body format strings but the XML parser's `extract_first_element` doesn't reference namespaces at all. *(LOW)*
-
-- [ ] **UUID generated for every calendar upsert including conflicts** — `uuid::Uuid::new_v4()` called per row even when ON CONFLICT → UPDATE discards the `id`. Harmless but wasteful. *(LOW)*
-
-- [ ] **`calendar_apply_sync_result` may clear existing `ctag` when only `sync_token` is provided** — Sets both `sync_token` and `ctag` unconditionally. `None` for one clears the column. *(LOW)*
-
-- [ ] **`updated` vec always empty in `google_calendar_sync_events`** — Initialized but never populated. *(LOW)*
-
-- [ ] **`google_calendar_request_with_body` body parameter serves double duty** — Used for both initial request and 401 retry via `body.as_ref()`. Correct but fragile if refactored. *(LOW)*
-
----
-
 ## AI Service
 
 - [ ] **`reqwest::Client::new()` on every AI completion call** — Each `complete_*` function creates a fresh client. AI is called frequently during post-sync hooks, meaning repeated TLS handshakes to the same API endpoints. *(MED)*

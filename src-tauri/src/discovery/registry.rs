@@ -6,6 +6,7 @@ use crate::discovery::types::{
 struct RegistryEntry {
     domains: &'static [&'static str],
     name: &'static str,
+    help_url: Option<&'static str>,
     /// Protocol options paired with optional auth overrides.
     /// If the auth override is None, the entry-level default auth is used.
     options: &'static [(RegistryProtocol, Option<RegistryAuthConfig>)],
@@ -88,6 +89,7 @@ static REGISTRY: &[RegistryEntry] = &[
     RegistryEntry {
         domains: &["gmail.com", "googlemail.com"],
         name: "Gmail",
+        help_url: None,
         options: &[
             (RegistryProtocol::GmailApi, None),
             (
@@ -131,6 +133,7 @@ static REGISTRY: &[RegistryEntry] = &[
             "hotmail.co.uk",
         ],
         name: "Outlook",
+        help_url: None,
         options: &[
             (
                 RegistryProtocol::MicrosoftGraph,
@@ -191,6 +194,7 @@ static REGISTRY: &[RegistryEntry] = &[
     RegistryEntry {
         domains: &["yahoo.com", "yahoo.co.uk", "yahoo.co.jp", "ymail.com"],
         name: "Yahoo",
+        help_url: None,
         options: &[(
             RegistryProtocol::Imap {
                 imap_host: "imap.mail.yahoo.com",
@@ -217,6 +221,7 @@ static REGISTRY: &[RegistryEntry] = &[
     RegistryEntry {
         domains: &["icloud.com", "me.com", "mac.com"],
         name: "iCloud",
+        help_url: Some("https://support.apple.com/102654"),
         options: &[(
             RegistryProtocol::Imap {
                 imap_host: "imap.mail.me.com",
@@ -237,6 +242,7 @@ static REGISTRY: &[RegistryEntry] = &[
     RegistryEntry {
         domains: &["fastmail.com", "fastmail.fm", "messagingengine.com"],
         name: "Fastmail",
+        help_url: None,
         options: &[
             (
                 RegistryProtocol::Jmap {
@@ -265,6 +271,7 @@ static REGISTRY: &[RegistryEntry] = &[
     RegistryEntry {
         domains: &["zoho.com", "zohomail.com"],
         name: "Zoho",
+        help_url: None,
         options: &[(
             RegistryProtocol::Imap {
                 imap_host: "imap.zoho.com",
@@ -285,6 +292,7 @@ static REGISTRY: &[RegistryEntry] = &[
     RegistryEntry {
         domains: &["aol.com"],
         name: "AOL",
+        help_url: None,
         options: &[(
             RegistryProtocol::Imap {
                 imap_host: "imap.aol.com",
@@ -305,6 +313,7 @@ static REGISTRY: &[RegistryEntry] = &[
     RegistryEntry {
         domains: &["gmx.com", "gmx.net", "gmx.de"],
         name: "GMX",
+        help_url: None,
         options: &[(
             RegistryProtocol::Imap {
                 imap_host: "imap.gmx.com",
@@ -325,6 +334,7 @@ static REGISTRY: &[RegistryEntry] = &[
     RegistryEntry {
         domains: &["mail.ru", "inbox.ru", "list.ru", "bk.ru"],
         name: "Mail.ru",
+        help_url: None,
         options: &[(
             RegistryProtocol::Imap {
                 imap_host: "imap.mail.ru",
@@ -345,6 +355,7 @@ static REGISTRY: &[RegistryEntry] = &[
     RegistryEntry {
         domains: &["mailo.com", "net-c.com", "netc.fr"],
         name: "Mailo",
+        help_url: None,
         options: &[(
             RegistryProtocol::Imap {
                 imap_host: "mail.mailo.com",
@@ -451,6 +462,7 @@ pub fn lookup(domain: &str) -> Vec<ProtocolOption> {
                         protocol: protocol_from_registry(proto),
                         auth,
                         provider_name: Some(entry.name.to_string()),
+                        help_url: entry.help_url.map(str::to_string),
                         source: DiscoverySource::Registry,
                     }
                 })

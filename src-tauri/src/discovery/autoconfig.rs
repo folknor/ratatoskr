@@ -197,6 +197,7 @@ fn build_options_from_servers(
             },
             auth,
             provider_name: display_name.map(str::to_string),
+            help_url: None,
             source,
         });
     }

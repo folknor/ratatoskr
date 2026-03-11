@@ -38,6 +38,8 @@
   "usernameDiffersHelp": "Only needed if your login username differs from your email address.",
   "enterPassword": "Enter your email password or app password",
   "appPasswordHelp": "If your provider requires it, use an app-specific password.",
+  "appPasswordHelpLink": "Open {{provider}} app-password instructions.",
+  "provider": "provider",
   "autoConfigured": "Server settings have been auto-configured for your provider. You can adjust them if needed.",
   "imapServer": "IMAP Server",
   "imapServerPlaceholder": "imap.example.com",

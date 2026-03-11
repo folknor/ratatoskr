@@ -16,6 +16,8 @@ export interface WellKnownProviderResult {
   settings: ServerSettings;
   authMethods: AuthMethod[];
   oauthProviderId?: string | undefined;
+  providerName?: string | undefined;
+  helpUrl?: string | undefined;
   acceptInvalidCerts?: boolean | undefined;
 }
 
@@ -57,6 +59,7 @@ interface DiscoveredProtocolOption {
       };
   auth: DiscoveredAuthConfig;
   providerName: string | null;
+  helpUrl?: string | null;
   source: { type: string };
 }
 
@@ -136,6 +139,8 @@ export async function discoverSettings(
       },
       authMethods: mapAuthMethods(imapOption.auth),
       oauthProviderId: extractOAuthProviderId(imapOption.auth),
+      providerName: imapOption.providerName ?? undefined,
+      helpUrl: imapOption.helpUrl ?? undefined,
     };
   } catch {
     // Rust command failed — fall back to guessed settings

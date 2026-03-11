@@ -238,19 +238,27 @@ pub async fn calendar_upsert_discovered_calendars(
     db.with_conn(move |conn| {
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
         for calendar in calendars {
-            let id = uuid::Uuid::new_v4().to_string();
+            let existing_id: Option<String> = tx
+                .query_row(
+                    "SELECT id FROM calendars WHERE account_id = ?1 AND remote_id = ?2",
+                    params![&account_id, &calendar.remote_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?;
+            let id = existing_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
             tx.execute(
                 "INSERT INTO calendars (id, account_id, provider, remote_id, display_name, color, is_primary)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                  ON CONFLICT(account_id, remote_id) DO UPDATE SET
                    display_name = ?5, color = ?6, is_primary = ?7, updated_at = unixepoch()",
                 params![
-                    id,
-                    account_id,
-                    provider,
-                    calendar.remote_id,
-                    calendar.display_name,
-                    calendar.color,
+                    &id,
+                    &account_id,
+                    &provider,
+                    &calendar.remote_id,
+                    &calendar.display_name,
+                    &calendar.color,
                     calendar.is_primary as i64,
                 ],
             )
@@ -341,7 +349,7 @@ async fn google_calendar_sync_events_impl(
     let http = shared_http_client();
     let encoded_id = urlencoding::encode(calendar_remote_id);
     let mut created = Vec::new();
-    let updated = Vec::new();
+    let mut updated = Vec::new();
     let mut deleted_remote_ids = Vec::new();
     let mut page_token: Option<String> = None;
     let mut next_sync_token: Option<String> = None;
@@ -391,7 +399,12 @@ async fn google_calendar_sync_events_impl(
             if item.status.as_deref() == Some("cancelled") {
                 deleted_remote_ids.push(item.id);
             } else {
-                created.push(map_google_event(item)?);
+                let event = map_google_event(item)?;
+                if sync_token.is_some() {
+                    updated.push(event);
+                } else {
+                    created.push(event);
+                }
             }
         }
 
@@ -776,8 +789,16 @@ async fn apply_calendar_sync_result_impl(
 
         if sync_result.new_sync_token.is_some() || sync_result.new_ctag.is_some() {
             tx.execute(
-                "UPDATE calendars SET sync_token = ?1, ctag = ?2, updated_at = unixepoch() WHERE id = ?3",
-                params![sync_result.new_sync_token, sync_result.new_ctag, calendar_id],
+                "UPDATE calendars
+                 SET sync_token = COALESCE(?1, sync_token),
+                     ctag = COALESCE(?2, ctag),
+                     updated_at = unixepoch()
+                 WHERE id = ?3",
+                params![
+                    sync_result.new_sync_token,
+                    sync_result.new_ctag,
+                    calendar_id
+                ],
             )
             .map_err(|e| e.to_string())?;
         }
@@ -799,19 +820,27 @@ async fn upsert_discovered_calendars_impl(
     db.with_conn(move |conn| {
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
         for calendar in calendars {
-            let id = uuid::Uuid::new_v4().to_string();
+            let existing_id: Option<String> = tx
+                .query_row(
+                    "SELECT id FROM calendars WHERE account_id = ?1 AND remote_id = ?2",
+                    params![&account_id, &calendar.remote_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?;
+            let id = existing_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
             tx.execute(
                 "INSERT INTO calendars (id, account_id, provider, remote_id, display_name, color, is_primary)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                  ON CONFLICT(account_id, remote_id) DO UPDATE SET
                    display_name = ?5, color = ?6, is_primary = ?7, updated_at = unixepoch()",
                 params![
-                    id,
-                    account_id,
-                    provider,
-                    calendar.remote_id,
-                    calendar.display_name,
-                    calendar.color,
+                    &id,
+                    &account_id,
+                    &provider,
+                    &calendar.remote_id,
+                    &calendar.display_name,
+                    &calendar.color,
                     calendar.is_primary as i64,
                 ],
             )
@@ -1351,11 +1380,7 @@ fn extract_first_tag_value(xml: &str, tag_names: &[&str]) -> Option<String> {
 }
 
 fn extract_tag_value(xml: &str, tag_name: &str) -> Option<String> {
-    extract_first_element(xml, tag_name).and_then(|element| {
-        let start = element.find('>')? + 1;
-        let end = element.rfind('<')?;
-        Some(html_unescape(&element[start..end]))
-    })
+    extract_first_element(xml, tag_name).and_then(extract_element_text)
 }
 
 fn extract_first_element<'a>(xml: &'a str, tag_name: &str) -> Option<&'a str> {
@@ -1416,11 +1441,41 @@ fn normalize_url_for_compare(url: &str) -> String {
     url.trim_end_matches('/').to_string()
 }
 
-fn html_unescape(value: &str) -> String {
-    value
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&amp;", "&")
+fn extract_element_text(element: &str) -> Option<String> {
+    let mut reader = quick_xml::Reader::from_str(element);
+    reader.config_mut().trim_text(true);
+    let mut depth = 0usize;
+    let mut text = String::new();
+
+    loop {
+        match reader.read_event() {
+            Ok(quick_xml::events::Event::Start(_)) => depth += 1,
+            Ok(quick_xml::events::Event::Text(event)) => {
+                if depth >= 1
+                    && let Ok(unescaped) = event.unescape()
+                {
+                    text.push_str(&unescaped);
+                }
+            }
+            Ok(quick_xml::events::Event::CData(event)) => {
+                if depth >= 1
+                    && let Ok(decoded) = event.decode()
+                {
+                    text.push_str(&decoded);
+                }
+            }
+            Ok(quick_xml::events::Event::End(_)) => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    break;
+                }
+            }
+            Ok(quick_xml::events::Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+    }
+
+    if text.is_empty() { None } else { Some(text) }
 }
 
 fn parse_caldav_ical_event(ical_data: &str, href: &str) -> Result<CalendarEventDto, String> {
@@ -1839,17 +1894,17 @@ async fn google_calendar_request_with_body<T: serde::de::DeserializeOwned>(
     db: &DbState,
     method: &str,
     url: &str,
-    body: Option<serde_json::Value>,
+    json_body: Option<serde_json::Value>,
 ) -> Result<T, String> {
     let access_token = client.get_access_token(db).await?;
+    let request_body = json_body.as_ref();
     let response =
-        google_calendar_execute_with_retry(http, method, url, body.as_ref(), &access_token).await?;
+        google_calendar_execute_with_retry(http, method, url, request_body, &access_token).await?;
 
     if response.status().as_u16() == 401 {
         let refreshed = client.force_refresh_token(db).await?;
         let retry =
-            google_calendar_execute_with_retry(http, method, url, body.as_ref(), &refreshed)
-                .await?;
+            google_calendar_execute_with_retry(http, method, url, request_body, &refreshed).await?;
         return google_calendar_parse_json_response(retry).await;
     }
 
@@ -1880,7 +1935,7 @@ async fn google_calendar_execute_with_retry(
     http: &reqwest::Client,
     method: &str,
     url: &str,
-    body: Option<&serde_json::Value>,
+    json_body: Option<&serde_json::Value>,
     access_token: &str,
 ) -> Result<reqwest::Response, String> {
     for attempt in 0..GOOGLE_CALENDAR_RETRY_CONFIG.max_attempts {
@@ -1893,7 +1948,7 @@ async fn google_calendar_execute_with_retry(
         }
         .header("Authorization", format!("Bearer {access_token}"));
 
-        if let Some(payload) = body {
+        if let Some(payload) = json_body {
             // .json() sets Content-Type: application/json automatically.
             request = request.json(payload);
         }
@@ -2000,4 +2055,29 @@ fn map_google_event(event: GoogleCalendarEvent) -> Result<CalendarEventDto, Stri
         html_link: event.html_link,
         ical_data: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_tag_value;
+    use quick_xml::escape::unescape;
+
+    #[test]
+    fn extract_tag_value_flattens_nested_text() {
+        let xml = r#"<d:displayname xmlns:d="DAV:">Work <b>Calendar</b></d:displayname>"#;
+        assert_eq!(
+            extract_tag_value(xml, "displayname").as_deref(),
+            Some("Work Calendar")
+        );
+    }
+
+    #[test]
+    fn html_unescape_handles_named_and_numeric_entities() {
+        assert_eq!(
+            unescape("Tom &amp; &quot;Jerry&quot; &#39;ok&#39; &#x2603;")
+                .map(std::borrow::Cow::into_owned)
+                .unwrap(),
+            "Tom & \"Jerry\" 'ok' \u{2603}"
+        );
+    }
 }

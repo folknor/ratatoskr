@@ -38,6 +38,7 @@ export function AddCalDavAccount({
   const [password, setPassword] = useState("");
   const [providerName, setProviderName] = useState<string | null>(null);
   const [needsAppPassword, setNeedsAppPassword] = useState(false);
+  const [helpUrl, setHelpUrl] = useState<string | null>(null);
 
   // Test state
   const [testing, setTesting] = useState(false);
@@ -60,6 +61,7 @@ export function AddCalDavAccount({
     }
     setProviderName(result.providerName);
     setNeedsAppPassword(result.needsAppPassword);
+    setHelpUrl(result.helpUrl);
     setStep("server");
   }, [email]);
 
@@ -182,7 +184,20 @@ export function AddCalDavAccount({
             {needsAppPassword === true && (
               <div className="p-3 bg-warning/10 border border-warning/30 rounded text-xs text-text-secondary">
                 This provider requires an app-specific password. Generate one in
-                your provider's security settings.
+                {" "}
+                {helpUrl ? (
+                  <a
+                    href={helpUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-accent hover:underline"
+                  >
+                    your provider's security settings
+                  </a>
+                ) : (
+                  "your provider's security settings"
+                )}
+                .
               </div>
             )}
 

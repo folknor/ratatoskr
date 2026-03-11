@@ -55,6 +55,7 @@ pub async fn probe_ports(domain: &str, cancelled: bool) -> Vec<ProtocolOption> {
                     alternatives: Vec::new(),
                 },
                 provider_name: None,
+                help_url: None,
                 source: DiscoverySource::PortProbe,
             }]
         }

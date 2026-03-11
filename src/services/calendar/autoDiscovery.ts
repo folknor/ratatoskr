@@ -3,6 +3,7 @@ interface CalDavPreset {
   domains: string[];
   caldavUrl: string;
   authMethod: "basic" | "oauth2";
+  helpUrl?: string;
 }
 
 const PRESETS: CalDavPreset[] = [
@@ -17,6 +18,7 @@ const PRESETS: CalDavPreset[] = [
     domains: ["icloud.com", "me.com", "mac.com"],
     caldavUrl: "https://caldav.icloud.com",
     authMethod: "basic",
+    helpUrl: "https://support.apple.com/102654",
   },
   {
     name: "Fastmail",
@@ -43,6 +45,7 @@ export interface CalDavDiscoveryResult {
   caldavUrl: string | null;
   authMethod: "basic" | "oauth2";
   needsAppPassword: boolean;
+  helpUrl: string | null;
 }
 
 /**
@@ -59,6 +62,7 @@ export async function discoverCalDavSettings(
       caldavUrl: null,
       authMethod: "basic",
       needsAppPassword: false,
+      helpUrl: null,
     };
   }
 
@@ -70,6 +74,7 @@ export async function discoverCalDavSettings(
         caldavUrl: preset.caldavUrl,
         authMethod: preset.authMethod,
         needsAppPassword: preset.name === "iCloud",
+        helpUrl: preset.helpUrl ?? null,
       };
     }
   }
@@ -82,6 +87,7 @@ export async function discoverCalDavSettings(
       caldavUrl: wellKnownUrl,
       authMethod: "basic",
       needsAppPassword: false,
+      helpUrl: null,
     };
   }
 
@@ -93,6 +99,7 @@ export async function discoverCalDavSettings(
       caldavUrl: nextcloudUrl,
       authMethod: "basic",
       needsAppPassword: false,
+      helpUrl: null,
     };
   }
 
@@ -101,6 +108,7 @@ export async function discoverCalDavSettings(
     caldavUrl: null,
     authMethod: "basic",
     needsAppPassword: false,
+    helpUrl: null,
   };
 }
 

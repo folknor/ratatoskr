@@ -12,6 +12,8 @@ export interface AddImapAccountBasicStepProps {
   hasOAuthTokens: boolean;
   detectedAuthMethods: AuthMode[];
   detectedOAuthProviderId: string | null;
+  detectedProviderName: string | null;
+  detectedHelpUrl: string | null;
   oauthConnecting: boolean;
   oauthError: string | null;
   onOAuthConnect: (providerId: string) => void;
@@ -25,6 +27,8 @@ export function AddImapAccountBasicStep({
   hasOAuthTokens,
   detectedAuthMethods,
   detectedOAuthProviderId,
+  detectedProviderName,
+  detectedHelpUrl,
   oauthConnecting,
   oauthError,
   onOAuthConnect,
@@ -251,6 +255,21 @@ export function AddImapAccountBasicStep({
             />
             <p className="text-xs text-text-tertiary mt-1">
               {t("appPasswordHelp")}
+              {detectedHelpUrl ? (
+                <>
+                  {" "}
+                  <a
+                    href={detectedHelpUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-accent hover:underline"
+                  >
+                    {t("appPasswordHelpLink", {
+                      provider: detectedProviderName ?? t("provider"),
+                    })}
+                  </a>
+                </>
+              ) : null}
             </p>
           </div>
         </>
