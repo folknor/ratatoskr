@@ -466,9 +466,6 @@ pub fn run() {
             gmail::commands::gmail_delete_draft,
             gmail::commands::gmail_list_drafts,
             gmail::commands::gmail_fetch_send_as,
-            // Gmail sync engine (Phase 2)
-            gmail::commands::gmail_sync_initial,
-            gmail::commands::gmail_sync_delta,
             // JMAP provider
             jmap::commands::jmap_init_client,
             jmap::commands::jmap_remove_client,

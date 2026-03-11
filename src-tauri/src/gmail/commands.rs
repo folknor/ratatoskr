@@ -1,14 +1,11 @@
 #![allow(clippy::let_underscore_must_use)]
 
-use tauri::{AppHandle, State};
+use tauri::State;
 
-use crate::body_store::BodyStoreState;
 use crate::db::DbState;
-use crate::search::SearchState;
 
 use super::client::GmailState;
 use super::parse::{ParsedGmailMessage, parse_gmail_message};
-use super::sync::GmailSyncResult;
 use super::types::{
     GmailAttachmentData, GmailDraft, GmailDraftStub, GmailHistoryResponse, GmailLabel,
     GmailMessage, GmailProfile, GmailSendAs, GmailThread, GmailThreadStub,
@@ -320,37 +317,4 @@ pub async fn gmail_fetch_send_as(
 ) -> Result<Vec<GmailSendAs>, String> {
     let client = gmail.get(&account_id).await?;
     client.list_send_as(&db).await
-}
-
-// ── Sync ─────────────────────────────────────────────────────
-
-/// Run initial Gmail sync: labels + thread list + parallel fetch.
-#[tauri::command]
-pub async fn gmail_sync_initial(
-    account_id: String,
-    days_back: Option<i64>,
-    app: AppHandle,
-    db: State<'_, DbState>,
-    body_store: State<'_, BodyStoreState>,
-    search: State<'_, SearchState>,
-    gmail: State<'_, GmailState>,
-) -> Result<(), String> {
-    let client = gmail.get(&account_id).await?;
-    let days = days_back.unwrap_or(365);
-    super::sync::gmail_initial_sync(&client, &account_id, days, &db, &body_store, &search, &app)
-        .await
-}
-
-/// Run delta Gmail sync via History API.
-#[tauri::command]
-pub async fn gmail_sync_delta(
-    account_id: String,
-    app: AppHandle,
-    db: State<'_, DbState>,
-    body_store: State<'_, BodyStoreState>,
-    search: State<'_, SearchState>,
-    gmail: State<'_, GmailState>,
-) -> Result<GmailSyncResult, String> {
-    let client = gmail.get(&account_id).await?;
-    super::sync::gmail_delta_sync(&client, &account_id, &db, &body_store, &search, &app).await
 }

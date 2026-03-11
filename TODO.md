@@ -28,9 +28,6 @@
 
 
 
-
-- [ ] **Gmail sync still fully in TS** — `src/services/gmail/syncManager.ts:80-112` — `syncGmailAccount()` uses Gmail REST API via TS HTTP calls, not the Rust sync engine. Porting is a large effort with minimal benefit since HTTP overhead dominates. *(LOW)*
-
 ---
 
 ## Post-Sync Hooks
