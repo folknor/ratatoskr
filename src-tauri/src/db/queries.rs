@@ -144,6 +144,28 @@ pub struct SettingsBootstrapSnapshot {
     pub attachment_cache_max_mb: Option<String>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiBootstrapSnapshot {
+    pub theme: Option<String>,
+    pub sidebar_collapsed: bool,
+    pub contact_sidebar_visible: bool,
+    pub reading_pane_position: Option<String>,
+    pub read_filter: Option<String>,
+    pub email_list_width: Option<String>,
+    pub email_density: Option<String>,
+    pub default_reply_mode: Option<String>,
+    pub mark_as_read_behavior: Option<String>,
+    pub send_and_archive: bool,
+    pub font_size: Option<String>,
+    pub color_theme: Option<String>,
+    pub inbox_view_mode: Option<String>,
+    pub reduce_motion: bool,
+    pub show_sync_status: bool,
+    pub task_sidebar_visible: bool,
+    pub sidebar_nav_config: Option<String>,
+}
+
 fn decode_setting_value(raw: String, encryption_key: &[u8; 32]) -> String {
     if is_encrypted(&raw) {
         decrypt_value(encryption_key, &raw).unwrap_or(raw)
@@ -525,6 +547,43 @@ pub async fn settings_get_bootstrap_snapshot(
                 smart_notifications: get_bool("smart_notifications", true),
                 notify_categories: get("notify_categories"),
                 attachment_cache_max_mb: get("attachment_cache_max_mb"),
+            })
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn settings_get_ui_bootstrap_snapshot(
+    state: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
+) -> Result<UiBootstrapSnapshot, String> {
+    let encryption_key = *gmail.encryption_key();
+    state
+        .with_conn(move |conn| {
+            let settings = read_setting_map(conn, &encryption_key)?;
+            let get = |key: &str| settings.get(key).cloned();
+            let get_bool = |key: &str, default: bool| {
+                get(key).map_or(default, |value| value != "false")
+            };
+
+            Ok(UiBootstrapSnapshot {
+                theme: get("theme"),
+                sidebar_collapsed: get("sidebar_collapsed").is_some_and(|v| v == "true"),
+                contact_sidebar_visible: get_bool("contact_sidebar_visible", true),
+                reading_pane_position: get("reading_pane_position"),
+                read_filter: get("read_filter"),
+                email_list_width: get("email_list_width"),
+                email_density: get("email_density"),
+                default_reply_mode: get("default_reply_mode"),
+                mark_as_read_behavior: get("mark_as_read_behavior"),
+                send_and_archive: get("send_and_archive").is_some_and(|v| v == "true"),
+                font_size: get("font_size"),
+                color_theme: get("color_theme"),
+                inbox_view_mode: get("inbox_view_mode"),
+                reduce_motion: get("reduce_motion").is_some_and(|v| v == "true"),
+                show_sync_status: get_bool("show_sync_status", true),
+                task_sidebar_visible: get("task_sidebar_visible").is_some_and(|v| v == "true"),
+                sidebar_nav_config: get("sidebar_nav_config"),
             })
         })
         .await

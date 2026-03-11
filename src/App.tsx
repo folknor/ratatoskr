@@ -58,6 +58,7 @@ import {
   stopQueueProcessor,
   triggerQueueFlush,
 } from "./services/queue/queueProcessor";
+import { getUiBootstrapSnapshot } from "./services/settings/uiBootstrap";
 import {
   startScheduledSendChecker,
   stopScheduledSendChecker,
@@ -245,9 +246,10 @@ export default function App(): React.ReactNode {
 
         const layout = useUILayoutStore.getState();
         const prefs = useUIPreferencesStore.getState();
+        const uiSnapshot = await getUiBootstrapSnapshot();
 
         // Restore persisted theme
-        const savedTheme = await getSetting("theme");
+        const savedTheme = uiSnapshot.theme;
         if (
           savedTheme === "light" ||
           savedTheme === "dark" ||
@@ -257,19 +259,17 @@ export default function App(): React.ReactNode {
         }
 
         // Restore persisted sidebar state
-        const savedSidebar = await getSetting("sidebar_collapsed");
-        if (savedSidebar === "true") {
+        if (uiSnapshot.sidebarCollapsed) {
           layout.setSidebarCollapsed(true);
         }
 
         // Restore contact sidebar visibility
-        const savedContactSidebar = await getSetting("contact_sidebar_visible");
-        if (savedContactSidebar === "false") {
+        if (!uiSnapshot.contactSidebarVisible) {
           layout.setContactSidebarVisible(false);
         }
 
         // Restore reading pane position
-        const savedPanePos = await getSetting("reading_pane_position");
+        const savedPanePos = uiSnapshot.readingPanePosition;
         if (
           savedPanePos === "right" ||
           savedPanePos === "bottom" ||
@@ -279,7 +279,7 @@ export default function App(): React.ReactNode {
         }
 
         // Restore read filter
-        const savedReadFilter = await getSetting("read_filter");
+        const savedReadFilter = uiSnapshot.readFilter;
         if (
           savedReadFilter === "all" ||
           savedReadFilter === "read" ||
@@ -289,14 +289,14 @@ export default function App(): React.ReactNode {
         }
 
         // Restore email list width
-        const savedListWidth = await getSetting("email_list_width");
+        const savedListWidth = uiSnapshot.emailListWidth;
         if (savedListWidth) {
           const w = parseInt(savedListWidth, 10);
           if (w >= 240 && w <= 800) layout.setEmailListWidth(w);
         }
 
         // Restore email density
-        const savedDensity = await getSetting("email_density");
+        const savedDensity = uiSnapshot.emailDensity;
         if (
           savedDensity === "compact" ||
           savedDensity === "default" ||
@@ -306,13 +306,13 @@ export default function App(): React.ReactNode {
         }
 
         // Restore default reply mode
-        const savedReplyMode = await getSetting("default_reply_mode");
+        const savedReplyMode = uiSnapshot.defaultReplyMode;
         if (savedReplyMode === "reply" || savedReplyMode === "replyAll") {
           prefs.setDefaultReplyMode(savedReplyMode);
         }
 
         // Restore mark-as-read behavior
-        const savedMarkRead = await getSetting("mark_as_read_behavior");
+        const savedMarkRead = uiSnapshot.markAsReadBehavior;
         if (
           savedMarkRead === "instant" ||
           savedMarkRead === "2s" ||
@@ -322,13 +322,12 @@ export default function App(): React.ReactNode {
         }
 
         // Restore send and archive
-        const savedSendArchive = await getSetting("send_and_archive");
-        if (savedSendArchive === "true") {
+        if (uiSnapshot.sendAndArchive) {
           prefs.setSendAndArchive(true);
         }
 
         // Restore font scale
-        const savedFontScale = await getSetting("font_size");
+        const savedFontScale = uiSnapshot.fontSize;
         if (
           savedFontScale === "small" ||
           savedFontScale === "default" ||
@@ -339,7 +338,7 @@ export default function App(): React.ReactNode {
         }
 
         // Restore color theme
-        const savedColorTheme = await getSetting("color_theme");
+        const savedColorTheme = uiSnapshot.colorTheme;
         if (
           savedColorTheme &&
           COLOR_THEMES.some((ct) => ct.id === savedColorTheme)
@@ -348,31 +347,28 @@ export default function App(): React.ReactNode {
         }
 
         // Restore inbox view mode
-        const savedViewMode = await getSetting("inbox_view_mode");
+        const savedViewMode = uiSnapshot.inboxViewMode;
         if (savedViewMode === "unified" || savedViewMode === "split") {
           prefs.setInboxViewMode(savedViewMode);
         }
 
         // Restore reduce motion preference
-        const savedReduceMotion = await getSetting("reduce_motion");
-        if (savedReduceMotion === "true") {
+        if (uiSnapshot.reduceMotion) {
           prefs.setReduceMotion(true);
         }
 
         // Restore show sync status bar preference
-        const savedShowSyncStatus = await getSetting("show_sync_status");
-        if (savedShowSyncStatus === "false") {
+        if (!uiSnapshot.showSyncStatus) {
           prefs.setShowSyncStatusBar(false);
         }
 
         // Restore task sidebar visibility
-        const savedTaskSidebar = await getSetting("task_sidebar_visible");
-        if (savedTaskSidebar === "true") {
+        if (uiSnapshot.taskSidebarVisible) {
           layout.setTaskSidebarVisible(true);
         }
 
         // Restore sidebar nav config
-        const savedNavConfig = await getSetting("sidebar_nav_config");
+        const savedNavConfig = uiSnapshot.sidebarNavConfig;
         if (savedNavConfig) {
           try {
             const parsed = JSON.parse(savedNavConfig);

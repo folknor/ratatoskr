@@ -5,8 +5,8 @@ import { UndoSendToast } from "./components/composer/UndoSendToast";
 import type { ColorThemeId } from "./constants/themes";
 import { COLOR_THEMES, getThemeById } from "./constants/themes";
 import { listAccountBasicInfo } from "./services/accounts/basicInfo";
-import { getSetting } from "./services/db/settings";
 import { initializeClients } from "./services/gmail/tokenManager";
+import { getUiBootstrapSnapshot } from "./services/settings/uiBootstrap";
 import { useAccountStore } from "./stores/accountStore";
 import type { ComposerMode } from "./stores/composerStore";
 import { useComposerStore } from "./stores/composerStore";
@@ -26,9 +26,10 @@ export default function ComposerWindow(): React.ReactNode {
         // Load persisted language
         const { loadPersistedLanguage } = await import("./i18n");
         await loadPersistedLanguage();
+        const uiSnapshot = await getUiBootstrapSnapshot();
 
         // Restore theme
-        const savedTheme = await getSetting("theme");
+        const savedTheme = uiSnapshot.theme;
         if (
           savedTheme === "light" ||
           savedTheme === "dark" ||
@@ -38,7 +39,7 @@ export default function ComposerWindow(): React.ReactNode {
         }
 
         // Restore font scale
-        const savedFontScale = await getSetting("font_size");
+        const savedFontScale = uiSnapshot.fontSize;
         if (
           savedFontScale === "small" ||
           savedFontScale === "default" ||
@@ -49,7 +50,7 @@ export default function ComposerWindow(): React.ReactNode {
         }
 
         // Restore color theme
-        const savedColorTheme = await getSetting("color_theme");
+        const savedColorTheme = uiSnapshot.colorTheme;
         if (
           savedColorTheme &&
           COLOR_THEMES.some((t) => t.id === savedColorTheme)

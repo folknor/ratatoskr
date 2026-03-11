@@ -159,6 +159,7 @@ pub fn run() {
             db::queries::db_get_secure_setting,
             db::queries::db_get_all_settings,
             db::queries::settings_get_bootstrap_snapshot,
+            db::queries::settings_get_ui_bootstrap_snapshot,
             db::queries::db_set_setting,
             db::queries::db_get_category_unread_counts,
             db::queries::db_get_categories_for_threads,
