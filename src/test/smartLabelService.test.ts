@@ -16,7 +16,10 @@ import { classifyThreadsBySmartLabels } from "@/services/ai/aiService";
 import { getEnabledSmartLabelRules } from "@/services/db/smartLabelRules";
 import { messageMatchesFilter } from "@/services/filters/filterEngine";
 import type { ParsedMessage } from "@/services/gmail/messageParser";
-import { matchSmartLabels } from "./smartLabelService";
+import {
+  classifySmartLabelRemainder,
+  matchSmartLabels,
+} from "@/services/smartLabels/smartLabelService";
 
 function makeMessage(overrides: Partial<ParsedMessage> = {}): ParsedMessage {
   return {
@@ -208,5 +211,69 @@ describe("matchSmartLabels", () => {
 
     // Criteria match should still work
     expect(result).toEqual([{ threadId: "t1", labelIds: ["label-jobs"] }]);
+  });
+});
+
+describe("classifySmartLabelRemainder", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("filters out pre-applied thread-label pairs from AI results", async () => {
+    vi.mocked(classifyThreadsBySmartLabels).mockResolvedValue(
+      new Map([
+        ["t1", ["label-a", "label-b"]],
+        ["t2", ["label-c"]],
+      ]),
+    );
+
+    const result = await classifySmartLabelRemainder(
+      [
+        {
+          id: "t1",
+          subject: "Hello",
+          snippet: "World",
+          fromAddress: "a@example.com",
+        },
+        {
+          id: "t2",
+          subject: "Other",
+          snippet: "Thread",
+          fromAddress: "b@example.com",
+        },
+      ],
+      [
+        { labelId: "label-a", description: "A" },
+        { labelId: "label-b", description: "B" },
+        { labelId: "label-c", description: "C" },
+      ],
+      [{ threadId: "t1", labelIds: ["label-a"] }],
+    );
+
+    expect(result).toEqual([
+      { threadId: "t1", labelIds: ["label-b"] },
+      { threadId: "t2", labelIds: ["label-c"] },
+    ]);
+  });
+
+  it("returns empty when AI only repeats pre-applied labels", async () => {
+    vi.mocked(classifyThreadsBySmartLabels).mockResolvedValue(
+      new Map([["t1", ["label-a"]]]),
+    );
+
+    const result = await classifySmartLabelRemainder(
+      [
+        {
+          id: "t1",
+          subject: "Hello",
+          snippet: "World",
+          fromAddress: "a@example.com",
+        },
+      ],
+      [{ labelId: "label-a", description: "A" }],
+      [{ threadId: "t1", labelIds: ["label-a"] }],
+    );
+
+    expect(result).toEqual([]);
   });
 });

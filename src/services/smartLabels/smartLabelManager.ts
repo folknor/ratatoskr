@@ -1,6 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { getMessagesByIds } from "@/services/db/messages";
-import { dbMessageToParsedMessage } from "@/services/filters/filterEngine";
 import type { ParsedMessage } from "@/services/gmail/messageParser";
 import {
   classifySmartLabelRemainder,
@@ -29,6 +27,7 @@ export async function applySmartLabelsToMessages(
         ? await classifySmartLabelRemainder(
             aiRemainder.threads,
             aiRemainder.rules,
+            preAppliedMatches,
           )
         : await matchSmartLabels(accountId, messages, preAppliedMatches);
     if (matches.length === 0) return;
@@ -44,37 +43,22 @@ export async function applySmartLabelsToMessages(
 }
 
 /**
- * Load messages by IDs from DB, apply smart labels. Used by Rust sync post-sync hooks.
+ * Apply AI smart-label remainder returned by the Rust sync pipeline.
  */
-export async function applySmartLabelsToNewMessageIds(
+export async function applySmartLabelsFromAiRemainder(
   accountId: string,
   provider: string,
-  messageIds: string[],
   preAppliedMatches: { threadId: string; labelIds: string[] }[] = [],
-  aiRemainder?: {
+  aiRemainder: {
     threads: SmartLabelAIThread[];
     rules: SmartLabelAIRule[];
   },
 ): Promise<void> {
-  if (aiRemainder != null) {
-    await applySmartLabelsToMessages(
-      accountId,
-      provider,
-      [],
-      preAppliedMatches,
-      aiRemainder,
-    );
-    return;
-  }
-
-  if (messageIds.length === 0) return;
-  const rows = await getMessagesByIds(accountId, messageIds);
-  if (rows.length === 0) return;
-  const messages = rows.map(dbMessageToParsedMessage);
   await applySmartLabelsToMessages(
     accountId,
     provider,
-    messages,
+    [],
     preAppliedMatches,
+    aiRemainder,
   );
 }

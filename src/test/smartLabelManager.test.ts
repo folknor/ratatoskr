@@ -1,17 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("./smartLabelService", () => ({
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+}));
+
+vi.mock("@/services/smartLabels/smartLabelService", () => ({
   matchSmartLabels: vi.fn(),
+  classifySmartLabelRemainder: vi.fn(),
 }));
 
-vi.mock("@/services/emailActions", () => ({
-  addThreadLabel: vi.fn(() => Promise.resolve({ success: true })),
-}));
-
-import { addThreadLabel } from "@/services/emailActions";
+import { invoke } from "@tauri-apps/api/core";
 import type { ParsedMessage } from "@/services/gmail/messageParser";
-import { applySmartLabelsToMessages } from "./smartLabelManager";
-import { matchSmartLabels } from "./smartLabelService";
+import {
+  applySmartLabelsFromAiRemainder,
+  applySmartLabelsToMessages,
+} from "@/services/smartLabels/smartLabelManager";
+import {
+  classifySmartLabelRemainder,
+  matchSmartLabels,
+} from "@/services/smartLabels/smartLabelService";
 
 function makeMessage(threadId = "t1"): ParsedMessage {
   return {
@@ -46,53 +53,89 @@ describe("applySmartLabelsToMessages", () => {
     vi.clearAllMocks();
   });
 
-  it("applies matched labels via addThreadLabel", async () => {
+  it("applies matched labels via rust invoke", async () => {
     vi.mocked(matchSmartLabels).mockResolvedValue([
       { threadId: "t1", labelIds: ["label-a", "label-b"] },
       { threadId: "t2", labelIds: ["label-c"] },
     ]);
 
-    await applySmartLabelsToMessages("acc-1", [
+    await applySmartLabelsToMessages("acc-1", "gmail_api", [
       makeMessage("t1"),
       makeMessage("t2"),
     ]);
 
-    expect(addThreadLabel).toHaveBeenCalledTimes(3);
-    expect(addThreadLabel).toHaveBeenCalledWith("acc-1", "t1", "label-a");
-    expect(addThreadLabel).toHaveBeenCalledWith("acc-1", "t1", "label-b");
-    expect(addThreadLabel).toHaveBeenCalledWith("acc-1", "t2", "label-c");
+    expect(invoke).toHaveBeenCalledWith("smart_labels_apply_matches", {
+      accountId: "acc-1",
+      provider: "gmail_api",
+      matches: [
+        { threadId: "t1", labelIds: ["label-a", "label-b"] },
+        { threadId: "t2", labelIds: ["label-c"] },
+      ],
+    });
   });
 
   it("does not throw when matchSmartLabels returns empty", async () => {
     vi.mocked(matchSmartLabels).mockResolvedValue([]);
 
     await expect(
-      applySmartLabelsToMessages("acc-1", [makeMessage()]),
+      applySmartLabelsToMessages("acc-1", "gmail_api", [makeMessage()]),
     ).resolves.toBeUndefined();
 
-    expect(addThreadLabel).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
   });
 
   it("does not throw when matchSmartLabels fails", async () => {
     vi.mocked(matchSmartLabels).mockRejectedValue(new Error("DB error"));
 
     await expect(
-      applySmartLabelsToMessages("acc-1", [makeMessage()]),
+      applySmartLabelsToMessages("acc-1", "gmail_api", [makeMessage()]),
     ).resolves.toBeUndefined();
   });
 
-  it("continues applying other labels when one fails", async () => {
+  it("does not throw when rust label application fails", async () => {
     vi.mocked(matchSmartLabels).mockResolvedValue([
-      { threadId: "t1", labelIds: ["label-a", "label-b"] },
+      { threadId: "t1", labelIds: ["label-a"] },
     ]);
-    vi.mocked(addThreadLabel)
-      .mockRejectedValueOnce(new Error("API error"))
-      .mockResolvedValueOnce({ success: true } as never);
+    vi.mocked(invoke).mockRejectedValue(new Error("IPC error"));
 
     await expect(
-      applySmartLabelsToMessages("acc-1", [makeMessage()]),
+      applySmartLabelsToMessages("acc-1", "gmail_api", [makeMessage()]),
     ).resolves.toBeUndefined();
+  });
 
-    expect(addThreadLabel).toHaveBeenCalledTimes(2);
+  it("passes pre-applied matches into ai remainder classification", async () => {
+    vi.mocked(classifySmartLabelRemainder).mockResolvedValue([
+      { threadId: "t1", labelIds: ["label-b"] },
+    ]);
+
+    await applySmartLabelsFromAiRemainder(
+      "acc-1",
+      "gmail_api",
+      [{ threadId: "t1", labelIds: ["label-a"] }],
+      {
+        threads: [
+          {
+            id: "t1",
+            subject: "Test",
+            snippet: "Snippet",
+            fromAddress: "sender@example.com",
+          },
+        ],
+        rules: [{ labelId: "label-b", description: "B" }],
+      },
+    );
+
+    expect(classifySmartLabelRemainder).toHaveBeenCalledWith(
+      [
+        {
+          id: "t1",
+          subject: "Test",
+          snippet: "Snippet",
+          fromAddress: "sender@example.com",
+        },
+      ],
+      [{ labelId: "label-b", description: "B" }],
+      [{ threadId: "t1", labelIds: ["label-a"] }],
+    );
   });
 });

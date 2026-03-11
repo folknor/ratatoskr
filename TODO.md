@@ -70,11 +70,7 @@
 
 - [ ] **`load_enabled_rules_for_ai` overlaps with `load_enabled_criteria_rules`** — Both query same table for same account. Could be a single query. *(LOW)*
 
-- [ ] **`classifySmartLabelRemainder` doesn't filter pre-applied pairs from AI results** — Already-applied labels get re-applied (idempotent but wasteful). *(LOW)*
-
 - [ ] **`smart_labels_apply_matches` only callable via IPC** — Label application after AI classification still crosses the IPC boundary. Could be called directly in Rust once AI classification moves too. *(LOW)*
-
-- [ ] **TS re-queries all messages for AI matching phase** — `applySmartLabelsToNewMessageIds` calls `getMessagesByIds` to get messages the Rust side already loaded. *(LOW)*
 
 ---
 

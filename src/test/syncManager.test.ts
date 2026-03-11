@@ -10,7 +10,7 @@ const {
   mockGetCalendarProvider,
   mockGetVisibleCalendars,
   mockQueueNewEmailNotification,
-  mockApplySmartLabelsToNewMessageIds,
+  mockApplySmartLabelsFromAiRemainder,
   mockCategorizeNewThreads,
 } = vi.hoisted(() => ({
   eventHandlers: new Map<string, (event: { payload: unknown }) => void>(),
@@ -22,7 +22,7 @@ const {
   mockGetCalendarProvider: vi.fn(),
   mockGetVisibleCalendars: vi.fn(),
   mockQueueNewEmailNotification: vi.fn(),
-  mockApplySmartLabelsToNewMessageIds: vi.fn(),
+  mockApplySmartLabelsFromAiRemainder: vi.fn(),
   mockCategorizeNewThreads: vi.fn(),
 }));
 
@@ -43,7 +43,7 @@ vi.mock("@/services/accounts/basicInfo", () => ({
 }));
 
 vi.mock("@/services/smartLabels/smartLabelManager", () => ({
-  applySmartLabelsToNewMessageIds: mockApplySmartLabelsToNewMessageIds,
+  applySmartLabelsFromAiRemainder: mockApplySmartLabelsFromAiRemainder,
 }));
 
 vi.mock("@/services/ai/categorizationManager", () => ({
@@ -90,7 +90,7 @@ describe("syncManager", () => {
     vi.clearAllMocks();
     vi.resetModules();
     eventHandlers.clear();
-    mockApplySmartLabelsToNewMessageIds.mockResolvedValue(undefined);
+    mockApplySmartLabelsFromAiRemainder.mockResolvedValue(undefined);
     mockCategorizeNewThreads.mockResolvedValue(undefined);
     mockListAccountBasicInfo.mockResolvedValue([
       {
@@ -263,10 +263,9 @@ describe("syncManager", () => {
 
     await flushAsyncWork();
 
-    expect(mockApplySmartLabelsToNewMessageIds).toHaveBeenCalledWith(
+    expect(mockApplySmartLabelsFromAiRemainder).toHaveBeenCalledWith(
       "acc-1",
       "gmail_api",
-      ["m1", "m2"],
       [{ threadId: "t1", labelIds: ["label-1"] }],
       {
         threads: [{ threadId: "t1", subject: "Hello" }],

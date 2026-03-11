@@ -167,16 +167,27 @@ export async function matchSmartLabels(
 export async function classifySmartLabelRemainder(
   threads: SmartLabelAIThread[],
   rules: SmartLabelAIRule[],
+  preAppliedMatches: SmartLabelMatch[] = [],
 ): Promise<SmartLabelMatch[]> {
   if (threads.length === 0 || rules.length === 0) {
     return [];
   }
 
+  const preAppliedPairs = new Set<string>();
+  for (const match of preAppliedMatches) {
+    for (const labelId of match.labelIds) {
+      preAppliedPairs.add(toPairKey(match.threadId, labelId));
+    }
+  }
+
   const aiResults = await classifyThreadsBySmartLabels(threads, rules);
   const results: SmartLabelMatch[] = [];
   for (const [threadId, labelIds] of aiResults) {
-    if (labelIds.length > 0) {
-      results.push({ threadId, labelIds });
+    const unappliedLabelIds = labelIds.filter(
+      (labelId) => !preAppliedPairs.has(toPairKey(threadId, labelId)),
+    );
+    if (unappliedLabelIds.length > 0) {
+      results.push({ threadId, labelIds: unappliedLabelIds });
     }
   }
   return results;

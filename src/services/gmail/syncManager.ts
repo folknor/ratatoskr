@@ -18,7 +18,7 @@ import {
   categorizeNewThreads,
 } from "@/services/ai/categorizationManager";
 import { queueNewEmailNotification } from "@/services/notifications/notificationManager";
-import { applySmartLabelsToNewMessageIds } from "@/services/smartLabels/smartLabelManager";
+import { applySmartLabelsFromAiRemainder } from "@/services/smartLabels/smartLabelManager";
 import type {
   SmartLabelAIRule,
   SmartLabelAIThread,
@@ -60,10 +60,9 @@ async function runPostSyncHooks(input: PostSyncHooksInput): Promise<void> {
 
   if (newInboxEmailIds.length > 0) {
     // Smart labels (fire-and-forget)
-    applySmartLabelsToNewMessageIds(
+    applySmartLabelsFromAiRemainder(
       accountId,
       provider,
-      newInboxEmailIds,
       criteriaSmartLabelMatches,
       { threads: aiSmartLabelThreads, rules: aiSmartLabelRules },
     ).catch((err) => console.error("[syncManager] Smart label error:", err));
