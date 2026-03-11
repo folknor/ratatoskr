@@ -12,8 +12,8 @@ use crate::search::SearchState;
 
 use super::router::{get_ops, get_provider_type};
 use super::types::{
-    AttachmentData, ProviderCtx, ProviderFolder, ProviderParsedMessage, ProviderProfile,
-    ProviderTestResult, SyncResult,
+    AttachmentData, AutoSyncResult, ProviderCtx, ProviderFolder, ProviderParsedMessage,
+    ProviderProfile, ProviderTestResult, SyncResult,
 };
 
 // ── Sync ────────────────────────────────────────────────────
@@ -85,6 +85,112 @@ pub async fn provider_sync_delta(
         app_handle: &app_handle,
     };
     ops.sync_delta(&ctx).await
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn provider_sync_auto(
+    account_id: String,
+    db: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
+    jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
+    body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
+    search: State<'_, SearchState>,
+    app_handle: AppHandle,
+) -> Result<AutoSyncResult, String> {
+    let provider = get_provider_type(&db, &account_id).await?;
+    let has_history = {
+        let aid = account_id.clone();
+        db.with_conn(move |conn| {
+            conn.query_row(
+                "SELECT history_id FROM accounts WHERE id = ?1",
+                rusqlite::params![aid],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .map(|history_id| history_id.is_some())
+            .map_err(|e| format!("Failed to read sync state for account: {e}"))
+        })
+        .await?
+    };
+    let sync_days = db
+        .with_conn(|conn| {
+            let value: Option<String> = conn
+                .query_row(
+                    "SELECT value FROM settings WHERE key = 'sync_period_days'",
+                    [],
+                    |row| row.get(0),
+                )
+                .ok();
+            Ok(value.and_then(|v| v.parse::<i64>().ok()).unwrap_or(365))
+        })
+        .await?;
+
+    let ops = get_ops(
+        &provider,
+        &account_id,
+        &gmail,
+        &jmap,
+        &graph,
+        *gmail.encryption_key(),
+    )
+    .await?;
+    let ctx = ProviderCtx {
+        account_id: &account_id,
+        db: &db,
+        body_store: &body_store,
+        inline_images: &inline_images,
+        search: &search,
+        app_handle: &app_handle,
+    };
+
+    let fallback_marker = if provider == "gmail_api" {
+        Some("HISTORY_EXPIRED")
+    } else if provider == "jmap" {
+        Some("JMAP_STATE_EXPIRED")
+    } else if provider == "graph" {
+        Some("GRAPH_NO_DELTA_STATE")
+    } else {
+        None
+    };
+
+    if has_history {
+        match ops.sync_delta(&ctx).await {
+            Ok(result) => {
+                return Ok(AutoSyncResult {
+                    new_inbox_message_ids: result.new_inbox_message_ids,
+                    affected_thread_ids: result.affected_thread_ids,
+                    was_delta: true,
+                    fell_back_to_initial: false,
+                });
+            }
+            Err(err) if should_fallback_to_initial(&err, fallback_marker) => {
+                ops.sync_initial(&ctx, sync_days).await?;
+                return Ok(AutoSyncResult {
+                    new_inbox_message_ids: Vec::new(),
+                    affected_thread_ids: vec!["_resync".to_string()],
+                    was_delta: true,
+                    fell_back_to_initial: true,
+                });
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
+    ops.sync_initial(&ctx, sync_days).await?;
+    Ok(AutoSyncResult {
+        new_inbox_message_ids: Vec::new(),
+        affected_thread_ids: Vec::new(),
+        was_delta: false,
+        fell_back_to_initial: false,
+    })
+}
+
+fn should_fallback_to_initial(err: &str, fallback_marker: Option<&str>) -> bool {
+    fallback_marker
+        .map(|marker| err == marker || err.contains(marker))
+        .unwrap_or(false)
 }
 
 // ── Actions (thread-level) ──────────────────────────────────

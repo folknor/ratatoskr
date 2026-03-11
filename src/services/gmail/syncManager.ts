@@ -16,7 +16,6 @@ import { clearAllFolderSyncStates } from "../db/folderSyncState";
 import { deleteAllMessagesForAccount } from "../db/messages";
 import { getSetting } from "../db/settings";
 import { deleteAllThreadsForAccount } from "../db/threads";
-import { ensureFreshToken } from "../oauth/oauthTokenManager";
 export interface SyncProgress {
   phase: "labels" | "threads" | "messages" | "done";
   current: number;
@@ -25,13 +24,6 @@ export interface SyncProgress {
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import {
-  type ImapSyncResult,
-  syncGmailDelta,
-  syncGmailInitial,
-  syncImapDelta,
-  syncImapInitial,
-} from "@/core/rustDb";
 import { categorizeNewThreads } from "@/services/ai/categorizationManager";
 import { getMessagesByIds } from "@/services/db/messages";
 import { getVipSenders } from "@/services/db/notificationVips";
@@ -131,6 +123,40 @@ function mapImapPhase(
   return phase as "labels" | "threads" | "messages" | "done";
 }
 
+function getSyncEventName(provider: string): string | null {
+  if (provider === "gmail_api") return "gmail-sync-progress";
+  if (provider === "imap") return "imap-sync-progress";
+  if (provider === "jmap") return "jmap-sync-progress";
+  if (provider === "graph") return "graph-sync-progress";
+  return null;
+}
+
+function mapProviderSyncProgress(
+  provider: string,
+  payload: Record<string, unknown>,
+): SyncProgress {
+  if (provider === "graph") {
+    return {
+      phase: "messages",
+      current: Number(payload.messagesProcessed ?? 0),
+      total: Number(payload.totalFolders ?? 0),
+    };
+  }
+
+  return {
+    phase: mapImapPhase(String(payload.phase ?? "")),
+    current: Number(payload.current ?? 0),
+    total: Number(payload.total ?? 0),
+  };
+}
+
+interface ProviderAutoSyncResult {
+  newInboxMessageIds: string[];
+  affectedThreadIds: string[];
+  wasDelta: boolean;
+  fellBackToInitial: boolean;
+}
+
 let syncTimer: ReturnType<typeof setInterval> | null = null;
 let syncPromise: Promise<void> | null = null;
 let pendingAccountIds: string[] | null = null;
@@ -151,231 +177,41 @@ export function onSyncStatus(cb: SyncStatusCallback): () => void {
   };
 }
 
-/**
- * Run a sync for a single Gmail API account (initial or delta).
- *
- * The entire sync pipeline runs in Rust: Gmail API calls → message parsing →
- * DB writes → body store → tantivy indexing → label sync.
- * TS only calls the Rust command and runs post-sync hooks on the result.
- */
-async function syncGmailAccount(accountId: string): Promise<void> {
-  const account = await getAccount(accountId);
-  if (!account) {
-    throw new Error("Account not found");
-  }
-
-  const syncPeriodStr = await getSetting("sync_period_days");
-  const syncDays = parseInt(syncPeriodStr ?? "365", 10) || 365;
-
-  // Listen for progress events from Rust
-  let unlisten: UnlistenFn | null = null;
-  try {
-    unlisten = await listen<{
-      accountId: string;
-      phase: string;
-      current: number;
-      total: number;
-    }>("gmail-sync-progress", (event) => {
-      if (event.payload.accountId !== accountId) return;
-      statusCallback?.(accountId, "syncing", {
-        phase: mapImapPhase(event.payload.phase),
-        current: event.payload.current,
-        total: event.payload.total,
-      });
-    });
-  } catch {
-    // Listen failure is non-fatal — sync will work without progress events
-  }
-
-  try {
-    if (account.history_id) {
-      // Delta sync
-      try {
-        const result = await syncGmailDelta(accountId);
-        await runPostSyncHooks(
-          accountId,
-          result.newInboxMessageIds,
-          result.affectedThreadIds,
-          true,
-        );
-      } catch (err) {
-        const message = String(err ?? "");
-        if (
-          message === "HISTORY_EXPIRED" ||
-          message.includes("HISTORY_EXPIRED")
-        ) {
-          // Fallback to full sync — still run categorization (not notifications).
-          // Initial sync doesn't return message IDs, but we pass a synthetic
-          // marker so categorization runs for the re-synced account.
-          await syncGmailInitial(accountId, syncDays);
-          await runPostSyncHooks(accountId, [], ["_resync"], false);
-        } else {
-          throw err;
-        }
-      }
-    } else {
-      // First time — full initial sync
-      await syncGmailInitial(accountId, syncDays);
-    }
-  } finally {
-    unlisten?.();
-  }
-}
-
-/**
- * Run a sync for a single JMAP account (initial or delta).
- *
- * The entire sync pipeline runs in Rust: JMAP API calls → message parsing →
- * DB writes → body store → tantivy indexing.
- * TS only calls the Rust command and runs post-sync hooks on the result.
- */
-async function syncJmapAccount(accountId: string): Promise<void> {
-  // Check if this account has been synced before (has a state token)
-  const account = await getAccount(accountId);
-  const isDelta = !!account?.history_id;
-
-  try {
-    const result: { newInboxEmailIds: string[]; affectedThreadIds: string[] } =
-      await invoke("jmap_sync_delta", { accountId });
-
-    await runPostSyncHooks(
-      accountId,
-      result.newInboxEmailIds,
-      result.affectedThreadIds,
-      isDelta,
-    );
-  } catch (err) {
-    const message = String(err ?? "");
-    if (
-      message === "JMAP_STATE_EXPIRED" ||
-      message === "JMAP_NO_STATE" ||
-      message.includes("JMAP_STATE_EXPIRED") ||
-      message.includes("JMAP_NO_STATE")
-    ) {
-      // Fallback to full initial sync — still run categorization
-      await invoke("jmap_sync_initial", { accountId });
-      await runPostSyncHooks(accountId, [], ["_resync"], false);
-    } else {
-      throw err;
-    }
-  }
-}
-
-/**
- * Run a sync for a single Graph account (initial or delta).
- *
- * The entire sync pipeline runs in Rust: Graph API calls → message parsing →
- * DB writes → body store → tantivy indexing.
- * TS only calls the Rust command and runs post-sync hooks on the result.
- */
-async function syncGraphAccount(accountId: string): Promise<void> {
-  // Check if this account has been synced before (has a delta state token)
-  const account = await getAccount(accountId);
-  const isDelta = !!account?.history_id;
-
-  try {
-    const result: {
-      newInboxMessageIds: string[];
-      affectedThreadIds: string[];
-    } = await invoke("provider_sync_delta", { accountId });
-
-    await runPostSyncHooks(
-      accountId,
-      result.newInboxMessageIds,
-      result.affectedThreadIds,
-      isDelta,
-    );
-  } catch (err) {
-    const message = String(err ?? "");
-    if (
-      message === "GRAPH_NO_DELTA_STATE" ||
-      message.includes("GRAPH_NO_DELTA_STATE")
-    ) {
-      // Fallback to full initial sync — still run categorization
-      const syncPeriodStr = await getSetting("sync_period_days");
-      const syncDays = parseInt(syncPeriodStr ?? "365", 10) || 365;
-      await invoke("provider_sync_initial", { accountId, daysBack: syncDays });
-      await runPostSyncHooks(accountId, [], ["_resync"], false);
-    } else {
-      throw err;
-    }
-  }
-}
-
-/**
- * Run IMAP sync via the Rust sync engine (Phase 4).
- *
- * The entire pipeline runs in Rust: IMAP fetch → parse → DB write →
- * body store → tantivy index → JWZ threading → thread storage.
- * Zero IPC during the pipeline — only one invoke() call.
- *
- * Post-sync hooks (filters, notifications, AI categorization) run in TS
- * using the returned new message IDs.
- */
-async function syncImapAccountRust(accountId: string): Promise<void> {
+async function syncEmailAccount(accountId: string): Promise<void> {
   const account = await getAccount(accountId);
   if (!account) throw new Error("Account not found");
 
-  // Refresh OAuth2 token before syncing (if applicable).
-  // The Rust engine reads the password from DB, so we need the fresh token
-  // written to DB before invoking.
-  if (account.auth_method === "oauth2") {
-    await ensureFreshToken(account);
-  }
-
   // Listen for progress events from Rust
   let unlisten: UnlistenFn | null = null;
+  const eventName = getSyncEventName(account.provider);
   try {
-    unlisten = await listen<{
-      accountId: string;
-      phase: string;
-      current: number;
-      total: number;
-      folder: string | null;
-    }>("imap-sync-progress", (event) => {
-      if (event.payload.accountId !== accountId) return;
-      statusCallback?.(accountId, "syncing", {
-        phase: mapImapPhase(event.payload.phase),
-        current: event.payload.current,
-        total: event.payload.total,
+    if (eventName) {
+      unlisten = await listen<Record<string, unknown>>(eventName, (event) => {
+        if (event.payload.accountId !== accountId) return;
+        statusCallback?.(
+          accountId,
+          "syncing",
+          mapProviderSyncProgress(account.provider, event.payload),
+        );
       });
-    });
+    }
   } catch {
     // Listen failure is non-fatal — sync will work without progress events
   }
 
   try {
-    let result: ImapSyncResult;
-    const isDelta = !!account.history_id;
-
-    if (isDelta) {
-      // Recovery (0 messages + 0 threads → force initial) is handled
-      // inside the Rust sync_imap_delta command — no extra IPC needed.
-      result = await syncImapDelta(accountId);
-    } else {
-      result = await syncImapInitial(accountId);
-    }
-
-    // IMAP uses storedCount as a proxy for affected threads (no thread IDs returned).
-    // Build a synthetic affectedThreadIds array to gate AI categorization.
-    const affectedThreadIds = result.storedCount > 0 ? ["_imap_stored"] : [];
+    const result = await invoke<ProviderAutoSyncResult>("provider_sync_auto", {
+      accountId,
+    });
     await runPostSyncHooks(
       accountId,
       result.newInboxMessageIds,
-      affectedThreadIds,
-      isDelta,
+      result.affectedThreadIds,
+      result.wasDelta && !result.fellBackToInitial,
     );
   } finally {
     unlisten?.();
   }
-}
-
-/**
- * Run a sync for a single IMAP account (initial or delta).
- * Delegates entirely to the Rust sync engine.
- */
-async function syncImapAccount(accountId: string): Promise<void> {
-  return syncImapAccountRust(accountId);
 }
 
 /**
@@ -467,7 +303,6 @@ async function syncCalendarForAccount(accountId: string): Promise<void> {
 
 /**
  * Run a sync for a single account (initial or delta).
- * Routes to Gmail or IMAP sync based on account provider.
  */
 async function syncAccountInternal(accountId: string): Promise<void> {
   try {
@@ -490,15 +325,7 @@ async function syncAccountInternal(accountId: string): Promise<void> {
       return;
     }
 
-    if (account.provider === "jmap") {
-      await syncJmapAccount(accountId);
-    } else if (account.provider === "graph") {
-      await syncGraphAccount(accountId);
-    } else if (account.provider === "imap") {
-      await syncImapAccount(accountId);
-    } else {
-      await syncGmailAccount(accountId);
-    }
+    await syncEmailAccount(accountId);
 
     // Always emit "done" when an initial sync completes (clears the bar).
     // Also emit for delta syncs that fell back to initial (recovery re-sync)
@@ -525,7 +352,7 @@ async function runSync(accountIds: string[]): Promise<void> {
   // the active cycle to drain the queue. Using a Set ensures no IDs are lost
   // even under rapid concurrent triggers — all mutations of pendingAccountIds
   // happen synchronously (no await between read and write).
-  if (syncPromise) {
+  if (syncPromise !== null) {
     const existing = new Set(pendingAccountIds ?? []);
     for (const id of accountIds) existing.add(id);
     pendingAccountIds = [...existing];
@@ -539,7 +366,7 @@ async function runSync(accountIds: string[]): Promise<void> {
     let toSync: string[] | null = accountIds;
 
     // Loop: process current batch, then drain anything queued while we were busy.
-    while (toSync) {
+    while (toSync !== null) {
       for (const id of toSync) {
         await syncAccountInternal(id);
       }

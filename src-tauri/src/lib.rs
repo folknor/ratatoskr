@@ -455,6 +455,7 @@ pub fn run() {
             // Provider-agnostic commands (Phase 3a)
             provider::commands::provider_sync_initial,
             provider::commands::provider_sync_delta,
+            provider::commands::provider_sync_auto,
             provider::commands::provider_archive,
             provider::commands::provider_trash,
             provider::commands::provider_permanent_delete,

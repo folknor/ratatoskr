@@ -14,6 +14,16 @@ pub struct SyncResult {
     pub affected_thread_ids: Vec<String>,
 }
 
+/// Result from auto-selecting initial vs delta sync, including fallback info.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoSyncResult {
+    pub new_inbox_message_ids: Vec<String>,
+    pub affected_thread_ids: Vec<String>,
+    pub was_delta: bool,
+    pub fell_back_to_initial: bool,
+}
+
 /// Shared context for provider operations.
 /// Bundles state references to stay under clippy's 7-arg limit.
 pub struct ProviderCtx<'a> {
