@@ -406,88 +406,190 @@ Remove Gmail-specific folder/label CRUD logic from frontend stores and make fold
 
 Label/folder UI can remain unchanged while the backend becomes the sole owner of provider-specific folder semantics.
 
-## Recommended First Implementation Slice
+## Status as of 2026-03-11
 
-This is the best first chunk to implement without destabilizing the UI:
+### Largely complete
 
-1. Move account/auth ownership to Rust, including collapsing the dual TS/Rust encryption flow.
-2. Add unified provider commands for:
-   - `provider_test_connection`
-   - `provider_get_profile`
-   - `provider_create_folder`
-   - `provider_rename_folder`
-   - `provider_delete_folder`
-3. Update the current frontend to consume those commands.
-4. Verify Rust IMAP operations refresh OAuth tokens before ad-hoc operations.
+- Phase 1: account/auth ownership
+- Phase 2: unified provider API
+- Phase 3: IMAP semantics migration
+- Phase 4: provider normalization cleanup
+- Phase 5: sync orchestration migration
+- Phase 7: folder/label cleanup
 
-### Why this slice first
+### Partially complete
 
-- It removes real business logic instead of only wrappers.
-- It stabilizes a backend API that a native frontend can also consume later.
-- It avoids starting with the riskier sync-orchestration rewrite.
-- It should noticeably reduce frontend complexity immediately.
+- Phase 6: post-sync automations
 
-### Explicit deferral
+Rust now owns most of:
 
-`provider_fetch_raw_message` is useful, but not required in the first slice.
+- account creation and reauthorization flows
+- token refresh and secret decryption on read
+- provider test/profile/fetch/folder CRUD
+- IMAP config building and OAuth freshness
+- sync queueing, timers, selection, fallback, and reset prep
+- post-sync filters
+- criteria-based smart labels
+- notification eligibility
+- AI categorization candidate selection
+- smart-label AI candidate preparation
+- calendar provider resolution and persistence
+- Google Calendar and CalDAV provider networking
 
-`RawMessageModal.tsx` can keep going through the existing provider adapter until the unified provider surface is further along.
+TypeScript still owns a much smaller set of business logic:
 
-## Concrete First Patch Set
+- actual AI inference calls and prompt/result shaping
+- some settings-loading orchestration
+- a few rich account-detail editor flows
+- desktop notification display
 
-### Rust
+## Concrete Remaining Work
 
-- add account/auth command module for Gmail and OAuth IMAP account flows
-- extend `ProviderOps`
-- add Tauri commands for provider test/profile/folder CRUD
-- normalize provider DTOs in Rust
+### 1. Replace full account-row reads used only for UI/editor metadata
 
-### TypeScript
+Current remaining hotspots:
 
-- replace OAuth/token flow logic in account setup components with invoke-backed calls
-- replace Gmail client init logic with one backend call
-- replace `labelStore` Gmail-specific commands with provider-agnostic calls
-- shrink or remove provider-specific TS classes where possible
+- `src/components/settings/SettingsAccountsTab.tsx`
 
-## Likely Files to Shrink or Disappear
+This file still loads full `DbAccount` rows because the inline CalDAV editor uses richer account fields than the current basic-info DTO exposes.
 
-High probability:
+Concrete next step:
 
-- `src/services/gmail/auth.ts`
-- `src/services/oauth/oauthFlow.ts`
+- add a Rust-backed account details DTO specifically for settings/editor use
+- move `SettingsAccountsTab` off `getAccount()` where possible
+
+### 2. Add a Rust-backed settings snapshot for Settings UI bootstrap
+
+Current hotspot:
+
+- `src/components/settings/SettingsPage.tsx`
+
+The settings page still performs many individual `getSetting()` / `getSecureSetting()` calls from TS during initial load.
+
+Concrete next step:
+
+- add one Rust command returning a typed settings snapshot for:
+  - Google/Microsoft OAuth settings
+  - AI settings
+  - notification settings
+  - sync settings
+  - UI preference defaults that are currently fetched one-by-one
+- keep TS-side writes unchanged initially
+
+This is mostly cleanup, but it also moves more "application config shape" knowledge into Rust.
+
+### 3. Decide whether actual AI inference calls should move to Rust
+
+Current state:
+
+- provider/runtime/config selection is already Rust-backed
+- TS still assembles prompts and invokes AI for:
+  - summaries
+  - smart replies
+  - compose/reply transforms
+  - ask inbox
+  - task extraction
+  - writing style analysis
+  - auto-draft generation
+  - smart-label AI classification
+  - category inference
+
+Concrete options:
+
+- keep inference calls in TS, with Rust remaining the owner of provider/runtime/config
+- or move prompt execution into Rust via typed AI task commands
+
+Suggested next step:
+
+- do not move this blindly
+- first decide whether the native-frontend target wants Rust to own:
+  - prompt templates
+  - output parsing/validation
+  - AI task-specific DTOs
+
+If yes, define explicit commands such as:
+
+- `ai_summarize_thread`
+- `ai_generate_smart_replies`
+- `ai_transform_text`
+- `ai_extract_task`
+- `ai_generate_auto_draft`
+
+### 4. Finish post-sync automation boundary
+
+Current TS-owned remainder:
+
+- actual desktop notification display
+- actual AI smart-label inference call
+- actual AI categorization inference call
+
+Current hotspot:
+
+- `src/services/gmail/syncManager.ts`
+
+Concrete next step:
+
+- decide whether `syncManager.ts` should remain a thin event subscriber permanently
+- if so, keep:
+  - notification display
+  - UI progress shaping
+- and move:
+  - any remaining policy decisions still embedded in TS
+
+### 5. Trim legacy account/settings wrappers that are now mostly compatibility code
+
+Current likely targets:
+
+- `src/services/db/accounts.ts`
+- `src/services/db/settings.ts`
+- parts of `src/services/gmail/tokenManager.ts`
+
+Concrete next step:
+
+- audit which exports are still used by app code versus only tests
+- replace generic DB-shaped helpers with narrower Rust-backed app-facing helpers
+
+### 6. Strengthen regression coverage around migrated sync behavior
+
+Current gap:
+
+- architecture moved faster than broad regression coverage
+- targeted tests were updated, but end-to-end sync coverage remains thinner than ideal
+
+Concrete next step:
+
+- repair and expand `src/test/syncManager.test.ts`
+- add focused tests for:
+  - sync status event handling
+  - background sync start/stop behavior
+  - post-sync hook triggering
+  - account bootstrap paths that now use account-summary DTOs
+
+## Likely Remaining Files to Shrink
+
+- `src/components/settings/SettingsPage.tsx`
+- `src/components/settings/SettingsAccountsTab.tsx`
+- `src/services/gmail/syncManager.ts`
+- `src/services/db/accounts.ts`
+- `src/services/db/settings.ts`
 - `src/services/gmail/tokenManager.ts`
-- `src/services/email/gmailProvider.ts`
-- `src/services/email/imapSmtpProvider.ts`
-- `src/services/email/providerFactory.ts`
 
-Later:
+## Current Risks
 
-- large parts of `src/services/gmail/syncManager.ts`
+- `SettingsAccountsTab` still depends on richer account data than the new summary DTOs expose.
+- The remaining TS-side AI call layer is now the largest intentionally un-migrated business-logic seam.
+- Sync behavior is user-visible, and although ownership moved successfully, broader regression coverage should catch up.
 
-## Risks
+## Updated Recommended Execution Order
 
-- IMAP message ID handling is currently encoded in TS and must be preserved carefully when moved.
-- Some frontend code still assumes access to decrypted account data. That cannot be fully removed until IMAP config building and ad-hoc IMAP operations move to Rust.
-- Sync and post-sync logic are user-visible and should not be migrated in the same patch set as auth/account changes.
-- IMAP OAuth refresh behavior must be made consistent across all Rust-side operations before the TS IMAP provider can be collapsed.
-
-## Open Questions
-
-- Should Rust fully own browser-opening for OAuth, or should it return an auth URL and let the frontend open it?
-- Should desktop notifications remain frontend-side permanently, with Rust only emitting notification candidates?
-- Do we want the frontend to keep a small invoke-backed provider adapter, or should provider operations move directly into `src/core/` facade functions?
-- Should IMAP/SMTP auto-discovery eventually move to Rust as part of the native-frontend effort, or remain a TS-side compatibility layer for now?
-
-## Recommended Execution Order
-
-1. Account/auth backend ownership
-2. Unified provider test/profile/folder CRUD
-3. IMAP semantics migration
-4. Gmail/JMAP/Graph normalization cleanup
-5. Sync orchestration migration
-6. Post-sync automation migration
-7. Final removal of legacy TS provider glue
+1. Add Rust-backed settings/account-detail snapshot commands for settings UI
+2. Trim remaining TS full-account reads and generic wrappers
+3. Decide the final boundary for AI task execution
+4. If desired, move AI task execution into Rust with typed commands
+5. Expand sync regression coverage and remove any leftover compatibility glue
 
 ## Progress Log
 
 - 2026-03-11: Initial migration plan written based on current repo structure and command surface.
+- 2026-03-11: Major migration progress completed across account/auth, provider unification, IMAP semantics, sync orchestration, post-sync hooks, calendar providers, and AI runtime.
+- 2026-03-11: Plan updated to reflect current status and concrete remaining work instead of the original broad migration phases.
