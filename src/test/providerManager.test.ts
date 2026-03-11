@@ -9,7 +9,6 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import {
-  clearProviderClients,
   getActiveProviderName,
   isAiAvailable,
 } from "@/services/ai/providerManager";
@@ -40,12 +39,6 @@ describe("providerManager", () => {
       mockInvoke.mockRejectedValue(new Error("boom"));
 
       expect(await isAiAvailable()).toBe(false);
-    });
-  });
-
-  describe("clearProviderClients", () => {
-    it("is a no-op", () => {
-      expect(() => clearProviderClients()).not.toThrow();
     });
   });
 });

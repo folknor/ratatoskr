@@ -12,5 +12,3 @@ export async function isAiAvailable(): Promise<boolean> {
     return false;
   }
 }
-
-export function clearProviderClients(): void {}

@@ -4,6 +4,7 @@
  */
 
 // AI service functions
+// biome-ignore lint/performance/noBarrelFile: Intentional UI-facing facade for AI APIs.
 export {
   composeFromPrompt,
   generateReply,
@@ -16,10 +17,7 @@ export {
 // Ask inbox
 export { type AskInboxResult, askMyInbox } from "@/services/ai/askInbox";
 // Provider management
-export {
-  clearProviderClients,
-  isAiAvailable,
-} from "@/services/ai/providerManager";
+export { isAiAvailable } from "@/services/ai/providerManager";
 // Task extraction
 export { extractTask } from "@/services/ai/taskExtraction";
 // AI types

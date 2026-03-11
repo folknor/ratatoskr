@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 export interface AccountBasicInfo {
   id: string;
   email: string;
+  displayName: string | null;
+  avatarUrl: string | null;
   provider: string;
   isActive: boolean;
 }

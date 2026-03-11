@@ -22,6 +22,7 @@ import { COLOR_THEMES, getThemeById } from "./constants/themes";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { router } from "./router";
 import { getSelectedThreadId } from "./router/navigate";
+import { listAccountBasicInfo } from "./services/accounts/basicInfo";
 import {
   startPreCacheManager,
   stopPreCacheManager,
@@ -31,7 +32,6 @@ import {
   startBundleChecker,
   stopBundleChecker,
 } from "./services/bundles/bundleManager";
-import { getAllAccounts } from "./services/db/accounts";
 import { getSetting } from "./services/db/settings";
 import { getIncompleteTaskCount } from "./services/db/tasks";
 import { initDeepLinkHandler } from "./services/deepLinkHandler";
@@ -212,7 +212,7 @@ export default function App(): React.ReactNode {
 
         // Migrate existing bodies from metadata DB to compressed body store (Phase 2).
         // This is idempotent — once all bodies are migrated, it's a no-op.
-        import("@/core/rustDb").then(({ bodyStoreMigrate }) =>
+        void import("@/core/rustDb").then(({ bodyStoreMigrate }) =>
           bodyStoreMigrate().catch((e: unknown) =>
             console.warn("Body store migration skipped:", e),
           ),
@@ -224,7 +224,7 @@ export default function App(): React.ReactNode {
           const SEARCH_INDEX_VERSION = "1";
           const indexVersion = await getSetting("search_index_version");
           if (indexVersion !== SEARCH_INDEX_VERSION) {
-            import("@/core/rustDb").then(async (rustDb) => {
+            void import("@/core/rustDb").then(async (rustDb) => {
               try {
                 const count = await rustDb.rebuildSearchIndex();
                 await rustDb.setSetting(
@@ -385,13 +385,13 @@ export default function App(): React.ReactNode {
         // Load custom keyboard shortcuts
         await useShortcutStore.getState().loadKeyMap();
 
-        const dbAccounts = await getAllAccounts();
+        const dbAccounts = await listAccountBasicInfo();
         const mapped = dbAccounts.map((a) => ({
           id: a.id,
           email: a.email,
-          displayName: a.display_name,
-          avatarUrl: a.avatar_url,
-          isActive: a.is_active === 1,
+          displayName: a.displayName,
+          avatarUrl: a.avatarUrl,
+          isActive: a.isActive,
           provider: a.provider,
         }));
         const savedAccountId = await getSetting("active_account_id");
@@ -402,7 +402,7 @@ export default function App(): React.ReactNode {
 
         // Initialize JMAP clients
         for (const account of dbAccounts.filter(
-          (a) => a.is_active && a.provider === "jmap",
+          (a) => a.isActive && a.provider === "jmap",
         )) {
           try {
             await invoke("jmap_init_client", { accountId: account.id });
@@ -413,7 +413,7 @@ export default function App(): React.ReactNode {
 
         // Initialize Graph clients
         for (const account of dbAccounts.filter(
-          (a) => a.is_active && a.provider === "graph",
+          (a) => a.isActive && a.provider === "graph",
         )) {
           try {
             await invoke("graph_init_client", { accountId: account.id });
@@ -627,13 +627,13 @@ export default function App(): React.ReactNode {
 
   const handleAddAccountSuccess = useCallback(async () => {
     setShowAddAccount(false);
-    const dbAccounts = await getAllAccounts();
+    const dbAccounts = await listAccountBasicInfo();
     const mapped = dbAccounts.map((a) => ({
       id: a.id,
       email: a.email,
-      displayName: a.display_name,
-      avatarUrl: a.avatar_url,
-      isActive: a.is_active === 1,
+      displayName: a.displayName,
+      avatarUrl: a.avatarUrl,
+      isActive: a.isActive,
       provider: a.provider,
     }));
     useAccountStore.getState().setAccounts(mapped);
