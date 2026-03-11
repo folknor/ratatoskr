@@ -5,23 +5,14 @@
  * instead of reaching into @/services/db/accounts directly.
  */
 
+// biome-ignore lint/performance/noBarrelFile: Intentional app-facing facade for account APIs.
 export {
-  type DbAccount,
   deleteAccount,
-  getAllAccounts,
-  insertAccount,
   insertCalDavAccount,
-  insertGraphAccount,
   insertImapAccount,
-  insertOAuthImapAccount,
+  insertJmapAccount,
   updateAccountCalDav,
 } from "@/services/db/accounts";
-// Gmail OAuth
-export { startOAuthFlow } from "@/services/gmail/auth";
-export {
-  getClientId,
-  getClientSecret,
-} from "@/services/gmail/tokenManager";
 // IMAP auto-discovery (backed by Rust discover_email_config command)
 export {
   type AuthMethod,
@@ -35,14 +26,4 @@ export {
   type WellKnownProviderResult,
 } from "@/services/imap/autoDiscovery";
 // OAuth (generic provider flow for IMAP accounts)
-export {
-  type ProviderUserInfo,
-  refreshProviderToken,
-  startProviderOAuthFlow,
-  type TokenResponse as OAuthTokenResponse,
-} from "@/services/oauth/oauthFlow";
-export {
-  getAllOAuthProviders,
-  getOAuthProvider,
-  type OAuthProviderConfig,
-} from "@/services/oauth/providers";
+export { getOAuthProvider } from "@/services/oauth/providers";

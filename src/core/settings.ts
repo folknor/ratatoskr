@@ -5,9 +5,8 @@
  * instead of reaching into @/services/db/settings directly.
  */
 
+// biome-ignore lint/performance/noBarrelFile: Intentional app-facing facade for settings APIs.
 export {
-  getAllSettings,
-  getSecureSetting,
   getSetting,
   setSecureSetting,
   setSetting,
