@@ -19,6 +19,7 @@ use crate::search::SearchState;
 use crate::smart_labels::commands::load_enabled_criteria_rules;
 use crate::smart_labels::commands::load_enabled_rules_for_ai;
 use crate::smart_labels::commands::smart_labels_apply_criteria_to_messages_impl;
+use crate::smart_labels::commands::smart_labels_classify_and_apply_remainder_impl;
 use crate::smart_labels::commands::smart_labels_prepare_ai_remainder_for_messages;
 
 use super::{SyncQueueState, SyncState};
@@ -194,8 +195,6 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                     criteria_smart_label_matches: Vec::new(),
                     notifications_to_queue: Vec::new(),
                     ai_categorization_candidates: Vec::new(),
-                    ai_smart_label_threads: Vec::new(),
-                    ai_smart_label_rules: Vec::new(),
                 }),
             },
         );
@@ -357,6 +356,46 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                     }
                 };
 
+            if !ai_smart_label_threads.is_empty() && !ai_smart_label_rules.is_empty() {
+                let app_handle = app.clone();
+                let provider_for_ai = provider.clone();
+                let account_id_for_ai = account_id.to_string();
+                let pre_applied_matches = criteria_smart_label_matches.clone();
+                tauri::async_runtime::spawn(async move {
+                    let db: tauri::State<'_, DbState> = app_handle.state();
+                    let crypto: tauri::State<'_, AppCryptoState> = app_handle.state();
+                    let gmail: tauri::State<'_, GmailState> = app_handle.state();
+                    let jmap: tauri::State<'_, JmapState> = app_handle.state();
+                    let graph: tauri::State<'_, GraphState> = app_handle.state();
+                    let body_store: tauri::State<'_, BodyStoreState> = app_handle.state();
+                    let inline_images: tauri::State<'_, InlineImageStoreState> = app_handle.state();
+                    let search: tauri::State<'_, SearchState> = app_handle.state();
+
+                    if let Err(error) = smart_labels_classify_and_apply_remainder_impl(
+                        &account_id_for_ai,
+                        &provider_for_ai,
+                        &ai_smart_label_threads,
+                        &ai_smart_label_rules,
+                        &pre_applied_matches,
+                        &db,
+                        &crypto,
+                        &gmail,
+                        &jmap,
+                        &graph,
+                        &body_store,
+                        &inline_images,
+                        &search,
+                        &app_handle,
+                    )
+                    .await
+                    {
+                        log::warn!(
+                            "Failed to classify/apply AI smart label remainder for {account_id_for_ai}: {error}"
+                        );
+                    }
+                });
+            }
+
             let ai_categorization_candidates = if result.affected_thread_ids.is_empty() {
                 Vec::new()
             } else {
@@ -385,8 +424,6 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                         criteria_smart_label_matches,
                         notifications_to_queue,
                         ai_categorization_candidates,
-                        ai_smart_label_threads,
-                        ai_smart_label_rules,
                     }),
                 },
             )

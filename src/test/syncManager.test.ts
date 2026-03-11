@@ -10,7 +10,6 @@ const {
   mockGetCalendarProvider,
   mockGetVisibleCalendars,
   mockQueueNewEmailNotification,
-  mockApplySmartLabelsFromAiRemainder,
   mockCategorizeNewThreads,
 } = vi.hoisted(() => ({
   eventHandlers: new Map<string, (event: { payload: unknown }) => void>(),
@@ -22,7 +21,6 @@ const {
   mockGetCalendarProvider: vi.fn(),
   mockGetVisibleCalendars: vi.fn(),
   mockQueueNewEmailNotification: vi.fn(),
-  mockApplySmartLabelsFromAiRemainder: vi.fn(),
   mockCategorizeNewThreads: vi.fn(),
 }));
 
@@ -40,10 +38,6 @@ vi.mock("@/services/notifications/notificationManager", () => ({
 
 vi.mock("@/services/accounts/basicInfo", () => ({
   listAccountBasicInfo: mockListAccountBasicInfo,
-}));
-
-vi.mock("@/services/smartLabels/smartLabelManager", () => ({
-  applySmartLabelsFromAiRemainder: mockApplySmartLabelsFromAiRemainder,
 }));
 
 vi.mock("@/services/ai/categorizationManager", () => ({
@@ -90,7 +84,6 @@ describe("syncManager", () => {
     vi.clearAllMocks();
     vi.resetModules();
     eventHandlers.clear();
-    mockApplySmartLabelsFromAiRemainder.mockResolvedValue(undefined);
     mockCategorizeNewThreads.mockResolvedValue(undefined);
     mockListAccountBasicInfo.mockResolvedValue([
       {
@@ -282,24 +275,10 @@ describe("syncManager", () => {
           },
         ],
         aiCategorizationCandidates: [{ threadId: "t1", subject: "Hello" }],
-        aiSmartLabelThreads: [{ threadId: "t1", subject: "Hello" }],
-        aiSmartLabelRules: [
-          { id: "rule-1", name: "VIP", instructions: "Mark VIP" },
-        ],
       },
     });
 
     await flushAsyncWork();
-
-    expect(mockApplySmartLabelsFromAiRemainder).toHaveBeenCalledWith(
-      "acc-1",
-      "gmail_api",
-      [{ threadId: "t1", labelIds: ["label-1"] }],
-      {
-        threads: [{ threadId: "t1", subject: "Hello" }],
-        rules: [{ id: "rule-1", name: "VIP", instructions: "Mark VIP" }],
-      },
-    );
     expect(mockQueueNewEmailNotification).toHaveBeenCalledWith(
       "Alice",
       "Hello",
@@ -357,8 +336,6 @@ describe("syncManager", () => {
         criteriaSmartLabelMatches: [],
         notificationsToQueue: [],
         aiCategorizationCandidates: [],
-        aiSmartLabelThreads: [],
-        aiSmartLabelRules: [],
       },
     });
 

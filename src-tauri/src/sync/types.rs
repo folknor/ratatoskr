@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::smart_labels::{AppliedSmartLabelMatch, SmartLabelAIRule, SmartLabelAIThread};
+use crate::smart_labels::AppliedSmartLabelMatch;
 
 /// Progress event emitted during sync.
 #[derive(Debug, Clone, Serialize)]
@@ -55,8 +55,6 @@ pub struct SyncStatusDonePayload {
     pub criteria_smart_label_matches: Vec<AppliedSmartLabelMatch>,
     pub notifications_to_queue: Vec<NotificationCandidate>,
     pub ai_categorization_candidates: Vec<AICategorizationCandidate>,
-    pub ai_smart_label_threads: Vec<SmartLabelAIThread>,
-    pub ai_smart_label_rules: Vec<SmartLabelAIRule>,
 }
 
 /// Generic sync lifecycle event emitted for queued/manual sync runs.

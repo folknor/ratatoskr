@@ -37,8 +37,6 @@
 
 > **Systemic issue**: Rust sync now shares one post-sync message load across filters, criteria smart labels, AI prep, and notifications, but later TS-side AI matching still re-queries message data and post-sync actions still duplicate some provider/setup work. The remaining debt is mostly across the Rust/TS boundary.
 
-- [ ] **`smart_labels_apply_matches` only callable via IPC** — Label application after AI classification still crosses the IPC boundary. Could be called directly in Rust once AI classification moves too. *(LOW)*
-
 ---
 
 ## Calendar

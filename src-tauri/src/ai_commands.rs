@@ -4,8 +4,7 @@ use serde::Deserialize;
 use tauri::State;
 
 use crate::db::DbState;
-use crate::gmail::client::GmailState;
-use crate::provider::crypto::{decrypt_value, is_encrypted};
+use crate::provider::crypto::{AppCryptoState, decrypt_value, is_encrypted};
 
 const DEFAULT_CLAUDE_MODEL: &str = "claude-haiku-4-5-20251001";
 const DEFAULT_OPENAI_MODEL: &str = "gpt-4o-mini";
@@ -50,14 +49,21 @@ pub async fn ai_get_provider_name(db: State<'_, DbState>) -> Result<String, Stri
 #[tauri::command]
 pub async fn ai_is_available(
     db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
+    crypto: State<'_, AppCryptoState>,
+) -> Result<bool, String> {
+    ai_is_available_impl(&db, &crypto).await
+}
+
+pub(crate) async fn ai_is_available_impl(
+    db: &DbState,
+    crypto: &AppCryptoState,
 ) -> Result<bool, String> {
     let enabled = read_plain_setting(&db, "ai_enabled").await?;
     if enabled.as_deref() == Some("false") {
         return Ok(false);
     }
 
-    let config = load_ai_config(&db, gmail.encryption_key()).await?;
+    let config = load_ai_config(db, crypto.encryption_key()).await?;
     Ok(match config.provider {
         AiProviderKind::Ollama => config
             .server_url
@@ -73,9 +79,9 @@ pub async fn ai_is_available(
 #[tauri::command]
 pub async fn ai_test_connection(
     db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
+    crypto: State<'_, AppCryptoState>,
 ) -> Result<bool, String> {
-    let config = load_ai_config(&db, gmail.encryption_key()).await?;
+    let config = load_ai_config(&db, crypto.encryption_key()).await?;
     let request = AiCompleteRequest {
         system_prompt: "You are a helpful assistant.".to_string(),
         user_content: "Say hi".to_string(),
@@ -90,11 +96,19 @@ pub async fn ai_test_connection(
 #[tauri::command]
 pub async fn ai_complete(
     db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
+    crypto: State<'_, AppCryptoState>,
     request: AiCompleteRequest,
 ) -> Result<String, String> {
-    let config = load_ai_config(&db, gmail.encryption_key()).await?;
-    complete_with_config(&config, &request).await
+    complete_ai_impl(&db, &crypto, &request).await
+}
+
+pub(crate) async fn complete_ai_impl(
+    db: &DbState,
+    crypto: &AppCryptoState,
+    request: &AiCompleteRequest,
+) -> Result<String, String> {
+    let config = load_ai_config(db, crypto.encryption_key()).await?;
+    complete_with_config(&config, request).await
 }
 
 async fn load_ai_config(db: &DbState, encryption_key: &[u8; 32]) -> Result<AiConfig, String> {

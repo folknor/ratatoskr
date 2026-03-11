@@ -18,11 +18,6 @@ import {
   categorizeNewThreads,
 } from "@/services/ai/categorizationManager";
 import { queueNewEmailNotification } from "@/services/notifications/notificationManager";
-import { applySmartLabelsFromAiRemainder } from "@/services/smartLabels/smartLabelManager";
-import type {
-  SmartLabelAIRule,
-  SmartLabelAIThread,
-} from "@/services/smartLabels/smartLabelService";
 
 /**
  * Shared post-sync hooks: apply filters, smart labels, notifications, and AI categorization.
@@ -30,10 +25,8 @@ import type {
  */
 interface PostSyncHooksInput {
   accountId: string;
-  provider: string;
   newInboxEmailIds: string[];
   affectedThreadIds: string[];
-  criteriaSmartLabelMatches?: { threadId: string; labelIds: string[] }[];
   notificationsToQueue?: {
     threadId: string;
     fromName?: string | null;
@@ -41,32 +34,18 @@ interface PostSyncHooksInput {
     subject?: string | null;
   }[];
   aiCategorizationCandidates?: CategorizationCandidate[];
-  aiSmartLabelThreads?: SmartLabelAIThread[];
-  aiSmartLabelRules?: SmartLabelAIRule[];
 }
 
 async function runPostSyncHooks(input: PostSyncHooksInput): Promise<void> {
   const {
     accountId,
-    provider,
     newInboxEmailIds,
     affectedThreadIds,
-    criteriaSmartLabelMatches = [],
     notificationsToQueue = [],
     aiCategorizationCandidates = [],
-    aiSmartLabelThreads = [],
-    aiSmartLabelRules = [],
   } = input;
 
   if (newInboxEmailIds.length > 0) {
-    // Smart labels (fire-and-forget)
-    applySmartLabelsFromAiRemainder(
-      accountId,
-      provider,
-      criteriaSmartLabelMatches,
-      { threads: aiSmartLabelThreads, rules: aiSmartLabelRules },
-    ).catch((err) => console.error("[syncManager] Smart label error:", err));
-
     try {
       for (const candidate of notificationsToQueue) {
         queueNewEmailNotification(
@@ -127,8 +106,6 @@ interface SyncStatusEvent {
       subject?: string | null;
     }[];
     aiCategorizationCandidates: CategorizationCandidate[];
-    aiSmartLabelThreads: SmartLabelAIThread[];
-    aiSmartLabelRules: SmartLabelAIRule[];
   } | null;
 }
 
@@ -228,20 +205,14 @@ async function handleSyncStatusEvent(event: SyncStatusEvent): Promise<void> {
     criteriaSmartLabelMatches: [],
     notificationsToQueue: [],
     aiCategorizationCandidates: [],
-    aiSmartLabelThreads: [],
-    aiSmartLabelRules: [],
   };
 
   await runPostSyncHooks({
     accountId: event.accountId,
-    provider: event.provider,
     newInboxEmailIds: result.newInboxMessageIds,
     affectedThreadIds: result.affectedThreadIds,
-    criteriaSmartLabelMatches: result.criteriaSmartLabelMatches,
     notificationsToQueue: result.notificationsToQueue,
     aiCategorizationCandidates: result.aiCategorizationCandidates,
-    aiSmartLabelThreads: result.aiSmartLabelThreads,
-    aiSmartLabelRules: result.aiSmartLabelRules,
   });
 
   statusCallback?.(event.accountId, "done");
