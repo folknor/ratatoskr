@@ -4,6 +4,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
+use crate::filters::commands::filters_apply_to_new_message_ids_impl;
 use crate::gmail::client::GmailState;
 use crate::graph::client::GraphState;
 use crate::inline_image_store::InlineImageStoreState;
@@ -208,18 +209,37 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
     )
     .await
     {
-        Ok(result) => emit_sync_status(
-            app,
-            SyncStatusEvent {
-                account_id: account_id.to_string(),
-                provider,
-                status: "done".to_string(),
-                error: None,
-                new_inbox_message_ids: Some(result.new_inbox_message_ids),
-                affected_thread_ids: Some(result.affected_thread_ids),
-                is_delta: Some(result.was_delta && !result.fell_back_to_initial),
-            },
-        ),
+        Ok(result) => {
+            if let Err(error) = filters_apply_to_new_message_ids_impl(
+                account_id,
+                &result.new_inbox_message_ids,
+                &db,
+                &gmail,
+                &jmap,
+                &graph,
+                &body_store,
+                &inline_images,
+                &search,
+                app,
+            )
+            .await
+            {
+                log::warn!("Failed to run post-sync filters for {account_id}: {error}");
+            }
+
+            emit_sync_status(
+                app,
+                SyncStatusEvent {
+                    account_id: account_id.to_string(),
+                    provider,
+                    status: "done".to_string(),
+                    error: None,
+                    new_inbox_message_ids: Some(result.new_inbox_message_ids),
+                    affected_thread_ids: Some(result.affected_thread_ids),
+                    is_delta: Some(result.was_delta && !result.fell_back_to_initial),
+                },
+            )
+        }
         Err(error) => emit_sync_status(
             app,
             SyncStatusEvent {

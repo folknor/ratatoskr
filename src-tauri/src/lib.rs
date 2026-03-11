@@ -399,6 +399,7 @@ pub fn run() {
             db::pending_ops::db_pending_ops_recover_executing,
             // Filter engine (Phase 6)
             filters::commands::filters_evaluate,
+            filters::commands::filters_apply_to_new_message_ids,
             // JWZ threading (Phase 6)
             threading::commands::threading_build_threads,
             threading::commands::threading_update_threads,

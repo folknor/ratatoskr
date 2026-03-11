@@ -25,7 +25,6 @@ import { getMessagesByIds } from "@/services/db/messages";
 import { getVipSenders } from "@/services/db/notificationVips";
 import { getThreadCategory } from "@/services/db/threadCategories";
 import { getMutedThreadIds } from "@/services/db/threads";
-import { applyFiltersToNewMessageIds } from "@/services/filters/filterEngine";
 import {
   queueNewEmailNotification,
   shouldNotifyForMessage,
@@ -44,12 +43,6 @@ async function runPostSyncHooks(
   isDelta: boolean,
 ): Promise<void> {
   if (newInboxEmailIds.length > 0) {
-    try {
-      await applyFiltersToNewMessageIds(accountId, newInboxEmailIds);
-    } catch (err) {
-      console.error("[syncManager] Filter application failed:", err);
-    }
-
     // Smart labels (fire-and-forget)
     applySmartLabelsToNewMessageIds(accountId, newInboxEmailIds).catch((err) =>
       console.error("[syncManager] Smart label error:", err),

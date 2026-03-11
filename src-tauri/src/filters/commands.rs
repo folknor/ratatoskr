@@ -2,9 +2,18 @@
 
 use std::collections::HashMap;
 
-use tauri::State;
+use tauri::{AppHandle, State};
 
+use crate::body_store::BodyStoreState;
 use crate::db::DbState;
+use crate::db::queries::row_to_message;
+use crate::gmail::client::GmailState;
+use crate::graph::client::GraphState;
+use crate::inline_image_store::InlineImageStoreState;
+use crate::jmap::client::JmapState;
+use crate::provider::router::{get_ops, get_provider_type};
+use crate::provider::types::ProviderCtx;
+use crate::search::SearchState;
 
 use super::{FilterActions, FilterCriteria, FilterResult, FilterableMessage, evaluate_filters};
 
@@ -22,7 +31,116 @@ pub async fn filters_evaluate(
     }
 
     // Read enabled filters from DB
-    let filters = state
+    let filters = load_enabled_filters(&state, &account_id).await?;
+
+    if filters.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    // Run matching on blocking thread (CPU-bound for large filter sets)
+    tokio::task::spawn_blocking(move || Ok(evaluate_filters(&filters, &messages)))
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn filters_apply_to_new_message_ids_impl(
+    account_id: &str,
+    message_ids: &[String],
+    db: &DbState,
+    gmail: &GmailState,
+    jmap: &JmapState,
+    graph: &GraphState,
+    body_store: &BodyStoreState,
+    inline_images: &InlineImageStoreState,
+    search: &SearchState,
+    app_handle: &AppHandle,
+) -> Result<(), String> {
+    if message_ids.is_empty() {
+        return Ok(());
+    }
+
+    let filters = load_enabled_filters(db, account_id).await?;
+    if filters.is_empty() {
+        return Ok(());
+    }
+
+    let needs_body = filters.iter().any(|(criteria, _)| criteria.body.is_some());
+    let messages = load_filterable_messages(db, body_store, account_id, message_ids, needs_body).await?;
+    if messages.is_empty() {
+        return Ok(());
+    }
+
+    let thread_actions = tokio::task::spawn_blocking(move || evaluate_filters(&filters, &messages))
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?;
+    if thread_actions.is_empty() {
+        return Ok(());
+    }
+
+    let provider = get_provider_type(db, account_id).await?;
+    let ops = get_ops(
+        &provider,
+        account_id,
+        gmail,
+        jmap,
+        graph,
+        *gmail.encryption_key(),
+    )
+    .await?;
+    let ctx = ProviderCtx {
+        account_id,
+        db,
+        body_store,
+        inline_images,
+        search,
+        app_handle,
+    };
+
+    for (thread_id, result) in thread_actions {
+        if let Err(error) = apply_filter_result(&*ops, &ctx, &thread_id, &result).await {
+            log::warn!("Failed to apply filters to thread {thread_id}: {error}");
+        }
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn filters_apply_to_new_message_ids(
+    account_id: String,
+    message_ids: Vec<String>,
+    db: State<'_, DbState>,
+    gmail: State<'_, GmailState>,
+    jmap: State<'_, JmapState>,
+    graph: State<'_, GraphState>,
+    body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
+    search: State<'_, SearchState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    filters_apply_to_new_message_ids_impl(
+        &account_id,
+        &message_ids,
+        &db,
+        &gmail,
+        &jmap,
+        &graph,
+        &body_store,
+        &inline_images,
+        &search,
+        &app_handle,
+    )
+    .await
+}
+
+async fn load_enabled_filters(
+    state: &DbState,
+    account_id: &str,
+) -> Result<Vec<(FilterCriteria, FilterActions)>, String> {
+    let account_id = account_id.to_string();
+    state
         .with_conn(move |conn| {
             let mut stmt = conn
                 .prepare(
@@ -44,7 +162,6 @@ pub async fn filters_evaluate(
             for row in rows {
                 let (criteria_json, actions_json) =
                     row.map_err(|e| format!("read filter row: {e}"))?;
-                // Skip filters with invalid JSON (same as TS flatMap + try/catch)
                 let criteria: FilterCriteria = match serde_json::from_str(&criteria_json) {
                     Ok(c) => c,
                     Err(_) => continue,
@@ -58,14 +175,101 @@ pub async fn filters_evaluate(
 
             Ok(filters)
         })
+        .await
+}
+
+async fn load_filterable_messages(
+    db: &DbState,
+    body_store: &BodyStoreState,
+    account_id: &str,
+    message_ids: &[String],
+    needs_body: bool,
+) -> Result<Vec<FilterableMessage>, String> {
+    let account_id = account_id.to_string();
+    let ids = message_ids.to_vec();
+    let mut rows = db
+        .with_conn(move |conn| {
+            let mut all_results = Vec::new();
+            for chunk in ids.chunks(500) {
+                let placeholders: String = chunk
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| format!("?{}", i + 2))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let sql = format!(
+                    "SELECT * FROM messages WHERE account_id = ?1 AND id IN ({placeholders})"
+                );
+                let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+                let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+                param_values.push(Box::new(account_id.clone()));
+                for id in chunk {
+                    param_values.push(Box::new(id.clone()));
+                }
+                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                    param_values.iter().map(AsRef::as_ref).collect();
+                let rows = stmt
+                    .query_map(param_refs.as_slice(), row_to_message)
+                    .map_err(|e| e.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())?;
+                all_results.extend(rows);
+            }
+            Ok(all_results)
+        })
         .await?;
 
-    if filters.is_empty() {
-        return Ok(HashMap::new());
+    if needs_body {
+        let bodies = body_store.get_batch(message_ids.to_vec()).await?;
+        let body_map: HashMap<String, crate::body_store::MessageBody> = bodies
+            .into_iter()
+            .map(|body| (body.message_id.clone(), body))
+            .collect();
+
+        for row in &mut rows {
+            if let Some(body) = body_map.get(&row.id) {
+                row.body_html = body.body_html.clone();
+                row.body_text = body.body_text.clone();
+            }
+        }
     }
 
-    // Run matching on blocking thread (CPU-bound for large filter sets)
-    tokio::task::spawn_blocking(move || Ok(evaluate_filters(&filters, &messages)))
-        .await
-        .map_err(|e| format!("spawn_blocking: {e}"))?
+    Ok(rows
+        .into_iter()
+        .map(|row| FilterableMessage {
+            thread_id: row.thread_id,
+            from_name: row.from_name,
+            from_address: row.from_address,
+            to_addresses: row.to_addresses,
+            subject: row.subject,
+            body_text: row.body_text,
+            body_html: row.body_html,
+            has_attachments: false,
+        })
+        .collect())
+}
+
+async fn apply_filter_result(
+    ops: &dyn crate::provider::ops::ProviderOps,
+    ctx: &ProviderCtx<'_>,
+    thread_id: &str,
+    result: &FilterResult,
+) -> Result<(), String> {
+    for label_id in &result.add_label_ids {
+        ops.add_tag(ctx, thread_id, label_id).await?;
+    }
+
+    for label_id in &result.remove_label_ids {
+        ops.remove_tag(ctx, thread_id, label_id).await?;
+    }
+
+    if result.mark_read {
+        ops.mark_read(ctx, thread_id, true).await?;
+    }
+
+    if result.star {
+        ops.star(ctx, thread_id, true).await?;
+    }
+
+    Ok(())
 }
