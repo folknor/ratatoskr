@@ -212,9 +212,16 @@ pub async fn db_get_threads(
                     .prepare(
                         "SELECT t.*, m.from_name, m.from_address FROM threads t
                      INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-                     LEFT JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id
-                       AND m.date = (SELECT MAX(m2.date) FROM messages m2
-                                     WHERE m2.account_id = t.account_id AND m2.thread_id = t.id)
+                     LEFT JOIN (
+                       SELECT id, account_id, thread_id, from_name, from_address FROM (
+                         SELECT id, account_id, thread_id, from_name, from_address,
+                                ROW_NUMBER() OVER (
+                                  PARTITION BY account_id, thread_id
+                                  ORDER BY date DESC, id DESC
+                                ) AS rn
+                         FROM messages
+                       ) WHERE rn = 1
+                     ) m ON m.account_id = t.account_id AND m.thread_id = t.id
                      WHERE t.account_id = ?1 AND tl.label_id = ?2
                      GROUP BY t.account_id, t.id
                      ORDER BY t.is_pinned DESC, t.last_message_at DESC
@@ -230,9 +237,16 @@ pub async fn db_get_threads(
                 let mut stmt = conn
                     .prepare(
                         "SELECT t.*, m.from_name, m.from_address FROM threads t
-                     LEFT JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id
-                       AND m.date = (SELECT MAX(m2.date) FROM messages m2
-                                     WHERE m2.account_id = t.account_id AND m2.thread_id = t.id)
+                     LEFT JOIN (
+                       SELECT id, account_id, thread_id, from_name, from_address FROM (
+                         SELECT id, account_id, thread_id, from_name, from_address,
+                                ROW_NUMBER() OVER (
+                                  PARTITION BY account_id, thread_id
+                                  ORDER BY date DESC, id DESC
+                                ) AS rn
+                         FROM messages
+                       ) WHERE rn = 1
+                     ) m ON m.account_id = t.account_id AND m.thread_id = t.id
                      WHERE t.account_id = ?1
                      ORDER BY t.is_pinned DESC, t.last_message_at DESC
                      LIMIT ?2 OFFSET ?3",
@@ -267,9 +281,16 @@ pub async fn db_get_threads_for_category(
                         "SELECT t.*, m.from_name, m.from_address FROM threads t
                      INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
                      LEFT JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
-                     LEFT JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id
-                       AND m.date = (SELECT MAX(m2.date) FROM messages m2
-                                     WHERE m2.account_id = t.account_id AND m2.thread_id = t.id)
+                     LEFT JOIN (
+                       SELECT id, account_id, thread_id, from_name, from_address FROM (
+                         SELECT id, account_id, thread_id, from_name, from_address,
+                                ROW_NUMBER() OVER (
+                                  PARTITION BY account_id, thread_id
+                                  ORDER BY date DESC, id DESC
+                                ) AS rn
+                         FROM messages
+                       ) WHERE rn = 1
+                     ) m ON m.account_id = t.account_id AND m.thread_id = t.id
                      WHERE t.account_id = ?1 AND tl.label_id = 'INBOX'
                        AND (tc.category IS NULL OR tc.category = 'Primary')
                      GROUP BY t.account_id, t.id
@@ -288,9 +309,16 @@ pub async fn db_get_threads_for_category(
                         "SELECT t.*, m.from_name, m.from_address FROM threads t
                      INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
                      INNER JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
-                     LEFT JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id
-                       AND m.date = (SELECT MAX(m2.date) FROM messages m2
-                                     WHERE m2.account_id = t.account_id AND m2.thread_id = t.id)
+                     LEFT JOIN (
+                       SELECT id, account_id, thread_id, from_name, from_address FROM (
+                         SELECT id, account_id, thread_id, from_name, from_address,
+                                ROW_NUMBER() OVER (
+                                  PARTITION BY account_id, thread_id
+                                  ORDER BY date DESC, id DESC
+                                ) AS rn
+                         FROM messages
+                       ) WHERE rn = 1
+                     ) m ON m.account_id = t.account_id AND m.thread_id = t.id
                      WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND tc.category = ?2
                      GROUP BY t.account_id, t.id
                      ORDER BY t.is_pinned DESC, t.last_message_at DESC
@@ -318,9 +346,16 @@ pub async fn db_get_thread_by_id(
             let mut stmt = conn
                 .prepare(
                     "SELECT t.*, m.from_name, m.from_address FROM threads t
-                 LEFT JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id
-                   AND m.date = (SELECT MAX(m2.date) FROM messages m2
-                                 WHERE m2.account_id = t.account_id AND m2.thread_id = t.id)
+                 LEFT JOIN (
+                   SELECT id, account_id, thread_id, from_name, from_address FROM (
+                     SELECT id, account_id, thread_id, from_name, from_address,
+                            ROW_NUMBER() OVER (
+                              PARTITION BY account_id, thread_id
+                              ORDER BY date DESC, id DESC
+                            ) AS rn
+                     FROM messages
+                   ) WHERE rn = 1
+                 ) m ON m.account_id = t.account_id AND m.thread_id = t.id
                  WHERE t.account_id = ?1 AND t.id = ?2
                  LIMIT 1",
                 )

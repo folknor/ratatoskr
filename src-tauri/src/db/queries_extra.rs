@@ -59,8 +59,16 @@ pub fn load_recent_rule_categorized_threads(
              FROM threads t
              INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
              INNER JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
-             LEFT JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id
-               AND m.date = (SELECT MAX(m2.date) FROM messages m2 WHERE m2.account_id = t.account_id AND m2.thread_id = t.id)
+             LEFT JOIN (
+               SELECT account_id, thread_id, from_address FROM (
+                 SELECT account_id, thread_id, from_address,
+                        ROW_NUMBER() OVER (
+                          PARTITION BY account_id, thread_id
+                          ORDER BY date DESC, id DESC
+                        ) AS rn
+                 FROM messages
+               ) WHERE rn = 1
+             ) m ON m.account_id = t.account_id AND m.thread_id = t.id
              WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND tc.is_manual = 0
              ORDER BY t.last_message_at DESC
              LIMIT ?2",
@@ -4161,8 +4169,16 @@ pub async fn db_get_uncategorized_inbox_thread_ids(
                     "SELECT t.id, t.subject, t.snippet, m.from_address
                      FROM threads t
                      INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-                     LEFT JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id
-                       AND m.date = (SELECT MAX(m2.date) FROM messages m2 WHERE m2.account_id = t.account_id AND m2.thread_id = t.id)
+                     LEFT JOIN (
+                       SELECT account_id, thread_id, from_address FROM (
+                         SELECT account_id, thread_id, from_address,
+                                ROW_NUMBER() OVER (
+                                  PARTITION BY account_id, thread_id
+                                  ORDER BY date DESC, id DESC
+                                ) AS rn
+                         FROM messages
+                       ) WHERE rn = 1
+                     ) m ON m.account_id = t.account_id AND m.thread_id = t.id
                      LEFT JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
                      WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND tc.thread_id IS NULL
                      ORDER BY t.last_message_at DESC
@@ -4947,8 +4963,16 @@ pub async fn db_get_inbox_threads_for_backfill(
                             m.to_addresses, t.has_attachments, m.id
                      FROM threads t
                      INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-                     LEFT JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id
-                       AND m.date = (SELECT MAX(m2.date) FROM messages m2 WHERE m2.account_id = t.account_id AND m2.thread_id = t.id)
+                     LEFT JOIN (
+                       SELECT id, account_id, thread_id, from_address, from_name, to_addresses FROM (
+                         SELECT id, account_id, thread_id, from_address, from_name, to_addresses,
+                                ROW_NUMBER() OVER (
+                                  PARTITION BY account_id, thread_id
+                                  ORDER BY date DESC, id DESC
+                                ) AS rn
+                         FROM messages
+                       ) WHERE rn = 1
+                     ) m ON m.account_id = t.account_id AND m.thread_id = t.id
                      WHERE t.account_id = ?1 AND tl.label_id = 'INBOX'
                      ORDER BY t.last_message_at DESC
                      LIMIT ?2 OFFSET ?3",
