@@ -3,6 +3,7 @@ node_modules/
 research
 iced-proto/thunderbird.sqlite
 iced-proto/target
+.plans
 
 # Build outputs
 dist/
