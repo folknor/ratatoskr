@@ -11,6 +11,7 @@ use super::types::{
 use crate::provider::crypto::AppCryptoState;
 
 pub type SettingsBootstrapSnapshot = ratatoskr_core::db::queries::SettingsBootstrapSnapshot;
+pub type SettingsSecretsSnapshot = ratatoskr_core::db::queries::SettingsSecretsSnapshot;
 pub type UiBootstrapSnapshot = ratatoskr_core::db::queries::UiBootstrapSnapshot;
 
 // ── Thread queries ───────────────────────────────────────────
@@ -126,6 +127,17 @@ pub async fn settings_get_bootstrap_snapshot(
     let encryption_key = *crypto.encryption_key();
     state
         .with_conn(move |conn| super::get_settings_bootstrap_snapshot(conn, &encryption_key))
+        .await
+}
+
+#[tauri::command]
+pub async fn settings_get_secrets_snapshot(
+    state: State<'_, DbState>,
+    crypto: State<'_, AppCryptoState>,
+) -> Result<SettingsSecretsSnapshot, String> {
+    let encryption_key = *crypto.encryption_key();
+    state
+        .with_conn(move |conn| super::get_settings_secrets_snapshot(conn, &encryption_key))
         .await
 }
 

@@ -17,9 +17,9 @@
 
 ### Settings and Account Compatibility Sweeps
 
-- [ ] **Stop decrypting every setting in `read_setting_map`** — Most settings are not encrypted. The current unconditional decode/decrypt path is wasteful, especially for bootstrap/UI snapshot paths.
+- [x] **Stop decrypting every setting in `read_setting_map`** — Settings snapshots now decrypt only the small secure-key subset they actually need, while UI/non-sensitive bootstrap reads stay plain.
 
-- [ ] **Stop bundling API keys with non-sensitive settings snapshots** — Callers outside the actual settings UI should not receive AI/provider API keys alongside ordinary UI preferences.
+- [x] **Stop bundling API keys with non-sensitive settings snapshots** — Non-sensitive settings bootstrap data and secrets now come from separate snapshot commands, so only the settings page requests API keys/client secrets.
 
 - [ ] **Sweep remaining full account/settings compatibility reads** — Continue replacing one-off `getAccount()` / `getSetting()` reads and legacy full-row helpers with narrow Rust DTOs in active paths such as `src/services/db/accounts.ts`, `src/services/db/settings.ts`, and `src/services/gmail/tokenManager.ts`.
 

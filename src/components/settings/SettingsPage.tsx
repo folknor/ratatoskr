@@ -26,7 +26,10 @@ import {
 } from "@/core/sync";
 import { getPersistedLanguage, getSystemLanguageName } from "@/i18n";
 import { navigateToLabel, navigateToSettings } from "@/router/navigate";
-import { getSettingsBootstrapSnapshot } from "@/services/settings/bootstrapSnapshot";
+import {
+  getSettingsBootstrapSnapshot,
+  getSettingsSecretsSnapshot,
+} from "@/services/settings/bootstrapSnapshot";
 import { useAccountStore } from "@/stores/accountStore";
 import { SettingsAboutTab } from "./SettingsAboutTab";
 import { SettingsAccountsTab } from "./SettingsAccountsTab";
@@ -164,12 +167,15 @@ export function SettingsPage(): React.ReactNode {
   // Load settings from DB
   useEffect(() => {
     async function load(): Promise<void> {
-      const snapshot = await getSettingsBootstrapSnapshot();
+      const [snapshot, secrets] = await Promise.all([
+        getSettingsBootstrapSnapshot(),
+        getSettingsSecretsSnapshot(),
+      ]);
 
       setNotificationsEnabled(snapshot.notificationsEnabled);
       setUndoSendDelay(snapshot.undoSendDelaySeconds ?? "5");
       setClientId(snapshot.googleClientId ?? "");
-      setClientSecret(snapshot.googleClientSecret ?? "");
+      setClientSecret(secrets.googleClientSecret ?? "");
       setMicrosoftClientId(snapshot.microsoftClientId ?? "");
       setBlockRemoteImages(snapshot.blockRemoteImages);
       setPhishingDetectionEnabled(snapshot.phishingDetectionEnabled);
@@ -200,13 +206,13 @@ export function SettingsPage(): React.ReactNode {
       if (openaiModelVal) setOpenaiModel(openaiModelVal);
       const geminiModelVal = snapshot.geminiModel;
       if (geminiModelVal) setGeminiModel(geminiModelVal);
-      const aiKey = snapshot.claudeApiKey;
+      const aiKey = secrets.claudeApiKey;
       setClaudeApiKey(aiKey ?? "");
-      const oaiKey = snapshot.openaiApiKey;
+      const oaiKey = secrets.openaiApiKey;
       setOpenaiApiKey(oaiKey ?? "");
-      const gemKey = snapshot.geminiApiKey;
+      const gemKey = secrets.geminiApiKey;
       setGeminiApiKey(gemKey ?? "");
-      const copKey = snapshot.copilotApiKey;
+      const copKey = secrets.copilotApiKey;
       setCopilotApiKey(copKey ?? "");
       const copilotModelVal = snapshot.copilotModel;
       if (copilotModelVal) setCopilotModel(copilotModelVal);

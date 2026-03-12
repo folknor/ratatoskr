@@ -4,7 +4,6 @@ export interface SettingsBootstrapSnapshot {
   notificationsEnabled: boolean;
   undoSendDelaySeconds: string | null;
   googleClientId: string | null;
-  googleClientSecret: string | null;
   microsoftClientId: string | null;
   blockRemoteImages: boolean;
   phishingDetectionEnabled: boolean;
@@ -16,10 +15,6 @@ export interface SettingsBootstrapSnapshot {
   claudeModel: string | null;
   openaiModel: string | null;
   geminiModel: string | null;
-  claudeApiKey: string | null;
-  openaiApiKey: string | null;
-  geminiApiKey: string | null;
-  copilotApiKey: string | null;
   copilotModel: string | null;
   aiEnabled: boolean;
   aiAutoCategorize: boolean;
@@ -32,6 +27,18 @@ export interface SettingsBootstrapSnapshot {
   attachmentCacheMaxMb: string | null;
 }
 
+export interface SettingsSecretsSnapshot {
+  googleClientSecret: string | null;
+  claudeApiKey: string | null;
+  openaiApiKey: string | null;
+  geminiApiKey: string | null;
+  copilotApiKey: string | null;
+}
+
 export async function getSettingsBootstrapSnapshot(): Promise<SettingsBootstrapSnapshot> {
   return invoke<SettingsBootstrapSnapshot>("settings_get_bootstrap_snapshot");
+}
+
+export async function getSettingsSecretsSnapshot(): Promise<SettingsSecretsSnapshot> {
+  return invoke<SettingsSecretsSnapshot>("settings_get_secrets_snapshot");
 }

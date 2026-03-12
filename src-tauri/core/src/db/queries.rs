@@ -114,7 +114,6 @@ pub struct SettingsBootstrapSnapshot {
     pub notifications_enabled: bool,
     pub undo_send_delay_seconds: Option<String>,
     pub google_client_id: Option<String>,
-    pub google_client_secret: Option<String>,
     pub microsoft_client_id: Option<String>,
     pub block_remote_images: bool,
     pub phishing_detection_enabled: bool,
@@ -126,10 +125,6 @@ pub struct SettingsBootstrapSnapshot {
     pub claude_model: Option<String>,
     pub openai_model: Option<String>,
     pub gemini_model: Option<String>,
-    pub claude_api_key: Option<String>,
-    pub openai_api_key: Option<String>,
-    pub gemini_api_key: Option<String>,
-    pub copilot_api_key: Option<String>,
     pub copilot_model: Option<String>,
     pub ai_enabled: bool,
     pub ai_auto_categorize: bool,
@@ -140,6 +135,16 @@ pub struct SettingsBootstrapSnapshot {
     pub smart_notifications: bool,
     pub notify_categories: Option<String>,
     pub attachment_cache_max_mb: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsSecretsSnapshot {
+    pub google_client_secret: Option<String>,
+    pub claude_api_key: Option<String>,
+    pub openai_api_key: Option<String>,
+    pub gemini_api_key: Option<String>,
+    pub copilot_api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -163,7 +168,15 @@ pub struct UiBootstrapSnapshot {
     pub sidebar_nav_config: Option<String>,
 }
 
-fn decode_setting_value(raw: String, encryption_key: &[u8; 32]) -> String {
+const SECURE_SETTING_KEYS: &[&str] = &[
+    "google_client_secret",
+    "claude_api_key",
+    "openai_api_key",
+    "gemini_api_key",
+    "copilot_api_key",
+];
+
+fn decode_secure_setting_value(raw: String, encryption_key: &[u8; 32]) -> String {
     if is_encrypted(&raw) {
         decrypt_value(encryption_key, &raw).unwrap_or(raw)
     } else {
@@ -174,6 +187,7 @@ fn decode_setting_value(raw: String, encryption_key: &[u8; 32]) -> String {
 fn read_setting_map(
     conn: &Connection,
     encryption_key: &[u8; 32],
+    secure_keys: &[&str],
 ) -> Result<HashMap<String, String>, String> {
     let mut stmt = conn
         .prepare("SELECT key, value FROM settings")
@@ -188,7 +202,14 @@ fn read_setting_map(
 
     Ok(rows
         .into_iter()
-        .map(|(key, raw)| (key, decode_setting_value(raw, encryption_key)))
+        .map(|(key, raw)| {
+            let value = if secure_keys.contains(&key.as_str()) {
+                decode_secure_setting_value(raw, encryption_key)
+            } else {
+                raw
+            };
+            (key, value)
+        })
         .collect())
 }
 
@@ -461,14 +482,14 @@ pub fn get_secure_setting(
     key: String,
 ) -> Result<Option<String>, String> {
     let result = get_setting(conn, key)?;
-    Ok(result.map(|raw| decode_setting_value(raw, encryption_key)))
+    Ok(result.map(|raw| decode_secure_setting_value(raw, encryption_key)))
 }
 
 pub fn get_settings_bootstrap_snapshot(
     conn: &Connection,
     encryption_key: &[u8; 32],
 ) -> Result<SettingsBootstrapSnapshot, String> {
-    let settings = read_setting_map(conn, encryption_key)?;
+    let settings = read_setting_map(conn, encryption_key, &[])?;
     let get = |key: &str| settings.get(key).cloned();
     let get_bool = |key: &str, default: bool| get(key).map_or(default, |value| value != "false");
 
@@ -476,7 +497,6 @@ pub fn get_settings_bootstrap_snapshot(
         notifications_enabled: get_bool("notifications_enabled", true),
         undo_send_delay_seconds: get("undo_send_delay_seconds"),
         google_client_id: get("google_client_id"),
-        google_client_secret: get("google_client_secret"),
         microsoft_client_id: get("microsoft_client_id"),
         block_remote_images: get_bool("block_remote_images", true),
         phishing_detection_enabled: get_bool("phishing_detection_enabled", true),
@@ -488,10 +508,6 @@ pub fn get_settings_bootstrap_snapshot(
         claude_model: get("claude_model"),
         openai_model: get("openai_model"),
         gemini_model: get("gemini_model"),
-        claude_api_key: get("claude_api_key"),
-        openai_api_key: get("openai_api_key"),
-        gemini_api_key: get("gemini_api_key"),
-        copilot_api_key: get("copilot_api_key"),
         copilot_model: get("copilot_model"),
         ai_enabled: get_bool("ai_enabled", true),
         ai_auto_categorize: get_bool("ai_auto_categorize", true),
@@ -505,11 +521,27 @@ pub fn get_settings_bootstrap_snapshot(
     })
 }
 
+pub fn get_settings_secrets_snapshot(
+    conn: &Connection,
+    encryption_key: &[u8; 32],
+) -> Result<SettingsSecretsSnapshot, String> {
+    let settings = read_setting_map(conn, encryption_key, SECURE_SETTING_KEYS)?;
+    let get = |key: &str| settings.get(key).cloned();
+
+    Ok(SettingsSecretsSnapshot {
+        google_client_secret: get("google_client_secret"),
+        claude_api_key: get("claude_api_key"),
+        openai_api_key: get("openai_api_key"),
+        gemini_api_key: get("gemini_api_key"),
+        copilot_api_key: get("copilot_api_key"),
+    })
+}
+
 pub fn get_ui_bootstrap_snapshot(
     conn: &Connection,
     encryption_key: &[u8; 32],
 ) -> Result<UiBootstrapSnapshot, String> {
-    let settings = read_setting_map(conn, encryption_key)?;
+    let settings = read_setting_map(conn, encryption_key, &[])?;
     let get = |key: &str| settings.get(key).cloned();
     let get_bool = |key: &str, default: bool| get(key).map_or(default, |value| value != "false");
 
@@ -531,6 +563,89 @@ pub fn get_ui_bootstrap_snapshot(
         task_sidebar_visible: get("task_sidebar_visible").is_some_and(|value| value == "true"),
         sidebar_nav_config: get("sidebar_nav_config"),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::Connection;
+
+    use super::{
+        get_settings_bootstrap_snapshot, get_settings_secrets_snapshot, get_ui_bootstrap_snapshot,
+    };
+    use crate::provider::crypto::encrypt_value;
+
+    fn setup_conn() -> Connection {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute(
+            "CREATE TABLE settings (
+                key TEXT PRIMARY KEY NOT NULL,
+                value TEXT NOT NULL
+            )",
+            [],
+        )
+        .expect("create settings table");
+        conn
+    }
+
+    fn insert_setting(conn: &Connection, key: &str, value: &str) {
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)",
+            rusqlite::params![key, value],
+        )
+        .expect("insert setting");
+    }
+
+    #[test]
+    fn ui_bootstrap_ignores_secure_settings() {
+        let conn = setup_conn();
+        let key = [11_u8; 32];
+        let encrypted_secret =
+            encrypt_value(&key, "top-secret").expect("encrypt google client secret");
+        insert_setting(&conn, "theme", "dark");
+        insert_setting(&conn, "google_client_secret", &encrypted_secret);
+
+        let snapshot = get_ui_bootstrap_snapshot(&conn, &key).expect("ui snapshot");
+
+        assert_eq!(snapshot.theme.as_deref(), Some("dark"));
+    }
+
+    #[test]
+    fn settings_bootstrap_excludes_secure_fields() {
+        let conn = setup_conn();
+        let key = [13_u8; 32];
+        let encrypted_secret =
+            encrypt_value(&key, "top-secret").expect("encrypt google client secret");
+        insert_setting(&conn, "google_client_id", "client-id");
+        insert_setting(&conn, "google_client_secret", &encrypted_secret);
+        insert_setting(&conn, "notifications_enabled", "false");
+
+        let snapshot = get_settings_bootstrap_snapshot(&conn, &key).expect("settings snapshot");
+
+        assert_eq!(snapshot.google_client_id.as_deref(), Some("client-id"));
+        assert!(!snapshot.notifications_enabled);
+    }
+
+    #[test]
+    fn secure_snapshot_decrypts_only_secret_fields() {
+        let conn = setup_conn();
+        let key = [17_u8; 32];
+        let encrypted_google_secret =
+            encrypt_value(&key, "google-secret").expect("encrypt google client secret");
+        let encrypted_openai_key =
+            encrypt_value(&key, "openai-secret").expect("encrypt openai api key");
+        insert_setting(&conn, "google_client_secret", &encrypted_google_secret);
+        insert_setting(&conn, "openai_api_key", &encrypted_openai_key);
+        insert_setting(&conn, "google_client_id", "client-id");
+
+        let snapshot = get_settings_secrets_snapshot(&conn, &key).expect("secure snapshot");
+
+        assert_eq!(
+            snapshot.google_client_secret.as_deref(),
+            Some("google-secret")
+        );
+        assert_eq!(snapshot.openai_api_key.as_deref(), Some("openai-secret"));
+        assert_eq!(snapshot.gemini_api_key, None);
+    }
 }
 
 pub fn set_setting(conn: &Connection, key: String, value: String) -> Result<(), String> {
