@@ -1,17 +1,8 @@
 use std::collections::HashMap;
 
-use super::types::GraphMailFolder;
+use crate::provider::folder_roles::graph_well_known_aliases;
 
-/// Well-known folder aliases that Graph accepts as URL path segments.
-/// (graph_alias, label_id, label_name)
-const WELL_KNOWN_ALIASES: &[(&str, &str, &str)] = &[
-    ("inbox", "INBOX", "Inbox"),
-    ("drafts", "DRAFT", "Drafts"),
-    ("sentitems", "SENT", "Sent"),
-    ("deleteditems", "TRASH", "Trash"),
-    ("junkemail", "SPAM", "Spam"),
-    ("archive", "archive", "Archive"),
-];
+use super::types::GraphMailFolder;
 
 /// Runtime mapping between opaque Graph folder IDs and Gmail-style label IDs.
 #[derive(Debug, Clone)]
@@ -118,7 +109,7 @@ impl FolderMap {
     }
 
     /// The well-known alias list (used by the resolution step in sync).
-    pub fn well_known_aliases() -> &'static [(&'static str, &'static str, &'static str)] {
-        WELL_KNOWN_ALIASES
+    pub fn well_known_aliases() -> Vec<(&'static str, &'static str, &'static str)> {
+        graph_well_known_aliases()
     }
 }

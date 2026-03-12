@@ -363,7 +363,7 @@ pub(crate) async fn sync_folders_public(
 async fn sync_folders(client: &GraphClient, ctx: &ProviderCtx<'_>) -> Result<FolderMap, String> {
     // Phase 1: Resolve well-known aliases to opaque IDs
     let mut resolved = HashMap::new();
-    for &(alias, label_id, label_name) in FolderMap::well_known_aliases() {
+    for (alias, label_id, label_name) in FolderMap::well_known_aliases() {
         match client
             .get_json::<GraphMailFolder>(&format!("/me/mailFolders/{alias}"), ctx.db)
             .await

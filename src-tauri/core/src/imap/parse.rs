@@ -4,6 +4,7 @@ use mail_parser::{MessageParser, MimeHeaders};
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::provider::email_parsing::format_address_list as format_addresses;
+use crate::provider::folder_roles::imap_name_to_special_use;
 
 use super::types::*;
 
@@ -30,18 +31,7 @@ pub fn detect_special_use(name: &async_imap::types::Name) -> Option<String> {
 
     // Heuristic fallback based on common folder names
     let lower = name.name().to_lowercase();
-    match lower.as_str() {
-        "inbox" => Some("\\Inbox".to_string()),
-        "sent" | "sent messages" | "sent items" | "[gmail]/sent mail" => Some("\\Sent".to_string()),
-        "trash" | "deleted" | "deleted items" | "deleted messages" | "bin" | "corbeille"
-        | "unsolbox" | "[gmail]/trash" => Some("\\Trash".to_string()),
-        "drafts" | "draft" | "draftbox" | "brouillons" | "[gmail]/drafts" => {
-            Some("\\Drafts".to_string())
-        }
-        "junk" | "spam" | "junk e-mail" | "[gmail]/spam" => Some("\\Junk".to_string()),
-        "archive" | "archives" | "[gmail]/all mail" => Some("\\Archive".to_string()),
-        _ => None,
-    }
+    imap_name_to_special_use(&lower).map(ToString::to_string)
 }
 
 /// Parse a raw email message into our ImapMessage struct.

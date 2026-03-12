@@ -1,4 +1,5 @@
 use crate::imap::types::ImapFolder;
+use crate::provider::folder_roles::{imap_name_to_special_use, system_folder_by_imap_special_use};
 
 /// Mapping from an IMAP folder to a Gmail-style label.
 #[derive(Debug, Clone)]
@@ -10,47 +11,17 @@ pub struct FolderLabelMapping {
 
 /// Map IMAP special-use flags to Gmail-style label IDs.
 fn special_use_mapping(special_use: &str) -> Option<FolderLabelMapping> {
-    let (id, name, ltype) = match special_use {
-        "\\Inbox" => ("INBOX", "Inbox", "system"),
-        "\\Sent" => ("SENT", "Sent", "system"),
-        "\\Drafts" => ("DRAFT", "Drafts", "system"),
-        "\\Trash" => ("TRASH", "Trash", "system"),
-        "\\Junk" => ("SPAM", "Spam", "system"),
-        "\\Archive" => ("archive", "Archive", "system"),
-        "\\Flagged" => ("STARRED", "Starred", "system"),
-        "\\All" => ("all-mail", "All Mail", "system"),
-        "\\Important" => ("IMPORTANT", "Important", "system"),
-        _ => return None,
-    };
+    let mapping = system_folder_by_imap_special_use(special_use)?;
     Some(FolderLabelMapping {
-        label_id: id.to_string(),
-        label_name: name.to_string(),
-        label_type: ltype.to_string(),
+        label_id: mapping.label_id.to_string(),
+        label_name: mapping.label_name.to_string(),
+        label_type: "system".to_string(),
     })
 }
 
 /// Well-known folder names (case-insensitive) → special-use attribute.
 fn folder_name_to_special_use(name: &str) -> Option<&'static str> {
-    match name {
-        "inbox" => Some("\\Inbox"),
-        "sent" | "sent items" | "sent mail" => Some("\\Sent"),
-        "drafts" | "draft" | "draftbox" | "brouillons" => Some("\\Drafts"),
-        "trash" | "deleted items" | "deleted messages" | "bin" | "corbeille" | "unsolbox" => {
-            Some("\\Trash")
-        }
-        "junk" | "junk e-mail" | "spam" => Some("\\Junk"),
-        "archive" | "archives" => Some("\\Archive"),
-        "flagged" | "starred" => Some("\\Flagged"),
-        "all mail" => Some("\\All"),
-        "[gmail]/all mail" => Some("\\All"),
-        "[gmail]/sent mail" => Some("\\Sent"),
-        "[gmail]/drafts" => Some("\\Drafts"),
-        "[gmail]/spam" => Some("\\Junk"),
-        "[gmail]/trash" => Some("\\Trash"),
-        "[gmail]/starred" => Some("\\Flagged"),
-        "[gmail]/important" => Some("\\Important"),
-        _ => None,
-    }
+    imap_name_to_special_use(name)
 }
 
 /// Map an IMAP folder to a Gmail-style label.

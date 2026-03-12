@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use base64::Engine;
 use rusqlite::Connection;
 
+use crate::provider::folder_roles::{imap_name_to_special_use, imap_special_use_to_label_id};
 use crate::provider::ops::ProviderOps;
 use crate::provider::types::{
     AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
@@ -20,23 +21,9 @@ use super::connection::connect;
 /// Mirrors the old TS `mapFolderToLabel` logic:
 /// system folders get well-known IDs (INBOX, SENT, …), user folders get `folder-{path}`.
 fn canonical_folder_id(path: &str, special_use: Option<&str>) -> String {
-    let canonical = match special_use {
-        Some("\\Inbox") => Some("INBOX"),
-        Some("\\Sent") => Some("SENT"),
-        Some("\\Trash") => Some("TRASH"),
-        Some("\\Drafts") => Some("DRAFT"),
-        Some("\\Junk") => Some("SPAM"),
-        Some("\\Archive") | Some("\\All") => Some("ARCHIVE"),
-        Some("\\Flagged") => Some("STARRED"),
-        _ => None,
-    };
-    // Also detect by well-known path name as a fallback
-    let by_name = match path.to_lowercase().as_str() {
-        "inbox" => Some("INBOX"),
-        _ => None,
-    };
-    canonical
-        .or(by_name)
+    let lower = path.to_lowercase();
+    imap_special_use_to_label_id(special_use.unwrap_or_default())
+        .or_else(|| imap_name_to_special_use(&lower).and_then(imap_special_use_to_label_id))
         .map(str::to_string)
         .unwrap_or_else(|| format!("folder-{path}"))
 }
@@ -217,15 +204,7 @@ fn find_special_folder(
     }
 
     // Fallback: map special-use to well-known label ID
-    let label_id = match special_use {
-        "\\Trash" => Some("TRASH"),
-        "\\Junk" => Some("SPAM"),
-        "\\Archive" => Some("ARCHIVE"),
-        "\\Sent" => Some("SENT"),
-        "\\Drafts" => Some("DRAFT"),
-        "\\All" => Some("ALL"),
-        _ => None,
-    };
+    let label_id = imap_special_use_to_label_id(special_use);
 
     if let Some(lid) = label_id {
         let fallback: Option<String> = conn

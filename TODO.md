@@ -44,7 +44,7 @@
 
 - [x] **Shared address parsing** — The duplicated "Name <email>" parsing/formatting helpers from `ratatoskr-core::{gmail,imap,graph,jmap}::parse` now live in `ratatoskr-core::provider::email_parsing`.
 
-- [ ] **Shared folder role mapping** — `jmap/mailbox_mapper.rs:4-77`, `graph/folder_mapper.rs:7-124`, `imap/ops.rs:22-42` all map well-known folder roles (inbox, sent, trash, junk, drafts, archive) to canonical names. Create a shared `SYSTEM_FOLDER_ROLES` constant.
+- [x] **Shared folder role mapping** — The duplicated system folder role mappings for JMAP, Graph, and IMAP now live in `ratatoskr-core::provider::folder_roles` as a shared `SYSTEM_FOLDER_ROLES` table with provider-specific lookup helpers.
 
 - [ ] **Shared label/flag extraction** — `jmap/mailbox_mapper.rs:51-77` and `graph/folder_mapper.rs:78-107` have ~95% identical logic for extracting labels from folder membership + keywords/flags. Unify with provider-specific adapters.
 

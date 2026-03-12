@@ -1,15 +1,5 @@
+use crate::provider::folder_roles::{SYSTEM_FOLDER_ROLES, system_folder_by_jmap_role};
 use std::collections::HashMap;
-
-/// (jmap_role, label_id, label_name)
-const ROLE_MAP: &[(&str, &str, &str)] = &[
-    ("inbox", "INBOX", "Inbox"),
-    ("archive", "archive", "Archive"),
-    ("drafts", "DRAFT", "Drafts"),
-    ("sent", "SENT", "Sent"),
-    ("trash", "TRASH", "Trash"),
-    ("junk", "SPAM", "Spam"),
-    ("important", "IMPORTANT", "Important"),
-];
 
 pub struct MailboxLabelMapping {
     pub label_id: String,
@@ -27,11 +17,11 @@ pub fn map_mailbox_to_label(
     name: &str,
 ) -> MailboxLabelMapping {
     if let Some(r) = role
-        && let Some(&(_, label_id, label_name)) = ROLE_MAP.iter().find(|&&(rr, _, _)| rr == r)
+        && let Some(mapping) = system_folder_by_jmap_role(r)
     {
         return MailboxLabelMapping {
-            label_id: label_id.to_string(),
-            label_name: label_name.to_string(),
+            label_id: mapping.label_id.to_string(),
+            label_name: mapping.label_name.to_string(),
             label_type: "system",
         };
     }
@@ -82,19 +72,14 @@ pub fn label_id_to_mailbox_id(
     mailboxes: &[(String, Option<String>, String)], // (id, role, name)
 ) -> Option<String> {
     // Check system role mappings
-    for &(_, sys_label_id, _) in ROLE_MAP {
-        if sys_label_id == label_id {
-            // Find the role name for this label
-            let role_name = ROLE_MAP
+    for mapping in SYSTEM_FOLDER_ROLES {
+        if mapping.label_id == label_id
+            && let Some(role) = mapping.jmap_role
+        {
+            return mailboxes
                 .iter()
-                .find(|(_, lid, _)| *lid == label_id)
-                .map(|(r, _, _)| *r);
-            if let Some(role) = role_name {
-                return mailboxes
-                    .iter()
-                    .find(|(_, r, _)| r.as_deref() == Some(role))
-                    .map(|(id, _, _)| id.clone());
-            }
+                .find(|(_, r, _)| r.as_deref() == Some(role))
+                .map(|(id, _, _)| id.clone());
         }
     }
 
