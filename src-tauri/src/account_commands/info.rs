@@ -13,6 +13,7 @@ use crate::sync::config;
 
 use super::types::{
     AccountBasicInfo, AccountCaldavSettingsInfo, CaldavConnectionInfo, CalendarProviderInfo,
+    OAuthDefaults,
 };
 
 #[tauri::command]
@@ -291,6 +292,32 @@ pub async fn account_get_caldav_settings_info(
         )
         .optional()
         .map_err(|e| format!("query account caldav settings info: {e}"))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn account_get_provider_oauth_defaults(
+    db: State<'_, DbState>,
+    provider: String,
+) -> Result<Option<OAuthDefaults>, String> {
+    db.with_conn(move |conn| {
+        conn.query_row(
+            "SELECT oauth_client_id, oauth_client_secret FROM accounts \
+             WHERE provider = ?1 AND oauth_client_id IS NOT NULL AND oauth_client_id != '' \
+             ORDER BY rowid DESC LIMIT 1",
+            rusqlite::params![provider],
+            |row| {
+                Ok(OAuthDefaults {
+                    client_id: row.get(0)?,
+                    has_secret: row
+                        .get::<_, Option<String>>(1)?
+                        .is_some_and(|s| !s.is_empty()),
+                })
+            },
+        )
+        .optional()
+        .map_err(|e| format!("query provider oauth defaults: {e}"))
     })
     .await
 }

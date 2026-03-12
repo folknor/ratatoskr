@@ -16,7 +16,7 @@ import type React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { deleteAccount } from "@/core/accounts";
-import { setSecureSetting, setSetting } from "@/core/settings";
+import { setSetting } from "@/core/settings";
 import {
   forceFullSync,
   reauthorizeAccount,
@@ -102,10 +102,6 @@ export function SettingsPage(): React.ReactNode {
   const [systemLanguageName, setSystemLanguageName] = useState("English");
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [undoSendDelay, setUndoSendDelay] = useState("5");
-  const [clientId, setClientId] = useState("");
-  const [clientSecret, setClientSecret] = useState("");
-  const [microsoftClientId, setMicrosoftClientId] = useState("");
-  const [apiSettingsSaved, setApiSettingsSaved] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncPeriodDays, setSyncPeriodDays] = useState("365");
   const [blockRemoteImages, setBlockRemoteImages] = useState(true);
@@ -174,9 +170,6 @@ export function SettingsPage(): React.ReactNode {
 
       setNotificationsEnabled(snapshot.notificationsEnabled);
       setUndoSendDelay(snapshot.undoSendDelaySeconds ?? "5");
-      setClientId(snapshot.googleClientId ?? "");
-      setClientSecret(secrets.googleClientSecret ?? "");
-      setMicrosoftClientId(snapshot.microsoftClientId ?? "");
       setBlockRemoteImages(snapshot.blockRemoteImages);
       setPhishingDetectionEnabled(snapshot.phishingDetectionEnabled);
       if (
@@ -303,19 +296,6 @@ export function SettingsPage(): React.ReactNode {
     [],
   );
 
-  const handleSaveApiSettings = useCallback(async (): Promise<void> => {
-    const trimmedId = clientId.trim();
-    if (trimmedId) {
-      await setSetting("google_client_id", trimmedId);
-    }
-    const trimmedSecret = clientSecret.trim();
-    if (trimmedSecret) {
-      await setSecureSetting("google_client_secret", trimmedSecret);
-    }
-    setApiSettingsSaved(true);
-    setTimeout(() => setApiSettingsSaved(false), 2000);
-  }, [clientId, clientSecret]);
-
   const handleManualSync = useCallback(async (): Promise<void> => {
     const activeIds = accounts.filter((a) => a.isActive).map((a) => a.id);
     if (activeIds.length === 0) return;
@@ -348,10 +328,14 @@ export function SettingsPage(): React.ReactNode {
   );
 
   const handleReauthorizeAccount = useCallback(
-    async (accountId: string, email: string): Promise<void> => {
+    async (
+      accountId: string,
+      email: string,
+      provider?: string,
+    ): Promise<void> => {
       setReauthStatus((prev) => ({ ...prev, [accountId]: "authorizing" }));
       try {
-        await reauthorizeAccount(accountId, email);
+        await reauthorizeAccount(accountId, email, provider);
         setReauthStatus((prev) => ({ ...prev, [accountId]: "done" }));
         setTimeout(() => {
           setReauthStatus((prev) => ({ ...prev, [accountId]: "idle" }));
@@ -489,14 +473,6 @@ export function SettingsPage(): React.ReactNode {
 
               {activeTab === "accounts" && (
                 <SettingsAccountsTab
-                  clientId={clientId}
-                  setClientId={setClientId}
-                  clientSecret={clientSecret}
-                  setClientSecret={setClientSecret}
-                  microsoftClientId={microsoftClientId}
-                  setMicrosoftClientId={setMicrosoftClientId}
-                  apiSettingsSaved={apiSettingsSaved}
-                  handleSaveApiSettings={handleSaveApiSettings}
                   isSyncing={isSyncing}
                   handleManualSync={handleManualSync}
                   handleForceFullSync={handleForceFullSync}

@@ -1,8 +1,4 @@
-use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
-
-use crate::db::DbState;
-use crate::provider::crypto::{decrypt_value, is_encrypted};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -83,29 +79,9 @@ pub struct AccountCaldavSettingsInfo {
     pub calendar_provider: Option<String>,
 }
 
-pub(super) async fn read_setting(
-    db: &DbState,
-    key: &str,
-    encryption_key: &[u8; 32],
-) -> Result<Option<String>, String> {
-    let key_name = key.to_string();
-    let value = db
-        .with_conn(move |conn| {
-            conn.query_row(
-                "SELECT value FROM settings WHERE key = ?1",
-                rusqlite::params![key_name],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()
-            .map_err(|e| format!("Failed to read setting: {e}"))
-        })
-        .await?;
-
-    Ok(value.map(|raw| {
-        if is_encrypted(&raw) {
-            decrypt_value(encryption_key, &raw).unwrap_or(raw)
-        } else {
-            raw
-        }
-    }))
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthDefaults {
+    pub client_id: String,
+    pub has_secret: bool,
 }

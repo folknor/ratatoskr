@@ -76,6 +76,8 @@ pub fn run() {
             account_commands::account_get_caldav_connection_info,
             account_commands::account_get_calendar_provider_info,
             account_commands::account_reauthorize_gmail,
+            account_commands::account_reauthorize_graph,
+            account_commands::account_get_provider_oauth_defaults,
             oauth::oauth_exchange_token,
             oauth::oauth_refresh_token,
             tray::set_tray_tooltip,

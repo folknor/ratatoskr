@@ -112,8 +112,6 @@ fn row_to_attachment(row: &Row<'_>) -> rusqlite::Result<DbAttachment> {
 pub struct SettingsBootstrapSnapshot {
     pub notifications_enabled: bool,
     pub undo_send_delay_seconds: Option<String>,
-    pub google_client_id: Option<String>,
-    pub microsoft_client_id: Option<String>,
     pub block_remote_images: bool,
     pub phishing_detection_enabled: bool,
     pub phishing_sensitivity: Option<String>,
@@ -139,7 +137,6 @@ pub struct SettingsBootstrapSnapshot {
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsSecretsSnapshot {
-    pub google_client_secret: Option<String>,
     pub claude_api_key: Option<String>,
     pub openai_api_key: Option<String>,
     pub gemini_api_key: Option<String>,
@@ -173,7 +170,6 @@ pub struct UiBootstrapSnapshot {
 }
 
 const SECURE_SETTING_KEYS: &[&str] = &[
-    "google_client_secret",
     "claude_api_key",
     "openai_api_key",
     "gemini_api_key",
@@ -484,8 +480,6 @@ pub fn get_settings_bootstrap_snapshot(
     Ok(SettingsBootstrapSnapshot {
         notifications_enabled: get_bool("notifications_enabled", true),
         undo_send_delay_seconds: get("undo_send_delay_seconds"),
-        google_client_id: get("google_client_id"),
-        microsoft_client_id: get("microsoft_client_id"),
         block_remote_images: get_bool("block_remote_images", true),
         phishing_detection_enabled: get_bool("phishing_detection_enabled", true),
         phishing_sensitivity: get("phishing_sensitivity"),
@@ -517,7 +511,6 @@ pub fn get_settings_secrets_snapshot(
     let get = |key: &str| settings.get(key).cloned();
 
     Ok(SettingsSecretsSnapshot {
-        google_client_secret: get("google_client_secret"),
         claude_api_key: get("claude_api_key"),
         openai_api_key: get("openai_api_key"),
         gemini_api_key: get("gemini_api_key"),
@@ -593,10 +586,10 @@ mod tests {
         let conn = setup_conn();
         let key = [11_u8; 32];
         let encrypted_secret =
-            encrypt_value(&key, "top-secret").expect("encrypt google client secret");
+            encrypt_value(&key, "top-secret").expect("encrypt api key");
         insert_setting(&conn, "theme", "dark");
         insert_setting(&conn, "language", "en");
-        insert_setting(&conn, "google_client_secret", &encrypted_secret);
+        insert_setting(&conn, "claude_api_key", &encrypted_secret);
 
         let snapshot = get_ui_bootstrap_snapshot(&conn, &key).expect("ui snapshot");
 
@@ -608,15 +601,10 @@ mod tests {
     fn settings_bootstrap_excludes_secure_fields() {
         let conn = setup_conn();
         let key = [13_u8; 32];
-        let encrypted_secret =
-            encrypt_value(&key, "top-secret").expect("encrypt google client secret");
-        insert_setting(&conn, "google_client_id", "client-id");
-        insert_setting(&conn, "google_client_secret", &encrypted_secret);
         insert_setting(&conn, "notifications_enabled", "false");
 
         let snapshot = get_settings_bootstrap_snapshot(&conn, &key).expect("settings snapshot");
 
-        assert_eq!(snapshot.google_client_id.as_deref(), Some("client-id"));
         assert!(!snapshot.notifications_enabled);
     }
 
@@ -624,20 +612,12 @@ mod tests {
     fn secure_snapshot_decrypts_only_secret_fields() {
         let conn = setup_conn();
         let key = [17_u8; 32];
-        let encrypted_google_secret =
-            encrypt_value(&key, "google-secret").expect("encrypt google client secret");
         let encrypted_openai_key =
             encrypt_value(&key, "openai-secret").expect("encrypt openai api key");
-        insert_setting(&conn, "google_client_secret", &encrypted_google_secret);
         insert_setting(&conn, "openai_api_key", &encrypted_openai_key);
-        insert_setting(&conn, "google_client_id", "client-id");
 
         let snapshot = get_settings_secrets_snapshot(&conn, &key).expect("secure snapshot");
 
-        assert_eq!(
-            snapshot.google_client_secret.as_deref(),
-            Some("google-secret")
-        );
         assert_eq!(snapshot.openai_api_key.as_deref(), Some("openai-secret"));
         assert_eq!(snapshot.gemini_api_key, None);
     }

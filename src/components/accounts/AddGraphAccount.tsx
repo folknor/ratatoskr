@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "@/components/ui/Modal";
 import { useAccountStore } from "@/stores/accountStore";
+import { SetupProviderCredentials } from "./SetupProviderCredentials";
 
 interface AddGraphAccountProps {
   onClose: () => void;
@@ -20,27 +21,34 @@ interface GraphAccountResult {
   provider: string;
 }
 
+type GraphView = "credentials" | "auth";
+
 export function AddGraphAccount({
   onClose,
   onSuccess,
   onBack,
 }: AddGraphAccountProps): React.ReactNode {
   const { t } = useTranslation("accounts");
+  const [graphView, setGraphView] = useState<GraphView>("credentials");
   const [status, setStatus] = useState<
     "idle" | "checking" | "authenticating" | "error"
   >("idle");
   const [error, setError] = useState<string | null>(null);
   const addAccount = useAccountStore((s) => s.addAccount);
 
-  const handleSignIn = async (): Promise<void> => {
-    setStatus("checking");
+  const handleCredentials = (clientId: string): void => {
+    setGraphView("auth");
+    void handleSignIn(clientId);
+  };
+
+  const handleSignIn = async (clientId: string): Promise<void> => {
+    setStatus("authenticating");
     setError(null);
 
     try {
-      setStatus("authenticating");
-
       const account = await invoke<GraphAccountResult>(
         "account_create_graph_via_oauth",
+        { clientId },
       );
 
       addAccount({
@@ -57,8 +65,19 @@ export function AddGraphAccount({
       console.error("Add Graph account error:", err);
       setError(err instanceof Error ? err.message : String(err));
       setStatus("error");
+      setGraphView("credentials");
     }
   };
+
+  if (graphView === "credentials") {
+    return (
+      <SetupProviderCredentials
+        provider="microsoft"
+        onSubmit={(clientId: string): void => handleCredentials(clientId)}
+        onCancel={onBack}
+      />
+    );
+  }
 
   return (
     <Modal
@@ -97,34 +116,18 @@ export function AddGraphAccount({
         <div className="flex gap-3 justify-between">
           <button
             type="button"
-            onClick={(): void => {
-              onBack();
-            }}
+            onClick={onBack}
             className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
           >
             {t("common:back", "Back")}
           </button>
-          <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
-            >
-              {t("common:cancel", "Cancel")}
-            </button>
-            <button
-              type="button"
-              onClick={handleSignIn}
-              disabled={status === "authenticating" || status === "checking"}
-              className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {status === "authenticating"
-                ? t("common:waiting", "Waiting...")
-                : status === "checking"
-                  ? t("common:checking", "Checking...")
-                  : t("signInWithMicrosoft", "Sign in with Microsoft")}
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
+          >
+            {t("common:cancel", "Cancel")}
+          </button>
         </div>
       </div>
     </Modal>

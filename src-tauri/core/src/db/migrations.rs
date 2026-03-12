@@ -757,6 +757,22 @@ static MIGRATIONS: &[Migration] = &[
                 );
         "#,
     },
+    Migration {
+        version: 29,
+        description: "Backfill per-account OAuth credentials from global settings",
+        sql: r#"
+            UPDATE accounts
+            SET oauth_client_id = (SELECT value FROM settings WHERE key = 'google_client_id'),
+                oauth_client_secret = (SELECT value FROM settings WHERE key = 'google_client_secret')
+            WHERE provider = 'gmail_api'
+              AND (oauth_client_id IS NULL OR oauth_client_id = '');
+
+            UPDATE accounts
+            SET oauth_client_id = (SELECT value FROM settings WHERE key = 'microsoft_client_id')
+            WHERE provider = 'graph'
+              AND (oauth_client_id IS NULL OR oauth_client_id = '');
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -996,6 +1012,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))
             .expect("query");
-        assert_eq!(max_ver, 28);
+        assert_eq!(max_ver, 29);
     }
 }

@@ -493,16 +493,13 @@ fn read_account_tokens(
     let access_token = decrypt_or_raw(key, &enc_access);
     let refresh_token = decrypt_or_raw(key, &enc_refresh);
 
-    // Client ID: from account's oauth_client_id, or fall back to global setting
-    let client_id = if let Some(cid) = row.3 {
-        if cid.is_empty() {
-            read_ms_client_id(conn, key)?
-        } else {
-            cid
-        }
-    } else {
-        read_ms_client_id(conn, key)?
-    };
+    let client_id = row
+        .3
+        .filter(|s| !s.is_empty())
+        .map(|s| decrypt_or_raw(key, &s))
+        .ok_or_else(|| {
+            "Account missing OAuth credentials — reauthorize to fix".to_string()
+        })?;
 
     Ok((access_token, refresh_token, expires_at, client_id))
 }
@@ -513,17 +510,6 @@ fn decrypt_or_raw(key: &[u8; 32], value: &str) -> String {
     } else {
         value.to_string()
     }
-}
-
-fn read_ms_client_id(conn: &rusqlite::Connection, key: &[u8; 32]) -> Result<String, String> {
-    let raw: String = conn
-        .query_row(
-            "SELECT value FROM settings WHERE key = 'microsoft_client_id'",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|_| "No microsoft_client_id configured in settings".to_string())?;
-    Ok(decrypt_or_raw(key, &raw))
 }
 
 /// Persist a refreshed access token (encrypted) to the database.

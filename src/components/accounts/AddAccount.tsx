@@ -8,7 +8,7 @@ import { useAccountStore } from "@/stores/accountStore";
 import { AddCalDavAccount } from "./AddCalDavAccount";
 import { AddGraphAccount } from "./AddGraphAccount";
 import { AddImapAccount } from "./AddImapAccount";
-import { SetupClientId } from "./SetupClientId";
+import { SetupProviderCredentials } from "./SetupProviderCredentials";
 
 interface AddAccountProps {
   onClose: () => void;
@@ -24,7 +24,13 @@ interface GmailAccountResult {
   provider: string;
 }
 
-type View = "select-provider" | "gmail" | "imap" | "caldav" | "graph";
+type View =
+  | "select-provider"
+  | "gmail-credentials"
+  | "gmail-auth"
+  | "imap"
+  | "caldav"
+  | "graph";
 
 export function AddAccount({
   onClose,
@@ -36,17 +42,27 @@ export function AddAccount({
     "idle" | "checking" | "authenticating" | "error"
   >("idle");
   const [error, setError] = useState<string | null>(null);
-  const [needsSetup, setNeedsSetup] = useState(false);
   const addAccount = useAccountStore((s) => s.addAccount);
 
-  const handleAddGmailAccount = async (): Promise<void> => {
-    setStatus("checking");
+  const handleGmailCredentials = (
+    clientId: string,
+    clientSecret: string | null,
+  ): void => {
+    setView("gmail-auth");
+    void handleAddGmailAccount(clientId, clientSecret);
+  };
+
+  const handleAddGmailAccount = async (
+    clientId: string,
+    clientSecret: string | null,
+  ): Promise<void> => {
+    setStatus("authenticating");
     setError(null);
 
     try {
-      setStatus("authenticating");
       const account = await invoke<GmailAccountResult>(
         "account_create_gmail_via_oauth",
+        { clientId, clientSecret },
       );
 
       addAccount({
@@ -62,22 +78,17 @@ export function AddAccount({
     } catch (err) {
       console.error("Add account error:", err);
       const message = err instanceof Error ? err.message : String(err);
-      if (message.includes("Client ID not configured")) {
-        setNeedsSetup(true);
-      } else {
-        setError(message);
-        setStatus("error");
-      }
+      setError(message);
+      setStatus("error");
+      setView("gmail-credentials");
     }
   };
 
-  if (needsSetup) {
+  if (view === "gmail-credentials") {
     return (
-      <SetupClientId
-        onComplete={(): void => {
-          setNeedsSetup(false);
-          setStatus("idle");
-        }}
+      <SetupProviderCredentials
+        provider="google"
+        onSubmit={handleGmailCredentials}
         onCancel={onClose}
       />
     );
@@ -113,7 +124,7 @@ export function AddAccount({
     );
   }
 
-  if (view === "gmail") {
+  if (view === "gmail-auth") {
     return (
       <Modal
         isOpen={true}
@@ -153,27 +164,13 @@ export function AddAccount({
             >
               {t("common:back")}
             </button>
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
-              >
-                {t("common:cancel")}
-              </button>
-              <button
-                type="button"
-                onClick={handleAddGmailAccount}
-                disabled={status === "authenticating" || status === "checking"}
-                className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {status === "authenticating"
-                  ? t("common:waiting")
-                  : status === "checking"
-                    ? t("common:checking")
-                    : t("signInWithGoogle")}
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
+            >
+              {t("common:cancel")}
+            </button>
           </div>
         </div>
       </Modal>
@@ -196,7 +193,7 @@ export function AddAccount({
         <div className="space-y-3">
           <button
             type="button"
-            onClick={(): void => setView("gmail")}
+            onClick={(): void => setView("gmail-credentials")}
             className="w-full flex items-center gap-4 p-4 rounded-lg border border-border-primary bg-bg-secondary hover:bg-bg-hover transition-colors text-left group"
           >
             <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-bg-tertiary flex items-center justify-center">

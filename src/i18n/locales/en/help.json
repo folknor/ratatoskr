@@ -49,13 +49,13 @@
     "client-id-setup": {
       "title": "Google Client ID setup",
       "summary": "Set up your own Google Cloud OAuth credentials (Gmail only).",
-      "description": "This step is only needed for Gmail accounts. The app uses your own Google Cloud project for OAuth authentication — this means your credentials stay on your device and are never shared. When you first add a Gmail account, a setup wizard guides you through creating a Google Cloud project, enabling the Gmail and Calendar APIs, and generating an OAuth Client ID. The process takes about 5 minutes. The app uses PKCE authentication, so no client secret is needed. IMAP/SMTP accounts do not require a Client ID.",
+      "description": "This step is only needed for Gmail accounts. The app uses your own Google Cloud project for OAuth authentication — this means your credentials stay on your device and are never shared. When you add a Gmail account, you're prompted to enter your Google Cloud OAuth Client ID and Client Secret. Each account stores its own credentials, so you can use different app registrations for different accounts. The process takes about 5 minutes. IMAP/SMTP accounts do not require a Google Client ID.",
       "tips": [
         "Go to console.cloud.google.com to create your project.",
         "Enable both the Gmail API and Google Calendar API.",
         "Choose 'Desktop application' when creating OAuth credentials.",
-        "Your Client ID is stored locally — never sent to external servers.",
-        "Update your Client ID later in Settings > About.",
+        "Credentials are stored per-account and encrypted locally — never sent to external servers.",
+        "When adding another Gmail account, your previous Client ID is pre-filled for convenience.",
         "IMAP accounts skip this step entirely — no Google Cloud project needed."
       ]
     },

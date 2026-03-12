@@ -49,9 +49,15 @@
 
 - [x] **Deduplicate account-to-store mapping in the React entry points** — The shared account-store shaping now lives in `src/services/accounts/basicInfo.ts::mapAccountBasicInfos()`, and `App.tsx`, `ComposerWindow.tsx`, and `ThreadWindow.tsx` all use that helper.
 
+### Per-Account OAuth Credentials
+
+- [ ] **Add per-account credential editing UI for existing accounts** — The Rust reauth commands (`account_reauthorize_gmail`, `account_reauthorize_graph`) already accept optional `client_id`/`client_secret` parameters to update stored credentials, but the frontend reauth flow doesn't surface fields to edit them. Add a `SetupProviderCredentials` step (prefilled with current values) before the reauth OAuth redirect, so users can inspect and change which app registration an existing account uses.
+
+- [ ] **Clean up orphaned global credential settings rows** — Migration v29 backfilled per-account `oauth_client_id`/`oauth_client_secret` from the global `settings` table, but the original `google_client_id`, `google_client_secret`, and `microsoft_client_id` rows remain in the `settings` table as dead data. Add a follow-up migration or cleanup step to delete these rows once the per-account migration has been live long enough.
+
 ### Microsoft Graph
 
-- [ ] **Decide on Azure AD app registration model** — Currently users must provide their own `microsoft_client_id` via settings UI (`SettingsAccountsTab.tsx`). No default client ID is shipped. The open question is whether to register and ship a default Entra ID app registration (simpler onboarding, but requires maintaining an Azure AD app, handling consent prompts, and staying within Microsoft's rate limits across all users) or keep requiring user-provided credentials (friction for non-technical users, but zero shared infrastructure). The `microsoft_client_id` settings field and encrypted storage infra are already in place — this is a product/policy decision, not a code gap.
+- [ ] **Decide on Azure AD app registration model** — Currently users must provide their own `microsoft_client_id` during account setup. No default client ID is shipped. The open question is whether to register and ship a default Entra ID app registration (simpler onboarding, but requires maintaining an Azure AD app, handling consent prompts, and staying within Microsoft's rate limits across all users) or keep requiring user-provided credentials (friction for non-technical users, but zero shared infrastructure). Credentials are now stored per-account — this is a product/policy decision, not a code gap.
 
 - [ ] **Implement large attachment upload sessions (>3MB)** — Graph API rejects inline base64 attachments over 3MB. Larger files require a multi-step resumable upload session: `POST /me/messages/{id}/attachments/createUploadSession` → chunked `PUT` to the returned upload URL. Currently `graph/ops.rs` uses simple `POST /me/messages/{id}/attachments` which will fail silently or error for large files. Need to detect size threshold, create upload session, chunk the file (recommended 5-10MB chunks per Microsoft docs), and handle resume on failure. Affects `send_message` (create-draft-then-send pattern in `ops.rs` lines ~211-249) and `save_draft`.
 

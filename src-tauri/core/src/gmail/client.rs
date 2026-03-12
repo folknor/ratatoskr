@@ -355,7 +355,7 @@ fn read_account_tokens(
     let mut stmt = conn
         .prepare(
             "SELECT access_token, refresh_token, token_expires_at,
-                    oauth_client_id
+                    oauth_client_id, oauth_client_secret
              FROM accounts WHERE id = ?1",
         )
         .map_err(|e| format!("prepare: {e}"))?;
@@ -367,6 +367,7 @@ fn read_account_tokens(
                 row.get::<_, Option<String>>(1)?,
                 row.get::<_, Option<i64>>(2)?,
                 row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
             ))
         })
         .map_err(|e| format!("Account {account_id} not found: {e}"))?;
@@ -378,19 +379,18 @@ fn read_account_tokens(
     let access_token = decrypt_or_raw(key, &enc_access);
     let refresh_token = decrypt_or_raw(key, &enc_refresh);
 
-    // Client ID: from account's oauth_client_id, or fall back to global setting
-    let client_id = if let Some(cid) = row.3 {
-        if cid.is_empty() {
-            read_global_client_id(conn, key)?
-        } else {
-            cid
-        }
-    } else {
-        read_global_client_id(conn, key)?
-    };
+    let client_id = row
+        .3
+        .filter(|s| !s.is_empty())
+        .map(|s| decrypt_or_raw(key, &s))
+        .ok_or_else(|| {
+            "Account missing OAuth credentials — reauthorize to fix".to_string()
+        })?;
 
-    // Client secret: read from global settings (optional)
-    let client_secret = read_global_client_secret(conn, key);
+    let client_secret = row
+        .4
+        .filter(|s| !s.is_empty())
+        .map(|s| decrypt_or_raw(key, &s));
 
     Ok((
         access_token,
@@ -408,28 +408,6 @@ fn decrypt_or_raw(key: &[u8; 32], value: &str) -> String {
     } else {
         value.to_string()
     }
-}
-
-fn read_global_client_id(conn: &rusqlite::Connection, key: &[u8; 32]) -> Result<String, String> {
-    let raw: String = conn
-        .query_row(
-            "SELECT value FROM settings WHERE key = 'google_client_id'",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|_| "No google_client_id configured in settings".to_string())?;
-    Ok(decrypt_or_raw(key, &raw))
-}
-
-fn read_global_client_secret(conn: &rusqlite::Connection, key: &[u8; 32]) -> Option<String> {
-    let raw: Option<String> = conn
-        .query_row(
-            "SELECT value FROM settings WHERE key = 'google_client_secret'",
-            [],
-            |row| row.get(0),
-        )
-        .ok();
-    raw.map(|r| decrypt_or_raw(key, &r))
 }
 
 /// Persist a refreshed access token (encrypted) to the database.

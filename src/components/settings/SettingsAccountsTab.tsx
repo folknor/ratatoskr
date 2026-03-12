@@ -3,7 +3,6 @@ import type React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/Button";
-import { TextField } from "@/components/ui/TextField";
 import {
   getAliasesForAccount,
   mapDbAlias,
@@ -19,35 +18,23 @@ import { useAccountStore } from "@/stores/accountStore";
 import { Section, SettingRow } from "./SettingsShared";
 
 export interface SettingsAccountsTabProps {
-  clientId: string;
-  setClientId: (val: string) => void;
-  clientSecret: string;
-  setClientSecret: (val: string) => void;
-  microsoftClientId: string;
-  setMicrosoftClientId: (val: string) => void;
-  apiSettingsSaved: boolean;
-  handleSaveApiSettings: () => Promise<void>;
   isSyncing: boolean;
   handleManualSync: () => Promise<void>;
   handleForceFullSync: () => Promise<void>;
   syncPeriodDays: string;
   setSyncPeriodDays: (val: string) => void;
   handleRemoveAccount: (accountId: string) => Promise<void>;
-  handleReauthorizeAccount: (accountId: string, email: string) => Promise<void>;
+  handleReauthorizeAccount: (
+    accountId: string,
+    email: string,
+    provider?: string,
+  ) => Promise<void>;
   handleResyncAccount: (accountId: string) => Promise<void>;
   reauthStatus: Record<string, "idle" | "authorizing" | "done" | "error">;
   resyncStatus: Record<string, "idle" | "syncing" | "done" | "error">;
 }
 
 export function SettingsAccountsTab({
-  clientId,
-  setClientId,
-  clientSecret,
-  setClientSecret,
-  microsoftClientId,
-  setMicrosoftClientId,
-  apiSettingsSaved,
-  handleSaveApiSettings,
   isSyncing,
   handleManualSync,
   handleForceFullSync,
@@ -97,6 +84,7 @@ export function SettingsAccountsTab({
                           void handleReauthorizeAccount(
                             account.id,
                             account.email,
+                            account.provider,
                           )
                         }
                         disabled={reauthStatus[account.id] === "authorizing"}
@@ -180,63 +168,6 @@ export function SettingsAccountsTab({
       <SendAsAliasesSection />
 
       <ImapCalDavSection />
-
-      <Section title={t("googleApi")}>
-        <div className="space-y-3">
-          <TextField
-            label={t("clientId")}
-            size="md"
-            type="text"
-            value={clientId}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
-              setClientId(e.target.value)
-            }
-            placeholder={t("googleClientId")}
-          />
-          <TextField
-            label={t("clientSecret")}
-            size="md"
-            type="password"
-            value={clientSecret}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
-              setClientSecret(e.target.value)
-            }
-            placeholder={t("googleClientSecret")}
-          />
-          <Button
-            variant="primary"
-            size="md"
-            onClick={handleSaveApiSettings}
-            disabled={!clientId.trim()}
-          >
-            {apiSettingsSaved ? t("saved") : t("save")}
-          </Button>
-        </div>
-      </Section>
-
-      <Section title={t("microsoftApi")}>
-        <div className="space-y-3">
-          <TextField
-            label={t("microsoftClientId")}
-            size="md"
-            type="text"
-            value={microsoftClientId}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
-              setMicrosoftClientId(e.target.value)
-            }
-            onBlur={async (): Promise<void> => {
-              const trimmed = microsoftClientId.trim();
-              if (trimmed) {
-                await setSetting("microsoft_client_id", trimmed);
-              }
-            }}
-            placeholder={t("microsoftClientIdPlaceholder")}
-          />
-          <p className="text-xs text-text-tertiary">
-            {t("microsoftClientIdDescription")}
-          </p>
-        </div>
-      </Section>
 
       <Section title={t("sync")}>
         <div className="flex items-center justify-between">

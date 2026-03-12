@@ -35,15 +35,26 @@ export async function initializeClients(): Promise<void> {
 }
 
 /**
- * Re-authorize an existing account to obtain new tokens (e.g., after scope changes).
- * Preserves all local data — only replaces tokens.
+ * Re-authorize an existing account to obtain new tokens.
+ * Dispatches to the correct Rust command based on provider.
  */
 export async function reauthorizeAccount(
   accountId: string,
   expectedEmail: string,
+  provider?: string,
 ): Promise<void> {
-  await invoke("account_reauthorize_gmail", {
-    accountId,
-    expectedEmail: normalizeEmail(expectedEmail),
-  });
+  const email = normalizeEmail(expectedEmail);
+
+  if (provider === "graph") {
+    await invoke("account_reauthorize_graph", {
+      accountId,
+      expectedEmail: email,
+    });
+  } else {
+    // Default to Gmail reauth for backwards compatibility
+    await invoke("account_reauthorize_gmail", {
+      accountId,
+      expectedEmail: email,
+    });
+  }
 }
