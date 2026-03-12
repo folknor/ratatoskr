@@ -1,12 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { eventHandlers, mockInvoke, mockListen, mockListAccountBasicInfo } =
-  vi.hoisted(() => ({
-    eventHandlers: new Map<string, (event: { payload: unknown }) => void>(),
-    mockInvoke: vi.fn(),
-    mockListen: vi.fn(),
-    mockListAccountBasicInfo: vi.fn(),
-  }));
+const { eventHandlers, mockInvoke, mockListen } = vi.hoisted(() => ({
+  eventHandlers: new Map<string, (event: { payload: unknown }) => void>(),
+  mockInvoke: vi.fn(),
+  mockListen: vi.fn(),
+}));
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: mockInvoke,
@@ -14,10 +12,6 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 vi.mock("@tauri-apps/api/event", () => ({
   listen: mockListen,
-}));
-
-vi.mock("@/services/accounts/basicInfo", () => ({
-  listAccountBasicInfo: mockListAccountBasicInfo,
 }));
 
 async function loadSyncManager() {
@@ -47,32 +41,6 @@ describe("syncManager", () => {
     vi.clearAllMocks();
     vi.resetModules();
     eventHandlers.clear();
-    mockListAccountBasicInfo.mockResolvedValue([
-      {
-        id: "acc-1",
-        email: "user1@example.com",
-        displayName: "User One",
-        avatarUrl: null,
-        provider: "gmail_api",
-        isActive: true,
-      },
-      {
-        id: "acc-2",
-        email: "user2@example.com",
-        displayName: "User Two",
-        avatarUrl: null,
-        provider: "imap",
-        isActive: true,
-      },
-      {
-        id: "acc-caldav",
-        email: "cal@example.com",
-        displayName: "Calendar",
-        avatarUrl: null,
-        provider: "caldav",
-        isActive: true,
-      },
-    ]);
     mockListen.mockImplementation(
       async (
         eventName: string,
@@ -192,6 +160,7 @@ describe("syncManager", () => {
   it("propagates sync-status errors including plain string errors", async () => {
     const { onSyncStatus } = await loadSyncManager();
     const callback = vi.fn();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     onSyncStatus(callback);
     await flushListenerSetup();
@@ -211,6 +180,7 @@ describe("syncManager", () => {
       undefined,
       "authentication failed for user@test.com",
     );
+    expect(errorSpy).toHaveBeenCalled();
   });
 
   it("runs post-sync hooks from rust-provided completion data", async () => {
@@ -257,28 +227,12 @@ describe("syncManager", () => {
     expect(callback).toHaveBeenCalledWith("acc-1", "done");
   });
 
-  it("syncs standalone caldav accounts directly in ts", async () => {
-    const { onSyncStatus, syncAccount } = await loadSyncManager();
-    const callback = vi.fn();
-
-    onSyncStatus(callback);
+  it("routes standalone caldav sync through the rust queue", async () => {
+    const { syncAccount } = await loadSyncManager();
     await syncAccount("acc-caldav");
 
-    expect(mockInvoke).toHaveBeenCalledWith("calendar_sync_account", {
-      accountId: "acc-caldav",
-    });
-    expect(callback).toHaveBeenCalledWith("acc-caldav", "done");
-    expect(mockInvoke).not.toHaveBeenCalledWith("sync_run_accounts", {
+    expect(mockInvoke).toHaveBeenCalledWith("sync_run_accounts", {
       accountIds: ["acc-caldav"],
     });
-
-    const applyIndex = mockInvoke.mock.calls.findIndex(
-      ([command]) => command === "calendar_sync_account",
-    );
-    const applyOrder =
-      applyIndex >= 0 ? mockInvoke.mock.invocationCallOrder[applyIndex] : -1;
-    const doneOrder = callback.mock.invocationCallOrder.at(-1);
-    expect(applyOrder).toBeGreaterThanOrEqual(0);
-    expect(applyOrder).toBeLessThan(doneOrder ?? 0);
   });
 });

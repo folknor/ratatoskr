@@ -177,20 +177,32 @@ async fn run_sync_account(app_state: &AppState, account_id: &str) {
     );
 
     if provider == "caldav" {
-        emit_sync_status(
-            app_state.progress.as_ref(),
-            SyncStatusEvent {
-                account_id: account_id.to_string(),
-                provider,
-                status: SyncStatus::Done,
-                error: None,
-                result: Some(SyncStatusDonePayload {
-                    new_inbox_message_ids: Vec::new(),
-                    affected_thread_ids: Vec::new(),
-                    criteria_smart_label_matches: Vec::new(),
-                }),
-            },
-        );
+        match calendar_sync_account_impl(account_id, db, providers.gmail.as_ref()).await {
+            Ok(()) => emit_sync_status(
+                app_state.progress.as_ref(),
+                SyncStatusEvent {
+                    account_id: account_id.to_string(),
+                    provider,
+                    status: SyncStatus::Done,
+                    error: None,
+                    result: Some(SyncStatusDonePayload {
+                        new_inbox_message_ids: Vec::new(),
+                        affected_thread_ids: Vec::new(),
+                        criteria_smart_label_matches: Vec::new(),
+                    }),
+                },
+            ),
+            Err(error) => emit_sync_status(
+                app_state.progress.as_ref(),
+                SyncStatusEvent {
+                    account_id: account_id.to_string(),
+                    provider,
+                    status: SyncStatus::Error,
+                    error: Some(error),
+                    result: None,
+                },
+            ),
+        }
         return;
     }
 

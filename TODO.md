@@ -13,7 +13,7 @@
 > Rust sync now owns filters, smart labels, calendar follow-up, notification evaluation, and AI categorization preparation/application.
 > The remaining Rust/TS boundary is mainly desktop notification display plus actual AI inference calls still triggered from the frontend.
 
-- [ ] **Trim `syncManager.ts` down to a deliberate UI boundary** — Keep only event subscription, UI progress shaping, and notification display in TypeScript. Any remaining policy logic should move to Rust or be removed.
+- [x] **Trim `syncManager.ts` down to a deliberate UI boundary** — Standalone CalDAV partitioning/background scheduling has been removed from TypeScript. `syncManager.ts` now acts as an event subscriber plus thin invoke wrapper around Rust-owned sync orchestration.
 
 ### Settings and Account Compatibility Sweeps
 

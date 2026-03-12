@@ -6,7 +6,6 @@ export interface SyncProgress {
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { listAccountBasicInfo } from "@/services/accounts/basicInfo";
 
 /** Map IMAP sync phases to the SyncProgress phases the UI understands. */
 function mapImapPhase(
@@ -43,8 +42,6 @@ interface SyncStatusEvent {
 }
 
 let syncListenersPromise: Promise<void> | null = null;
-let caldavBackgroundTimer: number | null = null;
-const BACKGROUND_SYNC_INTERVAL_MS = 60_000;
 
 export type SyncStatusCallback = (
   accountId: string,
@@ -134,99 +131,9 @@ async function handleSyncStatusEvent(event: SyncStatusEvent): Promise<void> {
   statusCallback?.(event.accountId, "done");
 }
 
-async function partitionSyncAccountIds(accountIds: string[]): Promise<{
-  caldavIds: string[];
-  emailIds: string[];
-}> {
-  if (accountIds.length === 0) {
-    return { caldavIds: [], emailIds: [] };
-  }
-
-  const allAccounts = await listAccountBasicInfo();
-  const accountMap = new Map(
-    allAccounts.map((account) => [account.id, account]),
-  );
-  const caldavIds: string[] = [];
-  const emailIds: string[] = [];
-
-  for (const accountId of accountIds) {
-    const account = accountMap.get(accountId);
-    if (account?.provider === "caldav") {
-      caldavIds.push(accountId);
-    } else {
-      emailIds.push(accountId);
-    }
-  }
-
-  return { caldavIds, emailIds };
-}
-
-async function syncStandaloneCaldavAccount(accountId: string): Promise<void> {
-  statusCallback?.(accountId, "syncing");
-  try {
-    await syncCalendarForAccount(accountId);
-    statusCallback?.(accountId, "done");
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Calendar sync failed";
-    console.error(`[syncManager] CalDAV sync failed for ${accountId}:`, error);
-    statusCallback?.(accountId, "error", undefined, message);
-  }
-}
-
-async function syncStandaloneCaldavAccounts(
-  accountIds: string[],
-): Promise<void> {
-  await Promise.all(
-    accountIds.map((accountId) => syncStandaloneCaldavAccount(accountId)),
-  );
-}
-
-function startCaldavBackgroundSync(
-  accountIds: string[],
-  skipImmediateSync: boolean,
-): void {
-  if (caldavBackgroundTimer !== null) {
-    window.clearInterval(caldavBackgroundTimer);
-    caldavBackgroundTimer = null;
-  }
-
-  if (accountIds.length === 0) {
-    return;
-  }
-
-  const run = () => {
-    void syncStandaloneCaldavAccounts(accountIds);
-  };
-
-  if (!skipImmediateSync) {
-    run();
-  }
-
-  caldavBackgroundTimer = window.setInterval(run, BACKGROUND_SYNC_INTERVAL_MS);
-}
-
-/**
- * Sync calendars for a single account via the CalendarProvider abstraction.
- * Discovers calendars, syncs events for each visible calendar, stores results in DB.
- */
-async function syncCalendarForAccount(accountId: string): Promise<void> {
-  await invoke("calendar_sync_account", { accountId });
-
-  // Emit event for UI update
-  window.dispatchEvent(new CustomEvent("ratatoskr-calendar-sync-done"));
-}
-
 async function runSync(accountIds: string[]): Promise<void> {
   await ensureSyncListeners();
-  const { caldavIds, emailIds } = await partitionSyncAccountIds(accountIds);
-
-  await Promise.all([
-    syncStandaloneCaldavAccounts(caldavIds),
-    emailIds.length > 0
-      ? invoke("sync_run_accounts", { accountIds: emailIds })
-      : Promise.resolve(),
-  ]);
+  await invoke("sync_run_accounts", { accountIds });
 }
 
 /**
@@ -250,31 +157,20 @@ export function startBackgroundSync(
   void Promise.resolve(ensureSyncListeners()).catch((error) => {
     console.warn("[syncManager] Failed to initialize sync listeners:", error);
   });
-  void partitionSyncAccountIds(accountIds)
-    .then(({ caldavIds, emailIds }) => {
-      startCaldavBackgroundSync(caldavIds, skipImmediateSync);
-      if (emailIds.length === 0) {
-        return;
-      }
-
-      return invoke("sync_start_background", {
-        accountIds: emailIds,
-        skipImmediateSync,
-      });
-    })
-    .catch((error) => {
-      console.warn("[syncManager] Failed to start background sync:", error);
-    });
+  void Promise.resolve(
+    invoke("sync_start_background", {
+      accountIds,
+      skipImmediateSync,
+    }),
+  ).catch((error) => {
+    console.warn("[syncManager] Failed to start background sync:", error);
+  });
 }
 
 /**
  * Stop the background sync timer.
  */
 export function stopBackgroundSync(): void {
-  if (caldavBackgroundTimer !== null) {
-    window.clearInterval(caldavBackgroundTimer);
-    caldavBackgroundTimer = null;
-  }
   void invoke("sync_stop_background");
 }
 
