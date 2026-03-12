@@ -383,9 +383,7 @@ fn read_account_tokens(
         .3
         .filter(|s| !s.is_empty())
         .map(|s| decrypt_or_raw(key, &s))
-        .ok_or_else(|| {
-            "Account missing OAuth credentials — reauthorize to fix".to_string()
-        })?;
+        .ok_or_else(|| "Account missing OAuth credentials — reauthorize to fix".to_string())?;
 
     let client_secret = row
         .4

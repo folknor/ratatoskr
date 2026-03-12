@@ -497,9 +497,7 @@ fn read_account_tokens(
         .3
         .filter(|s| !s.is_empty())
         .map(|s| decrypt_or_raw(key, &s))
-        .ok_or_else(|| {
-            "Account missing OAuth credentials — reauthorize to fix".to_string()
-        })?;
+        .ok_or_else(|| "Account missing OAuth credentials — reauthorize to fix".to_string())?;
 
     Ok((access_token, refresh_token, expires_at, client_id))
 }

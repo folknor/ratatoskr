@@ -366,24 +366,32 @@ pub async fn account_reauthorize_gmail(
             conn.query_row(
                 "SELECT oauth_client_id, oauth_client_secret FROM accounts WHERE id = ?1",
                 rusqlite::params![aid],
-                |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                    ))
+                },
             )
             .map_err(|e| format!("Failed to read account credentials: {e}"))
             .and_then(|(cid, cs)| {
-                let cid = cid
-                    .filter(|s| !s.is_empty())
-                    .ok_or_else(|| "Account has no stored OAuth credentials. Provide client_id to reauthorize.".to_string())?;
+                let cid = cid.filter(|s| !s.is_empty()).ok_or_else(|| {
+                    "Account has no stored OAuth credentials. Provide client_id to reauthorize."
+                        .to_string()
+                })?;
                 let cid = if crate::provider::crypto::is_encrypted(&cid) {
-                        crate::provider::crypto::decrypt_value(&encryption_key, &cid).unwrap_or(cid)
-                    } else {
-                        cid
-                    };
+                    crate::provider::crypto::decrypt_value(&encryption_key, &cid).unwrap_or(cid)
+                } else {
+                    cid
+                };
                 let cs = cs
                     .filter(|s| !s.is_empty())
-                    .map(|s| if crate::provider::crypto::is_encrypted(&s) {
-                        crate::provider::crypto::decrypt_value(&encryption_key, &s).unwrap_or(s)
-                    } else {
-                        s
+                    .map(|s| {
+                        if crate::provider::crypto::is_encrypted(&s) {
+                            crate::provider::crypto::decrypt_value(&encryption_key, &s).unwrap_or(s)
+                        } else {
+                            s
+                        }
                     })
                     .unwrap_or_default();
                 Ok((cid, cs))
@@ -485,14 +493,15 @@ pub async fn account_reauthorize_graph(
             )
             .map_err(|e| format!("Failed to read account credentials: {e}"))
             .and_then(|cid| {
-                let cid = cid
-                    .filter(|s| !s.is_empty())
-                    .ok_or_else(|| "Account has no stored OAuth credentials. Provide client_id to reauthorize.".to_string())?;
+                let cid = cid.filter(|s| !s.is_empty()).ok_or_else(|| {
+                    "Account has no stored OAuth credentials. Provide client_id to reauthorize."
+                        .to_string()
+                })?;
                 Ok(if crate::provider::crypto::is_encrypted(&cid) {
-                        crate::provider::crypto::decrypt_value(&encryption_key, &cid).unwrap_or(cid)
-                    } else {
-                        cid
-                    })
+                    crate::provider::crypto::decrypt_value(&encryption_key, &cid).unwrap_or(cid)
+                } else {
+                    cid
+                })
             })
         })
         .await?

@@ -585,8 +585,7 @@ mod tests {
     fn ui_bootstrap_ignores_secure_settings() {
         let conn = setup_conn();
         let key = [11_u8; 32];
-        let encrypted_secret =
-            encrypt_value(&key, "top-secret").expect("encrypt api key");
+        let encrypted_secret = encrypt_value(&key, "top-secret").expect("encrypt api key");
         insert_setting(&conn, "theme", "dark");
         insert_setting(&conn, "language", "en");
         insert_setting(&conn, "claude_api_key", &encrypted_secret);
