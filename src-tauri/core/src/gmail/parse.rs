@@ -222,7 +222,8 @@ fn collect_attachments(part: &GmailPayload, results: &mut Vec<ParsedAttachment>)
         if has_filename || has_cid {
             let cid = content_id_header
                 .map(|h| h.value.trim_matches(|c| c == '<' || c == '>').to_string());
-            let inline_data = if is_inline && !has_filename && part.mime_type.starts_with("image/") {
+            let inline_data = if is_inline && !has_filename && part.mime_type.starts_with("image/")
+            {
                 body.data
                     .as_deref()
                     .and_then(decode_base64url_bytes)

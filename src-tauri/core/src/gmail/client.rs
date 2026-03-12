@@ -36,15 +36,16 @@ struct ClientInner {
 }
 
 /// Tauri-managed state holding all Gmail clients and the encryption key.
+#[derive(Clone)]
 pub struct GmailState {
-    clients: RwLock<HashMap<String, GmailClient>>,
+    clients: Arc<RwLock<HashMap<String, GmailClient>>>,
     encryption_key: [u8; 32],
 }
 
 impl GmailState {
     pub fn new(encryption_key: [u8; 32]) -> Self {
         Self {
-            clients: RwLock::new(HashMap::new()),
+            clients: Arc::new(RwLock::new(HashMap::new())),
             encryption_key,
         }
     }

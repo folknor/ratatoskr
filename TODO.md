@@ -15,11 +15,15 @@
 
 ### Phase 1.5: Remaining Decoupling
 
-- [ ] **`AppState` aggregate (plan Step 5)** — Create a single `AppState` struct bundling all shared state. Eliminates `app.state::<T>()` calls in spawned tasks (`sync/commands.rs`). Wrap `GmailState`/`JmapState`/`GraphState` in `Arc` for `Clone`.
+- [x] **`AppState` aggregate (plan Step 5)** — Added `AppState`/`ProviderStates`, made provider states and `SyncQueueState` cloneable, and rewired `sync/commands.rs` background/manual sync paths to pass cloned state instead of calling `app.state::<T>()` inside spawned tasks.
 
-- [ ] **`ProviderRegistry` trait (plan Step 6)** — Abstract `get_ops()` behind a trait to collapse `resolve_provider_command()` from ~10 params to ~3-4.
+- [x] **`ProviderRegistry` trait (plan Step 6)** — Added `provider/registry.rs`, implemented it for `ProviderStates`, and switched the sync auto path in `provider/commands.rs` to resolve providers through the registry.
+
+- [ ] **Finish registry refactor outside sync path** — `filters/commands.rs`, `smart_labels/commands.rs`, and the remaining non-sync provider commands still pass `gmail/jmap/graph` separately. Migrate those call sites to `ProviderRegistry` or `AppState`, then simplify/remove `provider/router.rs::get_ops()`.
 
 - [ ] **Split `db/queries.rs` commands from logic** — 28 `#[tauri::command]` functions mix query logic with Tauri wrappers. Extract pure `fn(conn, ...)` bodies to core, keep thin wrappers in app. Same for `db/queries_extra.rs` (~130 commands) and `db/pending_ops.rs`.
+
+- [ ] **Clean up post-refactor Rust warnings** — The new state/registry wiring left a few tracked warnings: unused re-exports in `src-tauri/src/sync/mod.rs`, `TauriProgressReporter::new` unused in `src-tauri/src/progress.rs`, `ProviderRegistry::encryption_key` currently unused in `src-tauri/src/provider/registry.rs`, and `AppState::app_data_dir` currently unused in `src-tauri/src/state.rs`. Either use them in follow-up refactors or remove them.
 
 ### Phase 2: Decouple Tauri-Specific Concerns
 

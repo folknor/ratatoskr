@@ -378,10 +378,12 @@ pub async fn account_delete(
                     let mut stmt = conn
                         .prepare("SELECT id FROM messages WHERE account_id = ?1")
                         .map_err(|e| format!("prepare account message query: {e}"))?;
-                    stmt.query_map(rusqlite::params![&account_id], |row| row.get::<_, String>(0))
-                        .map_err(|e| format!("query account message ids: {e}"))?
-                        .collect::<Result<Vec<_>, _>>()
-                        .map_err(|e| format!("collect account message ids: {e}"))?
+                    stmt.query_map(rusqlite::params![&account_id], |row| {
+                        row.get::<_, String>(0)
+                    })
+                    .map_err(|e| format!("query account message ids: {e}"))?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| format!("collect account message ids: {e}"))?
                 };
 
                 let cached_files = {
@@ -413,10 +415,12 @@ pub async fn account_delete(
                                AND content_hash IS NOT NULL",
                         )
                         .map_err(|e| format!("prepare account inline hash query: {e}"))?;
-                    stmt.query_map(rusqlite::params![&account_id], |row| row.get::<_, String>(0))
-                        .map_err(|e| format!("query account inline hashes: {e}"))?
-                        .collect::<Result<Vec<_>, _>>()
-                        .map_err(|e| format!("collect account inline hashes: {e}"))?
+                    stmt.query_map(rusqlite::params![&account_id], |row| {
+                        row.get::<_, String>(0)
+                    })
+                    .map_err(|e| format!("query account inline hashes: {e}"))?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| format!("collect account inline hashes: {e}"))?
                 };
 
                 Ok((message_ids, cached_files, inline_hashes))
@@ -463,7 +467,9 @@ pub async fn account_delete(
         }
     }
 
-    inline_images.delete_unreferenced(&db, inline_hashes).await?;
+    inline_images
+        .delete_unreferenced(&db, inline_hashes)
+        .await?;
 
     gmail.remove(&account_id).await;
     jmap.remove(&account_id).await;

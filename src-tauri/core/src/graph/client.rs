@@ -48,15 +48,16 @@ struct ClientInner {
 }
 
 /// Tauri-managed state holding all Graph clients and the encryption key.
+#[derive(Clone)]
 pub struct GraphState {
-    clients: RwLock<HashMap<String, GraphClient>>,
+    clients: Arc<RwLock<HashMap<String, GraphClient>>>,
     encryption_key: [u8; 32],
 }
 
 impl GraphState {
     pub fn new(encryption_key: [u8; 32]) -> Self {
         Self {
-            clients: RwLock::new(HashMap::new()),
+            clients: Arc::new(RwLock::new(HashMap::new())),
             encryption_key,
         }
     }

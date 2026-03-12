@@ -1,10 +1,12 @@
 pub use ratatoskr_core::sync::*;
-pub use ratatoskr_core::sync::{config, convert, folder_mapper, imap_delta, imap_initial, pipeline, types};
+pub use ratatoskr_core::sync::{
+    config, convert, folder_mapper, imap_delta, imap_initial, pipeline, types,
+};
 
 pub mod commands;
 
 use std::collections::HashSet;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
@@ -41,18 +43,19 @@ struct SyncQueueInner {
 }
 
 /// Serialized sync queue for manual/frontend-triggered sync runs.
+#[derive(Clone)]
 pub struct SyncQueueState {
-    inner: Mutex<SyncQueueInner>,
+    inner: Arc<Mutex<SyncQueueInner>>,
 }
 
 impl SyncQueueState {
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(SyncQueueInner {
+            inner: Arc::new(Mutex::new(SyncQueueInner {
                 active: false,
                 pending_account_ids: Vec::new(),
                 waiters: Vec::new(),
-            }),
+            })),
         }
     }
 

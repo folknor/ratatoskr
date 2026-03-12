@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::progress::{self, ProgressReporter};
 use jmap_client::core::query::QueryResponse;
 use jmap_client::email;
 use jmap_client::mailbox::Role;
 use serde::Serialize;
-use crate::progress::{self, ProgressReporter};
 
 use crate::attachment_cache::hash_bytes;
 use crate::body_store::{BodyStoreState, MessageBody};

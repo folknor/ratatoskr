@@ -126,9 +126,7 @@ impl std::fmt::Debug for ImapStream {
 
 /// Build a TLS connector, optionally accepting invalid certificates
 /// (for local mail bridges like ProtonMail Bridge with self-signed certs).
-pub fn build_tls_connector(
-    accept_invalid_certs: bool,
-) -> Result<native_tls::TlsConnector, String> {
+pub fn build_tls_connector(accept_invalid_certs: bool) -> Result<native_tls::TlsConnector, String> {
     let mut builder = native_tls::TlsConnector::builder();
     if accept_invalid_certs {
         builder.danger_accept_invalid_certs(true);

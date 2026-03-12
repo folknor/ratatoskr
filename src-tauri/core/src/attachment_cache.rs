@@ -43,10 +43,7 @@ pub fn write_cached(
 }
 
 /// Delete a cached attachment file by its DB-relative path.
-pub fn remove_cached_relative(
-    app_data_dir: &Path,
-    relative_path: &str,
-) -> Result<(), String> {
+pub fn remove_cached_relative(app_data_dir: &Path, relative_path: &str) -> Result<(), String> {
     if !relative_path.starts_with(&format!("{CACHE_DIR}/")) {
         return Err(format!("invalid attachment cache path: {relative_path}"));
     }

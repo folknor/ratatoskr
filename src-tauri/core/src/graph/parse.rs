@@ -125,7 +125,11 @@ pub fn parse_graph_message(
         .map(|a| {
             let is_inline = a.is_inline.unwrap_or(false);
             let mime_type = a.content_type.clone();
-            let inline_data = if is_inline && mime_type.as_deref().is_some_and(|v| v.starts_with("image/")) {
+            let inline_data = if is_inline
+                && mime_type
+                    .as_deref()
+                    .is_some_and(|v| v.starts_with("image/"))
+            {
                 a.content_bytes.as_deref().and_then(decode_inline_bytes)
             } else {
                 None

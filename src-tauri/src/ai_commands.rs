@@ -137,19 +137,22 @@ async fn load_ai_config(db: &DbState, encryption_key: &[u8; 32]) -> Result<AiCon
     match provider_name.as_str() {
         "openai" => Ok(AiConfig {
             provider: AiProviderKind::OpenAi,
-            model: plain_setting("openai_model").unwrap_or_else(|| DEFAULT_OPENAI_MODEL.to_string()),
+            model: plain_setting("openai_model")
+                .unwrap_or_else(|| DEFAULT_OPENAI_MODEL.to_string()),
             api_key: secure_setting("openai_api_key"),
             server_url: None,
         }),
         "gemini" => Ok(AiConfig {
             provider: AiProviderKind::Gemini,
-            model: plain_setting("gemini_model").unwrap_or_else(|| DEFAULT_GEMINI_MODEL.to_string()),
+            model: plain_setting("gemini_model")
+                .unwrap_or_else(|| DEFAULT_GEMINI_MODEL.to_string()),
             api_key: secure_setting("gemini_api_key"),
             server_url: None,
         }),
         "ollama" => Ok(AiConfig {
             provider: AiProviderKind::Ollama,
-            model: plain_setting("ollama_model").unwrap_or_else(|| DEFAULT_OLLAMA_MODEL.to_string()),
+            model: plain_setting("ollama_model")
+                .unwrap_or_else(|| DEFAULT_OLLAMA_MODEL.to_string()),
             api_key: None,
             server_url: Some(
                 plain_setting("ollama_server_url")
@@ -165,7 +168,8 @@ async fn load_ai_config(db: &DbState, encryption_key: &[u8; 32]) -> Result<AiCon
         }),
         _ => Ok(AiConfig {
             provider: AiProviderKind::Claude,
-            model: plain_setting("claude_model").unwrap_or_else(|| DEFAULT_CLAUDE_MODEL.to_string()),
+            model: plain_setting("claude_model")
+                .unwrap_or_else(|| DEFAULT_CLAUDE_MODEL.to_string()),
             api_key: secure_setting("claude_api_key"),
             server_url: None,
         }),

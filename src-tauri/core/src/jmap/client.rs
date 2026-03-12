@@ -97,15 +97,16 @@ fn read_jmap_credentials(
 }
 
 /// Tauri-managed state holding all JMAP clients.
+#[derive(Clone)]
 pub struct JmapState {
-    clients: RwLock<HashMap<String, JmapClient>>,
+    clients: Arc<RwLock<HashMap<String, JmapClient>>>,
     encryption_key: [u8; 32],
 }
 
 impl JmapState {
     pub fn new(encryption_key: [u8; 32]) -> Self {
         Self {
-            clients: RwLock::new(HashMap::new()),
+            clients: Arc::new(RwLock::new(HashMap::new())),
             encryption_key,
         }
     }

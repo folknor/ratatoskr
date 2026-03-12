@@ -42,9 +42,7 @@ pub async fn get_mailbox_list(
 }
 
 /// Get the first identity ID for email submission.
-pub async fn get_first_identity_id(
-    client: &jmap_client::client::Client,
-) -> Result<String, String> {
+pub async fn get_first_identity_id(client: &jmap_client::client::Client) -> Result<String, String> {
     let mut request = client.build();
     request.get_identity();
     let response = request
@@ -61,10 +59,7 @@ pub async fn get_first_identity_id(
 }
 
 /// Resolve a Gmail-style label ID to a JMAP mailbox ID.
-pub async fn resolve_mailbox_id(
-    client: &JmapClient,
-    label_id: &str,
-) -> Result<String, String> {
+pub async fn resolve_mailbox_id(client: &JmapClient, label_id: &str) -> Result<String, String> {
     let mailboxes = get_mailbox_list(client).await?;
     label_id_to_mailbox_id(label_id, &mailboxes)
         .ok_or_else(|| format!("Cannot resolve label \"{label_id}\" to JMAP mailbox"))

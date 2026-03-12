@@ -1,9 +1,8 @@
 #![allow(clippy::let_underscore_must_use)]
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::body_store::BodyStoreState;
-use crate::progress::{self, TauriProgressReporter};
 use crate::calendar_commands::calendar_sync_account_impl;
 use crate::categorization::AiCategorizationCandidate;
 use crate::categorization::commands::categorize_threads_with_ai_impl;
@@ -13,10 +12,8 @@ use crate::filters::FilterableMessage;
 use crate::filters::commands::filters_apply_to_messages_impl;
 use crate::filters::commands::load_enabled_filters;
 use crate::filters::commands::load_filterable_messages;
-use crate::gmail::client::GmailState;
-use crate::graph::client::GraphState;
 use crate::inline_image_store::InlineImageStoreState;
-use crate::jmap::client::JmapState;
+use crate::progress::{self, TauriProgressReporter};
 use crate::provider::commands::provider_sync_auto_for_provider;
 use crate::provider::crypto::AppCryptoState;
 use crate::search::SearchState;
@@ -25,6 +22,7 @@ use crate::smart_labels::commands::load_enabled_rules_for_ai;
 use crate::smart_labels::commands::smart_labels_apply_criteria_to_messages_impl;
 use crate::smart_labels::commands::smart_labels_classify_and_apply_remainder_impl;
 use crate::smart_labels::commands::smart_labels_prepare_ai_remainder_for_messages;
+use crate::state::AppState;
 
 use super::config;
 use super::types::{
@@ -37,36 +35,36 @@ const SYNC_INTERVAL_MS: u64 = 60_000;
 
 #[tauri::command]
 pub async fn sync_run_accounts(
-    app: AppHandle,
+    app_state: State<'_, AppState>,
     queue: State<'_, SyncQueueState>,
     account_ids: Vec<String>,
 ) -> Result<(), String> {
-    queue_sync_accounts(&app, &queue, &account_ids).await
+    queue_sync_accounts(&app_state, &queue, &account_ids).await
 }
 
 #[tauri::command]
 pub async fn sync_start_background(
-    app: AppHandle,
+    app_state: State<'_, AppState>,
+    queue: State<'_, SyncQueueState>,
     background: State<'_, super::BackgroundSyncState>,
     account_ids: Vec<String>,
     skip_immediate_sync: Option<bool>,
 ) -> Result<(), String> {
-    let app_handle = app.clone();
+    let app_state = app_state.inner().clone();
+    let queue = queue.inner().clone();
     let ids = account_ids;
     let skip_immediate = skip_immediate_sync.unwrap_or(false);
 
     let task = tokio::spawn(async move {
         if !skip_immediate {
-            let queue: tauri::State<'_, SyncQueueState> = app_handle.state();
-            let account_ids = load_background_account_ids(&app_handle, &ids).await;
-            let _ = queue_sync_accounts(&app_handle, &queue, &account_ids).await;
+            let account_ids = load_background_account_ids(&app_state.db, &ids).await;
+            let _ = queue_sync_accounts(&app_state, &queue, &account_ids).await;
         }
 
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(SYNC_INTERVAL_MS)).await;
-            let queue: tauri::State<'_, SyncQueueState> = app_handle.state();
-            let account_ids = load_background_account_ids(&app_handle, &ids).await;
-            let _ = queue_sync_accounts(&app_handle, &queue, &account_ids).await;
+            let account_ids = load_background_account_ids(&app_state.db, &ids).await;
+            let _ = queue_sync_accounts(&app_state, &queue, &account_ids).await;
         }
     });
 
@@ -82,9 +80,8 @@ pub async fn sync_stop_background(
     Ok(())
 }
 
-async fn run_sync_queue(app: AppHandle) {
+async fn run_sync_queue(app_state: &AppState, queue: &SyncQueueState) {
     loop {
-        let queue: tauri::State<'_, SyncQueueState> = app.state();
         let account_ids = queue.take_pending_batch();
         if account_ids.is_empty() {
             if let Some(waiters) = queue.finish_if_idle() {
@@ -100,13 +97,13 @@ async fn run_sync_queue(app: AppHandle) {
         }
 
         for account_id in account_ids {
-            run_sync_account(&app, &account_id).await;
+            run_sync_account(app_state, &account_id).await;
         }
     }
 }
 
 async fn queue_sync_accounts(
-    app: &AppHandle,
+    app_state: &AppState,
     queue: &SyncQueueState,
     account_ids: &[String],
 ) -> Result<(), String> {
@@ -116,9 +113,10 @@ async fn queue_sync_accounts(
 
     let (should_spawn, rx) = queue.enqueue(account_ids);
     if should_spawn {
-        let app_handle = app.clone();
+        let app_state = app_state.clone();
+        let queue = queue.clone();
         tokio::spawn(async move {
-            run_sync_queue(app_handle).await;
+            run_sync_queue(&app_state, &queue).await;
         });
     }
 
@@ -126,8 +124,7 @@ async fn queue_sync_accounts(
         .map_err(|_| "Sync queue worker stopped unexpectedly".to_string())
 }
 
-async fn load_background_account_ids(app: &AppHandle, fallback_ids: &[String]) -> Vec<String> {
-    let db: tauri::State<'_, DbState> = app.state();
+async fn load_background_account_ids(db: &DbState, fallback_ids: &[String]) -> Vec<String> {
     match db.with_conn(config::get_active_account_ids).await {
         Ok(account_ids) => account_ids,
         Err(error) => {
@@ -137,14 +134,12 @@ async fn load_background_account_ids(app: &AppHandle, fallback_ids: &[String]) -
     }
 }
 
-async fn run_sync_account(app: &AppHandle, account_id: &str) {
-    let db: tauri::State<'_, DbState> = app.state();
-    let gmail: tauri::State<'_, GmailState> = app.state();
-    let jmap: tauri::State<'_, JmapState> = app.state();
-    let graph: tauri::State<'_, GraphState> = app.state();
-    let body_store: tauri::State<'_, BodyStoreState> = app.state();
-    let inline_images: tauri::State<'_, InlineImageStoreState> = app.state();
-    let search: tauri::State<'_, SearchState> = app.state();
+async fn run_sync_account(app_state: &AppState, account_id: &str) {
+    let db = &app_state.db;
+    let body_store = &app_state.body_store;
+    let inline_images = &app_state.inline_images;
+    let search = &app_state.search;
+    let providers = &app_state.providers;
 
     let sync_config = match db
         .with_conn({
@@ -156,7 +151,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
         Ok(sync_config) => sync_config,
         Err(error) => {
             emit_sync_status(
-                app,
+                app_state.progress.as_ref(),
                 SyncStatusEvent {
                     account_id: account_id.to_string(),
                     provider: "unknown".to_string(),
@@ -171,7 +166,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
     let provider = sync_config.provider.clone();
 
     emit_sync_status(
-        app,
+        app_state.progress.as_ref(),
         SyncStatusEvent {
             account_id: account_id.to_string(),
             provider: provider.clone(),
@@ -183,7 +178,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
 
     if provider == "caldav" {
         emit_sync_status(
-            app,
+            app_state.progress.as_ref(),
             SyncStatusEvent {
                 account_id: account_id.to_string(),
                 provider,
@@ -199,20 +194,17 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
         return;
     }
 
-    let reporter = TauriProgressReporter::from_ref(app);
     match provider_sync_auto_for_provider(
         account_id,
         &sync_config.provider,
         sync_config.initial_sync_completed,
         sync_config.sync_period_days,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
+        db,
+        providers,
+        body_store,
+        inline_images,
+        search,
+        app_state.progress.as_ref(),
     )
     .await
     {
@@ -272,14 +264,14 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 &provider,
                 &filters,
                 &loaded_messages,
-                &db,
-                &gmail,
-                &jmap,
-                &graph,
-                &body_store,
-                &inline_images,
-                &search,
-                &reporter,
+                db,
+                providers.gmail.as_ref(),
+                providers.jmap.as_ref(),
+                providers.graph.as_ref(),
+                body_store,
+                inline_images,
+                search,
+                app_state.progress.as_ref(),
             )
             .await
             {
@@ -291,14 +283,14 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 &provider,
                 &criteria_rules,
                 &loaded_messages,
-                &db,
-                &gmail,
-                &jmap,
-                &graph,
-                &body_store,
-                &inline_images,
-                &search,
-                &reporter,
+                db,
+                providers.gmail.as_ref(),
+                providers.jmap.as_ref(),
+                providers.graph.as_ref(),
+                body_store,
+                inline_images,
+                search,
+                app_state.progress.as_ref(),
             )
             .await
             {
@@ -354,21 +346,17 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 };
 
             if !ai_smart_label_threads.is_empty() && !ai_smart_label_rules.is_empty() {
-                let app_handle = app.clone();
+                let db = app_state.db.clone();
+                let crypto = app_state.crypto.clone();
+                let providers = app_state.providers.clone();
+                let body_store = app_state.body_store.clone();
+                let inline_images = app_state.inline_images.clone();
+                let search = app_state.search.clone();
+                let progress = app_state.progress.clone();
                 let provider_for_ai = provider.clone();
                 let account_id_for_ai = account_id.to_string();
                 let pre_applied_matches = criteria_smart_label_matches.clone();
                 tauri::async_runtime::spawn(async move {
-                    let db: tauri::State<'_, DbState> = app_handle.state();
-                    let crypto: tauri::State<'_, AppCryptoState> = app_handle.state();
-                    let gmail: tauri::State<'_, GmailState> = app_handle.state();
-                    let jmap: tauri::State<'_, JmapState> = app_handle.state();
-                    let graph: tauri::State<'_, GraphState> = app_handle.state();
-                    let body_store: tauri::State<'_, BodyStoreState> = app_handle.state();
-                    let inline_images: tauri::State<'_, InlineImageStoreState> = app_handle.state();
-                    let search: tauri::State<'_, SearchState> = app_handle.state();
-
-                    let reporter = TauriProgressReporter::from_ref(&app_handle);
                     if let Err(error) = smart_labels_classify_and_apply_remainder_impl(
                         &account_id_for_ai,
                         &provider_for_ai,
@@ -377,13 +365,13 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                         &pre_applied_matches,
                         &db,
                         &crypto,
-                        &gmail,
-                        &jmap,
-                        &graph,
+                        providers.gmail.as_ref(),
+                        providers.jmap.as_ref(),
+                        providers.graph.as_ref(),
                         &body_store,
                         &inline_images,
                         &search,
-                        &reporter,
+                        progress.as_ref(),
                     )
                     .await
                     {
@@ -395,12 +383,10 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
             }
 
             if !result.affected_thread_ids.is_empty() {
-                let app_handle = app.clone();
+                let db = app_state.db.clone();
+                let crypto = app_state.crypto.clone();
                 let account_id_for_ai = account_id.to_string();
                 tauri::async_runtime::spawn(async move {
-                    let db: tauri::State<'_, DbState> = app_handle.state();
-                    let crypto: tauri::State<'_, AppCryptoState> = app_handle.state();
-
                     let candidates = match get_ai_categorization_candidates(&db, &account_id_for_ai)
                         .await
                     {
@@ -430,7 +416,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
 
             if !notifications_to_queue.is_empty() {
                 emit_sync_notifications(
-                    app,
+                    app_state.progress.as_ref(),
                     SyncNotificationsEvent {
                         account_id: account_id.to_string(),
                         notifications: notifications_to_queue.clone(),
@@ -439,13 +425,14 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
             }
 
             if should_sync_calendar
-                && let Err(error) = calendar_sync_account_impl(account_id, &db, &gmail).await
+                && let Err(error) =
+                    calendar_sync_account_impl(account_id, db, providers.gmail.as_ref()).await
             {
                 log::warn!("Failed to run calendar follow-up for {account_id}: {error}");
             }
 
             emit_sync_status(
-                app,
+                app_state.progress.as_ref(),
                 SyncStatusEvent {
                     account_id: account_id.to_string(),
                     provider,
@@ -460,7 +447,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
             )
         }
         Err(error) => emit_sync_status(
-            app,
+            app_state.progress.as_ref(),
             SyncStatusEvent {
                 account_id: account_id.to_string(),
                 provider,
@@ -697,14 +684,15 @@ async fn load_post_sync_messages(
     load_filterable_messages(db, body_store, account_id, message_ids, &body_criteria).await
 }
 
-fn emit_sync_status(app: &AppHandle, event: SyncStatusEvent) {
-    let reporter = TauriProgressReporter::from_ref(app);
-    progress::emit_event(&reporter, "sync-status", &event);
+fn emit_sync_status(progress: &dyn progress::ProgressReporter, event: SyncStatusEvent) {
+    progress::emit_event(progress, "sync-status", &event);
 }
 
-fn emit_sync_notifications(app: &AppHandle, event: SyncNotificationsEvent) {
-    let reporter = TauriProgressReporter::from_ref(app);
-    progress::emit_event(&reporter, "sync-notifications", &event);
+fn emit_sync_notifications(
+    progress: &dyn progress::ProgressReporter,
+    event: SyncNotificationsEvent,
+) {
+    progress::emit_event(progress, "sync-notifications", &event);
 }
 
 /// Run initial IMAP sync for an account.

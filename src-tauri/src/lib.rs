@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use tauri::{Emitter, Manager};
 #[cfg(not(target_os = "linux"))]
 use tauri::{
@@ -27,6 +29,7 @@ mod provider;
 mod search;
 mod smart_labels;
 mod smtp;
+mod state;
 mod sync;
 mod threading;
 
@@ -539,13 +542,13 @@ pub fn run() {
                     .map_err(|e| Box::new(std::io::Error::other(format!("app data dir: {e}"))))?;
                 let db_state = db::DbState::init(&app_data_dir)
                     .map_err(|e| Box::new(std::io::Error::other(format!("db init: {e}"))))?;
-                app.manage(db_state);
+                app.manage(db_state.clone());
 
                 let body_store_state =
                     body_store::BodyStoreState::init(&app_data_dir).map_err(|e| {
                         Box::new(std::io::Error::other(format!("body store init: {e}")))
                     })?;
-                app.manage(body_store_state);
+                app.manage(body_store_state.clone());
 
                 let inline_image_store_state = inline_image_store::InlineImageStoreState::init(
                     &app_data_dir,
@@ -555,11 +558,11 @@ pub fn run() {
                         "inline image store init: {e}"
                     )))
                 })?;
-                app.manage(inline_image_store_state);
+                app.manage(inline_image_store_state.clone());
 
                 let search_state = search::SearchState::init(&app_data_dir)
                     .map_err(|e| Box::new(std::io::Error::other(format!("search init: {e}"))))?;
-                app.manage(search_state);
+                app.manage(search_state.clone());
 
                 app.manage(sync::SyncState::new());
                 app.manage(sync::SyncQueueState::new());
@@ -574,14 +577,37 @@ pub fn run() {
                         );
                         [0u8; 32]
                     });
-                app.manage(provider::crypto::AppCryptoState::new(encryption_key));
-                app.manage(gmail::client::GmailState::new(encryption_key));
+                let crypto_state = provider::crypto::AppCryptoState::new(encryption_key);
+                app.manage(crypto_state.clone());
 
                 // JMAP provider state — shares the same encryption key
-                app.manage(jmap::client::JmapState::new(encryption_key));
+                let gmail_state = gmail::client::GmailState::new(encryption_key);
+                app.manage(gmail_state.clone());
 
                 // Graph provider state — shares the same encryption key
-                app.manage(graph::client::GraphState::new(encryption_key));
+                let jmap_state = jmap::client::JmapState::new(encryption_key);
+                app.manage(jmap_state.clone());
+
+                let graph_state = graph::client::GraphState::new(encryption_key);
+                app.manage(graph_state.clone());
+
+                let providers = state::ProviderStates::new(
+                    Arc::new(gmail_state),
+                    Arc::new(jmap_state),
+                    Arc::new(graph_state),
+                    encryption_key,
+                );
+                let app_state = state::AppState {
+                    db: db_state,
+                    body_store: body_store_state,
+                    inline_images: inline_image_store_state,
+                    search: search_state,
+                    crypto: crypto_state,
+                    providers,
+                    progress: Arc::new(progress::TauriProgressReporter::from_ref(app.handle())),
+                    app_data_dir,
+                };
+                app.manage(app_state);
             }
 
             #[cfg(not(target_os = "linux"))]

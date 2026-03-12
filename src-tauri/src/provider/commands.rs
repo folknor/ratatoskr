@@ -10,9 +10,11 @@ use crate::inline_image_store::InlineImageStoreState;
 use crate::jmap::client::JmapState;
 use crate::progress::{self, ProgressReporter, TauriProgressReporter};
 use crate::search::SearchState;
+use crate::state::AppState;
 use crate::sync::{self, SyncState};
 
 use super::ops::ProviderOps;
+use super::registry::ProviderRegistry;
 use super::router::{get_ops, get_provider_type};
 use super::types::{
     AttachmentData, AutoSyncResult, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
@@ -57,6 +59,32 @@ async fn resolve_provider_command<'a>(
     Ok((ops, ctx))
 }
 
+async fn resolve_provider_command_with_registry<'a>(
+    provider: Option<&str>,
+    account_id: &'a str,
+    registry: &'a dyn ProviderRegistry,
+    db: &'a DbState,
+    body_store: &'a BodyStoreState,
+    inline_images: &'a InlineImageStoreState,
+    search: &'a SearchState,
+    progress: &'a dyn ProgressReporter,
+) -> Result<(Box<dyn ProviderOps>, ProviderCtx<'a>), String> {
+    let provider = match provider {
+        Some(provider) => provider.to_string(),
+        None => get_provider_type(db, account_id).await?,
+    };
+    let ops = registry.get_ops(&provider, account_id).await?;
+    let ctx = ProviderCtx {
+        account_id,
+        db,
+        body_store,
+        inline_images,
+        search,
+        progress,
+    };
+    Ok((ops, ctx))
+}
+
 // ── Sync ────────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
@@ -66,21 +94,17 @@ pub(crate) async fn provider_sync_auto_for_provider(
     initial_sync_completed: bool,
     sync_days: i64,
     db: &DbState,
-    gmail: &GmailState,
-    jmap: &JmapState,
-    graph: &GraphState,
+    registry: &dyn ProviderRegistry,
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
     progress: &dyn ProgressReporter,
 ) -> Result<AutoSyncResult, String> {
-    let (ops, ctx) = resolve_provider_command(
+    let (ops, ctx) = resolve_provider_command_with_registry(
         Some(provider),
         account_id,
+        registry,
         db,
-        gmail,
-        jmap,
-        graph,
         body_store,
         inline_images,
         search,
@@ -133,11 +157,7 @@ pub(crate) async fn provider_sync_auto_for_provider(
     })
 }
 
-fn emit_fallback_progress(
-    progress: &dyn ProgressReporter,
-    provider: &str,
-    account_id: &str,
-) {
+fn emit_fallback_progress(progress: &dyn ProgressReporter, provider: &str, account_id: &str) {
     let event_name = match provider {
         "gmail_api" => "gmail-sync-progress",
         "imap" => "imap-sync-progress",
@@ -160,17 +180,12 @@ fn emit_fallback_progress(
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn provider_sync_auto_impl(
     account_id: &str,
-    db: &DbState,
-    gmail: &GmailState,
-    jmap: &JmapState,
-    graph: &GraphState,
-    body_store: &BodyStoreState,
-    inline_images: &InlineImageStoreState,
-    search: &SearchState,
+    app_state: &AppState,
     progress: &dyn ProgressReporter,
 ) -> Result<AutoSyncResult, String> {
     let account_id_owned = account_id.to_string();
-    let sync_config = db
+    let sync_config = app_state
+        .db
         .with_conn(move |conn| sync::config::get_auto_sync_config(conn, &account_id_owned))
         .await?;
     provider_sync_auto_for_provider(
@@ -178,13 +193,11 @@ pub(crate) async fn provider_sync_auto_impl(
         &sync_config.provider,
         sync_config.initial_sync_completed,
         sync_config.sync_period_days,
-        db,
-        gmail,
-        jmap,
-        graph,
-        body_store,
-        inline_images,
-        search,
+        &app_state.db,
+        &app_state.providers,
+        &app_state.body_store,
+        &app_state.inline_images,
+        &app_state.search,
         progress,
     )
     .await
@@ -312,13 +325,7 @@ pub async fn provider_sync_delta(
 pub async fn provider_sync_auto(
     account_id: String,
     sync_state: State<'_, SyncState>,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<AutoSyncResult, String> {
     if !sync_state.try_lock_account(&account_id) {
@@ -326,18 +333,7 @@ pub async fn provider_sync_auto(
     }
 
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let result = provider_sync_auto_impl(
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await;
+    let result = provider_sync_auto_impl(&account_id, &app_state, &reporter).await;
     sync_state.unlock_account(&account_id);
     result
 }
