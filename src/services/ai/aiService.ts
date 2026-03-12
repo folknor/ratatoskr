@@ -1,6 +1,6 @@
 import { getAiCache, setAiCache } from "@/services/db/aiCache";
 import type { DbMessage } from "@/services/db/messages";
-import { completeAi, testAiConnection } from "./client";
+import { callAi, testAiConnection } from "./client";
 import {
   ASK_INBOX_PROMPT,
   CATEGORIZE_PROMPT,
@@ -14,13 +14,6 @@ import {
   SMART_REPLY_PROMPT,
   SUMMARIZE_PROMPT,
 } from "./prompts";
-
-async function callAi(
-  systemPrompt: string,
-  userContent: string,
-): Promise<string> {
-  return completeAi({ systemPrompt, userContent });
-}
 
 function formatMessageForSummary(msg: DbMessage): string {
   const from = msg.from_name

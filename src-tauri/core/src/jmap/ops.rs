@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use jmap_client::core::response::EmailSetResponse;
 use jmap_client::mailbox::Role;
 
 use crate::provider::ops::ProviderOps;
@@ -73,20 +74,19 @@ impl ProviderOps for JmapOps {
         let archive_id = find_mailbox_id_by_role(&mailboxes, "archive");
 
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
+        let mut request = self.client.inner().build();
+        let set_req = request.set_email();
         for eid in &email_ids {
-            self.client
-                .inner()
-                .email_set_mailbox(eid, &inbox_id, false)
-                .await
-                .map_err(|e| format!("archive remove inbox: {e}"))?;
+            let update = set_req.update(eid);
+            update.mailbox_id(&inbox_id, false);
             if let Some(ref aid) = archive_id {
-                self.client
-                    .inner()
-                    .email_set_mailbox(eid, aid, true)
-                    .await
-                    .map_err(|e| format!("archive add archive: {e}"))?;
+                update.mailbox_id(aid, true);
             }
         }
+        request
+            .send_single::<EmailSetResponse>()
+            .await
+            .map_err(|e| format!("archive: {e}"))?;
         Ok(())
     }
 
@@ -97,20 +97,19 @@ impl ProviderOps for JmapOps {
         let inbox_id = find_mailbox_id_by_role(&mailboxes, "inbox");
 
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
+        let mut request = self.client.inner().build();
+        let set_req = request.set_email();
         for eid in &email_ids {
-            self.client
-                .inner()
-                .email_set_mailbox(eid, &trash_id, true)
-                .await
-                .map_err(|e| format!("trash add: {e}"))?;
+            let update = set_req.update(eid);
+            update.mailbox_id(&trash_id, true);
             if let Some(ref iid) = inbox_id {
-                self.client
-                    .inner()
-                    .email_set_mailbox(eid, iid, false)
-                    .await
-                    .map_err(|e| format!("trash remove inbox: {e}"))?;
+                update.mailbox_id(iid, false);
             }
         }
+        request
+            .send_single::<EmailSetResponse>()
+            .await
+            .map_err(|e| format!("trash: {e}"))?;
         Ok(())
     }
 
@@ -120,13 +119,14 @@ impl ProviderOps for JmapOps {
         thread_id: &str,
     ) -> Result<(), String> {
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
-        for eid in &email_ids {
-            self.client
-                .inner()
-                .email_destroy(eid)
-                .await
-                .map_err(|e| format!("permanent delete: {e}"))?;
-        }
+        let mut request = self.client.inner().build();
+        request
+            .set_email()
+            .destroy(email_ids.iter().map(String::as_str));
+        request
+            .send_single::<EmailSetResponse>()
+            .await
+            .map_err(|e| format!("permanent delete: {e}"))?;
         Ok(())
     }
 
@@ -137,13 +137,15 @@ impl ProviderOps for JmapOps {
         read: bool,
     ) -> Result<(), String> {
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
+        let mut request = self.client.inner().build();
+        let set_req = request.set_email();
         for eid in &email_ids {
-            self.client
-                .inner()
-                .email_set_keyword(eid, "$seen", read)
-                .await
-                .map_err(|e| format!("mark read: {e}"))?;
+            set_req.update(eid).keyword("$seen", read);
         }
+        request
+            .send_single::<EmailSetResponse>()
+            .await
+            .map_err(|e| format!("mark read: {e}"))?;
         Ok(())
     }
 
@@ -154,13 +156,15 @@ impl ProviderOps for JmapOps {
         starred: bool,
     ) -> Result<(), String> {
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
+        let mut request = self.client.inner().build();
+        let set_req = request.set_email();
         for eid in &email_ids {
-            self.client
-                .inner()
-                .email_set_keyword(eid, "$flagged", starred)
-                .await
-                .map_err(|e| format!("star: {e}"))?;
+            set_req.update(eid).keyword("$flagged", starred);
         }
+        request
+            .send_single::<EmailSetResponse>()
+            .await
+            .map_err(|e| format!("star: {e}"))?;
         Ok(())
     }
 
@@ -177,31 +181,25 @@ impl ProviderOps for JmapOps {
             find_mailbox_id_by_role(&mailboxes, "inbox").ok_or("No inbox mailbox found")?;
 
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
+        let mut request = self.client.inner().build();
+        let set_req = request.set_email();
         for eid in &email_ids {
             if is_spam {
-                self.client
-                    .inner()
-                    .email_set_mailbox(eid, &junk_id, true)
-                    .await
-                    .map_err(|e| format!("spam add junk: {e}"))?;
-                self.client
-                    .inner()
-                    .email_set_mailbox(eid, &inbox_id, false)
-                    .await
-                    .map_err(|e| format!("spam remove inbox: {e}"))?;
+                set_req
+                    .update(eid)
+                    .mailbox_id(&junk_id, true)
+                    .mailbox_id(&inbox_id, false);
             } else {
-                self.client
-                    .inner()
-                    .email_set_mailbox(eid, &inbox_id, true)
-                    .await
-                    .map_err(|e| format!("not-spam add inbox: {e}"))?;
-                self.client
-                    .inner()
-                    .email_set_mailbox(eid, &junk_id, false)
-                    .await
-                    .map_err(|e| format!("not-spam remove junk: {e}"))?;
+                set_req
+                    .update(eid)
+                    .mailbox_id(&inbox_id, true)
+                    .mailbox_id(&junk_id, false);
             }
         }
+        request
+            .send_single::<EmailSetResponse>()
+            .await
+            .map_err(|e| format!("spam: {e}"))?;
         Ok(())
     }
 
@@ -213,13 +211,15 @@ impl ProviderOps for JmapOps {
     ) -> Result<(), String> {
         let target_id = resolve_mailbox_id(&self.client, folder_id).await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
+        let mut request = self.client.inner().build();
+        let set_req = request.set_email();
         for eid in &email_ids {
-            self.client
-                .inner()
-                .email_set_mailboxes(eid, vec![target_id.clone()])
-                .await
-                .map_err(|e| format!("move to folder: {e}"))?;
+            set_req.update(eid).mailbox_ids([target_id.as_str()]);
         }
+        request
+            .send_single::<EmailSetResponse>()
+            .await
+            .map_err(|e| format!("move to folder: {e}"))?;
         Ok(())
     }
 
@@ -231,13 +231,15 @@ impl ProviderOps for JmapOps {
     ) -> Result<(), String> {
         let mailbox_id = resolve_mailbox_id(&self.client, tag_id).await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
+        let mut request = self.client.inner().build();
+        let set_req = request.set_email();
         for eid in &email_ids {
-            self.client
-                .inner()
-                .email_set_mailbox(eid, &mailbox_id, true)
-                .await
-                .map_err(|e| format!("add tag: {e}"))?;
+            set_req.update(eid).mailbox_id(&mailbox_id, true);
         }
+        request
+            .send_single::<EmailSetResponse>()
+            .await
+            .map_err(|e| format!("add tag: {e}"))?;
         Ok(())
     }
 
@@ -249,13 +251,15 @@ impl ProviderOps for JmapOps {
     ) -> Result<(), String> {
         let mailbox_id = resolve_mailbox_id(&self.client, tag_id).await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
+        let mut request = self.client.inner().build();
+        let set_req = request.set_email();
         for eid in &email_ids {
-            self.client
-                .inner()
-                .email_set_mailbox(eid, &mailbox_id, false)
-                .await
-                .map_err(|e| format!("remove tag: {e}"))?;
+            set_req.update(eid).mailbox_id(&mailbox_id, false);
         }
+        request
+            .send_single::<EmailSetResponse>()
+            .await
+            .map_err(|e| format!("remove tag: {e}"))?;
         Ok(())
     }
 

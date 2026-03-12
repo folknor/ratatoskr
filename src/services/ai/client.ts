@@ -29,6 +29,13 @@ export async function completeAi(req: AiCompletionRequest): Promise<string> {
   }
 }
 
+export async function callAi(
+  systemPrompt: string,
+  userContent: string,
+): Promise<string> {
+  return completeAi({ systemPrompt, userContent });
+}
+
 export async function testAiConnection(): Promise<boolean> {
   try {
     return await invoke<boolean>("ai_test_connection");

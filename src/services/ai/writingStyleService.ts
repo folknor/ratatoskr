@@ -7,18 +7,11 @@ import {
   upsertWritingStyleProfile,
 } from "@/services/db/writingStyleProfiles";
 import { getAiWritingFlags } from "@/services/settings/runtimeFlags";
-import { completeAi, testAiConnection } from "./client";
+import { callAi, testAiConnection } from "./client";
 import {
   AUTO_DRAFT_REPLY_PROMPT,
   WRITING_STYLE_ANALYSIS_PROMPT,
 } from "./prompts";
-
-async function callAi(
-  systemPrompt: string,
-  userContent: string,
-): Promise<string> {
-  return completeAi({ systemPrompt, userContent });
-}
 
 /**
  * Analyze writing style from sent email samples.

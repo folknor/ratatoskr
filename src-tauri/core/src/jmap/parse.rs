@@ -164,12 +164,10 @@ pub fn parse_jmap_email(
     let in_reply_to_header = email.in_reply_to().map(|ids| ids.join(" "));
 
     // List-Unsubscribe headers (RFC 2369 / RFC 8058)
-    let list_unsubscribe = extract_header_text(
-        email.header(&Header::as_text("List-Unsubscribe", false)),
-    );
-    let list_unsubscribe_post = extract_header_text(
-        email.header(&Header::as_text("List-Unsubscribe-Post", false)),
-    );
+    let list_unsubscribe =
+        extract_header_text(email.header(&Header::as_text("List-Unsubscribe", false)));
+    let list_unsubscribe_post =
+        extract_header_text(email.header(&Header::as_text("List-Unsubscribe-Post", false)));
 
     let raw_size = i64::try_from(email.size()).unwrap_or(i64::MAX);
 

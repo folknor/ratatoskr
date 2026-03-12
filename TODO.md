@@ -6,7 +6,7 @@
 
 - [ ] **Decide whether AI inference execution should move to Rust** — Rust already owns provider/runtime/config selection, but TypeScript still owns prompt assembly and actual inference calls for summaries, smart replies, transforms, ask-inbox, task extraction, smart-label AI, category inference, and auto-drafts. This needs an explicit boundary decision, not ad-hoc drift.
 
-- [ ] **Deduplicate the shared `callAi` wrapper** — `aiService.ts` and `writingStyleService.ts` still define the same `callAi(systemPrompt, userContent)` helper. If inference remains in TypeScript, this should collapse to one shared wrapper or direct `completeAi` use.
+- [x] **Deduplicate the shared `callAi` wrapper** — `aiService.ts` and `writingStyleService.ts` still define the same `callAi(systemPrompt, userContent)` helper. If inference remains in TypeScript, this should collapse to one shared wrapper or direct `completeAi` use.
 
 ### Regression Coverage
 
@@ -75,7 +75,7 @@
 
 - [x] **Fetch `List-Unsubscribe` header in JMAP sync** — The `messages` table has `list_unsubscribe` and `list_unsubscribe_post` columns, but JMAP sync sets them to NULL. JMAP can fetch arbitrary headers via `header:List-Unsubscribe:asText` and `header:List-Unsubscribe-Post:asText` properties in `Email/get`. Add these to the property list in `parse.rs`'s `email_get_properties()`, parse the values, and persist them. This enables one-click unsubscribe UI for JMAP accounts (IMAP and Gmail already populate these columns).
 
-- [ ] **Batch `Email/set` for JMAP thread actions** — All thread-level actions in `jmap/ops.rs` (archive, trash, move, mark read, star, spam) loop through email IDs and call `email_set_mailbox()`/`email_set_keyword()` per-email sequentially — one API round-trip per email in the thread. Should build a single `Email/set` request with patches for all email IDs using jmap-client's request builder, reducing N API calls to 1. The per-email convenience methods (`email_set_mailbox`, `email_set_keyword`) don't support batching; need to drop to the lower-level `set_email()` builder with explicit patch operations.
+- [x] **Batch `Email/set` for JMAP thread actions** — All thread-level actions in `jmap/ops.rs` (archive, trash, move, mark read, star, spam) loop through email IDs and call `email_set_mailbox()`/`email_set_keyword()` per-email sequentially — one API round-trip per email in the thread. Should build a single `Email/set` request with patches for all email IDs using jmap-client's request builder, reducing N API calls to 1. The per-email convenience methods (`email_set_mailbox`, `email_set_keyword`) don't support batching; need to drop to the lower-level `set_email()` builder with explicit patch operations.
 
 - [ ] **Batch JMAP send into a single request** — `send_message` in `jmap/ops.rs` makes 5 sequential API calls: `email_import()` → `email_submission_create()` → `email_set_keyword($draft, false)` → `email_set_keyword($seen, true)`. The JMAP spec supports batching these into a single request with back-references: `Email/import` result ID feeds into `EmailSubmission/set` + `onSuccessUpdateEmail` for keyword cleanup. The `jmap-client` high-level API doesn't expose this cleanly — would need the raw request builder to wire back-references.
 
