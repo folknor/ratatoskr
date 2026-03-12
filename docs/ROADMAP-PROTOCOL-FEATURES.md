@@ -12,20 +12,21 @@ Ratatoskr supports four providers: **Exchange (Graph)**, **Gmail API**, **JMAP (
 
 Every feature gets a **local-only implementation** as the baseline. Provider-native support is an optimization on top. The UI never distinguishes — a category is a category whether it syncs to Exchange or lives only in the local DB.
 
-| Feature | Exchange (Graph) | Gmail API | JMAP | IMAP | Local Fallback |
-|---|---|---|---|---|---|
-| Categories | Native (`categories`) | Labels (partial overlap) | `keywords` | IMAP keywords (limited) | Local-only labels+colors |
-| Contacts | Native (`/me/contacts`) | People API | Not standardized | Nothing | Local address book |
-| Auto-collected contacts | People API (ranked) | "Other Contacts" | Nothing | Nothing | `seen_addresses` table |
-| @Mentions | Native (`mentions`) | Nothing | Nothing | Nothing | Local-only, no server flag |
-| Reactions | Native (`reactions`) | Nothing | Nothing | Nothing | Local-only |
-| Scheduled send | Native (deferred delivery) | Native | `EmailSubmission.sendAt` | Nothing | Local timer + send-on-wake |
-| Roaming signatures | Native (roaming settings) | Gmail API settings | Nothing | Nothing | Local-only signatures |
-| Cloud attachments | OneDrive via Graph | Google Drive API | Nothing | Nothing | Local large-file warning only |
-| Tracking blocking | N/A (client-side) | N/A (client-side) | N/A (client-side) | N/A (client-side) | Fully local |
-| Shared mailboxes | Native (delegate access) | Native (delegation) | Shared via ACL | IMAP ACL (RFC 4314) | N/A — requires server support |
-| Public folders | Native (legacy Exchange) | Nothing | Nothing | Nothing | N/A — Exchange-only concept |
-| BIMI | N/A (DNS + headers) | N/A (DNS + headers) | N/A (DNS + headers) | N/A (DNS + headers) | Fully local |
+| Feature | Status | Exchange (Graph) | Gmail API | JMAP | IMAP | Local Fallback |
+|---|---|---|---|---|---|---|
+| Categories | ⚠️ Partial | Native (`categories`) | Labels (partial overlap) | `keywords` | IMAP keywords (limited) | Local-only labels+colors |
+| Contacts | ⚠️ Partial | Native (`/me/contacts`) | People API | Not standardized | Nothing | Local address book |
+| Auto-collected contacts | ⚠️ Partial | People API (ranked) | "Other Contacts" | Nothing | Nothing | `seen_addresses` table |
+| @Mentions | ❌ | Native (`mentions`) | Nothing | Nothing | Nothing | Local-only, no server flag |
+| Reactions | ❌ | Native (`reactions`) | Nothing | Nothing | Nothing | Local-only |
+| Scheduled send | ✅ Local | Native (deferred delivery) | Native | `EmailSubmission.sendAt` | Nothing | Local timer + send-on-wake |
+| Roaming signatures | ⚠️ Partial | Native (roaming settings) | Gmail API settings | Nothing | Nothing | Local-only signatures |
+| Cloud attachments | ❌ | OneDrive via Graph | Google Drive API | Nothing | Nothing | Local large-file warning only |
+| Tracking blocking | ✅ Images | N/A (client-side) | N/A (client-side) | N/A (client-side) | N/A (client-side) | Fully local |
+| Shared mailboxes | ❌ | Native (delegate access) | Native (delegation) | Shared via ACL | IMAP ACL (RFC 4314) | N/A — requires server support |
+| Public folders | ❌ | Native (legacy Exchange) | Nothing | Nothing | Nothing | N/A — Exchange-only concept |
+| BIMI | ❌ | N/A (DNS + headers) | N/A (DNS + headers) | N/A (DNS + headers) | N/A (DNS + headers) | Fully local |
+| IMAP SPECIAL-USE | ✅ Done | N/A | N/A | N/A | Native | N/A |
 
 ### Multi-Account UX
 
@@ -60,6 +61,7 @@ These are features enterprise users actively rely on daily. Missing any of these
 
 ### Categories (Color Flags)
 
+- **Status**: ⚠️ **Partial** — Gmail `CATEGORY_*` labels are mapped, Graph `categories` field is parsed to `cat:` prefixed labels, and a rule engine + AI pipeline handles inbox triage (Primary/Updates/Promotions/Social/Newsletters). But this is automated inbox categorization, not the user-customizable color-flag categories described below. No master category list sync, no unified color mapping, no user-applied categories on individual messages.
 - **What**: Per-user string labels with associated colors, applied to messages
 - **Scope**: Per-user on personal mailboxes; shared visibility on shared mailboxes and public folders
 
@@ -82,6 +84,7 @@ These are features enterprise users actively rely on daily. Missing any of these
 
 ### Contacts & Groups
 
+- **Status**: ⚠️ **Partial** — Local contact DB exists (`contacts` table with frequency ranking, avatars, notes). Contacts auto-collected on send. Compose autocomplete works against local contacts. Gravatar integration, contact sidebar with stats/colleagues/shared files. **Missing**: server-side sync (Exchange `/me/contacts`, Google People API), `seen_addresses` from received mail headers, distribution list/group resolution, contact photos from server.
 - **What**: Exchange-stored personal contacts, distribution lists, M365 Groups
 - **Dependency**: Needed for @mentions, compose autocomplete, group expansion
 
@@ -105,6 +108,7 @@ These are features enterprise users actively rely on daily. Missing any of these
 
 ### Tracking Pixel / Read Receipt Blocking
 
+- **Status**: ⚠️ **Mostly done** — Remote image blocking is fully implemented: blocked by default, CSP enforcement on iframe, per-sender allowlist (`image_allowlist` table), "load images" / "always load from sender" buttons. **Missing**: MDN (`Disposition-Notification-To`) suppression, per-account/per-sender read receipt policy.
 - **What**: Block remote image loading by default (defeats tracking pixels), suppress MDN (Message Disposition Notification) headers
 - **Scope**: Client-side only — identical implementation across all providers
 
@@ -119,6 +123,7 @@ These are features enterprise users actively rely on daily. Missing any of these
 
 ### Cloud Attachment Linking (OneDrive / Google Drive)
 
+- **Status**: ❌ **Not implemented**
 - **What**: Attachments above a size threshold uploaded to cloud storage, shared as links instead of inline
 
 **Cross-provider behavior**:
@@ -140,6 +145,7 @@ These are features enterprise users actively rely on daily. Missing any of these
 
 ### IMAP CONDSTORE/QRESYNC (RFC 7162)
 
+- **Status**: ❌ **Not implemented** — The `modseq` column exists in `folder_sync_state` and `ImapFolderStatus` parses it from SELECT responses, but it's unused (`_modseq`). Sync relies on UID comparison only. No capability detection, no `CHANGEDSINCE`/`VANISHED` handling.
 - **What**: Efficient delta sync for IMAP — server tracks mod-sequences, client fetches only changes since last sync
 - **Scope**: Stalwart and most modern IMAP servers support this. Critical for users not on Graph/JMAP.
 
@@ -154,6 +160,7 @@ These are features enterprise users actively rely on daily. Missing any of these
 
 ### Shared / Delegated Mailboxes
 
+- **Status**: ❌ **Not implemented** — Gmail Send-As aliases are functional (fetch, store, FromSelector in compose, smart alias selection for replies), but this is outbound identity only, not shared mailbox access. No `*.Shared` OAuth scopes requested for Graph. No delegation discovery, no shared mailbox reading, no IMAP ACL, no JMAP Sharing.
 - **What**: Any mailbox the user has delegate access to — shared mailboxes, other users' mailboxes, resource mailboxes (rooms/equipment). In enterprise M365, these auto-appear in Outlook when a user is granted Full Access.
 - **Scope**: **Adoption blocker**. Enterprise clients cannot switch until this works. Many M365 orgs have dozens of shared/delegated mailboxes per user. Users switch between personal and delegated mailboxes constantly throughout the day.
 
@@ -205,6 +212,7 @@ A user may have Full Access but not Send As (can read but not impersonate), or S
 
 ### Public Folders
 
+- **Status**: ❌ **Not implemented**
 - **What**: Hierarchical shared folder trees accessible to the entire organization (or subsets). Legacy Exchange concept, still heavily used in enterprises that have been on Exchange for 15+ years.
 - **Scope**: Exchange-only. Microsoft has been trying to deprecate public folders since Exchange 2013. Enterprise customers refuse. They're still supported in Exchange Online/M365.
 
@@ -236,6 +244,7 @@ Features users notice are missing after a week of daily use.
 
 ### @Mentions
 
+- **Status**: ❌ **Not implemented**
 - **What**: `@User` in email body, recipient gets the message auto-flagged
 - **Dependency**: Contacts & Groups sync (Tier 1)
 
@@ -257,6 +266,7 @@ Features users notice are missing after a week of daily use.
 
 ### Roaming Signatures
 
+- **Status**: ⚠️ **Partial** — Local signature editor and DB storage (`signatures` table) are fully functional: create/edit/delete, per-account defaults, HTML body, sort order. **Missing**: server-side sync — no fetch from Exchange Graph roaming settings or Gmail `users.settings.sendAs` signatures. First-run experience doesn't auto-populate.
 - **What**: Signatures stored server-side, synced across clients
 
 **Cross-provider behavior**:
@@ -279,6 +289,7 @@ Features users notice are missing after a week of daily use.
 
 ### Scheduled Send
 
+- **Status**: ✅ **Done (local)** — Full implementation: schedule dialog with presets (tomorrow 9am/1pm, Monday 9am) + custom date/time picker, `scheduled_emails` table with status tracking (pending/sending/sent/failed/cancelled), background sender service. Currently local-only (client holds and sends). **Missing**: server-native delegation to Exchange/Gmail/JMAP for reliability when client is offline.
 - **What**: Compose now, deliver later at a specified time
 
 **Cross-provider behavior**:
@@ -300,6 +311,7 @@ Features users notice are missing after a week of daily use.
 
 ### Reactions
 
+- **Status**: ❌ **Not implemented**
 - **What**: Emoji reactions on email messages (Exchange/new Outlook feature)
 
 **Cross-provider behavior**:
@@ -327,6 +339,7 @@ Features that go beyond Outlook parity into "this client is actually better."
 
 ### BIMI (Brand Indicators for Message Identification)
 
+- **Status**: ❌ **Not implemented**
 - **What**: Verified sender brand logos displayed next to messages from authenticated domains
 - **Scope**: Client-side only — DNS lookup + header check, works identically across all providers
 
@@ -341,6 +354,7 @@ Features that go beyond Outlook parity into "this client is actually better."
 
 ### IMAP SPECIAL-USE (RFC 6154)
 
+- **Status**: ✅ **Done** — Full implementation in `imap/parse.rs`: detects `\Sent`, `\Trash`, `\Drafts`, `\Junk`, `\Archive`, `\All`, `\Flagged` attributes from LIST response. Heuristic fallback via `imap_name_to_special_use()` covers 50+ folder name variations across languages. Role mapping in `provider/folder_roles.rs`.
 - **What**: Server declares which folders are Trash, Sent, Drafts, Archive, Junk via attributes
 - **Scope**: IMAP only — other providers have explicit folder semantics in their APIs
 
