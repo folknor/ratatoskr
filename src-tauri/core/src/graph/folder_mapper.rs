@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::provider::folder_roles::graph_well_known_aliases;
+use crate::provider::label_flags::{assemble_labels, prefixed_labels};
 
 use super::types::GraphMailFolder;
 
@@ -74,27 +75,20 @@ impl FolderMap {
         is_read: bool,
         flag_status: &str,
     ) -> Vec<String> {
-        let mut labels = Vec::new();
+        let primary_labels = self
+            .by_id
+            .get(parent_folder_id)
+            .map(|mapping| vec![mapping.label_id.clone()])
+            .unwrap_or_default();
+        let category_refs = categories.iter().map(String::as_str);
 
-        // Primary folder label
-        if let Some(mapping) = self.by_id.get(parent_folder_id) {
-            labels.push(mapping.label_id.clone());
-        }
-
-        // Categories as supplementary labels
-        for cat in categories {
-            labels.push(format!("cat:{cat}"));
-        }
-
-        // Pseudo-labels from flags
-        if !is_read {
-            labels.push("UNREAD".to_string());
-        }
-        if flag_status == "flagged" {
-            labels.push("STARRED".to_string());
-        }
-
-        labels
+        assemble_labels(
+            primary_labels,
+            prefixed_labels("cat:", category_refs),
+            is_read,
+            flag_status == "flagged",
+            false,
+        )
     }
 
     /// Return all mappings (for list_folders trait method).

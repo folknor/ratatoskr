@@ -1,4 +1,5 @@
 use crate::provider::folder_roles::{SYSTEM_FOLDER_ROLES, system_folder_by_jmap_role};
+use crate::provider::label_flags::assemble_labels;
 use std::collections::HashMap;
 
 pub struct MailboxLabelMapping {
@@ -44,26 +45,19 @@ pub fn get_labels_for_email(
     keywords: &[&str],
     mailbox_map: &HashMap<String, MailboxInfo>,
 ) -> Vec<String> {
-    let mut labels = Vec::new();
+    let primary_labels = mailbox_ids.iter().filter_map(|mb_id| {
+        mailbox_map
+            .get(*mb_id)
+            .map(|info| map_mailbox_to_label(info.role.as_deref(), mb_id, &info.name).label_id)
+    });
 
-    for &mb_id in mailbox_ids {
-        if let Some(info) = mailbox_map.get(mb_id) {
-            let mapping = map_mailbox_to_label(info.role.as_deref(), mb_id, &info.name);
-            labels.push(mapping.label_id);
-        }
-    }
-
-    if !keywords.contains(&"$seen") {
-        labels.push("UNREAD".to_string());
-    }
-    if keywords.contains(&"$flagged") {
-        labels.push("STARRED".to_string());
-    }
-    if keywords.contains(&"$draft") && !labels.contains(&"DRAFT".to_string()) {
-        labels.push("DRAFT".to_string());
-    }
-
-    labels
+    assemble_labels(
+        primary_labels,
+        std::iter::empty::<String>(),
+        keywords.contains(&"$seen"),
+        keywords.contains(&"$flagged"),
+        keywords.contains(&"$draft"),
+    )
 }
 
 /// Reverse lookup: Gmail-style label ID → JMAP mailbox ID.

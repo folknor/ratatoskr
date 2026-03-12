@@ -46,7 +46,7 @@
 
 - [x] **Shared folder role mapping** — The duplicated system folder role mappings for JMAP, Graph, and IMAP now live in `ratatoskr-core::provider::folder_roles` as a shared `SYSTEM_FOLDER_ROLES` table with provider-specific lookup helpers.
 
-- [ ] **Shared label/flag extraction** — `jmap/mailbox_mapper.rs:51-77` and `graph/folder_mapper.rs:78-107` have ~95% identical logic for extracting labels from folder membership + keywords/flags. Unify with provider-specific adapters.
+- [x] **Shared label/flag extraction** — The shared label assembly logic for JMAP and Graph now lives in `ratatoskr-core::provider::label_flags`, with provider-specific mailbox/folder resolution left in the adapters.
 
 - [x] **Shared attachment deduplication** — The shared dedup/merge mechanics for Gmail and IMAP attachments now live in `ratatoskr-core::provider::attachment_dedup`, with provider-specific key selection left at the call sites.
 
