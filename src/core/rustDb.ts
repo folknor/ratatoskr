@@ -26,12 +26,6 @@ import type { DbThread } from "@/services/db/threads";
 
 // ── Rust-specific row types (flat structs returned by Rust) ─────────
 
-/** Row returned by `db_get_all_settings` */
-interface SettingRow {
-  key: string;
-  value: string;
-}
-
 /** Row returned by `db_get_category_unread_counts` */
 interface CategoryCountRow {
   category: string | null;
@@ -129,11 +123,6 @@ export async function getLabelsForAccount(
 
 export async function getSetting(key: string): Promise<string | null> {
   return invoke<string | null>("db_get_setting", { key });
-}
-
-export async function getAllSettings(): Promise<Record<string, string>> {
-  const rows = await invoke<SettingRow[]>("db_get_all_settings");
-  return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }
 
 export async function setSetting(key: string, value: string): Promise<void> {

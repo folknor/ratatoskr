@@ -4,8 +4,7 @@ use rusqlite::{Connection, Row, params};
 
 use super::DbState;
 use super::types::{
-    CategoryCount, DbAttachment, DbContact, DbLabel, DbMessage, DbThread, SettingRow,
-    ThreadCategoryRow,
+    CategoryCount, DbAttachment, DbContact, DbLabel, DbMessage, DbThread, ThreadCategoryRow,
 };
 use crate::body_store::{BodyStoreState, MessageBody};
 use crate::provider::crypto::{decrypt_value, is_encrypted};
@@ -458,22 +457,6 @@ pub fn get_setting(conn: &Connection, key: String) -> Result<Option<String>, Str
         )
         .ok();
     Ok(result)
-}
-
-pub fn get_all_settings(conn: &Connection) -> Result<Vec<SettingRow>, String> {
-    let mut stmt = conn
-        .prepare("SELECT key, value FROM settings")
-        .map_err(|e| e.to_string())?;
-
-    stmt.query_map([], |row| {
-        Ok(SettingRow {
-            key: row.get(0)?,
-            value: row.get(1)?,
-        })
-    })
-    .map_err(|e| e.to_string())?
-    .collect::<Result<Vec<_>, _>>()
-    .map_err(|e| e.to_string())
 }
 
 pub fn get_secure_setting(

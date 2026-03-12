@@ -93,7 +93,6 @@ export {
   getActiveFollowUpThreadIds,
   getAllContacts,
   getAllowlistedSenders,
-  getAllSettings,
   getAttachmentsFromContact,
   getBundleRules,
   getBundleSummaries,

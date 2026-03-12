@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { normalizeEmail } from "@/utils/emailUtils";
-import { getAllAccounts } from "../db/accounts";
-import { getSetting } from "../db/settings";
+import { listAccountBasicInfo } from "../accounts/basicInfo";
 
 /**
  * Remove a client from cache (e.g., on account removal or re-auth).
@@ -19,17 +18,10 @@ export async function removeClient(accountId: string): Promise<void> {
  * Initialize Rust-side Gmail clients for all active Gmail API accounts on app startup.
  */
 export async function initializeClients(): Promise<void> {
-  const accounts = await getAllAccounts();
-  const clientId = await getSetting("google_client_id");
-  if (!clientId) return;
+  const accounts = await listAccountBasicInfo();
 
   for (const account of accounts) {
-    if (
-      account.is_active === 1 &&
-      account.provider === "gmail_api" &&
-      account.access_token &&
-      account.refresh_token
-    ) {
+    if (account.isActive && account.provider === "gmail_api") {
       try {
         await invoke<void>("gmail_init_client", { accountId: account.id });
       } catch (err) {

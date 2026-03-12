@@ -5,8 +5,7 @@ use tauri::State;
 
 use super::DbState;
 use super::types::{
-    CategoryCount, DbAttachment, DbContact, DbLabel, DbMessage, DbThread, SettingRow,
-    ThreadCategoryRow,
+    CategoryCount, DbAttachment, DbContact, DbLabel, DbMessage, DbThread, ThreadCategoryRow,
 };
 use crate::provider::crypto::AppCryptoState;
 
@@ -100,11 +99,6 @@ pub async fn db_get_setting(
     state
         .with_conn(move |conn| super::get_setting(conn, key))
         .await
-}
-
-#[tauri::command]
-pub async fn db_get_all_settings(state: State<'_, DbState>) -> Result<Vec<SettingRow>, String> {
-    state.with_conn(super::get_all_settings).await
 }
 
 #[tauri::command]

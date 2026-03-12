@@ -115,12 +115,6 @@ pub struct DbLabel {
 
 // ── Setting ──────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SettingRow {
-    pub key: String,
-    pub value: String,
-}
-
 // ── Thread category ──────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
