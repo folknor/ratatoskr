@@ -9,7 +9,6 @@ export {
   resyncAccount,
   triggerSync,
 } from "@/services/gmail/syncManager";
-
 // Account lifecycle
 export {
   reauthorizeAccount,

@@ -51,7 +51,7 @@
 
 ### Per-Account OAuth Credentials
 
-- [ ] **Add per-account credential editing UI for existing accounts** — The Rust reauth commands (`account_reauthorize_gmail`, `account_reauthorize_graph`) already accept optional `client_id`/`client_secret` parameters to update stored credentials, but the frontend reauth flow doesn't surface fields to edit them. Add a `SetupProviderCredentials` step (prefilled with current values) before the reauth OAuth redirect, so users can inspect and change which app registration an existing account uses.
+- [x] **Add per-account credential editing UI for existing accounts** — Gmail and Graph accounts now expose an explicit per-account “Update OAuth App” reauth path in settings. The UI reads that account’s stored credentials, lets the user inspect or change them, and reauthorizes without any cross-account prefill/default behavior.
 
 - [ ] **Clean up orphaned global credential settings rows** — Migration v29 backfilled per-account `oauth_client_id`/`oauth_client_secret` from the global `settings` table, but the original `google_client_id`, `google_client_secret`, and `microsoft_client_id` rows remain in the `settings` table as dead data. Add a follow-up migration or cleanup step to delete these rows once the per-account migration has been live long enough.
 

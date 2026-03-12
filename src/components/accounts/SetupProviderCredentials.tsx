@@ -1,75 +1,57 @@
-import { invoke } from "@tauri-apps/api/core";
 import type React from "react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "@/components/ui/Modal";
-
-interface OAuthDefaults {
-  clientId: string;
-  hasSecret: boolean;
-}
 
 interface SetupProviderCredentialsProps {
   provider: "google" | "microsoft";
   onSubmit: (clientId: string, clientSecret: string | null) => void;
   onCancel: () => void;
+  initialClientId?: string;
+  initialClientSecret?: string | null;
+  title?: string;
+  submitLabel?: string;
+  error?: string | null;
 }
 
 export function SetupProviderCredentials({
   provider,
   onSubmit,
   onCancel,
+  initialClientId = "",
+  initialClientSecret = "",
+  title,
+  submitLabel,
+  error,
 }: SetupProviderCredentialsProps): React.ReactNode {
   const { t } = useTranslation("accounts");
-  const [clientId, setClientId] = useState("");
-  const [clientSecret, setClientSecret] = useState("");
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    async function prefill(): Promise<void> {
-      try {
-        const providerKey = provider === "google" ? "gmail_api" : "graph";
-        const defaults = await invoke<OAuthDefaults | null>(
-          "account_get_provider_oauth_defaults",
-          { provider: providerKey },
-        );
-        if (defaults) {
-          setClientId(defaults.clientId);
-        }
-      } catch {
-        // No defaults available — user starts fresh
-      } finally {
-        setLoading(false);
-      }
-    }
-    void prefill();
-  }, [provider]);
+  const [clientId, setClientId] = useState(initialClientId);
+  const [clientSecret, setClientSecret] = useState(initialClientSecret ?? "");
 
   const handleSubmit = (): void => {
     const trimmedId = clientId.trim();
     if (!trimmedId) return;
     const trimmedSecret = clientSecret.trim();
-    onSubmit(
-      trimmedId,
-      provider === "google" && trimmedSecret ? trimmedSecret : null,
-    );
+    if (provider === "google" && !trimmedSecret) return;
+    onSubmit(trimmedId, provider === "google" ? trimmedSecret : null);
   };
 
   const isValid =
     provider === "microsoft"
       ? clientId.trim().length > 0
-      : clientId.trim().length > 0;
+      : clientId.trim().length > 0 && clientSecret.trim().length > 0;
 
-  const title =
-    provider === "google"
+  const resolvedTitle =
+    title ??
+    (provider === "google"
       ? t("googleApiSetup", "Google API Setup")
-      : t("microsoftApiSetup", "Microsoft API Setup");
+      : t("microsoftApiSetup", "Microsoft API Setup"));
 
   return (
     <Modal
       isOpen={true}
       onClose={onCancel}
-      title={title}
+      title={resolvedTitle}
       width="w-full max-w-lg"
     >
       <div className="p-4">
@@ -142,54 +124,49 @@ export function SetupProviderCredentials({
           </>
         )}
 
-        {loading ? (
-          <div className="text-text-tertiary text-sm py-2">
-            {t("common:loading", "Loading...")}
+        {Boolean(error) && (
+          <div className="mb-4 rounded-lg border border-danger/20 bg-danger/10 p-3 text-sm text-danger">
+            {error}
           </div>
-        ) : (
+        )}
+
+        <input
+          type="text"
+          value={clientId}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+            setClientId(e.target.value)
+          }
+          placeholder={
+            provider === "google"
+              ? t("googleClientIdPlaceholder", "Paste your Client ID here...")
+              : t(
+                  "microsoftClientIdPlaceholder",
+                  "Azure App Registration Client ID",
+                )
+          }
+          className="w-full px-3 py-2 bg-bg-secondary border border-border-primary rounded-lg text-sm mb-3 outline-none focus:border-accent"
+        />
+
+        {provider === "google" && (
           <>
             <input
-              type="text"
-              value={clientId}
+              type="password"
+              value={clientSecret}
               onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
-                setClientId(e.target.value)
+                setClientSecret(e.target.value)
               }
-              placeholder={
-                provider === "google"
-                  ? t(
-                      "googleClientIdPlaceholder",
-                      "Paste your Client ID here...",
-                    )
-                  : t(
-                      "microsoftClientIdPlaceholder",
-                      "Azure App Registration Client ID",
-                    )
-              }
-              className="w-full px-3 py-2 bg-bg-secondary border border-border-primary rounded-lg text-sm mb-3 outline-none focus:border-accent"
+              placeholder={t(
+                "googleClientSecretPlaceholder",
+                "Paste your Client Secret here...",
+              )}
+              className="w-full px-3 py-2 bg-bg-secondary border border-border-primary rounded-lg text-sm mb-1 outline-none focus:border-accent"
             />
-
-            {provider === "google" && (
-              <>
-                <input
-                  type="password"
-                  value={clientSecret}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
-                    setClientSecret(e.target.value)
-                  }
-                  placeholder={t(
-                    "googleClientSecretPlaceholder",
-                    "Paste your Client Secret here...",
-                  )}
-                  className="w-full px-3 py-2 bg-bg-secondary border border-border-primary rounded-lg text-sm mb-1 outline-none focus:border-accent"
-                />
-                <p className="text-text-tertiary text-xs mb-4">
-                  {t(
-                    "clientSecretHint",
-                    "Required for Web application credentials",
-                  )}
-                </p>
-              </>
-            )}
+            <p className="text-text-tertiary text-xs mb-4">
+              {t(
+                "clientSecretHint",
+                "Required for Web application credentials",
+              )}
+            </p>
           </>
         )}
 
@@ -204,10 +181,10 @@ export function SetupProviderCredentials({
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={!isValid || loading}
+            disabled={!isValid}
             className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {t("continueSetup", "Continue")}
+            {submitLabel ?? t("continueSetup", "Continue")}
           </button>
         </div>
       </div>

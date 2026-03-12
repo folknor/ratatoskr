@@ -81,7 +81,7 @@ pub struct AccountCaldavSettingsInfo {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OAuthDefaults {
+pub struct AccountOAuthCredentials {
     pub client_id: String,
-    pub has_secret: bool,
+    pub client_secret: Option<String>,
 }

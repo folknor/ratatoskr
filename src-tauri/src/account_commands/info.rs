@@ -8,12 +8,12 @@ use crate::gmail::client::GmailState;
 use crate::graph::client::GraphState;
 use crate::inline_image_store::InlineImageStoreState;
 use crate::jmap::client::JmapState;
-use crate::provider::crypto::{decrypt_value, is_encrypted};
+use crate::provider::crypto::{AppCryptoState, decrypt_value, is_encrypted};
 use crate::sync::config;
 
 use super::types::{
-    AccountBasicInfo, AccountCaldavSettingsInfo, CaldavConnectionInfo, CalendarProviderInfo,
-    OAuthDefaults,
+    AccountBasicInfo, AccountCaldavSettingsInfo, AccountOAuthCredentials, CaldavConnectionInfo,
+    CalendarProviderInfo,
 };
 
 #[tauri::command]
@@ -297,27 +297,61 @@ pub async fn account_get_caldav_settings_info(
 }
 
 #[tauri::command]
-pub async fn account_get_provider_oauth_defaults(
+pub async fn account_get_oauth_credentials(
     db: State<'_, DbState>,
-    provider: String,
-) -> Result<Option<OAuthDefaults>, String> {
+    crypto: State<'_, AppCryptoState>,
+    account_id: String,
+) -> Result<Option<AccountOAuthCredentials>, String> {
+    let encryption_key = *crypto.encryption_key();
     db.with_conn(move |conn| {
         conn.query_row(
-            "SELECT oauth_client_id, oauth_client_secret FROM accounts \
-             WHERE provider = ?1 AND oauth_client_id IS NOT NULL AND oauth_client_id != '' \
-             ORDER BY rowid DESC LIMIT 1",
-            rusqlite::params![provider],
+            "SELECT provider, oauth_client_id, oauth_client_secret
+             FROM accounts
+             WHERE id = ?1",
+            rusqlite::params![account_id],
             |row| {
-                Ok(OAuthDefaults {
-                    client_id: row.get(0)?,
-                    has_secret: row
-                        .get::<_, Option<String>>(1)?
-                        .is_some_and(|s| !s.is_empty()),
-                })
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
             },
         )
         .optional()
-        .map_err(|e| format!("query provider oauth defaults: {e}"))
+        .map_err(|e| format!("query account oauth credentials: {e}"))
+        .map(|result| {
+            result.and_then(|(provider, client_id, client_secret)| {
+                if provider != "gmail_api" && provider != "graph" {
+                    return None;
+                }
+
+                let client_id =
+                    client_id
+                        .filter(|value| !value.trim().is_empty())
+                        .map(|value| {
+                            if is_encrypted(&value) {
+                                decrypt_value(&encryption_key, &value).unwrap_or(value)
+                            } else {
+                                value
+                            }
+                        })?;
+                let client_secret =
+                    client_secret
+                        .filter(|value| !value.trim().is_empty())
+                        .map(|value| {
+                            if is_encrypted(&value) {
+                                decrypt_value(&encryption_key, &value).unwrap_or(value)
+                            } else {
+                                value
+                            }
+                        });
+
+                Some(AccountOAuthCredentials {
+                    client_id,
+                    client_secret,
+                })
+            })
+        })
     })
     .await
 }

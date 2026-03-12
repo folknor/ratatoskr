@@ -26,6 +26,7 @@ import {
 } from "@/core/sync";
 import { getPersistedLanguage, getSystemLanguageName } from "@/i18n";
 import { navigateToLabel, navigateToSettings } from "@/router/navigate";
+import type { ReauthorizationCredentials } from "@/services/gmail/tokenManager";
 import {
   getSettingsBootstrapSnapshot,
   getSettingsSecretsSnapshot,
@@ -332,10 +333,11 @@ export function SettingsPage(): React.ReactNode {
       accountId: string,
       email: string,
       provider?: string,
+      credentials?: ReauthorizationCredentials,
     ): Promise<void> => {
       setReauthStatus((prev) => ({ ...prev, [accountId]: "authorizing" }));
       try {
-        await reauthorizeAccount(accountId, email, provider);
+        await reauthorizeAccount(accountId, email, provider, credentials);
         setReauthStatus((prev) => ({ ...prev, [accountId]: "done" }));
         setTimeout(() => {
           setReauthStatus((prev) => ({ ...prev, [accountId]: "idle" }));
@@ -346,6 +348,7 @@ export function SettingsPage(): React.ReactNode {
         setTimeout(() => {
           setReauthStatus((prev) => ({ ...prev, [accountId]: "idle" }));
         }, 3000);
+        throw err;
       }
     },
     [],

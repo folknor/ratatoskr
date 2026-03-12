@@ -13,9 +13,19 @@ import { setSetting } from "@/core/settings";
 import {
   type AccountCaldavSettingsInfo,
   getAccountCaldavSettingsInfo,
+  getAccountOAuthCredentials,
 } from "@/services/accounts/basicInfo";
 import { useAccountStore } from "@/stores/accountStore";
+import { SetupProviderCredentials } from "../accounts/SetupProviderCredentials";
 import { Section, SettingRow } from "./SettingsShared";
+
+interface CredentialEditorState {
+  accountId: string;
+  email: string;
+  provider: "gmail_api" | "graph";
+  clientId: string;
+  clientSecret: string | null;
+}
 
 export interface SettingsAccountsTabProps {
   isSyncing: boolean;
@@ -28,6 +38,7 @@ export interface SettingsAccountsTabProps {
     accountId: string,
     email: string,
     provider?: string,
+    credentials?: { clientId: string; clientSecret?: string | null },
   ) => Promise<void>;
   handleResyncAccount: (accountId: string) => Promise<void>;
   reauthStatus: Record<string, "idle" | "authorizing" | "done" | "error">;
@@ -48,10 +59,97 @@ export function SettingsAccountsTab({
 }: SettingsAccountsTabProps): React.ReactNode {
   const { t } = useTranslation("settings");
   const accounts = useAccountStore((s) => s.accounts);
+  const [credentialEditor, setCredentialEditor] =
+    useState<CredentialEditorState | null>(null);
+  const [credentialEditorError, setCredentialEditorError] = useState<
+    string | null
+  >(null);
+
+  const handleOpenCredentialEditor = useCallback(
+    async (
+      accountId: string,
+      email: string,
+      provider: string,
+    ): Promise<void> => {
+      if (provider !== "gmail_api" && provider !== "graph") return;
+      setCredentialEditorError(null);
+      try {
+        const credentials = await getAccountOAuthCredentials(accountId);
+        if (!credentials) {
+          throw new Error(t("oauthCredentialsUnavailable"));
+        }
+        setCredentialEditor({
+          accountId,
+          email,
+          provider: provider as "gmail_api" | "graph",
+          clientId: credentials.clientId,
+          clientSecret: credentials.clientSecret,
+        });
+      } catch (err) {
+        setCredentialEditorError(
+          err instanceof Error ? err.message : t("oauthCredentialsUnavailable"),
+        );
+      }
+    },
+    [t],
+  );
+
+  const handleSubmitCredentialEditor = useCallback(
+    async (clientId: string, clientSecret: string | null): Promise<void> => {
+      if (!credentialEditor) return;
+      setCredentialEditorError(null);
+      try {
+        await handleReauthorizeAccount(
+          credentialEditor.accountId,
+          credentialEditor.email,
+          credentialEditor.provider,
+          { clientId, clientSecret },
+        );
+        setCredentialEditor(null);
+      } catch (err) {
+        setCredentialEditorError(
+          err instanceof Error ? err.message : t("oauthCredentialUpdateFailed"),
+        );
+      }
+    },
+    [credentialEditor, handleReauthorizeAccount, t],
+  );
+
+  const editableProviderLabel =
+    credentialEditor?.provider === "graph"
+      ? t("microsoftOutlook", "Microsoft Outlook")
+      : t("googleGmail", "Google Gmail");
 
   return (
     <>
+      {credentialEditor ? (
+        <SetupProviderCredentials
+          provider={
+            credentialEditor.provider === "graph" ? "microsoft" : "google"
+          }
+          initialClientId={credentialEditor.clientId}
+          initialClientSecret={credentialEditor.clientSecret}
+          title={t("updateOauthAppTitle", {
+            provider: editableProviderLabel,
+          })}
+          submitLabel={t("updateAndReauthorize")}
+          error={credentialEditorError}
+          onSubmit={(clientId: string, clientSecret: string | null): void => {
+            void handleSubmitCredentialEditor(clientId, clientSecret);
+          }}
+          onCancel={(): void => {
+            setCredentialEditor(null);
+            setCredentialEditorError(null);
+          }}
+        />
+      ) : null}
+
       <Section title={t("mailAccounts")}>
+        {credentialEditorError && !credentialEditor && (
+          <div className="mb-3 rounded-lg border border-danger/20 bg-danger/10 p-3 text-sm text-danger">
+            {credentialEditorError}
+          </div>
+        )}
         {accounts.filter((a) => a.provider !== "caldav").length === 0 ? (
           <p className="text-sm text-text-tertiary">{t("noMailAccounts")}</p>
         ) : (
@@ -60,7 +158,16 @@ export function SettingsAccountsTab({
               .filter((a) => a.provider !== "caldav")
               .map((account) => {
                 const providerLabel =
-                  account.provider === "imap" ? t("imap") : t("gmail");
+                  account.provider === "imap"
+                    ? t("imap")
+                    : account.provider === "graph"
+                      ? t("microsoftOutlook", "Microsoft Outlook")
+                      : t("gmail");
+                const canEditOauthApp =
+                  account.provider === "gmail_api" ||
+                  account.provider === "graph";
+                const editableProvider =
+                  account.provider === "graph" ? "graph" : "gmail_api";
                 return (
                   <div
                     key={account.id}
@@ -80,13 +187,13 @@ export function SettingsAccountsTab({
                     <div className="flex items-center gap-3">
                       <button
                         type="button"
-                        onClick={(): void =>
+                        onClick={(): void => {
                           void handleReauthorizeAccount(
                             account.id,
                             account.email,
                             account.provider,
-                          )
-                        }
+                          ).catch(() => {});
+                        }}
                         disabled={reauthStatus[account.id] === "authorizing"}
                         className="text-xs text-accent hover:text-accent-hover transition-colors disabled:opacity-50"
                       >
@@ -98,6 +205,21 @@ export function SettingsAccountsTab({
                           reauthStatus[account.id] === "idle") &&
                           t("reauthorize")}
                       </button>
+                      {Boolean(canEditOauthApp) && (
+                        <button
+                          type="button"
+                          onClick={(): void => {
+                            void handleOpenCredentialEditor(
+                              account.id,
+                              account.email,
+                              editableProvider,
+                            );
+                          }}
+                          className="text-xs text-accent hover:text-accent-hover transition-colors"
+                        >
+                          {t("updateOauthApp")}
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={(): void =>

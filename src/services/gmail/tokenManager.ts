@@ -2,6 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { normalizeEmail } from "@/utils/emailUtils";
 import { listAccountBasicInfo } from "../accounts/basicInfo";
 
+export interface ReauthorizationCredentials {
+  clientId: string;
+  clientSecret?: string | null;
+}
+
 /**
  * Remove a client from cache (e.g., on account removal or re-auth).
  * Evicts the Rust-side Gmail client.
@@ -42,6 +47,7 @@ export async function reauthorizeAccount(
   accountId: string,
   expectedEmail: string,
   provider?: string,
+  credentials?: ReauthorizationCredentials,
 ): Promise<void> {
   const email = normalizeEmail(expectedEmail);
 
@@ -49,12 +55,15 @@ export async function reauthorizeAccount(
     await invoke("account_reauthorize_graph", {
       accountId,
       expectedEmail: email,
+      clientId: credentials?.clientId,
     });
   } else {
     // Default to Gmail reauth for backwards compatibility
     await invoke("account_reauthorize_gmail", {
       accountId,
       expectedEmail: email,
+      clientId: credentials?.clientId,
+      clientSecret: credentials?.clientSecret ?? null,
     });
   }
 }

@@ -19,6 +19,11 @@ export interface AccountCaldavSettingsInfo {
   calendarProvider: string | null;
 }
 
+export interface AccountOAuthCredentials {
+  clientId: string;
+  clientSecret: string | null;
+}
+
 export async function getAccountBasicInfo(
   accountId: string,
 ): Promise<AccountBasicInfo | null> {
@@ -47,6 +52,17 @@ export async function getAccountCaldavSettingsInfo(
 ): Promise<AccountCaldavSettingsInfo | null> {
   return invoke<AccountCaldavSettingsInfo | null>(
     "account_get_caldav_settings_info",
+    {
+      accountId,
+    },
+  );
+}
+
+export async function getAccountOAuthCredentials(
+  accountId: string,
+): Promise<AccountOAuthCredentials | null> {
+  return invoke<AccountOAuthCredentials | null>(
+    "account_get_oauth_credentials",
     {
       accountId,
     },
