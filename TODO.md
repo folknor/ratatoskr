@@ -48,7 +48,7 @@
 
 - [ ] **Shared label/flag extraction** — `jmap/mailbox_mapper.rs:51-77` and `graph/folder_mapper.rs:78-107` have ~95% identical logic for extracting labels from folder membership + keywords/flags. Unify with provider-specific adapters.
 
-- [ ] **Shared attachment deduplication** — `gmail/parse.rs:172-201` (`dedup_by_attachment_id`) and `imap/parse.rs:286-318` (`dedup_attachments_by_hash`) do nearly identical dedup-and-merge logic. Extract to `provider/attachment_dedup.rs` with a generic key trait.
+- [x] **Shared attachment deduplication** — The shared dedup/merge mechanics for Gmail and IMAP attachments now live in `ratatoskr-core::provider::attachment_dedup`, with provider-specific key selection left at the call sites.
 
 - [ ] **Shared sync progress emission** — `gmail/sync.rs`, `jmap/sync.rs`, `graph/sync.rs` each have `emit_progress()` with identical structure (`account_id`, `phase`, `current`, `total`). Consolidate into `sync/progress.rs`. (Overlaps with `ProgressReporter` trait above.)
 

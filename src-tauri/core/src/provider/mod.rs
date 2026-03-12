@@ -1,3 +1,4 @@
+pub mod attachment_dedup;
 pub mod crypto;
 pub mod email_parsing;
 pub mod folder_roles;

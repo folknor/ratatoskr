@@ -1,8 +1,9 @@
-use std::collections::HashMap;
-
 use mail_parser::{MessageParser, MimeHeaders};
 use xxhash_rust::xxh3::xxh3_64;
 
+use crate::provider::attachment_dedup::{
+    dedup_by_key, prefer_missing_clone, prefer_missing_take, prefer_non_placeholder_filename,
+};
 use crate::provider::email_parsing::format_address_list as format_addresses;
 use crate::provider::folder_roles::imap_name_to_special_use;
 
@@ -281,32 +282,28 @@ pub fn build_imap_section_map(
 /// Prefer the record with a real filename over "attachment", and prefer one with
 /// a `content_id` so CID references in the HTML body resolve correctly.
 fn dedup_attachments_by_hash(parts: Vec<(u64, ImapAttachment)>) -> Vec<ImapAttachment> {
-    let mut seen: HashMap<u64, ImapAttachment> = HashMap::new();
-    for (hash, mut att) in parts {
-        seen.entry(hash)
-            .and_modify(|existing| {
-                // Prefer whichever has a real filename
-                let existing_has_name = existing.filename != "attachment";
-                let new_has_name = att.filename != "attachment";
-                if !existing_has_name && new_has_name {
-                    existing.filename = att.filename.clone();
-                }
-                // Prefer whichever has a content_id
-                if existing.content_id.is_none() && att.content_id.is_some() {
-                    existing.content_id.clone_from(&att.content_id);
-                }
-                // Mark as inline if either copy is
-                if att.is_inline {
-                    existing.is_inline = true;
-                }
-                // Keep inline_data if either copy has it
-                if existing.inline_data.is_none() && att.inline_data.is_some() {
-                    existing.inline_data = att.inline_data.take();
-                }
-            })
-            .or_insert(att);
-    }
-    seen.into_values().collect()
+    dedup_by_key(
+        parts,
+        |(hash, _)| *hash,
+        |existing, mut new| {
+            let existing_is_placeholder = existing.1.filename == "attachment";
+            let new_is_placeholder = new.1.filename == "attachment";
+            prefer_non_placeholder_filename(
+                &mut existing.1.filename,
+                &new.1.filename,
+                existing_is_placeholder,
+                new_is_placeholder,
+            );
+            prefer_missing_clone(&mut existing.1.content_id, &new.1.content_id);
+            if new.1.is_inline {
+                existing.1.is_inline = true;
+            }
+            prefer_missing_take(&mut existing.1.inline_data, &mut new.1.inline_data);
+        },
+    )
+    .into_iter()
+    .map(|(_, attachment)| attachment)
+    .collect()
 }
 
 /// Extract a text value from a HeaderValue, if present.

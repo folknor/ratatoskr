@@ -1,6 +1,9 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::Serialize;
 
+use crate::provider::attachment_dedup::{
+    dedup_by_key, prefer_missing_clone, prefer_non_placeholder_filename,
+};
 use crate::provider::email_parsing::parse_single_address_header;
 
 use super::auth_parser::parse_authentication_results;
@@ -149,34 +152,29 @@ fn extract_attachments(part: &GmailPayload) -> Vec<ParsedAttachment> {
 /// Collapse attachments that share the same `gmail_attachment_id`.
 /// Prefers the entry with a real filename and preserves `content_id`.
 fn dedup_by_attachment_id(attachments: Vec<ParsedAttachment>) -> Vec<ParsedAttachment> {
-    use std::collections::HashMap;
-
-    let mut seen: HashMap<String, ParsedAttachment> = HashMap::new();
-    for att in attachments {
-        seen.entry(att.gmail_attachment_id.clone())
-            .and_modify(|existing| {
-                // Prefer whichever has a real filename
-                if existing.filename == existing.content_id.as_deref().unwrap_or("inline")
-                    && att.filename != att.content_id.as_deref().unwrap_or("inline")
-                {
-                    existing.filename.clone_from(&att.filename);
-                }
-                // Preserve content_id for CID resolution
-                if existing.content_id.is_none() && att.content_id.is_some() {
-                    existing.content_id.clone_from(&att.content_id);
-                }
-                // Mark as inline if either copy is
-                if att.is_inline {
-                    existing.is_inline = true;
-                }
-                if existing.inline_data.is_none() && att.inline_data.is_some() {
-                    existing.inline_data.clone_from(&att.inline_data);
-                    existing.content_hash.clone_from(&att.content_hash);
-                }
-            })
-            .or_insert(att);
-    }
-    seen.into_values().collect()
+    dedup_by_key(
+        attachments,
+        |att| att.gmail_attachment_id.clone(),
+        |existing, att| {
+            let existing_is_placeholder =
+                existing.filename == existing.content_id.as_deref().unwrap_or("inline");
+            let new_is_placeholder = att.filename == att.content_id.as_deref().unwrap_or("inline");
+            prefer_non_placeholder_filename(
+                &mut existing.filename,
+                &att.filename,
+                existing_is_placeholder,
+                new_is_placeholder,
+            );
+            prefer_missing_clone(&mut existing.content_id, &att.content_id);
+            if att.is_inline {
+                existing.is_inline = true;
+            }
+            if existing.inline_data.is_none() && att.inline_data.is_some() {
+                existing.inline_data.clone_from(&att.inline_data);
+                existing.content_hash.clone_from(&att.content_hash);
+            }
+        },
+    )
 }
 
 fn collect_attachments(part: &GmailPayload, results: &mut Vec<ParsedAttachment>) {
