@@ -1,141 +1,48 @@
 # TODO
 
-## Iced Migration Prep
+## Migration Backlog
 
-> The project is moving from Tauri (Rust+TS) to a pure Rust stack using iced for UI.
-> These tasks prepare the Rust codebase for that transition.
+### AI Boundary
 
-### Phase 1: Extract Portable Core ✅
+- [ ] **Decide whether AI inference execution should move to Rust** — Rust already owns provider/runtime/config selection, but TypeScript still owns prompt assembly and actual inference calls for summaries, smart replies, transforms, ask-inbox, task extraction, smart-label AI, category inference, and auto-drafts. This needs an explicit boundary decision, not ad-hoc drift.
 
-- [x] **Introduce `ProgressReporter` trait** — Replaced all `app.emit()` calls with trait-based `&dyn ProgressReporter`. `TauriProgressReporter` wraps `AppHandle::emit()` at command boundaries. Core trait lives in `ratatoskr-core::progress`.
+- [ ] **Deduplicate the shared `callAi` wrapper** — `aiService.ts` and `writingStyleService.ts` still define the same `callAi(systemPrompt, userContent)` helper. If inference remains in TypeScript, this should collapse to one shared wrapper or direct `completeAi` use.
 
-- [x] **Decouple `attachment_cache.rs`** — Changed from `&AppHandle` to `&Path` (app_data_dir). Made `DbState`, `BodyStoreState`, `InlineImageStoreState`, `SearchState`, `AppCryptoState` all `Clone`.
+### Post-Sync Boundary
 
-- [x] **Extract `ratatoskr-core` crate** — 21.6k lines of framework-agnostic logic: all 4 providers (gmail, jmap, graph, imap), sync engine, threading, filters, smart labels, categorization, discovery, email actions, SMTP, DB core, body/inline-image/search stores, attachment cache, `ProgressReporter` trait. App crate (16.5k lines) retains Tauri command wrappers and `TauriProgressReporter`. App `mod.rs` files re-export from core via `pub use ratatoskr_core::{module}::*;`.
+> Rust sync now owns filters, smart labels, calendar follow-up, notification evaluation, and AI categorization preparation/application.
+> The remaining Rust/TS boundary is mainly desktop notification display plus actual AI inference calls still triggered from the frontend.
 
-### Phase 1.5: Remaining Decoupling
+- [ ] **Trim `syncManager.ts` down to a deliberate UI boundary** — Keep only event subscription, UI progress shaping, and notification display in TypeScript. Any remaining policy logic should move to Rust or be removed.
 
-- [x] **`AppState` aggregate (plan Step 5)** — Added `AppState`/`ProviderStates`, made provider states and `SyncQueueState` cloneable, and rewired `sync/commands.rs` background/manual sync paths to pass cloned state instead of calling `app.state::<T>()` inside spawned tasks.
+### Settings and Account Compatibility Sweeps
 
-- [x] **`ProviderRegistry` trait (plan Step 6)** — Added `provider/registry.rs`, implemented it for `ProviderStates`, and switched the sync auto path in `provider/commands.rs` to resolve providers through the registry.
+- [ ] **Stop decrypting every setting in `read_setting_map`** — Most settings are not encrypted. The current unconditional decode/decrypt path is wasteful, especially for bootstrap/UI snapshot paths.
 
-- [x] **Finish registry refactor outside sync path** — `filters/commands.rs`, `smart_labels/commands.rs`, and the remaining non-sync provider commands now resolve providers through `ProviderRegistry` / `AppState`, and `provider/router.rs::get_ops()` has been removed.
+- [ ] **Stop bundling API keys with non-sensitive settings snapshots** — Callers outside the actual settings UI should not receive AI/provider API keys alongside ordinary UI preferences.
 
-- [x] **Split `db/queries.rs` commands from logic** — Pure DB logic for `db/queries.rs`, `db/queries_extra.rs`, and `db/pending_ops.rs` now lives in `ratatoskr-core::db::{queries,queries_extra,pending_ops}` with thin Tauri wrappers retained in the app crate.
+- [ ] **Sweep remaining full account/settings compatibility reads** — Continue replacing one-off `getAccount()` / `getSetting()` reads and legacy full-row helpers with narrow Rust DTOs in active paths such as `src/services/db/accounts.ts`, `src/services/db/settings.ts`, and `src/services/gmail/tokenManager.ts`.
 
-- [x] **Clean up post-refactor Rust warnings** — Removed the tracked warnings from `src-tauri/src/sync/mod.rs`, `src-tauri/src/progress.rs`, `src-tauri/src/provider/registry.rs`, and put `AppState::app_data_dir` into use in attachment fetch flow.
+### Regression Coverage
 
-### Phase 2: Decouple Tauri-Specific Concerns
+- [ ] **Expand regression coverage around migrated sync/bootstrap behavior** — Add focused tests for sync status events, background sync start/stop, post-sync hook triggering, and account bootstrap paths that now rely on Rust-backed summary DTOs.
 
-- [x] **Abstract OAuth flow** — OAuth browser/listener handling, provider definitions, token exchange, and provider-specific user-info fetches now live in `src-tauri/src/oauth.rs`, with a standalone `OAuthIdentityProvider` abstraction. `account_commands.rs` now just invokes the flow and persists account state.
+- [ ] **Replace the magic microtask loop in `flushListenerSetup`** — The current 8-iteration `await Promise.resolve()` loop is brittle and hides ordering assumptions in sync listener tests.
 
-- [x] **Split `lib.rs` (715 lines)** — Extracted app-state initialization into `src-tauri/src/app_setup.rs`, tray handling into `src-tauri/src/tray.rs`, and window helpers into `src-tauri/src/window.rs`. `lib.rs` now delegates setup/window/tray responsibilities to those modules.
+## Non-Migration Cleanup
 
-- [x] **Abstract window/tray management** — Platform-specific tray setup now lives in `src-tauri/src/tray.rs`, and window show/hide/focus helpers now live in `src-tauri/src/window.rs`, reducing `lib.rs` to wiring.
-
----
-
-## Rust Code Consolidation
-
-> Provider implementations (Gmail, JMAP, Graph, IMAP) have significant duplication.
-> Estimated ~800-1200 lines removable.
-
-### High Priority
-
-- [x] **Shared address parsing** — The duplicated "Name <email>" parsing/formatting helpers from `ratatoskr-core::{gmail,imap,graph,jmap}::parse` now live in `ratatoskr-core::provider::email_parsing`.
-
-- [x] **Shared folder role mapping** — The duplicated system folder role mappings for JMAP, Graph, and IMAP now live in `ratatoskr-core::provider::folder_roles` as a shared `SYSTEM_FOLDER_ROLES` table with provider-specific lookup helpers.
-
-- [x] **Shared label/flag extraction** — The shared label assembly logic for JMAP and Graph now lives in `ratatoskr-core::provider::label_flags`, with provider-specific mailbox/folder resolution left in the adapters.
-
-- [x] **Shared attachment deduplication** — The shared dedup/merge mechanics for Gmail and IMAP attachments now live in `ratatoskr-core::provider::attachment_dedup`, with provider-specific key selection left at the call sites.
-
-- [x] **Shared sync progress emission** — Shared sync progress emission now lives in `ratatoskr-core::sync::progress`, with Gmail, JMAP, and Graph sync routing their event payloads through the shared helper.
-
-- [x] **Shared sync state persistence** — Shared sync cursor persistence now lives in `ratatoskr-core::sync::state`, covering Gmail history IDs, JMAP sync state, and Graph delta tokens.
-
-- [x] **Shared message persistence pipeline** — The shared thread aggregate, thread-label replacement, body-store writes, inline-image writes, and search-index writes now live in `ratatoskr-core::sync::persistence`, with provider-specific DB upserts and JMAP inline-fetch handling left in the adapters.
-
-### Medium Priority
-
-- [x] **Shared header extraction** — Shared case-insensitive header lookup now lives in `ratatoskr-core::provider::headers`; Gmail and Graph parsing use it directly. The old IMAP reference here was stale after the core split.
-
-- [x] **Shared thread message lookup** — Shared message/thread lookup helpers now live in `ratatoskr-core::db::lookups`, and the old `jmap/commands.rs` reference in this item was stale after the core/app split.
-
-- [x] **Consolidate base64 utilities** — Shared base64/base64url helpers now live in `ratatoskr-core::provider::encoding`, and the relevant provider/cache/mailer call sites now route through it.
-
-- [x] **Shared pending ops filtering** — Shared pending-operation filtering now lives in `ratatoskr-core::sync::pending`, and Gmail/JMAP/Graph sync now delegate to it.
-
----
-
-## Rust Code Structure
-
-- [x] **Split `db/queries_extra.rs`** — Core DB extra queries now live under `src-tauri/core/src/db/queries_extra/` as domain modules with a small facade in `queries_extra.rs`.
-
-- [x] **Split `calendar_commands.rs`** — Calendar commands now live under `src-tauri/src/calendar_commands/` split by concern (`google`, `caldav`, `sync`, `types`) with a small facade in `mod.rs`.
-
-- [x] **Split `account_commands.rs`** — Account commands now live under `src-tauri/src/account_commands/` split by concern (`info`, `provider_init`, `types`) with a small facade in `mod.rs`.
-
-- [x] **Audit `.unwrap()` in `calendar_commands.rs`** — No production `.unwrap()` calls remained; only `unwrap_or*` patterns and a test `unwrap()` in the XML entity test.
-
----
-
-## Security & Data Safety
-
-- [x] **Decryption failure clears encrypted secrets instead of exposing raw values** — `src/services/db/accounts.ts` now clears encrypted credential fields on decrypt failure rather than returning the raw stored value. Plaintext legacy values still pass through when they are not marked as encrypted. *(LOW)*
-
-- [x] **`decrypt_if_needed` returns `Err` on decryption failure** — Post-split IMAP config loading lives in `src-tauri/core/src/imap/account_config.rs`; decrypt failures already surface as `Err`, and this behavior is now covered by a focused test.
-
-- [x] **Draft auto-save flushes pending saves on lifecycle transitions** — `src/services/composer/draftAutoSave.ts` now flushes a pending save on `pagehide`, `visibilitychange`, and `stopAutoSave()`, reducing the unsaved window from pure debounce-only behavior. *(LOW)*
-
----
-
-## Provider Operations
-
-- [x] **Snippet fallback truncation is grapheme-safe** — IMAP snippet generation and fallback truncation now use a shared grapheme-aware helper in `src-tauri/core/src/provider/text.rs`. *(LOW)*
-
----
-
-## Post-Sync Hooks
-
-> **Systemic issue**: Rust sync now owns filters, smart labels, calendar follow-up, notification evaluation, and AI categorization preparation/application. The remaining Rust/TS boundary is mainly desktop notification display/action handling via the notification service.
-
----
-
-## AI Service
-
-- [ ] **Duplicate `callAi` wrapper in two services** — Both `aiService.ts` and `writingStyleService.ts` define identical `callAi(systemPrompt, userContent)` wrappers. Callers could use `completeAi` directly or share a single wrapper. *(LOW)*
-
----
-
-## Settings
-
-- [ ] **`read_setting_map` decrypts all settings unconditionally** — Every value goes through `decode_setting_value`/`is_encrypted`. Most settings aren't encrypted (only API keys). Wasteful when reused by the UI bootstrap snapshot which has no encrypted fields. *(LOW)*
-
-- [ ] **API keys bundled with non-sensitive settings in one snapshot** — All 4 API keys returned alongside UI settings like `notifications_enabled`. Callers other than `SettingsPage` would receive API keys unnecessarily. *(LOW)*
-
----
-
-## Branding
+### Branding
 
 - [ ] **Replace logo SVG** — `src/assets/logo.svg` still renders the old "VELO" text as path outlines. Needs a new logo for Ratatoskr.
 
-- [ ] **Replace app icons** — `src-tauri/icons/`, `assets/icon.png`, `src/assets/logo.svg`, and the inline SVG in `splashscreen.html` all contain old Velo branding. Need new Ratatoskr icons for all platforms (macOS .icns, Windows .ico, Linux .png at 32x32, 128x128, 256x256, 512x512).
+- [ ] **Replace app icons** — `src-tauri/icons/`, `assets/icon.png`, `src/assets/logo.svg`, and the inline SVG in `splashscreen.html` still contain old Velo branding. Need new Ratatoskr icons for all platforms.
 
----
+### Code Quality
 
-## Code Quality
+- [ ] **Category add/remove is racy** — `src-tauri/src/graph/ops.rs` does read-then-write for categories. Two concurrent actions can clobber each other. Graph has no atomic array-update primitive, so this likely needs client-side locking if we want to address it.
 
-- [ ] **Category add/remove is racy** — `src-tauri/src/graph/ops.rs` — `add_category`/`remove_category` do a read-then-write. Two concurrent actions could clobber each other. Graph has no atomic "add to array" operation — unavoidable without client-side locking. *(LOW)*
+- [ ] **Add Graph `$batch` optimization for thread actions** — Thread-level Graph actions still loop per message. Batching up to 20 operations per `/$batch` call would reduce request count.
 
-- [ ] **No `$batch` optimization for Graph thread actions** — Thread-level actions loop per-message. Batching up to 20 per `/$batch` call would be faster. *(LOW)*
+- [ ] **Decide whether Graph `raw_size = 0` should stay accepted** — Graph still lacks a clean size field for the current query path. Either keep this as an accepted cosmetic limitation or document a better fallback if one exists.
 
-- [ ] **`raw_size` is always 0 for Graph messages** — Graph API has no first-class size property. `PidTagMessageSize` can't combine with `$select`. Accepted cosmetic limitation. *(LOW)*
-
-- [ ] **Account-to-store mapping duplicated 4 times** — `App.tsx` (twice), `ComposerWindow.tsx`, and `ThreadWindow.tsx` all have identical `dbAccounts.map(...)`. Could be a shared helper. *(LOW)*
-
----
-
-## Testing
-
-- [ ] **`flushListenerSetup` uses magic 8-iteration microtick loop** — `for (let index = 0; index < 8; index += 1) { await Promise.resolve(); }` is brittle and unexplained. If `ensureSyncListeners` gains more async steps, tests will silently break. *(LOW)*
+- [ ] **Deduplicate account-to-store mapping in the React entry points** — `App.tsx`, `ComposerWindow.tsx`, and `ThreadWindow.tsx` still duplicate the same `dbAccounts.map(...)` shaping logic.
