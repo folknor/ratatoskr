@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { Account } from "@/stores/accountStore";
 
 export interface AccountBasicInfo {
   id: string;
@@ -28,6 +29,17 @@ export async function getAccountBasicInfo(
 
 export async function listAccountBasicInfo(): Promise<AccountBasicInfo[]> {
   return invoke<AccountBasicInfo[]>("account_list_basic_info");
+}
+
+export function mapAccountBasicInfos(accounts: AccountBasicInfo[]): Account[] {
+  return accounts.map((account) => ({
+    id: account.id,
+    email: account.email,
+    displayName: account.displayName,
+    avatarUrl: account.avatarUrl,
+    isActive: account.isActive,
+    provider: account.provider,
+  }));
 }
 
 export async function getAccountCaldavSettingsInfo(

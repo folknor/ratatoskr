@@ -19,9 +19,15 @@ async function loadSyncManager() {
 }
 
 async function flushListenerSetup(): Promise<void> {
-  for (let index = 0; index < 8; index += 1) {
-    await Promise.resolve();
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (eventHandlers.size === 5) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
+  throw new Error(
+    `Expected 5 sync listeners, found ${String(eventHandlers.size)}`,
+  );
 }
 
 async function flushAsyncWork(): Promise<void> {

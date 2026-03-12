@@ -4,7 +4,10 @@ import { Composer } from "./components/composer/Composer";
 import { UndoSendToast } from "./components/composer/UndoSendToast";
 import type { ColorThemeId } from "./constants/themes";
 import { COLOR_THEMES, getThemeById } from "./constants/themes";
-import { listAccountBasicInfo } from "./services/accounts/basicInfo";
+import {
+  listAccountBasicInfo,
+  mapAccountBasicInfos,
+} from "./services/accounts/basicInfo";
 import { initializeClients } from "./services/gmail/tokenManager";
 import { getUiBootstrapSnapshot } from "./services/settings/uiBootstrap";
 import { useAccountStore } from "./stores/accountStore";
@@ -60,14 +63,7 @@ export default function ComposerWindow(): React.ReactNode {
 
         // Load accounts into store
         const dbAccounts = await listAccountBasicInfo();
-        const mapped = dbAccounts.map((a) => ({
-          id: a.id,
-          email: a.email,
-          displayName: a.displayName,
-          avatarUrl: a.avatarUrl,
-          isActive: a.isActive,
-          provider: a.provider,
-        }));
+        const mapped = mapAccountBasicInfos(dbAccounts);
         setAccounts(mapped);
 
         // Initialize Gmail clients

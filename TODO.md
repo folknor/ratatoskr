@@ -47,7 +47,7 @@
 
 - [ ] **Decide whether Graph `raw_size = 0` should stay accepted** — Graph still lacks a clean size field for the current query path. Either keep this as an accepted cosmetic limitation or document a better fallback if one exists.
 
-- [ ] **Deduplicate account-to-store mapping in the React entry points** — `App.tsx`, `ComposerWindow.tsx`, and `ThreadWindow.tsx` still duplicate the same `dbAccounts.map(...)` shaping logic.
+- [x] **Deduplicate account-to-store mapping in the React entry points** — The shared account-store shaping now lives in `src/services/accounts/basicInfo.ts::mapAccountBasicInfos()`, and `App.tsx`, `ComposerWindow.tsx`, and `ThreadWindow.tsx` all use that helper.
 
 ### Microsoft Graph
 

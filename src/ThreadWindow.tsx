@@ -5,7 +5,10 @@ import { UndoSendToast } from "./components/composer/UndoSendToast";
 import { ThreadView } from "./components/email/ThreadView";
 import type { ColorThemeId } from "./constants/themes";
 import { COLOR_THEMES, getThemeById } from "./constants/themes";
-import { listAccountBasicInfo } from "./services/accounts/basicInfo";
+import {
+  listAccountBasicInfo,
+  mapAccountBasicInfos,
+} from "./services/accounts/basicInfo";
 import { getThreadById, getThreadLabelIds } from "./services/db/threads";
 import { initializeClients } from "./services/gmail/tokenManager";
 import { getUiBootstrapSnapshot } from "./services/settings/uiBootstrap";
@@ -73,14 +76,7 @@ export default function ThreadWindow(): React.ReactNode {
 
         // Load accounts into store
         const dbAccounts = await listAccountBasicInfo();
-        const mapped = dbAccounts.map((a) => ({
-          id: a.id,
-          email: a.email,
-          displayName: a.displayName,
-          avatarUrl: a.avatarUrl,
-          isActive: a.isActive,
-          provider: a.provider,
-        }));
+        const mapped = mapAccountBasicInfos(dbAccounts);
         setAccounts(mapped);
 
         // Set active account to the thread's account (without persisting to settings)

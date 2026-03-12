@@ -22,7 +22,10 @@ import { COLOR_THEMES, getThemeById } from "./constants/themes";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { router } from "./router";
 import { getSelectedThreadId } from "./router/navigate";
-import { listAccountBasicInfo } from "./services/accounts/basicInfo";
+import {
+  listAccountBasicInfo,
+  mapAccountBasicInfos,
+} from "./services/accounts/basicInfo";
 import {
   startPreCacheManager,
   stopPreCacheManager,
@@ -379,14 +382,7 @@ export default function App(): React.ReactNode {
           .loadKeyMap(uiSnapshot.customShortcuts);
 
         const dbAccounts = await listAccountBasicInfo();
-        const mapped = dbAccounts.map((a) => ({
-          id: a.id,
-          email: a.email,
-          displayName: a.displayName,
-          avatarUrl: a.avatarUrl,
-          isActive: a.isActive,
-          provider: a.provider,
-        }));
+        const mapped = mapAccountBasicInfos(dbAccounts);
         const savedAccountId = uiSnapshot.activeAccountId;
         useAccountStore.getState().setAccounts(mapped, savedAccountId);
 
@@ -615,14 +611,7 @@ export default function App(): React.ReactNode {
   const handleAddAccountSuccess = useCallback(async () => {
     setShowAddAccount(false);
     const dbAccounts = await listAccountBasicInfo();
-    const mapped = dbAccounts.map((a) => ({
-      id: a.id,
-      email: a.email,
-      displayName: a.displayName,
-      avatarUrl: a.avatarUrl,
-      isActive: a.isActive,
-      provider: a.provider,
-    }));
+    const mapped = mapAccountBasicInfos(dbAccounts);
     useAccountStore.getState().setAccounts(mapped);
 
     // Re-initialize clients for the new account
