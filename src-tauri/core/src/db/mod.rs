@@ -1,5 +1,9 @@
 pub mod migrations;
+pub mod pending_ops;
+pub mod queries;
+pub mod queries_extra;
 pub mod types;
+pub use queries::*;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};

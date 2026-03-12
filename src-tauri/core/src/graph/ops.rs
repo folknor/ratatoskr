@@ -20,6 +20,12 @@ pub struct GraphOps {
     pub(crate) client: GraphClient,
 }
 
+impl GraphOps {
+    pub fn new(client: GraphClient) -> Self {
+        Self { client }
+    }
+}
+
 #[async_trait]
 impl ProviderOps for GraphOps {
     async fn sync_initial(

@@ -19,11 +19,11 @@
 
 - [x] **`ProviderRegistry` trait (plan Step 6)** — Added `provider/registry.rs`, implemented it for `ProviderStates`, and switched the sync auto path in `provider/commands.rs` to resolve providers through the registry.
 
-- [ ] **Finish registry refactor outside sync path** — `filters/commands.rs`, `smart_labels/commands.rs`, and the remaining non-sync provider commands still pass `gmail/jmap/graph` separately. Migrate those call sites to `ProviderRegistry` or `AppState`, then simplify/remove `provider/router.rs::get_ops()`.
+- [x] **Finish registry refactor outside sync path** — `filters/commands.rs`, `smart_labels/commands.rs`, and the remaining non-sync provider commands now resolve providers through `ProviderRegistry` / `AppState`, and `provider/router.rs::get_ops()` has been removed.
 
-- [ ] **Split `db/queries.rs` commands from logic** — 28 `#[tauri::command]` functions mix query logic with Tauri wrappers. Extract pure `fn(conn, ...)` bodies to core, keep thin wrappers in app. Same for `db/queries_extra.rs` (~130 commands) and `db/pending_ops.rs`.
+- [x] **Split `db/queries.rs` commands from logic** — Pure DB logic for `db/queries.rs`, `db/queries_extra.rs`, and `db/pending_ops.rs` now lives in `ratatoskr-core::db::{queries,queries_extra,pending_ops}` with thin Tauri wrappers retained in the app crate.
 
-- [ ] **Clean up post-refactor Rust warnings** — The new state/registry wiring left a few tracked warnings: unused re-exports in `src-tauri/src/sync/mod.rs`, `TauriProgressReporter::new` unused in `src-tauri/src/progress.rs`, `ProviderRegistry::encryption_key` currently unused in `src-tauri/src/provider/registry.rs`, and `AppState::app_data_dir` currently unused in `src-tauri/src/state.rs`. Either use them in follow-up refactors or remove them.
+- [x] **Clean up post-refactor Rust warnings** — Removed the tracked warnings from `src-tauri/src/sync/mod.rs`, `src-tauri/src/progress.rs`, `src-tauri/src/provider/registry.rs`, and put `AppState::app_data_dir` into use in attachment fetch flow.
 
 ### Phase 2: Decouple Tauri-Specific Concerns
 

@@ -1,7 +1,10 @@
 use async_trait::async_trait;
 
+use crate::gmail::ops::GmailOps;
+use crate::graph::ops::GraphOps;
+use crate::imap::ops::ImapOps;
+use crate::jmap::ops::JmapOps;
 use crate::provider::ops::ProviderOps;
-use crate::provider::router::get_ops;
 use crate::state::ProviderStates;
 
 #[async_trait]
@@ -11,8 +14,6 @@ pub trait ProviderRegistry: Send + Sync {
         provider: &str,
         account_id: &str,
     ) -> Result<Box<dyn ProviderOps>, String>;
-
-    fn encryption_key(&self) -> [u8; 32];
 }
 
 #[async_trait]
@@ -22,18 +23,21 @@ impl ProviderRegistry for ProviderStates {
         provider: &str,
         account_id: &str,
     ) -> Result<Box<dyn ProviderOps>, String> {
-        get_ops(
-            provider,
-            account_id,
-            self.gmail.as_ref(),
-            self.jmap.as_ref(),
-            self.graph.as_ref(),
-            self.encryption_key(),
-        )
-        .await
-    }
-
-    fn encryption_key(&self) -> [u8; 32] {
-        self.encryption_key()
+        match provider {
+            "gmail_api" => {
+                let client = self.gmail.get(account_id).await?;
+                Ok(Box::new(GmailOps::new(client)))
+            }
+            "jmap" => {
+                let client = self.jmap.get(account_id).await?;
+                Ok(Box::new(JmapOps::new(client)))
+            }
+            "graph" => {
+                let client = self.graph.get(account_id).await?;
+                Ok(Box::new(GraphOps::new(client)))
+            }
+            "imap" => Ok(Box::new(ImapOps::new(self.encryption_key()))),
+            other => Err(format!("Unknown provider: {other}")),
+        }
     }
 }

@@ -1,13 +1,10 @@
 #![allow(clippy::let_underscore_must_use)]
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
-use crate::gmail::client::GmailState;
-use crate::graph::client::GraphState;
 use crate::inline_image_store::InlineImageStoreState;
-use crate::jmap::client::JmapState;
 use crate::progress::{self, ProgressReporter, TauriProgressReporter};
 use crate::search::SearchState;
 use crate::state::AppState;
@@ -15,7 +12,7 @@ use crate::sync::{self, SyncState};
 
 use super::ops::ProviderOps;
 use super::registry::ProviderRegistry;
-use super::router::{get_ops, get_provider_type};
+use super::router::get_provider_type;
 use super::types::{
     AttachmentData, AutoSyncResult, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
     ProviderParsedMessage, ProviderProfile, ProviderTestResult, SyncResult,
@@ -26,37 +23,20 @@ use crate::sync::types::SyncProgressEvent;
 async fn resolve_provider_command<'a>(
     provider: Option<&str>,
     account_id: &'a str,
-    db: &'a DbState,
-    gmail: &'a GmailState,
-    jmap: &'a JmapState,
-    graph: &'a GraphState,
-    body_store: &'a BodyStoreState,
-    inline_images: &'a InlineImageStoreState,
-    search: &'a SearchState,
+    app_state: &'a AppState,
     progress: &'a dyn ProgressReporter,
 ) -> Result<(Box<dyn ProviderOps>, ProviderCtx<'a>), String> {
-    let provider = match provider {
-        Some(provider) => provider.to_string(),
-        None => get_provider_type(db, account_id).await?,
-    };
-    let ops = get_ops(
-        &provider,
+    resolve_provider_command_with_registry(
+        provider,
         account_id,
-        gmail,
-        jmap,
-        graph,
-        *gmail.encryption_key(),
-    )
-    .await?;
-    let ctx = ProviderCtx {
-        account_id,
-        db,
-        body_store,
-        inline_images,
-        search,
+        &app_state.providers,
+        &app_state.db,
+        &app_state.body_store,
+        &app_state.inline_images,
+        &app_state.search,
         progress,
-    };
-    Ok((ops, ctx))
+    )
+    .await
 }
 
 async fn resolve_provider_command_with_registry<'a>(
@@ -263,29 +243,11 @@ pub async fn provider_prepare_account_resync(
 pub async fn provider_sync_initial(
     account_id: String,
     days_back: Option<i64>,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     let _ = ops.sync_initial(&ctx, days_back.unwrap_or(365)).await?;
     Ok(())
 }
@@ -294,29 +256,11 @@ pub async fn provider_sync_initial(
 #[tauri::command]
 pub async fn provider_sync_delta(
     account_id: String,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<SyncResult, String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     ops.sync_delta(&ctx, None).await
 }
 
@@ -351,29 +295,11 @@ fn should_fallback_to_initial(err: &str, fallback_marker: Option<&str>) -> bool 
 pub async fn provider_archive(
     account_id: String,
     thread_id: String,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     ops.archive(&ctx, &thread_id).await
 }
 
@@ -382,29 +308,11 @@ pub async fn provider_archive(
 pub async fn provider_trash(
     account_id: String,
     thread_id: String,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     ops.trash(&ctx, &thread_id).await
 }
 
@@ -413,29 +321,11 @@ pub async fn provider_trash(
 pub async fn provider_permanent_delete(
     account_id: String,
     thread_id: String,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     ops.permanent_delete(&ctx, &thread_id).await
 }
 
@@ -445,29 +335,11 @@ pub async fn provider_mark_read(
     account_id: String,
     thread_id: String,
     read: bool,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     ops.mark_read(&ctx, &thread_id, read).await
 }
 
@@ -477,29 +349,11 @@ pub async fn provider_star(
     account_id: String,
     thread_id: String,
     starred: bool,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     ops.star(&ctx, &thread_id, starred).await
 }
 
@@ -509,29 +363,11 @@ pub async fn provider_spam(
     account_id: String,
     thread_id: String,
     is_spam: bool,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     ops.spam(&ctx, &thread_id, is_spam).await
 }
 
@@ -541,29 +377,11 @@ pub async fn provider_move_to_folder(
     account_id: String,
     thread_id: String,
     folder_id: String,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     ops.move_to_folder(&ctx, &thread_id, &folder_id).await
 }
 
@@ -573,29 +391,11 @@ pub async fn provider_add_tag(
     account_id: String,
     thread_id: String,
     tag_id: String,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     ops.add_tag(&ctx, &thread_id, &tag_id).await
 }
 
@@ -605,29 +405,11 @@ pub async fn provider_remove_tag(
     account_id: String,
     thread_id: String,
     tag_id: String,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     ops.remove_tag(&ctx, &thread_id, &tag_id).await
 }
 
@@ -639,29 +421,11 @@ pub async fn provider_send_email(
     account_id: String,
     raw_base64url: String,
     thread_id: Option<String>,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     ops.send_email(&ctx, &raw_base64url, thread_id.as_deref())
         .await
 }
@@ -672,29 +436,11 @@ pub async fn provider_create_draft(
     account_id: String,
     raw_base64url: String,
     thread_id: Option<String>,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     ops.create_draft(&ctx, &raw_base64url, thread_id.as_deref())
         .await
 }
@@ -706,29 +452,11 @@ pub async fn provider_update_draft(
     draft_id: String,
     raw_base64url: String,
     thread_id: Option<String>,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     ops.update_draft(&ctx, &draft_id, &raw_base64url, thread_id.as_deref())
         .await
 }
@@ -738,29 +466,11 @@ pub async fn provider_update_draft(
 pub async fn provider_delete_draft(
     account_id: String,
     draft_id: String,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     ops.delete_draft(&ctx, &draft_id).await
 }
 
@@ -772,19 +482,13 @@ pub async fn provider_fetch_attachment(
     account_id: String,
     message_id: String,
     attachment_id: String,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<AttachmentData, String> {
     // 1. Check inline image store (fast SQLite lookup for small images)
     if let Some(hit) = try_inline_image_hit(
-        &db,
-        &inline_images,
+        &app_state.db,
+        &app_state.inline_images,
         &account_id,
         &message_id,
         &attachment_id,
@@ -795,40 +499,30 @@ pub async fn provider_fetch_attachment(
     }
 
     // 2. Check file-based cache
-    let app_data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("resolve app data dir: {e}"))?;
-    if let Some(hit) =
-        try_cache_hit(&db, &app_data_dir, &account_id, &message_id, &attachment_id).await?
+    if let Some(hit) = try_cache_hit(
+        &app_state.db,
+        &app_state.app_data_dir,
+        &account_id,
+        &message_id,
+        &attachment_id,
+    )
+    .await?
     {
         return Ok(hit);
     }
 
     // 3. Cache miss — fetch from provider
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     let result = ops
         .fetch_attachment(&ctx, &message_id, &attachment_id)
         .await?;
 
     // 4. Cache the result (fire-and-forget — don't delay response)
     cache_after_fetch(
-        &db,
-        &inline_images,
-        &app_data_dir,
+        &app_state.db,
+        &app_state.inline_images,
+        &app_state.app_data_dir,
         &account_id,
         &message_id,
         &attachment_id,
@@ -986,29 +680,11 @@ fn cache_after_fetch(
 pub async fn provider_fetch_message(
     account_id: String,
     message_id: String,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<ProviderParsedMessage, String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     ops.fetch_message(&ctx, &message_id).await
 }
 
@@ -1017,29 +693,11 @@ pub async fn provider_fetch_message(
 pub async fn provider_fetch_raw_message(
     account_id: String,
     message_id: String,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     ops.fetch_raw_message(&ctx, &message_id).await
 }
 
@@ -1049,29 +707,11 @@ pub async fn provider_fetch_raw_message(
 #[tauri::command]
 pub async fn provider_test_connection(
     account_id: String,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<ProviderTestResult, String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     match ops.test_connection(&ctx).await {
         Ok(result) => Ok(result),
         Err(e) => Ok(ProviderTestResult {
@@ -1085,29 +725,11 @@ pub async fn provider_test_connection(
 #[tauri::command]
 pub async fn provider_get_profile(
     account_id: String,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<ProviderProfile, String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     ops.get_profile(&ctx).await
 }
 
@@ -1115,29 +737,11 @@ pub async fn provider_get_profile(
 #[tauri::command]
 pub async fn provider_list_folders(
     account_id: String,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<Vec<ProviderFolderEntry>, String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     ops.list_folders(&ctx).await
 }
 
@@ -1149,29 +753,11 @@ pub async fn provider_create_folder(
     parent_id: Option<String>,
     text_color: Option<String>,
     bg_color: Option<String>,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<ProviderFolderMutation, String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     ops.create_folder(
         &ctx,
         &name,
@@ -1190,29 +776,11 @@ pub async fn provider_rename_folder(
     new_name: String,
     text_color: Option<String>,
     bg_color: Option<String>,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<ProviderFolderMutation, String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     ops.rename_folder(
         &ctx,
         &folder_id,
@@ -1228,28 +796,10 @@ pub async fn provider_rename_folder(
 pub async fn provider_delete_folder(
     account_id: String,
     folder_id: String,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    let (ops, ctx) = resolve_provider_command(
-        None,
-        &account_id,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await?;
+    let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
     ops.delete_folder(&ctx, &folder_id).await
 }

@@ -279,24 +279,6 @@ pub struct JmapAttachmentData {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Get all email IDs in a JMAP thread.
-pub(crate) async fn query_thread_email_ids(
-    client: &JmapClient,
-    thread_id: &str,
-) -> Result<Vec<String>, String> {
-    use jmap_client::email;
-
-    let filter: jmap_client::core::query::Filter<email::query::Filter> =
-        email::query::Filter::in_thread(thread_id).into();
-    let result = client
-        .inner()
-        .email_query(Some(filter), None::<Vec<_>>)
-        .await
-        .map_err(|e| format!("Email/query inThread: {e}"))?;
-
-    Ok(result.ids().to_vec())
-}
-
 /// Get the full mailbox list as (id, role, name) tuples.
 pub(crate) async fn get_mailbox_list(
     client: &JmapClient,
@@ -318,25 +300,6 @@ pub(crate) async fn get_mailbox_list(
         result.push((id.to_string(), role_str, name.to_string()));
     }
     Ok(result)
-}
-
-/// Get the first identity ID for email submission.
-pub(crate) async fn get_first_identity_id(
-    client: &jmap_client::client::Client,
-) -> Result<String, String> {
-    let mut request = client.build();
-    request.get_identity();
-    let response = request
-        .send()
-        .await
-        .map_err(|e| format!("Identity/get: {e}"))?;
-
-    response
-        .unwrap_method_responses()
-        .pop()
-        .and_then(|r| r.unwrap_get_identity().ok())
-        .and_then(|mut r| r.take_list().into_iter().next().map(|mut i| i.take_id()))
-        .ok_or_else(|| "No identity found for email submission".to_string())
 }
 
 /// Resolve a Gmail-style label ID to a JMAP mailbox ID.

@@ -12,6 +12,12 @@ pub struct GmailOps {
     pub(crate) client: GmailClient,
 }
 
+impl GmailOps {
+    pub fn new(client: GmailClient) -> Self {
+        Self { client }
+    }
+}
+
 #[async_trait]
 impl ProviderOps for GmailOps {
     async fn sync_initial(

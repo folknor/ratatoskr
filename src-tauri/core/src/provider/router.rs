@@ -1,14 +1,4 @@
 use crate::db::DbState;
-use crate::gmail::client::GmailState;
-use crate::gmail::ops::GmailOps;
-use crate::graph::client::GraphState;
-use crate::graph::ops::GraphOps;
-use crate::imap::ops::ImapOps;
-use crate::jmap::client::JmapState;
-use crate::jmap::ops::JmapOps;
-
-use super::ops::ProviderOps;
-
 /// Look up the provider type for an account from the database.
 pub async fn get_provider_type(db: &DbState, account_id: &str) -> Result<String, String> {
     let aid = account_id.to_string();
@@ -20,32 +10,4 @@ pub async fn get_provider_type(db: &DbState, account_id: &str) -> Result<String,
             .map_err(|e| format!("No account found for {aid}: {e}"))
     })
     .await
-}
-
-/// Resolve account → provider → `Box<dyn ProviderOps>`.
-#[allow(clippy::too_many_arguments)]
-pub async fn get_ops(
-    provider: &str,
-    account_id: &str,
-    gmail: &GmailState,
-    jmap: &JmapState,
-    graph: &GraphState,
-    encryption_key: [u8; 32],
-) -> Result<Box<dyn ProviderOps>, String> {
-    match provider {
-        "gmail_api" => {
-            let client = gmail.get(account_id).await?;
-            Ok(Box::new(GmailOps { client }))
-        }
-        "jmap" => {
-            let client = jmap.get(account_id).await?;
-            Ok(Box::new(JmapOps { client }))
-        }
-        "graph" => {
-            let client = graph.get(account_id).await?;
-            Ok(Box::new(GraphOps { client }))
-        }
-        "imap" => Ok(Box::new(ImapOps { encryption_key })),
-        other => Err(format!("Unknown provider: {other}")),
-    }
 }

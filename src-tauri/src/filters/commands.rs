@@ -5,17 +5,14 @@ use std::collections::HashMap;
 use futures::stream::{self, StreamExt};
 use tauri::{AppHandle, State};
 
+use crate::body_store::BodyStoreState;
 use crate::progress::{ProgressReporter, TauriProgressReporter};
 
-use crate::body_store::BodyStoreState;
 use crate::db::DbState;
-use crate::gmail::client::GmailState;
-use crate::graph::client::GraphState;
-use crate::inline_image_store::InlineImageStoreState;
-use crate::jmap::client::JmapState;
-use crate::provider::router::{get_ops, get_provider_type};
+use crate::provider::registry::ProviderRegistry;
+use crate::provider::router::get_provider_type;
 use crate::provider::types::ProviderCtx;
-use crate::search::SearchState;
+use crate::state::AppState;
 
 use super::{
     FilterActions, FilterCriteria, FilterResult, FilterableMessage, evaluate_filters,
@@ -55,20 +52,14 @@ pub(crate) async fn filters_apply_to_new_message_ids_impl(
     account_id: &str,
     provider: &str,
     message_ids: &[String],
-    db: &DbState,
-    gmail: &GmailState,
-    jmap: &JmapState,
-    graph: &GraphState,
-    body_store: &BodyStoreState,
-    inline_images: &InlineImageStoreState,
-    search: &SearchState,
+    app_state: &AppState,
     progress: &dyn ProgressReporter,
 ) -> Result<(), String> {
     if message_ids.is_empty() {
         return Ok(());
     }
 
-    let filters = load_enabled_filters(db, account_id).await?;
+    let filters = load_enabled_filters(&app_state.db, account_id).await?;
     if filters.is_empty() {
         return Ok(());
     }
@@ -77,21 +68,16 @@ pub(crate) async fn filters_apply_to_new_message_ids_impl(
         .iter()
         .filter_map(|(criteria, _)| criteria.body.as_ref().map(|_| criteria.clone()))
         .collect();
-    let messages =
-        load_filterable_messages(db, body_store, account_id, message_ids, &body_criteria).await?;
-    filters_apply_to_messages_impl(
+    let messages = load_filterable_messages(
+        &app_state.db,
+        &app_state.body_store,
         account_id,
-        provider,
-        &filters,
-        &messages,
-        db,
-        gmail,
-        jmap,
-        graph,
-        body_store,
-        inline_images,
-        search,
-        progress,
+        message_ids,
+        &body_criteria,
+    )
+    .await?;
+    filters_apply_to_messages_impl(
+        account_id, provider, &filters, &messages, app_state, progress,
     )
     .await
 }
@@ -101,27 +87,15 @@ pub(crate) async fn filters_apply_to_new_message_ids_impl(
 pub async fn filters_apply_to_new_message_ids(
     account_id: String,
     message_ids: Vec<String>,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
     filters_apply_to_new_message_ids_impl(
         &account_id,
-        &get_provider_type(&db, &account_id).await?,
+        &get_provider_type(&app_state.db, &account_id).await?,
         &message_ids,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
+        &app_state,
         &reporter,
     )
     .await
@@ -265,13 +239,7 @@ pub(crate) async fn filters_apply_to_messages_impl(
     provider: &str,
     filters: &[(FilterCriteria, FilterActions)],
     messages: &[FilterableMessage],
-    db: &DbState,
-    gmail: &GmailState,
-    jmap: &JmapState,
-    graph: &GraphState,
-    body_store: &BodyStoreState,
-    inline_images: &InlineImageStoreState,
-    search: &SearchState,
+    app_state: &AppState,
     progress: &dyn ProgressReporter,
 ) -> Result<(), String> {
     if filters.is_empty() || messages.is_empty() {
@@ -287,21 +255,13 @@ pub(crate) async fn filters_apply_to_messages_impl(
         return Ok(());
     }
 
-    let ops = get_ops(
-        provider,
-        account_id,
-        gmail,
-        jmap,
-        graph,
-        *gmail.encryption_key(),
-    )
-    .await?;
+    let ops = app_state.providers.get_ops(provider, account_id).await?;
     let ctx = ProviderCtx {
         account_id,
-        db,
-        body_store,
-        inline_images,
-        search,
+        db: &app_state.db,
+        body_store: &app_state.body_store,
+        inline_images: &app_state.inline_images,
+        search: &app_state.search,
         progress,
     };
     let ops = &*ops;

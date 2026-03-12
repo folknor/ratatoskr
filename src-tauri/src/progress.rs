@@ -6,10 +6,6 @@ pub struct TauriProgressReporter {
 }
 
 impl TauriProgressReporter {
-    pub fn new(app_handle: tauri::AppHandle) -> Self {
-        Self { app_handle }
-    }
-
     pub fn from_ref(app_handle: &tauri::AppHandle) -> Self {
         Self {
             app_handle: app_handle.clone(),

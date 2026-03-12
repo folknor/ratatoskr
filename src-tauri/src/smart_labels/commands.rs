@@ -8,18 +8,14 @@ use tauri::{AppHandle, State};
 use crate::progress::{ProgressReporter, TauriProgressReporter};
 
 use crate::ai_commands::{AiCompleteRequest, ai_is_available_impl, complete_ai_impl};
-use crate::body_store::BodyStoreState;
 use crate::db::DbState;
 use crate::filters::commands::load_filterable_messages;
 use crate::filters::{FilterCriteria, FilterableMessage, message_matches_filter};
-use crate::gmail::client::GmailState;
-use crate::graph::client::GraphState;
-use crate::inline_image_store::InlineImageStoreState;
-use crate::jmap::client::JmapState;
 use crate::provider::crypto::AppCryptoState;
-use crate::provider::router::{get_ops, get_provider_type};
+use crate::provider::registry::ProviderRegistry;
+use crate::provider::router::get_provider_type;
 use crate::provider::types::ProviderCtx;
-use crate::search::SearchState;
+use crate::state::AppState;
 
 use super::{AppliedSmartLabelMatch, SmartLabelAIRule, SmartLabelAIThread};
 
@@ -50,20 +46,14 @@ pub(crate) async fn smart_labels_apply_criteria_to_new_message_ids_impl(
     account_id: &str,
     provider: &str,
     message_ids: &[String],
-    db: &DbState,
-    gmail: &GmailState,
-    jmap: &JmapState,
-    graph: &GraphState,
-    body_store: &BodyStoreState,
-    inline_images: &InlineImageStoreState,
-    search: &SearchState,
+    app_state: &AppState,
     progress: &dyn ProgressReporter,
 ) -> Result<Vec<AppliedSmartLabelMatch>, String> {
     if message_ids.is_empty() {
         return Ok(Vec::new());
     }
 
-    let rules = load_enabled_criteria_rules(db, account_id).await?;
+    let rules = load_enabled_criteria_rules(&app_state.db, account_id).await?;
     if rules.is_empty() {
         return Ok(Vec::new());
     }
@@ -72,21 +62,16 @@ pub(crate) async fn smart_labels_apply_criteria_to_new_message_ids_impl(
         .iter()
         .filter_map(|(_, criteria)| criteria.body.as_ref().map(|_| criteria.clone()))
         .collect();
-    let messages =
-        load_filterable_messages(db, body_store, account_id, message_ids, &body_criteria).await?;
-    smart_labels_apply_criteria_to_messages_impl(
+    let messages = load_filterable_messages(
+        &app_state.db,
+        &app_state.body_store,
         account_id,
-        provider,
-        &rules,
-        &messages,
-        db,
-        gmail,
-        jmap,
-        graph,
-        body_store,
-        inline_images,
-        search,
-        progress,
+        message_ids,
+        &body_criteria,
+    )
+    .await?;
+    smart_labels_apply_criteria_to_messages_impl(
+        account_id, provider, &rules, &messages, app_state, progress,
     )
     .await
 }
@@ -96,34 +81,20 @@ pub(crate) async fn smart_labels_apply_matches_impl(
     account_id: &str,
     provider: &str,
     matches: &[AppliedSmartLabelMatch],
-    db: &DbState,
-    gmail: &GmailState,
-    jmap: &JmapState,
-    graph: &GraphState,
-    body_store: &BodyStoreState,
-    inline_images: &InlineImageStoreState,
-    search: &SearchState,
+    app_state: &AppState,
     progress: &dyn ProgressReporter,
 ) -> Result<(), String> {
     if matches.is_empty() {
         return Ok(());
     }
 
-    let ops = get_ops(
-        provider,
-        account_id,
-        gmail,
-        jmap,
-        graph,
-        *gmail.encryption_key(),
-    )
-    .await?;
+    let ops = app_state.providers.get_ops(provider, account_id).await?;
     let ctx = ProviderCtx {
         account_id,
-        db,
-        body_store,
-        inline_images,
-        search,
+        db: &app_state.db,
+        body_store: &app_state.body_store,
+        inline_images: &app_state.inline_images,
+        search: &app_state.search,
         progress,
     };
 
@@ -148,36 +119,18 @@ pub(crate) async fn smart_labels_classify_and_apply_remainder_impl(
     threads: &[SmartLabelAIThread],
     rules: &[SmartLabelAIRule],
     pre_applied_matches: &[AppliedSmartLabelMatch],
-    db: &DbState,
+    app_state: &AppState,
     crypto: &AppCryptoState,
-    gmail: &GmailState,
-    jmap: &JmapState,
-    graph: &GraphState,
-    body_store: &BodyStoreState,
-    inline_images: &InlineImageStoreState,
-    search: &SearchState,
     progress: &dyn ProgressReporter,
 ) -> Result<Vec<AppliedSmartLabelMatch>, String> {
     let matches =
-        classify_smart_label_remainder(db, crypto, threads, rules, pre_applied_matches).await?;
+        classify_smart_label_remainder(&app_state.db, crypto, threads, rules, pre_applied_matches)
+            .await?;
     if matches.is_empty() {
         return Ok(Vec::new());
     }
 
-    smart_labels_apply_matches_impl(
-        account_id,
-        provider,
-        &matches,
-        db,
-        gmail,
-        jmap,
-        graph,
-        body_store,
-        inline_images,
-        search,
-        progress,
-    )
-    .await?;
+    smart_labels_apply_matches_impl(account_id, provider, &matches, app_state, progress).await?;
 
     Ok(matches)
 }
@@ -213,27 +166,15 @@ pub(crate) async fn smart_labels_prepare_ai_remainder_for_messages(
 pub async fn smart_labels_apply_criteria_to_new_message_ids(
     account_id: String,
     message_ids: Vec<String>,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<Vec<AppliedSmartLabelMatch>, String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
     smart_labels_apply_criteria_to_new_message_ids_impl(
         &account_id,
-        &get_provider_type(&db, &account_id).await?,
+        &get_provider_type(&app_state.db, &account_id).await?,
         &message_ids,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
+        &app_state,
         &reporter,
     )
     .await
@@ -245,30 +186,11 @@ pub async fn smart_labels_apply_matches(
     account_id: String,
     provider: String,
     matches: Vec<AppliedSmartLabelMatch>,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-    jmap: State<'_, JmapState>,
-    graph: State<'_, GraphState>,
-    body_store: State<'_, BodyStoreState>,
-    inline_images: State<'_, InlineImageStoreState>,
-    search: State<'_, SearchState>,
+    app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
-    smart_labels_apply_matches_impl(
-        &account_id,
-        &provider,
-        &matches,
-        &db,
-        &gmail,
-        &jmap,
-        &graph,
-        &body_store,
-        &inline_images,
-        &search,
-        &reporter,
-    )
-    .await
+    smart_labels_apply_matches_impl(&account_id, &provider, &matches, &app_state, &reporter).await
 }
 
 pub(crate) async fn load_enabled_criteria_rules(
@@ -345,13 +267,7 @@ pub(crate) async fn smart_labels_apply_criteria_to_messages_impl(
     provider: &str,
     rules: &[(String, FilterCriteria)],
     messages: &[FilterableMessage],
-    db: &DbState,
-    gmail: &GmailState,
-    jmap: &JmapState,
-    graph: &GraphState,
-    body_store: &BodyStoreState,
-    inline_images: &InlineImageStoreState,
-    search: &SearchState,
+    app_state: &AppState,
     progress: &dyn ProgressReporter,
 ) -> Result<Vec<AppliedSmartLabelMatch>, String> {
     if rules.is_empty() || messages.is_empty() {
@@ -367,21 +283,13 @@ pub(crate) async fn smart_labels_apply_criteria_to_messages_impl(
         return Ok(Vec::new());
     }
 
-    let ops = get_ops(
-        provider,
-        account_id,
-        gmail,
-        jmap,
-        graph,
-        *gmail.encryption_key(),
-    )
-    .await?;
+    let ops = app_state.providers.get_ops(provider, account_id).await?;
     let ctx = ProviderCtx {
         account_id,
-        db,
-        body_store,
-        inline_images,
-        search,
+        db: &app_state.db,
+        body_store: &app_state.body_store,
+        inline_images: &app_state.inline_images,
+        search: &app_state.search,
         progress,
     };
     let ops = &*ops;

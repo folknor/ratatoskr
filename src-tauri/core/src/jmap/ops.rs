@@ -19,6 +19,12 @@ pub struct JmapOps {
     pub(crate) client: JmapClient,
 }
 
+impl JmapOps {
+    pub fn new(client: JmapClient) -> Self {
+        Self { client }
+    }
+}
+
 #[async_trait]
 impl ProviderOps for JmapOps {
     async fn sync_initial(

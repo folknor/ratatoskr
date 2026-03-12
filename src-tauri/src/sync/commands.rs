@@ -264,13 +264,7 @@ async fn run_sync_account(app_state: &AppState, account_id: &str) {
                 &provider,
                 &filters,
                 &loaded_messages,
-                db,
-                providers.gmail.as_ref(),
-                providers.jmap.as_ref(),
-                providers.graph.as_ref(),
-                body_store,
-                inline_images,
-                search,
+                app_state,
                 app_state.progress.as_ref(),
             )
             .await
@@ -283,13 +277,7 @@ async fn run_sync_account(app_state: &AppState, account_id: &str) {
                 &provider,
                 &criteria_rules,
                 &loaded_messages,
-                db,
-                providers.gmail.as_ref(),
-                providers.jmap.as_ref(),
-                providers.graph.as_ref(),
-                body_store,
-                inline_images,
-                search,
+                app_state,
                 app_state.progress.as_ref(),
             )
             .await
@@ -346,13 +334,9 @@ async fn run_sync_account(app_state: &AppState, account_id: &str) {
                 };
 
             if !ai_smart_label_threads.is_empty() && !ai_smart_label_rules.is_empty() {
-                let db = app_state.db.clone();
                 let crypto = app_state.crypto.clone();
-                let providers = app_state.providers.clone();
-                let body_store = app_state.body_store.clone();
-                let inline_images = app_state.inline_images.clone();
-                let search = app_state.search.clone();
                 let progress = app_state.progress.clone();
+                let app_state = app_state.clone();
                 let provider_for_ai = provider.clone();
                 let account_id_for_ai = account_id.to_string();
                 let pre_applied_matches = criteria_smart_label_matches.clone();
@@ -363,14 +347,8 @@ async fn run_sync_account(app_state: &AppState, account_id: &str) {
                         &ai_smart_label_threads,
                         &ai_smart_label_rules,
                         &pre_applied_matches,
-                        &db,
+                        &app_state,
                         &crypto,
-                        providers.gmail.as_ref(),
-                        providers.jmap.as_ref(),
-                        providers.graph.as_ref(),
-                        &body_store,
-                        &inline_images,
-                        &search,
                         progress.as_ref(),
                     )
                     .await

@@ -61,6 +61,12 @@ pub struct ImapOps {
     pub(crate) encryption_key: [u8; 32],
 }
 
+impl ImapOps {
+    pub fn new(encryption_key: [u8; 32]) -> Self {
+        Self { encryption_key }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
