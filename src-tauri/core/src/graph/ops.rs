@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use base64::{Engine, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use mail_parser::MimeHeaders;
 
 use crate::provider::ops::ProviderOps;
@@ -226,8 +225,7 @@ impl ProviderOps for GraphOps {
             .await?;
 
         let data = if let Some(ref content_bytes) = attachment.content_bytes {
-            BASE64_STANDARD
-                .decode(content_bytes)
+            crate::provider::encoding::decode_base64_standard(content_bytes)
                 .map_err(|e| format!("Failed to decode attachment: {e}"))?
         } else {
             let raw = self
@@ -245,7 +243,7 @@ impl ProviderOps for GraphOps {
 
         let size = data.len();
         Ok(AttachmentData {
-            data: BASE64_STANDARD.encode(&data),
+            data: crate::provider::encoding::encode_base64_standard(&data),
             size,
         })
     }
@@ -492,17 +490,7 @@ async fn query_thread_message_ids(
     let tid = thread_id.to_string();
     let aid = ctx.account_id.to_string();
     ctx.db
-        .with_conn(move |conn| {
-            let mut stmt = conn
-                .prepare("SELECT id FROM messages WHERE thread_id = ?1 AND account_id = ?2")
-                .map_err(|e| format!("prepare: {e}"))?;
-            let ids: Vec<String> = stmt
-                .query_map(rusqlite::params![tid, aid], |row| row.get(0))
-                .map_err(|e| format!("query: {e}"))?
-                .filter_map(Result::ok)
-                .collect();
-            Ok(ids)
-        })
+        .with_conn(move |conn| crate::db::lookups::get_message_ids_for_thread(conn, &aid, &tid))
         .await
 }
 
@@ -625,11 +613,8 @@ async fn create_draft_impl(
     raw_base64url: &str,
     _thread_id: Option<&str>,
 ) -> Result<String, String> {
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-
     // Decode base64url → raw MIME bytes
-    let raw_bytes = URL_SAFE_NO_PAD
-        .decode(raw_base64url)
+    let raw_bytes = crate::provider::encoding::decode_base64url_nopad(raw_base64url)
         .map_err(|e| format!("Failed to decode base64url: {e}"))?;
 
     // Parse MIME using mail-parser
@@ -740,7 +725,8 @@ async fn upload_attachments_from_mime(
                 }
             })
             .unwrap_or_else(|| "application/octet-stream".to_string());
-        let content_bytes = BASE64_STANDARD.encode(attachment.contents());
+        let content_bytes =
+            crate::provider::encoding::encode_base64_standard(attachment.contents());
         let is_inline = attachment
             .content_disposition()
             .is_some_and(|d| d.ctype() == "inline");

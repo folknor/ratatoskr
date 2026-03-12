@@ -1,7 +1,9 @@
 pub mod attachment_dedup;
 pub mod crypto;
 pub mod email_parsing;
+pub mod encoding;
 pub mod folder_roles;
+pub mod headers;
 pub mod http;
 pub mod label_flags;
 pub mod ops;

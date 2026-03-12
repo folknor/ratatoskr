@@ -1,6 +1,8 @@
 use super::folder_mapper::FolderMap;
 use super::types::{GraphMessage, GraphRecipient};
 use crate::provider::email_parsing::format_address_list;
+use crate::provider::encoding::decode_base64_standard;
+use crate::provider::headers::find_header_value_case_insensitive;
 
 /// Parsed attachment metadata ready for DB persistence.
 #[derive(Debug, Clone)]
@@ -205,11 +207,12 @@ fn get_header(
     headers: &Option<Vec<super::types::GraphInternetHeader>>,
     name: &str,
 ) -> Option<String> {
-    headers
-        .as_ref()?
-        .iter()
-        .find(|h| h.name.eq_ignore_ascii_case(name))
-        .map(|h| h.value.clone())
+    find_header_value_case_insensitive(
+        headers.as_ref()?,
+        name,
+        |h| h.name.as_str(),
+        |h| h.value.as_str(),
+    )
 }
 
 /// Format Graph recipients to "Name <email>, ..." string.
@@ -224,9 +227,7 @@ fn format_recipients(recipients: Option<&[GraphRecipient]>) -> Option<String> {
 }
 
 fn decode_inline_bytes(data: &str) -> Option<Vec<u8>> {
-    use base64::{Engine, engine::general_purpose::STANDARD};
-
-    let decoded = STANDARD.decode(data).ok()?;
+    let decoded = decode_base64_standard(data).ok()?;
     if decoded.len() > crate::inline_image_store::MAX_INLINE_SIZE {
         return None;
     }

@@ -4,15 +4,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Serialize;
 
-use crate::body_store::{BodyStoreState, MessageBody};
+use crate::body_store::BodyStoreState;
 use crate::db::DbState;
 use crate::inline_image_store::{InlineImage, InlineImageStoreState};
-use crate::progress::{self, ProgressReporter};
+use crate::progress::ProgressReporter;
 use crate::search::{SearchDocument, SearchState};
 
 use super::client::GmailClient;
 use super::parse::{ParsedGmailMessage, parse_gmail_message};
 use super::types::GmailLabel;
+use crate::sync::{
+    pending as sync_pending, persistence as sync_persistence, progress as sync_progress,
+    state as sync_state,
+};
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -24,16 +28,6 @@ use super::types::GmailLabel;
 pub struct GmailSyncResult {
     pub new_inbox_message_ids: Vec<String>,
     pub affected_thread_ids: Vec<String>,
-}
-
-/// Progress event emitted during Gmail sync.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct GmailSyncProgress {
-    account_id: String,
-    phase: String,
-    current: u64,
-    total: u64,
 }
 
 /// Bundle of shared state references to stay under the 7-arg clippy limit.
@@ -89,10 +83,7 @@ async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), Strin
 
     // Store history ID for delta sync
     if !history_id.is_empty() {
-        let aid = ctx.account_id.to_string();
-        ctx.db
-            .with_conn(move |conn| update_account_history_id(conn, &aid, &history_id))
-            .await?;
+        sync_state::save_account_history_id(ctx.db, ctx.account_id, &history_id).await?;
     }
 
     let total = thread_ids.len() as u64;
@@ -129,12 +120,7 @@ pub async fn gmail_delta_sync(
 
 async fn run_delta_sync(ctx: &SyncCtx<'_>) -> Result<GmailSyncResult, String> {
     // Read current history_id from account
-    let last_history_id = {
-        let aid = ctx.account_id.to_string();
-        ctx.db
-            .with_conn(move |conn| read_account_history_id(conn, &aid))
-            .await?
-    };
+    let last_history_id = { sync_state::load_account_history_id(ctx.db, ctx.account_id).await? };
     let Some(last_history_id) = last_history_id else {
         return Err("No history_id found — run initial sync first".to_string());
     };
@@ -391,127 +377,19 @@ fn upsert_thread_record(
     // First upsert the incoming messages so they are visible in DB queries
     upsert_messages(tx, account_id, messages)?;
 
-    // Now aggregate thread fields from ALL messages in the DB for this thread
-    let message_count: i64 = tx
-        .query_row(
-            "SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND account_id = ?2",
-            rusqlite::params![thread_id, account_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| format!("count messages: {e}"))?;
-
-    let is_read: bool = tx
-        .query_row(
-            "SELECT COUNT(*) FROM messages \
-             WHERE thread_id = ?1 AND account_id = ?2 AND is_read = 0",
-            rusqlite::params![thread_id, account_id],
-            |row| row.get::<_, i64>(0),
-        )
-        .map(|unread| unread == 0)
-        .map_err(|e| format!("check is_read: {e}"))?;
-
-    let is_starred: bool = tx
-        .query_row(
-            "SELECT COUNT(*) FROM messages \
-             WHERE thread_id = ?1 AND account_id = ?2 AND is_starred = 1",
-            rusqlite::params![thread_id, account_id],
-            |row| row.get::<_, i64>(0),
-        )
-        .map(|starred| starred > 0)
-        .map_err(|e| format!("check is_starred: {e}"))?;
-
-    let has_attachments: bool = tx
-        .query_row(
-            "SELECT COUNT(*) FROM attachments a \
-             JOIN messages m ON a.message_id = m.id \
-             WHERE m.thread_id = ?1 AND m.account_id = ?2",
-            rusqlite::params![thread_id, account_id],
-            |row| row.get::<_, i64>(0),
-        )
-        .map(|count| count > 0)
-        .map_err(|e| format!("check has_attachments: {e}"))?;
-
-    // Get snippet + date from the most recent message in the thread
-    let (snippet, last_date): (String, i64) = tx
-        .query_row(
-            "SELECT COALESCE(snippet, ''), date FROM messages \
-             WHERE thread_id = ?1 AND account_id = ?2 \
-             ORDER BY date DESC LIMIT 1",
-            rusqlite::params![thread_id, account_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(|e| format!("get latest message: {e}"))?;
-
-    // Get subject from the earliest message (thread subject)
-    let subject: Option<String> = tx
-        .query_row(
-            "SELECT subject FROM messages \
-             WHERE thread_id = ?1 AND account_id = ?2 \
-             ORDER BY date ASC LIMIT 1",
-            rusqlite::params![thread_id, account_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| format!("get subject: {e}"))?;
-
-    let all_labels: HashSet<&str> = messages
+    let is_important = messages
         .iter()
-        .flat_map(|m| m.label_ids.iter().map(String::as_str))
-        .collect();
-    let is_important = all_labels.contains("IMPORTANT");
+        .flat_map(|message| message.label_ids.iter().map(String::as_str))
+        .any(|label| label == "IMPORTANT");
 
-    // Check if thread already exists to preserve fields like is_pinned, is_muted
-    let exists: bool = tx
-        .query_row(
-            "SELECT COUNT(*) FROM threads WHERE id = ?1 AND account_id = ?2",
-            rusqlite::params![thread_id, account_id],
-            |row| row.get::<_, i64>(0),
-        )
-        .map(|c| c > 0)
-        .map_err(|e| format!("check thread exists: {e}"))?;
-
-    if exists {
-        tx.execute(
-            "UPDATE threads SET subject = ?1, snippet = ?2, last_message_at = ?3, \
-             message_count = ?4, is_read = ?5, is_starred = ?6, is_important = ?7, \
-             has_attachments = ?8 \
-             WHERE id = ?9 AND account_id = ?10",
-            rusqlite::params![
-                subject,
-                snippet,
-                last_date,
-                message_count,
-                is_read,
-                is_starred,
-                is_important,
-                has_attachments,
-                thread_id,
-                account_id,
-            ],
-        )
-        .map_err(|e| format!("update thread: {e}"))?;
-    } else {
-        tx.execute(
-            "INSERT INTO threads \
-             (id, account_id, subject, snippet, last_message_at, message_count, \
-              is_read, is_starred, is_important, has_attachments) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            rusqlite::params![
-                thread_id,
-                account_id,
-                subject,
-                snippet,
-                last_date,
-                message_count,
-                is_read,
-                is_starred,
-                is_important,
-                has_attachments,
-            ],
-        )
-        .map_err(|e| format!("insert thread: {e}"))?;
-    }
-
-    Ok(())
+    let aggregate = sync_persistence::compute_thread_aggregate(tx, account_id, thread_id)?;
+    sync_persistence::upsert_thread_aggregate(
+        tx,
+        account_id,
+        thread_id,
+        &aggregate,
+        Some(is_important),
+    )
 }
 
 fn set_thread_labels(
@@ -520,27 +398,14 @@ fn set_thread_labels(
     thread_id: &str,
     messages: &[ParsedGmailMessage],
 ) -> Result<(), String> {
-    let all_labels: HashSet<&str> = messages
-        .iter()
-        .flat_map(|m| m.label_ids.iter().map(String::as_str))
-        .collect();
-
-    tx.execute(
-        "DELETE FROM thread_labels WHERE account_id = ?1 AND thread_id = ?2",
-        rusqlite::params![account_id, thread_id],
+    sync_persistence::replace_thread_labels(
+        tx,
+        account_id,
+        thread_id,
+        messages
+            .iter()
+            .flat_map(|message| message.label_ids.iter().map(String::as_str)),
     )
-    .map_err(|e| format!("delete thread labels: {e}"))?;
-
-    for label_id in &all_labels {
-        tx.execute(
-            "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
-             VALUES (?1, ?2, ?3)",
-            rusqlite::params![account_id, thread_id, label_id],
-        )
-        .map_err(|e| format!("insert thread label: {e}"))?;
-    }
-
-    Ok(())
 }
 
 fn upsert_messages(
@@ -640,23 +505,15 @@ fn upsert_attachments(
 // ---------------------------------------------------------------------------
 
 async fn store_bodies(body_store: &BodyStoreState, messages: &[ParsedGmailMessage]) {
-    let bodies: Vec<MessageBody> = messages
-        .iter()
-        .filter(|m| m.body_html.is_some() || m.body_text.is_some())
-        .map(|m| MessageBody {
-            message_id: m.id.clone(),
-            body_html: m.body_html.clone(),
-            body_text: m.body_text.clone(),
-        })
-        .collect();
-
-    if bodies.is_empty() {
-        return;
-    }
-
-    if let Err(e) = body_store.put_batch(bodies).await {
-        log::warn!("Failed to store Gmail bodies: {e}");
-    }
+    sync_persistence::store_message_bodies(
+        body_store,
+        messages,
+        "Gmail",
+        |message| &message.id,
+        |message| message.body_html.as_ref(),
+        |message| message.body_text.as_ref(),
+    )
+    .await;
 }
 
 async fn store_inline_images(
@@ -677,13 +534,7 @@ async fn store_inline_images(
         })
         .collect();
 
-    if images.is_empty() {
-        return;
-    }
-
-    if let Err(e) = inline_images.put_batch(images).await {
-        log::warn!("Failed to store Gmail inline images: {e}");
-    }
+    sync_persistence::store_inline_images(inline_images, images, "Gmail").await;
 }
 
 // ---------------------------------------------------------------------------
@@ -710,9 +561,7 @@ async fn index_messages(search: &SearchState, account_id: &str, messages: &[Pars
         })
         .collect();
 
-    if let Err(e) = search.index_messages_batch(&docs).await {
-        log::warn!("Failed to index Gmail messages: {e}");
-    }
+    sync_persistence::index_search_documents(search, docs, "Gmail").await;
 }
 
 // ---------------------------------------------------------------------------
@@ -804,78 +653,17 @@ async fn filter_pending_ops(
     thread_ids: &HashSet<String>,
 ) -> Result<Vec<String>, String> {
     let tids: Vec<String> = thread_ids.iter().cloned().collect();
-    let aid = ctx.account_id.to_string();
-
-    let skipped = ctx
-        .db
-        .with_conn(move |conn| check_pending_ops(conn, &aid, &tids))
-        .await?;
+    let skipped = sync_pending::blocked_thread_ids(ctx.db, ctx.account_id, tids).await?;
 
     Ok(thread_ids
         .iter()
-        .filter(|tid| !skipped.contains(*tid))
+        .filter(|thread_id| !skipped.contains(*thread_id))
         .cloned()
         .collect())
 }
 
-fn check_pending_ops(
-    conn: &rusqlite::Connection,
-    account_id: &str,
-    thread_ids: &[String],
-) -> Result<HashSet<String>, String> {
-    let mut skipped = HashSet::new();
-    for tid in thread_ids {
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM pending_operations \
-                 WHERE account_id = ?1 AND resource_id = ?2 AND status != 'failed'",
-                rusqlite::params![account_id, tid],
-                |row| row.get(0),
-            )
-            .map_err(|e| format!("check pending ops: {e}"))?;
-        if count > 0 {
-            log::info!("Skipping thread {tid}: has {count} pending local ops");
-            skipped.insert(tid.clone());
-        }
-    }
-    Ok(skipped)
-}
-
-// ---------------------------------------------------------------------------
-// Account history_id helpers
-// ---------------------------------------------------------------------------
-
-fn update_account_history_id(
-    conn: &rusqlite::Connection,
-    account_id: &str,
-    history_id: &str,
-) -> Result<(), String> {
-    conn.execute(
-        "UPDATE accounts SET history_id = ?1, initial_sync_completed = 1 WHERE id = ?2",
-        rusqlite::params![history_id, account_id],
-    )
-    .map_err(|e| format!("update history_id: {e}"))?;
-    Ok(())
-}
-
-fn read_account_history_id(
-    conn: &rusqlite::Connection,
-    account_id: &str,
-) -> Result<Option<String>, String> {
-    conn.query_row(
-        "SELECT history_id FROM accounts WHERE id = ?1",
-        rusqlite::params![account_id],
-        |row| row.get(0),
-    )
-    .map_err(|e| format!("read history_id: {e}"))
-}
-
 async fn update_history_id(ctx: &SyncCtx<'_>, history_id: &str) -> Result<(), String> {
-    let aid = ctx.account_id.to_string();
-    let hid = history_id.to_string();
-    ctx.db
-        .with_conn(move |conn| update_account_history_id(conn, &aid, &hid))
-        .await
+    sync_state::save_account_history_id(ctx.db, ctx.account_id, history_id).await
 }
 
 // ---------------------------------------------------------------------------
@@ -883,13 +671,15 @@ async fn update_history_id(ctx: &SyncCtx<'_>, history_id: &str) -> Result<(), St
 // ---------------------------------------------------------------------------
 
 fn emit_progress(ctx: &SyncCtx<'_>, phase: &str, current: u64, total: u64) {
-    let event = GmailSyncProgress {
-        account_id: ctx.account_id.to_string(),
-        phase: phase.to_string(),
+    sync_progress::emit_sync_progress(
+        ctx.progress,
+        "gmail-sync-progress",
+        ctx.account_id,
+        phase,
         current,
         total,
-    };
-    progress::emit_event(ctx.progress, "gmail-sync-progress", &event);
+        None,
+    );
 }
 
 // ---------------------------------------------------------------------------

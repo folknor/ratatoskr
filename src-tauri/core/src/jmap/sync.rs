@@ -1,20 +1,24 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::progress::{self, ProgressReporter};
+use crate::db::{DbState, lookups};
+use crate::progress::ProgressReporter;
 use jmap_client::core::query::QueryResponse;
 use jmap_client::email;
 use jmap_client::mailbox::Role;
 use serde::Serialize;
 
 use crate::attachment_cache::hash_bytes;
-use crate::body_store::{BodyStoreState, MessageBody};
-use crate::db::DbState;
+use crate::body_store::BodyStoreState;
 use crate::inline_image_store::{InlineImage, InlineImageStoreState, MAX_INLINE_SIZE};
 use crate::search::{SearchDocument, SearchState};
 
 use super::client::JmapClient;
 use super::mailbox_mapper::{MailboxInfo, map_mailbox_to_label};
 use super::parse::{ParsedJmapMessage, email_get_properties, parse_jmap_email};
+use crate::sync::{
+    pending as sync_pending, persistence as sync_persistence, progress as sync_progress,
+    state as sync_state,
+};
 
 const BATCH_SIZE: usize = 50;
 
@@ -28,16 +32,6 @@ const BATCH_SIZE: usize = 50;
 pub struct JmapSyncResult {
     pub new_inbox_email_ids: Vec<String>,
     pub affected_thread_ids: Vec<String>,
-}
-
-/// Progress event emitted during JMAP sync.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct JmapSyncProgress {
-    account_id: String,
-    phase: String,
-    current: u64,
-    total: u64,
 }
 
 /// Bundle of shared state references.
@@ -453,32 +447,13 @@ async fn filter_pending_ops(
         return Ok(messages);
     }
 
-    // Collect unique thread IDs
-    let thread_ids: HashSet<String> = messages.iter().map(|m| m.thread_id.clone()).collect();
-    let aid = ctx.account_id.to_string();
-
-    // Check which threads have pending ops
-    let blocked_threads: HashSet<String> = ctx
-        .db
-        .with_conn(move |conn| {
-            let mut blocked = HashSet::new();
-            for tid in &thread_ids {
-                let count: i64 = conn
-                    .query_row(
-                        "SELECT COUNT(*) FROM pending_operations \
-                         WHERE account_id = ?1 AND resource_id = ?2 \
-                         AND status != 'failed'",
-                        rusqlite::params![aid, tid],
-                        |row| row.get(0),
-                    )
-                    .unwrap_or(0);
-                if count > 0 {
-                    blocked.insert(tid.clone());
-                }
-            }
-            Ok(blocked)
-        })
-        .await?;
+    let thread_ids: HashSet<String> = messages
+        .iter()
+        .map(|message| message.thread_id.clone())
+        .collect();
+    let blocked_threads =
+        sync_pending::blocked_thread_ids(ctx.db, ctx.account_id, thread_ids.into_iter().collect())
+            .await?;
 
     if blocked_threads.is_empty() {
         return Ok(messages);
@@ -489,10 +464,11 @@ async fn filter_pending_ops(
         blocked_threads.len()
     );
 
-    Ok(messages
-        .into_iter()
-        .filter(|m| !blocked_threads.contains(&m.thread_id))
-        .collect())
+    Ok(sync_pending::filter_by_blocked_threads(
+        messages,
+        &blocked_threads,
+        |message| &message.thread_id,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -563,11 +539,7 @@ async fn delete_messages(ctx: &SyncCtx<'_>, message_ids: &[&str]) -> Result<(), 
             // Collect affected thread IDs before deleting
             let mut affected_threads = HashSet::new();
             for id in &ids {
-                if let Ok(tid) = tx.query_row(
-                    "SELECT thread_id FROM messages WHERE account_id = ?1 AND id = ?2",
-                    rusqlite::params![aid, id],
-                    |row| row.get::<_, String>(0),
-                ) {
+                if let Ok(Some(tid)) = lookups::get_thread_id_for_message(&tx, &aid, id) {
                     affected_threads.insert(tid);
                 }
             }
@@ -636,85 +608,8 @@ fn reaggregate_thread(
     account_id: &str,
     thread_id: &str,
 ) -> Result<(), String> {
-    let message_count: i64 = tx
-        .query_row(
-            "SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND account_id = ?2",
-            rusqlite::params![thread_id, account_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| format!("count messages: {e}"))?;
-
-    let is_read: bool = tx
-        .query_row(
-            "SELECT COUNT(*) FROM messages \
-             WHERE thread_id = ?1 AND account_id = ?2 AND is_read = 0",
-            rusqlite::params![thread_id, account_id],
-            |row| row.get::<_, i64>(0),
-        )
-        .map(|unread| unread == 0)
-        .map_err(|e| format!("check is_read: {e}"))?;
-
-    let is_starred: bool = tx
-        .query_row(
-            "SELECT COUNT(*) FROM messages \
-             WHERE thread_id = ?1 AND account_id = ?2 AND is_starred = 1",
-            rusqlite::params![thread_id, account_id],
-            |row| row.get::<_, i64>(0),
-        )
-        .map(|starred| starred > 0)
-        .map_err(|e| format!("check is_starred: {e}"))?;
-
-    let has_attachments: bool = tx
-        .query_row(
-            "SELECT COUNT(*) FROM attachments a \
-             JOIN messages m ON a.message_id = m.id \
-             WHERE m.thread_id = ?1 AND m.account_id = ?2",
-            rusqlite::params![thread_id, account_id],
-            |row| row.get::<_, i64>(0),
-        )
-        .map(|count| count > 0)
-        .map_err(|e| format!("check has_attachments: {e}"))?;
-
-    let (snippet, last_date): (String, i64) = tx
-        .query_row(
-            "SELECT COALESCE(snippet, ''), date FROM messages \
-             WHERE thread_id = ?1 AND account_id = ?2 \
-             ORDER BY date DESC LIMIT 1",
-            rusqlite::params![thread_id, account_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(|e| format!("get latest message: {e}"))?;
-
-    let subject: Option<String> = tx
-        .query_row(
-            "SELECT subject FROM messages \
-             WHERE thread_id = ?1 AND account_id = ?2 \
-             ORDER BY date ASC LIMIT 1",
-            rusqlite::params![thread_id, account_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| format!("get subject: {e}"))?;
-
-    tx.execute(
-        "UPDATE threads SET subject = ?1, snippet = ?2, last_message_at = ?3, \
-         message_count = ?4, is_read = ?5, is_starred = ?6, \
-         has_attachments = ?7 \
-         WHERE id = ?8 AND account_id = ?9",
-        rusqlite::params![
-            subject,
-            snippet,
-            last_date,
-            message_count,
-            is_read,
-            is_starred,
-            has_attachments,
-            thread_id,
-            account_id,
-        ],
-    )
-    .map_err(|e| format!("reaggregate thread: {e}"))?;
-
-    Ok(())
+    let aggregate = sync_persistence::compute_thread_aggregate(tx, account_id, thread_id)?;
+    sync_persistence::upsert_thread_aggregate(tx, account_id, thread_id, &aggregate, None)
 }
 
 // ---------------------------------------------------------------------------
@@ -748,127 +643,19 @@ fn upsert_thread_record(
     // First upsert the incoming messages so they are visible in DB queries
     upsert_messages(tx, account_id, messages)?;
 
-    // Now aggregate thread fields from ALL messages in the DB for this thread
-    let message_count: i64 = tx
-        .query_row(
-            "SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND account_id = ?2",
-            rusqlite::params![thread_id, account_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| format!("count messages: {e}"))?;
-
-    let is_read: bool = tx
-        .query_row(
-            "SELECT COUNT(*) FROM messages \
-             WHERE thread_id = ?1 AND account_id = ?2 AND is_read = 0",
-            rusqlite::params![thread_id, account_id],
-            |row| row.get::<_, i64>(0),
-        )
-        .map(|unread| unread == 0)
-        .map_err(|e| format!("check is_read: {e}"))?;
-
-    let is_starred: bool = tx
-        .query_row(
-            "SELECT COUNT(*) FROM messages \
-             WHERE thread_id = ?1 AND account_id = ?2 AND is_starred = 1",
-            rusqlite::params![thread_id, account_id],
-            |row| row.get::<_, i64>(0),
-        )
-        .map(|starred| starred > 0)
-        .map_err(|e| format!("check is_starred: {e}"))?;
-
-    let has_attachments: bool = tx
-        .query_row(
-            "SELECT COUNT(*) FROM attachments a \
-             JOIN messages m ON a.message_id = m.id \
-             WHERE m.thread_id = ?1 AND m.account_id = ?2",
-            rusqlite::params![thread_id, account_id],
-            |row| row.get::<_, i64>(0),
-        )
-        .map(|count| count > 0)
-        .map_err(|e| format!("check has_attachments: {e}"))?;
-
-    // Get snippet + date from the most recent message in the thread
-    let (snippet, last_date): (String, i64) = tx
-        .query_row(
-            "SELECT COALESCE(snippet, ''), date FROM messages \
-             WHERE thread_id = ?1 AND account_id = ?2 \
-             ORDER BY date DESC LIMIT 1",
-            rusqlite::params![thread_id, account_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(|e| format!("get latest message: {e}"))?;
-
-    // Get subject from the earliest message (thread subject)
-    let subject: Option<String> = tx
-        .query_row(
-            "SELECT subject FROM messages \
-             WHERE thread_id = ?1 AND account_id = ?2 \
-             ORDER BY date ASC LIMIT 1",
-            rusqlite::params![thread_id, account_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| format!("get subject: {e}"))?;
-
-    let all_labels: HashSet<&str> = messages
+    let is_important = messages
         .iter()
-        .flat_map(|m| m.label_ids.iter().map(String::as_str))
-        .collect();
-    let is_important = all_labels.contains("IMPORTANT");
+        .flat_map(|message| message.label_ids.iter().map(String::as_str))
+        .any(|label| label == "IMPORTANT");
 
-    // Check if thread already exists to preserve fields like is_pinned, is_muted
-    let exists: bool = tx
-        .query_row(
-            "SELECT COUNT(*) FROM threads WHERE id = ?1 AND account_id = ?2",
-            rusqlite::params![thread_id, account_id],
-            |row| row.get::<_, i64>(0),
-        )
-        .map(|c| c > 0)
-        .map_err(|e| format!("check thread exists: {e}"))?;
-
-    if exists {
-        tx.execute(
-            "UPDATE threads SET subject = ?1, snippet = ?2, last_message_at = ?3, \
-             message_count = ?4, is_read = ?5, is_starred = ?6, is_important = ?7, \
-             has_attachments = ?8 \
-             WHERE id = ?9 AND account_id = ?10",
-            rusqlite::params![
-                subject,
-                snippet,
-                last_date,
-                message_count,
-                is_read,
-                is_starred,
-                is_important,
-                has_attachments,
-                thread_id,
-                account_id,
-            ],
-        )
-        .map_err(|e| format!("update thread: {e}"))?;
-    } else {
-        tx.execute(
-            "INSERT INTO threads \
-             (id, account_id, subject, snippet, last_message_at, message_count, \
-              is_read, is_starred, is_important, has_attachments) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            rusqlite::params![
-                thread_id,
-                account_id,
-                subject,
-                snippet,
-                last_date,
-                message_count,
-                is_read,
-                is_starred,
-                is_important,
-                has_attachments,
-            ],
-        )
-        .map_err(|e| format!("insert thread: {e}"))?;
-    }
-
-    Ok(())
+    let aggregate = sync_persistence::compute_thread_aggregate(tx, account_id, thread_id)?;
+    sync_persistence::upsert_thread_aggregate(
+        tx,
+        account_id,
+        thread_id,
+        &aggregate,
+        Some(is_important),
+    )
 }
 
 fn set_thread_labels(
@@ -877,27 +664,14 @@ fn set_thread_labels(
     thread_id: &str,
     messages: &[ParsedJmapMessage],
 ) -> Result<(), String> {
-    let all_labels: HashSet<&str> = messages
-        .iter()
-        .flat_map(|m| m.label_ids.iter().map(String::as_str))
-        .collect();
-
-    tx.execute(
-        "DELETE FROM thread_labels WHERE account_id = ?1 AND thread_id = ?2",
-        rusqlite::params![account_id, thread_id],
+    sync_persistence::replace_thread_labels(
+        tx,
+        account_id,
+        thread_id,
+        messages
+            .iter()
+            .flat_map(|message| message.label_ids.iter().map(String::as_str)),
     )
-    .map_err(|e| format!("delete thread labels: {e}"))?;
-
-    for label_id in &all_labels {
-        tx.execute(
-            "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
-             VALUES (?1, ?2, ?3)",
-            rusqlite::params![account_id, thread_id, label_id],
-        )
-        .map_err(|e| format!("insert thread label: {e}"))?;
-    }
-
-    Ok(())
 }
 
 fn upsert_messages(
@@ -984,23 +758,15 @@ fn upsert_attachments(
 // ---------------------------------------------------------------------------
 
 async fn store_bodies(body_store: &BodyStoreState, messages: &[ParsedJmapMessage]) {
-    let bodies: Vec<MessageBody> = messages
-        .iter()
-        .filter(|m| m.body_html.is_some() || m.body_text.is_some())
-        .map(|m| MessageBody {
-            message_id: m.id.clone(),
-            body_html: m.body_html.clone(),
-            body_text: m.body_text.clone(),
-        })
-        .collect();
-
-    if bodies.is_empty() {
-        return;
-    }
-
-    if let Err(e) = body_store.put_batch(bodies).await {
-        log::warn!("Failed to store JMAP bodies: {e}");
-    }
+    sync_persistence::store_message_bodies(
+        body_store,
+        messages,
+        "JMAP",
+        |message| &message.id,
+        |message| message.body_html.as_ref(),
+        |message| message.body_text.as_ref(),
+    )
+    .await;
 }
 
 async fn store_inline_images(ctx: &SyncCtx<'_>, messages: &[ParsedJmapMessage]) {
@@ -1119,9 +885,7 @@ async fn index_messages(search: &SearchState, account_id: &str, messages: &[Pars
         })
         .collect();
 
-    if let Err(e) = search.index_messages_batch(&docs).await {
-        log::warn!("Failed to index JMAP messages: {e}");
-    }
+    sync_persistence::index_search_documents(search, docs, "JMAP").await;
 }
 
 // ---------------------------------------------------------------------------
@@ -1134,20 +898,7 @@ async fn save_sync_state(
     state_type: &str,
     state: &str,
 ) -> Result<(), String> {
-    let aid = account_id.to_string();
-    let st = state_type.to_string();
-    let sv = state.to_string();
-
-    db.with_conn(move |conn| {
-        conn.execute(
-            "INSERT OR REPLACE INTO jmap_sync_state (account_id, type, state, updated_at) \
-             VALUES (?1, ?2, ?3, strftime('%s', 'now'))",
-            rusqlite::params![aid, st, sv],
-        )
-        .map_err(|e| format!("save jmap sync state: {e}"))?;
-        Ok(())
-    })
-    .await
+    sync_state::save_jmap_sync_state(db, account_id, state_type, state).await
 }
 
 async fn load_sync_state(
@@ -1155,20 +906,7 @@ async fn load_sync_state(
     account_id: &str,
     state_type: &str,
 ) -> Result<Option<String>, String> {
-    let aid = account_id.to_string();
-    let st = state_type.to_string();
-
-    db.with_conn(move |conn| {
-        let result = conn
-            .query_row(
-                "SELECT state FROM jmap_sync_state WHERE account_id = ?1 AND type = ?2",
-                rusqlite::params![aid, st],
-                |row| row.get::<_, String>(0),
-            )
-            .ok();
-        Ok(result)
-    })
-    .await
+    sync_state::load_jmap_sync_state(db, account_id, state_type).await
 }
 
 // ---------------------------------------------------------------------------
@@ -1234,15 +972,14 @@ pub async fn fetch_all_mailboxes(
 }
 
 fn emit_progress(ctx: &SyncCtx<'_>, phase: &str, current: u64, total: u64) {
-    progress::emit_event(
+    sync_progress::emit_sync_progress(
         ctx.progress,
         "jmap-sync-progress",
-        &JmapSyncProgress {
-            account_id: ctx.account_id.to_string(),
-            phase: phase.to_string(),
-            current,
-            total,
-        },
+        ctx.account_id,
+        phase,
+        current,
+        total,
+        None,
     );
 }
 

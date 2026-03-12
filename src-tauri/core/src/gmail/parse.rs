@@ -1,10 +1,11 @@
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::Serialize;
 
 use crate::provider::attachment_dedup::{
     dedup_by_key, prefer_missing_clone, prefer_non_placeholder_filename,
 };
 use crate::provider::email_parsing::parse_single_address_header;
+use crate::provider::encoding::decode_base64url_nopad;
+use crate::provider::headers::find_header_value_case_insensitive;
 
 use super::auth_parser::parse_authentication_results;
 use super::types::{GmailHeader, GmailMessage, GmailPayload};
@@ -114,10 +115,7 @@ pub fn parse_gmail_message(msg: &GmailMessage) -> ParsedGmailMessage {
 }
 
 fn get_header(headers: &[GmailHeader], name: &str) -> Option<String> {
-    headers
-        .iter()
-        .find(|h| h.name.eq_ignore_ascii_case(name))
-        .map(|h| h.value.clone())
+    find_header_value_case_insensitive(headers, name, |h| h.name.as_str(), |h| h.value.as_str())
 }
 
 /// Recursively extract a body part matching the given MIME type.
@@ -243,5 +241,5 @@ fn decode_base64url(data: &str) -> Option<String> {
 }
 
 fn decode_base64url_bytes(data: &str) -> Option<Vec<u8>> {
-    URL_SAFE_NO_PAD.decode(data).ok()
+    decode_base64url_nopad(data).ok()
 }

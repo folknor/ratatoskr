@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use base64::Engine;
 use rusqlite::Connection;
 
 use crate::provider::folder_roles::{imap_name_to_special_use, imap_special_use_to_label_id};
@@ -599,9 +598,7 @@ impl ProviderOps for ImapOps {
         // Copy sent message to Sent folder (non-fatal if it fails)
         let raw_b64url = raw_base64url.to_string();
         if let Err(e) = async {
-            let raw_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-                .decode(&raw_b64url)
-                .map_err(|e| format!("base64url decode: {e}"))?;
+            let raw_bytes = crate::provider::encoding::decode_base64url_nopad(&raw_b64url)?;
 
             with_session!(&imap_config, session => {
                 imap_client::append_message(&mut session, &sent_folder, Some("(\\Seen)"), &raw_bytes).await
@@ -635,9 +632,7 @@ impl ProviderOps for ImapOps {
             .await?
             .unwrap_or_else(|| "Drafts".to_string());
 
-        let raw_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(raw_base64url)
-            .map_err(|e| format!("base64url decode: {e}"))?;
+        let raw_bytes = crate::provider::encoding::decode_base64url_nopad(raw_base64url)?;
 
         with_session!(&config, session => {
             imap_client::append_message(&mut session, &drafts_folder, Some("(\\Draft)"), &raw_bytes).await

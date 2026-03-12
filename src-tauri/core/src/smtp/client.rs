@@ -1,4 +1,3 @@
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use lettre::{
     AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
     transport::smtp::{
@@ -11,8 +10,7 @@ use super::types::{SmtpConfig, SmtpSendResult};
 
 /// Decode a base64url-encoded string (Gmail format) to raw bytes.
 fn decode_base64url(input: &str) -> Result<Vec<u8>, String> {
-    URL_SAFE_NO_PAD
-        .decode(input)
+    crate::provider::encoding::decode_base64url_nopad(input)
         .map_err(|e| format!("Base64 decode error: {e}"))
 }
 

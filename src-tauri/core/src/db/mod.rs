@@ -1,3 +1,4 @@
+pub mod lookups;
 pub mod migrations;
 pub mod pending_ops;
 pub mod queries;

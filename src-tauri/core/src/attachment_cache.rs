@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use base64::{Engine, engine::general_purpose::STANDARD};
 use rusqlite::OptionalExtension;
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -59,14 +58,12 @@ pub fn remove_cached_relative(app_data_dir: &Path, relative_path: &str) -> Resul
 /// Decode base64 (standard or URL-safe) to raw bytes.
 pub fn decode_base64(data: &str) -> Result<Vec<u8>, String> {
     let normalized = data.replace('-', "+").replace('_', "/");
-    STANDARD
-        .decode(&normalized)
-        .map_err(|e| format!("base64 decode: {e}"))
+    crate::provider::encoding::decode_base64_standard(&normalized)
 }
 
 /// Encode raw bytes to standard base64.
 pub fn encode_base64(data: &[u8]) -> String {
-    STANDARD.encode(data)
+    crate::provider::encoding::encode_base64_standard(data)
 }
 
 // ── DB helpers (run inside with_conn closures) ──────────────

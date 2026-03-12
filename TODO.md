@@ -50,21 +50,21 @@
 
 - [x] **Shared attachment deduplication** — The shared dedup/merge mechanics for Gmail and IMAP attachments now live in `ratatoskr-core::provider::attachment_dedup`, with provider-specific key selection left at the call sites.
 
-- [ ] **Shared sync progress emission** — `gmail/sync.rs`, `jmap/sync.rs`, `graph/sync.rs` each have `emit_progress()` with identical structure (`account_id`, `phase`, `current`, `total`). Consolidate into `sync/progress.rs`. (Overlaps with `ProgressReporter` trait above.)
+- [x] **Shared sync progress emission** — Shared sync progress emission now lives in `ratatoskr-core::sync::progress`, with Gmail, JMAP, and Graph sync routing their event payloads through the shared helper.
 
-- [ ] **Shared sync state persistence** — `gmail/sync.rs` (`update_account_history_id`), `jmap/sync.rs` (`save_sync_state`), `graph/sync.rs` (`save_delta_token`) all save/restore sync cursors with nearly identical transaction patterns. Create generic `sync/state.rs` with `save_sync_state()` / `load_sync_state()`.
+- [x] **Shared sync state persistence** — Shared sync cursor persistence now lives in `ratatoskr-core::sync::state`, covering Gmail history IDs, JMAP sync state, and Graph delta tokens.
 
-- [ ] **Shared message persistence pipeline** — All 3 sync modules follow the same pattern: filter pending ops → upsert messages → update thread aggregates → set thread labels → write to body store → index for search. Consolidate into `sync/persistence.rs`. (~300 lines duplication.)
+- [x] **Shared message persistence pipeline** — The shared thread aggregate, thread-label replacement, body-store writes, inline-image writes, and search-index writes now live in `ratatoskr-core::sync::persistence`, with provider-specific DB upserts and JMAP inline-fetch handling left in the adapters.
 
 ### Medium Priority
 
-- [ ] **Shared header extraction** — `gmail/parse.rs:111-116`, `graph/parse.rs:198-208`, `imap/parse.rs:320-332` all extract headers by name (case-insensitive) from a header collection. Shared helper.
+- [x] **Shared header extraction** — Shared case-insensitive header lookup now lives in `ratatoskr-core::provider::headers`; Gmail and Graph parsing use it directly. The old IMAP reference here was stale after the core split.
 
-- [ ] **Shared thread message lookup** — `graph/ops.rs:482-501`, `imap/ops.rs:75-109`, `jmap/commands.rs:280-295` all query message IDs for a thread. Move the SQL query to a shared DB helper.
+- [x] **Shared thread message lookup** — Shared message/thread lookup helpers now live in `ratatoskr-core::db::lookups`, and the old `jmap/commands.rs` reference in this item was stale after the core/app split.
 
-- [ ] **Consolidate base64 utilities** — `gmail/parse.rs:262-269` (URL_SAFE_NO_PAD), `attachment_cache.rs:71-82` (STANDARD), `graph/parse.rs:228-236` (STANDARD) — different wrappers with different error handling. Consolidate into `provider/encoding.rs`.
+- [x] **Consolidate base64 utilities** — Shared base64/base64url helpers now live in `ratatoskr-core::provider::encoding`, and the relevant provider/cache/mailer call sites now route through it.
 
-- [ ] **Shared pending ops filtering** — `jmap/sync.rs:245,317` and `graph/sync.rs:317` both call `filter_pending_ops()` defined separately in each sync module. Move to `db/` or `email_actions/`.
+- [x] **Shared pending ops filtering** — Shared pending-operation filtering now lives in `ratatoskr-core::sync::pending`, and Gmail/JMAP/Graph sync now delegate to it.
 
 ---
 

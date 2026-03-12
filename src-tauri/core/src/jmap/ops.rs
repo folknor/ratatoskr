@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use jmap_client::mailbox::Role;
 
 use crate::provider::ops::ProviderOps;
@@ -266,9 +265,7 @@ impl ProviderOps for JmapOps {
         raw_base64url: &str,
         _thread_id: Option<&str>,
     ) -> Result<String, String> {
-        let raw_bytes = URL_SAFE_NO_PAD
-            .decode(raw_base64url)
-            .map_err(|e| format!("base64url decode: {e}"))?;
+        let raw_bytes = crate::provider::encoding::decode_base64url_nopad(raw_base64url)?;
 
         let mut email = self
             .client
@@ -317,9 +314,7 @@ impl ProviderOps for JmapOps {
         raw_base64url: &str,
         _thread_id: Option<&str>,
     ) -> Result<String, String> {
-        let raw_bytes = URL_SAFE_NO_PAD
-            .decode(raw_base64url)
-            .map_err(|e| format!("base64url decode: {e}"))?;
+        let raw_bytes = crate::provider::encoding::decode_base64url_nopad(raw_base64url)?;
 
         let mailboxes = get_mailbox_list(&self.client).await?;
         let drafts_id =
@@ -379,7 +374,7 @@ impl ProviderOps for JmapOps {
             .map_err(|e| format!("Blob download: {e}"))?;
 
         Ok(AttachmentData {
-            data: base64::engine::general_purpose::STANDARD.encode(&data),
+            data: crate::provider::encoding::encode_base64_standard(&data),
             size: data.len(),
         })
     }
