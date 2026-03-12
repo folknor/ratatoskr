@@ -8,26 +8,28 @@
 
 - [ ] **Deduplicate the shared `callAi` wrapper** — `aiService.ts` and `writingStyleService.ts` still define the same `callAi(systemPrompt, userContent)` helper. If inference remains in TypeScript, this should collapse to one shared wrapper or direct `completeAi` use.
 
-### Post-Sync Boundary
-
-> Rust sync now owns filters, smart labels, calendar follow-up, notification evaluation, and AI categorization preparation/application.
-> The remaining Rust/TS boundary is mainly desktop notification display plus actual AI inference calls still triggered from the frontend.
-
-- [x] **Trim `syncManager.ts` down to a deliberate UI boundary** — Standalone CalDAV partitioning/background scheduling has been removed from TypeScript. `syncManager.ts` now acts as an event subscriber plus thin invoke wrapper around Rust-owned sync orchestration.
-
-### Settings and Account Compatibility Sweeps
-
-- [x] **Stop decrypting every setting in `read_setting_map`** — Settings snapshots now decrypt only the small secure-key subset they actually need, while UI/non-sensitive bootstrap reads stay plain.
-
-- [x] **Stop bundling API keys with non-sensitive settings snapshots** — Non-sensitive settings bootstrap data and secrets now come from separate snapshot commands, so only the settings page requests API keys/client secrets.
-
-- [x] **Sweep remaining full account/settings compatibility reads** — Active app paths no longer rely on one-off `getSetting()` calls or full-account compatibility reads for startup/UI/runtime flags. Those paths now use Rust-backed snapshots or narrower DTOs, and the dead `getAllSettings` / `getSecureSetting` compatibility surface has been removed.
-
 ### Regression Coverage
 
 - [ ] **Expand regression coverage around migrated sync/bootstrap behavior** — Add focused tests for sync status events, background sync start/stop, post-sync hook triggering, and account bootstrap paths that now rely on Rust-backed summary DTOs.
 
 - [ ] **Replace the magic microtask loop in `flushListenerSetup`** — The current 8-iteration `await Promise.resolve()` loop is brittle and hides ordering assumptions in sync listener tests.
+
+## Inline Image Store Eviction
+
+- [ ] **Wire up user-configurable eviction for `inline_images.db`** — The file-based attachment cache (`attachment_cache/`) has full user-facing eviction: a configurable max size in settings, `evictOldestCached()` in `cacheManager.ts` that respects content-hash dedup, and `clearAllCache()`. The inline image store has none of this plumbing on the TS/UI side, even though the Rust backend already has the building blocks (`prune_to_size()`, `delete_unreferenced()`, `stats()`, `clear()`).
+
+  **What exists today (Rust side)**:
+  - `prune_to_size(max_bytes)` — evicts oldest rows by `created_at ASC` until total size fits under the cap. Already called automatically after every `put()` and `put_batch()` with a hardcoded 128 MB ceiling (`MAX_INLINE_STORE_BYTES`).
+  - `delete_unreferenced(db, hashes)` — cross-references `attachments` table to find orphaned blobs (no remaining `is_inline = 1` rows with that `content_hash`), then deletes them.
+  - `stats()` — returns `{ image_count, total_bytes }`.
+  - `clear()` — deletes all rows.
+  - `inline_image_stats` and `inline_image_clear` Tauri commands already exposed.
+
+  **What's missing**:
+  1. **Settings UI**: No user-facing control for inline image store size. The 128 MB cap is hardcoded in Rust. The settings page should expose this alongside the existing attachment cache size slider, or at minimum show the current usage via `inline_image_stats`.
+  2. **Orphan cleanup on account/message deletion**: When messages or accounts are deleted, their attachment rows disappear but the corresponding inline image blobs may linger as orphans. Need to call `delete_unreferenced()` after bulk deletions (account removal, message purge, trash empty). The file cache has analogous hash-aware cleanup via `db_count_cached_by_hash`; the inline store needs the same trigger points.
+  3. **Scheduled eviction**: The file cache runs eviction after every `provider_fetch_attachment` cache-on-miss (via `enforce_cache_limit`). The inline store's `prune_to_size` runs after `put`/`put_batch` which covers sync-time inserts, but there's no periodic sweep to catch edge cases (e.g., if `MAX_INLINE_STORE_BYTES` is lowered in a future update). Consider adding a periodic call in `preCacheManager.ts` or a dedicated background task.
+  4. **Tauri command for configurable limit**: If the cap becomes user-configurable, need a command to update the limit and trigger an immediate prune (or read it from the settings DB at `init()` time instead of using the const).
 
 ## Non-Migration Cleanup
 
@@ -46,3 +48,31 @@
 - [ ] **Decide whether Graph `raw_size = 0` should stay accepted** — Graph still lacks a clean size field for the current query path. Either keep this as an accepted cosmetic limitation or document a better fallback if one exists.
 
 - [ ] **Deduplicate account-to-store mapping in the React entry points** — `App.tsx`, `ComposerWindow.tsx`, and `ThreadWindow.tsx` still duplicate the same `dbAccounts.map(...)` shaping logic.
+
+### Microsoft Graph
+
+- [ ] **Decide on Azure AD app registration model** — Currently users must provide their own `microsoft_client_id` via settings UI (`SettingsAccountsTab.tsx`). No default client ID is shipped. The open question is whether to register and ship a default Entra ID app registration (simpler onboarding, but requires maintaining an Azure AD app, handling consent prompts, and staying within Microsoft's rate limits across all users) or keep requiring user-provided credentials (friction for non-technical users, but zero shared infrastructure). The `microsoft_client_id` settings field and encrypted storage infra are already in place — this is a product/policy decision, not a code gap.
+
+- [ ] **Implement large attachment upload sessions (>3MB)** — Graph API rejects inline base64 attachments over 3MB. Larger files require a multi-step resumable upload session: `POST /me/messages/{id}/attachments/createUploadSession` → chunked `PUT` to the returned upload URL. Currently `graph/ops.rs` uses simple `POST /me/messages/{id}/attachments` which will fail silently or error for large files. Need to detect size threshold, create upload session, chunk the file (recommended 5-10MB chunks per Microsoft docs), and handle resume on failure. Affects `send_message` (create-draft-then-send pattern in `ops.rs` lines ~211-249) and `save_draft`.
+
+- [ ] **Add Graph webhook subscriptions for real-time sync** — Currently Graph sync is purely poll-based via delta queries with priority-based folder scheduling (`sync.rs`). Microsoft Graph supports change notifications via webhooks (`POST /subscriptions` with `changeType: "created,updated,deleted"` on `/me/messages`). This would enable near-instant inbox updates instead of waiting for the next sync cycle. Requires: a notification endpoint (likely a Tauri localhost server or push notification relay), subscription lifecycle management (create, renew before 3-day expiry, handle validation tokens), and delta sync as fallback when subscriptions lapse. Low priority while polling works acceptably.
+
+- [ ] **Wire up Focused Inbox data from Graph** — The `inferenceClassification` field is already fetched in Graph sync queries (`$select=...inferenceClassification...` in `sync.rs`) and parsed into `GraphMessage` (`types.rs`), but the value is discarded before DB storage. To use it: persist the classification (`focused` or `other`) in a column or as a pseudo-label, then surface it in the UI as a tab or filter alongside categories. This is an optional enrichment — useful for Outlook users who rely on Focused Inbox, but not blocking for core functionality.
+
+### JMAP
+
+- [ ] **Add Bearer/OAuth authentication for JMAP** — Currently `jmap/client.rs` uses `Credentials::basic()` only, ignoring the `auth_method` column in the accounts table. This means JMAP providers that require OAuth2 (e.g., Fastmail's OAuth flow) can't be used. Implementation needs: (a) read `auth_method` from DB in `read_jmap_credentials()` and branch on `"oauth2"`/`"bearer"` to use `Credentials::bearer(token)`, (b) handle token refresh — `jmap-client` binds credentials at construction, so either rebuild `JmapClientInner` on refresh or patch the crate for a credential callback, (c) per-provider OAuth endpoint config (Fastmail has its own auth/token URLs and scopes, distinct from Microsoft/Google), (d) account setup UI flow for OAuth JMAP providers. The `auth_method` column and IMAP/Graph OAuth infra already exist as reference patterns.
+
+- [ ] **Add JMAP push notifications via WebSocket** — Currently JMAP sync is purely poll-based via `email_changes()`/`mailbox_changes()` state strings in `sync.rs`. The JMAP spec (RFC 8620 §7) defines push via EventSource or WebSocket, and `jmap-client` 0.4 supports WebSocket push. This would enable near-instant sync instead of waiting for the next poll cycle. Requires: WebSocket connection lifecycle management, state change event parsing, and triggering delta sync on push events. Delta polling remains as fallback. Low priority while polling works.
+
+- [ ] **Add JMAP Sieve filter management** — `jmap-client` supports full Sieve CRUD (RFC 6785 over JMAP). This would allow users to manage server-side mail filters (filing rules, vacation replies, forwarding) directly from the UI. Currently no Sieve code exists. Requires: Sieve script CRUD commands, a filter rule editor UI, and testing against Fastmail/Stalwart/Cyrus Sieve implementations. Nice-to-have feature, not blocking.
+
+- [ ] **Fetch `List-Unsubscribe` header in JMAP sync** — The `messages` table has `list_unsubscribe` and `list_unsubscribe_post` columns, but JMAP sync sets them to NULL. JMAP can fetch arbitrary headers via `header:List-Unsubscribe:asText` and `header:List-Unsubscribe-Post:asText` properties in `Email/get`. Add these to the property list in `parse.rs`'s `email_get_properties()`, parse the values, and persist them. This enables one-click unsubscribe UI for JMAP accounts (IMAP and Gmail already populate these columns).
+
+- [ ] **Batch `Email/set` for JMAP thread actions** — All thread-level actions in `jmap/ops.rs` (archive, trash, move, mark read, star, spam) loop through email IDs and call `email_set_mailbox()`/`email_set_keyword()` per-email sequentially — one API round-trip per email in the thread. Should build a single `Email/set` request with patches for all email IDs using jmap-client's request builder, reducing N API calls to 1. The per-email convenience methods (`email_set_mailbox`, `email_set_keyword`) don't support batching; need to drop to the lower-level `set_email()` builder with explicit patch operations.
+
+- [ ] **Batch JMAP send into a single request** — `send_message` in `jmap/ops.rs` makes 5 sequential API calls: `email_import()` → `email_submission_create()` → `email_set_keyword($draft, false)` → `email_set_keyword($seen, true)`. The JMAP spec supports batching these into a single request with back-references: `Email/import` result ID feeds into `EmailSubmission/set` + `onSuccessUpdateEmail` for keyword cleanup. The `jmap-client` high-level API doesn't expose this cleanly — would need the raw request builder to wire back-references.
+
+- [ ] **Add `is_known_jmap_provider()` quick-check utility** — The autodiscovery system (`discovery/`) can detect JMAP support, but only via the full cascade (registry + autoconfig + MX + .well-known probe). A lightweight utility that checks just the registry for known JMAP providers (currently only Fastmail) would be useful for UI hints during account setup (e.g., "JMAP supported" badge). Could be a simple function in `discovery/registry.rs` exposed as a Tauri command, or folded into the existing `discover_email_config` response.
+
+- [ ] **JMAP for Calendars** — `jmap-client` has no calendar support (upstream Issue #3). JMAP for Calendars (RFC 8984) would unify calendar sync for providers like Fastmail that support it. Blocked until `jmap-client` adds calendar types, or we build raw JMAP calendar requests. Low priority — CalDAV covers calendar sync for now.
