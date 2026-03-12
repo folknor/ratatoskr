@@ -1,5 +1,6 @@
 import { vi } from "vitest";
 import { createMockGmailAccount, createMockImapAccount } from "@/test/mocks";
+import { decryptValue } from "@/utils/crypto";
 
 const mockInvoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
@@ -79,6 +80,17 @@ describe("accounts", () => {
       const result = await getAccount("acc-imap");
 
       expect(result?.imap_password).toBeNull();
+    });
+
+    it("clears encrypted secrets when decryption fails", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      mockInvoke.mockResolvedValue(createMockImapAccount());
+      vi.mocked(decryptValue).mockRejectedValueOnce(new Error("bad key"));
+
+      const result = await getAccount("acc-imap");
+
+      expect(result?.imap_password).toBeNull();
+      expect(warnSpy).toHaveBeenCalled();
     });
   });
 

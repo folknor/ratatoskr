@@ -1,4 +1,5 @@
 use crate::imap::types::ImapMessage;
+use crate::provider::text::truncate_graphemes;
 use crate::threading::ThreadableMessage;
 
 use super::folder_mapper::get_labels_for_message;
@@ -43,10 +44,7 @@ pub fn convert_imap_message(
     let snippet = msg.snippet.clone().unwrap_or_else(|| {
         msg.body_text
             .as_deref()
-            .map(|t| {
-                let chars: String = t.chars().take(200).collect();
-                chars
-            })
+            .map(|text| truncate_graphemes(text, 200))
             .unwrap_or_default()
     });
 

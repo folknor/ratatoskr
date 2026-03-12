@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { startAutoSave, stopAutoSave } from "@/services/composer/draftAutoSave";
 import { useComposerStore } from "@/stores/composerStore";
-import { startAutoSave, stopAutoSave } from "./draftAutoSave";
 
 // Mock emailActions instead of getGmailClient
 vi.mock("@/services/emailActions", () => ({
@@ -84,5 +84,25 @@ describe("draftAutoSave", () => {
     await vi.advanceTimersByTimeAsync(3500);
 
     expect(useComposerStore.getState().draftId).toBeNull();
+  });
+
+  it("flushes a pending save on stop", async () => {
+    startAutoSave("account-1");
+
+    useComposerStore.getState().setBodyHtml("<p>Flush me</p>");
+    stopAutoSave();
+    await Promise.resolve();
+
+    expect(useComposerStore.getState().draftId).toBe("draft-1");
+  });
+
+  it("flushes a pending save on pagehide", async () => {
+    startAutoSave("account-1");
+
+    useComposerStore.getState().setBodyHtml("<p>Page hide</p>");
+    window.dispatchEvent(new Event("pagehide"));
+    await Promise.resolve();
+
+    expect(useComposerStore.getState().draftId).toBe("draft-1");
   });
 });

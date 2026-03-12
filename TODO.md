@@ -82,17 +82,17 @@
 
 ## Security & Data Safety
 
-- [ ] **Decryption failure fallback returns plaintext** — `src/services/db/accounts.ts:40-81` — When decryption fails, code falls back to the raw (potentially plaintext) value with only `console.warn`. Credentials stored before encryption was enabled remain accessible in plaintext indefinitely. *(LOW)*
+- [x] **Decryption failure clears encrypted secrets instead of exposing raw values** — `src/services/db/accounts.ts` now clears encrypted credential fields on decrypt failure rather than returning the raw stored value. Plaintext legacy values still pass through when they are not marked as encrypted. *(LOW)*
 
-- [ ] **`decrypt_if_needed` silently returns ciphertext on failure** — `src-tauri/src/imap/account_config.rs:51-58` — If decryption fails, returns the encrypted blob as the IMAP password, causing a confusing auth failure. Should return `Err` instead. *(LOW)*
+- [x] **`decrypt_if_needed` returns `Err` on decryption failure** — Post-split IMAP config loading lives in `src-tauri/core/src/imap/account_config.rs`; decrypt failures already surface as `Err`, and this behavior is now covered by a focused test.
 
-- [ ] **Draft auto-save has no crash-recovery guarantee** — `src/services/composer/draftAutoSave.ts` — 3-second debounce means up to 3s of content lost on crash. Combined with `synchronous=NORMAL`, even locally-persisted drafts might not survive power failure. *(LOW)*
+- [x] **Draft auto-save flushes pending saves on lifecycle transitions** — `src/services/composer/draftAutoSave.ts` now flushes a pending save on `pagehide`, `visibilitychange`, and `stopAutoSave()`, reducing the unsaved window from pure debounce-only behavior. *(LOW)*
 
 ---
 
 ## Provider Operations
 
-- [ ] **Snippet fallback truncation not grapheme-safe** — `imap_message_to_provider_message` uses `.chars().take(200).collect()` which can split multi-byte grapheme clusters. Minor cosmetic issue. *(LOW)*
+- [x] **Snippet fallback truncation is grapheme-safe** — IMAP snippet generation and fallback truncation now use a shared grapheme-aware helper in `src-tauri/core/src/provider/text.rs`. *(LOW)*
 
 ---
 

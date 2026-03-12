@@ -4741,6 +4741,7 @@ dependencies = [
  "tantivy",
  "tokio",
  "tokio-native-tls",
+ "unicode-segmentation",
  "urlencoding",
  "utf7-imap",
  "uuid",

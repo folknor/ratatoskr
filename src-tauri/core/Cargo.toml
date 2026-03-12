@@ -69,3 +69,4 @@ hickory-resolver = { version = "0.25", features = ["tokio"] }
 quick-xml = "0.37"
 xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 sha2 = "0.10"
+unicode-segmentation = "1.12"

@@ -8,6 +8,7 @@ import { buildRawEmail } from "@/utils/emailBuilder";
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let unsubscribe: (() => void) | null = null;
+let saveInFlight: Promise<void> | null = null;
 
 const DEBOUNCE_MS = 3000;
 
@@ -90,9 +91,42 @@ async function saveDraft(): Promise<void> {
   }
 }
 
+function runSaveNow(): Promise<void> {
+  if (saveInFlight !== null) {
+    return saveInFlight;
+  }
+  const savePromise = saveDraft().finally(() => {
+    if (saveInFlight === savePromise) {
+      saveInFlight = null;
+    }
+  });
+  saveInFlight = savePromise;
+  return savePromise;
+}
+
 function scheduleSave(): void {
   if (debounceTimer) clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(saveDraft, DEBOUNCE_MS);
+  debounceTimer = setTimeout(() => {
+    debounceTimer = null;
+    void runSaveNow();
+  }, DEBOUNCE_MS);
+}
+
+function flushPendingSave(): void {
+  if (!debounceTimer) return;
+  clearTimeout(debounceTimer);
+  debounceTimer = null;
+  void runSaveNow();
+}
+
+function handlePageHide(): void {
+  flushPendingSave();
+}
+
+function handleVisibilityChange(): void {
+  if (document.visibilityState === "hidden") {
+    flushPendingSave();
+  }
 }
 
 /**
@@ -125,18 +159,20 @@ export function startAutoSave(accountId?: string): void {
       scheduleSave();
     }
   });
+
+  window.addEventListener("pagehide", handlePageHide);
+  document.addEventListener("visibilitychange", handleVisibilityChange);
 }
 
 /**
  * Stop auto-saving and clean up.
  */
 export function stopAutoSave(): void {
-  if (debounceTimer) {
-    clearTimeout(debounceTimer);
-    debounceTimer = null;
-  }
+  flushPendingSave();
   if (unsubscribe) {
     unsubscribe();
     unsubscribe = null;
   }
+  window.removeEventListener("pagehide", handlePageHide);
+  document.removeEventListener("visibilitychange", handleVisibilityChange);
 }

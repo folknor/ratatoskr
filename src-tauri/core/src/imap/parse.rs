@@ -6,6 +6,7 @@ use crate::provider::attachment_dedup::{
 };
 use crate::provider::email_parsing::format_address_list as format_addresses;
 use crate::provider::folder_roles::imap_name_to_special_use;
+use crate::provider::text::snippet_from_text_body;
 
 use super::types::*;
 
@@ -92,20 +93,9 @@ pub fn parse_message(
     let body_text = message.body_text(0).map(|s| s.to_string());
     let body_html = message.body_html(0).map(|s| s.to_string());
 
-    // Generate snippet from text body (truncate at char boundary)
-    let snippet = body_text.as_ref().map(|text| {
-        let cleaned: String = text
-            .chars()
-            .map(|c| if c.is_whitespace() { ' ' } else { c })
-            .collect();
-        let trimmed = cleaned.trim();
-        if trimmed.chars().count() > 200 {
-            let end: String = trimmed.chars().take(200).collect();
-            format!("{end}...")
-        } else {
-            trimmed.to_string()
-        }
-    });
+    let snippet = body_text
+        .as_ref()
+        .map(|text| snippet_from_text_body(text, 200));
 
     // List-Unsubscribe headers
     let list_unsubscribe =

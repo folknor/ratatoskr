@@ -38,46 +38,44 @@ export interface DbAccount {
 }
 
 async function decryptAccountTokens(account: DbAccount): Promise<DbAccount> {
-  if (account.access_token && isEncrypted(account.access_token)) {
-    try {
-      account.access_token = await decryptValue(account.access_token);
-    } catch (err) {
-      console.warn("Failed to decrypt access token, using raw value:", err);
+  async function decryptField(
+    value: string | null,
+    fieldName: string,
+  ): Promise<string | null> {
+    if (!(value && isEncrypted(value))) {
+      return value;
     }
-  }
-  if (account.refresh_token && isEncrypted(account.refresh_token)) {
     try {
-      account.refresh_token = await decryptValue(account.refresh_token);
-    } catch (err) {
-      console.warn("Failed to decrypt refresh token, using raw value:", err);
-    }
-  }
-  if (account.imap_password && isEncrypted(account.imap_password)) {
-    try {
-      account.imap_password = await decryptValue(account.imap_password);
-    } catch (err) {
-      console.warn("Failed to decrypt IMAP password, using raw value:", err);
-    }
-  }
-  if (account.oauth_client_secret && isEncrypted(account.oauth_client_secret)) {
-    try {
-      account.oauth_client_secret = await decryptValue(
-        account.oauth_client_secret,
-      );
+      return await decryptValue(value);
     } catch (err) {
       console.warn(
-        "Failed to decrypt OAuth client secret, using raw value:",
+        `Failed to decrypt ${fieldName}, clearing stored value:`,
         err,
       );
+      return null;
     }
   }
-  if (account.caldav_password && isEncrypted(account.caldav_password)) {
-    try {
-      account.caldav_password = await decryptValue(account.caldav_password);
-    } catch (err) {
-      console.warn("Failed to decrypt CalDAV password, using raw value:", err);
-    }
-  }
+
+  account.access_token = await decryptField(
+    account.access_token,
+    "access token",
+  );
+  account.refresh_token = await decryptField(
+    account.refresh_token,
+    "refresh token",
+  );
+  account.imap_password = await decryptField(
+    account.imap_password,
+    "IMAP password",
+  );
+  account.oauth_client_secret = await decryptField(
+    account.oauth_client_secret,
+    "OAuth client secret",
+  );
+  account.caldav_password = await decryptField(
+    account.caldav_password,
+    "CalDAV password",
+  );
   return account;
 }
 

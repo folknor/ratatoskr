@@ -329,3 +329,16 @@ pub async fn load_both_configs(
     let smtp = smtp_config_from_record(account_id, &record, username, password)?;
     Ok(ImapAndSmtpConfig { imap, smtp })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::decrypt_if_needed;
+
+    #[test]
+    fn decrypt_failure_returns_err() {
+        let key = [7_u8; 32];
+        let encrypted_like = Some("AAAAAAAAAAAAAAAA:AAAA".to_string());
+        let err = decrypt_if_needed(&key, encrypted_like).expect_err("expected decrypt failure");
+        assert!(err.contains("decrypt stored account credential"));
+    }
+}
