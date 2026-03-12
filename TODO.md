@@ -70,7 +70,7 @@
 
 ## Rust Code Structure
 
-- [ ] **Split `db/queries_extra.rs` (5128 lines)** — Largest file in the codebase. Split by domain (calendar queries, contact queries, draft queries, etc.).
+- [x] **Split `db/queries_extra.rs`** — Core DB extra queries now live under `src-tauri/core/src/db/queries_extra/` as domain modules with a small facade in `queries_extra.rs`.
 
 - [ ] **Split `calendar_commands.rs` (2083 lines)** — Could be split by provider or concern (CalDAV sync, event parsing, recurrence handling).
 
