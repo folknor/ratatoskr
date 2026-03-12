@@ -1,5 +1,3 @@
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -10,36 +8,13 @@ use crate::graph::client::{GraphClient, GraphState};
 use crate::graph::types::GraphProfile;
 use crate::inline_image_store::InlineImageStoreState;
 use crate::jmap::client::JmapState;
+use crate::oauth::{
+    GenericOAuthProvider, GoogleOAuthProvider, OAuthProviderAuthorizationRequest,
+    PendingOAuthAuthorization, PendingOAuthAuthorizations,
+};
 use crate::provider::crypto::{AppCryptoState, decrypt_value, encrypt_value, is_encrypted};
 use crate::sync::config;
 use crate::{attachment_cache, body_store::BodyStoreState};
-
-const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
-const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-const GOOGLE_USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v2/userinfo";
-const MICROSOFT_GRAPH_AUTH_URL: &str =
-    "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
-const MICROSOFT_GRAPH_TOKEN_URL: &str =
-    "https://login.microsoftonline.com/common/oauth2/v2.0/token";
-const GOOGLE_SCOPES: &str = concat!(
-    "https://www.googleapis.com/auth/gmail.readonly ",
-    "https://www.googleapis.com/auth/gmail.modify ",
-    "https://www.googleapis.com/auth/gmail.send ",
-    "https://www.googleapis.com/auth/gmail.labels ",
-    "https://www.googleapis.com/auth/userinfo.email ",
-    "https://www.googleapis.com/auth/userinfo.profile ",
-    "https://www.googleapis.com/auth/calendar.readonly ",
-    "https://www.googleapis.com/auth/calendar.events"
-);
-const MICROSOFT_GRAPH_SCOPES: [&str; 7] = [
-    "Mail.ReadWrite",
-    "Mail.Send",
-    "MailboxSettings.ReadWrite",
-    "offline_access",
-    "openid",
-    "profile",
-    "User.Read",
-];
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,19 +25,6 @@ pub struct AccountResult {
     pub avatar_url: Option<String>,
     pub is_active: bool,
     pub provider: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OAuthProviderAuthorizationRequest {
-    pub provider_id: String,
-    pub auth_url: String,
-    pub token_url: String,
-    pub scopes: Vec<String>,
-    pub user_info_url: Option<String>,
-    pub use_pkce: bool,
-    pub client_id: String,
-    pub client_secret: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -133,34 +95,26 @@ pub struct AccountCaldavSettingsInfo {
     pub calendar_provider: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct GoogleTokenResponse {
-    access_token: String,
-    refresh_token: Option<String>,
-    expires_in: i64,
-}
-
-#[derive(Debug, Deserialize)]
-struct GoogleUserInfo {
-    email: String,
-    name: String,
-    picture: Option<String>,
-}
-
-#[derive(Debug)]
-struct OAuthProviderUserInfo {
-    email: String,
-    name: String,
-    picture: Option<String>,
-}
-
 #[tauri::command]
 pub async fn account_create_gmail_via_oauth(
     app: AppHandle,
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
 ) -> Result<AccountResult, String> {
-    let oauth = perform_google_oauth(&app, &db, gmail.encryption_key()).await?;
+    let oauth = crate::oauth::authorize_with_provider(
+        &app,
+        &GoogleOAuthProvider::new(
+            read_setting(&db, "google_client_id", gmail.encryption_key())
+                .await?
+                .ok_or("Google Client ID not configured. Go to Settings to set it up.")?,
+            read_setting(&db, "google_client_secret", gmail.encryption_key())
+                .await?
+                .ok_or(
+                    "Client Secret is not configured. Go to Settings -> Google API to add it.",
+                )?,
+        ),
+    )
+    .await?;
 
     let email_for_check = oauth.user_info.email.clone();
     let duplicate = db
@@ -182,7 +136,8 @@ pub async fn account_create_gmail_via_oauth(
     }
 
     let account_id = uuid::Uuid::new_v4().to_string();
-    let expires_at = chrono::Utc::now().timestamp() + oauth.tokens.expires_in;
+    let expires_at = chrono::Utc::now().timestamp()
+        + i64::try_from(oauth.tokens.expires_in).map_err(|_| "Google token expiry overflow")?;
     let access_token = encrypt_value(gmail.encryption_key(), &oauth.tokens.access_token)?;
     let refresh_token = encrypt_value(
         gmail.encryption_key(),
@@ -518,7 +473,9 @@ pub async fn account_authorize_oauth_provider(
     request: OAuthProviderAuthorizationRequest,
     pending_oauth: State<'_, PendingOAuthAuthorizations>,
 ) -> Result<OAuthProviderAuthorizationResult, String> {
-    let oauth = perform_provider_oauth(&app, &request).await?;
+    let oauth =
+        crate::oauth::authorize_with_provider(&app, &GenericOAuthProvider::from_request(request))
+            .await?;
     let access_token = oauth.tokens.access_token.clone();
     let expires_in = oauth.tokens.expires_in;
     let authorization_id = uuid::Uuid::new_v4().to_string();
@@ -638,21 +595,9 @@ pub async fn account_create_graph_via_oauth(
         .await?
         .ok_or("Microsoft Client ID not configured. Go to Settings to set it up.")?;
 
-    let oauth = perform_provider_oauth(
+    let oauth = crate::oauth::authorize_with_provider(
         &app,
-        &OAuthProviderAuthorizationRequest {
-            provider_id: "microsoft_graph".to_string(),
-            auth_url: MICROSOFT_GRAPH_AUTH_URL.to_string(),
-            token_url: MICROSOFT_GRAPH_TOKEN_URL.to_string(),
-            scopes: MICROSOFT_GRAPH_SCOPES
-                .iter()
-                .map(|scope| (*scope).to_string())
-                .collect(),
-            user_info_url: None,
-            use_pkce: true,
-            client_id,
-            client_secret: None,
-        },
+        &GenericOAuthProvider::microsoft_graph(client_id),
     )
     .await?;
 
@@ -764,7 +709,20 @@ pub async fn account_reauthorize_gmail(
     db: State<'_, DbState>,
     gmail: State<'_, GmailState>,
 ) -> Result<(), String> {
-    let oauth = perform_google_oauth(&app, &db, gmail.encryption_key()).await?;
+    let oauth = crate::oauth::authorize_with_provider(
+        &app,
+        &GoogleOAuthProvider::new(
+            read_setting(&db, "google_client_id", gmail.encryption_key())
+                .await?
+                .ok_or("Google Client ID not configured. Go to Settings to set it up.")?,
+            read_setting(&db, "google_client_secret", gmail.encryption_key())
+                .await?
+                .ok_or(
+                    "Client Secret is not configured. Go to Settings -> Google API to add it.",
+                )?,
+        ),
+    )
+    .await?;
     if !oauth.user_info.email.eq_ignore_ascii_case(&expected_email) {
         return Err(format!(
             "Signed in as {}, but expected {}. Please sign in with the correct account.",
@@ -778,7 +736,8 @@ pub async fn account_reauthorize_gmail(
         .ok_or("Google did not return a refresh token. Please revoke app access and try again.")?;
     let access_token = encrypt_value(gmail.encryption_key(), &oauth.tokens.access_token)?;
     let refresh_token = encrypt_value(gmail.encryption_key(), &refresh_token)?;
-    let expires_at = chrono::Utc::now().timestamp() + oauth.tokens.expires_in;
+    let expires_at = chrono::Utc::now().timestamp()
+        + i64::try_from(oauth.tokens.expires_in).map_err(|_| "Google token expiry overflow")?;
 
     db.with_conn({
         let id = account_id.clone();
@@ -798,109 +757,6 @@ pub async fn account_reauthorize_gmail(
     let client = GmailClient::from_account(&db, &account_id, *gmail.encryption_key()).await?;
     gmail.insert(account_id, client).await;
     Ok(())
-}
-
-struct GoogleOAuthBundle {
-    tokens: GoogleTokenResponse,
-    user_info: GoogleUserInfo,
-}
-
-struct OAuthProviderBundle {
-    tokens: crate::oauth::TokenExchangeResult,
-    user_info: OAuthProviderUserInfo,
-}
-
-pub(crate) struct PendingOAuthAuthorization {
-    tokens: crate::oauth::TokenExchangeResult,
-}
-
-pub(crate) type PendingOAuthAuthorizations =
-    std::sync::Mutex<std::collections::HashMap<String, PendingOAuthAuthorization>>;
-
-async fn perform_google_oauth(
-    app: &AppHandle,
-    db: &DbState,
-    encryption_key: &[u8; 32],
-) -> Result<GoogleOAuthBundle, String> {
-    let client_id = read_setting(db, "google_client_id", encryption_key)
-        .await?
-        .ok_or("Google Client ID not configured. Go to Settings to set it up.")?;
-    let client_secret = read_setting(db, "google_client_secret", encryption_key)
-        .await?
-        .ok_or("Client Secret is not configured. Go to Settings -> Google API to add it.")?;
-
-    let auth = crate::oauth::run_oauth_authorization_flow(
-        app,
-        crate::oauth::OAuthAuthorizationRequest {
-            auth_url: GOOGLE_AUTH_URL.to_string(),
-            client_id: client_id.clone(),
-            scopes: vec![GOOGLE_SCOPES.to_string()],
-            use_pkce: true,
-            extra_auth_params: vec![
-                ("access_type".to_string(), "offline".to_string()),
-                ("prompt".to_string(), "consent".to_string()),
-            ],
-        },
-    )
-    .await?;
-
-    let tokens = exchange_google_code(
-        &auth.code,
-        &client_id,
-        &client_secret,
-        &auth.redirect_uri,
-        auth.code_verifier
-            .as_deref()
-            .ok_or("Missing PKCE verifier for Google OAuth")?,
-    )
-    .await?;
-    let user_info = fetch_google_userinfo(&tokens.access_token).await?;
-
-    Ok(GoogleOAuthBundle { tokens, user_info })
-}
-
-async fn perform_provider_oauth(
-    app: &AppHandle,
-    request: &OAuthProviderAuthorizationRequest,
-) -> Result<OAuthProviderBundle, String> {
-    let extra_auth_params =
-        if request.provider_id == "microsoft" || request.provider_id == "microsoft_graph" {
-            vec![
-                ("prompt".to_string(), "consent".to_string()),
-                ("response_mode".to_string(), "query".to_string()),
-            ]
-        } else {
-            vec![("access_type".to_string(), "offline".to_string())]
-        };
-    let auth = crate::oauth::run_oauth_authorization_flow(
-        app,
-        crate::oauth::OAuthAuthorizationRequest {
-            auth_url: request.auth_url.clone(),
-            client_id: request.client_id.clone(),
-            scopes: request.scopes.clone(),
-            use_pkce: request.use_pkce,
-            extra_auth_params,
-        },
-    )
-    .await?;
-
-    let tokens = crate::oauth::oauth_exchange_token(
-        request.token_url.clone(),
-        auth.code,
-        request.client_id.clone(),
-        auth.redirect_uri,
-        auth.code_verifier,
-        request.client_secret.clone(),
-        if request.provider_id == "microsoft" || request.provider_id == "microsoft_graph" {
-            Some(request.scopes.join(" "))
-        } else {
-            None
-        },
-    )
-    .await?;
-    let user_info = fetch_provider_userinfo(request, &tokens).await?;
-
-    Ok(OAuthProviderBundle { tokens, user_info })
 }
 
 async fn read_setting(
@@ -928,159 +784,4 @@ async fn read_setting(
             raw
         }
     }))
-}
-
-async fn exchange_google_code(
-    code: &str,
-    client_id: &str,
-    client_secret: &str,
-    redirect_uri: &str,
-    code_verifier: &str,
-) -> Result<GoogleTokenResponse, String> {
-    let response = reqwest::Client::new()
-        .post(GOOGLE_TOKEN_URL)
-        .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
-        .form(&[
-            ("code", code),
-            ("client_id", client_id),
-            ("client_secret", client_secret),
-            ("redirect_uri", redirect_uri),
-            ("grant_type", "authorization_code"),
-            ("code_verifier", code_verifier),
-        ])
-        .send()
-        .await
-        .map_err(|e| format!("Token exchange request failed: {e}"))?;
-
-    if !response.status().is_success() {
-        let error = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        return Err(format!("Token exchange failed: {error}"));
-    }
-
-    response
-        .json::<GoogleTokenResponse>()
-        .await
-        .map_err(|e| format!("Failed to parse token response: {e}"))
-}
-
-async fn fetch_google_userinfo(access_token: &str) -> Result<GoogleUserInfo, String> {
-    let response = reqwest::Client::new()
-        .get(GOOGLE_USERINFO_URL)
-        .header(AUTHORIZATION, format!("Bearer {access_token}"))
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch Google user info: {e}"))?;
-
-    if !response.status().is_success() {
-        return Err("Failed to fetch Google user info".to_string());
-    }
-
-    response
-        .json::<GoogleUserInfo>()
-        .await
-        .map_err(|e| format!("Failed to parse Google user info: {e}"))
-}
-
-async fn fetch_provider_userinfo(
-    request: &OAuthProviderAuthorizationRequest,
-    tokens: &crate::oauth::TokenExchangeResult,
-) -> Result<OAuthProviderUserInfo, String> {
-    if request.provider_id == "microsoft" || request.provider_id == "microsoft_graph" {
-        return parse_microsoft_userinfo(tokens);
-    }
-
-    let user_info_url = request
-        .user_info_url
-        .as_deref()
-        .ok_or_else(|| format!("Provider {} has no user info endpoint", request.provider_id))?;
-    let response = reqwest::Client::new()
-        .get(user_info_url)
-        .header(AUTHORIZATION, format!("Bearer {}", tokens.access_token))
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch provider user info: {e}"))?;
-
-    if !response.status().is_success() {
-        let error = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        return Err(format!("Failed to fetch provider user info: {error}"));
-    }
-
-    let data = response
-        .json::<serde_json::Value>()
-        .await
-        .map_err(|e| format!("Failed to parse provider user info: {e}"))?;
-
-    let email = data
-        .get("email")
-        .and_then(serde_json::Value::as_str)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            format!(
-                "Provider {} did not return an email address",
-                request.provider_id
-            )
-        })?
-        .to_string();
-
-    Ok(OAuthProviderUserInfo {
-        email,
-        name: data
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .or_else(|| data.get("nickname").and_then(serde_json::Value::as_str))
-            .unwrap_or_default()
-            .to_string(),
-        picture: data
-            .get("picture")
-            .and_then(serde_json::Value::as_str)
-            .map(ToString::to_string),
-    })
-}
-
-fn parse_microsoft_userinfo(
-    tokens: &crate::oauth::TokenExchangeResult,
-) -> Result<OAuthProviderUserInfo, String> {
-    // This is only used to populate local profile fields after OAuth completes.
-    // We intentionally do not treat these claims as an authentication boundary.
-    let id_token = tokens
-        .id_token
-        .as_deref()
-        .ok_or("Microsoft OAuth response did not include an ID token")?;
-    let payload = id_token
-        .split('.')
-        .nth(1)
-        .ok_or("Invalid ID token format")?;
-    let decoded = URL_SAFE_NO_PAD
-        .decode(payload)
-        .map_err(|e| format!("Failed to decode ID token payload: {e}"))?;
-    let claims = serde_json::from_slice::<serde_json::Value>(&decoded)
-        .map_err(|e| format!("Failed to parse ID token payload: {e}"))?;
-
-    let email = claims
-        .get("email")
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| {
-            claims
-                .get("preferred_username")
-                .and_then(serde_json::Value::as_str)
-        })
-        .filter(|s| !s.is_empty())
-        .ok_or("Microsoft ID token did not contain an email or preferred_username claim")?
-        .to_string();
-
-    Ok(OAuthProviderUserInfo {
-        email,
-        name: claims
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
-        picture: None,
-    })
 }

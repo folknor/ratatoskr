@@ -1,7 +1,10 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use reqwest::header::AUTHORIZATION;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::OnceLock;
 use std::time::Duration;
 use tauri::AppHandle;
@@ -10,6 +13,34 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 const OAUTH_CALLBACK_PORT: u16 = 17248;
+const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
+const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+const GOOGLE_USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v2/userinfo";
+const GOOGLE_SCOPES: &str = concat!(
+    "https://www.googleapis.com/auth/gmail.readonly ",
+    "https://www.googleapis.com/auth/gmail.modify ",
+    "https://www.googleapis.com/auth/gmail.send ",
+    "https://www.googleapis.com/auth/gmail.labels ",
+    "https://www.googleapis.com/auth/userinfo.email ",
+    "https://www.googleapis.com/auth/userinfo.profile ",
+    "https://www.googleapis.com/auth/calendar.readonly ",
+    "https://www.googleapis.com/auth/calendar.events"
+);
+const MICROSOFT_GRAPH_AUTH_URL: &str =
+    "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
+const MICROSOFT_GRAPH_TOKEN_URL: &str =
+    "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+const MICROSOFT_GRAPH_SCOPES: [&str; 7] = [
+    "Mail.ReadWrite",
+    "Mail.Send",
+    "MailboxSettings.ReadWrite",
+    "offline_access",
+    "openid",
+    "profile",
+    "User.Read",
+];
+
+type OAuthFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 fn shared_http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -35,6 +66,135 @@ pub struct OAuthAuthorizationFlow {
     pub code: String,
     pub redirect_uri: String,
     pub code_verifier: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthProviderAuthorizationRequest {
+    pub provider_id: String,
+    pub auth_url: String,
+    pub token_url: String,
+    pub scopes: Vec<String>,
+    pub user_info_url: Option<String>,
+    pub use_pkce: bool,
+    pub client_id: String,
+    pub client_secret: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OAuthUserInfo {
+    pub email: String,
+    pub name: String,
+    pub picture: Option<String>,
+}
+
+pub struct OAuthAuthorizationBundle {
+    pub tokens: TokenExchangeResult,
+    pub user_info: OAuthUserInfo,
+}
+
+pub struct PendingOAuthAuthorization {
+    pub tokens: TokenExchangeResult,
+}
+
+pub type PendingOAuthAuthorizations =
+    std::sync::Mutex<std::collections::HashMap<String, PendingOAuthAuthorization>>;
+
+pub trait OAuthIdentityProvider {
+    fn authorization_request(&self) -> OAuthAuthorizationRequest;
+    fn token_request(&self) -> OAuthTokenRequest;
+    fn fetch_user_info<'a>(
+        &'a self,
+        tokens: &'a TokenExchangeResult,
+    ) -> OAuthFuture<'a, Result<OAuthUserInfo, String>>;
+}
+
+pub struct OAuthTokenRequest {
+    pub token_url: String,
+    pub client_id: String,
+    pub client_secret: Option<String>,
+    pub scope: Option<String>,
+}
+
+pub struct GoogleOAuthProvider {
+    client_id: String,
+    client_secret: String,
+}
+
+impl GoogleOAuthProvider {
+    pub fn new(client_id: String, client_secret: String) -> Self {
+        Self {
+            client_id,
+            client_secret,
+        }
+    }
+}
+
+pub struct GenericOAuthProvider {
+    provider_id: String,
+    auth_url: String,
+    token_url: String,
+    scopes: Vec<String>,
+    user_info_url: Option<String>,
+    use_pkce: bool,
+    client_id: String,
+    client_secret: Option<String>,
+}
+
+impl GenericOAuthProvider {
+    pub fn from_request(request: OAuthProviderAuthorizationRequest) -> Self {
+        Self {
+            provider_id: request.provider_id,
+            auth_url: request.auth_url,
+            token_url: request.token_url,
+            scopes: request.scopes,
+            user_info_url: request.user_info_url,
+            use_pkce: request.use_pkce,
+            client_id: request.client_id,
+            client_secret: request.client_secret,
+        }
+    }
+
+    pub fn microsoft_graph(client_id: String) -> Self {
+        Self {
+            provider_id: "microsoft_graph".to_string(),
+            auth_url: MICROSOFT_GRAPH_AUTH_URL.to_string(),
+            token_url: MICROSOFT_GRAPH_TOKEN_URL.to_string(),
+            scopes: MICROSOFT_GRAPH_SCOPES
+                .iter()
+                .map(|scope| (*scope).to_string())
+                .collect(),
+            user_info_url: None,
+            use_pkce: true,
+            client_id,
+            client_secret: None,
+        }
+    }
+
+    fn is_microsoft(&self) -> bool {
+        self.provider_id == "microsoft" || self.provider_id == "microsoft_graph"
+    }
+}
+
+pub async fn authorize_with_provider<P: OAuthIdentityProvider>(
+    app: &AppHandle,
+    provider: &P,
+) -> Result<OAuthAuthorizationBundle, String> {
+    let auth = run_oauth_authorization_flow(app, provider.authorization_request()).await?;
+    let token_request = provider.token_request();
+    let tokens = oauth_exchange_token(
+        token_request.token_url,
+        auth.code,
+        token_request.client_id,
+        auth.redirect_uri,
+        auth.code_verifier,
+        token_request.client_secret,
+        token_request.scope,
+    )
+    .await?;
+    let user_info = provider.fetch_user_info(&tokens).await?;
+
+    Ok(OAuthAuthorizationBundle { tokens, user_info })
 }
 
 pub async fn run_oauth_authorization_flow(
@@ -91,6 +251,74 @@ pub async fn run_oauth_authorization_flow(
         redirect_uri,
         code_verifier,
     })
+}
+
+impl OAuthIdentityProvider for GoogleOAuthProvider {
+    fn authorization_request(&self) -> OAuthAuthorizationRequest {
+        OAuthAuthorizationRequest {
+            auth_url: GOOGLE_AUTH_URL.to_string(),
+            client_id: self.client_id.clone(),
+            scopes: vec![GOOGLE_SCOPES.to_string()],
+            use_pkce: true,
+            extra_auth_params: vec![
+                ("access_type".to_string(), "offline".to_string()),
+                ("prompt".to_string(), "consent".to_string()),
+            ],
+        }
+    }
+
+    fn token_request(&self) -> OAuthTokenRequest {
+        OAuthTokenRequest {
+            token_url: GOOGLE_TOKEN_URL.to_string(),
+            client_id: self.client_id.clone(),
+            client_secret: Some(self.client_secret.clone()),
+            scope: None,
+        }
+    }
+
+    fn fetch_user_info<'a>(
+        &'a self,
+        tokens: &'a TokenExchangeResult,
+    ) -> OAuthFuture<'a, Result<OAuthUserInfo, String>> {
+        Box::pin(async move { fetch_google_userinfo(&tokens.access_token).await })
+    }
+}
+
+impl OAuthIdentityProvider for GenericOAuthProvider {
+    fn authorization_request(&self) -> OAuthAuthorizationRequest {
+        let extra_auth_params = if self.is_microsoft() {
+            vec![
+                ("prompt".to_string(), "consent".to_string()),
+                ("response_mode".to_string(), "query".to_string()),
+            ]
+        } else {
+            vec![("access_type".to_string(), "offline".to_string())]
+        };
+
+        OAuthAuthorizationRequest {
+            auth_url: self.auth_url.clone(),
+            client_id: self.client_id.clone(),
+            scopes: self.scopes.clone(),
+            use_pkce: self.use_pkce,
+            extra_auth_params,
+        }
+    }
+
+    fn token_request(&self) -> OAuthTokenRequest {
+        OAuthTokenRequest {
+            token_url: self.token_url.clone(),
+            client_id: self.client_id.clone(),
+            client_secret: self.client_secret.clone(),
+            scope: self.is_microsoft().then(|| self.scopes.join(" ")),
+        }
+    }
+
+    fn fetch_user_info<'a>(
+        &'a self,
+        tokens: &'a TokenExchangeResult,
+    ) -> OAuthFuture<'a, Result<OAuthUserInfo, String>> {
+        Box::pin(async move { fetch_provider_userinfo(self, tokens).await })
+    }
 }
 
 /// Bind to a localhost port for an OAuth callback. Tries the given port first,
@@ -336,6 +564,135 @@ pub async fn oauth_refresh_token(
         .json::<TokenExchangeResult>()
         .await
         .map_err(|e| format!("Failed to parse token response: {e}"))
+}
+
+async fn fetch_google_userinfo(access_token: &str) -> Result<OAuthUserInfo, String> {
+    let response = shared_http_client()
+        .get(GOOGLE_USERINFO_URL)
+        .header(AUTHORIZATION, format!("Bearer {access_token}"))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch Google user info: {e}"))?;
+
+    if !response.status().is_success() {
+        return Err("Failed to fetch Google user info".to_string());
+    }
+
+    response
+        .json::<GoogleUserInfo>()
+        .await
+        .map(|user| OAuthUserInfo {
+            email: user.email,
+            name: user.name,
+            picture: user.picture,
+        })
+        .map_err(|e| format!("Failed to parse Google user info: {e}"))
+}
+
+async fn fetch_provider_userinfo(
+    provider: &GenericOAuthProvider,
+    tokens: &TokenExchangeResult,
+) -> Result<OAuthUserInfo, String> {
+    if provider.is_microsoft() {
+        return parse_microsoft_userinfo(tokens);
+    }
+
+    let user_info_url = provider.user_info_url.as_deref().ok_or_else(|| {
+        format!(
+            "Provider {} has no user info endpoint",
+            provider.provider_id
+        )
+    })?;
+    let response = shared_http_client()
+        .get(user_info_url)
+        .header(AUTHORIZATION, format!("Bearer {}", tokens.access_token))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch provider user info: {e}"))?;
+
+    if !response.status().is_success() {
+        let error = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Failed to fetch provider user info: {error}"));
+    }
+
+    let data = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| format!("Failed to parse provider user info: {e}"))?;
+
+    let email = data
+        .get("email")
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            format!(
+                "Provider {} did not return an email address",
+                provider.provider_id
+            )
+        })?
+        .to_string();
+
+    Ok(OAuthUserInfo {
+        email,
+        name: data
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| data.get("nickname").and_then(serde_json::Value::as_str))
+            .unwrap_or_default()
+            .to_string(),
+        picture: data
+            .get("picture")
+            .and_then(serde_json::Value::as_str)
+            .map(ToString::to_string),
+    })
+}
+
+fn parse_microsoft_userinfo(tokens: &TokenExchangeResult) -> Result<OAuthUserInfo, String> {
+    let id_token = tokens
+        .id_token
+        .as_deref()
+        .ok_or("Microsoft OAuth response did not include an ID token")?;
+    let payload = id_token
+        .split('.')
+        .nth(1)
+        .ok_or("Invalid ID token format")?;
+    let decoded = URL_SAFE_NO_PAD
+        .decode(payload)
+        .map_err(|e| format!("Failed to decode ID token payload: {e}"))?;
+    let claims = serde_json::from_slice::<serde_json::Value>(&decoded)
+        .map_err(|e| format!("Failed to parse ID token payload: {e}"))?;
+
+    let email = claims
+        .get("email")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            claims
+                .get("preferred_username")
+                .and_then(serde_json::Value::as_str)
+        })
+        .filter(|s| !s.is_empty())
+        .ok_or("Microsoft ID token did not contain an email or preferred_username claim")?
+        .to_string();
+
+    Ok(OAuthUserInfo {
+        email,
+        name: claims
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        picture: None,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct GoogleUserInfo {
+    email: String,
+    name: String,
+    picture: Option<String>,
 }
 
 fn random_base64url(size: usize) -> Result<String, String> {

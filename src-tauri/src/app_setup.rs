@@ -26,7 +26,7 @@ pub fn init_app_state(app: &tauri::App) -> tauri::Result<()> {
     app.manage(crate::sync::SyncState::new());
     app.manage(crate::sync::SyncQueueState::new());
     app.manage(crate::sync::BackgroundSyncState::new());
-    app.manage(crate::account_commands::PendingOAuthAuthorizations::default());
+    app.manage(crate::oauth::PendingOAuthAuthorizations::default());
 
     let encryption_key = crate::provider::crypto::load_encryption_key(&app_data_dir)
         .unwrap_or_else(|e| {

@@ -27,7 +27,7 @@
 
 ### Phase 2: Decouple Tauri-Specific Concerns
 
-- [ ] **Abstract OAuth flow** — The browser/listener authorization-code flow now lives in `src-tauri/src/oauth.rs`, but `account_commands.rs` still owns provider-specific token/user-info handling. Finish this with a standalone `OAuthProvider` trait or equivalent provider abstraction.
+- [x] **Abstract OAuth flow** — OAuth browser/listener handling, provider definitions, token exchange, and provider-specific user-info fetches now live in `src-tauri/src/oauth.rs`, with a standalone `OAuthIdentityProvider` abstraction. `account_commands.rs` now just invokes the flow and persists account state.
 
 - [x] **Split `lib.rs` (715 lines)** — Extracted app-state initialization into `src-tauri/src/app_setup.rs`, tray handling into `src-tauri/src/tray.rs`, and window helpers into `src-tauri/src/window.rs`. `lib.rs` now delegates setup/window/tray responsibilities to those modules.
 
@@ -74,7 +74,7 @@
 
 - [ ] **Split `calendar_commands.rs` (2083 lines)** — Could be split by provider or concern (CalDAV sync, event parsing, recurrence handling).
 
-- [ ] **Split `account_commands.rs` (~600 lines)** — The generic OAuth browser/listener flow moved into `src-tauri/src/oauth.rs`, but provider-specific OAuth/token/user-info code is still mixed with account CRUD and provider initialization.
+- [ ] **Split `account_commands.rs` (~600 lines)** — OAuth flow internals moved to `src-tauri/src/oauth.rs`, but account CRUD and provider initialization still live together in one large command module.
 
 - [ ] **Audit `.unwrap()` in `calendar_commands.rs`** — Clippy denies `unwrap_used` project-wide but there may be an instance that slipped through. Verify and convert to `?` or `.unwrap_or()`.
 
