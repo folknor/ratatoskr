@@ -42,7 +42,7 @@
 
 ### High Priority
 
-- [ ] **Shared address parsing** — `gmail/parse.rs:118-139`, `imap/parse.rs:335-370`, `graph/parse.rs:210-226`, `jmap/parse.rs:187-203` all implement the same "Name \<email\>" parsing and formatting. Consolidate into `provider/email_parsing.rs`.
+- [x] **Shared address parsing** — The duplicated "Name <email>" parsing/formatting helpers from `ratatoskr-core::{gmail,imap,graph,jmap}::parse` now live in `ratatoskr-core::provider::email_parsing`.
 
 - [ ] **Shared folder role mapping** — `jmap/mailbox_mapper.rs:4-77`, `graph/folder_mapper.rs:7-124`, `imap/ops.rs:22-42` all map well-known folder roles (inbox, sent, trash, junk, drafts, archive) to canonical names. Create a shared `SYSTEM_FOLDER_ROLES` constant.
 

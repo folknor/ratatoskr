@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use mail_parser::{MessageParser, MimeHeaders};
 use xxhash_rust::xxh3::xxh3_64;
 
+use crate::provider::email_parsing::format_address_list as format_addresses;
+
 use super::types::*;
 
 /// Detect special-use attribute from IMAP folder attributes and name heuristics.
@@ -350,21 +352,13 @@ fn extract_first_address(addr: Option<&mail_parser::Address>) -> (Option<String>
 /// Format an address list as a comma-separated string of "Name <email>" or "email".
 fn format_address_list(addr: Option<&mail_parser::Address>) -> Option<String> {
     let addr = addr?;
-
-    let parts: Vec<String> = addr
-        .iter()
-        .map(|a| {
-            let email = a.address.as_deref().unwrap_or("");
-            match a.name.as_deref() {
-                Some(name) if !name.is_empty() => format!("{name} <{email}>"),
-                _ => email.to_string(),
-            }
-        })
-        .collect();
-
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join(", "))
-    }
+    format_addresses(addr.iter().map(|a| {
+        (
+            a.name.as_ref().map(ToString::to_string),
+            a.address
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_default(),
+        )
+    }))
 }

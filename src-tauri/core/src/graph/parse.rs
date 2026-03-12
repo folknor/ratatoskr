@@ -1,5 +1,6 @@
 use super::folder_mapper::FolderMap;
 use super::types::{GraphMessage, GraphRecipient};
+use crate::provider::email_parsing::format_address_list;
 
 /// Parsed attachment metadata ready for DB persistence.
 #[derive(Debug, Clone)]
@@ -214,19 +215,12 @@ fn get_header(
 /// Format Graph recipients to "Name <email>, ..." string.
 fn format_recipients(recipients: Option<&[GraphRecipient]>) -> Option<String> {
     let recipients = recipients?;
-    if recipients.is_empty() {
-        return None;
-    }
-    let formatted: Vec<String> = recipients
-        .iter()
-        .map(|r| match &r.email_address.name {
-            Some(name) if !name.is_empty() => {
-                format!("{name} <{}>", r.email_address.address)
-            }
-            _ => r.email_address.address.clone(),
-        })
-        .collect();
-    Some(formatted.join(", "))
+    format_address_list(recipients.iter().map(|r| {
+        (
+            r.email_address.name.clone(),
+            r.email_address.address.clone(),
+        )
+    }))
 }
 
 fn decode_inline_bytes(data: &str) -> Option<Vec<u8>> {

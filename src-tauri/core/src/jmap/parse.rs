@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use jmap_client::email::{Email, Property};
 
+use crate::provider::email_parsing::format_address_list;
+
 use super::mailbox_mapper::{MailboxInfo, get_labels_for_email};
 
 /// Parsed JMAP email ready for DB persistence.
@@ -187,20 +189,11 @@ pub fn parse_jmap_email(
 /// Format JMAP EmailAddress array to "Name <email>, ..." string.
 fn format_addresses(addrs: Option<&[jmap_client::email::EmailAddress]>) -> Option<String> {
     let addrs = addrs?;
-    if addrs.is_empty() {
-        return None;
-    }
-    let formatted: Vec<String> = addrs
-        .iter()
-        .map(|a| {
-            if let Some(name) = a.name() {
-                format!("{name} <{}>", a.email())
-            } else {
-                a.email().to_string()
-            }
-        })
-        .collect();
-    Some(formatted.join(", "))
+    format_address_list(
+        addrs
+            .iter()
+            .map(|a| (a.name().map(ToString::to_string), a.email().to_string())),
+    )
 }
 
 /// Extract body text or HTML from the email's bodyValues.

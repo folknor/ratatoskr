@@ -1,6 +1,8 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::Serialize;
 
+use crate::provider::email_parsing::parse_single_address_header;
+
 use super::auth_parser::parse_authentication_results;
 use super::types::{GmailHeader, GmailMessage, GmailPayload};
 
@@ -57,7 +59,7 @@ pub fn parse_gmail_message(msg: &GmailMessage) -> ParsedGmailMessage {
     let headers = payload.map_or(&[] as &[GmailHeader], |p| &p.headers);
 
     let from_raw = get_header(headers, "From");
-    let (from_name, from_address) = parse_email_address(from_raw.as_deref());
+    let (from_name, from_address) = parse_single_address_header(from_raw.as_deref());
 
     let body_html = payload
         .and_then(|p| extract_body(p, "text/html"))
@@ -113,29 +115,6 @@ fn get_header(headers: &[GmailHeader], name: &str) -> Option<String> {
         .iter()
         .find(|h| h.name.eq_ignore_ascii_case(name))
         .map(|h| h.value.clone())
-}
-
-fn parse_email_address(raw: Option<&str>) -> (Option<String>, Option<String>) {
-    let Some(raw) = raw else {
-        return (None, None);
-    };
-
-    // Format: "Display Name <email@example.com>" or "\"Name\" <email>"
-    if let Some(angle_start) = raw.rfind('<')
-        && let Some(angle_end) = raw[angle_start..].find('>')
-    {
-        let address = raw[angle_start + 1..angle_start + angle_end].trim();
-        let name_part = raw[..angle_start].trim().trim_matches('"').trim();
-        let name = if name_part.is_empty() || name_part == address {
-            None
-        } else {
-            Some(name_part.to_string())
-        };
-        return (name, Some(address.to_string()));
-    }
-
-    // Bare email
-    (None, Some(raw.trim().to_string()))
 }
 
 /// Recursively extract a body part matching the given MIME type.
