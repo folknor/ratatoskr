@@ -2,9 +2,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager, State};
-use tauri_plugin_opener::OpenerExt;
 
 use crate::db::DbState;
 use crate::gmail::client::{GmailClient, GmailState};
@@ -23,7 +21,6 @@ const MICROSOFT_GRAPH_AUTH_URL: &str =
     "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
 const MICROSOFT_GRAPH_TOKEN_URL: &str =
     "https://login.microsoftonline.com/common/oauth2/v2.0/token";
-const OAUTH_CALLBACK_PORT: u16 = 17248;
 const GOOGLE_SCOPES: &str = concat!(
     "https://www.googleapis.com/auth/gmail.readonly ",
     "https://www.googleapis.com/auth/gmail.modify ",
@@ -832,32 +829,29 @@ async fn perform_google_oauth(
         .await?
         .ok_or("Client Secret is not configured. Go to Settings -> Google API to add it.")?;
 
-    let code_verifier = random_base64url(32)?;
-    let code_challenge = sha256_base64url(code_verifier.as_bytes());
-    let state = random_base64url(32)?;
-
-    let (listener, actual_port) = crate::oauth::bind_oauth_listener(OAUTH_CALLBACK_PORT).await?;
-    let redirect_uri = format!("http://127.0.0.1:{actual_port}");
-    let auth_url = format!(
-        "{GOOGLE_AUTH_URL}?client_id={}&redirect_uri={}&response_type=code&scope={}&code_challenge={}&code_challenge_method=S256&access_type=offline&prompt=consent&state={}",
-        urlencoding::encode(&client_id),
-        urlencoding::encode(&redirect_uri),
-        urlencoding::encode(GOOGLE_SCOPES),
-        urlencoding::encode(&code_challenge),
-        urlencoding::encode(&state),
-    );
-
-    app.opener()
-        .open_url(auth_url, None::<&str>)
-        .map_err(|e| format!("Failed to open browser for OAuth: {e}"))?;
-    let result = crate::oauth::await_oauth_callback(listener, &state).await?;
+    let auth = crate::oauth::run_oauth_authorization_flow(
+        app,
+        crate::oauth::OAuthAuthorizationRequest {
+            auth_url: GOOGLE_AUTH_URL.to_string(),
+            client_id: client_id.clone(),
+            scopes: vec![GOOGLE_SCOPES.to_string()],
+            use_pkce: true,
+            extra_auth_params: vec![
+                ("access_type".to_string(), "offline".to_string()),
+                ("prompt".to_string(), "consent".to_string()),
+            ],
+        },
+    )
+    .await?;
 
     let tokens = exchange_google_code(
-        &result.code,
+        &auth.code,
         &client_id,
         &client_secret,
-        &redirect_uri,
-        &code_verifier,
+        &auth.redirect_uri,
+        auth.code_verifier
+            .as_deref()
+            .ok_or("Missing PKCE verifier for Google OAuth")?,
     )
     .await?;
     let user_info = fetch_google_userinfo(&tokens.access_token).await?;
@@ -869,63 +863,33 @@ async fn perform_provider_oauth(
     app: &AppHandle,
     request: &OAuthProviderAuthorizationRequest,
 ) -> Result<OAuthProviderBundle, String> {
-    let code_verifier = if request.use_pkce {
-        Some(random_base64url(32)?)
-    } else {
-        None
-    };
-    let code_challenge = code_verifier
-        .as_deref()
-        .map(|verifier| sha256_base64url(verifier.as_bytes()));
-    let state = random_base64url(32)?;
-
-    let (listener, actual_port) = crate::oauth::bind_oauth_listener(OAUTH_CALLBACK_PORT).await?;
-    let redirect_uri = format!("http://127.0.0.1:{actual_port}");
-    let mut params = vec![
-        ("client_id".to_string(), request.client_id.clone()),
-        ("redirect_uri".to_string(), redirect_uri.clone()),
-        ("response_type".to_string(), "code".to_string()),
-        ("scope".to_string(), request.scopes.join(" ")),
-        ("state".to_string(), state.clone()),
-    ];
-
-    if let Some(challenge) = code_challenge {
-        params.push(("code_challenge".to_string(), challenge));
-        params.push(("code_challenge_method".to_string(), "S256".to_string()));
-    }
-
-    if request.provider_id == "microsoft" || request.provider_id == "microsoft_graph" {
-        params.push(("prompt".to_string(), "consent".to_string()));
-        params.push(("response_mode".to_string(), "query".to_string()));
-    } else {
-        params.push(("access_type".to_string(), "offline".to_string()));
-    }
-
-    let auth_url = format!(
-        "{}?{}",
-        request.auth_url,
-        params
-            .into_iter()
-            .map(|(key, value)| format!(
-                "{}={}",
-                urlencoding::encode(&key),
-                urlencoding::encode(&value)
-            ))
-            .collect::<Vec<_>>()
-            .join("&")
-    );
-
-    app.opener()
-        .open_url(auth_url, None::<&str>)
-        .map_err(|e| format!("Failed to open browser for OAuth: {e}"))?;
-    let result = crate::oauth::await_oauth_callback(listener, &state).await?;
+    let extra_auth_params =
+        if request.provider_id == "microsoft" || request.provider_id == "microsoft_graph" {
+            vec![
+                ("prompt".to_string(), "consent".to_string()),
+                ("response_mode".to_string(), "query".to_string()),
+            ]
+        } else {
+            vec![("access_type".to_string(), "offline".to_string())]
+        };
+    let auth = crate::oauth::run_oauth_authorization_flow(
+        app,
+        crate::oauth::OAuthAuthorizationRequest {
+            auth_url: request.auth_url.clone(),
+            client_id: request.client_id.clone(),
+            scopes: request.scopes.clone(),
+            use_pkce: request.use_pkce,
+            extra_auth_params,
+        },
+    )
+    .await?;
 
     let tokens = crate::oauth::oauth_exchange_token(
         request.token_url.clone(),
-        result.code,
+        auth.code,
         request.client_id.clone(),
-        redirect_uri,
-        code_verifier,
+        auth.redirect_uri,
+        auth.code_verifier,
         request.client_secret.clone(),
         if request.provider_id == "microsoft" || request.provider_id == "microsoft_graph" {
             Some(request.scopes.join(" "))
@@ -1119,15 +1083,4 @@ fn parse_microsoft_userinfo(
             .to_string(),
         picture: None,
     })
-}
-
-fn random_base64url(size: usize) -> Result<String, String> {
-    let mut buf = vec![0u8; size];
-    getrandom::getrandom(&mut buf).map_err(|e| format!("Failed to generate random bytes: {e}"))?;
-    Ok(URL_SAFE_NO_PAD.encode(buf))
-}
-
-fn sha256_base64url(input: &[u8]) -> String {
-    let digest = Sha256::digest(input);
-    URL_SAFE_NO_PAD.encode(digest)
 }

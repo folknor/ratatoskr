@@ -27,11 +27,11 @@
 
 ### Phase 2: Decouple Tauri-Specific Concerns
 
-- [ ] **Abstract OAuth flow** — `account_commands.rs` mixes OAuth server setup (via `tauri_plugin_opener`) with account management. Extract pure OAuth exchange logic into a standalone module with an `OAuthProvider` trait. The callback port (`17248`) and HTTP listener are already portable.
+- [ ] **Abstract OAuth flow** — The browser/listener authorization-code flow now lives in `src-tauri/src/oauth.rs`, but `account_commands.rs` still owns provider-specific token/user-info handling. Finish this with a standalone `OAuthProvider` trait or equivalent provider abstraction.
 
-- [ ] **Split `lib.rs` (715 lines)** — Currently a monolith handling Tauri Builder setup, tray menus, window decorations, plugin init, and 107 `#[tauri::command]` registrations. Extract state initialization into `fn init_app_state()`, tray into its own module.
+- [x] **Split `lib.rs` (715 lines)** — Extracted app-state initialization into `src-tauri/src/app_setup.rs`, tray handling into `src-tauri/src/tray.rs`, and window helpers into `src-tauri/src/window.rs`. `lib.rs` now delegates setup/window/tray responsibilities to those modules.
 
-- [ ] **Abstract window/tray management** — `lib.rs:586-680` has platform-specific tray handling. `lib.rs:34-69` handles window show/hide/focus. Extract behind platform traits for iced equivalents.
+- [x] **Abstract window/tray management** — Platform-specific tray setup now lives in `src-tauri/src/tray.rs`, and window show/hide/focus helpers now live in `src-tauri/src/window.rs`, reducing `lib.rs` to wiring.
 
 ---
 
@@ -74,7 +74,7 @@
 
 - [ ] **Split `calendar_commands.rs` (2083 lines)** — Could be split by provider or concern (CalDAV sync, event parsing, recurrence handling).
 
-- [ ] **Split `account_commands.rs` (~600 lines)** — Mixes OAuth server setup, account CRUD, and provider initialization. Separate OAuth into its own module.
+- [ ] **Split `account_commands.rs` (~600 lines)** — The generic OAuth browser/listener flow moved into `src-tauri/src/oauth.rs`, but provider-specific OAuth/token/user-info code is still mixed with account CRUD and provider initialization.
 
 - [ ] **Audit `.unwrap()` in `calendar_commands.rs`** — Clippy denies `unwrap_used` project-wide but there may be an instance that slipped through. Verify and convert to `?` or `.unwrap_or()`.
 

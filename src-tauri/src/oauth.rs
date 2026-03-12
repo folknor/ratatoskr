@@ -1,9 +1,15 @@
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::time::Duration;
+use tauri::AppHandle;
+use tauri_plugin_opener::OpenerExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+
+const OAUTH_CALLBACK_PORT: u16 = 17248;
 
 fn shared_http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -15,6 +21,76 @@ pub struct OAuthResult {
     pub code: String,
     pub state: String,
     pub actual_port: u16,
+}
+
+pub struct OAuthAuthorizationRequest {
+    pub auth_url: String,
+    pub client_id: String,
+    pub scopes: Vec<String>,
+    pub use_pkce: bool,
+    pub extra_auth_params: Vec<(String, String)>,
+}
+
+pub struct OAuthAuthorizationFlow {
+    pub code: String,
+    pub redirect_uri: String,
+    pub code_verifier: Option<String>,
+}
+
+pub async fn run_oauth_authorization_flow(
+    app: &AppHandle,
+    request: OAuthAuthorizationRequest,
+) -> Result<OAuthAuthorizationFlow, String> {
+    let code_verifier = if request.use_pkce {
+        Some(random_base64url(32)?)
+    } else {
+        None
+    };
+    let code_challenge = code_verifier
+        .as_deref()
+        .map(|verifier| sha256_base64url(verifier.as_bytes()));
+    let state = random_base64url(32)?;
+
+    let (listener, actual_port) = bind_oauth_listener(OAUTH_CALLBACK_PORT).await?;
+    let redirect_uri = format!("http://127.0.0.1:{actual_port}");
+
+    let mut params = vec![
+        ("client_id".to_string(), request.client_id),
+        ("redirect_uri".to_string(), redirect_uri.clone()),
+        ("response_type".to_string(), "code".to_string()),
+        ("scope".to_string(), request.scopes.join(" ")),
+        ("state".to_string(), state.clone()),
+    ];
+    if let Some(challenge) = code_challenge {
+        params.push(("code_challenge".to_string(), challenge));
+        params.push(("code_challenge_method".to_string(), "S256".to_string()));
+    }
+    params.extend(request.extra_auth_params);
+
+    let auth_url = format!(
+        "{}?{}",
+        request.auth_url,
+        params
+            .into_iter()
+            .map(|(key, value)| format!(
+                "{}={}",
+                urlencoding::encode(&key),
+                urlencoding::encode(&value)
+            ))
+            .collect::<Vec<_>>()
+            .join("&")
+    );
+
+    app.opener()
+        .open_url(auth_url, None::<&str>)
+        .map_err(|e| format!("Failed to open browser for OAuth: {e}"))?;
+    let result = await_oauth_callback(listener, &state).await?;
+
+    Ok(OAuthAuthorizationFlow {
+        code: result.code,
+        redirect_uri,
+        code_verifier,
+    })
 }
 
 /// Bind to a localhost port for an OAuth callback. Tries the given port first,
@@ -260,4 +336,15 @@ pub async fn oauth_refresh_token(
         .json::<TokenExchangeResult>()
         .await
         .map_err(|e| format!("Failed to parse token response: {e}"))
+}
+
+fn random_base64url(size: usize) -> Result<String, String> {
+    let mut buf = vec![0u8; size];
+    getrandom::getrandom(&mut buf).map_err(|e| format!("Failed to generate random bytes: {e}"))?;
+    Ok(URL_SAFE_NO_PAD.encode(buf))
+}
+
+fn sha256_base64url(input: &[u8]) -> String {
+    let digest = Sha256::digest(input);
+    URL_SAFE_NO_PAD.encode(digest)
 }

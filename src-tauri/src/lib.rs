@@ -1,14 +1,8 @@
-use std::sync::Arc;
-
 use tauri::{Emitter, Manager};
-#[cfg(not(target_os = "linux"))]
-use tauri::{
-    menu::{Menu, MenuItem},
-    tray::{TrayIconBuilder, TrayIconId},
-};
 
 mod account_commands;
 mod ai_commands;
+mod app_setup;
 mod attachment_cache;
 mod body_store;
 mod calendar_commands;
@@ -32,45 +26,8 @@ mod smtp;
 mod state;
 mod sync;
 mod threading;
-
-#[allow(clippy::needless_pass_by_value)]
-#[tauri::command]
-fn close_splashscreen(app: tauri::AppHandle) {
-    if let Some(w) = app.get_webview_window("splashscreen") {
-        _ = w.close();
-    }
-    if let Some(w) = app.get_webview_window("main") {
-        _ = w.show();
-        _ = w.set_focus();
-    }
-}
-
-#[allow(clippy::needless_pass_by_value)]
-#[tauri::command]
-fn set_tray_tooltip(app: tauri::AppHandle, tooltip: String) -> Result<(), String> {
-    #[cfg(not(target_os = "linux"))]
-    {
-        let tray = app
-            .tray_by_id(&TrayIconId::new("main-tray"))
-            .ok_or_else(|| "Tray icon not found".to_string())?;
-        tray.set_tooltip(Some(&tooltip)).map_err(|e| e.to_string())
-    }
-    #[cfg(target_os = "linux")]
-    {
-        _ = tooltip;
-        _ = app;
-        log::debug!("set_tray_tooltip is not supported on Linux (KSNI tray)");
-        Ok(())
-    }
-}
-
-#[allow(clippy::needless_pass_by_value)]
-#[tauri::command]
-fn open_devtools(app: tauri::AppHandle) {
-    if let Some(w) = app.get_webview_window("main") {
-        w.open_devtools();
-    }
-}
+mod tray;
+mod window;
 
 #[allow(clippy::too_many_lines)]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -89,11 +46,7 @@ pub fn run() {
     tauri::Builder::default()
         // Single instance MUST be first
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                _ = window.show();
-                _ = window.set_focus();
-                _ = window.unminimize();
-            }
+            window::reveal_main_window(app);
             // Forward args for deep linking
             _ = app.emit("single-instance-args", argv);
         }))
@@ -125,9 +78,9 @@ pub fn run() {
             account_commands::account_reauthorize_gmail,
             oauth::oauth_exchange_token,
             oauth::oauth_refresh_token,
-            set_tray_tooltip,
-            close_splashscreen,
-            open_devtools,
+            tray::set_tray_tooltip,
+            window::close_splashscreen,
+            window::open_devtools,
             commands::imap_test_connection,
             commands::imap_list_folders,
             commands::imap_fetch_messages,
@@ -533,199 +486,9 @@ pub fn run() {
                 )?;
             }
 
-            // Initialize Rust-owned SQLite database (same ratatoskr.db file)
-            // and tantivy search index
-            {
-                let app_data_dir = app
-                    .path()
-                    .app_data_dir()
-                    .map_err(|e| Box::new(std::io::Error::other(format!("app data dir: {e}"))))?;
-                let db_state = db::DbState::init(&app_data_dir)
-                    .map_err(|e| Box::new(std::io::Error::other(format!("db init: {e}"))))?;
-                app.manage(db_state.clone());
-
-                let body_store_state =
-                    body_store::BodyStoreState::init(&app_data_dir).map_err(|e| {
-                        Box::new(std::io::Error::other(format!("body store init: {e}")))
-                    })?;
-                app.manage(body_store_state.clone());
-
-                let inline_image_store_state = inline_image_store::InlineImageStoreState::init(
-                    &app_data_dir,
-                )
-                .map_err(|e| {
-                    Box::new(std::io::Error::other(format!(
-                        "inline image store init: {e}"
-                    )))
-                })?;
-                app.manage(inline_image_store_state.clone());
-
-                let search_state = search::SearchState::init(&app_data_dir)
-                    .map_err(|e| Box::new(std::io::Error::other(format!("search init: {e}"))))?;
-                app.manage(search_state.clone());
-
-                app.manage(sync::SyncState::new());
-                app.manage(sync::SyncQueueState::new());
-                app.manage(sync::BackgroundSyncState::new());
-                app.manage(account_commands::PendingOAuthAuthorizations::default());
-
-                // Gmail provider state — load encryption key for token decryption
-                let encryption_key = provider::crypto::load_encryption_key(&app_data_dir)
-                    .unwrap_or_else(|e| {
-                        log::warn!(
-                            "Gmail provider: no encryption key ({e}), will init on first use"
-                        );
-                        [0u8; 32]
-                    });
-                let crypto_state = provider::crypto::AppCryptoState::new(encryption_key);
-                app.manage(crypto_state.clone());
-
-                // JMAP provider state — shares the same encryption key
-                let gmail_state = gmail::client::GmailState::new(encryption_key);
-                app.manage(gmail_state.clone());
-
-                // Graph provider state — shares the same encryption key
-                let jmap_state = jmap::client::JmapState::new(encryption_key);
-                app.manage(jmap_state.clone());
-
-                let graph_state = graph::client::GraphState::new(encryption_key);
-                app.manage(graph_state.clone());
-
-                let providers = state::ProviderStates::new(
-                    Arc::new(gmail_state),
-                    Arc::new(jmap_state),
-                    Arc::new(graph_state),
-                    encryption_key,
-                );
-                let app_state = state::AppState {
-                    db: db_state,
-                    body_store: body_store_state,
-                    inline_images: inline_image_store_state,
-                    search: search_state,
-                    crypto: crypto_state,
-                    providers,
-                    progress: Arc::new(progress::TauriProgressReporter::from_ref(app.handle())),
-                    app_data_dir,
-                };
-                app.manage(app_state);
-            }
-
-            #[cfg(not(target_os = "linux"))]
-            {
-                // Build system tray menu
-                let show = MenuItem::with_id(app, "show", "Show Ratatoskr", true, None::<&str>)?;
-                let check_mail =
-                    MenuItem::with_id(app, "check_mail", "Check for Mail", true, None::<&str>)?;
-                let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-                let menu = Menu::with_items(app, &[&show, &check_mail, &quit])?;
-
-                let icon = app
-                    .default_window_icon()
-                    .cloned()
-                    .expect("app should have a default icon configured in tauri.conf.json bundle");
-
-                TrayIconBuilder::with_id("main-tray")
-                    .icon(icon)
-                    .tooltip("Ratatoskr")
-                    .menu(&menu)
-                    .show_menu_on_left_click(false)
-                    .on_menu_event(|app, event| match event.id.as_ref() {
-                        "show" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                _ = window.show();
-                                _ = window.set_focus();
-                            }
-                        }
-                        "check_mail" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                _ = window.emit("tray-check-mail", ());
-                            }
-                        }
-                        "quit" => {
-                            app.exit(0);
-                        }
-                        _ => {}
-                    })
-                    .on_tray_icon_event(|tray, event| {
-                        if let tauri::tray::TrayIconEvent::DoubleClick { .. } = event {
-                            let app = tray.app_handle();
-                            if let Some(window) = app.get_webview_window("main") {
-                                _ = window.show();
-                                _ = window.set_focus();
-                            }
-                        }
-                    })
-                    .build(app)?;
-            }
-
-            #[cfg(target_os = "linux")]
-            {
-                use tray_item::{IconSource, TrayItem};
-
-                let app_handle = app.handle().clone();
-
-                std::thread::spawn(move || {
-                    let mut tray =
-                        match TrayItem::new("Ratatoskr", IconSource::Resource("mail-read")) {
-                            Ok(t) => t,
-                            Err(e) => {
-                                log::warn!("Failed to create system tray: {e}");
-                                return;
-                            }
-                        };
-
-                    let app_handle_show = app_handle.clone();
-                    if let Err(e) = tray.add_menu_item("Show Ratatoskr", move || {
-                        if let Some(window) = app_handle_show.get_webview_window("main") {
-                            _ = window.show();
-                            _ = window.set_focus();
-                        }
-                    }) {
-                        log::warn!("Failed to add tray menu item 'Show Ratatoskr': {e}");
-                    }
-
-                    let app_handle_check = app_handle.clone();
-                    if let Err(e) = tray.add_menu_item("Check for Mail", move || {
-                        if let Some(window) = app_handle_check.get_webview_window("main") {
-                            _ = window.emit("tray-check-mail", ());
-                        }
-                    }) {
-                        log::warn!("Failed to add tray menu item 'Check for Mail': {e}");
-                    }
-
-                    let app_handle_quit = app_handle.clone();
-                    if let Err(e) = tray.add_menu_item("Quit", move || {
-                        app_handle_quit.exit(0);
-                    }) {
-                        log::warn!("Failed to add tray menu item 'Quit': {e}");
-                    }
-
-                    loop {
-                        std::thread::park();
-                    }
-                });
-            }
-
-            // On Windows/Linux, remove decorations for custom titlebar.
-            // macOS uses titleBarStyle: "overlay" from config instead, which
-            // preserves native event routing in WKWebView.
-            #[cfg(not(target_os = "macos"))]
-            {
-                if let Some(window) = app.get_webview_window("main") {
-                    _ = window.set_decorations(false);
-                }
-            }
-
-            // Start hidden in tray if launched with --hidden (autostart)
-            if std::env::args().any(|a| a == "--hidden") {
-                if let Some(window) = app.get_webview_window("main") {
-                    _ = window.hide();
-                }
-                // Also close splash screen when starting hidden
-                if let Some(splash) = app.get_webview_window("splashscreen") {
-                    _ = splash.close();
-                }
-            }
+            app_setup::init_app_state(app)?;
+            tray::setup_tray(app)?;
+            window::configure_main_window(app);
 
             Ok(())
         })
