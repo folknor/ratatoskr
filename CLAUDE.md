@@ -34,6 +34,21 @@ App module `mod.rs` files re-export from core: `pub use ratatoskr_core::{module}
 
 **Core vs app crate boundary**: Business logic belongs in `ratatoskr-core`. Anything importing `tauri::*` stays in the app crate. When adding new core functionality, add it to `core/src/` and re-export from the app's `mod.rs`.
 
+## `jmap-client` crate gotchas
+
+These are non-obvious behaviors of the `jmap-client` crate that will matter if the code is modified:
+
+- **Getting all mailboxes**: `mailbox_get(id, props)` fetches ONE mailbox. To get all, use the builder pattern: `request.get_mailbox()` with no ID set.
+- **`mb.role()`** returns `Role` directly (not `Option<Role>`). Compare with `Role::None` to check if unset.
+- **`mb.total_emails()`** returns `usize` directly, not `Option<usize>`.
+- **`take_id()` / `take_list()`** require `let mut` on the response object.
+- **Filter type inference**: Rust can't infer the generic for `Some(filter.into())` in `email_query()`. Bind to an explicit type: `let filter: core::query::Filter<email::query::Filter> = ...;`
+- **`download(blob_id)`** takes only the blob ID — NOT `(account_id, blob_id, name)`.
+- **`email_submission_create(email_id, identity_id)`** needs an identity ID, not account ID. Fetch identities via builder pattern.
+- **`changes.created()/updated()/destroyed()`** return `&[String]`, not `&[&str]`. Use `.map(String::as_str)` not `.copied()`.
+- **`fetch_text_body_values(true)`** is accessed via `get_req.arguments().fetch_text_body_values(true)`, not directly on the get request.
+- **`mailbox_changes(since_state, 0)`** — max_changes of 0 is invalid per JMAP spec. Use 500.
+
 ## Lint rules that will surprise you
 
 **Rust (edition 2024, strict clippy)**:

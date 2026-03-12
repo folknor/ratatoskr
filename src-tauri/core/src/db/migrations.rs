@@ -773,6 +773,17 @@ static MIGRATIONS: &[Migration] = &[
               AND (oauth_client_id IS NULL OR oauth_client_id = '');
         "#,
     },
+    Migration {
+        version: 30,
+        description: "Remove orphaned global OAuth credential settings",
+        sql: r#"
+            DELETE FROM settings WHERE key IN (
+                'google_client_id',
+                'google_client_secret',
+                'microsoft_client_id'
+            );
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks

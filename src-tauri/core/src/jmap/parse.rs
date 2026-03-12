@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use jmap_client::email::{Email, Property};
+use jmap_client::email::{Email, Header, HeaderValue, Property};
 
 use crate::provider::email_parsing::format_address_list;
 
@@ -37,6 +37,10 @@ pub struct ParsedJmapMessage {
     pub references_header: Option<String>,
     /// JMAP In-Reply-To header values
     pub in_reply_to_header: Option<String>,
+    /// List-Unsubscribe header (RFC 2369)
+    pub list_unsubscribe: Option<String>,
+    /// List-Unsubscribe-Post header (RFC 8058)
+    pub list_unsubscribe_post: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +78,8 @@ pub fn email_get_properties() -> Vec<Property> {
         Property::TextBody,
         Property::HtmlBody,
         Property::Attachments,
+        Property::Header(Header::as_text("List-Unsubscribe", false)),
+        Property::Header(Header::as_text("List-Unsubscribe-Post", false)),
     ]
 }
 
@@ -157,6 +163,14 @@ pub fn parse_jmap_email(
     let references_header = email.references().map(|refs| refs.join(" "));
     let in_reply_to_header = email.in_reply_to().map(|ids| ids.join(" "));
 
+    // List-Unsubscribe headers (RFC 2369 / RFC 8058)
+    let list_unsubscribe = extract_header_text(
+        email.header(&Header::as_text("List-Unsubscribe", false)),
+    );
+    let list_unsubscribe_post = extract_header_text(
+        email.header(&Header::as_text("List-Unsubscribe-Post", false)),
+    );
+
     let raw_size = i64::try_from(email.size()).unwrap_or(i64::MAX);
 
     Ok(ParsedJmapMessage {
@@ -183,6 +197,8 @@ pub fn parse_jmap_email(
         message_id_header,
         references_header,
         in_reply_to_header,
+        list_unsubscribe,
+        list_unsubscribe_post,
     })
 }
 
@@ -194,6 +210,14 @@ fn format_addresses(addrs: Option<&[jmap_client::email::EmailAddress]>) -> Optio
             .iter()
             .map(|a| (a.name().map(ToString::to_string), a.email().to_string())),
     )
+}
+
+/// Extract a text header value from a JMAP `HeaderValue`.
+fn extract_header_text(hv: Option<&HeaderValue>) -> Option<String> {
+    match hv {
+        Some(HeaderValue::AsText(t)) => Some(t.clone()),
+        _ => None,
+    }
 }
 
 /// Extract body text or HTML from the email's bodyValues.

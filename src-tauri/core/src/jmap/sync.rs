@@ -690,7 +690,7 @@ fn upsert_messages(
               list_unsubscribe, list_unsubscribe_post, auth_results, \
               message_id_header, references_header, in_reply_to_header, body_cached) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, \
-                     ?13, ?14, ?15, ?16, NULL, NULL, NULL, ?17, ?18, ?19, ?20)",
+                     ?13, ?14, ?15, ?16, ?17, ?18, NULL, ?19, ?20, ?21, ?22)",
             rusqlite::params![
                 msg.id,
                 account_id,
@@ -708,6 +708,8 @@ fn upsert_messages(
                 msg.is_starred,
                 msg.raw_size,
                 msg.internal_date,
+                msg.list_unsubscribe,
+                msg.list_unsubscribe_post,
                 msg.message_id_header,
                 msg.references_header,
                 msg.in_reply_to_header,
