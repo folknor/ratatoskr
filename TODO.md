@@ -72,11 +72,11 @@
 
 - [x] **Split `db/queries_extra.rs`** — Core DB extra queries now live under `src-tauri/core/src/db/queries_extra/` as domain modules with a small facade in `queries_extra.rs`.
 
-- [ ] **Split `calendar_commands.rs` (2083 lines)** — Could be split by provider or concern (CalDAV sync, event parsing, recurrence handling).
+- [x] **Split `calendar_commands.rs`** — Calendar commands now live under `src-tauri/src/calendar_commands/` split by concern (`google`, `caldav`, `sync`, `types`) with a small facade in `mod.rs`.
 
-- [ ] **Split `account_commands.rs` (~600 lines)** — OAuth flow internals moved to `src-tauri/src/oauth.rs`, but account CRUD and provider initialization still live together in one large command module.
+- [x] **Split `account_commands.rs`** — Account commands now live under `src-tauri/src/account_commands/` split by concern (`info`, `provider_init`, `types`) with a small facade in `mod.rs`.
 
-- [ ] **Audit `.unwrap()` in `calendar_commands.rs`** — Clippy denies `unwrap_used` project-wide but there may be an instance that slipped through. Verify and convert to `?` or `.unwrap_or()`.
+- [x] **Audit `.unwrap()` in `calendar_commands.rs`** — No production `.unwrap()` calls remained; only `unwrap_or*` patterns and a test `unwrap()` in the XML entity test.
 
 ---
 
