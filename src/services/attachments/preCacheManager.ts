@@ -4,7 +4,7 @@ import {
   type BackgroundChecker,
   createBackgroundChecker,
 } from "../backgroundCheckers";
-import { getSetting } from "../db/settings";
+import { getAttachmentCacheMaxMb } from "../settings/runtimeFlags";
 
 const MAX_ATTACHMENT_SIZE: number = 5 * 1024 * 1024; // 5MB
 const RECENT_DAYS = 7;
@@ -30,10 +30,7 @@ async function preCacheRecent(): Promise<void> {
     "db_attachment_cache_total_size",
   );
 
-  const maxCacheMb = parseInt(
-    (await getSetting("attachment_cache_max_mb")) ?? "500",
-    10,
-  );
+  const maxCacheMb = await getAttachmentCacheMaxMb();
   const maxCacheBytes = maxCacheMb * 1024 * 1024;
 
   if (currentCacheSize >= maxCacheBytes) return;

@@ -23,7 +23,7 @@ import {
   sendEmail,
   upsertContact,
 } from "@/core/mutations";
-import { getSetting } from "@/core/settings";
+import { getUndoSendDelaySeconds } from "@/services/settings/runtimeFlags";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useUIPreferencesStore } from "@/stores/uiPreferencesStore";
@@ -134,7 +134,7 @@ export function Composer(): React.ReactNode {
     return () => {
       cancelled = true;
     };
-  }, [isOpen, activeAccountId]);
+  }, [isOpen, activeAccountId, templateShortcutsRef]);
 
   // Start/stop draft auto-save
   useEffect(() => {
@@ -239,8 +239,7 @@ export function Composer(): React.ReactNode {
     });
 
     // Get undo send delay
-    const delaySetting = await getSetting("undo_send_delay_seconds");
-    const delaySeconds = parseInt(delaySetting ?? "5", 10);
+    const delaySeconds = await getUndoSendDelaySeconds();
     const delay = delaySeconds * 1000;
     const currentDraftId = state.draftId;
 

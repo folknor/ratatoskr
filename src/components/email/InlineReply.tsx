@@ -23,7 +23,7 @@ import {
 import { getDefaultSignature } from "@/core/composer";
 import { archiveThread, sendEmail, upsertContact } from "@/core/mutations";
 import type { DbMessage } from "@/core/queries";
-import { getSetting } from "@/core/settings";
+import { getUndoSendDelaySeconds } from "@/services/settings/runtimeFlags";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import type { Thread } from "@/stores/threadStore";
@@ -217,12 +217,11 @@ export function InlineReply({
       });
 
       // Get undo send delay
-      const delaySetting = await getSetting("undo_send_delay_seconds");
-      const delay = parseInt(delaySetting ?? "5", 10) * 1000;
+      const delaySeconds = await getUndoSendDelaySeconds();
+      const delay = delaySeconds * 1000;
 
       const { setUndoSendVisible, setUndoSendTimer } =
         useComposerStore.getState();
-      const delaySeconds = parseInt(delaySetting ?? "5", 10);
       setUndoSendVisible(true, delaySeconds);
 
       const timer = setTimeout(async () => {

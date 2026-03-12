@@ -8,10 +8,10 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import i18n from "@/i18n";
+import { getNotificationsEnabled } from "@/services/settings/runtimeFlags";
 import { normalizeEmail } from "@/utils/emailUtils";
 import { navigateToLabel } from "../../router/navigate";
 import { useComposerStore } from "../../stores/composerStore";
-import { getSetting } from "../db/settings";
 
 let initialized = false;
 let notificationsEnabled = true;
@@ -57,8 +57,7 @@ export async function initNotifications(): Promise<void> {
   if (initialized) return;
   initialized = true;
 
-  const setting = await getSetting("notifications_enabled");
-  notificationsEnabled = setting !== "false";
+  notificationsEnabled = await getNotificationsEnabled();
 
   if (!notificationsEnabled) return;
 
@@ -136,13 +135,13 @@ export async function initNotifications(): Promise<void> {
         (event) => {
           const { accountId, notifications } = event.payload;
           for (const candidate of notifications) {
-            enqueueNewEmailNotification(
-              candidate.fromName ?? candidate.fromAddress ?? "Unknown",
-              candidate.subject ?? "",
-              candidate.threadId,
+            enqueueNewEmailNotification({
+              from: candidate.fromName ?? candidate.fromAddress ?? "Unknown",
+              subject: candidate.subject ?? "",
+              threadId: candidate.threadId,
               accountId,
-              candidate.fromAddress ?? undefined,
-            );
+              fromAddress: candidate.fromAddress ?? undefined,
+            });
           }
         },
       );
@@ -159,13 +158,21 @@ export async function initNotifications(): Promise<void> {
 let pendingCount = 0;
 let notifyTimer: ReturnType<typeof setTimeout> | null = null;
 
-function enqueueNewEmailNotification(
-  from: string,
-  subject: string,
-  threadId?: string,
-  accountId?: string,
-  fromAddress?: string,
-): void {
+interface PendingNotificationContext {
+  from: string;
+  subject: string;
+  threadId?: string | undefined;
+  accountId?: string | undefined;
+  fromAddress?: string | undefined;
+}
+
+function enqueueNewEmailNotification({
+  from,
+  subject,
+  threadId,
+  accountId,
+  fromAddress,
+}: PendingNotificationContext): void {
   if (!notificationsEnabled) return;
 
   pendingCount++;

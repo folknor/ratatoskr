@@ -32,7 +32,6 @@ import {
   startBundleChecker,
   stopBundleChecker,
 } from "./services/bundles/bundleManager";
-import { getSetting } from "./services/db/settings";
 import { getIncompleteTaskCount } from "./services/db/tasks";
 import { initDeepLinkHandler } from "./services/deepLinkHandler";
 import {
@@ -58,6 +57,7 @@ import {
   stopQueueProcessor,
   triggerQueueFlush,
 } from "./services/queue/queueProcessor";
+import { getStartupUiSettings } from "./services/settings/runtimeFlags";
 import { getUiBootstrapSnapshot } from "./services/settings/uiBootstrap";
 import {
   startScheduledSendChecker,
@@ -222,7 +222,8 @@ export default function App(): React.ReactNode {
         // Uses a version key so the index is rebuilt when the schema changes.
         {
           const SEARCH_INDEX_VERSION = "1";
-          const indexVersion = await getSetting("search_index_version");
+          const { searchIndexVersion: indexVersion } =
+            await getStartupUiSettings();
           if (indexVersion !== SEARCH_INDEX_VERSION) {
             void import("@/core/rustDb").then(async (rustDb) => {
               try {
@@ -373,7 +374,9 @@ export default function App(): React.ReactNode {
         }
 
         // Load custom keyboard shortcuts
-        await useShortcutStore.getState().loadKeyMap();
+        await useShortcutStore
+          .getState()
+          .loadKeyMap(uiSnapshot.customShortcuts);
 
         const dbAccounts = await listAccountBasicInfo();
         const mapped = dbAccounts.map((a) => ({
@@ -384,7 +387,7 @@ export default function App(): React.ReactNode {
           isActive: a.isActive,
           provider: a.provider,
         }));
-        const savedAccountId = await getSetting("active_account_id");
+        const savedAccountId = uiSnapshot.activeAccountId;
         useAccountStore.getState().setAccounts(mapped, savedAccountId);
 
         // Initialize Gmail clients for existing accounts

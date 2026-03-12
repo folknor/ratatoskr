@@ -11,8 +11,8 @@ import {
   type DbMessage,
   getAllowlistedSenders,
   getMessagesForThread,
-  getSetting,
 } from "@/core/queries";
+import { getBlockRemoteImagesEnabled } from "@/services/settings/runtimeFlags";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useContextMenuStore } from "@/stores/contextMenuStore";
@@ -83,9 +83,7 @@ export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
 
   // Preload settings eagerly on mount (parallel with message loading)
   useEffect(() => {
-    getSetting("block_remote_images").then((val) =>
-      setBlockImages(val !== "false"),
-    );
+    void getBlockRemoteImagesEnabled().then(setBlockImages);
   }, []);
 
   // Load messages
@@ -302,6 +300,7 @@ export function ThreadView({ thread }: ThreadViewProps): React.ReactNode {
 
   // Reset focused index when thread changes
   useEffect(() => {
+    void thread.id;
     setFocusedMsgIdx(-1);
   }, [thread.id]);
 

@@ -5,7 +5,8 @@ import {
   unregister,
 } from "@tauri-apps/plugin-global-shortcut";
 import { useComposerStore } from "../stores/composerStore";
-import { getSetting, setSetting } from "./db/settings";
+import { setSetting } from "./db/settings";
+import { getGlobalComposeShortcut } from "./settings/runtimeFlags";
 
 const DEFAULT_SHORTCUT = "CmdOrCtrl+Shift+M";
 let currentShortcut: string | null = null;
@@ -20,7 +21,7 @@ async function handleComposeShortcut(): Promise<void> {
 }
 
 export async function initGlobalShortcut(): Promise<void> {
-  const saved = await getSetting("global_compose_shortcut");
+  const saved = await getGlobalComposeShortcut();
   const shortcut = saved ?? DEFAULT_SHORTCUT;
 
   try {

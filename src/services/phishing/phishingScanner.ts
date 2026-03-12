@@ -3,11 +3,8 @@ import {
   getCachedScanResult,
 } from "@/services/db/linkScanResults";
 import { isPhishingAllowlisted } from "@/services/db/phishingAllowlist";
-import { getSetting } from "@/services/db/settings";
-import type {
-  MessageScanResult,
-  PhishingSensitivity,
-} from "@/utils/phishingDetector";
+import { getPhishingSettings } from "@/services/settings/runtimeFlags";
+import type { MessageScanResult } from "@/utils/phishingDetector";
 import { scanMessage } from "@/utils/phishingDetector";
 
 /**
@@ -26,9 +23,8 @@ export async function scanMessageLinks(
   bodyHtml: string | null,
   senderAddress: string | null,
 ): Promise<MessageScanResult | null> {
-  // 1. Check if phishing detection is enabled
-  const enabled = await getSetting("phishing_detection_enabled");
-  if (enabled === "false") {
+  const { enabled, sensitivity } = await getPhishingSettings();
+  if (!enabled) {
     return null;
   }
 
@@ -50,12 +46,6 @@ export async function scanMessageLinks(
     }
   }
 
-  // 4. Read sensitivity setting and scan the message
-  const sensitivityRaw = await getSetting("phishing_sensitivity");
-  const sensitivity: PhishingSensitivity =
-    sensitivityRaw === "low" || sensitivityRaw === "high"
-      ? sensitivityRaw
-      : "default";
   const result = scanMessage(messageId, bodyHtml, sensitivity);
 
   // 5. Cache the result

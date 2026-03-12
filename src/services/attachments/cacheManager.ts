@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { getSetting } from "@/services/db/settings";
+import { getAttachmentCacheMaxMb } from "@/services/settings/runtimeFlags";
 
 const CACHE_DIR = "attachment_cache";
 
@@ -8,8 +8,7 @@ export async function getCacheSize(): Promise<number> {
 }
 
 export async function evictOldestCached(): Promise<void> {
-  const maxMbStr = await getSetting("attachment_cache_max_mb");
-  const maxBytes = parseInt(maxMbStr ?? "500", 10) * 1024 * 1024;
+  const maxBytes = (await getAttachmentCacheMaxMb()) * 1024 * 1024;
   const currentSize = await getCacheSize();
 
   if (currentSize <= maxBytes) return;

@@ -1,13 +1,14 @@
 import type { StoreApi, UseBoundStore } from "zustand";
 import { create } from "zustand";
 import { getDefaultKeyMap } from "@/constants/shortcuts";
-import { getSetting, setSetting } from "@/core/settings";
+import { setSetting } from "@/core/settings";
+import { getCustomShortcutOverrides } from "@/services/settings/runtimeFlags";
 
 interface ShortcutState {
   /** Map of shortcut ID -> current key binding */
   keyMap: Record<string, string>;
   /** Load custom bindings from DB, merging with defaults */
-  loadKeyMap: () => Promise<void>;
+  loadKeyMap: (rawOverrides?: string | null) => Promise<void>;
   /** Update a single shortcut binding */
   setKey: (id: string, keys: string) => void;
   /** Reset a single shortcut to its default */
@@ -34,10 +35,10 @@ export const useShortcutStore: UseBoundStore<StoreApi<ShortcutState>> =
   create<ShortcutState>((set, get) => ({
     keyMap: getDefaultKeyMap(),
 
-    loadKeyMap: async () => {
+    loadKeyMap: async (rawOverrides: string | null = null) => {
       const defaults = getDefaultKeyMap();
       try {
-        const raw = await getSetting(SETTINGS_KEY);
+        const raw = rawOverrides ?? (await getCustomShortcutOverrides());
         if (raw) {
           const overrides = JSON.parse(raw) as Record<string, string>;
           set({ keyMap: { ...defaults, ...overrides } });

@@ -21,7 +21,7 @@
 
 - [x] **Stop bundling API keys with non-sensitive settings snapshots** — Non-sensitive settings bootstrap data and secrets now come from separate snapshot commands, so only the settings page requests API keys/client secrets.
 
-- [ ] **Sweep remaining full account/settings compatibility reads** — Continue replacing one-off `getAccount()` / `getSetting()` reads and legacy compatibility helpers with narrow Rust DTOs in active paths. `src/services/gmail/tokenManager.ts` no longer uses full account rows, and the dead `getAllSettings` / `getSecureSetting` compatibility surface has been removed.
+- [x] **Sweep remaining full account/settings compatibility reads** — Active app paths no longer rely on one-off `getSetting()` calls or full-account compatibility reads for startup/UI/runtime flags. Those paths now use Rust-backed snapshots or narrower DTOs, and the dead `getAllSettings` / `getSecureSetting` compatibility surface has been removed.
 
 ### Regression Coverage
 

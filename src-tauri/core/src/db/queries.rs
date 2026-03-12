@@ -149,6 +149,11 @@ pub struct SettingsSecretsSnapshot {
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UiBootstrapSnapshot {
+    pub active_account_id: Option<String>,
+    pub language: Option<String>,
+    pub global_compose_shortcut: Option<String>,
+    pub custom_shortcuts: Option<String>,
+    pub search_index_version: Option<String>,
     pub theme: Option<String>,
     pub sidebar_collapsed: bool,
     pub contact_sidebar_visible: bool,
@@ -529,6 +534,11 @@ pub fn get_ui_bootstrap_snapshot(
     let get_bool = |key: &str, default: bool| get(key).map_or(default, |value| value != "false");
 
     Ok(UiBootstrapSnapshot {
+        active_account_id: get("active_account_id"),
+        language: get("language"),
+        global_compose_shortcut: get("global_compose_shortcut"),
+        custom_shortcuts: get("custom_shortcuts"),
+        search_index_version: get("search_index_version"),
         theme: get("theme"),
         sidebar_collapsed: get("sidebar_collapsed").is_some_and(|value| value == "true"),
         contact_sidebar_visible: get_bool("contact_sidebar_visible", true),
@@ -585,11 +595,13 @@ mod tests {
         let encrypted_secret =
             encrypt_value(&key, "top-secret").expect("encrypt google client secret");
         insert_setting(&conn, "theme", "dark");
+        insert_setting(&conn, "language", "en");
         insert_setting(&conn, "google_client_secret", &encrypted_secret);
 
         let snapshot = get_ui_bootstrap_snapshot(&conn, &key).expect("ui snapshot");
 
         assert_eq!(snapshot.theme.as_deref(), Some("dark"));
+        assert_eq!(snapshot.language.as_deref(), Some("en"));
     }
 
     #[test]

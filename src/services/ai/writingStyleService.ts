@@ -1,12 +1,12 @@
 import { getAccountBasicInfo } from "@/services/accounts/basicInfo";
 import { deleteAiCache, getAiCache, setAiCache } from "@/services/db/aiCache";
 import { type DbMessage, getRecentSentMessages } from "@/services/db/messages";
-import { getSetting } from "@/services/db/settings";
 import {
   deleteWritingStyleProfile,
   getWritingStyleProfile,
   upsertWritingStyleProfile,
 } from "@/services/db/writingStyleProfiles";
+import { getAiWritingFlags } from "@/services/settings/runtimeFlags";
 import { completeAi, testAiConnection } from "./client";
 import {
   AUTO_DRAFT_REPLY_PROMPT,
@@ -42,8 +42,8 @@ export async function analyzeWritingStyle(
 export async function getOrCreateStyleProfile(
   accountId: string,
 ): Promise<string | null> {
-  const styleEnabled = await getSetting("ai_writing_style_enabled");
-  if (styleEnabled === "false") return null;
+  const { writingStyleEnabled } = await getAiWritingFlags();
+  if (!writingStyleEnabled) return null;
 
   // Check for cached profile
   const existing = await getWritingStyleProfile(accountId);
@@ -153,8 +153,8 @@ export async function regenerateAutoDraft(
  * Check if auto-draft is available (AI configured + setting enabled).
  */
 export async function isAutoDraftEnabled(): Promise<boolean> {
-  const enabled = await getSetting("ai_auto_draft_enabled");
-  if (enabled === "false") return false;
+  const { autoDraftEnabled } = await getAiWritingFlags();
+  if (!autoDraftEnabled) return false;
 
   try {
     return await testAiConnection();

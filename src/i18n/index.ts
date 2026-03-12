@@ -1,5 +1,6 @@
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
+import { getStoredLanguagePreference } from "@/services/settings/runtimeFlags";
 import accountsEN from "./locales/en/accounts.json";
 import attachmentsEN from "./locales/en/attachments.json";
 import calendarEN from "./locales/en/calendar.json";
@@ -86,8 +87,7 @@ export async function resetToSystemLanguage(): Promise<void> {
  * Call this early in app init, after migrations.
  */
 export async function loadPersistedLanguage(): Promise<void> {
-  const { getSetting } = await import("@/services/db/settings");
-  const saved = await getSetting("language");
+  const saved = await getStoredLanguagePreference();
   if (
     saved &&
     saved !== "system" &&
@@ -106,8 +106,7 @@ export async function loadPersistedLanguage(): Promise<void> {
  * Check if the user has explicitly chosen a language (vs using system default).
  */
 export async function getPersistedLanguage(): Promise<string | null> {
-  const { getSetting } = await import("@/services/db/settings");
-  const saved = await getSetting("language");
+  const saved = await getStoredLanguagePreference();
   if (
     saved &&
     saved !== "system" &&

@@ -1,6 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export interface UiBootstrapSnapshot {
+  activeAccountId: string | null;
+  language: string | null;
+  globalComposeShortcut: string | null;
+  customShortcuts: string | null;
+  searchIndexVersion: string | null;
   theme: string | null;
   sidebarCollapsed: boolean;
   contactSidebarVisible: boolean;
