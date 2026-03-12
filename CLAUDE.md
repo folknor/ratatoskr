@@ -1,22 +1,38 @@
 # Ratatoskr
 
-Tauri v2 desktop email client. Rust backend, React 19 frontend. ~23k lines Rust, ~73k lines TS.
+Tauri v2 desktop email client migrating to pure Rust (iced UI). Cargo workspace with two crates:
+
+- **`ratatoskr-core`** (`src-tauri/core/`, ~22k lines) — Framework-agnostic business logic: providers, sync, threading, filters, search, DB, etc.
+- **`ratatoskr`** (`src-tauri/src/`, ~16.5k lines) — Tauri app shell: `#[tauri::command]` wrappers, `TauriProgressReporter`, window/tray management.
+- **Frontend** — React 19 + TypeScript (~73k lines), to be replaced by iced.
 
 ## Commands
 
 - `pnpm exec biome check --write` — lint+format (Biome, not ESLint/Prettier)
 - `bunx tauri dev` — run dev (uses bun for tauri CLI, pnpm for deps)
 - `vitest run` — tests; `vitest run path/to/file` for single file
+- `cargo check --workspace` — check both Rust crates
+- `cargo check -p ratatoskr-core` — check core crate only
+
+## Crate Architecture
+
+App module `mod.rs` files re-export from core: `pub use ratatoskr_core::{module}::*;` + `pub mod commands;`. The `commands.rs` files stay in the app crate with Tauri-specific imports.
+
+**`ProgressReporter` trait** (`ratatoskr_core::progress`) — All event emission goes through `&dyn ProgressReporter`. App crate provides `TauriProgressReporter` (wraps `AppHandle::emit()`). Future iced frontend will provide its own implementation.
+
+**State types are `Clone`** — `DbState`, `BodyStoreState`, `InlineImageStoreState`, `SearchState`, `AppCryptoState` all wrap `Arc<Mutex<Connection>>` or similar and implement `Clone`.
 
 ## Gotchas that will break your code
 
-**Multiple content stores**: Message metadata is not the whole story. Message bodies live outside the main `messages` table in `bodies.db` (zstd-compressed), and inline multipart images have their own attachment database as well. Use the Rust-side data access layer and existing fetch/write commands rather than assuming message content is fully stored in the main SQLite database.
+**Multiple content stores**: Message bodies live outside the main `messages` table in `bodies.db` (zstd-compressed), and inline multipart images have their own attachment database. Use the Rust-side data access layer rather than assuming message content is in the main SQLite database.
 
-**Four email providers in Rust**: `gmail_api`, `jmap`, `graph` (Microsoft), `imap`. All unified behind the `ProviderOps` trait (`provider/ops.rs`). Provider-agnostic commands in `provider/commands.rs`. The TS `EmailProvider` interface still exists but Graph throws — it uses Rust commands directly.
+**Four email providers in Rust**: `gmail_api`, `jmap`, `graph` (Microsoft), `imap`. All unified behind the `ProviderOps` trait (`core/src/provider/ops.rs`). Provider-agnostic commands in `src/provider/commands.rs`.
 
 **Offline actions**: All email mutations go through `emailActions.ts` (optimistic UI + local DB + offline queue). Never call provider APIs directly from components.
 
-**`src/core/`** is the facade layer — UI imports from `core/`, not from `services/db/` directly. `rustDb.ts` (38KB) wraps all Rust DB invoke calls.
+**`src/core/`** (TS) is the facade layer — UI imports from `core/`, not from `services/db/` directly. `rustDb.ts` (38KB) wraps all Rust DB invoke calls.
+
+**Core vs app crate boundary**: Business logic belongs in `ratatoskr-core`. Anything importing `tauri::*` stays in the app crate. When adding new core functionality, add it to `core/src/` and re-export from the app's `mod.rs`.
 
 ## Lint rules that will surprise you
 
@@ -48,7 +64,7 @@ Tauri v2 desktop email client. Rust backend, React 19 frontend. ~23k lines Rust,
 
 - **Capabilities**: New plugins need permissions in `src-tauri/capabilities/default.json`. Allowed windows: `main`, `splashscreen`, `thread-*`, `compose-*`
 - **SQL plugin preload**: Must be array `["sqlite:ratatoskr.db"]`, not object
-- **Emitter trait**: Must `use tauri::Emitter;` to call `.emit()` on windows
+- **Progress events**: Use `TauriProgressReporter::from_ref(&app_handle)` at command boundaries, pass `&reporter` (as `&dyn ProgressReporter`) to core functions. Never call `app.emit()` directly in core logic.
 - **Single instance**: Must be first plugin registered
 - **Minimize-to-tray**: Use `.on_window_event()` on Builder, not `window.on_window_event()`
 - **Linux tray**: Uses `tray-item` crate (KSNI), not Tauri's built-in tray. `set_tray_tooltip` is a no-op on Linux

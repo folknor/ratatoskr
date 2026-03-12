@@ -8,16 +8,16 @@ use super::types::*;
 
 // ---------- Timeout constants ----------
 
-pub(crate) const TCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-pub(crate) const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
-pub(crate) const AUTH_TIMEOUT: Duration = Duration::from_secs(30);
-pub(crate) const IMAP_CMD_TIMEOUT: Duration = Duration::from_secs(30);
-pub(crate) const IMAP_FETCH_TIMEOUT: Duration = Duration::from_secs(120);
-pub(crate) const IMAP_SEARCH_TIMEOUT: Duration = Duration::from_secs(60);
-pub(crate) const OVERALL_CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
+pub const TCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+pub const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+pub const AUTH_TIMEOUT: Duration = Duration::from_secs(30);
+pub const IMAP_CMD_TIMEOUT: Duration = Duration::from_secs(30);
+pub const IMAP_FETCH_TIMEOUT: Duration = Duration::from_secs(120);
+pub const IMAP_SEARCH_TIMEOUT: Duration = Duration::from_secs(60);
+pub const OVERALL_CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Configure TCP keepalive and nodelay on a connected socket.
-pub(crate) fn configure_tcp_socket(stream: &TcpStream) {
+pub fn configure_tcp_socket(stream: &TcpStream) {
     // Set TCP nodelay via tokio's built-in API
     if let Err(e) = stream.set_nodelay(true) {
         log::warn!("Failed to set TCP_NODELAY: {e}");
@@ -62,7 +62,7 @@ impl Authenticator for XOAuth2 {
 // ---------- Stream wrapper ----------
 
 /// Wrapper to unify TLS / plain streams so Session can be generic.
-pub(crate) enum ImapStream {
+pub enum ImapStream {
     Tls(TlsStream<TcpStream>),
     Plain(TcpStream),
 }
@@ -126,7 +126,7 @@ impl std::fmt::Debug for ImapStream {
 
 /// Build a TLS connector, optionally accepting invalid certificates
 /// (for local mail bridges like ProtonMail Bridge with self-signed certs).
-pub(crate) fn build_tls_connector(
+pub fn build_tls_connector(
     accept_invalid_certs: bool,
 ) -> Result<native_tls::TlsConnector, String> {
     let mut builder = native_tls::TlsConnector::builder();
@@ -140,7 +140,7 @@ pub(crate) fn build_tls_connector(
 
 // ---------- Public API ----------
 
-pub(crate) type ImapSession = Session<ImapStream>;
+pub type ImapSession = Session<ImapStream>;
 
 /// Establish an IMAP connection and authenticate.
 ///
@@ -174,7 +174,7 @@ async fn connect_inner(config: &ImapConfig) -> Result<ImapSession, String> {
 }
 
 /// Establish TCP + TLS or plain stream for "tls" and "none" security modes.
-pub(crate) async fn connect_stream(config: &ImapConfig) -> Result<ImapStream, String> {
+pub async fn connect_stream(config: &ImapConfig) -> Result<ImapStream, String> {
     let addr = (&*config.host, config.port);
 
     match config.security.as_str() {

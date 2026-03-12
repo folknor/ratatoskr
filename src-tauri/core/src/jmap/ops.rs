@@ -9,7 +9,7 @@ use crate::provider::types::{
 };
 
 use super::client::JmapClient;
-use super::commands::{
+use super::helpers::{
     get_first_identity_id, get_mailbox_list, query_thread_email_ids, resolve_mailbox_id,
 };
 use super::mailbox_mapper::{find_mailbox_id_by_role, map_mailbox_to_label};
@@ -34,7 +34,7 @@ impl ProviderOps for JmapOps {
             ctx.body_store,
             ctx.inline_images,
             ctx.search,
-            ctx.app_handle,
+            ctx.progress,
         )
         .await?;
         Ok(SyncResult::default())
@@ -52,7 +52,7 @@ impl ProviderOps for JmapOps {
             ctx.body_store,
             ctx.inline_images,
             ctx.search,
-            ctx.app_handle,
+            ctx.progress,
         )
         .await?;
         Ok(SyncResult {

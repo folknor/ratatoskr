@@ -27,7 +27,7 @@ impl ProviderOps for GmailOps {
             ctx.body_store,
             ctx.inline_images,
             ctx.search,
-            ctx.app_handle,
+            ctx.progress,
         )
         .await?;
         Ok(SyncResult::default())
@@ -45,7 +45,7 @@ impl ProviderOps for GmailOps {
             ctx.body_store,
             ctx.inline_images,
             ctx.search,
-            ctx.app_handle,
+            ctx.progress,
         )
         .await?;
         Ok(SyncResult {

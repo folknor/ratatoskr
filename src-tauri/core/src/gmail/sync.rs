@@ -3,11 +3,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
 
 use crate::body_store::{BodyStoreState, MessageBody};
 use crate::db::DbState;
 use crate::inline_image_store::{InlineImage, InlineImageStoreState};
+use crate::progress::{self, ProgressReporter};
 use crate::search::{SearchDocument, SearchState};
 
 use super::client::GmailClient;
@@ -44,7 +44,7 @@ struct SyncCtx<'a> {
     body_store: &'a BodyStoreState,
     inline_images: &'a InlineImageStoreState,
     search: &'a SearchState,
-    app_handle: &'a AppHandle,
+    progress: &'a dyn ProgressReporter,
 }
 
 // ---------------------------------------------------------------------------
@@ -61,7 +61,7 @@ pub async fn gmail_initial_sync(
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
-    app_handle: &AppHandle,
+    progress: &dyn ProgressReporter,
 ) -> Result<(), String> {
     let ctx = SyncCtx {
         client,
@@ -70,7 +70,7 @@ pub async fn gmail_initial_sync(
         body_store,
         inline_images,
         search,
-        app_handle,
+        progress,
     };
     run_initial_sync(&ctx, days_back).await
 }
@@ -113,7 +113,7 @@ pub async fn gmail_delta_sync(
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
-    app_handle: &AppHandle,
+    progress: &dyn ProgressReporter,
 ) -> Result<GmailSyncResult, String> {
     let ctx = SyncCtx {
         client,
@@ -122,7 +122,7 @@ pub async fn gmail_delta_sync(
         body_store,
         inline_images,
         search,
-        app_handle,
+        progress,
     };
     run_delta_sync(&ctx).await
 }
@@ -889,9 +889,7 @@ fn emit_progress(ctx: &SyncCtx<'_>, phase: &str, current: u64, total: u64) {
         current,
         total,
     };
-    if let Err(e) = ctx.app_handle.emit("gmail-sync-progress", &event) {
-        log::warn!("Failed to emit gmail sync progress: {e}");
-    }
+    progress::emit_event(ctx.progress, "gmail-sync-progress", &event);
 }
 
 // ---------------------------------------------------------------------------

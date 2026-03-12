@@ -6,6 +6,7 @@ use tauri::{AppHandle, State};
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
+use crate::progress::TauriProgressReporter;
 use crate::search::SearchState;
 
 use super::client::{JmapClient, JmapState};
@@ -91,6 +92,7 @@ pub async fn jmap_sync_initial(
 ) -> Result<(), String> {
     let client = jmap.get(&account_id).await?;
     let days = days_back.unwrap_or(365);
+    let reporter = TauriProgressReporter::from_ref(&app_handle);
     jmap_initial_sync(
         &client,
         &account_id,
@@ -99,7 +101,7 @@ pub async fn jmap_sync_initial(
         &body_store,
         &inline_images,
         &search,
-        &app_handle,
+        &reporter,
     )
     .await
 }
@@ -115,6 +117,7 @@ pub async fn jmap_sync_delta(
     app_handle: AppHandle,
 ) -> Result<JmapSyncResult, String> {
     let client = jmap.get(&account_id).await?;
+    let reporter = TauriProgressReporter::from_ref(&app_handle);
     jmap_delta_sync(
         &client,
         &account_id,
@@ -122,7 +125,7 @@ pub async fn jmap_sync_delta(
         &body_store,
         &inline_images,
         &search,
-        &app_handle,
+        &reporter,
     )
     .await
 }

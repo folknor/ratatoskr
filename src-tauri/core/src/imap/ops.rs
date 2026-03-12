@@ -275,7 +275,7 @@ impl ProviderOps for ImapOps {
         .await?;
 
         let result = crate::sync::imap_initial::imap_initial_sync(
-            ctx.app_handle,
+            ctx.progress,
             ctx.db,
             ctx.body_store,
             ctx.inline_images,
@@ -307,7 +307,7 @@ impl ProviderOps for ImapOps {
         let days_back = days_back.unwrap_or(365);
 
         let result = crate::sync::imap_delta::imap_delta_sync(
-            ctx.app_handle,
+            ctx.progress,
             ctx.db,
             ctx.body_store,
             ctx.inline_images,

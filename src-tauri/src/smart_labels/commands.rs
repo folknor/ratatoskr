@@ -5,6 +5,8 @@ use std::collections::{HashMap, HashSet};
 use futures::stream::{self, StreamExt};
 use tauri::{AppHandle, State};
 
+use crate::progress::{ProgressReporter, TauriProgressReporter};
+
 use crate::ai_commands::{AiCompleteRequest, ai_is_available_impl, complete_ai_impl};
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
@@ -55,7 +57,7 @@ pub(crate) async fn smart_labels_apply_criteria_to_new_message_ids_impl(
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
-    app_handle: &AppHandle,
+    progress: &dyn ProgressReporter,
 ) -> Result<Vec<AppliedSmartLabelMatch>, String> {
     if message_ids.is_empty() {
         return Ok(Vec::new());
@@ -84,7 +86,7 @@ pub(crate) async fn smart_labels_apply_criteria_to_new_message_ids_impl(
         body_store,
         inline_images,
         search,
-        app_handle,
+        progress,
     )
     .await
 }
@@ -101,7 +103,7 @@ pub(crate) async fn smart_labels_apply_matches_impl(
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
-    app_handle: &AppHandle,
+    progress: &dyn ProgressReporter,
 ) -> Result<(), String> {
     if matches.is_empty() {
         return Ok(());
@@ -122,7 +124,7 @@ pub(crate) async fn smart_labels_apply_matches_impl(
         body_store,
         inline_images,
         search,
-        app_handle,
+        progress,
     };
 
     for applied in matches {
@@ -154,7 +156,7 @@ pub(crate) async fn smart_labels_classify_and_apply_remainder_impl(
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
-    app_handle: &AppHandle,
+    progress: &dyn ProgressReporter,
 ) -> Result<Vec<AppliedSmartLabelMatch>, String> {
     let matches =
         classify_smart_label_remainder(db, crypto, threads, rules, pre_applied_matches).await?;
@@ -173,7 +175,7 @@ pub(crate) async fn smart_labels_classify_and_apply_remainder_impl(
         body_store,
         inline_images,
         search,
-        app_handle,
+        progress,
     )
     .await?;
 
@@ -220,6 +222,7 @@ pub async fn smart_labels_apply_criteria_to_new_message_ids(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<Vec<AppliedSmartLabelMatch>, String> {
+    let reporter = TauriProgressReporter::from_ref(&app_handle);
     smart_labels_apply_criteria_to_new_message_ids_impl(
         &account_id,
         &get_provider_type(&db, &account_id).await?,
@@ -231,7 +234,7 @@ pub async fn smart_labels_apply_criteria_to_new_message_ids(
         &body_store,
         &inline_images,
         &search,
-        &app_handle,
+        &reporter,
     )
     .await
 }
@@ -251,6 +254,7 @@ pub async fn smart_labels_apply_matches(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
+    let reporter = TauriProgressReporter::from_ref(&app_handle);
     smart_labels_apply_matches_impl(
         &account_id,
         &provider,
@@ -262,7 +266,7 @@ pub async fn smart_labels_apply_matches(
         &body_store,
         &inline_images,
         &search,
-        &app_handle,
+        &reporter,
     )
     .await
 }
@@ -348,7 +352,7 @@ pub(crate) async fn smart_labels_apply_criteria_to_messages_impl(
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
-    app_handle: &AppHandle,
+    progress: &dyn ProgressReporter,
 ) -> Result<Vec<AppliedSmartLabelMatch>, String> {
     if rules.is_empty() || messages.is_empty() {
         return Ok(Vec::new());
@@ -378,7 +382,7 @@ pub(crate) async fn smart_labels_apply_criteria_to_messages_impl(
         body_store,
         inline_images,
         search,
-        app_handle,
+        progress,
     };
     let ops = &*ops;
     let ctx = &ctx;

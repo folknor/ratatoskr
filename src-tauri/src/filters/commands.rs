@@ -5,6 +5,8 @@ use std::collections::HashMap;
 use futures::stream::{self, StreamExt};
 use tauri::{AppHandle, State};
 
+use crate::progress::{ProgressReporter, TauriProgressReporter};
+
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
 use crate::gmail::client::GmailState;
@@ -60,7 +62,7 @@ pub(crate) async fn filters_apply_to_new_message_ids_impl(
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
-    app_handle: &AppHandle,
+    progress: &dyn ProgressReporter,
 ) -> Result<(), String> {
     if message_ids.is_empty() {
         return Ok(());
@@ -89,7 +91,7 @@ pub(crate) async fn filters_apply_to_new_message_ids_impl(
         body_store,
         inline_images,
         search,
-        app_handle,
+        progress,
     )
     .await
 }
@@ -108,6 +110,7 @@ pub async fn filters_apply_to_new_message_ids(
     search: State<'_, SearchState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
+    let reporter = TauriProgressReporter::from_ref(&app_handle);
     filters_apply_to_new_message_ids_impl(
         &account_id,
         &get_provider_type(&db, &account_id).await?,
@@ -119,7 +122,7 @@ pub async fn filters_apply_to_new_message_ids(
         &body_store,
         &inline_images,
         &search,
-        &app_handle,
+        &reporter,
     )
     .await
 }
@@ -269,7 +272,7 @@ pub(crate) async fn filters_apply_to_messages_impl(
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
-    app_handle: &AppHandle,
+    progress: &dyn ProgressReporter,
 ) -> Result<(), String> {
     if filters.is_empty() || messages.is_empty() {
         return Ok(());
@@ -299,7 +302,7 @@ pub(crate) async fn filters_apply_to_messages_impl(
         body_store,
         inline_images,
         search,
-        app_handle,
+        progress,
     };
     let ops = &*ops;
     let ctx = &ctx;

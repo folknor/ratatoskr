@@ -1,11 +1,7 @@
+pub use ratatoskr_core::sync::*;
+pub use ratatoskr_core::sync::{config, convert, folder_mapper, imap_delta, imap_initial, pipeline, types};
+
 pub mod commands;
-pub(crate) mod config;
-mod convert;
-mod folder_mapper;
-pub(crate) mod imap_delta;
-pub(crate) mod imap_initial;
-pub(crate) mod pipeline;
-pub(crate) mod types;
 
 use std::collections::HashSet;
 use std::sync::Mutex;

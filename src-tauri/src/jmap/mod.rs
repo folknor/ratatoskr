@@ -1,6 +1,3 @@
-pub mod client;
+pub use ratatoskr_core::jmap::*;
+
 pub mod commands;
-pub mod mailbox_mapper;
-pub mod ops;
-pub mod parse;
-pub mod sync;

@@ -1,2 +1,1 @@
-pub mod client;
-pub mod types;
+pub use ratatoskr_core::smtp::*;

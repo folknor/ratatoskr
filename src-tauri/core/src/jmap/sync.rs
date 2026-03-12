@@ -4,7 +4,7 @@ use jmap_client::core::query::QueryResponse;
 use jmap_client::email;
 use jmap_client::mailbox::Role;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use crate::progress::{self, ProgressReporter};
 
 use crate::attachment_cache::hash_bytes;
 use crate::body_store::{BodyStoreState, MessageBody};
@@ -48,7 +48,7 @@ struct SyncCtx<'a> {
     body_store: &'a BodyStoreState,
     inline_images: &'a InlineImageStoreState,
     search: &'a SearchState,
-    app_handle: &'a AppHandle,
+    progress: &'a dyn ProgressReporter,
 }
 
 // ---------------------------------------------------------------------------
@@ -65,7 +65,7 @@ pub async fn jmap_initial_sync(
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
-    app_handle: &AppHandle,
+    progress: &dyn ProgressReporter,
 ) -> Result<(), String> {
     let ctx = SyncCtx {
         client,
@@ -74,7 +74,7 @@ pub async fn jmap_initial_sync(
         body_store,
         inline_images,
         search,
-        app_handle,
+        progress,
     };
 
     emit_progress(&ctx, "mailboxes", 0, 1);
@@ -179,7 +179,7 @@ pub async fn jmap_delta_sync(
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
-    app_handle: &AppHandle,
+    progress: &dyn ProgressReporter,
 ) -> Result<JmapSyncResult, String> {
     let ctx = SyncCtx {
         client,
@@ -188,7 +188,7 @@ pub async fn jmap_delta_sync(
         body_store,
         inline_images,
         search,
-        app_handle,
+        progress,
     };
 
     // Load current sync states
@@ -1215,7 +1215,7 @@ async fn get_email_state(client: &JmapClient) -> Result<String, String> {
 // ---------------------------------------------------------------------------
 
 /// Fetch all mailboxes using the builder pattern (no filter = all mailboxes).
-pub(super) async fn fetch_all_mailboxes(
+pub async fn fetch_all_mailboxes(
     client: &JmapClient,
 ) -> Result<Vec<jmap_client::mailbox::Mailbox<jmap_client::Get>>, String> {
     let mut request = client.inner().build();
@@ -1234,23 +1234,19 @@ pub(super) async fn fetch_all_mailboxes(
 }
 
 fn emit_progress(ctx: &SyncCtx<'_>, phase: &str, current: u64, total: u64) {
-    if let Err(err) = ctx.app_handle.emit(
+    progress::emit_event(
+        ctx.progress,
         "jmap-sync-progress",
-        JmapSyncProgress {
+        &JmapSyncProgress {
             account_id: ctx.account_id.to_string(),
             phase: phase.to_string(),
             current,
             total,
         },
-    ) {
-        log::warn!(
-            "Failed to emit JMAP sync progress for {}: {err}",
-            ctx.account_id
-        );
-    }
+    );
 }
 
-pub(crate) fn role_to_str(role: &jmap_client::mailbox::Role) -> &'static str {
+pub fn role_to_str(role: &jmap_client::mailbox::Role) -> &'static str {
     use jmap_client::mailbox::Role;
     match role {
         Role::Inbox => "inbox",

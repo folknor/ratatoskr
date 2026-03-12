@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
 
 use crate::body_store::{BodyStoreState, MessageBody};
 use crate::db::DbState;
 use crate::inline_image_store::{InlineImage, InlineImageStoreState};
+use crate::progress::{self, ProgressReporter};
 use crate::provider::types::{ProviderCtx, SyncResult};
 use crate::search::{SearchDocument, SearchState};
 
@@ -39,7 +39,7 @@ struct SyncCtx<'a> {
     body_store: &'a BodyStoreState,
     inline_images: &'a InlineImageStoreState,
     search: &'a SearchState,
-    app_handle: &'a AppHandle,
+    progress: &'a dyn ProgressReporter,
 }
 
 // ---------------------------------------------------------------------------
@@ -59,7 +59,7 @@ pub(crate) async fn graph_initial_sync(
         body_store: ctx.body_store,
         inline_images: ctx.inline_images,
         search: ctx.search,
-        app_handle: ctx.app_handle,
+        progress: ctx.progress,
     };
 
     // Phase 1: Sync folders → labels → build folder map
@@ -180,7 +180,7 @@ pub(crate) async fn graph_delta_sync(
         body_store: ctx.body_store,
         inline_images: ctx.inline_images,
         search: ctx.search,
-        app_handle: ctx.app_handle,
+        progress: ctx.progress,
     };
 
     let cycle = client.increment_sync_cycle();
@@ -1328,9 +1328,10 @@ fn emit_progress(
     total_folders: u64,
     messages_processed: u64,
 ) {
-    if let Err(err) = sctx.app_handle.emit(
+    progress::emit_event(
+        sctx.progress,
         "graph-sync-progress",
-        GraphSyncProgress {
+        &GraphSyncProgress {
             account_id: sctx.account_id.to_string(),
             phase: phase.to_string(),
             current: if phase == "messages" {
@@ -1341,10 +1342,5 @@ fn emit_progress(
             total: total_folders,
             folder: (!folder_name.is_empty()).then(|| folder_name.to_string()),
         },
-    ) {
-        log::warn!(
-            "Failed to emit Graph sync progress for {}: {err}",
-            sctx.account_id
-        );
-    }
+    );
 }

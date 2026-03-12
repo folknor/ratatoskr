@@ -22,6 +22,7 @@ mod imap;
 mod inline_image_store;
 mod jmap;
 mod oauth;
+mod progress;
 mod provider;
 mod search;
 mod smart_labels;

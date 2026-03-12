@@ -5,23 +5,27 @@
 > The project is moving from Tauri (Rust+TS) to a pure Rust stack using iced for UI.
 > These tasks prepare the Rust codebase for that transition.
 
-### Phase 1: Extract Portable Core
+### Phase 1: Extract Portable Core ✅
 
-- [ ] **Extract `ratatoskr_core` crate** — Pull `db/`, `provider/`, `sync/pipeline.rs`, `search/`, `discovery/`, `body_store/`, `inline_image_store/`, `filters/`, `threading/` into a standalone library crate with zero framework dependencies.
+- [x] **Introduce `ProgressReporter` trait** — Replaced all `app.emit()` calls with trait-based `&dyn ProgressReporter`. `TauriProgressReporter` wraps `AppHandle::emit()` at command boundaries. Core trait lives in `ratatoskr-core::progress`.
 
-- [ ] **Introduce `ProgressReporter` trait** — Replace all `app.emit()` calls in sync modules (`gmail/sync.rs`, `jmap/sync.rs`, `graph/sync.rs`, `provider/commands.rs`, `sync/imap_initial.rs`) with a trait-based callback/channel pattern. Currently 5+ files import `tauri::Emitter` just for progress events.
+- [x] **Decouple `attachment_cache.rs`** — Changed from `&AppHandle` to `&Path` (app_data_dir). Made `DbState`, `BodyStoreState`, `InlineImageStoreState`, `SearchState`, `AppCryptoState` all `Clone`.
 
-- [ ] **Replace `State<T>` with `Arc<T>`** — ~70 occurrences of Tauri's `State<T>` macro across command handlers. Convert to `&T` or `Arc<T>` parameters for framework-agnostic state access.
+- [x] **Extract `ratatoskr-core` crate** — 21.6k lines of framework-agnostic logic: all 4 providers (gmail, jmap, graph, imap), sync engine, threading, filters, smart labels, categorization, discovery, email actions, SMTP, DB core, body/inline-image/search stores, attachment cache, `ProgressReporter` trait. App crate (16.5k lines) retains Tauri command wrappers and `TauriProgressReporter`. App `mod.rs` files re-export from core via `pub use ratatoskr_core::{module}::*;`.
 
-- [ ] **Create `ProviderStateRegistry` trait** — `provider/router.rs:get_ops()` currently requires all 4 provider state objects (`GmailState`, `JmapState`, `GraphState`, encryption key) as separate parameters. Replace with a single registry trait for cleaner inversion of control.
+### Phase 1.5: Remaining Decoupling
+
+- [ ] **`AppState` aggregate (plan Step 5)** — Create a single `AppState` struct bundling all shared state. Eliminates `app.state::<T>()` calls in spawned tasks (`sync/commands.rs`). Wrap `GmailState`/`JmapState`/`GraphState` in `Arc` for `Clone`.
+
+- [ ] **`ProviderRegistry` trait (plan Step 6)** — Abstract `get_ops()` behind a trait to collapse `resolve_provider_command()` from ~10 params to ~3-4.
+
+- [ ] **Split `db/queries.rs` commands from logic** — 28 `#[tauri::command]` functions mix query logic with Tauri wrappers. Extract pure `fn(conn, ...)` bodies to core, keep thin wrappers in app. Same for `db/queries_extra.rs` (~130 commands) and `db/pending_ops.rs`.
 
 ### Phase 2: Decouple Tauri-Specific Concerns
 
-- [ ] **Extract `BackgroundSyncWorker`** — `sync/commands.rs:47-82` spawns a long-lived tokio task that captures `AppHandle` and calls `app_handle.state()` inside the loop. Refactor to take `Arc` references upfront instead.
-
 - [ ] **Abstract OAuth flow** — `account_commands.rs` mixes OAuth server setup (via `tauri_plugin_opener`) with account management. Extract pure OAuth exchange logic into a standalone module with an `OAuthProvider` trait. The callback port (`17248`) and HTTP listener are already portable.
 
-- [ ] **Split `lib.rs` (715 lines)** — Currently a monolith handling Tauri Builder setup, tray menus, window decorations, plugin init, and 107 `#[tauri::command]` registrations. Extract state initialization into `fn init_app_state()`, tray into its own module, and convert command handlers to regular async fns.
+- [ ] **Split `lib.rs` (715 lines)** — Currently a monolith handling Tauri Builder setup, tray menus, window decorations, plugin init, and 107 `#[tauri::command]` registrations. Extract state initialization into `fn init_app_state()`, tray into its own module.
 
 - [ ] **Abstract window/tray management** — `lib.rs:586-680` has platform-specific tray handling. `lib.rs:34-69` handles window show/hide/focus. Extract behind platform traits for iced equivalents.
 

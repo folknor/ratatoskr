@@ -6,7 +6,7 @@ use xxhash_rust::xxh3::xxh3_64;
 use super::types::*;
 
 /// Detect special-use attribute from IMAP folder attributes and name heuristics.
-pub(crate) fn detect_special_use(name: &async_imap::types::Name) -> Option<String> {
+pub fn detect_special_use(name: &async_imap::types::Name) -> Option<String> {
     use async_imap::types::NameAttribute;
 
     // Check RFC 6154 attributes first
@@ -47,7 +47,7 @@ pub(crate) fn detect_special_use(name: &async_imap::types::Name) -> Option<Strin
 /// `internal_date`: optional INTERNALDATE timestamp from the IMAP server,
 /// used as fallback when the Date header cannot be parsed.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
-pub(crate) fn parse_message(
+pub fn parse_message(
     parser: &MessageParser,
     raw: &[u8],
     uid: u32,
@@ -239,7 +239,7 @@ pub(crate) fn parse_message(
 /// IMAP section numbering: children of a multipart container are numbered 1, 2, 3, ...
 /// Nested multipart children get dot-separated paths (e.g., "1.2" for the 2nd child of the 1st child).
 /// For non-multipart messages, the single body is section "1".
-pub(crate) fn build_imap_section_map(
+pub fn build_imap_section_map(
     message: &mail_parser::Message,
 ) -> std::collections::HashMap<usize, String> {
     use mail_parser::PartType;

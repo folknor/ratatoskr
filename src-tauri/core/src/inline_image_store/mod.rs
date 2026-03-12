@@ -1,0 +1,327 @@
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+
+use rusqlite::{Connection, params};
+
+/// Max size for inline images stored in the SQLite blob store (256 KB).
+/// Anything larger falls through to the file-based cache.
+pub const MAX_INLINE_SIZE: usize = 256 * 1024;
+/// Cap the inline image store so signature/logo blobs do not grow forever.
+pub const MAX_INLINE_STORE_BYTES: u64 = 128 * 1024 * 1024;
+
+/// Separate SQLite database for small inline images (signatures, logos).
+///
+/// Content-addressed by xxh3 hash. Identical blobs across messages share
+/// one row. No compression — images are already compressed (PNG, JPEG, GIF).
+#[derive(Clone)]
+pub struct InlineImageStoreState {
+    conn: Arc<Mutex<Connection>>,
+}
+
+/// A stored inline image blob.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InlineImage {
+    pub content_hash: String,
+    pub data: Vec<u8>,
+    pub mime_type: String,
+}
+
+impl InlineImageStoreState {
+    /// Open (or create) the inline image store database.
+    pub fn init(app_data_dir: &Path) -> Result<Self, String> {
+        std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create app dir: {e}"))?;
+
+        let db_path = app_data_dir.join("inline_images.db");
+        let conn =
+            Connection::open(&db_path).map_err(|e| format!("open inline image store: {e}"))?;
+
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA temp_store = MEMORY;
+             PRAGMA mmap_size = 268435456;
+             PRAGMA cache_size = -16000;
+             PRAGMA busy_timeout = 15000;",
+        )
+        .map_err(|e| format!("inline image store pragmas: {e}"))?;
+
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS inline_images (
+                content_hash TEXT PRIMARY KEY,
+                data         BLOB NOT NULL,
+                mime_type    TEXT NOT NULL,
+                size         INTEGER NOT NULL,
+                created_at   INTEGER NOT NULL DEFAULT (unixepoch())
+             );",
+        )
+        .map_err(|e| format!("create inline_images table: {e}"))?;
+
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
+    }
+
+    /// Run a closure on the connection via `spawn_blocking`.
+    pub async fn with_conn<F, T>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&Connection) -> Result<T, String> + Send + 'static,
+        T: Send + 'static,
+    {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            let conn = conn
+                .lock()
+                .map_err(|e| format!("inline image store lock poisoned: {e}"))?;
+            f(&conn)
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
+    }
+
+    /// Store an inline image by content hash. No-op if hash already exists.
+    pub async fn put(
+        &self,
+        content_hash: String,
+        data: Vec<u8>,
+        mime_type: String,
+    ) -> Result<(), String> {
+        self.with_conn(move |conn| {
+            #[allow(clippy::cast_possible_wrap)]
+            let size = data.len() as i64;
+            conn.execute(
+                "INSERT OR IGNORE INTO inline_images (content_hash, data, mime_type, size)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![content_hash, data, mime_type, size],
+            )
+            .map_err(|e| format!("inline image put: {e}"))?;
+            Ok(())
+        })
+        .await?;
+        self.prune_to_size(MAX_INLINE_STORE_BYTES).await?;
+        Ok(())
+    }
+
+    /// Store a batch of inline images in a single transaction.
+    pub async fn put_batch(&self, images: Vec<InlineImage>) -> Result<(), String> {
+        if images.is_empty() {
+            return Ok(());
+        }
+
+        self.with_conn(move |conn| {
+            let tx = conn
+                .unchecked_transaction()
+                .map_err(|e| format!("inline image tx: {e}"))?;
+
+            {
+                let mut stmt = tx
+                    .prepare(
+                        "INSERT OR IGNORE INTO inline_images (content_hash, data, mime_type, size)
+                         VALUES (?1, ?2, ?3, ?4)",
+                    )
+                    .map_err(|e| format!("prepare batch put: {e}"))?;
+
+                for img in &images {
+                    #[allow(clippy::cast_possible_wrap)]
+                    let size = img.data.len() as i64;
+                    stmt.execute(params![img.content_hash, img.data, img.mime_type, size])
+                        .map_err(|e| format!("batch put row: {e}"))?;
+                }
+            }
+
+            tx.commit()
+                .map_err(|e| format!("inline image commit: {e}"))?;
+            Ok(())
+        })
+        .await?;
+        self.prune_to_size(MAX_INLINE_STORE_BYTES).await?;
+        Ok(())
+    }
+
+    /// Retrieve an inline image by content hash.
+    pub async fn get(&self, content_hash: String) -> Result<Option<(Vec<u8>, String)>, String> {
+        self.with_conn(move |conn| {
+            let result = conn
+                .query_row(
+                    "SELECT data, mime_type FROM inline_images WHERE content_hash = ?1",
+                    params![content_hash],
+                    |row| {
+                        let data: Vec<u8> = row.get(0)?;
+                        let mime_type: String = row.get(1)?;
+                        Ok((data, mime_type))
+                    },
+                )
+                .ok();
+            Ok(result)
+        })
+        .await
+    }
+
+    /// Get storage statistics.
+    pub async fn stats(&self) -> Result<InlineImageStats, String> {
+        self.with_conn(|conn| {
+            let count: i64 = conn
+                .query_row("SELECT COUNT(*) FROM inline_images", [], |row| row.get(0))
+                .map_err(|e| format!("count: {e}"))?;
+            let total_bytes: i64 = conn
+                .query_row(
+                    "SELECT COALESCE(SUM(size), 0) FROM inline_images",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|e| format!("total size: {e}"))?;
+
+            #[allow(clippy::cast_sign_loss)]
+            Ok(InlineImageStats {
+                image_count: count as u64,
+                total_bytes: total_bytes as u64,
+            })
+        })
+        .await
+    }
+
+    /// Clear all stored inline images.
+    pub async fn clear(&self) -> Result<u64, String> {
+        self.with_conn(|conn| {
+            let deleted = conn
+                .execute("DELETE FROM inline_images", [])
+                .map_err(|e| format!("clear inline images: {e}"))?;
+            #[allow(clippy::cast_sign_loss)]
+            Ok(deleted as u64)
+        })
+        .await
+    }
+
+    /// Delete specific inline image blobs by content hash.
+    pub async fn delete_hashes(&self, content_hashes: Vec<String>) -> Result<u64, String> {
+        if content_hashes.is_empty() {
+            return Ok(0);
+        }
+
+        self.with_conn(move |conn| {
+            let tx = conn
+                .unchecked_transaction()
+                .map_err(|e| format!("inline image delete tx: {e}"))?;
+            let mut deleted = 0u64;
+
+            for hash in content_hashes {
+                let count = tx
+                    .execute(
+                        "DELETE FROM inline_images WHERE content_hash = ?1",
+                        params![hash],
+                    )
+                    .map_err(|e| format!("delete inline image: {e}"))?;
+                #[allow(clippy::cast_sign_loss)]
+                {
+                    deleted += count as u64;
+                }
+            }
+
+            tx.commit()
+                .map_err(|e| format!("inline image delete commit: {e}"))?;
+            Ok(deleted)
+        })
+        .await
+    }
+
+    /// Evict oldest inline image blobs until the store fits under `max_bytes`.
+    pub async fn prune_to_size(&self, max_bytes: u64) -> Result<u64, String> {
+        self.with_conn(move |conn| {
+            let total_bytes: i64 = conn
+                .query_row(
+                    "SELECT COALESCE(SUM(size), 0) FROM inline_images",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|e| format!("inline image total size: {e}"))?;
+
+            #[allow(clippy::cast_possible_wrap)]
+            let max_bytes_i64 = max_bytes as i64;
+            if total_bytes <= max_bytes_i64 {
+                return Ok(0);
+            }
+
+            let excess = total_bytes - max_bytes_i64;
+            let mut stmt = conn
+                .prepare(
+                    "SELECT content_hash, size
+                     FROM inline_images
+                     ORDER BY created_at ASC
+                     LIMIT 512",
+                )
+                .map_err(|e| format!("prepare inline image prune query: {e}"))?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })
+                .map_err(|e| format!("query inline images for pruning: {e}"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("collect inline images for pruning: {e}"))?;
+
+            let tx = conn
+                .unchecked_transaction()
+                .map_err(|e| format!("inline image prune tx: {e}"))?;
+            let mut freed = 0i64;
+            let mut deleted = 0u64;
+            for (content_hash, size) in rows {
+                if freed >= excess {
+                    break;
+                }
+                let count = tx
+                    .execute(
+                        "DELETE FROM inline_images WHERE content_hash = ?1",
+                        params![content_hash],
+                    )
+                    .map_err(|e| format!("delete inline image during prune: {e}"))?;
+                freed += size.max(0);
+                #[allow(clippy::cast_sign_loss)]
+                {
+                    deleted += count as u64;
+                }
+            }
+            tx.commit()
+                .map_err(|e| format!("inline image prune commit: {e}"))?;
+            Ok(deleted)
+        })
+        .await
+    }
+
+    /// Delete inline image blobs that are no longer referenced by any attachment row.
+    pub async fn delete_unreferenced(
+        &self,
+        db: &crate::db::DbState,
+        content_hashes: Vec<String>,
+    ) -> Result<u64, String> {
+        if content_hashes.is_empty() {
+            return Ok(0);
+        }
+
+        let mut orphaned = Vec::new();
+        for content_hash in content_hashes {
+            let hash_for_query = content_hash.clone();
+            let remaining_refs: i64 = db
+                .with_conn(move |conn| {
+                    conn.query_row(
+                        "SELECT COUNT(*) FROM attachments
+                         WHERE is_inline = 1 AND content_hash = ?1",
+                        params![hash_for_query],
+                        |row| row.get(0),
+                    )
+                    .map_err(|e| format!("count inline image refs: {e}"))
+                })
+                .await?;
+            if remaining_refs == 0 {
+                orphaned.push(content_hash);
+            }
+        }
+
+        self.delete_hashes(orphaned).await
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InlineImageStats {
+    pub image_count: u64,
+    pub total_bytes: u64,
+}

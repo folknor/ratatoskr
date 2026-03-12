@@ -4681,6 +4681,7 @@ dependencies = [
  "mail-parser",
  "native-tls",
  "quick-xml 0.37.5",
+ "ratatoskr-core",
  "reqwest 0.13.2",
  "rusqlite",
  "serde",
@@ -4709,6 +4710,40 @@ dependencies = [
  "utf7-imap",
  "uuid",
  "windows",
+ "xxhash-rust",
+ "zstd",
+]
+
+[[package]]
+name = "ratatoskr-core"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "async-imap",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "futures",
+ "getrandom 0.2.17",
+ "hickory-resolver",
+ "jmap-client",
+ "lettre",
+ "log",
+ "mail-parser",
+ "native-tls",
+ "quick-xml 0.37.5",
+ "reqwest 0.13.2",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "socket2 0.6.3",
+ "tantivy",
+ "tokio",
+ "tokio-native-tls",
+ "urlencoding",
+ "utf7-imap",
+ "uuid",
  "xxhash-rust",
  "zstd",
 ]

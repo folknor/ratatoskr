@@ -1,8 +1,9 @@
 #![allow(clippy::let_underscore_must_use)]
 
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::body_store::BodyStoreState;
+use crate::progress::{self, TauriProgressReporter};
 use crate::calendar_commands::calendar_sync_account_impl;
 use crate::categorization::AiCategorizationCandidate;
 use crate::categorization::commands::categorize_threads_with_ai_impl;
@@ -198,6 +199,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
         return;
     }
 
+    let reporter = TauriProgressReporter::from_ref(app);
     match provider_sync_auto_for_provider(
         account_id,
         &sync_config.provider,
@@ -210,7 +212,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
         &body_store,
         &inline_images,
         &search,
-        app,
+        &reporter,
     )
     .await
     {
@@ -277,7 +279,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 &body_store,
                 &inline_images,
                 &search,
-                app,
+                &reporter,
             )
             .await
             {
@@ -296,7 +298,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                 &body_store,
                 &inline_images,
                 &search,
-                app,
+                &reporter,
             )
             .await
             {
@@ -366,6 +368,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                     let inline_images: tauri::State<'_, InlineImageStoreState> = app_handle.state();
                     let search: tauri::State<'_, SearchState> = app_handle.state();
 
+                    let reporter = TauriProgressReporter::from_ref(&app_handle);
                     if let Err(error) = smart_labels_classify_and_apply_remainder_impl(
                         &account_id_for_ai,
                         &provider_for_ai,
@@ -380,7 +383,7 @@ async fn run_sync_account(app: &AppHandle, account_id: &str) {
                         &body_store,
                         &inline_images,
                         &search,
-                        &app_handle,
+                        &reporter,
                     )
                     .await
                     {
@@ -695,15 +698,13 @@ async fn load_post_sync_messages(
 }
 
 fn emit_sync_status(app: &AppHandle, event: SyncStatusEvent) {
-    if let Err(error) = app.emit("sync-status", &event) {
-        log::warn!("Failed to emit sync-status event: {error}");
-    }
+    let reporter = TauriProgressReporter::from_ref(app);
+    progress::emit_event(&reporter, "sync-status", &event);
 }
 
 fn emit_sync_notifications(app: &AppHandle, event: SyncNotificationsEvent) {
-    if let Err(error) = app.emit("sync-notifications", &event) {
-        log::warn!("Failed to emit sync-notifications event: {error}");
-    }
+    let reporter = TauriProgressReporter::from_ref(app);
+    progress::emit_event(&reporter, "sync-notifications", &event);
 }
 
 /// Run initial IMAP sync for an account.
@@ -751,8 +752,9 @@ pub async fn sync_imap_initial(
 
         let days = days_back.unwrap_or(actual_days_back);
 
+        let reporter = TauriProgressReporter::from_ref(&app);
         super::imap_initial::imap_initial_sync(
-            &app,
+            &reporter,
             &db,
             &body_store,
             &inline_images,
@@ -812,8 +814,9 @@ pub async fn sync_imap_delta(
 
         let days = days_back.unwrap_or(actual_days_back);
 
+        let reporter = TauriProgressReporter::from_ref(&app);
         let result = super::imap_delta::imap_delta_sync(
-            &app,
+            &reporter,
             &db,
             &body_store,
             &inline_images,
@@ -853,7 +856,7 @@ pub async fn sync_imap_delta(
                 }
 
                 return super::imap_initial::imap_initial_sync(
-                    &app,
+                    &reporter,
                     &db,
                     &body_store,
                     &inline_images,

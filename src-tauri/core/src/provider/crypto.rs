@@ -3,6 +3,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use std::path::Path;
 
 /// App-wide encryption key state shared by commands that don't own provider clients.
+#[derive(Clone)]
 pub struct AppCryptoState {
     encryption_key: [u8; 32],
 }

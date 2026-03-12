@@ -3,7 +3,7 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::db::DbState;
@@ -455,7 +455,11 @@ pub async fn account_delete(
             })
             .await?;
         if remaining_refs == 0 {
-            let _ = attachment_cache::remove_cached_relative(&app_handle, &local_path);
+            let app_data_dir = app_handle
+                .path()
+                .app_data_dir()
+                .map_err(|e| format!("resolve app data dir: {e}"))?;
+            let _ = attachment_cache::remove_cached_relative(&app_data_dir, &local_path);
         }
     }
 

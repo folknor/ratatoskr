@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use tauri::{AppHandle, Emitter};
+use crate::progress::{self, ProgressReporter};
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
@@ -50,10 +50,8 @@ fn compute_since_date(days_back: i64) -> String {
     date.format("%d-%b-%Y").to_string()
 }
 
-fn emit_progress(app: &AppHandle, event: &SyncProgressEvent) {
-    if let Err(e) = app.emit("imap-sync-progress", event) {
-        log::warn!("Failed to emit sync progress: {e}");
-    }
+fn emit_progress(progress: &dyn ProgressReporter, event: &SyncProgressEvent) {
+    progress::emit_event(progress, "imap-sync-progress", event);
 }
 
 // ---------------------------------------------------------------------------
@@ -64,7 +62,7 @@ fn emit_progress(app: &AppHandle, event: &SyncProgressEvent) {
 #[allow(clippy::cognitive_complexity, clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
 pub async fn imap_initial_sync(
-    app: &AppHandle,
+    progress: &dyn ProgressReporter,
     db: &DbState,
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
@@ -75,7 +73,7 @@ pub async fn imap_initial_sync(
 ) -> Result<ImapSyncResult, String> {
     // Phase 1: List and sync folders
     emit_progress(
-        app,
+        progress,
         &SyncProgressEvent {
             account_id: account_id.to_string(),
             phase: "folders".to_string(),
@@ -112,7 +110,7 @@ pub async fn imap_initial_sync(
     );
 
     emit_progress(
-        app,
+        progress,
         &SyncProgressEvent {
             account_id: account_id.to_string(),
             phase: "folders".to_string(),
@@ -167,7 +165,7 @@ pub async fn imap_initial_sync(
         let folder_mapping = map_folder_to_label(folder);
 
         match sync_single_folder(
-            app,
+            progress,
             db,
             body_store,
             inline_images,
@@ -210,7 +208,7 @@ pub async fn imap_initial_sync(
 
     // Phase 3: Threading
     emit_progress(
-        app,
+        progress,
         &SyncProgressEvent {
             account_id: account_id.to_string(),
             phase: "threading".to_string(),
@@ -229,7 +227,7 @@ pub async fn imap_initial_sync(
 
     // Phase 4: Store threads
     emit_progress(
-        app,
+        progress,
         &SyncProgressEvent {
             account_id: account_id.to_string(),
             phase: "storing_threads".to_string(),
@@ -258,7 +256,7 @@ pub async fn imap_initial_sync(
     };
 
     emit_progress(
-        app,
+        progress,
         &SyncProgressEvent {
             account_id: account_id.to_string(),
             phase: "storing_threads".to_string(),
@@ -295,7 +293,7 @@ pub async fn imap_initial_sync(
         .collect();
 
     emit_progress(
-        app,
+        progress,
         &SyncProgressEvent {
             account_id: account_id.to_string(),
             phase: "done".to_string(),
@@ -327,7 +325,7 @@ pub async fn imap_initial_sync(
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::cognitive_complexity, clippy::too_many_lines)]
 async fn sync_single_folder(
-    app: &AppHandle,
+    progress: &dyn ProgressReporter,
     db: &DbState,
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
@@ -443,7 +441,7 @@ async fn sync_single_folder(
         }
 
         emit_progress(
-            app,
+            progress,
             &SyncProgressEvent {
                 account_id: account_id.to_string(),
                 phase: "messages".to_string(),

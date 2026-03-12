@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use tauri::AppHandle;
+use crate::progress::ProgressReporter;
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
@@ -43,7 +43,7 @@ fn compute_since_date(days_back: i64) -> String {
 /// Run delta IMAP sync for an account.
 #[allow(clippy::too_many_lines)]
 pub async fn imap_delta_sync(
-    _app: &AppHandle,
+    _progress: &dyn ProgressReporter,
     db: &DbState,
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
