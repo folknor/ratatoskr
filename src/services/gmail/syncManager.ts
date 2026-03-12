@@ -11,7 +11,7 @@ import { listAccountBasicInfo } from "@/services/accounts/basicInfo";
 /** Map IMAP sync phases to the SyncProgress phases the UI understands. */
 function mapImapPhase(
   phase: string,
-) : "labels" | "threads" | "messages" | "fallback" | "done" {
+): "labels" | "threads" | "messages" | "fallback" | "done" {
   if (phase === "folders") return "labels";
   if (phase === "threading" || phase === "storing_threads") return "threads";
   if (phase === "messages") return "messages";
@@ -20,7 +20,9 @@ function mapImapPhase(
   return phase as "labels" | "threads" | "messages" | "fallback" | "done";
 }
 
-function mapProviderSyncProgress(payload: Record<string, unknown>): SyncProgress {
+function mapProviderSyncProgress(
+  payload: Record<string, unknown>,
+): SyncProgress {
   return {
     phase: mapImapPhase(String(payload.phase ?? "")),
     current: Number(payload.current ?? 0),
@@ -141,7 +143,9 @@ async function partitionSyncAccountIds(accountIds: string[]): Promise<{
   }
 
   const allAccounts = await listAccountBasicInfo();
-  const accountMap = new Map(allAccounts.map((account) => [account.id, account]));
+  const accountMap = new Map(
+    allAccounts.map((account) => [account.id, account]),
+  );
   const caldavIds: string[] = [];
   const emailIds: string[] = [];
 

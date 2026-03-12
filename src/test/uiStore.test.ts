@@ -200,5 +200,4 @@ describe("uiStore", () => {
     expect(setSetting).toHaveBeenCalledWith("inbox_view_mode", "unified");
     expect(useUIStore.getState().inboxViewMode).toBe("unified");
   });
-
 });

@@ -1,16 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const {
-  eventHandlers,
-  mockInvoke,
-  mockListen,
-  mockListAccountBasicInfo,
-} = vi.hoisted(() => ({
-  eventHandlers: new Map<string, (event: { payload: unknown }) => void>(),
-  mockInvoke: vi.fn(),
-  mockListen: vi.fn(),
-  mockListAccountBasicInfo: vi.fn(),
-}));
+const { eventHandlers, mockInvoke, mockListen, mockListAccountBasicInfo } =
+  vi.hoisted(() => ({
+    eventHandlers: new Map<string, (event: { payload: unknown }) => void>(),
+    mockInvoke: vi.fn(),
+    mockListen: vi.fn(),
+    mockListAccountBasicInfo: vi.fn(),
+  }));
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: mockInvoke,
@@ -118,9 +114,13 @@ describe("syncManager", () => {
 
     await forceFullSync(["acc-1", "acc-2"]);
 
-    expect(mockInvoke).toHaveBeenNthCalledWith(1, "provider_prepare_full_sync", {
-      accountIds: ["acc-1", "acc-2"],
-    });
+    expect(mockInvoke).toHaveBeenNthCalledWith(
+      1,
+      "provider_prepare_full_sync",
+      {
+        accountIds: ["acc-1", "acc-2"],
+      },
+    );
     expect(mockInvoke).toHaveBeenNthCalledWith(2, "sync_run_accounts", {
       accountIds: ["acc-1", "acc-2"],
     });

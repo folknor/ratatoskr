@@ -146,8 +146,8 @@ export abstract class RustBackedProviderBase implements EmailProvider {
       type: folder.folderType === "system" ? "system" : "user",
       specialUse: folder.specialUse ?? null,
       delimiter: folder.delimiter ?? "/",
-      messageCount: "messageCount" in folder ? folder.messageCount ?? 0 : 0,
-      unreadCount: "unreadCount" in folder ? folder.unreadCount ?? 0 : 0,
+      messageCount: "messageCount" in folder ? (folder.messageCount ?? 0) : 0,
+      unreadCount: "unreadCount" in folder ? (folder.unreadCount ?? 0) : 0,
     };
   }
 }

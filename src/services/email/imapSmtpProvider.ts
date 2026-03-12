@@ -1,7 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ParsedMessage } from "../gmail/messageParser";
 import { RustBackedProviderBase } from "./rustBackedProvider";
-import type { EmailFolder, ProviderFolderListResult, SyncResult } from "./types";
+import type {
+  EmailFolder,
+  ProviderFolderListResult,
+  SyncResult,
+} from "./types";
 
 interface ProviderAttachment {
   data: string;

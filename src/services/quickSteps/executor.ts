@@ -30,9 +30,7 @@ async function executeSingleAction(
 ): Promise<void> {
   switch (action.type) {
     case "archive":
-      await Promise.all(
-        threadIds.map((id) => archiveThread(accountId, id)),
-      );
+      await Promise.all(threadIds.map((id) => archiveThread(accountId, id)));
       break;
 
     case "trash":
@@ -52,9 +50,7 @@ async function executeSingleAction(
       break;
 
     case "star":
-      await Promise.all(
-        threadIds.map((id) => starThread(accountId, id, true)),
-      );
+      await Promise.all(threadIds.map((id) => starThread(accountId, id, true)));
       break;
 
     case "unstar":
@@ -161,9 +157,7 @@ async function executeSingleAction(
       break;
 
     case "spam":
-      await Promise.all(
-        threadIds.map((id) => spamThread(accountId, id, true)),
-      );
+      await Promise.all(threadIds.map((id) => spamThread(accountId, id, true)));
       break;
 
     case "notSpam":

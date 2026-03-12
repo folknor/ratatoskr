@@ -12,11 +12,11 @@ vi.mock("@/services/oauth/oauthFlow", () => ({
   refreshProviderToken: vi.fn(),
 }));
 
-import { createMockDbAccount } from "@/test/mocks";
 import { updateAccountTokens } from "@/services/db/accounts";
 import { refreshProviderToken } from "@/services/oauth/oauthFlow";
 import { ensureFreshToken } from "@/services/oauth/oauthTokenManager";
 import { getOAuthProvider } from "@/services/oauth/providers";
+import { createMockDbAccount } from "@/test/mocks";
 
 const oauthOverrides = {
   email: "user@outlook.com",

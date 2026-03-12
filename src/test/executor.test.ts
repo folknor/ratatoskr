@@ -58,9 +58,9 @@ vi.mock("@/stores/threadStore", () => {
 });
 
 import { setThreadCategory } from "@/services/db/threadCategories";
+import { executeQuickStep } from "@/services/quickSteps/executor";
 import { useThreadStore } from "@/stores/threadStore";
 import { createMockQuickStep } from "@/test/mocks";
-import { executeQuickStep } from "@/services/quickSteps/executor";
 
 describe("executeQuickStep", () => {
   beforeEach(() => {

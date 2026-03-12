@@ -49,12 +49,6 @@ vi.mock("@/router/navigate", () => ({
 import { invoke } from "@tauri-apps/api/core";
 import { getSelectedThreadId, navigateToThread } from "@/router/navigate";
 import { enqueuePendingOperation } from "@/services/db/pendingOperations";
-import { useSyncStateStore } from "@/stores/syncStateStore";
-import { useThreadStore } from "@/stores/threadStore";
-import {
-  createMockThreadStoreState,
-  createMockUIStoreState,
-} from "@/test/mocks";
 import {
   archiveThread,
   executeEmailAction,
@@ -65,6 +59,12 @@ import {
   starThread,
   trashThread,
 } from "@/services/emailActions";
+import { useSyncStateStore } from "@/stores/syncStateStore";
+import { useThreadStore } from "@/stores/threadStore";
+import {
+  createMockThreadStoreState,
+  createMockUIStoreState,
+} from "@/test/mocks";
 
 const mockUpdateThread = vi.fn();
 const mockRemoveThread = vi.fn();

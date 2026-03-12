@@ -88,9 +88,9 @@ export function AddImapAccount({
   const [detectedAuthMethods, setDetectedAuthMethods] = useState<AuthMode[]>([
     "password",
   ]);
-  const [detectedProviderName, setDetectedProviderName] = useState<string | null>(
-    null,
-  );
+  const [detectedProviderName, setDetectedProviderName] = useState<
+    string | null
+  >(null);
   const [detectedHelpUrl, setDetectedHelpUrl] = useState<string | null>(null);
   const [detectedOAuthProviderId, setDetectedOAuthProviderId] = useState<
     string | null

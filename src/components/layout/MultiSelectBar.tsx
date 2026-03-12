@@ -59,9 +59,7 @@ export function MultiSelectBar({
     const ids = [...selectedThreadIds];
     removeThreads(ids);
     try {
-      await Promise.all(
-        ids.map((id) => archiveThread(activeAccountId, id)),
-      );
+      await Promise.all(ids.map((id) => archiveThread(activeAccountId, id)));
     } catch (err) {
       console.error("Bulk archive failed:", err);
     }

@@ -183,8 +183,7 @@ export function AddCalDavAccount({
 
             {needsAppPassword === true && (
               <div className="p-3 bg-warning/10 border border-warning/30 rounded text-xs text-text-secondary">
-                This provider requires an app-specific password. Generate one in
-                {" "}
+                This provider requires an app-specific password. Generate one in{" "}
                 {helpUrl ? (
                   <a
                     href={helpUrl}

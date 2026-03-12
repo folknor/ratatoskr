@@ -35,9 +35,6 @@ vi.mock("@/services/backgroundCheckers", () => ({
   })),
 }));
 
-import { useSyncStateStore } from "@/stores/syncStateStore";
-import { createMockUIStoreState } from "@/test/mocks";
-import { classifyError } from "@/utils/networkErrors";
 import {
   compactQueue,
   deleteOperation,
@@ -51,6 +48,9 @@ import {
   stopQueueProcessor,
   triggerQueueFlush,
 } from "@/services/queue/queueProcessor";
+import { useSyncStateStore } from "@/stores/syncStateStore";
+import { createMockUIStoreState } from "@/test/mocks";
+import { classifyError } from "@/utils/networkErrors";
 
 const mockSetPendingOpsCount = vi.fn();
 
