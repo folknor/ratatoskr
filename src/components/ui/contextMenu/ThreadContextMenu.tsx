@@ -22,7 +22,7 @@ import { useEffect, useState } from "react";
 import {
   addThreadLabel,
   archiveThread,
-  deleteDraftsForThread,
+  deleteDraftThread,
   deleteThread as deleteThreadFromDb,
   executeQuickStep,
   markThreadRead,
@@ -170,12 +170,7 @@ export function ThreadContextMenu({
         await permanentDeleteThread(activeAccountId, id);
         await deleteThreadFromDb(activeAccountId, id);
       } else if (isDraftsView) {
-        useThreadStore.getState().removeThread(id);
-        try {
-          await deleteDraftsForThread(activeAccountId, id);
-        } catch (err) {
-          console.error("Failed to delete drafts:", err);
-        }
+        await deleteDraftThread(activeAccountId, id);
       } else {
         await trashThread(activeAccountId, id);
       }

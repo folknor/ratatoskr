@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import {
   archiveThread,
-  deleteDraftsForThread,
+  deleteDraftThread,
   deleteThread as deleteThreadFromDb,
   muteThread,
   permanentDeleteThread,
@@ -377,12 +377,7 @@ async function executeAction(actionId: string): Promise<void> {
             await permanentDeleteThread(activeAccountId, id);
             await deleteThreadFromDb(activeAccountId, id);
           } else if (isDraftsView) {
-            try {
-              await deleteDraftsForThread(activeAccountId, id);
-              useThreadStore.getState().removeThread(id);
-            } catch (err) {
-              console.error("Draft delete failed:", err);
-            }
+            await deleteDraftThread(activeAccountId, id);
           } else {
             await trashThread(activeAccountId, id);
           }

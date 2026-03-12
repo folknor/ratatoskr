@@ -9,6 +9,7 @@ export {
   archiveThread,
   createDraft,
   deleteDraft,
+  deleteDraftThread,
   markThreadRead,
   moveThread,
   muteThread,

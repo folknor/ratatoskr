@@ -28,7 +28,7 @@ import { Button } from "@/components/ui/Button";
 import {
   archiveThread,
   cancelFollowUpForThread,
-  deleteDraftsForThread,
+  deleteDraftThread,
   deleteThread as deleteThreadFromDb,
   insertFollowUpReminder,
   markThreadRead,
@@ -46,7 +46,6 @@ import { type DbMessage, getFollowUpForThread } from "@/core/queries";
 import { useActiveLabel } from "@/hooks/useRouteNavigation";
 import { useAccountStore } from "@/stores/accountStore";
 import type { Thread } from "@/stores/threadStore";
-import { useThreadStore } from "@/stores/threadStore";
 import { FollowUpDialog } from "./FollowUpDialog";
 import { SnoozeDialog } from "./SnoozeDialog";
 
@@ -88,7 +87,7 @@ export function ActionBar({
   onToggleTaskSidebar,
 }: ActionBarProps): React.ReactNode {
   const { t } = useTranslation("email");
-  const removeThread = useThreadStore((s) => s.removeThread);
+
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
   const activeLabel = useActiveLabel();
   const [showSnooze, setShowSnooze] = useState(false);
@@ -128,12 +127,7 @@ export function ActionBar({
       await permanentDeleteThread(activeAccountId, thread.id);
       await deleteThreadFromDb(activeAccountId, thread.id);
     } else if (isDraftsView) {
-      removeThread(thread.id);
-      try {
-        await deleteDraftsForThread(activeAccountId, thread.id);
-      } catch (err) {
-        console.error("Failed to delete drafts:", err);
-      }
+      await deleteDraftThread(activeAccountId, thread.id);
     } else {
       await trashThread(activeAccountId, thread.id);
     }
@@ -327,7 +321,9 @@ export function ActionBar({
           }
           onClick={handleToggleStar}
           title={
-            thread.isStarred ? t("unstarThreadShortcut") : t("starThreadShortcut")
+            thread.isStarred
+              ? t("unstarThreadShortcut")
+              : t("starThreadShortcut")
           }
           className={thread.isStarred ? "text-warning" : ""}
         />

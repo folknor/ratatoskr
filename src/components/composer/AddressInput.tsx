@@ -8,6 +8,7 @@ interface AddressInputProps {
   addresses: string[];
   onChange: (addresses: string[]) => void;
   placeholder?: string;
+  autoFocus?: boolean;
 }
 
 export function AddressInput({
@@ -15,6 +16,7 @@ export function AddressInput({
   addresses,
   onChange,
   placeholder,
+  autoFocus = false,
 }: AddressInputProps): React.ReactNode {
   const { t } = useTranslation("composer");
   const resolvedPlaceholder = placeholder ?? t("addRecipients");
@@ -34,6 +36,12 @@ export function AddressInput({
     },
     [],
   );
+
+  useEffect(() => {
+    if (autoFocus) {
+      inputRef.current?.focus();
+    }
+  }, [autoFocus]);
 
   const handleInputChange = useCallback((value: string): void => {
     setInputValue(value);
@@ -74,11 +82,14 @@ export function AddressInput({
 
   const handleKeyDown = (e: React.KeyboardEvent): void => {
     if (e.key === "Enter" || e.key === "Tab" || e.key === ",") {
-      e.preventDefault();
       if (showSuggestions && selectedIdx >= 0) {
+        e.preventDefault();
         addAddress(suggestions[selectedIdx]?.email ?? "");
       } else if (inputValue.trim()) {
+        e.preventDefault();
         addAddress(inputValue);
+      } else if (e.key !== "Tab") {
+        e.preventDefault();
       }
     } else if (e.key === "Backspace" && !inputValue && addresses.length > 0) {
       removeAddress(addresses.length - 1);

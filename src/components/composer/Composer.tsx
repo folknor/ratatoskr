@@ -145,6 +145,20 @@ export function Composer(): React.ReactNode {
     };
   }, [isOpen, activeAccountId]);
 
+  // Handle Ctrl/Cmd+Enter to send
+  const handleSendRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    if (!isOpen) return;
+    const handler = (e: KeyboardEvent): void => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        handleSendRef.current();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [isOpen]);
+
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     dragCounterRef.current++;
@@ -280,6 +294,7 @@ export function Composer(): React.ReactNode {
     state.setUndoSendTimer(timer);
     closeComposer();
   }, [activeAccountId, activeAccount, closeComposer, getFullHtml]);
+  handleSendRef.current = handleSend;
 
   const handleSchedule = useCallback(
     async (scheduledAt: number) => {
@@ -490,7 +505,12 @@ export function Composer(): React.ReactNode {
               // biome-ignore lint/nursery/useExplicitType: inline callback
               onChange={(alias) => setFromEmail(alias.email)}
             />
-            <AddressInput label="To" addresses={to} onChange={setTo} />
+            <AddressInput
+              label="To"
+              addresses={to}
+              onChange={setTo}
+              autoFocus={mode === "new"}
+            />
             {showCcBcc ? (
               <>
                 <AddressInput label="Cc" addresses={cc} onChange={setCc} />
