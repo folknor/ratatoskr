@@ -1,7 +1,7 @@
 # Contacts & Groups
 
 **Tier**: 1 — Blocks switching from Outlook
-**Status**: ⚠️ **Partial** — Local contact DB with frequency ranking, avatars, notes. `seen_addresses` auto-collected during sync with direction-weighted ranking (Phase 1). FTS5 prefix search on contacts with email-aware tokenizer, two-tier ranking (explicit > observed), LIKE fallback for seen_addresses (Phase 2). Exchange personal contacts sync via Graph `/me/contacts` with per-folder delta sync, 410 fallback, reference-counted deletes, `display_name_overridden` flag for user edit protection (Phase 3). Compose autocomplete returns explicit contacts, server-synced contacts, and observed addresses. Gravatar integration, contact sidebar with stats/colleagues/shared files. **Missing**: Google People API sync, distribution list/group resolution, contact photos from server.
+**Status**: ⚠️ **Partial** — Local contact DB with frequency ranking, avatars, notes. `seen_addresses` auto-collected during sync with direction-weighted ranking (Phase 1). FTS5 prefix search on contacts with email-aware tokenizer, two-tier ranking (explicit > observed), LIKE fallback for seen_addresses (Phase 2). Exchange personal contacts sync via Graph `/me/contacts` with per-folder delta sync, 410 fallback, reference-counted deletes, `display_name_overridden` flag for user edit protection (Phase 3). Local contact groups with nested group support, DFS expansion with cycle detection, compose autocomplete integration with union suggestion model, group management UI in Settings (Phase 4). Compose autocomplete returns explicit contacts, server-synced contacts, observed addresses, and contact groups. Gravatar integration, contact sidebar with stats/colleagues/shared files. **Missing**: Google People API sync, Exchange group resolution, contact photos from server.
 
 ---
 
@@ -40,9 +40,9 @@ Add `contacts_fts` (FTS5) with email-aware tokenizer (`tokenchars='@._-'`), pref
 
 Graph `/me/contacts` with per-folder delta sync via `graph_contact_delta_tokens`. Source tracking (`source` column: `'user'` vs `'graph'`), `display_name_overridden` flag to protect user edits from sync overwrites. Reference-counted deletes via `graph_contact_map` — shared emails only removed when no mappings remain. 410 Gone fallback to full sync with stale contact pruning. Syncs every 20th mail cycle. Top-level contact folders only (nested folders deferred).
 
-### Phase 4 — Local groups + compose expansion
+### Phase 4 — Local groups + compose expansion ✅
 
-Local contact groups in SQLite (name + address list). DFS expansion with cycle detection via visited set. Compose UI integration. Useful immediately for JMAP/IMAP users with no server-side groups.
+Local contact groups in SQLite (`contact_groups` + `contact_group_members` with `member_type` for nesting). DFS expansion with cycle detection via visited set. Compose autocomplete refactored to union suggestion model (`AutocompleteSuggestion` discriminated union) supporting both contacts and groups. Groups expand to individual emails on selection. Group management UI in Settings → People tab (create, rename, delete, add/remove email and nested-group members). Delete cleanup removes inbound nested-group references to prevent dangling pointers.
 
 ### Phase 5 — Google People API sync
 

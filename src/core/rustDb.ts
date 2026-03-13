@@ -10,6 +10,10 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type { DbBundleRule } from "@/services/db/bundleRules";
 import type {
+  DbContactGroup,
+  DbContactGroupMember,
+} from "@/services/db/contactGroups";
+import type {
   ContactAttachment,
   ContactStats,
   DbContact,
@@ -175,6 +179,80 @@ export async function getContactByEmail(
   email: string,
 ): Promise<DbContact | null> {
   return invoke<DbContact | null>("db_get_contact_by_email", { email });
+}
+
+// ── Contact Groups ──────────────────────────────────────────────────
+
+export async function createContactGroup(
+  id: string,
+  name: string,
+): Promise<void> {
+  return invoke<void>("db_create_contact_group", { id, name });
+}
+
+export async function updateContactGroup(
+  id: string,
+  name: string,
+): Promise<void> {
+  return invoke<void>("db_update_contact_group", { id, name });
+}
+
+export async function deleteContactGroup(id: string): Promise<void> {
+  return invoke<void>("db_delete_contact_group", { id });
+}
+
+export async function getAllContactGroups(): Promise<DbContactGroup[]> {
+  return invoke<DbContactGroup[]>("db_get_all_contact_groups");
+}
+
+export async function getContactGroup(id: string): Promise<DbContactGroup> {
+  return invoke<DbContactGroup>("db_get_contact_group", { id });
+}
+
+export async function getContactGroupMembers(
+  groupId: string,
+): Promise<DbContactGroupMember[]> {
+  return invoke<DbContactGroupMember[]>("db_get_contact_group_members", {
+    groupId,
+  });
+}
+
+export async function addContactGroupMember(
+  groupId: string,
+  memberType: "email" | "group",
+  memberValue: string,
+): Promise<void> {
+  return invoke<void>("db_add_contact_group_member", {
+    groupId,
+    memberType,
+    memberValue,
+  });
+}
+
+export async function removeContactGroupMember(
+  groupId: string,
+  memberType: "email" | "group",
+  memberValue: string,
+): Promise<void> {
+  return invoke<void>("db_remove_contact_group_member", {
+    groupId,
+    memberType,
+    memberValue,
+  });
+}
+
+export async function searchContactGroups(
+  query: string,
+  limit: number = 10,
+): Promise<DbContactGroup[]> {
+  return invoke<DbContactGroup[]>("db_search_contact_groups", {
+    query,
+    limit,
+  });
+}
+
+export async function expandContactGroup(groupId: string): Promise<string[]> {
+  return invoke<string[]>("db_expand_contact_group", { groupId });
 }
 
 // ── Thread mutations ────────────────────────────────────────────────

@@ -7,7 +7,8 @@ use super::DbState;
 use super::types::{
     AttachmentSender, AttachmentWithContext, BackfillRow, BundleSummary, BundleSummarySingle,
     CachedAttachmentRow, ContactAttachmentRow, ContactStats, DbAccount, DbAllowlistEntry,
-    DbBundleRule, DbCalendar, DbCalendarEvent, DbContact, DbFilterRule, DbFolderSyncState,
+    DbBundleRule, DbCalendar, DbCalendarEvent, DbContact, DbContactGroup, DbContactGroupMember,
+    DbFilterRule, DbFolderSyncState,
     DbFollowUpReminder, DbLocalDraft, DbNotificationVip, DbPhishingAllowlistEntry, DbQuickStep,
     DbScheduledEmail, DbSendAsAlias, DbSignature, DbSmartFolder, DbSmartLabelRule, DbTask,
     DbTaskTag, DbTemplate, DbWritingStyleProfile, ImapMessageRow, LabelSortOrderItem, RecentThread,
@@ -101,6 +102,113 @@ pub async fn db_get_attachments_from_contact(
 ) -> Result<Vec<ContactAttachmentRow>, String> {
     ratatoskr_core::db::queries_extra::db_get_attachments_from_contact(&state, email, limit).await
 }
+
+// ── Contact Groups ──────────────────────────────────────────
+
+#[tauri::command]
+pub async fn db_create_contact_group(
+    state: State<'_, DbState>,
+    id: String,
+    name: String,
+) -> Result<(), String> {
+    ratatoskr_core::db::queries_extra::db_create_contact_group(&state, id, name).await
+}
+
+#[tauri::command]
+pub async fn db_update_contact_group(
+    state: State<'_, DbState>,
+    id: String,
+    name: String,
+) -> Result<(), String> {
+    ratatoskr_core::db::queries_extra::db_update_contact_group(&state, id, name).await
+}
+
+#[tauri::command]
+pub async fn db_delete_contact_group(
+    state: State<'_, DbState>,
+    id: String,
+) -> Result<(), String> {
+    ratatoskr_core::db::queries_extra::db_delete_contact_group(&state, id).await
+}
+
+#[tauri::command]
+pub async fn db_get_all_contact_groups(
+    state: State<'_, DbState>,
+) -> Result<Vec<DbContactGroup>, String> {
+    ratatoskr_core::db::queries_extra::db_get_all_contact_groups(&state).await
+}
+
+#[tauri::command]
+pub async fn db_get_contact_group(
+    state: State<'_, DbState>,
+    id: String,
+) -> Result<DbContactGroup, String> {
+    ratatoskr_core::db::queries_extra::db_get_contact_group(&state, id).await
+}
+
+#[tauri::command]
+pub async fn db_get_contact_group_members(
+    state: State<'_, DbState>,
+    group_id: String,
+) -> Result<Vec<DbContactGroupMember>, String> {
+    ratatoskr_core::db::queries_extra::db_get_contact_group_members(&state, group_id).await
+}
+
+#[tauri::command]
+pub async fn db_add_contact_group_member(
+    state: State<'_, DbState>,
+    group_id: String,
+    member_type: String,
+    member_value: String,
+) -> Result<(), String> {
+    ratatoskr_core::db::queries_extra::db_add_contact_group_member(
+        &state,
+        group_id,
+        member_type,
+        member_value,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn db_remove_contact_group_member(
+    state: State<'_, DbState>,
+    group_id: String,
+    member_type: String,
+    member_value: String,
+) -> Result<(), String> {
+    ratatoskr_core::db::queries_extra::db_remove_contact_group_member(
+        &state,
+        group_id,
+        member_type,
+        member_value,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn db_search_contact_groups(
+    state: State<'_, DbState>,
+    query: String,
+    limit: Option<i64>,
+) -> Result<Vec<DbContactGroup>, String> {
+    ratatoskr_core::db::queries_extra::db_search_contact_groups(
+        &state,
+        query,
+        limit.unwrap_or(10),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn db_expand_contact_group(
+    state: State<'_, DbState>,
+    group_id: String,
+) -> Result<Vec<String>, String> {
+    ratatoskr_core::db::queries_extra::db_expand_contact_group(&state, group_id).await
+}
+
+// ── Filters ─────────────────────────────────────────────────
 
 #[tauri::command]
 pub async fn db_get_filters_for_account(

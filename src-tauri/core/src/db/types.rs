@@ -186,6 +186,23 @@ pub struct RecentThread {
     pub last_message_at: Option<String>,
 }
 
+// ── Contact Group ───────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbContactGroup {
+    pub id: String,
+    pub name: String,
+    pub member_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbContactGroupMember {
+    pub member_type: String,
+    pub member_value: String,
+}
+
 // ── Filter Rule ─────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

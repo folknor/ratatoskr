@@ -16,6 +16,8 @@
   "noAccount": "No account",
   "scheduleSend": "Schedule send",
   "addRecipients": "Add recipients...",
+  "groupMembers_one": "{{count}} member",
+  "groupMembers_other": "{{count}} members",
   "boldTitle": "Bold (Ctrl+B)",
   "italicTitle": "Italic (Ctrl+I)",
   "underlineTitle": "Underline (Ctrl+U)",

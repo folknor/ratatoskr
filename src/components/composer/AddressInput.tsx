@@ -1,7 +1,18 @@
+import { Users } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { type DbContact, searchContacts } from "@/core/queries";
+import {
+  type DbContact,
+  type DbContactGroup,
+  expandContactGroup,
+  searchContactGroups,
+  searchContacts,
+} from "@/core/queries";
+
+type AutocompleteSuggestion =
+  | { kind: "contact"; data: DbContact }
+  | { kind: "group"; data: DbContactGroup };
 
 interface AddressInputProps {
   label: string;
@@ -21,7 +32,7 @@ export function AddressInput({
   const { t } = useTranslation("composer");
   const resolvedPlaceholder = placeholder ?? t("addRecipients");
   const [inputValue, setInputValue] = useState("");
-  const [suggestions, setSuggestions] = useState<DbContact[]>([]);
+  const [suggestions, setSuggestions] = useState<AutocompleteSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedIdx, setSelectedIdx] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -48,9 +59,20 @@ export function AddressInput({
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     if (value.length >= 2) {
       searchTimerRef.current = setTimeout(async () => {
-        const results = await searchContacts(value, 5);
-        setSuggestions(results);
-        setShowSuggestions(results.length > 0);
+        const [contacts, groups] = await Promise.all([
+          searchContacts(value, 5),
+          searchContactGroups(value, 3),
+        ]);
+        const merged: AutocompleteSuggestion[] = [
+          ...groups.map(
+            (g): AutocompleteSuggestion => ({ kind: "group", data: g }),
+          ),
+          ...contacts.map(
+            (c): AutocompleteSuggestion => ({ kind: "contact", data: c }),
+          ),
+        ];
+        setSuggestions(merged);
+        setShowSuggestions(merged.length > 0);
         setSelectedIdx(-1);
       }, 200);
     } else {
@@ -73,6 +95,34 @@ export function AddressInput({
     [addresses, onChange],
   );
 
+  const addAddresses = useCallback(
+    (newAddresses: string[]) => {
+      const unique = newAddresses.filter(
+        (a) => a.trim() && !addresses.includes(a),
+      );
+      if (unique.length > 0) {
+        onChange([...addresses, ...unique]);
+      }
+      setInputValue("");
+      setSuggestions([]);
+      setShowSuggestions(false);
+      inputRef.current?.focus();
+    },
+    [addresses, onChange],
+  );
+
+  const selectSuggestion = useCallback(
+    async (suggestion: AutocompleteSuggestion): Promise<void> => {
+      if (suggestion.kind === "contact") {
+        addAddress(suggestion.data.email);
+      } else {
+        const emails = await expandContactGroup(suggestion.data.id);
+        addAddresses(emails);
+      }
+    },
+    [addAddress, addAddresses],
+  );
+
   const removeAddress = useCallback(
     (index: number) => {
       onChange(addresses.filter((_, i) => i !== index));
@@ -84,7 +134,10 @@ export function AddressInput({
     if (e.key === "Enter" || e.key === "Tab" || e.key === ",") {
       if (showSuggestions && selectedIdx >= 0) {
         e.preventDefault();
-        addAddress(suggestions[selectedIdx]?.email ?? "");
+        const selected = suggestions[selectedIdx];
+        if (selected) {
+          void selectSuggestion(selected);
+        }
       } else if (inputValue.trim()) {
         e.preventDefault();
         addAddress(inputValue);
@@ -149,27 +202,62 @@ export function AddressInput({
         {/* Autocomplete dropdown */}
         {showSuggestions === true && (
           <div className="absolute top-full left-0 mt-1 w-full bg-bg-primary border border-border-primary rounded-md shadow-lg z-50 py-1">
-            {suggestions.map((contact, i) => (
-              <button
-                type="button"
-                key={contact.id}
-                // biome-ignore lint/nursery/useExplicitType: inline callback
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => addAddress(contact.email)}
-                className={`w-full text-left px-3 py-1.5 text-sm hover:bg-bg-hover ${
-                  i === selectedIdx ? "bg-bg-hover" : ""
-                }`}
-              >
-                <div className="text-text-primary">
-                  {contact.display_name ?? contact.email}
-                </div>
-                {contact.display_name != null && (
-                  <div className="text-xs text-text-tertiary">
-                    {contact.email}
+            {suggestions.map((suggestion, i) => {
+              const key =
+                suggestion.kind === "group"
+                  ? `group-${suggestion.data.id}`
+                  : `contact-${suggestion.data.id}`;
+
+              if (suggestion.kind === "group") {
+                return (
+                  <button
+                    type="button"
+                    key={key}
+                    // biome-ignore lint/nursery/useExplicitType: inline callback
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => void selectSuggestion(suggestion)}
+                    className={`w-full text-left px-3 py-1.5 text-sm hover:bg-bg-hover ${
+                      i === selectedIdx ? "bg-bg-hover" : ""
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 text-text-primary">
+                      <Users
+                        size={13}
+                        className="text-text-tertiary shrink-0"
+                      />
+                      {suggestion.data.name}
+                    </div>
+                    <div className="text-xs text-text-tertiary ml-[21px]">
+                      {t("groupMembers", {
+                        count: suggestion.data.member_count,
+                      })}
+                    </div>
+                  </button>
+                );
+              }
+
+              return (
+                <button
+                  type="button"
+                  key={key}
+                  // biome-ignore lint/nursery/useExplicitType: inline callback
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => void selectSuggestion(suggestion)}
+                  className={`w-full text-left px-3 py-1.5 text-sm hover:bg-bg-hover ${
+                    i === selectedIdx ? "bg-bg-hover" : ""
+                  }`}
+                >
+                  <div className="text-text-primary">
+                    {suggestion.data.display_name ?? suggestion.data.email}
                   </div>
-                )}
-              </button>
-            ))}
+                  {suggestion.data.display_name != null && (
+                    <div className="text-xs text-text-tertiary">
+                      {suggestion.data.email}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>

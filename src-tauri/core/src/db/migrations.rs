@@ -868,6 +868,25 @@ static MIGRATIONS: &[Migration] = &[
             );
         "#,
     },
+    Migration {
+        version: 34,
+        description: "Local contact groups with nested group support",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS contact_groups (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+            );
+
+            CREATE TABLE IF NOT EXISTS contact_group_members (
+                group_id TEXT NOT NULL REFERENCES contact_groups(id) ON DELETE CASCADE,
+                member_type TEXT NOT NULL CHECK (member_type IN ('email', 'group')),
+                member_value TEXT NOT NULL,
+                PRIMARY KEY (group_id, member_type, member_value)
+            );
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -1107,6 +1126,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))
             .expect("query");
-        assert_eq!(max_ver, 33);
+        assert_eq!(max_ver, 34);
     }
 }

@@ -395,6 +395,24 @@
     "cancel": "Cancel"
   },
 
+  "groups": "Contact Groups",
+  "groupsDescription": "Create groups of contacts for quick addressing. Groups can contain other groups.",
+
+  "groupEditor": {
+    "searchPlaceholder": "Search groups...",
+    "noGroups": "No groups yet",
+    "noMatching": "No matching groups",
+    "newGroup": "New Group",
+    "groupName": "Group name",
+    "editName": "Edit name",
+    "addMember": "Add member",
+    "deleteGroup": "Delete group",
+    "emailPlaceholder": "Email address",
+    "selectGroup": "Select a group...",
+    "group_one": "{{count}} group",
+    "group_other": "{{count}} groups"
+  },
+
   "contactEditor": {
     "searchPlaceholder": "Search contacts...",
     "noMatching": "No matching contacts",

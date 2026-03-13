@@ -20,6 +20,10 @@ export {
 export type { DbAttachment } from "@/services/db/attachments";
 export type { DbBundleRule } from "@/services/db/bundleRules";
 export type {
+  DbContactGroup,
+  DbContactGroupMember,
+} from "@/services/db/contactGroups";
+export type {
   ContactAttachment,
   ContactStats,
   DbContact,
@@ -63,6 +67,8 @@ export {
 // ── Body Store (Phase 2 — compressed body storage) ───────────
 // ── Search (tantivy full-text search — Phase 3) ─────────────
 export {
+  // Contact Groups
+  addContactGroupMember,
   // Image Allowlist
   addToAllowlist,
   // Notification VIPs
@@ -77,8 +83,10 @@ export {
   bodyStoreStats,
   // Follow-Up Reminders
   cancelFollowUpForThread,
+  createContactGroup,
   // Contacts (Phase 1.5)
   deleteContact,
+  deleteContactGroup,
   // Filters
   deleteFilter,
   // Quick Steps
@@ -90,7 +98,9 @@ export {
   deleteSmartLabelRule,
   // Threads / Messages / Labels / Settings (Phase 1)
   deleteThread,
+  expandContactGroup,
   getActiveFollowUpThreadIds,
+  getAllContactGroups,
   getAllContacts,
   getAllowlistedSenders,
   getAttachmentsFromContact,
@@ -100,6 +110,8 @@ export {
   getCategoriesForThreads,
   getCategoryUnreadCounts,
   getContactByEmail,
+  getContactGroup,
+  getContactGroupMembers,
   getContactStats,
   getContactsFromSameDomain,
   getEnabledQuickStepsForAccount,
@@ -131,13 +143,16 @@ export {
   isVipSender,
   type MessageBody,
   rebuildSearchIndex,
+  removeContactGroupMember,
   removeVipSender,
   type SearchDocument,
   type SearchResult,
+  searchContactGroups,
   searchContacts,
   searchMessages,
   setSetting,
   updateContact,
+  updateContactGroup,
   updateContactNotes,
   updateFilter,
   updateQuickStep,
