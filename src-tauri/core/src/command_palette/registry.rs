@@ -1,0 +1,580 @@
+use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
+use nucleo_matcher::{Config, Matcher, Utf32Str};
+
+use super::context::CommandContext;
+use super::descriptor::{CommandDescriptor, CommandMatch};
+use super::id::CommandId;
+
+pub struct CommandRegistry {
+    descriptors: Vec<CommandDescriptor>,
+}
+
+impl Default for CommandRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CommandRegistry {
+    pub fn new() -> Self {
+        let mut descriptors = Vec::with_capacity(55);
+        register_navigation(&mut descriptors);
+        register_email(&mut descriptors);
+        register_compose(&mut descriptors);
+        register_tasks(&mut descriptors);
+        register_view(&mut descriptors);
+        register_app(&mut descriptors);
+
+        #[cfg(debug_assertions)]
+        {
+            let mut seen = std::collections::HashSet::new();
+            for d in &descriptors {
+                assert!(seen.insert(d.id), "duplicate CommandId: {:?}", d.id);
+            }
+        }
+
+        Self { descriptors }
+    }
+
+    pub fn get(&self, id: CommandId) -> Option<&CommandDescriptor> {
+        self.descriptors.iter().find(|d| d.id == id)
+    }
+
+    pub fn command_for_key(&self, key: &str) -> Option<CommandId> {
+        self.descriptors
+            .iter()
+            .find(|d| d.keybinding == Some(key))
+            .map(|d| d.id)
+    }
+
+    pub fn query(&self, ctx: &CommandContext, query: &str) -> Vec<CommandMatch> {
+        if query.is_empty() {
+            return self.query_empty(ctx);
+        }
+        self.query_fuzzy(ctx, query)
+    }
+
+    fn query_empty(&self, ctx: &CommandContext) -> Vec<CommandMatch> {
+        let mut results: Vec<CommandMatch> = self
+            .descriptors
+            .iter()
+            .map(|d| CommandMatch {
+                id: d.id,
+                label: d.resolved_label(ctx),
+                category: d.category,
+                keybinding: d.keybinding,
+                available: (d.is_available)(ctx),
+                score: 0,
+                match_positions: vec![],
+            })
+            .collect();
+        results.sort_by(|a, b| a.category.cmp(b.category).then(a.label.cmp(b.label)));
+        results
+    }
+
+    fn query_fuzzy(&self, ctx: &CommandContext, query: &str) -> Vec<CommandMatch> {
+        let mut matcher = Matcher::new(Config::DEFAULT);
+        let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
+        let mut buf = Vec::new();
+        let mut indices = Vec::new();
+        let mut results = Vec::new();
+
+        for d in &self.descriptors {
+            let label = d.resolved_label(ctx);
+            let haystack_str = format!("{} > {}", d.category, label);
+            let haystack = Utf32Str::new(&haystack_str, &mut buf);
+
+            if let Some(score) = pattern.score(haystack, &mut matcher) {
+                indices.clear();
+                indices.resize(pattern.atoms.len() * 2, 0);
+                pattern.indices(haystack, &mut matcher, &mut indices);
+                indices.sort_unstable();
+                indices.dedup();
+
+                results.push(CommandMatch {
+                    id: d.id,
+                    label,
+                    category: d.category,
+                    keybinding: d.keybinding,
+                    available: (d.is_available)(ctx),
+                    score,
+                    match_positions: indices.clone(),
+                });
+            }
+        }
+
+        results.sort_by_key(|r| std::cmp::Reverse(r.score));
+        results
+    }
+}
+
+fn always(_ctx: &CommandContext) -> bool {
+    true
+}
+
+fn needs_selection(ctx: &CommandContext) -> bool {
+    ctx.has_selection()
+}
+
+fn needs_single_selection(ctx: &CommandContext) -> bool {
+    ctx.has_single_selection()
+}
+
+fn desc(
+    id: CommandId,
+    label: &'static str,
+    category: &'static str,
+    keybinding: Option<&'static str>,
+    is_available: fn(&CommandContext) -> bool,
+) -> CommandDescriptor {
+    CommandDescriptor {
+        id,
+        label,
+        category,
+        keybinding,
+        active_label: None,
+        is_available,
+        is_active: None,
+    }
+}
+
+fn toggle(
+    id: CommandId,
+    label: &'static str,
+    active_label: &'static str,
+    category: &'static str,
+    keybinding: Option<&'static str>,
+    is_available: fn(&CommandContext) -> bool,
+    is_active: fn(&CommandContext) -> bool,
+) -> CommandDescriptor {
+    CommandDescriptor {
+        id,
+        label,
+        category,
+        keybinding,
+        active_label: Some(active_label),
+        is_available,
+        is_active: Some(is_active),
+    }
+}
+
+fn register_navigation(out: &mut Vec<CommandDescriptor>) {
+    out.push(desc(CommandId::NavNext, "Next Thread", "Navigation", Some("j"), always));
+    out.push(desc(CommandId::NavPrev, "Previous Thread", "Navigation", Some("k"), always));
+    out.push(desc(CommandId::NavOpen, "Open Thread", "Navigation", Some("o"), needs_selection));
+    out.push(desc(
+        CommandId::NavMsgNext,
+        "Next Message",
+        "Navigation",
+        Some("ArrowDown"),
+        |ctx| ctx.active_message_id.is_some(),
+    ));
+    out.push(desc(
+        CommandId::NavMsgPrev,
+        "Previous Message",
+        "Navigation",
+        Some("ArrowUp"),
+        |ctx| ctx.active_message_id.is_some(),
+    ));
+    out.push(desc(CommandId::NavGoInbox, "Go to Inbox", "Navigation", Some("g then i"), always));
+    out.push(desc(CommandId::NavGoStarred, "Go to Starred", "Navigation", Some("g then s"), always));
+    out.push(desc(CommandId::NavGoSent, "Go to Sent", "Navigation", Some("g then t"), always));
+    out.push(desc(CommandId::NavGoDrafts, "Go to Drafts", "Navigation", Some("g then d"), always));
+    out.push(desc(CommandId::NavGoSnoozed, "Go to Snoozed", "Navigation", None, always));
+    out.push(desc(CommandId::NavGoTrash, "Go to Trash", "Navigation", None, always));
+    out.push(desc(CommandId::NavGoAllMail, "Go to All Mail", "Navigation", None, always));
+    register_navigation_categories(out);
+}
+
+fn register_navigation_categories(out: &mut Vec<CommandDescriptor>) {
+    out.push(desc(CommandId::NavGoPrimary, "Go to Primary", "Navigation", Some("g then p"), always));
+    out.push(desc(CommandId::NavGoUpdates, "Go to Updates", "Navigation", Some("g then u"), always));
+    out.push(desc(
+        CommandId::NavGoPromotions,
+        "Go to Promotions",
+        "Navigation",
+        Some("g then o"),
+        always,
+    ));
+    out.push(desc(CommandId::NavGoSocial, "Go to Social", "Navigation", Some("g then c"), always));
+    out.push(desc(
+        CommandId::NavGoNewsletters,
+        "Go to Newsletters",
+        "Navigation",
+        Some("g then n"),
+        always,
+    ));
+    out.push(desc(CommandId::NavGoTasks, "Go to Tasks", "Navigation", Some("g then k"), always));
+    out.push(desc(
+        CommandId::NavGoAttachments,
+        "Go to Attachments",
+        "Navigation",
+        Some("g then a"),
+        always,
+    ));
+    out.push(desc(
+        CommandId::NavEscape,
+        "Close / Go Back",
+        "Navigation",
+        Some("Escape"),
+        |ctx| ctx.has_selection() || ctx.composer_is_open,
+    ));
+}
+
+fn register_email(out: &mut Vec<CommandDescriptor>) {
+    out.push(desc(CommandId::EmailArchive, "Archive", "Email", Some("e"), needs_selection));
+    out.push(desc(
+        CommandId::EmailTrash,
+        "Move to Trash",
+        "Email",
+        Some("#"),
+        |ctx| ctx.has_selection() && ctx.thread_in_trash != Some(true),
+    ));
+    out.push(desc(
+        CommandId::EmailPermanentDelete,
+        "Permanently Delete",
+        "Email",
+        None,
+        |ctx| ctx.has_selection() && ctx.thread_in_trash == Some(true),
+    ));
+    out.push(toggle(
+        CommandId::EmailSpam,
+        "Report Spam",
+        "Not Spam",
+        "Email",
+        Some("!"),
+        needs_selection,
+        |ctx| ctx.thread_in_spam == Some(true),
+    ));
+    register_email_toggles(out);
+    register_email_other(out);
+}
+
+fn register_email_toggles(out: &mut Vec<CommandDescriptor>) {
+    out.push(toggle(
+        CommandId::EmailMarkRead,
+        "Mark as Read",
+        "Mark as Unread",
+        "Email",
+        None,
+        needs_selection,
+        |ctx| ctx.thread_is_read == Some(true),
+    ));
+    out.push(toggle(
+        CommandId::EmailStar,
+        "Star",
+        "Unstar",
+        "Email",
+        Some("s"),
+        needs_selection,
+        |ctx| ctx.thread_is_starred == Some(true),
+    ));
+    out.push(toggle(
+        CommandId::EmailPin,
+        "Pin",
+        "Unpin",
+        "Email",
+        Some("p"),
+        needs_selection,
+        |ctx| ctx.thread_is_pinned == Some(true),
+    ));
+    out.push(toggle(
+        CommandId::EmailMute,
+        "Mute",
+        "Unmute",
+        "Email",
+        Some("m"),
+        needs_selection,
+        |ctx| ctx.thread_is_muted == Some(true),
+    ));
+}
+
+fn register_email_other(out: &mut Vec<CommandDescriptor>) {
+    out.push(desc(
+        CommandId::EmailUnsubscribe,
+        "Unsubscribe",
+        "Email",
+        Some("u"),
+        needs_single_selection,
+    ));
+    out.push(desc(
+        CommandId::EmailMoveToFolder,
+        "Move to Folder",
+        "Email",
+        Some("v"),
+        needs_selection,
+    ));
+    out.push(desc(CommandId::EmailAddLabel, "Add Label", "Email", None, needs_selection));
+    out.push(desc(CommandId::EmailRemoveLabel, "Remove Label", "Email", None, needs_selection));
+    out.push(desc(CommandId::EmailSnooze, "Snooze", "Email", None, needs_selection));
+    out.push(desc(CommandId::EmailSelectAll, "Select All", "Email", Some("Ctrl+A"), always));
+    out.push(desc(
+        CommandId::EmailSelectFromHere,
+        "Select All From Here",
+        "Email",
+        Some("Ctrl+Shift+A"),
+        needs_selection,
+    ));
+}
+
+fn register_compose(out: &mut Vec<CommandDescriptor>) {
+    out.push(desc(CommandId::ComposeNew, "Compose New Email", "Compose", Some("c"), always));
+    out.push(desc(CommandId::ComposeReply, "Reply", "Compose", Some("r"), needs_selection));
+    out.push(desc(CommandId::ComposeReplyAll, "Reply All", "Compose", Some("a"), needs_selection));
+    out.push(desc(CommandId::ComposeForward, "Forward", "Compose", Some("f"), needs_selection));
+}
+
+fn register_tasks(out: &mut Vec<CommandDescriptor>) {
+    out.push(desc(CommandId::TaskCreate, "Create Task", "Tasks", None, always));
+    out.push(desc(
+        CommandId::TaskCreateFromEmail,
+        "Create Task from Email",
+        "Tasks",
+        Some("t"),
+        needs_selection,
+    ));
+    out.push(desc(CommandId::TaskTogglePanel, "Toggle Task Panel", "Tasks", None, always));
+    out.push(desc(CommandId::TaskViewAll, "View All Tasks", "Tasks", Some("g then k"), always));
+}
+
+fn register_view(out: &mut Vec<CommandDescriptor>) {
+    out.push(desc(
+        CommandId::ViewToggleSidebar,
+        "Toggle Sidebar",
+        "View",
+        Some("Ctrl+Shift+E"),
+        always,
+    ));
+    out.push(desc(CommandId::ViewSetThemeLight, "Light Theme", "View", None, always));
+    out.push(desc(CommandId::ViewSetThemeDark, "Dark Theme", "View", None, always));
+    out.push(desc(CommandId::ViewSetThemeSystem, "System Theme", "View", None, always));
+    out.push(desc(CommandId::ViewToggleTaskPanel, "Toggle Task Panel", "View", None, always));
+    register_view_reading_pane(out);
+}
+
+fn register_view_reading_pane(out: &mut Vec<CommandDescriptor>) {
+    out.push(desc(
+        CommandId::ViewReadingPaneRight,
+        "Reading Pane Right",
+        "View",
+        None,
+        always,
+    ));
+    out.push(desc(
+        CommandId::ViewReadingPaneBottom,
+        "Reading Pane Bottom",
+        "View",
+        None,
+        always,
+    ));
+    out.push(desc(
+        CommandId::ViewReadingPaneHidden,
+        "Reading Pane Hidden",
+        "View",
+        None,
+        always,
+    ));
+}
+
+fn register_app(out: &mut Vec<CommandDescriptor>) {
+    out.push(desc(CommandId::AppSearch, "Search", "App", Some("/"), always));
+    out.push(desc(CommandId::AppAskAi, "Ask AI", "App", Some("i"), always));
+    out.push(desc(CommandId::AppHelp, "Keyboard Shortcuts", "App", Some("?"), always));
+    out.push(desc(
+        CommandId::AppSyncFolder,
+        "Sync Current Folder",
+        "App",
+        Some("F5"),
+        |ctx| ctx.active_account_id.is_some(),
+    ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::command_palette::context::ViewType;
+
+    fn empty_context() -> CommandContext {
+        CommandContext {
+            selected_thread_ids: vec![],
+            active_message_id: None,
+            current_view: ViewType::Inbox,
+            current_label_id: None,
+            active_account_id: None,
+            provider_kind: None,
+            thread_is_read: None,
+            thread_is_starred: None,
+            thread_is_muted: None,
+            thread_is_pinned: None,
+            thread_is_draft: None,
+            thread_in_trash: None,
+            thread_in_spam: None,
+            is_online: true,
+            composer_is_open: false,
+        }
+    }
+
+    fn context_with_selection() -> CommandContext {
+        let mut ctx = empty_context();
+        ctx.selected_thread_ids = vec!["thread-1".to_string()];
+        ctx.active_account_id = Some("acc-1".to_string());
+        ctx
+    }
+
+    #[test]
+    fn registry_covers_all_command_ids() {
+        let registry = CommandRegistry::new();
+        for id in CommandId::all() {
+            assert!(
+                registry.get(*id).is_some(),
+                "CommandId::{id:?} not registered"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_query_returns_all_commands() {
+        let registry = CommandRegistry::new();
+        let ctx = empty_context();
+        let results = registry.query(&ctx, "");
+        assert_eq!(results.len(), CommandId::all().len());
+    }
+
+    #[test]
+    fn empty_query_sorted_by_category_then_label() {
+        let registry = CommandRegistry::new();
+        let ctx = empty_context();
+        let results = registry.query(&ctx, "");
+        for window in results.windows(2) {
+            let a = &window[0];
+            let b = &window[1];
+            assert!(
+                (a.category, a.label) <= (b.category, b.label),
+                "unsorted: {} > {} before {} > {}",
+                a.category,
+                a.label,
+                b.category,
+                b.label
+            );
+        }
+    }
+
+    #[test]
+    fn no_selection_marks_email_unavailable() {
+        let registry = CommandRegistry::new();
+        let ctx = empty_context();
+        let results = registry.query(&ctx, "");
+        let archive = results.iter().find(|r| r.id == CommandId::EmailArchive);
+        assert!(archive.is_some());
+        assert!(!archive.map_or(true, |a| a.available));
+    }
+
+    #[test]
+    fn selection_marks_email_available() {
+        let registry = CommandRegistry::new();
+        let ctx = context_with_selection();
+        let results = registry.query(&ctx, "");
+        let archive = results.iter().find(|r| r.id == CommandId::EmailArchive);
+        assert!(archive.map_or(false, |a| a.available));
+    }
+
+    #[test]
+    fn trash_vs_permanent_delete_exclusivity() {
+        let registry = CommandRegistry::new();
+
+        // Not in trash: Trash available, PermanentDelete not
+        let ctx = context_with_selection();
+        let results = registry.query(&ctx, "");
+        let trash = results.iter().find(|r| r.id == CommandId::EmailTrash);
+        let perm = results.iter().find(|r| r.id == CommandId::EmailPermanentDelete);
+        assert!(trash.map_or(false, |t| t.available));
+        assert!(!perm.map_or(true, |p| p.available));
+
+        // In trash: Trash not available, PermanentDelete available
+        let mut ctx2 = context_with_selection();
+        ctx2.thread_in_trash = Some(true);
+        let results2 = registry.query(&ctx2, "");
+        let trash2 = results2.iter().find(|r| r.id == CommandId::EmailTrash);
+        let perm2 = results2
+            .iter()
+            .find(|r| r.id == CommandId::EmailPermanentDelete);
+        assert!(!trash2.map_or(true, |t| t.available));
+        assert!(perm2.map_or(false, |p| p.available));
+    }
+
+    #[test]
+    fn fuzzy_search_finds_archive() {
+        let registry = CommandRegistry::new();
+        let ctx = empty_context();
+        let results = registry.query(&ctx, "arch");
+        let archive = results.iter().find(|r| r.id == CommandId::EmailArchive);
+        assert!(archive.is_some());
+        assert!(archive.map_or(false, |a| a.score > 0));
+    }
+
+    #[test]
+    fn fuzzy_first_letter_matching() {
+        let registry = CommandRegistry::new();
+        let ctx = empty_context();
+        let results = registry.query(&ctx, "ea");
+        let archive = results.iter().find(|r| r.id == CommandId::EmailArchive);
+        assert!(
+            archive.is_some(),
+            "\"ea\" should match \"Email > Archive\" via first-letter-of-each-word"
+        );
+    }
+
+    #[test]
+    fn fuzzy_results_sorted_by_score_desc() {
+        let registry = CommandRegistry::new();
+        let ctx = empty_context();
+        let results = registry.query(&ctx, "go");
+        for window in results.windows(2) {
+            assert!(
+                window[0].score >= window[1].score,
+                "results not sorted by score desc"
+            );
+        }
+    }
+
+    #[test]
+    fn toggle_label_resolves_based_on_state() {
+        let registry = CommandRegistry::new();
+
+        // Not starred → label is "Star"
+        let ctx = context_with_selection();
+        let results = registry.query(&ctx, "");
+        let star = results.iter().find(|r| r.id == CommandId::EmailStar);
+        assert_eq!(star.map(|s| s.label), Some("Star"));
+
+        // Starred → label is "Unstar"
+        let mut ctx2 = context_with_selection();
+        ctx2.thread_is_starred = Some(true);
+        let results2 = registry.query(&ctx2, "");
+        let star2 = results2.iter().find(|r| r.id == CommandId::EmailStar);
+        assert_eq!(star2.map(|s| s.label), Some("Unstar"));
+    }
+
+    #[test]
+    fn command_for_key_finds_binding() {
+        let registry = CommandRegistry::new();
+        assert_eq!(registry.command_for_key("e"), Some(CommandId::EmailArchive));
+        assert_eq!(registry.command_for_key("nonexistent"), None);
+    }
+
+    #[test]
+    fn sync_folder_needs_account() {
+        let registry = CommandRegistry::new();
+
+        let ctx = empty_context();
+        let results = registry.query(&ctx, "");
+        let sync = results.iter().find(|r| r.id == CommandId::AppSyncFolder);
+        assert!(!sync.map_or(true, |s| s.available));
+
+        let mut ctx2 = empty_context();
+        ctx2.active_account_id = Some("acc-1".to_string());
+        let results2 = registry.query(&ctx2, "");
+        let sync2 = results2.iter().find(|r| r.id == CommandId::AppSyncFolder);
+        assert!(sync2.map_or(false, |s| s.available));
+    }
+}

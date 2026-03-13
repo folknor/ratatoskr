@@ -1,6 +1,7 @@
 pub mod attachment_cache;
 pub mod body_store;
 pub mod categorization;
+pub mod command_palette;
 pub mod db;
 pub mod discovery;
 pub mod email_actions;

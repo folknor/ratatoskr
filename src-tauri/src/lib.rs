@@ -7,6 +7,7 @@ mod attachment_cache;
 mod body_store;
 mod calendar_commands;
 mod categorization;
+mod command_palette;
 mod commands;
 mod db;
 mod discovery;
@@ -470,6 +471,8 @@ pub fn run() {
             provider::commands::provider_create_folder,
             provider::commands::provider_rename_folder,
             provider::commands::provider_delete_folder,
+            // Command palette
+            command_palette::commands::command_palette_query,
             // Discovery
             discovery::commands::discover_email_config,
         ])

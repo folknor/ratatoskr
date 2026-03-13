@@ -23,6 +23,7 @@ pub fn init_app_state(app: &tauri::App) -> tauri::Result<()> {
         .map_err(|e| std::io::Error::other(format!("search init: {e}")))?;
     app.manage(search_state.clone());
 
+    app.manage(crate::command_palette::CommandRegistry::new());
     app.manage(crate::sync::SyncState::new());
     app.manage(crate::sync::SyncQueueState::new());
     app.manage(crate::sync::BackgroundSyncState::new());
