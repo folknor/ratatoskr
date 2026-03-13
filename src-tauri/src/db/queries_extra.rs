@@ -1377,27 +1377,41 @@ pub async fn db_clear_account_history_id(
 #[tauri::command]
 pub async fn db_delete_account(
     state: State<'_, DbState>,
+    body_store: State<'_, crate::body_store::BodyStoreState>,
     inline_images: State<'_, crate::inline_image_store::InlineImageStoreState>,
     id: String,
 ) -> Result<(), String> {
-    // Collect inline image hashes BEFORE cascade-deleting attachments
-    let hashes = {
+    // Collect message IDs and inline image hashes BEFORE cascade-deleting
+    let (message_ids, inline_hashes) = {
         let account_id = id.clone();
         state
             .with_conn(move |conn| {
-                ratatoskr_core::inline_image_store::collect_inline_hashes_for_account(
-                    conn,
-                    &account_id,
-                )
+                let mut stmt = conn
+                    .prepare("SELECT id FROM messages WHERE account_id = ?1")
+                    .map_err(|e| format!("prepare account message ids: {e}"))?;
+                let msg_ids = stmt
+                    .query_map(rusqlite::params![&account_id], |row| row.get::<_, String>(0))
+                    .map_err(|e| format!("query account message ids: {e}"))?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| format!("collect account message ids: {e}"))?;
+                let hashes =
+                    ratatoskr_core::inline_image_store::collect_inline_hashes_for_account(
+                        conn,
+                        &account_id,
+                    )?;
+                Ok((msg_ids, hashes))
             })
             .await?
     };
 
     ratatoskr_core::db::queries_extra::db_delete_account(&state, id).await?;
 
-    // Clean up orphaned inline images (hashes no longer referenced by any attachment)
-    if !hashes.is_empty() {
-        let _ = inline_images.delete_unreferenced(&state, hashes).await;
+    // Clean up orphaned bodies and inline images after cascade deletion
+    if !message_ids.is_empty() {
+        let _ = body_store.delete(message_ids).await;
+    }
+    if !inline_hashes.is_empty() {
+        let _ = inline_images.delete_unreferenced(&state, inline_hashes).await;
     }
     Ok(())
 }

@@ -723,17 +723,13 @@ async fn persist_messages(
         })
         .await?;
 
-    // 2. Body store writes
-    store_bodies(sctx.body_store, messages).await;
-
-    // 2.5. Inline image cache writes
-    store_inline_images(sctx.inline_images, messages).await;
-
-    // 3. Search index writes
-    index_messages(sctx.search, sctx.account_id, messages).await;
-
-    // 4. Seen addresses ingestion (fire-and-forget)
-    crate::seen_addresses::ingest_from_messages(sctx.db, sctx.account_id, messages).await;
+    // 2-5. Fire-and-forget post-DB writes — all independent, run concurrently.
+    tokio::join!(
+        store_bodies(sctx.body_store, messages),
+        store_inline_images(sctx.inline_images, messages),
+        index_messages(sctx.search, sctx.account_id, messages),
+        crate::seen_addresses::ingest_from_messages(sctx.db, sctx.account_id, messages),
+    );
 
     Ok(())
 }
@@ -810,11 +806,10 @@ async fn delete_messages(sctx: &SyncCtx<'_>, message_ids: &[String]) -> Result<(
         log::warn!("Failed to delete Graph bodies: {e}");
     }
 
-    // Delete from search index
-    for id in message_ids {
-        if let Err(e) = sctx.search.delete_message(id).await {
-            log::warn!("Failed to delete search document {id}: {e}");
-        }
+    // Delete from search index (batch — single commit)
+    let id_refs: Vec<&str> = message_ids.iter().map(String::as_str).collect();
+    if let Err(e) = sctx.search.delete_messages_batch(&id_refs).await {
+        log::warn!("Failed to batch-delete search documents: {e}");
     }
 
     Ok(())

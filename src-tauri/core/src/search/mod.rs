@@ -324,6 +324,21 @@ impl SearchState {
         Ok(())
     }
 
+    /// Batch-delete multiple documents by message_id. Single commit at the end.
+    pub async fn delete_messages_batch(&self, message_ids: &[&str]) -> Result<(), String> {
+        if message_ids.is_empty() {
+            return Ok(());
+        }
+        let mut writer = self.writer.lock().await;
+        for id in message_ids {
+            writer.delete_term(Term::from_field_text(self.fields.message_id, id));
+        }
+        writer
+            .commit()
+            .map_err(|e| format!("commit batch delete: {e}"))?;
+        Ok(())
+    }
+
     /// Simple free-text search filtered by account_id.
     #[allow(dead_code)]
     pub fn search(

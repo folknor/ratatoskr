@@ -511,17 +511,13 @@ async fn persist_messages(
         })
         .await?;
 
-    // 2. Body store writes
-    store_bodies(ctx.body_store, messages).await;
-
-    // 2.5. Inline image cache writes
-    store_inline_images(ctx, messages).await;
-
-    // 3. Search index writes
-    index_messages(ctx.search, ctx.account_id, messages).await;
-
-    // 4. Seen addresses ingestion (fire-and-forget)
-    crate::seen_addresses::ingest_from_messages(ctx.db, ctx.account_id, messages).await;
+    // 2-5. Fire-and-forget post-DB writes — all independent, run concurrently.
+    tokio::join!(
+        store_bodies(ctx.body_store, messages),
+        store_inline_images(ctx, messages),
+        index_messages(ctx.search, ctx.account_id, messages),
+        crate::seen_addresses::ingest_from_messages(ctx.db, ctx.account_id, messages),
+    );
 
     Ok(())
 }
@@ -595,11 +591,9 @@ async fn delete_messages(ctx: &SyncCtx<'_>, message_ids: &[&str]) -> Result<(), 
         log::warn!("Failed to delete JMAP bodies: {e}");
     }
 
-    // Delete from search index
-    for id in message_ids {
-        if let Err(e) = ctx.search.delete_message(id).await {
-            log::warn!("Failed to delete search document {id}: {e}");
-        }
+    // Delete from search index (batch — single commit)
+    if let Err(e) = ctx.search.delete_messages_batch(message_ids).await {
+        log::warn!("Failed to batch-delete search documents: {e}");
     }
 
     Ok(())
@@ -774,7 +768,12 @@ async fn store_bodies(body_store: &BodyStoreState, messages: &[ParsedJmapMessage
     .await;
 }
 
+/// Max concurrent JMAP blob downloads for inline images.
+const INLINE_BLOB_CONCURRENCY: usize = 5;
+
 async fn store_inline_images(ctx: &SyncCtx<'_>, messages: &[ParsedJmapMessage]) {
+    use futures::stream::{self, StreamExt};
+
     let eligible: Vec<(String, String, String)> = messages
         .iter()
         .flat_map(|msg| {
@@ -802,32 +801,45 @@ async fn store_inline_images(ctx: &SyncCtx<'_>, messages: &[ParsedJmapMessage]) 
         return;
     }
 
-    let mut blob_cache: HashMap<String, (String, Vec<u8>, String)> = HashMap::new();
-    let mut updates = Vec::new();
+    // Deduplicate blob IDs so each unique blob is downloaded once
+    let mut unique_blobs: HashMap<String, String> = HashMap::new(); // blob_id → mime_type
+    for (_, blob_id, mime_type) in &eligible {
+        unique_blobs.entry(blob_id.clone()).or_insert_with(|| mime_type.clone());
+    }
 
-    for (attachment_row_id, blob_id, mime_type) in eligible {
-        if !blob_cache.contains_key(&blob_id) {
+    // Download unique blobs in parallel with bounded concurrency
+    let blob_cache: HashMap<String, (String, Vec<u8>, String)> = stream::iter(unique_blobs)
+        .map(|(blob_id, mime_type)| async move {
             match ctx.client.inner().download(&blob_id).await {
                 Ok(data) if data.len() <= MAX_INLINE_SIZE => {
                     let content_hash = hash_bytes(&data);
-                    blob_cache.insert(blob_id.clone(), (content_hash, data, mime_type.clone()));
+                    Some((blob_id, (content_hash, data, mime_type)))
                 }
-                Ok(_) => continue,
+                Ok(_) => None,
                 Err(error) => {
                     log::warn!("Failed to download JMAP inline blob {blob_id}: {error}");
-                    continue;
+                    None
                 }
             }
-        }
-
-        if let Some((content_hash, _, _)) = blob_cache.get(&blob_id) {
-            updates.push((attachment_row_id, content_hash.clone()));
-        }
-    }
+        })
+        .buffer_unordered(INLINE_BLOB_CONCURRENCY)
+        .filter_map(|opt| async { opt })
+        .collect()
+        .await;
 
     if blob_cache.is_empty() {
         return;
     }
+
+    // Build attachment → content_hash mapping for DB updates
+    let updates: Vec<(String, String)> = eligible
+        .iter()
+        .filter_map(|(attachment_row_id, blob_id, _)| {
+            blob_cache
+                .get(blob_id)
+                .map(|(content_hash, _, _)| (attachment_row_id.clone(), content_hash.clone()))
+        })
+        .collect();
 
     let images: Vec<InlineImage> = blob_cache
         .into_values()

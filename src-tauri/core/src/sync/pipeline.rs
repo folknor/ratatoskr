@@ -237,17 +237,7 @@ pub(crate) async fn store_chunk(
     })
     .await?;
 
-    // 2. Store bodies (async, fire-and-forget)
-    store_bodies(body_store, chunk).await;
-
-    // 3. Store small inline images (fire-and-forget)
-    store_inline_images(inline_images, chunk).await;
-
-    // 4. Index in tantivy (async, fire-and-forget)
-    index_messages(search, chunk, account_id).await;
-
-    // 5. Ingest seen addresses (fire-and-forget)
-    // Use chunk's imap_msg fields since db_data was moved into the DB closure.
+    // 2-5. Fire-and-forget post-DB writes — all independent, run concurrently.
     let addr_data: Vec<ImapAddressData> = chunk
         .iter()
         .map(|c| ImapAddressData {
@@ -259,7 +249,13 @@ pub(crate) async fn store_chunk(
             date: c.meta.date,
         })
         .collect();
-    crate::seen_addresses::ingest_from_messages(db, account_id, &addr_data).await;
+
+    tokio::join!(
+        store_bodies(body_store, chunk),
+        store_inline_images(inline_images, chunk),
+        index_messages(search, chunk, account_id),
+        crate::seen_addresses::ingest_from_messages(db, account_id, &addr_data),
+    );
 
     Ok(())
 }

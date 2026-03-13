@@ -328,17 +328,13 @@ async fn process_single_thread(
     db.with_conn(move |conn| store_thread_to_db(conn, &aid, &tid, &parsed_clone))
         .await?;
 
-    // Body store writes
-    store_bodies(body_store, &parsed).await;
-
-    // Inline image cache writes
-    store_inline_images(inline_images, &parsed).await;
-
-    // Search index writes
-    index_messages(search, account_id, &parsed).await;
-
-    // Seen addresses ingestion (fire-and-forget)
-    crate::seen_addresses::ingest_from_messages(db, account_id, &parsed).await;
+    // Fire-and-forget post-DB writes — all independent, run concurrently.
+    tokio::join!(
+        store_bodies(body_store, &parsed),
+        store_inline_images(inline_images, &parsed),
+        index_messages(search, account_id, &parsed),
+        crate::seen_addresses::ingest_from_messages(db, account_id, &parsed),
+    );
 
     Ok(history_id)
 }
