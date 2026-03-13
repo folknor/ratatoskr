@@ -117,3 +117,11 @@ pub struct DeltaCheckResult {
     /// the cached value — meaning no flag or metadata changes occurred.
     pub modseq_unchanged: bool,
 }
+
+/// A flag change for a single message, returned by CHANGEDSINCE fetch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlagChange {
+    pub uid: u32,
+    pub is_read: bool,
+    pub is_starred: bool,
+}

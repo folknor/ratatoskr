@@ -553,7 +553,43 @@ async fn process_folder_delta(
     }
 
     if delta.new_uids.is_empty() {
-        // Even when no new UIDs, persist the server's modseq so we track it
+        // No new UIDs, but modseq changed → flags changed somewhere.
+        // Use CHANGEDSINCE to fetch only the changed flags (CONDSTORE Phase 2).
+        if let (Some(cached_modseq), Some(server_modseq)) = (saved.modseq, delta.highest_modseq) {
+            if server_modseq > cached_modseq {
+                log::info!(
+                    "[sync] {} modseq changed ({cached_modseq} → {server_modseq}), fetching flag changes",
+                    folder.path
+                );
+                let mut session = connect(config).await?;
+                match client::fetch_changed_flags(&mut session, &folder.raw_path, cached_modseq)
+                    .await
+                {
+                    Ok(changes) if !changes.is_empty() => {
+                        let aid = account_id.to_string();
+                        let fp = folder.raw_path.clone();
+                        let ch = changes;
+                        db.with_conn(move |conn| {
+                            pipeline::apply_flag_changes(conn, &aid, &fp, &ch)
+                        })
+                        .await?;
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        // CHANGEDSINCE may fail on servers that advertise modseq
+                        // but don't fully support CONDSTORE. Log and continue.
+                        log::warn!(
+                            "[sync] CHANGEDSINCE failed for {}, falling back: {e}",
+                            folder.path
+                        );
+                    }
+                }
+                let _ =
+                    tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+            }
+        }
+
+        // Persist updated modseq regardless of whether flag sync succeeded
         if delta.highest_modseq != saved.modseq {
             let aid = account_id.to_string();
             let fp = folder.raw_path.clone();

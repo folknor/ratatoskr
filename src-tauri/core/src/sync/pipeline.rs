@@ -695,6 +695,73 @@ pub fn clear_account_history_id(conn: &Connection, account_id: &str) -> Result<(
     Ok(())
 }
 
+/// Batch-update message flags from CONDSTORE CHANGEDSINCE results.
+///
+/// Matches messages by `(account_id, imap_folder, imap_uid)` — the indexed
+/// columns — and updates `is_read` and `is_starred`. Also updates the parent
+/// thread's aggregate flags.
+pub fn apply_flag_changes(
+    conn: &Connection,
+    account_id: &str,
+    folder: &str,
+    changes: &[crate::imap::types::FlagChange],
+) -> Result<u64, String> {
+    if changes.is_empty() {
+        return Ok(0);
+    }
+
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("flag change tx: {e}"))?;
+
+    let mut updated = 0u64;
+    let mut affected_threads: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for change in changes {
+        // Update message flags
+        let count = tx
+            .execute(
+                "UPDATE messages SET is_read = ?1, is_starred = ?2 \
+                 WHERE account_id = ?3 AND imap_folder = ?4 AND imap_uid = ?5",
+                rusqlite::params![
+                    change.is_read,
+                    change.is_starred,
+                    account_id,
+                    folder,
+                    i64::from(change.uid),
+                ],
+            )
+            .map_err(|e| format!("update message flags: {e}"))?;
+        updated += count as u64;
+
+        // Collect affected thread IDs for reaggregation
+        if let Ok(tid) = tx.query_row(
+            "SELECT thread_id FROM messages \
+             WHERE account_id = ?1 AND imap_folder = ?2 AND imap_uid = ?3",
+            rusqlite::params![account_id, folder, i64::from(change.uid)],
+            |row| row.get::<_, String>(0),
+        ) {
+            affected_threads.insert(tid);
+        }
+    }
+
+    // Reaggregate thread-level is_read/is_starred from constituent messages
+    for tid in &affected_threads {
+        tx.execute(
+            "UPDATE threads SET \
+               is_read = (SELECT MIN(is_read) FROM messages WHERE account_id = ?1 AND thread_id = ?2), \
+               is_starred = (SELECT MAX(is_starred) FROM messages WHERE account_id = ?1 AND thread_id = ?2) \
+             WHERE account_id = ?1 AND id = ?2",
+            rusqlite::params![account_id, tid],
+        )
+        .map_err(|e| format!("reaggregate thread flags: {e}"))?;
+    }
+
+    tx.commit()
+        .map_err(|e| format!("flag change commit: {e}"))?;
+    Ok(updated)
+}
+
 /// Clear all folder sync states for an account (forces full folder resync).
 pub fn clear_all_folder_sync_states(conn: &Connection, account_id: &str) -> Result<(), String> {
     conn.execute(

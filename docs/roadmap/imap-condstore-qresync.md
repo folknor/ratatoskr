@@ -1,7 +1,7 @@
 # IMAP CONDSTORE/QRESYNC (RFC 7162)
 
 **Tier**: 1 — Blocks switching from Outlook
-**Status**: ⚠️ **Phase 1 (modseq tracking + fast-path skip) implemented** — HIGHESTMODSEQ from SELECT is now persisted in `folder_sync_state.modseq` and compared on each delta check. When the server's HIGHESTMODSEQ matches the cached value, the folder is skipped entirely (no UID SEARCH). Phase 2 (CHANGEDSINCE flag sync) and Phase 3 (QRESYNC VANISHED) are not yet implemented — async-imap lacks typed CHANGEDSINCE/VANISHED support.
+**Status**: ⚠️ **Phase 1+2 implemented** — HIGHESTMODSEQ tracking with fast-path skip (Phase 1) and CHANGEDSINCE flag sync (Phase 2). When modseq is unchanged, folders are skipped entirely. When modseq changes but no new UIDs, `UID FETCH 1:* (FLAGS) (CHANGEDSINCE <modseq>)` fetches only changed flags and updates the local DB. Phase 3 (QRESYNC VANISHED for deletion detection) is not yet implemented. Upstream issue filed: https://github.com/chatmail/async-imap/issues/130
 
 ---
 

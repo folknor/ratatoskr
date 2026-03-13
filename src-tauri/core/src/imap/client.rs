@@ -670,6 +670,69 @@ pub async fn delta_check_folders(
     Ok(results)
 }
 
+/// Fetch only messages whose flags changed since the given mod-sequence (RFC 7162 CONDSTORE).
+///
+/// Issues `UID FETCH 1:* (FLAGS) (CHANGEDSINCE <modseq>)` which returns only messages
+/// whose metadata changed. The folder must already be SELECTed.
+///
+/// Returns an empty vec if the server doesn't support CONDSTORE or no flags changed.
+pub async fn fetch_changed_flags(
+    session: &mut ImapSession,
+    folder: &str,
+    since_modseq: u64,
+) -> Result<Vec<FlagChange>, String> {
+    // SELECT the folder first (needed for UID FETCH)
+    let _mailbox = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
+        .await
+        .map_err(|_| timeout_err(&format!("SELECT {folder}"), IMAP_CMD_TIMEOUT))?
+        .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
+
+    // Use uid_fetch with the CHANGEDSINCE modifier appended to the query.
+    // async-imap passes the query string directly, so this produces:
+    //   UID FETCH 1:* (FLAGS) (CHANGEDSINCE <modseq>)
+    let query = format!("(FLAGS) (CHANGEDSINCE {since_modseq})");
+    let stream = tokio::time::timeout(IMAP_FETCH_TIMEOUT, session.uid_fetch("1:*", &query))
+        .await
+        .map_err(|_| timeout_err(&format!("UID FETCH CHANGEDSINCE {folder}"), IMAP_FETCH_TIMEOUT))?
+        .map_err(|e| format!("UID FETCH CHANGEDSINCE {folder} failed: {e}"))?;
+
+    let raw: Vec<_> = tokio::time::timeout(
+        IMAP_FETCH_TIMEOUT,
+        stream.collect::<Vec<_>>(),
+    )
+    .await
+    .map_err(|_| timeout_err(&format!("CHANGEDSINCE stream {folder}"), IMAP_FETCH_TIMEOUT))?;
+
+    let mut changes = Vec::new();
+    for item in raw {
+        match item {
+            Ok(fetch) => {
+                let uid = match fetch.uid {
+                    Some(u) => u,
+                    None => continue,
+                };
+                let flags: Vec<_> = fetch.flags().collect();
+                let is_read = flags.iter().any(|f| matches!(f, Flag::Seen));
+                let is_starred = flags.iter().any(|f| matches!(f, Flag::Flagged));
+                changes.push(FlagChange {
+                    uid,
+                    is_read,
+                    is_starred,
+                });
+            }
+            Err(e) => {
+                log::warn!("CHANGEDSINCE fetch stream error in {folder}: {e}");
+            }
+        }
+    }
+
+    log::info!(
+        "IMAP CHANGEDSINCE {folder} (modseq={since_modseq}): {} flag changes",
+        changes.len()
+    );
+    Ok(changes)
+}
+
 /// Search a folder: SELECT → UID SEARCH, returning UIDs and folder status without fetching bodies.
 ///
 /// This is a lightweight alternative to `sync_folder` for callers that want to
