@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use jmap_client::core::response::EmailSetResponse;
+use jmap_client::core::set::SetObject;
 use jmap_client::mailbox::Role;
 
 use crate::provider::ops::ProviderOps;
@@ -270,44 +271,59 @@ impl ProviderOps for JmapOps {
         _thread_id: Option<&str>,
     ) -> Result<String, String> {
         let raw_bytes = crate::provider::encoding::decode_base64url_nopad(raw_base64url)?;
+        let client = self.client.inner();
 
-        let mut email = self
-            .client
-            .inner()
-            .email_import(
-                raw_bytes,
-                Vec::<String>::new(),
-                Some(vec!["$seen".to_string()]),
-                None,
-            )
-            .await
-            .map_err(|e| format!("Email/import: {e}"))?;
+        // Step 1: Upload blob and fetch identity concurrently.
+        let (mut upload_res, identity_id) = tokio::try_join!(
+            async {
+                client
+                    .upload(None, raw_bytes, None)
+                    .await
+                    .map_err(|e| format!("Blob upload: {e}"))
+            },
+            get_first_identity_id(client),
+        )?;
+        let blob_id = upload_res.take_blob_id();
 
-        let email_id = email.take_id();
-        let identity_id = get_first_identity_id(self.client.inner()).await?;
+        // Step 2: Batch Email/import + EmailSubmission/set into a single JMAP request.
+        // The import creates the email with $seen keyword. The submission sends it,
+        // and onSuccessUpdateEmail atomically clears $draft when the submission succeeds.
+        let mut request = client.build();
 
-        self.client
-            .inner()
-            .email_submission_create(&email_id, &identity_id)
-            .await
-            .map_err(|e| format!("EmailSubmission/set: {e}"))?;
+        let import_create_id = request
+            .import_email()
+            .email(&blob_id)
+            .mailbox_ids(Vec::<String>::new())
+            .keywords(["$seen"])
+            .create_id();
 
-        if let Err(err) = self
-            .client
-            .inner()
-            .email_set_keyword(&email_id, "$draft", false)
+        let sub_request = request.set_email_submission();
+        let sub_create_id = sub_request
+            .create()
+            .email_id(format!("#{import_create_id}"))
+            .identity_id(&identity_id)
+            .create_id()
+            .expect("submission create_id");
+        sub_request
+            .arguments()
+            .on_success_update_email(&sub_create_id)
+            .keyword("$draft", false);
+
+        let mut import_response = request
+            .send()
             .await
-        {
-            log::warn!("Failed to clear draft keyword for sent email {email_id}: {err}");
-        }
-        if let Err(err) = self
-            .client
-            .inner()
-            .email_set_keyword(&email_id, "$seen", true)
-            .await
-        {
-            log::warn!("Failed to mark sent email as seen {email_id}: {err}");
-        }
+            .map_err(|e| format!("JMAP batch send: {e}"))?
+            .unwrap_method_responses()
+            .into_iter()
+            .next()
+            .ok_or("No response from JMAP batch")?
+            .unwrap_import_email()
+            .map_err(|e| format!("Email/import response: {e}"))?;
+
+        let email_id = import_response
+            .created(&import_create_id)
+            .map_err(|e| format!("Email/import: {e}"))?
+            .take_id();
 
         Ok(email_id)
     }

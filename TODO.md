@@ -31,6 +31,14 @@
   3. **Scheduled eviction**: The file cache runs eviction after every `provider_fetch_attachment` cache-on-miss (via `enforce_cache_limit`). The inline store's `prune_to_size` runs after `put`/`put_batch` which covers sync-time inserts, but there's no periodic sweep to catch edge cases (e.g., if `MAX_INLINE_STORE_BYTES` is lowered in a future update). Consider adding a periodic call in `preCacheManager.ts` or a dedicated background task.
   4. **Tauri command for configurable limit**: If the cap becomes user-configurable, need a command to update the limit and trigger an immediate prune (or read it from the settings DB at `init()` time instead of using the const).
 
+## Iced Rewrite
+
+- [ ] **Investigate iced ecosystem projects** — Review these repos for patterns, widget implementations, and architecture ideas:
+  - https://github.com/hecrj/iced_fontello — Icon font integration for iced
+  - https://github.com/hecrj/iced_palace — Hecrj's iced showcase/playground
+  - https://github.com/pop-os/cosmic-edit — COSMIC text editor (large real-world iced app)
+  - https://github.com/pop-os/iced/blob/master/widget/src/markdown.rs — COSMIC fork's markdown widget: two-phase architecture using `pulldown_cmark` to parse into an `Item` enum, then a `Viewer` trait to render items as iced widgets (`rich_text` for text/headings, `container` for code blocks, `row`+`column` for lists, `table` for tables, syntax highlighting via `highlighter` feature). Supports incremental parsing and span caching. Relevant for rendering HTML email bodies.
+
 ## Non-Migration Cleanup
 
 ### Branding
@@ -77,7 +85,7 @@
 
 - [x] **Batch `Email/set` for JMAP thread actions** — All thread-level actions in `jmap/ops.rs` (archive, trash, move, mark read, star, spam) loop through email IDs and call `email_set_mailbox()`/`email_set_keyword()` per-email sequentially — one API round-trip per email in the thread. Should build a single `Email/set` request with patches for all email IDs using jmap-client's request builder, reducing N API calls to 1. The per-email convenience methods (`email_set_mailbox`, `email_set_keyword`) don't support batching; need to drop to the lower-level `set_email()` builder with explicit patch operations.
 
-- [ ] **Batch JMAP send into a single request** — `send_message` in `jmap/ops.rs` makes 5 sequential API calls: `email_import()` → `email_submission_create()` → `email_set_keyword($draft, false)` → `email_set_keyword($seen, true)`. The JMAP spec supports batching these into a single request with back-references: `Email/import` result ID feeds into `EmailSubmission/set` + `onSuccessUpdateEmail` for keyword cleanup. The `jmap-client` high-level API doesn't expose this cleanly — would need the raw request builder to wire back-references.
+- [x] **Batch JMAP send into a single request** — `send_email` now runs `upload()` and `Identity/get` concurrently, then batches `Email/import` + `EmailSubmission/set` (with `onSuccessUpdateEmail` to clear `$draft`) into a single JMAP request. Reduced from 5 sequential round-trips to 2 steps.
 
 - [ ] **Add `is_known_jmap_provider()` quick-check utility** — The autodiscovery system (`discovery/`) can detect JMAP support, but only via the full cascade (registry + autoconfig + MX + .well-known probe). A lightweight utility that checks just the registry for known JMAP providers (currently only Fastmail) would be useful for UI hints during account setup (e.g., "JMAP supported" badge). Could be a simple function in `discovery/registry.rs` exposed as a Tauri command, or folded into the existing `discover_email_config` response.
 
