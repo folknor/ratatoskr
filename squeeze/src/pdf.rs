@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 
 use image::{DynamicImage, ImageReader};
@@ -28,38 +29,27 @@ struct ImageInfo {
     components: u32,
 }
 
-/// Compress images embedded inside a PDF document.
-///
-/// Handles DCTDecode (JPEG) and FlateDecode (raw pixel) image XObjects.
-/// FlateDecode images are decoded from raw pixels, re-encoded as JPEG, and
-/// the stream filter is updated to DCTDecode.
+/// Compress a PDF document: image recompression, stream dedup, structural cleanup.
 pub fn compress_pdf(input: &[u8], config: &Config) -> Result<CompressResult, SqueezeError> {
     let mut doc =
         Document::load_mem(input).map_err(|e| SqueezeError::PdfParse(e.to_string()))?;
 
-    // Collect object IDs first to avoid borrow issues.
-    let object_ids: Vec<_> = doc.objects.keys().copied().collect();
+    // Phase 1: Recompress image XObjects.
+    recompress_images(&mut doc, config);
 
-    for id in object_ids {
-        let info = {
-            let Some(obj) = doc.objects.get(&id) else {
-                continue;
-            };
-            match classify_image_xobject(obj) {
-                Some(info) => info,
-                None => continue,
-            }
-        };
+    // Phase 2: Deduplicate identical streams (repeated logos, headers, etc.).
+    deduplicate_streams(&mut doc);
 
-        match info.filter {
-            ImageFilter::Dct => try_recompress_dct(&mut doc, id, &info, config),
-            ImageFilter::Flat => try_recompress_flat(&mut doc, id, &info, config),
-        }
-    }
+    // Phase 3: Remove unreferenced objects.
+    remove_unused_objects(&mut doc);
 
-    // Write the PDF using modern format (PDF 1.5 object streams + xref
-    // streams) for additional 11-38% structural compression — even if no
-    // images were recompressed, the structural savings alone are worthwhile.
+    // Phase 4: Strip non-essential metadata.
+    strip_metadata(&mut doc);
+
+    // Phase 5: Renumber objects sequentially.
+    doc.renumber_objects();
+
+    // Phase 6: Write using modern format (PDF 1.5 object streams + xref streams).
     let mut output = Vec::new();
     doc.save_modern(&mut output)
         .map_err(|e| SqueezeError::PdfWrite(e.to_string()))?;
@@ -81,7 +71,31 @@ pub fn compress_pdf(input: &[u8], config: &Config) -> Result<CompressResult, Squ
     }
 }
 
-/// Classify a PDF object: is it an image XObject, and what filter does it use?
+// ---------------------------------------------------------------------------
+// Phase 1: Image recompression
+// ---------------------------------------------------------------------------
+
+fn recompress_images(doc: &mut Document, config: &Config) {
+    let object_ids: Vec<_> = doc.objects.keys().copied().collect();
+
+    for id in object_ids {
+        let info = {
+            let Some(obj) = doc.objects.get(&id) else {
+                continue;
+            };
+            match classify_image_xobject(obj) {
+                Some(info) => info,
+                None => continue,
+            }
+        };
+
+        match info.filter {
+            ImageFilter::Dct => try_recompress_dct(doc, id, &info, config),
+            ImageFilter::Flat => try_recompress_flat(doc, id, &info, config),
+        }
+    }
+}
+
 fn classify_image_xobject(obj: &Object) -> Option<ImageInfo> {
     let Object::Stream(stream) = obj else {
         return None;
@@ -124,10 +138,8 @@ fn classify_image_xobject(obj: &Object) -> Option<ImageInfo> {
             b"DeviceRGB" => 3,
             b"DeviceGray" => 1,
             b"DeviceCMYK" => 4,
-            _ => return None, // Indexed, ICCBased, etc. — skip for now.
+            _ => return None,
         },
-        // Some PDFs use an array for ColorSpace (e.g. [/ICCBased ref]).
-        // Skip those for now.
         _ => return None,
     };
 
@@ -155,9 +167,7 @@ fn get_int(dict: &lopdf::Dictionary, key: &[u8]) -> Option<u32> {
     }
 }
 
-/// Re-compress a DCTDecode (JPEG) image stream.
 fn try_recompress_dct(doc: &mut Document, id: ObjectId, info: &ImageInfo, config: &Config) {
-    // Skip CMYK — image crate can't handle it.
     if info.components == 4 {
         return;
     }
@@ -192,23 +202,18 @@ fn try_recompress_dct(doc: &mut Document, id: ObjectId, info: &ImageInfo, config
     }
 }
 
-/// Decompress a FlateDecode image, reconstruct pixels, and re-encode as JPEG.
 fn try_recompress_flat(doc: &mut Document, id: ObjectId, info: &ImageInfo, config: &Config) {
-    // Skip CMYK — image crate can't handle it.
     if info.components == 4 {
         return;
     }
-    // Only handle 8-bit images.
     if info.bpc != 8 {
         return;
     }
 
-    // Decompress the FlateDecode stream.
     let raw_pixels = {
         let Some(Object::Stream(stream)) = doc.objects.get_mut(&id) else {
             return;
         };
-        // lopdf's decompress() inflates in-place and clears the Filter.
         if stream.decompress().is_err() {
             return;
         }
@@ -216,22 +221,24 @@ fn try_recompress_flat(doc: &mut Document, id: ObjectId, info: &ImageInfo, confi
     };
 
     let expected_len = (info.width * info.height * info.components) as usize;
-    // Some PDFs add stride padding; accept if we have at least enough data.
     if raw_pixels.len() < expected_len {
-        // Can't reconstruct — restore original by re-reading.
-        // Since we already decompressed in-place, we need to re-compress.
         recompress_flat_stream(doc, id);
         return;
     }
 
-    // Reconstruct a DynamicImage from raw pixel data.
     let img: Option<DynamicImage> = match info.components {
-        3 => image::RgbImage::from_raw(info.width, info.height, raw_pixels[..expected_len].to_vec())
-            .map(DynamicImage::ImageRgb8),
-        1 => {
-            image::GrayImage::from_raw(info.width, info.height, raw_pixels[..expected_len].to_vec())
-                .map(DynamicImage::ImageLuma8)
-        }
+        3 => image::RgbImage::from_raw(
+            info.width,
+            info.height,
+            raw_pixels[..expected_len].to_vec(),
+        )
+        .map(DynamicImage::ImageRgb8),
+        1 => image::GrayImage::from_raw(
+            info.width,
+            info.height,
+            raw_pixels[..expected_len].to_vec(),
+        )
+        .map(DynamicImage::ImageLuma8),
         _ => None,
     };
 
@@ -240,10 +247,9 @@ fn try_recompress_flat(doc: &mut Document, id: ObjectId, info: &ImageInfo, confi
         return;
     };
 
-    // Encode as JPEG via mozjpeg.
     let jpeg_result = compress_image_raw(
         &img,
-        expected_len, // Compare against uncompressed size.
+        expected_len,
         config,
         config.pdf_image_quality,
         config.pdf_image_max_dim,
@@ -253,25 +259,230 @@ fn try_recompress_flat(doc: &mut Document, id: ObjectId, info: &ImageInfo, confi
         Ok(Some(jpeg_bytes)) => {
             if let Some(Object::Stream(stream)) = doc.objects.get_mut(&id) {
                 stream.set_content(jpeg_bytes);
-                // Update filter from FlateDecode to DCTDecode.
                 stream
                     .dict
                     .set("Filter", Object::Name(b"DCTDecode".to_vec()));
-                // Remove DecodeParms if present (not applicable to DCTDecode).
                 stream.dict.remove(b"DecodeParms");
             }
         }
         _ => {
-            // Re-compress as FlateDecode since we decompressed in-place.
             recompress_flat_stream(doc, id);
         }
     }
 }
 
-/// Re-compress a stream that was decompressed in-place back to FlateDecode.
 fn recompress_flat_stream(doc: &mut Document, id: ObjectId) {
     if let Some(Object::Stream(stream)) = doc.objects.get_mut(&id) {
         let _ = stream.compress();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: Stream deduplication
+// ---------------------------------------------------------------------------
+
+/// Find streams with identical content+filter, replace duplicates with
+/// references to a single canonical object.
+fn deduplicate_streams(doc: &mut Document) {
+    use std::hash::{Hash, Hasher};
+
+    // Hash content + filter for each stream.
+    let mut hash_map: HashMap<u64, ObjectId> = HashMap::new();
+    let mut duplicates: Vec<(ObjectId, ObjectId)> = Vec::new();
+
+    let object_ids: Vec<_> = doc.objects.keys().copied().collect();
+
+    for id in &object_ids {
+        let Some(Object::Stream(stream)) = doc.objects.get(id) else {
+            continue;
+        };
+
+        let mut hasher = std::hash::DefaultHasher::new();
+        stream.content.hash(&mut hasher);
+        if let Ok(filter) = stream.dict.get(b"Filter") {
+            format!("{filter:?}").hash(&mut hasher);
+        }
+        let h = hasher.finish();
+
+        if let Some(&canonical_id) = hash_map.get(&h) {
+            if canonical_id != *id {
+                // Verify actual content equality (hash collision guard).
+                let content_matches = doc
+                    .objects
+                    .get(&canonical_id)
+                    .is_some_and(|canonical_obj| {
+                        if let (Object::Stream(a), Object::Stream(b)) = (canonical_obj, &Object::Stream(stream.clone())) {
+                            a.content == b.content
+                        } else {
+                            false
+                        }
+                    });
+                if content_matches {
+                    duplicates.push((*id, canonical_id));
+                }
+            }
+        } else {
+            hash_map.insert(h, *id);
+        }
+    }
+
+    if duplicates.is_empty() {
+        return;
+    }
+
+    let replace_map: HashMap<ObjectId, ObjectId> = duplicates.iter().copied().collect();
+
+    // Replace all references to duplicates with canonical.
+    let all_ids: Vec<_> = doc.objects.keys().copied().collect();
+    for id in all_ids {
+        if let Some(obj) = doc.objects.get_mut(&id) {
+            replace_references(obj, &replace_map);
+        }
+    }
+    replace_refs_in_dict(&mut doc.trailer, &replace_map);
+
+    // Remove duplicate objects.
+    for (dup_id, _) in &duplicates {
+        doc.objects.remove(dup_id);
+    }
+}
+
+fn replace_references(obj: &mut Object, map: &HashMap<ObjectId, ObjectId>) {
+    match obj {
+        Object::Reference(id) => {
+            if let Some(&new_id) = map.get(id) {
+                *id = new_id;
+            }
+        }
+        Object::Array(arr) => {
+            for item in arr.iter_mut() {
+                replace_references(item, map);
+            }
+        }
+        Object::Dictionary(dict) => {
+            replace_refs_in_dict(dict, map);
+        }
+        Object::Stream(stream) => {
+            replace_refs_in_dict(&mut stream.dict, map);
+        }
+        _ => {}
+    }
+}
+
+fn replace_refs_in_dict(dict: &mut lopdf::Dictionary, map: &HashMap<ObjectId, ObjectId>) {
+    for (_, value) in dict.iter_mut() {
+        replace_references(value, map);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3: Remove unreferenced objects
+// ---------------------------------------------------------------------------
+
+fn remove_unused_objects(doc: &mut Document) {
+    let referenced = collect_referenced_ids(doc);
+    let all_ids: Vec<ObjectId> = doc.objects.keys().copied().collect();
+
+    for id in all_ids {
+        if !referenced.contains(&id) {
+            doc.objects.remove(&id);
+        }
+    }
+}
+
+fn collect_referenced_ids(doc: &Document) -> HashSet<ObjectId> {
+    let mut visited = HashSet::new();
+
+    if let Ok(root) = doc.trailer.get(b"Root")
+        && let Ok(id) = root.as_reference()
+    {
+        walk_refs(doc, id, &mut visited);
+    }
+    if let Ok(info) = doc.trailer.get(b"Info")
+        && let Ok(id) = info.as_reference()
+    {
+        walk_refs(doc, id, &mut visited);
+    }
+
+    visited
+}
+
+fn walk_refs(doc: &Document, id: ObjectId, visited: &mut HashSet<ObjectId>) {
+    if !visited.insert(id) {
+        return;
+    }
+    if let Some(obj) = doc.objects.get(&id) {
+        collect_refs_from(doc, obj, visited);
+    }
+}
+
+fn collect_refs_from(doc: &Document, obj: &Object, visited: &mut HashSet<ObjectId>) {
+    match obj {
+        Object::Reference(id) => walk_refs(doc, *id, visited),
+        Object::Array(arr) => {
+            for item in arr {
+                collect_refs_from(doc, item, visited);
+            }
+        }
+        Object::Dictionary(dict) => {
+            for (_, value) in dict {
+                collect_refs_from(doc, value, visited);
+            }
+        }
+        Object::Stream(stream) => {
+            for (_, value) in &stream.dict {
+                collect_refs_from(doc, value, visited);
+            }
+        }
+        _ => {}
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4: Strip non-essential metadata
+// ---------------------------------------------------------------------------
+
+fn strip_metadata(doc: &mut Document) {
+    // Remove /Info dictionary (author, title, creation date, etc.).
+    if let Ok(Object::Reference(info_id)) = doc.trailer.get(b"Info") {
+        let info_id = *info_id;
+        doc.objects.remove(&info_id);
+        doc.trailer.remove(b"Info");
+    }
+
+    // Remove XMP metadata from catalog.
+    let catalog_id = doc
+        .trailer
+        .get(b"Root")
+        .ok()
+        .and_then(|r| r.as_reference().ok());
+
+    if let Some(cat_id) = catalog_id {
+        let xmp_ref = doc
+            .objects
+            .get(&cat_id)
+            .and_then(|obj| match obj {
+                Object::Dictionary(dict) => dict.get(b"Metadata").ok(),
+                _ => None,
+            })
+            .and_then(|m| m.as_reference().ok());
+
+        if let Some(meta_id) = xmp_ref {
+            doc.objects.remove(&meta_id);
+        }
+        if let Some(Object::Dictionary(dict)) = doc.objects.get_mut(&cat_id) {
+            dict.remove(b"Metadata");
+        }
+    }
+
+    // Remove PieceInfo / LastModified / Metadata from page objects.
+    let page_ids: Vec<_> = doc.get_pages().values().copied().collect();
+    for page_id in page_ids {
+        if let Some(Object::Dictionary(dict)) = doc.objects.get_mut(&page_id) {
+            dict.remove(b"PieceInfo");
+            dict.remove(b"LastModified");
+            dict.remove(b"Metadata");
+        }
     }
 }
 

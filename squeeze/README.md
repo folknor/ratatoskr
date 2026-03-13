@@ -21,8 +21,11 @@ Real-world test fixtures, `Config::email_default()` (JPEG q80, max 2048px, PDF i
 | Animated GIF | GIF | 3.9 MB | 95 KB | **97.5%** |
 | Image-heavy PDF | PDF | 6.8 MB | 499 KB | **92.7%** |
 | Image-heavy PDF | PDF | 30 MB | 2.1 MB | **93.2%** |
-| Mixed PDF (1775 pages) | PDF | 220 MB | 177 MB | **19.5%** |
-| Scanned PDF | PDF | 37 MB | 19 MB | **47.7%** |
+| Mixed PDF (1775 pages) | PDF | 220 MB | 65 MB | **70.5%** |
+| Scanned PDF | PDF | 37 MB | 19 MB | **47.8%** |
+| Presentation (slides) | PPTX | 13.6 MB | 5.2 MB | **61.3%** |
+| Document with images | ODT | 3.2 MB | 338 KB | **89.5%** |
+| Inkscape SVG (17 embedded images) | SVG | 114 MB | 86 MB | **24.9%** |
 | Small icon | JPEG | 82 KB | 65 KB | **20.5%** |
 | Small PNG | PNG | 780 KB | 667 KB | **14.4%** |
 
@@ -31,7 +34,8 @@ Files already small or without compressible content pass through unchanged.
 ## Supported formats
 
 - **Images**: JPEG (mozjpeg-rs, progressive + trellis), PNG (oxipng lossless), WebP, GIF, BMP, TIFF. HEIC behind optional `heic` feature flag.
-- **PDFs**: DCTDecode (JPEG) and FlateDecode (raw pixel) image recompression + structural compression via PDF 1.5 object streams (`save_modern`).
+- **PDFs**: DCTDecode (JPEG) and FlateDecode (raw pixel) image recompression, stream deduplication, unused object removal, metadata stripping, PDF 1.5 object streams (`save_modern`).
+- **SVGs**: Strip editor metadata (Inkscape/Sodipodi), optimize embedded base64 PNG/JPEG images.
 - **OOXML**: .docx, .xlsx, .pptx, .docm, .xlsm, .pptm -- compresses images in `word/media/`, `xl/media/`, `ppt/media/`.
 - **ODF**: .odt, .ods, .odp -- compresses images in `Pictures/`.
 

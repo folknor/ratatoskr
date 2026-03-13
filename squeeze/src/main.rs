@@ -83,7 +83,14 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    let result = match squeeze::compress(&input, &mime_type, &config) {
+    // Use format-appropriate MIME type so compress() doesn't re-detect wrong.
+    let effective_mime = if mime_type.is_empty() {
+        format.to_mime_type()
+    } else {
+        &mime_type
+    };
+
+    let result = match squeeze::compress(&input, effective_mime, &config) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error: {e}");

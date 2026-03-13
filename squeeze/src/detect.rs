@@ -11,6 +11,7 @@ pub enum Format {
     Pdf,
     Ooxml(OoxmlKind),
     Odf(OdfKind),
+    Svg,
     /// Format we cannot or should not compress.
     Unsupported,
 }
@@ -39,6 +40,29 @@ impl Format {
             self,
             Self::Jpeg | Self::Png | Self::WebP | Self::Gif | Self::Bmp | Self::Tiff | Self::Heic
         )
+    }
+
+    /// Returns a canonical MIME type string for this format.
+    #[must_use]
+    pub fn to_mime_type(self) -> &'static str {
+        match self {
+            Self::Jpeg => "image/jpeg",
+            Self::Png => "image/png",
+            Self::WebP => "image/webp",
+            Self::Gif => "image/gif",
+            Self::Bmp => "image/bmp",
+            Self::Tiff => "image/tiff",
+            Self::Heic => "image/heic",
+            Self::Pdf => "application/pdf",
+            Self::Ooxml(OoxmlKind::Docx) => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            Self::Ooxml(OoxmlKind::Xlsx) => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            Self::Ooxml(OoxmlKind::Pptx) => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            Self::Odf(OdfKind::Odt) => "application/vnd.oasis.opendocument.text",
+            Self::Odf(OdfKind::Ods) => "application/vnd.oasis.opendocument.spreadsheet",
+            Self::Odf(OdfKind::Odp) => "application/vnd.oasis.opendocument.presentation",
+            Self::Svg => "image/svg+xml",
+            Self::Unsupported => "application/octet-stream",
+        }
     }
 }
 
@@ -72,6 +96,7 @@ pub fn detect(mime_type: &str, data: &[u8]) -> Format {
         "application/vnd.oasis.opendocument.text" => return Format::Odf(OdfKind::Odt),
         "application/vnd.oasis.opendocument.spreadsheet" => return Format::Odf(OdfKind::Ods),
         "application/vnd.oasis.opendocument.presentation" => return Format::Odf(OdfKind::Odp),
+        "image/svg+xml" => return Format::Svg,
         _ => {}
     }
 
@@ -94,11 +119,29 @@ pub fn detect_from_extension(ext: &str, data: &[u8]) -> Format {
         "docx" | "docm" => Format::Ooxml(OoxmlKind::Docx),
         "xlsx" | "xlsm" => Format::Ooxml(OoxmlKind::Xlsx),
         "pptx" | "pptm" => Format::Ooxml(OoxmlKind::Pptx),
+        "svg" | "svgz" => Format::Svg,
         "odt" => Format::Odf(OdfKind::Odt),
         "ods" => Format::Odf(OdfKind::Ods),
         "odp" => Format::Odf(OdfKind::Odp),
         _ => detect_from_magic(data),
     }
+}
+
+fn trim_leading_whitespace_and_bom(data: &[u8]) -> &[u8] {
+    let mut s = data;
+    // Skip UTF-8 BOM.
+    if s.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        s = &s[3..];
+    }
+    // Skip whitespace.
+    while let Some((&first, rest)) = s.split_first() {
+        if first == b' ' || first == b'\t' || first == b'\n' || first == b'\r' {
+            s = rest;
+        } else {
+            break;
+        }
+    }
+    s
 }
 
 fn detect_from_magic(data: &[u8]) -> Format {
@@ -150,6 +193,19 @@ fn detect_from_magic(data: &[u8]) -> Format {
         || (data[0] == 0x4D && data[1] == 0x4D && data[2] == 0x00 && data[3] == 0x2A)
     {
         return Format::Tiff;
+    }
+
+    // SVG: starts with <svg or <?xml (with svg element inside).
+    // Only check for the <svg prefix — <?xml is too ambiguous.
+    if data.len() >= 4 && &data[..4] == b"<svg" {
+        return Format::Svg;
+    }
+    // Also check for BOM + <svg or whitespace + <svg.
+    if data.len() >= 10 {
+        let trimmed = trim_leading_whitespace_and_bom(data);
+        if trimmed.starts_with(b"<svg") {
+            return Format::Svg;
+        }
     }
 
     // ZIP-based (PK\x03\x04) — could be OOXML or ODF, but without MIME we

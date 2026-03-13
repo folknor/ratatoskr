@@ -4,6 +4,7 @@ pub mod detect;
 pub mod error;
 pub mod image;
 pub mod pdf;
+pub mod svg;
 
 use archive::ArchiveKind;
 use config::Config;
@@ -120,6 +121,7 @@ pub fn compress(
             };
             archive::compress_archive(input, archive_kind, config)
         }
+        Format::Svg => svg::compress_svg(input, config.min_savings_pct),
         Format::Unsupported => unchanged(),
     }
 }
