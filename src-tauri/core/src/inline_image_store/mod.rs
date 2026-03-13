@@ -319,6 +319,31 @@ impl InlineImageStoreState {
     }
 }
 
+/// Collect all distinct inline content hashes for an account's messages.
+///
+/// Call this **before** deleting messages/accounts so cascade-deleted
+/// attachment rows can still be queried. After deletion, pass the result
+/// to `InlineImageStoreState::delete_unreferenced()`.
+pub fn collect_inline_hashes_for_account(
+    conn: &Connection,
+    account_id: &str,
+) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT DISTINCT a.content_hash
+             FROM attachments a
+             JOIN messages m ON m.account_id = a.account_id AND m.id = a.message_id
+             WHERE a.account_id = ?1 AND a.is_inline = 1 AND a.content_hash IS NOT NULL",
+        )
+        .map_err(|e| format!("prepare inline hash query: {e}"))?;
+    let hashes = stmt
+        .query_map(params![account_id], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("query inline hashes: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("collect inline hashes: {e}"))?;
+    Ok(hashes)
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InlineImageStats {

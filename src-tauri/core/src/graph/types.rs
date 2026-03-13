@@ -30,6 +30,7 @@ pub struct GraphMessage {
     pub parent_folder_id: Option<String>,
     pub categories: Option<Vec<String>>,
     pub flag: Option<GraphFlag>,
+    pub inference_classification: Option<String>,
     pub internet_message_headers: Option<Vec<GraphInternetHeader>>,
     pub attachments: Option<Vec<GraphAttachment>>,
 }
@@ -186,6 +187,40 @@ toRecipients,ccRecipients,bccRecipients,replyTo,\
 receivedDateTime,sentDateTime,isRead,isDraft,hasAttachments,\
 importance,parentFolderId,categories,flag,\
 inferenceClassification,internetMessageHeaders,internetMessageId";
+
+// ── Batch request types ──────────────────────────────────
+
+/// A single request within a `POST /$batch` call.
+#[derive(Debug, Clone, Serialize)]
+pub struct BatchRequestItem {
+    pub id: String,
+    pub method: String,
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub headers: Option<std::collections::HashMap<String, String>>,
+}
+
+/// The top-level `POST /$batch` request body.
+#[derive(Debug, Serialize)]
+pub struct BatchRequest {
+    pub requests: Vec<BatchRequestItem>,
+}
+
+/// A single response from a `POST /$batch` call.
+#[derive(Debug, Deserialize)]
+pub struct BatchResponseItem {
+    pub id: String,
+    pub status: u16,
+    pub body: Option<serde_json::Value>,
+}
+
+/// The top-level `POST /$batch` response body.
+#[derive(Debug, Deserialize)]
+pub struct BatchResponse {
+    pub responses: Vec<BatchResponseItem>,
+}
 
 // ── Contact types ─────────────────────────────────────────
 

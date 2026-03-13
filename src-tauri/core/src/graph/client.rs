@@ -263,6 +263,18 @@ impl GraphClient {
         check_response_status(response).await
     }
 
+    /// Execute a batch of up to 20 requests in a single `POST /$batch` call.
+    ///
+    /// Returns per-request results. Callers should check each `BatchResponseItem.status`
+    /// for individual failures. Graph allows max 20 requests per batch.
+    pub async fn post_batch(
+        &self,
+        batch: &super::types::BatchRequest,
+        db: &DbState,
+    ) -> Result<super::types::BatchResponse, String> {
+        self.post("/$batch", batch, db).await
+    }
+
     /// GET a URL by full absolute URL (for OData pagination links).
     pub async fn get_absolute<T: DeserializeOwned>(
         &self,

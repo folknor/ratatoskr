@@ -128,8 +128,17 @@ pub fn parse_graph_message(
         .as_ref()
         .map(|f| f.flag_status.as_str())
         .unwrap_or("notFlagged");
-    let label_ids =
+    let mut label_ids =
         folder_map.get_labels_for_message(parent_folder, categories, is_read, flag_status);
+
+    // Wire up Focused Inbox classification as a pseudo-label
+    if msg
+        .inference_classification
+        .as_deref()
+        .is_some_and(|v| v == "focused")
+    {
+        label_ids.push("FOCUSED".to_string());
+    }
 
     // Internet headers (must be explicitly requested via $select)
     let headers = &msg.internet_message_headers;

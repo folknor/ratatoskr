@@ -201,19 +201,27 @@ pub async fn provider_prepare_full_sync(
 pub async fn provider_prepare_account_resync(
     db: State<'_, DbState>,
     body_store: State<'_, BodyStoreState>,
+    inline_images: State<'_, InlineImageStoreState>,
     account_id: String,
 ) -> Result<(), String> {
-    let message_ids = db
+    let (message_ids, inline_hashes) = db
         .with_conn({
             let account_id = account_id.clone();
             move |conn| {
                 let mut stmt = conn
                     .prepare("SELECT id FROM messages WHERE account_id = ?1")
                     .map_err(|e| format!("prepare resync message query: {e}"))?;
-                stmt.query_map(rusqlite::params![account_id], |row| row.get::<_, String>(0))
+                let msg_ids = stmt
+                    .query_map(rusqlite::params![account_id], |row| row.get::<_, String>(0))
                     .map_err(|e| format!("query resync message ids: {e}"))?
                     .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| format!("collect resync message ids: {e}"))
+                    .map_err(|e| format!("collect resync message ids: {e}"))?;
+                let hashes =
+                    ratatoskr_core::inline_image_store::collect_inline_hashes_for_account(
+                        conn,
+                        &account_id,
+                    )?;
+                Ok((msg_ids, hashes))
             }
         })
         .await?;
@@ -235,7 +243,13 @@ pub async fn provider_prepare_account_resync(
             .map_err(|e| format!("commit resync transaction: {e}"))?;
         Ok(())
     })
-    .await
+    .await?;
+
+    // Clean up orphaned inline images after messages are gone
+    if !inline_hashes.is_empty() {
+        let _ = inline_images.delete_unreferenced(&db, inline_hashes).await;
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

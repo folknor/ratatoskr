@@ -1375,8 +1375,31 @@ pub async fn db_clear_account_history_id(
 }
 
 #[tauri::command]
-pub async fn db_delete_account(state: State<'_, DbState>, id: String) -> Result<(), String> {
-    ratatoskr_core::db::queries_extra::db_delete_account(&state, id).await
+pub async fn db_delete_account(
+    state: State<'_, DbState>,
+    inline_images: State<'_, crate::inline_image_store::InlineImageStoreState>,
+    id: String,
+) -> Result<(), String> {
+    // Collect inline image hashes BEFORE cascade-deleting attachments
+    let hashes = {
+        let account_id = id.clone();
+        state
+            .with_conn(move |conn| {
+                ratatoskr_core::inline_image_store::collect_inline_hashes_for_account(
+                    conn,
+                    &account_id,
+                )
+            })
+            .await?
+    };
+
+    ratatoskr_core::db::queries_extra::db_delete_account(&state, id).await?;
+
+    // Clean up orphaned inline images (hashes no longer referenced by any attachment)
+    if !hashes.is_empty() {
+        let _ = inline_images.delete_unreferenced(&state, hashes).await;
+    }
+    Ok(())
 }
 
 #[tauri::command]

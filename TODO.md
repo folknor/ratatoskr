@@ -27,7 +27,7 @@
 
   **What's missing**:
   1. **Settings UI**: No user-facing control for inline image store size. The 128 MB cap is hardcoded in Rust. The settings page should expose this alongside the existing attachment cache size slider, or at minimum show the current usage via `inline_image_stats`.
-  2. **Orphan cleanup on account/message deletion**: When messages or accounts are deleted, their attachment rows disappear but the corresponding inline image blobs may linger as orphans. Need to call `delete_unreferenced()` after bulk deletions (account removal, message purge, trash empty). The file cache has analogous hash-aware cleanup via `db_count_cached_by_hash`; the inline store needs the same trigger points.
+  2. ~~**Orphan cleanup on account/message deletion**~~: Done — `db_delete_account` and `provider_prepare_account_resync` now collect inline content hashes before deletion, then call `delete_unreferenced()` to clean orphaned blobs.
   3. **Scheduled eviction**: The file cache runs eviction after every `provider_fetch_attachment` cache-on-miss (via `enforce_cache_limit`). The inline store's `prune_to_size` runs after `put`/`put_batch` which covers sync-time inserts, but there's no periodic sweep to catch edge cases (e.g., if `MAX_INLINE_STORE_BYTES` is lowered in a future update). Consider adding a periodic call in `preCacheManager.ts` or a dedicated background task.
   4. **Tauri command for configurable limit**: If the cap becomes user-configurable, need a command to update the limit and trigger an immediate prune (or read it from the settings DB at `init()` time instead of using the const).
 
@@ -51,7 +51,7 @@
 
 - [ ] **Category add/remove is racy** — `src-tauri/src/graph/ops.rs` does read-then-write for categories. Two concurrent actions can clobber each other. Graph has no atomic array-update primitive, so this likely needs client-side locking if we want to address it.
 
-- [ ] **Add Graph `$batch` optimization for thread actions** — Thread-level Graph actions still loop per message. Batching up to 20 operations per `/$batch` call would reduce request count.
+- [x] **Add Graph `$batch` optimization for thread actions** — `move_messages`, `patch_messages`, and `permanent_delete` now batch up to 20 operations per `POST /$batch` call. Category add/remove still uses per-message GET-then-PATCH (read-modify-write pattern not batchable).
 
 - [ ] **Decide whether Graph `raw_size = 0` should stay accepted** — Graph still lacks a clean size field for the current query path. Either keep this as an accepted cosmetic limitation or document a better fallback if one exists.
 
@@ -71,7 +71,7 @@
 
 - [ ] **Add Graph webhook subscriptions for real-time sync** — Currently Graph sync is purely poll-based via delta queries with priority-based folder scheduling (`sync.rs`). Microsoft Graph supports change notifications via webhooks (`POST /subscriptions` with `changeType: "created,updated,deleted"` on `/me/messages`). This would enable near-instant inbox updates instead of waiting for the next sync cycle. Requires: a notification endpoint (likely a Tauri localhost server or push notification relay), subscription lifecycle management (create, renew before 3-day expiry, handle validation tokens), and delta sync as fallback when subscriptions lapse. Low priority while polling works acceptably.
 
-- [ ] **Wire up Focused Inbox data from Graph** — The `inferenceClassification` field is already fetched in Graph sync queries (`$select=...inferenceClassification...` in `sync.rs`) and parsed into `GraphMessage` (`types.rs`), but the value is discarded before DB storage. To use it: persist the classification (`focused` or `other`) in a column or as a pseudo-label, then surface it in the UI as a tab or filter alongside categories. This is an optional enrichment — useful for Outlook users who rely on Focused Inbox, but not blocking for core functionality.
+- [x] **Wire up Focused Inbox data from Graph** — `inferenceClassification` is now deserialized into `GraphMessage` and surfaced as a "FOCUSED" pseudo-label in `thread_labels` (same pattern as UNREAD/STARRED). Persisted via the existing label pipeline — no schema migration needed.
 
 ### JMAP
 

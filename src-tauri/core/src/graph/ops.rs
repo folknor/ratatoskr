@@ -10,9 +10,12 @@ use crate::provider::types::{
 use super::client::GraphClient;
 use super::folder_mapper::FolderMap;
 use super::types::{
-    GraphAttachment, GraphCreateFolderRequest, GraphFlagInput, GraphMailFolder, GraphMessagePatch,
-    GraphMoveRequest, GraphRenameFolderRequest,
+    BatchRequest, BatchRequestItem, GraphAttachment, GraphCreateFolderRequest, GraphFlagInput,
+    GraphMailFolder, GraphMessagePatch, GraphMoveRequest, GraphRenameFolderRequest,
 };
+
+/// Microsoft Graph allows max 20 requests per `/$batch` call.
+const BATCH_CHUNK_SIZE: usize = 20;
 
 /// Graph implementation of the provider operations trait.
 pub struct GraphOps {
@@ -66,13 +69,7 @@ impl ProviderOps for GraphOps {
 
     async fn permanent_delete(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
-        for msg_id in &msg_ids {
-            let enc_id = urlencoding::encode(msg_id);
-            self.client
-                .delete(&format!("/me/messages/{enc_id}"), ctx.db)
-                .await?;
-        }
-        Ok(())
+        delete_messages(&self.client, ctx, &msg_ids).await
     }
 
     async fn mark_read(
@@ -494,39 +491,122 @@ async fn query_thread_message_ids(
         .await
 }
 
-/// Move multiple messages to a destination folder.
+/// Move multiple messages to a destination folder via `/$batch`.
 async fn move_messages(
     client: &GraphClient,
     ctx: &ProviderCtx<'_>,
     message_ids: &[String],
     destination_id: &str,
 ) -> Result<(), String> {
-    let body = GraphMoveRequest {
+    let body = serde_json::to_value(GraphMoveRequest {
         destination_id: destination_id.to_string(),
-    };
-    for msg_id in message_ids {
-        let enc_id = urlencoding::encode(msg_id);
-        let _: serde_json::Value = client
-            .post(&format!("/me/messages/{enc_id}/move"), &body, ctx.db)
-            .await?;
-    }
-    Ok(())
+    })
+    .map_err(|e| format!("serialize move body: {e}"))?;
+
+    let items: Vec<BatchRequestItem> = message_ids
+        .iter()
+        .enumerate()
+        .map(|(i, msg_id)| {
+            let enc_id = urlencoding::encode(msg_id);
+            BatchRequestItem {
+                id: i.to_string(),
+                method: "POST".to_string(),
+                url: format!("/me/messages/{enc_id}/move"),
+                body: Some(body.clone()),
+                headers: Some(content_type_json()),
+            }
+        })
+        .collect();
+
+    execute_batch(client, ctx, &items).await
 }
 
-/// PATCH multiple messages with the same patch body.
+/// PATCH multiple messages with the same patch body via `/$batch`.
 async fn patch_messages(
     client: &GraphClient,
     ctx: &ProviderCtx<'_>,
     message_ids: &[String],
     patch: &GraphMessagePatch,
 ) -> Result<(), String> {
-    for msg_id in message_ids {
-        let enc_id = urlencoding::encode(msg_id);
-        client
-            .patch(&format!("/me/messages/{enc_id}"), patch, ctx.db)
-            .await?;
+    let body = serde_json::to_value(patch).map_err(|e| format!("serialize patch body: {e}"))?;
+
+    let items: Vec<BatchRequestItem> = message_ids
+        .iter()
+        .enumerate()
+        .map(|(i, msg_id)| {
+            let enc_id = urlencoding::encode(msg_id);
+            BatchRequestItem {
+                id: i.to_string(),
+                method: "PATCH".to_string(),
+                url: format!("/me/messages/{enc_id}"),
+                body: Some(body.clone()),
+                headers: Some(content_type_json()),
+            }
+        })
+        .collect();
+
+    execute_batch(client, ctx, &items).await
+}
+
+/// Delete multiple messages via `/$batch`.
+async fn delete_messages(
+    client: &GraphClient,
+    ctx: &ProviderCtx<'_>,
+    message_ids: &[String],
+) -> Result<(), String> {
+    let items: Vec<BatchRequestItem> = message_ids
+        .iter()
+        .enumerate()
+        .map(|(i, msg_id)| {
+            let enc_id = urlencoding::encode(msg_id);
+            BatchRequestItem {
+                id: i.to_string(),
+                method: "DELETE".to_string(),
+                url: format!("/me/messages/{enc_id}"),
+                body: None,
+                headers: None,
+            }
+        })
+        .collect();
+
+    execute_batch(client, ctx, &items).await
+}
+
+/// Execute batch request items in chunks of `BATCH_CHUNK_SIZE` (20).
+///
+/// Collects per-item errors and returns the first failure if any.
+async fn execute_batch(
+    client: &GraphClient,
+    ctx: &ProviderCtx<'_>,
+    items: &[BatchRequestItem],
+) -> Result<(), String> {
+    for chunk in items.chunks(BATCH_CHUNK_SIZE) {
+        let batch = BatchRequest {
+            requests: chunk.to_vec(),
+        };
+        let response = client.post_batch(&batch, ctx.db).await?;
+
+        for resp in &response.responses {
+            if resp.status >= 400 {
+                let detail = resp
+                    .body
+                    .as_ref()
+                    .map(|b| b.to_string())
+                    .unwrap_or_default();
+                return Err(format!(
+                    "Batch request {} failed with status {}: {detail}",
+                    resp.id, resp.status
+                ));
+            }
+        }
     }
     Ok(())
+}
+
+fn content_type_json() -> std::collections::HashMap<String, String> {
+    let mut m = std::collections::HashMap::new();
+    m.insert("Content-Type".to_string(), "application/json".to_string());
+    m
 }
 
 /// Add a category to a single message.
