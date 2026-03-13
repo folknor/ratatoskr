@@ -120,7 +120,14 @@ Key differences that affect aggregation:
 - **Trash retention differs.** Gmail auto-purges after 30 days. Exchange follows org retention policy. JMAP/IMAP vary by server. The unified Trash view aggregates, but "empty trash" is per-account because the semantics differ.
 - **Sent is straightforward.** All providers have a clear Sent concept. Aggregation is a simple union.
 
-The backend must normalize these into a **unified query model** where each sidebar destination maps to a provider-agnostic query predicate (e.g., `starred = true` across accounts), not a provider-specific folder/label ID. This normalization already partially exists in `ratatoskr-core`'s provider abstraction but must be validated for each folder type.
+The backend normalizes these into a **unified query model** where each sidebar destination maps to a provider-agnostic query predicate (e.g., `is_starred = 1` across accounts), not a provider-specific folder/label ID. This is implemented in `core/src/db/queries_extra/scoped_queries.rs`:
+
+- **`AccountScope`** enum (`Single`/`Multiple`/`All`) controls which accounts a query spans.
+- **Starred and Snoozed** use predicate-based queries against boolean flags on the `threads` table (`get_starred_threads`, `get_snoozed_threads`), not label joins.
+- **Inbox, Sent, Drafts, Trash, Spam** use the existing `thread_labels` join with well-known label IDs.
+- **Drafts count** includes local-only drafts from the `local_drafts` table via `get_draft_count_with_local()`.
+- **`get_navigation_state()`** (`core/src/db/queries_extra/navigation.rs`) returns the full sidebar state in one call: universal folders with unread counts, smart folders, and (when scoped to a single account) that account's non-system labels.
+- **Smart folder unread counts and per-label unread counts** are scaffolded as 0 — not yet implemented.
 
 ### Navigation Contract
 

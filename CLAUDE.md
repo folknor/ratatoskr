@@ -22,6 +22,12 @@ App module `mod.rs` files re-export from core: `pub use ratatoskr_core::{module}
 
 **State types are `Clone`** — `DbState`, `BodyStoreState`, `InlineImageStoreState`, `SearchState`, `AppCryptoState` all wrap `Arc<Mutex<Connection>>` or similar and implement `Clone`.
 
+**Scoped queries** (`core/src/db/queries_extra/scoped_queries.rs`) — Cross-account query infrastructure. `AccountScope` enum (`Single`/`Multiple`/`All`) controls which accounts a query spans. Predicate-based virtual folder queries for Starred/Snoozed use boolean flags on `threads`, not label joins. Draft counts include `local_drafts` table.
+
+**Navigation state** (`core/src/db/queries_extra/navigation.rs`) — `get_navigation_state()` returns the full sidebar state in one call: universal folders (Inbox, Starred, Snoozed, Sent, Drafts, Trash) with unread counts, smart folders, and per-account labels when scoped. Smart folder and per-label unread counts are scaffolded (return 0).
+
+**Smart folder engine** (`core/src/smart_folder/`) — Rust port of the TypeScript smart folder query pipeline: query parser, date token resolver (`__LAST_7_DAYS__` etc.), and SQL builder. Supports `AccountScope` for cross-account queries. The TypeScript version in `src/services/search/` still exists and is used by the React frontend.
+
 ## Gotchas that will break your code
 
 **Multiple content stores**: Message bodies live outside the main `messages` table in `bodies.db` (zstd-compressed), and inline multipart images have their own attachment database. Use the Rust-side data access layer rather than assuming message content is in the main SQLite database.
