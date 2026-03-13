@@ -77,8 +77,9 @@ App layer (framework-specific):
 | `EmailAddLabel` | `Single` | `ListPicker { label: "Label" }` |
 | `EmailRemoveLabel` | `Single` | `ListPicker { label: "Label" }` |
 | `EmailSnooze` | `Single` | `DateTime { label: "Snooze until" }` |
+| `NavigateToLabel` | `Single` | `ListPicker { label: "Label" }` |
 
-Additional parameterized commands (templates, filters, etc.) will be added incrementally.
+`NavigateToLabel` is a cross-account parameterized command: the resolver populates options from all accounts when in unified scope, with account name in `OptionItem.path` for disambiguation. This command is a prerequisite for the sidebar's unified view (see `docs/sidebar/problem-statement.md` and the "Cross-Account Label/Folder Disambiguation" section in the command palette problem statement). Additional parameterized commands (templates, filters, etc.) will be added incrementally.
 
 **Files:** `src-tauri/core/src/command_palette/input.rs`, `src-tauri/core/src/command_palette/resolver.rs`, `src-tauri/src/command_palette/resolver.rs`
 
@@ -198,7 +199,7 @@ Replace the three TypeScript files with thin consumers of the Rust registry. Thi
 
 Not a numbered slice — this happens as part of the broader Tauri→iced migration. The command palette core APIs are framework-agnostic by design. The iced frontend will:
 
-- Implement its own `OptionProvider` (slice 2's trait) backed by its own state
+- Implement its own `CommandInputResolver` (slice 2's trait) backed by its own state
 - Build `CommandContext` from its own model
 - Map `CommandId` to iced `Message` variants in its `update()` function
 - Render palette UI, keyboard dispatch, and menus using the same registry

@@ -140,6 +140,46 @@ Ratatoskr supports multiple accounts across four providers (Gmail API, JMAP, Mic
 
 When a thread is selected, the active account is implied. When no thread is selected, the palette must either use the currently viewed account as context or show options from all accounts (disambiguated).
 
+#### Cross-Account Label/Folder Disambiguation
+
+The sidebar's unified ("All Accounts") view deliberately omits per-account labels — they're provider-specific noise in a cross-account context (see `docs/sidebar/problem-statement.md`). This means the command palette becomes the **primary way to navigate to a label or folder** when in unified view. The `Navigate to Label` command (Tier 3, parameterized) must handle this well enough that removing labels from the unified sidebar is not a discoverability regression.
+
+The problem: a user with three accounts may have labels/folders with the same name across accounts ("Clients" on Gmail, "Clients" on Exchange). The second-stage option list must disambiguate without being noisy for the common case (unique names).
+
+**Resolution via `OptionItem`**: The parameterized command infrastructure already provides the building blocks. When the `CommandInputResolver` resolves options for `Navigate to Label`:
+
+- **Scoped to a single account**: Options come from that account only. No disambiguation needed — `OptionItem.label` is the label/folder name, `OptionItem.path` reflects hierarchy (Exchange folder tree, JMAP mailbox nesting), and the account is implicit from scope.
+
+- **All Accounts scope (or no thread selected)**: Options come from all accounts. The resolver sets `OptionItem.path` to include the account name as the first segment:
+
+  ```
+  OptionItem { id: "gmail-abc:Label_42", label: "Clients", path: Some(["Foo Corp Gmail"]), ... }
+  OptionItem { id: "graph-xyz:folder-99", label: "Clients", path: Some(["Work Exchange"]), ... }
+  OptionItem { id: "graph-xyz:folder-77", label: "Reviews", path: Some(["Work Exchange", "Projects", "Q2"]), ... }
+  ```
+
+  The palette UI renders these as:
+  ```
+  Clients              Foo Corp Gmail
+  Clients              Work Exchange
+  Reviews              Work Exchange > Projects > Q2
+  ```
+
+  Fuzzy search covers both `label` and `path` segments, so typing "work clients" finds "Clients" under "Work Exchange" without the user needing to know the exact hierarchy.
+
+- **Unique names across accounts**: When a label name is unique (only exists on one account), the account prefix is still shown in the "All Accounts" context for consistency — but it's visually secondary (right-aligned or dimmed, a UI concern). The user doesn't need to type the account name; the label name alone matches.
+
+**Provider differences in the option list**: The resolver handles provider-specific structures transparently:
+
+- **Gmail**: Flat label list. Labels that look nested in Gmail's UI (e.g., "Projects/Q2") are actually flat labels with `/` in the name. The resolver can split these into `path` segments for hierarchical display, or leave them flat — this is a display choice, not a data model issue.
+- **Exchange/Graph**: Folder tree. The resolver walks the folder hierarchy and populates `path` with ancestor folders.
+- **JMAP**: Mailbox hierarchy, similar to Exchange.
+- **IMAP**: LSUB hierarchy, similar to Exchange.
+
+**System labels/folders are excluded**: The option list only shows user-visible labels and folders. System labels (Gmail's `INBOX`, `SENT`, `TRASH`, etc.) and well-known Exchange folders are not included — those are universal folders with their own sidebar destinations and palette commands (`Navigate > Inbox`, etc.).
+
+This design means the sidebar can safely omit labels from the unified view: the palette provides equivalent access with better search affordances. The prerequisite for removing labels from the unified sidebar is that this resolver is implemented and the `Navigate to Label` command works with cross-account options.
+
 #### CommandContext
 
 For the registry to determine command availability without leaking logic back into the app layer, it needs a concrete context snapshot. The app layer is responsible for assembling this struct from its own state (Zustand stores, Tauri state, iced model — whatever the framework uses) and passing it to the registry on each query. Core defines the shape; the app fills it in.

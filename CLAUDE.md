@@ -59,11 +59,7 @@ These are non-obvious behaviors of the `jmap-client` crate that will matter if t
 
 **Rust (edition 2024, strict clippy)**:
 - `unwrap_used`: denied — use `?` or handle errors
-- `too_many_arguments`: max 7
-- `too_many_lines`: max 100 per function
-- `cognitive_complexity`: denied
 - `await_holding_lock`: denied
-- `let_underscore_must_use`: denied (but fires on `tauri::command` macro expansion — pre-existing)
 
 **TypeScript**:
 - `verbatimModuleSyntax: true` — must use `import type` for type-only imports

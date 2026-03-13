@@ -226,13 +226,32 @@ These are explicitly out of scope for the sidebar, handled by the command palett
 
 2. **Unread count granularity in unified view**: Should "Inbox 12" in the unified view be expandable to show per-account breakdown (Foo: 7, Gmail: 3, Bar: 2), or is the total sufficient? A breakdown helps triage ("the 7 are all work") but adds visual complexity.
 
-3. **Provider-specific folder display**: Gmail's label model (tags, flat, multiple per message) is fundamentally different from Exchange's folder model (tree, exclusive, one per message). When scoped to a Gmail account, should the "Labels" section look and behave differently from the "Folders" section when scoped to an Exchange account? Or should the sidebar normalize them into one visual pattern? The Navigation Contract section above defines the click semantics, but the visual question remains: does a Gmail-scoped sidebar say "LABELS" and an Exchange-scoped sidebar say "FOLDERS", or do we use a single neutral term?
+3. **Provider-specific folder display**: Gmail's label model (tags, flat, multiple per message) is fundamentally different from Exchange's folder model (tree, exclusive, one per message). When scoped to a Gmail account, should the "Labels" section look and behave differently from the "Folders" section when scoped to an Exchange account? Or should the sidebar normalize them into one visual pattern? The Navigation Contract section above defines the click semantics. The section header will use "Labels" universally — Gmail has trained most users to understand this term, and conditional rendering for a section header isn't worth the complexity. The underlying click semantics still differ per provider (tags vs exclusive containers) as documented in the Navigation Contract.
 
 4. **Pinned labels/folders**: Should users be able to pin specific labels/folders so they appear in the unified view alongside the universal folders? This would let a user promote "Foo Corp > Clients" to top-level visibility without scoping to Foo Corp. It could blur the clean separation between unified and scoped views, but it's a common power-user request.
 
-5. **Smart Folder interaction with scope**: When a user is scoped to "Foo Corp" and clicks a Smart Folder (which is cross-account by definition), what happens to the scope indicator? Options: (a) scope visually switches to "All" for the duration, (b) scope stays on "Foo Corp" but the content pane shows cross-account results with an indicator, (c) Smart Folders filter to the current scope (breaking their cross-account nature). This affects whether scope is a global filter or a sidebar-local concern.
+5. **Smart Folder interaction with scope**: When a user is scoped to "Foo Corp" and clicks a Smart Folder (which is cross-account by definition), what happens to the scope indicator? Options: (a) scope visually switches to "All" for the duration, (b) scope stays on "Foo Corp" but the content pane shows cross-account results with an indicator. This affects whether scope is a global filter or a sidebar-local concern.
 
 6. **Scope in URL/router state**: Should the active scope be part of the URL so that deep links and browser back/forward preserve it? If scope is purely in-memory UI state, refreshing the app loses the user's account context. If it's in the URL, the routing model gets more complex. The current React app uses TanStack Router with hash history — scope could be a search param (`#/inbox?scope=foo-corp`) without affecting the route structure.
+
+7. **Default sender account for compose**: When the user opens a new compose window, which account's address should be the default "From"? This matters most in "All Accounts" scope where there's no single obvious answer. The resolution order:
+
+   1. **Explicit selection** — the user picks a sender in the compose window. This choice is honored unconditionally and becomes the "last manually selected" value for step 3.
+   2. **Thread context** — if a thread is selected, default to the account involved in that thread (specifically, the account that most recently received a message in the thread — not just any participant, which matters when the user has forwarded between their own accounts).
+   3. **Last manually selected sender** — a sticky preference from the most recent time the user explicitly chose a sender in step 1. Persisted across sessions.
+   4. **Current scope** — if the sidebar is scoped to a specific account, use that account.
+   5. **First account** — if none of the above apply (essentially first launch in unified view before any activity), fall back to whatever the account ordering produces. No special tracking needed.
+
+   This cascade covers the common cases (replying, composing in a scoped view) in steps 2 and 4, and the edge cases (fresh unified compose) degrade gracefully without requiring additional state beyond the sticky "last manually selected" preference.
+
+8. **Label navigation from unified view**: When the user navigates to a label via the command palette while in "All Accounts" scope, the scope should not auto-narrow to a single account. The label filter is applied across all accounts that have a matching label — if "Clients" exists on both Gmail and Exchange, the thread list shows threads from both. The scope stays on "All." This is consistent with how universal folders work (Inbox shows all accounts' inboxes) and avoids the jarring implicit scope switch. The palette's cross-account disambiguation (see `docs/command-palette/problem-statement.md`, "Cross-Account Label/Folder Disambiguation") lets the user pick a specific account's label if they want to narrow, but the default behavior is additive.
+
+## Dependencies
+
+- **Command palette Slice 2** (`docs/command-palette/roadmap.md`): The `NavigateToLabel` parameterized command with cross-account disambiguation must be implemented before labels can be removed from the unified sidebar (Phase 2). The resolver, `OptionItem` structure, and fuzzy search infrastructure are already scaffolded — what remains is the real `CommandInputResolver` implementation that queries account labels/folders from `DbState`. See "Cross-Account Label/Folder Disambiguation" in `docs/command-palette/problem-statement.md`.
+- **Command palette Slice 6** (`docs/command-palette/roadmap.md`): Phase 2 (stripping actions from sidebar) is gated on the palette frontend migration being far enough along to absorb label creation/editing/deletion and context menu actions.
+
+Phase 1 has no palette dependency and can proceed independently.
 
 ## Implementation Phases
 
