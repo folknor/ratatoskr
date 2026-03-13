@@ -29,6 +29,10 @@ struct Cli {
     #[arg(long)]
     dry_run: bool,
 
+    /// Fast estimate only — predict output size without compressing.
+    #[arg(long)]
+    estimate: bool,
+
     /// Override MIME type detection.
     #[arg(long)]
     mime: Option<String>,
@@ -41,38 +45,31 @@ struct Cli {
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    let input = match fs::read(&cli.file) {
-        Ok(data) => data,
-        Err(e) => {
-            eprintln!("error: failed to read {}: {e}", cli.file.display());
-            return ExitCode::FAILURE;
-        }
-    };
-
     let mut config = Config::email_default();
     config.jpeg_quality = cli.quality;
     config.max_dimension = cli.max_dim;
     config.pdf_image_quality = cli.quality.min(75); // PDF images get slightly more aggressive.
 
-    // Determine format.
     let mime_type = cli.mime.unwrap_or_default();
+
+    // For format detection we only need the file extension + a few magic bytes.
+    let magic_header = read_magic_header(&cli.file);
     let format = if mime_type.is_empty() {
-        // Use file extension.
         let ext = cli
             .file
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("");
-        detect::detect_from_extension(ext, &input)
+        detect::detect_from_extension(ext, &magic_header)
     } else {
-        detect::detect(&mime_type, &input)
+        detect::detect(&mime_type, &magic_header)
     };
 
     if cli.verbose {
+        let size = fs::metadata(&cli.file).map(|m| m.len()).unwrap_or(0);
         eprintln!(
-            "input: {} ({} bytes, format: {format:?})",
+            "input: {} ({size} bytes, format: {format:?})",
             cli.file.display(),
-            input.len()
         );
     }
 
@@ -82,6 +79,33 @@ fn main() -> ExitCode {
         }
         return ExitCode::SUCCESS;
     }
+
+    // Fast estimate mode — reads only headers/metadata, never loads the whole file.
+    if cli.estimate {
+        match squeeze::estimate::estimate_file(&cli.file, format, &config) {
+            Ok(est) => {
+                eprintln!("estimated:    {} bytes", est.expected_bytes);
+                eprintln!("floor:        {} bytes", est.floor_bytes);
+                eprintln!("worth trying: {}", est.worth_trying);
+                if let Some(reason) = &est.reason {
+                    eprintln!("reason:       {reason}");
+                }
+            }
+            Err(e) => {
+                eprintln!("estimate error: {e}");
+            }
+        }
+        return ExitCode::SUCCESS;
+    }
+
+    // Full compression — load the entire file.
+    let input = match fs::read(&cli.file) {
+        Ok(data) => data,
+        Err(e) => {
+            eprintln!("error: failed to read {}: {e}", cli.file.display());
+            return ExitCode::FAILURE;
+        }
+    };
 
     // Use format-appropriate MIME type so compress() doesn't re-detect wrong.
     let effective_mime = if mime_type.is_empty() {
@@ -163,4 +187,16 @@ fn main() -> ExitCode {
     }
 
     ExitCode::SUCCESS
+}
+
+/// Read just enough bytes for magic-byte format detection (first 64 bytes).
+fn read_magic_header(path: &std::path::Path) -> Vec<u8> {
+    use std::io::Read;
+    let Ok(mut file) = fs::File::open(path) else {
+        return Vec::new();
+    };
+    let mut buf = vec![0u8; 64];
+    let n = file.read(&mut buf).unwrap_or(0);
+    buf.truncate(n);
+    buf
 }

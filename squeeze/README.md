@@ -49,6 +49,7 @@ Options:
   -q, --quality <0-100>  JPEG quality [default: 80]
   -d, --max-dim <px>     Max longest edge [default: 2048]
   --dry-run              Report savings without writing
+  --estimate             Fast size prediction without compressing
   --mime <type>          Override MIME detection
   -v, --verbose          Detailed info
 ```
@@ -56,6 +57,9 @@ Options:
 ```bash
 # Check what you'd save
 squeeze --dry-run -v photo.jpg
+
+# Instant size prediction (no CPU-intensive compression)
+squeeze --estimate -v large_document.pdf
 
 # Compress in place (creates photo.jpg.orig backup)
 squeeze photo.jpg
@@ -65,6 +69,71 @@ squeeze photo.jpg -o photo_small.jpg
 ```
 
 ## Library
+
+Two entry points: `estimate()` for instant size prediction, `compress()` for actual compression.
+
+### Estimating size
+
+Two variants: `estimate()` for in-memory data, `estimate_file()` for file paths.
+
+`estimate_file()` never loads the entire file into memory — it reads only what each format needs: image headers (~64 bytes), ZIP central directory, or PDF xref table. Sub-millisecond for images and archives, ~100-300ms for large PDFs.
+
+```rust
+use squeeze::{estimate::{estimate, estimate_file}, detect, config::Config};
+use std::path::Path;
+
+let config = Config::email_default();
+
+// From a file path (preferred — avoids loading the whole file):
+let format = detect::detect_from_extension("pdf", &[]);
+let est = estimate_file(Path::new("report.pdf"), format, &config)?;
+
+// From memory (when you already have the bytes):
+let format = detect::detect("image/jpeg", &file_bytes);
+let est = estimate(&file_bytes, format, &config)?;
+
+// est.expected_bytes  — conservative upper bound on compressed size
+// est.floor_bytes     — non-compressible content (the hard minimum)
+// est.worth_trying    — false if compression can't meaningfully help
+```
+
+The estimate is deliberately conservative — it over-predicts output size by 1-5x so that "won't fit" is a reliable signal. If `floor_bytes` exceeds the provider limit, no amount of compression will make the file small enough.
+
+#### Typical integration: running total per email
+
+```rust
+use squeeze::{estimate::estimate_file, config::{Config, limits}, detect};
+use std::path::Path;
+
+let config = Config::email_default();
+let provider_limit = limits::GMAIL_YAHOO; // 18 MB
+
+let mut total_estimated: u64 = 0;
+
+// User drops an attachment — estimate is instant, no full file load:
+fn on_attachment_added(path: &Path, mime_type: &str) {
+    let format = detect::detect(mime_type, &[]);
+    let est = estimate_file(path, format, &config).unwrap();
+
+    total_estimated += est.expected_bytes;
+
+    if est.floor_bytes as usize > provider_limit {
+        // This single file can never fit — warn immediately.
+        // "This 220 MB PDF has 156 MB of non-image content and
+        //  cannot be compressed below the 18 MB limit."
+    } else if total_estimated as usize > provider_limit {
+        // Combined attachments exceed limit — warn.
+        // "Total attachments (~X MB) exceed the 18 MB limit.
+        //  Remove an attachment or reduce quality."
+    } else {
+        // Looks good — compress in background.
+        // Re-check total after compression completes
+        // (actual size will be smaller than estimate).
+    }
+}
+```
+
+### Compressing
 
 ```rust
 use squeeze::{compress, config::Config};
@@ -78,6 +147,18 @@ if result.was_compressed() {
     // use output...
 }
 ```
+
+### Estimate vs compress
+
+| | `estimate_file()` | `estimate()` | `compress()` |
+|--|--|--|--|
+| Input | File path | `&[u8]` | `&[u8]` |
+| Memory | Headers only | Full buffer (but no work) | Full buffer + decode/encode |
+| Speed | 2-80ms | Sub-millisecond | Seconds (CPU-intensive) |
+| Accuracy | Conservative (1-5x over) | Conservative (1-5x over) | Exact |
+| Use case | Pre-flight check | When bytes already in memory | Actual compression |
+
+The intended flow: `estimate_file` when the user drops a file (instant, low memory), reject obvious failures, then load and `compress` in background for files that might fit.
 
 ## Provider size limits
 
@@ -100,6 +181,7 @@ All pure Rust except optional HEIC:
 - `oxipng` 10 -- lossless PNG optimization
 - `lopdf` 0.39 -- PDF manipulation
 - `zip` 2 -- OOXML/ODF archive handling
+- `quick-xml` 0.37 -- SVG parsing
 - `clap` 4 -- CLI argument parsing
 
 ## Integration with Ratatoskr
@@ -113,3 +195,5 @@ squeeze = { path = "../../squeeze", optional = true }
 [features]
 compress-attachments = ["squeeze"]
 ```
+
+The orchestration layer (running totals, provider limits, UI warnings) belongs in ratatoskr-core. Squeeze is a per-file tool — it doesn't know about "the email" or how many attachments there are.

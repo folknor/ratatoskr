@@ -2,6 +2,7 @@ pub mod archive;
 pub mod config;
 pub mod detect;
 pub mod error;
+pub mod estimate;
 pub mod image;
 pub mod pdf;
 pub mod svg;
