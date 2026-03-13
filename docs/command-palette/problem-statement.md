@@ -212,27 +212,118 @@ The full design of undo tokens, stack depth, expiration, and multi-step undo is 
 
 2. **Command sequences, not composition**: "Archive and Next" is a registered compound command (`email.archive_and_next`) with its own ID, not a user-defined pipeline. This keeps the enum exhaustive and behavior predictable. If user-definable macros are needed later, they can be added as a separate feature on top.
 
+## Decisions (continued)
+
+3. **Parameterized command execution contract**: Resolved. The design separates command search (stage 1) from parameter resolution (stage 2) into distinct APIs with typed contracts.
+
+   ### Stage Separation
+
+   `CommandRegistry::query()` remains a top-level command search API. It does not serve second-stage options. Parameterized commands appear in query results as normal commands, with metadata telling the caller "this requires input before execution."
+
+   The caller flow:
+   1. `registry.query(ctx, query)` → user picks a `CommandMatch`
+   2. If `input_mode == InputMode::Direct` → execute immediately with `CommandId` alone
+   3. If `input_mode == InputMode::Parameterized { schema }` → use a separate `OptionProvider` to get options for each step in the schema, user picks values, caller builds a typed `CommandArgs`, then executes
+
+   ### Input Mode
+
+   `CommandMatch` carries an `input_mode` field:
+
+   ```
+   InputMode::Direct                              — no parameters, execute immediately
+   InputMode::Parameterized { schema: InputSchema } — requires parameter resolution before execution
+   ```
+
+   ### Input Schema
+
+   Commands declare their input requirements as a typed schema. This is not a generic form builder — it's an enum of input flows, starting minimal:
+
+   ```
+   InputSchema::Single(ParamDef)                  — one parameter, then done
+   InputSchema::Sequence(&'static [ParamDef])      — multiple parameters resolved sequentially
+   ```
+
+   `ParamDef` describes one parameter step:
+
+   ```
+   ParamDef::ListPicker { label }                 — pick one item from a dynamic list (folders, labels, accounts)
+   ParamDef::DateTime { label }                   — pick a date/time (snooze)
+   ParamDef::Enum { label, options: &[&str] }     — pick from a fixed set (theme: light/dark/system)
+   ParamDef::Text { label, placeholder }           — free text input (rename folder, search query)
+   ```
+
+   Examples:
+   - **Move to Folder**: `Single(ListPicker { label: "Folder" })`
+   - **Snooze**: `Single(DateTime { label: "Snooze until" })`
+   - **Compose with Template**: `Sequence(&[ListPicker { label: "Template" }, ListPicker { label: "Account" }])`
+   - **Switch Theme**: `Single(Enum { label: "Theme", options: &["Light", "Dark", "System"] })`
+   - **Rename Folder**: `Single(Text { label: "New name", placeholder: "Folder name" })`
+
+   This leaves room to add richer branching later (conditional steps, validation between steps) without pretending slice 2 is a full declarative form engine.
+
+   ### Option Provider (Trait)
+
+   For `ListPicker` parameters, the caller needs to fetch the available options. This is a trait defined in core, implemented by the app layer:
+
+   ```
+   trait OptionProvider: Send + Sync {
+       fn get_options(
+           &self,
+           command_id: CommandId,
+           param_index: usize,
+           ctx: &CommandContext,
+       ) -> Result<Vec<OptionItem>, String>;
+   }
+   ```
+
+   The `OptionProvider` is a **separate object from the registry**. The registry is immutable static data. The option provider needs DB access and live account state — things core cannot depend on. This follows the same pattern as `ProgressReporter`: core defines the trait, the app layer provides a concrete implementation.
+
+   - Tauri's implementation (`TauriOptionProvider`) queries `DbState` for folders, labels, accounts, templates.
+   - The future iced implementation queries its own model.
+   - The provider is registered in the app layer at startup, alongside but separate from the `CommandRegistry`.
+
+   ### Option Items (Flat, Not Trees)
+
+   The option provider returns a flat list, not a tree:
+
+   ```
+   OptionItem {
+       id: String,                    — stable identifier for execution (folder ID, label ID)
+       label: String,                 — leaf display name ("Reviews")
+       path: Option<Vec<String>>,     — breadcrumb path for hierarchical display (["Projects", "Q2", "Reviews"])
+       keywords: Option<Vec<String>>, — additional search terms (aliases, alternative names)
+       disabled: bool,                — greyed out but visible (e.g., can't move to current folder)
+   }
+   ```
+
+   Search operates on `label` (and `keywords` if present). The UI reconstructs hierarchical display from `path`. Execution uses `id`. This gives:
+   - Flat fuzzy search over all options
+   - Hierarchical display when desired (folder trees, nested labels)
+   - No tree traversal API in core
+   - Reusable structure for folders, labels, accounts, templates, and any future option type
+
+   ### Execution Payload (Typed)
+
+   The final execution payload is a typed enum in core — one variant per parameterized command or per small family of commands:
+
+   ```
+   CommandArgs::MoveToFolder { folder_id: String }
+   CommandArgs::AddLabel { label_id: String }
+   CommandArgs::RemoveLabel { label_id: String }
+   CommandArgs::Snooze { until: i64 }  // unix timestamp
+   CommandArgs::ComposeWithTemplate { template_id: String, account_id: String }
+   CommandArgs::SwitchTheme { theme: String }
+   CommandArgs::RenameFolder { folder_id: String, new_name: String }
+   ```
+
+   No `serde_json::Value`. No "one giant struct with every field optional." Each variant carries exactly the typed fields that command needs. The app layer matches on the variant and dispatches to the appropriate handler.
+
+   For non-parameterized commands, execution takes only a `CommandId` — no `CommandArgs` needed.
+
+4. **Disabled command visibility**: Resolved. `query()` returns all commands with an `available: bool` flag. The frontend decides whether to hide unavailable commands or show them greyed out. This keeps the API flexible for palette, context menus, and other surfaces.
+
 ## Open Questions
 
-1. **Parameterized command execution contract**: The current description of Tier 3 commands ("second stage populated with options") understates the problem. "Pick from a list" is only one input shape. Real commands have diverse input requirements:
+1. **Palette visibility vs bindability**: Must every registered command be searchable in the palette, or can some be keyboard-only? Examples: `nav.next` / `nav.prev` (j/k) are essential keybindings but arguably noise in the palette — no one opens the palette to move down one thread. If commands can opt out of palette visibility, the registry needs a `palette_visible: bool` (or a visibility enum) on the command metadata.
 
-   - **List picker**: Move to Folder (pick one folder), Add Label (pick one label), Switch Account (pick one account)
-   - **Date/time picker**: Snooze Until (pick a datetime)
-   - **Multi-parameter**: Compose with Template (pick template + pick account), Create Filter from Sender (pick criteria + pick action)
-   - **Enum/toggle**: Switch Theme (pick from fixed set of light/dark/system)
-   - **Free text**: Rename Folder (type a name), Search (type a query)
-
-   The backend needs a typed model for this. At minimum, each parameterized command must declare:
-
-   - **Input schema**: What parameters it needs and their types (list selection, date, text, multi-step)
-   - **Option identity vs display**: A folder has an internal ID and a display path — the registry must distinguish these so fuzzy search operates on the display label while execution uses the ID
-   - **Validation**: Can the user submit this combination of parameters? (e.g., can't move a thread to the folder it's already in)
-   - **Execution payload**: The final structured input passed to the command handler — not just "which option was picked" but the full typed arguments
-
-   This is the hardest part of the backend design and must be resolved during implementation planning. The solution must be framework-agnostic (Tauri and iced will render these input shapes differently) while keeping the type contracts in core.
-
-2. **Disabled command visibility**: Should commands that are currently unavailable (e.g., "Archive" with no thread selected) appear in palette results as greyed-out entries, or be hidden entirely? Showing them is discoverable (users learn what's possible), hiding them is less noisy (shorter, more relevant results). This is a product decision that affects the registry's query API — "return all commands with availability flags" vs "return only enabled commands."
-
-3. **Palette visibility vs bindability**: Must every registered command be searchable in the palette, or can some be keyboard-only? Examples: `nav.next` / `nav.prev` (j/k) are essential keybindings but arguably noise in the palette — no one opens the palette to move down one thread. If commands can opt out of palette visibility, the registry needs a `palette_visible: bool` (or a visibility enum) on the command metadata.
-
-4. **Scope of "single source of truth"**: The document states that keyboard dispatch and the palette UI consume the registry. But what about context menus, toolbars, right-click menus, and touch/mobile surfaces? If those also consume command metadata (label, icon, enabled state, keybinding hint), the registry is the app's entire action layer, not just the palette's backend. This is probably the right answer, but it expands the contract — the registry must serve any UI surface that can trigger or display a command, not just two.
+2. **Scope of "single source of truth"**: The document states that keyboard dispatch and the palette UI consume the registry. But what about context menus, toolbars, right-click menus, and touch/mobile surfaces? If those also consume command metadata (label, icon, enabled state, keybinding hint), the registry is the app's entire action layer, not just the palette's backend. This is probably the right answer, but it expands the contract — the registry must serve any UI surface that can trigger or display a command, not just two.
