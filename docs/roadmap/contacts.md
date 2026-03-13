@@ -1,7 +1,7 @@
 # Contacts & Groups
 
 **Tier**: 1 — Blocks switching from Outlook
-**Status**: ⚠️ **Partial** — Local contact DB exists (`contacts` table with frequency ranking, avatars, notes). Contacts auto-collected on send. Compose autocomplete works against local contacts. Gravatar integration, contact sidebar with stats/colleagues/shared files. **Missing**: server-side sync (Exchange `/me/contacts`, Google People API), `seen_addresses` from received mail headers, distribution list/group resolution, contact photos from server.
+**Status**: ⚠️ **Partial** — Local contact DB with frequency ranking, avatars, notes. `seen_addresses` auto-collected during sync with direction-weighted ranking (Phase 1). FTS5 prefix search on contacts with email-aware tokenizer, two-tier ranking (explicit > observed), LIKE fallback for seen_addresses (Phase 2). Compose autocomplete returns both explicit contacts and observed addresses. Gravatar integration, contact sidebar with stats/colleagues/shared files. **Missing**: server-side sync (Exchange `/me/contacts`, Google People API), distribution list/group resolution, contact photos from server.
 
 ---
 
@@ -28,13 +28,13 @@
 
 ## Implementation Phases
 
-### Phase 1 — `seen_addresses` ingestion
+### Phase 1 — `seen_addresses` ingestion ✅
 
 Parse `From`/`To`/`Cc`/`Reply-To` during sync via `mail-parser`. Populate `seen_addresses` with direction-weighted ranking and recency decay. Canonicalize emails, resolve display name conflicts. Immediate autocomplete value for every provider, forces core schema and ranking decisions early.
 
-### Phase 2 — Local contacts model + FTS5 autocomplete
+### Phase 2 — FTS5 contact search ✅
 
-Clean up the existing `contacts` table schema. Add `contacts_fts` (FTS5) with prefix search. Implement source-weighted ranking (`explicit > server_suggested > locally_observed`). Validates the search/ranking model before provider sync piles on — autocomplete improves as soon as local data exists.
+Add `contacts_fts` (FTS5) with email-aware tokenizer (`tokenchars='@._-'`), prefix indexes, and content-sync triggers. Two-tier ranking: explicit contacts above observed addresses. LIKE fallback for graceful degradation. Validates the explicit > observed ranking model before provider sync lands.
 
 ### Phase 3 — Exchange personal contacts sync
 

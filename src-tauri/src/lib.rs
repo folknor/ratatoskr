@@ -22,6 +22,7 @@ mod oauth;
 mod progress;
 mod provider;
 mod search;
+mod seen_addresses;
 mod smart_labels;
 mod smtp;
 mod state;
@@ -475,6 +476,8 @@ pub fn run() {
             command_palette::commands::command_palette_query,
             command_palette::commands::command_palette_get_options,
             command_palette::commands::command_palette_validate_option,
+            // Seen addresses (contacts Phase 1)
+            seen_addresses::commands::backfill_seen_addresses,
             // Discovery
             discovery::commands::discover_email_config,
         ])

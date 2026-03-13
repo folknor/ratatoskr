@@ -806,6 +806,42 @@ static MIGRATIONS: &[Migration] = &[
             CREATE INDEX IF NOT EXISTS idx_seen_addresses_last_seen ON seen_addresses(account_id, last_seen_at DESC);
         "#,
     },
+    Migration {
+        version: 32,
+        description: "FTS5 prefix search index for contacts",
+        sql: r#"
+            CREATE VIRTUAL TABLE IF NOT EXISTS contacts_fts USING fts5(
+                email,
+                display_name,
+                content=contacts,
+                content_rowid=rowid,
+                tokenize="unicode61 tokenchars '@._-'",
+                prefix='2,3'
+            );
+
+            INSERT INTO contacts_fts(contacts_fts) VALUES('rebuild');
+
+            CREATE TRIGGER IF NOT EXISTS contacts_fts_insert AFTER INSERT ON contacts
+            BEGIN
+                INSERT INTO contacts_fts(rowid, email, display_name)
+                    VALUES (NEW.rowid, NEW.email, COALESCE(NEW.display_name, ''));
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS contacts_fts_delete AFTER DELETE ON contacts
+            BEGIN
+                INSERT INTO contacts_fts(contacts_fts, rowid, email, display_name)
+                    VALUES ('delete', OLD.rowid, OLD.email, COALESCE(OLD.display_name, ''));
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS contacts_fts_update AFTER UPDATE ON contacts
+            BEGIN
+                INSERT INTO contacts_fts(contacts_fts, rowid, email, display_name)
+                    VALUES ('delete', OLD.rowid, OLD.email, COALESCE(OLD.display_name, ''));
+                INSERT INTO contacts_fts(rowid, email, display_name)
+                    VALUES (NEW.rowid, NEW.email, COALESCE(NEW.display_name, ''));
+            END;
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -1045,6 +1081,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))
             .expect("query");
-        assert_eq!(max_ver, 31);
+        assert_eq!(max_ver, 32);
     }
 }

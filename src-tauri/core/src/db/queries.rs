@@ -854,6 +854,68 @@ pub fn search_contacts(
     query: String,
     limit: i64,
 ) -> Result<Vec<DbContact>, String> {
+    match search_contacts_fts(conn, &query, limit) {
+        Ok(results) => Ok(results),
+        Err(_) => search_contacts_like(conn, &query, limit),
+    }
+}
+
+/// FTS5-based contact search with prefix matching.
+/// Contacts (explicit) rank above seen_addresses (observed).
+fn search_contacts_fts(
+    conn: &Connection,
+    query: &str,
+    limit: i64,
+) -> Result<Vec<DbContact>, String> {
+    let fts_query = build_fts_query(query);
+    if fts_query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let like_pattern = format!("%{query}%");
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT c.id, c.email, c.display_name, c.avatar_url, c.frequency,
+                    c.last_contacted_at, c.notes, 1 AS source_rank
+             FROM contacts c
+             INNER JOIN contacts_fts ON contacts_fts.rowid = c.rowid
+             WHERE contacts_fts MATCH ?1
+
+             UNION ALL
+
+             SELECT '' AS id, sa.email, sa.display_name, NULL AS avatar_url,
+               CAST(
+                 (sa.times_sent_to * 3.0 + sa.times_sent_cc * 1.5
+                  + sa.times_received_from * 1.0 + sa.times_received_cc * 0.5)
+                 / (1.0 + CAST((unixepoch() * 1000 - sa.last_seen_at) AS REAL)
+                    / 86400000.0 / 90.0)
+               AS INTEGER) AS frequency,
+               NULL AS last_contacted_at, NULL AS notes, 2 AS source_rank
+             FROM seen_addresses sa
+             WHERE (sa.email LIKE ?2 OR sa.display_name LIKE ?2)
+               AND sa.email NOT IN (
+                 SELECT c2.email FROM contacts c2
+                 INNER JOIN contacts_fts fts2 ON fts2.rowid = c2.rowid
+                 WHERE contacts_fts MATCH ?1
+               )
+
+             ORDER BY source_rank ASC, frequency DESC, display_name ASC
+             LIMIT ?3",
+        )
+        .map_err(|e| e.to_string())?;
+
+    stmt.query_map(params![fts_query, like_pattern, limit], row_to_contact)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+/// LIKE-based fallback for contact search (used when FTS5 table is unavailable).
+fn search_contacts_like(
+    conn: &Connection,
+    query: &str,
+    limit: i64,
+) -> Result<Vec<DbContact>, String> {
     let pattern = format!("%{query}%");
 
     let mut stmt = conn
@@ -889,6 +951,27 @@ pub fn search_contacts(
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
+}
+
+/// Convert user input to an FTS5 prefix-match expression.
+///
+/// `"john sm"` → `"john* sm*"` — each token gets a trailing `*` for prefix matching.
+/// FTS5 operators are stripped to prevent injection. Email-significant characters
+/// (`@`, `.`, `-`, `_`) are preserved since the tokenizer includes them via `tokenchars`.
+fn build_fts_query(raw: &str) -> String {
+    raw.split_whitespace()
+        .map(|token| {
+            let clean: String = token
+                .chars()
+                .filter(|c| {
+                    c.is_alphanumeric() || *c == '@' || *c == '.' || *c == '-' || *c == '_'
+                })
+                .collect();
+            format!("{clean}*")
+        })
+        .filter(|t| t.len() > 1) // skip empty tokens (just "*")
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub fn get_contact_by_email(conn: &Connection, email: String) -> Result<Option<DbContact>, String> {
