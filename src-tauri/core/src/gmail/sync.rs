@@ -337,6 +337,9 @@ async fn process_single_thread(
     // Search index writes
     index_messages(search, account_id, &parsed).await;
 
+    // Seen addresses ingestion (fire-and-forget)
+    crate::seen_addresses::ingest_from_messages(db, account_id, &parsed).await;
+
     Ok(history_id)
 }
 

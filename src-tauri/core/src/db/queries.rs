@@ -858,9 +858,29 @@ pub fn search_contacts(
 
     let mut stmt = conn
         .prepare(
-            "SELECT * FROM contacts
+            "SELECT id, email, display_name, avatar_url, frequency,
+                    last_contacted_at, notes, 1 AS source_rank
+             FROM contacts
              WHERE email LIKE ?1 OR display_name LIKE ?1
-             ORDER BY frequency DESC, display_name ASC
+
+             UNION ALL
+
+             SELECT '' AS id, sa.email, sa.display_name, NULL AS avatar_url,
+               CAST(
+                 (sa.times_sent_to * 3.0 + sa.times_sent_cc * 1.5
+                  + sa.times_received_from * 1.0 + sa.times_received_cc * 0.5)
+                 / (1.0 + CAST((unixepoch() * 1000 - sa.last_seen_at) AS REAL)
+                    / 86400000.0 / 90.0)
+               AS INTEGER) AS frequency,
+               NULL AS last_contacted_at, NULL AS notes, 2 AS source_rank
+             FROM seen_addresses sa
+             WHERE (sa.email LIKE ?1 OR sa.display_name LIKE ?1)
+               AND sa.email NOT IN (
+                 SELECT email FROM contacts
+                 WHERE email LIKE ?1 OR display_name LIKE ?1
+               )
+
+             ORDER BY source_rank ASC, frequency DESC, display_name ASC
              LIMIT ?2",
         )
         .map_err(|e| e.to_string())?;

@@ -6,6 +6,7 @@ use crate::body_store::BodyStoreState;
 use crate::db::DbState;
 use crate::inline_image_store::{InlineImage, InlineImageStoreState};
 use crate::search::{SearchDocument, SearchState};
+use crate::seen_addresses::MessageAddresses;
 use crate::threading::ThreadGroup;
 
 use super::convert::ConvertedMessage;
@@ -245,7 +246,56 @@ pub(crate) async fn store_chunk(
     // 4. Index in tantivy (async, fire-and-forget)
     index_messages(search, chunk, account_id).await;
 
+    // 5. Ingest seen addresses (fire-and-forget)
+    // Use chunk's imap_msg fields since db_data was moved into the DB closure.
+    let addr_data: Vec<ImapAddressData> = chunk
+        .iter()
+        .map(|c| ImapAddressData {
+            from_address: c.imap_msg.from_address.clone(),
+            from_name: c.imap_msg.from_name.clone(),
+            to_addresses: c.imap_msg.to_addresses.clone(),
+            cc_addresses: c.imap_msg.cc_addresses.clone(),
+            bcc_addresses: c.imap_msg.bcc_addresses.clone(),
+            date: c.meta.date,
+        })
+        .collect();
+    crate::seen_addresses::ingest_from_messages(db, account_id, &addr_data).await;
+
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Address data for seen_addresses ingestion (IMAP path)
+// ---------------------------------------------------------------------------
+
+struct ImapAddressData {
+    from_address: Option<String>,
+    from_name: Option<String>,
+    to_addresses: Option<String>,
+    cc_addresses: Option<String>,
+    bcc_addresses: Option<String>,
+    date: i64,
+}
+
+impl MessageAddresses for ImapAddressData {
+    fn sender_address(&self) -> Option<&str> {
+        self.from_address.as_deref()
+    }
+    fn sender_name(&self) -> Option<&str> {
+        self.from_name.as_deref()
+    }
+    fn to_addresses(&self) -> Option<&str> {
+        self.to_addresses.as_deref()
+    }
+    fn cc_addresses(&self) -> Option<&str> {
+        self.cc_addresses.as_deref()
+    }
+    fn bcc_addresses(&self) -> Option<&str> {
+        self.bcc_addresses.as_deref()
+    }
+    fn msg_date_ms(&self) -> i64 {
+        self.date
+    }
 }
 
 // ---------------------------------------------------------------------------

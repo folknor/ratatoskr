@@ -520,6 +520,9 @@ async fn persist_messages(
     // 3. Search index writes
     index_messages(ctx.search, ctx.account_id, messages).await;
 
+    // 4. Seen addresses ingestion (fire-and-forget)
+    crate::seen_addresses::ingest_from_messages(ctx.db, ctx.account_id, messages).await;
+
     Ok(())
 }
 

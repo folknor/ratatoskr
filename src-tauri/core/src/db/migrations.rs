@@ -784,6 +784,28 @@ static MIGRATIONS: &[Migration] = &[
             );
         "#,
     },
+    Migration {
+        version: 31,
+        description: "Seen addresses table for auto-collected contacts",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS seen_addresses (
+                email TEXT NOT NULL,
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                display_name TEXT,
+                display_name_source TEXT NOT NULL DEFAULT 'observed',
+                times_sent_to INTEGER NOT NULL DEFAULT 0,
+                times_sent_cc INTEGER NOT NULL DEFAULT 0,
+                times_received_from INTEGER NOT NULL DEFAULT 0,
+                times_received_cc INTEGER NOT NULL DEFAULT 0,
+                first_seen_at INTEGER NOT NULL,
+                last_seen_at INTEGER NOT NULL,
+                source TEXT NOT NULL DEFAULT 'local_observed',
+                PRIMARY KEY (account_id, email)
+            );
+            CREATE INDEX IF NOT EXISTS idx_seen_addresses_email ON seen_addresses(email);
+            CREATE INDEX IF NOT EXISTS idx_seen_addresses_last_seen ON seen_addresses(account_id, last_seen_at DESC);
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -1023,6 +1045,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))
             .expect("query");
-        assert_eq!(max_ver, 29);
+        assert_eq!(max_ver, 31);
     }
 }

@@ -26,9 +26,39 @@
 - M365 Groups are overloaded: a Group is simultaneously a shared mailbox, a Teams team, a SharePoint site, and a Planner plan. For our purposes we only care about "list of email addresses", but the API surface is complex.
 - Sync frequency: contacts change less often than email, but a stale contact list means autocomplete misses new hires. Need a sensible sync interval (hourly? daily?) and delta sync where supported (Graph has `/me/contacts/delta`).
 
-## Work
+## Implementation Phases
 
-Sync contacts to local DB per-account, unified autocomplete across all accounts, local address book for accounts without server-side contacts, group resolution for compose.
+### Phase 1 — `seen_addresses` ingestion
+
+Parse `From`/`To`/`Cc`/`Reply-To` during sync via `mail-parser`. Populate `seen_addresses` with direction-weighted ranking and recency decay. Canonicalize emails, resolve display name conflicts. Immediate autocomplete value for every provider, forces core schema and ranking decisions early.
+
+### Phase 2 — Local contacts model + FTS5 autocomplete
+
+Clean up the existing `contacts` table schema. Add `contacts_fts` (FTS5) with prefix search. Implement source-weighted ranking (`explicit > server_suggested > locally_observed`). Validates the search/ranking model before provider sync piles on — autocomplete improves as soon as local data exists.
+
+### Phase 3 — Exchange personal contacts sync
+
+Graph `/me/contacts` with delta sync per `(account, contact_folder)`. Handle `$deltatoken` storage, `410 Gone` fallback to full sync. `$select` to limit fields. This is the heaviest provider and the primary target user base.
+
+### Phase 4 — Local groups + compose expansion
+
+Local contact groups in SQLite (name + address list). DFS expansion with cycle detection via visited set. Compose UI integration. Useful immediately for JMAP/IMAP users with no server-side groups.
+
+### Phase 5 — Google People API sync
+
+`people.connections.list` with sync tokens (7-day expiry). `otherContacts` as lower-priority autocomplete candidates. Respect quota limits on full syncs.
+
+### Phase 6 — Exchange group resolution
+
+`/groups/{id}/transitiveMembers` for M365 Groups and distribution lists. Server handles recursion and cycle detection. Track partial resolution (hidden members). Skip dynamic DLs and personal DLs for now.
+
+### Phase 7 — Contact photos
+
+Schema and cache hooks can be designed earlier, but actual photo fetching lands here to avoid request volume and complexity before core sync/search is proven. Exchange: one request per photo, cache by `changeKey`. Google: public URLs with `?sz=` resizing. Local disk cache with eviction.
+
+### Phase 8 — CardDAV follow-up
+
+`libdav` + `calcard` for Fastmail, Stalwart, and other CardDAV servers. Etag-based sync. Covers JMAP accounts once server support matures.
 
 ---
 

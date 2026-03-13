@@ -57,6 +57,27 @@ pub struct ParsedGmailMessage {
     pub in_reply_to_header: Option<String>,
 }
 
+impl crate::seen_addresses::MessageAddresses for ParsedGmailMessage {
+    fn sender_address(&self) -> Option<&str> {
+        self.from_address.as_deref()
+    }
+    fn sender_name(&self) -> Option<&str> {
+        self.from_name.as_deref()
+    }
+    fn to_addresses(&self) -> Option<&str> {
+        self.to_addresses.as_deref()
+    }
+    fn cc_addresses(&self) -> Option<&str> {
+        self.cc_addresses.as_deref()
+    }
+    fn bcc_addresses(&self) -> Option<&str> {
+        self.bcc_addresses.as_deref()
+    }
+    fn msg_date_ms(&self) -> i64 {
+        self.date
+    }
+}
+
 /// Parse a Gmail API message into the internal representation.
 pub fn parse_gmail_message(msg: &GmailMessage) -> ParsedGmailMessage {
     let payload = msg.payload.as_ref();

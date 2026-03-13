@@ -14,6 +14,7 @@ pub mod jmap;
 pub mod progress;
 pub mod provider;
 pub mod search;
+pub mod seen_addresses;
 pub mod smart_folder;
 pub mod smart_labels;
 pub mod smtp;
