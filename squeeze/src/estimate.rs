@@ -43,11 +43,22 @@ pub fn estimate(
     config: &Config,
 ) -> Result<Estimate, SqueezeError> {
     match format {
-        Format::Jpeg | Format::Png | Format::WebP | Format::Gif | Format::Bmp | Format::Tiff
-        | Format::Heic => {
+        Format::Jpeg | Format::Png | Format::WebP | Format::Gif | Format::Bmp | Format::Tiff => {
             let original_size = input.len() as u64;
             let dims = read_image_dimensions_mem(input, format)?;
             estimate_image(original_size, dims, format, config)
+        }
+        Format::Heic => {
+            #[cfg(feature = "heic")]
+            {
+                let original_size = input.len() as u64;
+                let dims = read_image_dimensions_mem(input, format)?;
+                estimate_image(original_size, dims, format, config)
+            }
+            #[cfg(not(feature = "heic"))]
+            {
+                Ok(unchanged(input.len() as u64, "HEIC support requires the 'heic' feature"))
+            }
         }
         Format::Pdf => estimate_pdf_mem(input, config),
         Format::Ooxml(_) | Format::Odf(_) => {
@@ -72,10 +83,20 @@ pub fn estimate_file(
     let original_size = metadata.len();
 
     match format {
-        Format::Jpeg | Format::Png | Format::WebP | Format::Gif | Format::Bmp | Format::Tiff
-        | Format::Heic => {
+        Format::Jpeg | Format::Png | Format::WebP | Format::Gif | Format::Bmp | Format::Tiff => {
             let dims = read_image_dimensions_file(path, format)?;
             estimate_image(original_size, dims, format, config)
+        }
+        Format::Heic => {
+            #[cfg(feature = "heic")]
+            {
+                let dims = read_image_dimensions_file(path, format)?;
+                estimate_image(original_size, dims, format, config)
+            }
+            #[cfg(not(feature = "heic"))]
+            {
+                Ok(unchanged(original_size, "HEIC support requires the 'heic' feature"))
+            }
         }
         Format::Pdf => estimate_pdf_file(path, original_size, config),
         Format::Ooxml(_) | Format::Odf(_) => {
@@ -510,7 +531,10 @@ const MAX_QUOTE_SEARCH_BYTES: u64 = 100 * 1024 * 1024;
 /// Count bytes from current position until a closing quote (`"` or `'`).
 /// If the quote isn't in `local_buf`, continues reading from the reader.
 /// Stops searching after `MAX_QUOTE_SEARCH_BYTES` to avoid unbounded reads.
-fn find_quote_distance<R: Read>(local_buf: &[u8], reader: &mut R) -> Result<u64, SqueezeError> {
+///
+/// When the quote is found via read-ahead, seeks the reader back so bytes
+/// after the quote aren't lost to the caller's subsequent reads.
+fn find_quote_distance<R: Read + Seek>(local_buf: &[u8], reader: &mut R) -> Result<u64, SqueezeError> {
     // Check the local buffer first.
     for (i, &b) in local_buf.iter().enumerate() {
         if b == b'"' || b == b'\'' {
@@ -531,6 +555,15 @@ fn find_quote_distance<R: Read>(local_buf: &[u8], reader: &mut R) -> Result<u64,
         }
         for (i, &b) in small_buf[..n].iter().enumerate() {
             if b == b'"' || b == b'\'' {
+                // Seek back the unconsumed bytes so the caller doesn't
+                // miss content after the closing quote.
+                let unconsumed = n - i - 1;
+                if unconsumed > 0 {
+                    #[allow(clippy::cast_possible_wrap)]
+                    reader
+                        .seek(SeekFrom::Current(-(unconsumed as i64)))
+                        .map_err(SqueezeError::Io)?;
+                }
                 return Ok(distance + i as u64);
             }
         }

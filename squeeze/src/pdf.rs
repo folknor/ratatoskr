@@ -213,6 +213,18 @@ fn try_recompress_flat(doc: &mut Document, id: ObjectId, info: &ImageInfo, confi
         return;
     }
 
+    // Skip images with predictors (e.g. PNG predictors prepend a filter byte
+    // per row). After zlib decompression, the bytes aren't raw interleaved
+    // pixels — treating them as such produces silently corrupted JPEGs.
+    {
+        let Some(Object::Stream(stream)) = doc.objects.get(&id) else {
+            return;
+        };
+        if has_predictor(&stream.dict) {
+            return;
+        }
+    }
+
     let raw_pixels = {
         let Some(Object::Stream(stream)) = doc.objects.get_mut(&id) else {
             return;
@@ -294,6 +306,25 @@ fn try_recompress_flat(doc: &mut Document, id: ObjectId, info: &ImageInfo, confi
 fn recompress_flat_stream(doc: &mut Document, id: ObjectId) {
     if let Some(Object::Stream(stream)) = doc.objects.get_mut(&id) {
         let _ = stream.compress();
+    }
+}
+
+/// Check if a stream's /DecodeParms specifies a predictor (> 1).
+/// Predictor 1 = no prediction. Predictor 2 = TIFF. 10-15 = PNG sub/up/avg/paeth/optimum.
+fn has_predictor(dict: &lopdf::Dictionary) -> bool {
+    let Ok(params) = dict.get(b"DecodeParms") else {
+        return false;
+    };
+    let check = |d: &lopdf::Dictionary| -> bool {
+        matches!(d.get(b"Predictor").ok(), Some(Object::Integer(p)) if *p > 1)
+    };
+    match params {
+        Object::Dictionary(d) => check(d),
+        // Filter arrays can have per-filter DecodeParms.
+        Object::Array(arr) => arr.iter().any(|item| {
+            matches!(item, Object::Dictionary(d) if check(d))
+        }),
+        _ => false,
     }
 }
 

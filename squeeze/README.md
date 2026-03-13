@@ -76,7 +76,7 @@ Two entry points: `estimate()` for instant size prediction, `compress()` for act
 
 Two variants: `estimate()` for in-memory data, `estimate_file()` for file paths.
 
-`estimate_file()` never loads the entire file into memory — it reads only what each format needs: image headers (~64 bytes), ZIP central directory, or PDF xref table. Sub-millisecond for images and archives, ~100-300ms for large PDFs.
+`estimate_file()` avoids loading the entire file for images (reads only headers, ~64 bytes) and ZIP archives (reads only the central directory). For PDFs, lopdf loads the full document into memory to walk the object graph. Sub-millisecond for images and archives, ~100-300ms for large PDFs.
 
 ```rust
 use squeeze::{estimate::{estimate, estimate_file}, detect, config::Config};
@@ -84,7 +84,7 @@ use std::path::Path;
 
 let config = Config::email_default();
 
-// From a file path (preferred — avoids loading the whole file):
+// From a file path (preferred for images/archives — reads headers only):
 let format = detect::detect_from_extension("pdf", &[]);
 let est = estimate_file(Path::new("report.pdf"), format, &config)?;
 
@@ -110,7 +110,7 @@ let provider_limit = limits::GMAIL_YAHOO; // 18 MB
 
 let mut total_estimated: u64 = 0;
 
-// User drops an attachment — estimate is instant, no full file load:
+// User drops an attachment — estimate is fast, header-only for images/archives:
 fn on_attachment_added(path: &Path, mime_type: &str) {
     let format = detect::detect(mime_type, &[]);
     let est = estimate_file(path, format, &config).unwrap();
@@ -153,7 +153,7 @@ if result.was_compressed() {
 | | `estimate_file()` | `estimate()` | `compress()` |
 |--|--|--|--|
 | Input | File path | `&[u8]` | `&[u8]` |
-| Memory | Headers only | Full buffer (but no work) | Full buffer + decode/encode |
+| Memory | Headers only (images/archives), full file (PDFs) | Full buffer (but no work) | Full buffer + decode/encode |
 | Speed | 2-80ms | Sub-millisecond | Seconds (CPU-intensive) |
 | Accuracy | Conservative (1-5x over) | Conservative (1-5x over) | Exact |
 | Use case | Pre-flight check | When bytes already in memory | Actual compression |
