@@ -29,7 +29,7 @@
   1. **Settings UI**: No user-facing control for inline image store size. The 128 MB cap is hardcoded in Rust. The settings page should expose this alongside the existing attachment cache size slider, or at minimum show the current usage via `inline_image_stats`.
   2. ~~**Orphan cleanup on account/message deletion**~~: Done — `db_delete_account` and `provider_prepare_account_resync` now collect inline content hashes before deletion, then call `delete_unreferenced()` to clean orphaned blobs.
   3. **Scheduled eviction**: The file cache runs eviction after every `provider_fetch_attachment` cache-on-miss (via `enforce_cache_limit`). The inline store's `prune_to_size` runs after `put`/`put_batch` which covers sync-time inserts, but there's no periodic sweep to catch edge cases (e.g., if `MAX_INLINE_STORE_BYTES` is lowered in a future update). Consider adding a periodic call in `preCacheManager.ts` or a dedicated background task.
-  4. **Tauri command for configurable limit**: If the cap becomes user-configurable, need a command to update the limit and trigger an immediate prune (or read it from the settings DB at `init()` time instead of using the const).
+  4. ~~**Tauri command for configurable limit**~~: Done — `inline_image_prune` command accepts a custom `max_bytes` limit and triggers immediate eviction. The 128 MB default constant remains for automatic post-insert pruning; the command enables UI-driven limit changes.
 
 ## Iced Rewrite
 

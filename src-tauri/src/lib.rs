@@ -360,6 +360,7 @@ pub fn run() {
             inline_image_store::commands::inline_image_get,
             inline_image_store::commands::inline_image_stats,
             inline_image_store::commands::inline_image_clear,
+            inline_image_store::commands::inline_image_prune,
             // Tantivy full-text search (Phase 3)
             search::commands::search_messages,
             search::commands::index_message,

@@ -35,6 +35,18 @@ pub async fn inline_image_clear(state: State<'_, InlineImageStoreState>) -> Resu
     state.clear().await
 }
 
+/// Prune the inline image store to a given size limit (in bytes).
+///
+/// Evicts oldest entries until total size fits under `max_bytes`.
+/// Use this when the user changes the size limit in settings.
+#[tauri::command]
+pub async fn inline_image_prune(
+    state: State<'_, InlineImageStoreState>,
+    max_bytes: u64,
+) -> Result<u64, String> {
+    state.prune_to_size(max_bytes).await
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InlineImageResult {

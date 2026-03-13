@@ -149,7 +149,10 @@ pub fn parse_graph_message(
     let auth_results = get_header(headers, "Authentication-Results");
     let list_unsubscribe = get_header(headers, "List-Unsubscribe");
     let list_unsubscribe_post = get_header(headers, "List-Unsubscribe-Post");
-    let mdn_requested = get_header(headers, "Disposition-Notification-To").is_some();
+    // Prefer native Graph boolean; fall back to header detection
+    let mdn_requested = msg
+        .is_read_receipt_requested
+        .unwrap_or_else(|| get_header(headers, "Disposition-Notification-To").is_some());
 
     // Attachments
     let attachments: Vec<ParsedGraphAttachment> = msg

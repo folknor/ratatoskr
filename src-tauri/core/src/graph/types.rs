@@ -31,6 +31,7 @@ pub struct GraphMessage {
     pub categories: Option<Vec<String>>,
     pub flag: Option<GraphFlag>,
     pub inference_classification: Option<String>,
+    pub is_read_receipt_requested: Option<bool>,
     pub internet_message_headers: Option<Vec<GraphInternetHeader>>,
     pub attachments: Option<Vec<GraphAttachment>>,
 }
@@ -186,7 +187,7 @@ id,conversationId,subject,bodyPreview,body,uniqueBody,from,\
 toRecipients,ccRecipients,bccRecipients,replyTo,\
 receivedDateTime,sentDateTime,isRead,isDraft,hasAttachments,\
 importance,parentFolderId,categories,flag,\
-inferenceClassification,internetMessageHeaders,internetMessageId";
+inferenceClassification,isReadReceiptRequested,internetMessageHeaders,internetMessageId";
 
 // ── Batch request types ──────────────────────────────────
 
