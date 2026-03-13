@@ -8,6 +8,10 @@ use crate::detect::Format;
 use crate::error::SqueezeError;
 use crate::{CompressOutput, CompressResult};
 
+/// Maximum pixels (width × height) we'll decode.
+/// 100 megapixels — an RGB8 image at this size is ~300 MB.
+pub(crate) const MAX_IMAGE_PIXELS: u64 = 100_000_000;
+
 /// Map our `Format` enum to `image::ImageFormat` for decoding.
 fn to_image_format(format: Format) -> Option<ImageFormat> {
     match format {
@@ -34,6 +38,17 @@ pub fn compress_image(
     // For PNG, try lossless optimization first via oxipng — no decode needed.
     if format == Format::Png && !config.png_to_jpeg {
         return compress_png_lossless(input, config);
+    }
+
+    // Pre-flight dimension check: read header only, reject decompression bombs
+    // before committing to a full decode (which allocates width × height × channels).
+    if let Ok((w, h)) = ImageReader::with_format(Cursor::new(input), img_format).into_dimensions()
+    {
+        if u64::from(w) * u64::from(h) > MAX_IMAGE_PIXELS {
+            return Err(SqueezeError::ImageDecode(format!(
+                "image too large: {w}x{h} exceeds {MAX_IMAGE_PIXELS} pixel limit"
+            )));
+        }
     }
 
     let img = ImageReader::with_format(Cursor::new(input), img_format)
@@ -78,6 +93,12 @@ fn compress_png_lossless(input: &[u8], config: &Config) -> Result<CompressResult
     let needs_resize = {
         let reader = ImageReader::with_format(Cursor::new(input), ImageFormat::Png);
         if let Ok((w, h)) = reader.into_dimensions() {
+            // Reject decompression bombs before full decode.
+            if u64::from(w) * u64::from(h) > MAX_IMAGE_PIXELS {
+                return Err(SqueezeError::ImageDecode(format!(
+                    "PNG too large: {w}x{h} exceeds {MAX_IMAGE_PIXELS} pixel limit"
+                )));
+            }
             w.max(h) > config.max_dimension
         } else {
             false

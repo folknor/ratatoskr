@@ -77,25 +77,23 @@ pub fn compress_archive(
         let name = entry.name().to_string();
         let is_image_entry = is_compressible_image(&name, prefixes);
 
-        // Guard against zip bombs: check declared size before reading.
-        let declared_size = entry.size();
-        if declared_size > MAX_ARCHIVE_ENTRY_BYTES {
-            return Err(SqueezeError::ArchiveRead(format!(
-                "entry '{name}' declares {declared_size} bytes decompressed, exceeds limit"
-            )));
-        }
-        total_decompressed = total_decompressed.saturating_add(declared_size);
-        if total_decompressed > MAX_ARCHIVE_TOTAL_BYTES {
-            return Err(SqueezeError::ArchiveRead(
-                "archive total decompressed size exceeds limit".into(),
-            ));
-        }
-
-        // Read the entry content.
+        // Guard against zip bombs: cap actual decompressed bytes via take().
+        // We don't trust the declared size — attackers control that field.
         let mut content = Vec::new();
         entry
+            .by_ref()
+            .take(MAX_ARCHIVE_ENTRY_BYTES + 1)
             .read_to_end(&mut content)
             .map_err(|e| SqueezeError::ArchiveRead(e.to_string()))?;
+
+        if content.len() as u64 > MAX_ARCHIVE_ENTRY_BYTES {
+            return Ok(unchanged_result(input));
+        }
+
+        total_decompressed += content.len() as u64;
+        if total_decompressed > MAX_ARCHIVE_TOTAL_BYTES {
+            return Ok(unchanged_result(input));
+        }
 
         let options = FileOptions::<()>::default()
             .compression_method(entry.compression());
@@ -150,6 +148,15 @@ pub fn compress_archive(
     })
 }
 
+fn unchanged_result(input: &[u8]) -> CompressResult {
+    CompressResult {
+        original_size: input.len(),
+        compressed_size: input.len(),
+        output: CompressOutput::Unchanged,
+        new_mime_type: None,
+    }
+}
+
 /// Check if a ZIP entry path is a compressible image in the expected media directory.
 fn is_compressible_image(name: &str, prefixes: &[&str]) -> bool {
     let in_media_dir = prefixes.iter().any(|p| name.starts_with(p));
@@ -172,6 +179,16 @@ fn try_compress_archive_image(
     data: &[u8],
     config: &Config,
 ) -> Result<Option<Vec<u8>>, SqueezeError> {
+    // Pre-flight dimension check to reject decompression bombs.
+    let dims_reader = ImageReader::new(Cursor::new(data))
+        .with_guessed_format()
+        .map_err(|e| SqueezeError::ImageDecode(e.to_string()))?;
+    if let Ok((w, h)) = dims_reader.into_dimensions() {
+        if u64::from(w) * u64::from(h) > crate::image::MAX_IMAGE_PIXELS {
+            return Ok(None);
+        }
+    }
+
     let img = ImageReader::new(Cursor::new(data))
         .with_guessed_format()
         .map_err(|e| SqueezeError::ImageDecode(e.to_string()))?

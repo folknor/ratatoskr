@@ -54,7 +54,15 @@ pub fn compress_pdf(input: &[u8], config: &Config) -> Result<CompressResult, Squ
     doc.save_modern(&mut output)
         .map_err(|e| SqueezeError::PdfWrite(e.to_string()))?;
 
-    if output.len() < input.len() {
+    // Apply the same min_savings_pct threshold as images and SVGs.
+    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+    let savings = if input.is_empty() {
+        0.0_f32
+    } else {
+        ((1.0 - (output.len() as f64 / input.len() as f64)) * 100.0) as f32
+    };
+
+    if savings >= config.min_savings_pct {
         Ok(CompressResult {
             original_size: input.len(),
             compressed_size: output.len(),
@@ -348,10 +356,10 @@ fn deduplicate_streams(doc: &mut Document) {
     let all_ids: Vec<_> = doc.objects.keys().copied().collect();
     for id in all_ids {
         if let Some(obj) = doc.objects.get_mut(&id) {
-            replace_references(obj, &replace_map);
+            replace_references(obj, &replace_map, 0);
         }
     }
-    replace_refs_in_dict(&mut doc.trailer, &replace_map);
+    replace_refs_in_dict(&mut doc.trailer, &replace_map, 0);
 
     // Remove duplicate objects.
     for (dup_id, _) in &duplicates {
@@ -359,7 +367,13 @@ fn deduplicate_streams(doc: &mut Document) {
     }
 }
 
-fn replace_references(obj: &mut Object, map: &HashMap<ObjectId, ObjectId>) {
+/// Maximum nesting depth for intra-object traversal (arrays/dicts within one object).
+const MAX_OBJECT_DEPTH: usize = 100;
+
+fn replace_references(obj: &mut Object, map: &HashMap<ObjectId, ObjectId>, depth: usize) {
+    if depth > MAX_OBJECT_DEPTH {
+        return;
+    }
     match obj {
         Object::Reference(id) => {
             if let Some(&new_id) = map.get(id) {
@@ -368,22 +382,22 @@ fn replace_references(obj: &mut Object, map: &HashMap<ObjectId, ObjectId>) {
         }
         Object::Array(arr) => {
             for item in arr.iter_mut() {
-                replace_references(item, map);
+                replace_references(item, map, depth + 1);
             }
         }
         Object::Dictionary(dict) => {
-            replace_refs_in_dict(dict, map);
+            replace_refs_in_dict(dict, map, depth + 1);
         }
         Object::Stream(stream) => {
-            replace_refs_in_dict(&mut stream.dict, map);
+            replace_refs_in_dict(&mut stream.dict, map, depth + 1);
         }
         _ => {}
     }
 }
 
-fn replace_refs_in_dict(dict: &mut lopdf::Dictionary, map: &HashMap<ObjectId, ObjectId>) {
+fn replace_refs_in_dict(dict: &mut lopdf::Dictionary, map: &HashMap<ObjectId, ObjectId>, depth: usize) {
     for (_, value) in dict.iter_mut() {
-        replace_references(value, map);
+        replace_references(value, map, depth);
     }
 }
 
@@ -424,32 +438,34 @@ fn collect_referenced_ids(doc: &Document) -> HashSet<ObjectId> {
             continue;
         }
         if let Some(obj) = doc.objects.get(&id) {
-            collect_refs_into(obj, &mut stack);
+            collect_refs_into(obj, &mut stack, 0);
         }
     }
 
     visited
 }
 
-/// Collect all object-id references from a single PDF object (non-recursive).
-/// Nested arrays/dicts within one object are traversed recursively, but that
-/// nesting is always shallow (< 20 levels) in practice.
-fn collect_refs_into(obj: &Object, stack: &mut Vec<ObjectId>) {
+/// Collect all object-id references from a single PDF object.
+/// Depth-limited to prevent stack overflow from crafted deeply-nested objects.
+fn collect_refs_into(obj: &Object, stack: &mut Vec<ObjectId>, depth: usize) {
+    if depth > MAX_OBJECT_DEPTH {
+        return;
+    }
     match obj {
         Object::Reference(id) => stack.push(*id),
         Object::Array(arr) => {
             for item in arr {
-                collect_refs_into(item, stack);
+                collect_refs_into(item, stack, depth + 1);
             }
         }
         Object::Dictionary(dict) => {
             for (_, value) in dict {
-                collect_refs_into(value, stack);
+                collect_refs_into(value, stack, depth + 1);
             }
         }
         Object::Stream(stream) => {
             for (_, value) in &stream.dict {
-                collect_refs_into(value, stack);
+                collect_refs_into(value, stack, depth + 1);
             }
         }
         _ => {}

@@ -334,6 +334,7 @@ fn estimate_archive_reader<R: Read + Seek>(
 
     let mut image_bytes: u64 = 0;
     let mut estimated_image_output: u64 = 0;
+    let mut total_declared: u64 = 0;
 
     // Cap iteration to avoid spending excessive time on pathological archives.
     let entry_count = archive.len().min(50_000);
@@ -343,6 +344,28 @@ fn estimate_archive_reader<R: Read + Seek>(
         };
         let name = entry.name().to_string();
         let size = entry.size(); // uncompressed size
+
+        // Match the compressor's limits: if any entry or the total exceeds
+        // what the compressor would accept, don't claim it's worth trying.
+        if size > 512 * 1024 * 1024 {
+            return Ok(Estimate {
+                original_size,
+                expected_bytes: original_size,
+                floor_bytes: original_size,
+                worth_trying: false,
+                reason: Some("archive contains entries too large to safely decompress".into()),
+            });
+        }
+        total_declared += size;
+        if total_declared > 2 * 1024 * 1024 * 1024 {
+            return Ok(Estimate {
+                original_size,
+                expected_bytes: original_size,
+                floor_bytes: original_size,
+                worth_trying: false,
+                reason: Some("archive total decompressed size exceeds limit".into()),
+            });
+        }
 
         if is_likely_image_entry(&name) {
             image_bytes += size;

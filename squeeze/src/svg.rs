@@ -212,6 +212,9 @@ fn process_attrs(
     elem
 }
 
+/// Maximum base64 data URI length we'll decode and optimize (10 MB of base64 ≈ 7.5 MB decoded).
+const MAX_EMBEDDED_B64_LEN: usize = 10 * 1024 * 1024;
+
 /// Strip whitespace from base64 data (handles &#10; decoded to \n, spaces, etc.).
 fn decode_base64_lenient(b64_data: &str) -> Option<Vec<u8>> {
     let clean: String = b64_data
@@ -224,6 +227,9 @@ fn decode_base64_lenient(b64_data: &str) -> Option<Vec<u8>> {
 /// Optimize an embedded base64 PNG via oxipng.
 fn optimize_embedded_png(value: &str) -> Option<String> {
     let b64_data = value.strip_prefix(BASE64_PNG_PREFIX)?;
+    if b64_data.len() > MAX_EMBEDDED_B64_LEN {
+        return None;
+    }
     let png_bytes = decode_base64_lenient(b64_data)?;
 
     let opts = oxipng::Options::from_preset(4);
@@ -242,6 +248,9 @@ fn optimize_embedded_png(value: &str) -> Option<String> {
 /// Optimize an embedded base64 JPEG via mozjpeg.
 fn optimize_embedded_jpeg(value: &str) -> Option<String> {
     let b64_data = value.strip_prefix(BASE64_JPEG_PREFIX)?;
+    if b64_data.len() > MAX_EMBEDDED_B64_LEN {
+        return None;
+    }
     let jpeg_bytes = decode_base64_lenient(b64_data)?;
 
     let img = image::load_from_memory_with_format(&jpeg_bytes, image::ImageFormat::Jpeg).ok()?;
