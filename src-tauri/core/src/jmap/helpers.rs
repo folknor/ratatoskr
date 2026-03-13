@@ -19,9 +19,20 @@ pub async fn query_thread_email_ids(
 }
 
 /// Get the full mailbox list as (id, role, name) tuples.
+///
+/// Uses the TTL-cached mailbox list from `JmapClient` to avoid redundant
+/// `Mailbox/get` API calls across consecutive thread actions.
 pub async fn get_mailbox_list(
     client: &JmapClient,
-) -> Result<Vec<(String, Option<String>, String)>, String> {
+) -> Result<Vec<super::client::MailboxListEntry>, String> {
+    client.mailbox_list().await
+}
+
+/// Fetch the mailbox list directly from the server (bypassing cache).
+/// Called by `JmapClient::mailbox_list()` on cache miss.
+pub(super) async fn fetch_mailbox_list_from_server(
+    client: &JmapClient,
+) -> Result<Vec<super::client::MailboxListEntry>, String> {
     use jmap_client::mailbox::Role;
 
     let mailboxes = super::sync::fetch_all_mailboxes(client).await?;

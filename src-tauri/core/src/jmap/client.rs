@@ -7,6 +7,9 @@ use tokio::sync::RwLock;
 use crate::db::DbState;
 use crate::provider::crypto;
 
+/// Cached mailbox list entry: (mailbox_id, role, name).
+pub type MailboxListEntry = (String, Option<String>, String);
+
 /// Per-account JMAP client.
 ///
 /// For Basic auth the client is fully immutable after construction —
@@ -14,12 +17,40 @@ use crate::provider::crypto;
 #[derive(Clone)]
 pub struct JmapClient {
     inner: Arc<Client>,
+    /// Cached mailbox list with timestamp for TTL-based invalidation.
+    mailbox_cache: Arc<RwLock<Option<(Vec<MailboxListEntry>, std::time::Instant)>>>,
 }
+
+/// Mailbox cache TTL — 60 seconds matches Graph's folder_map_age threshold.
+const MAILBOX_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
 
 impl JmapClient {
     /// Direct access to the underlying `jmap-client` Client.
     pub fn inner(&self) -> &Client {
         &self.inner
+    }
+
+    /// Get the cached mailbox list, or fetch and cache it if stale/missing.
+    pub async fn mailbox_list(&self) -> Result<Vec<MailboxListEntry>, String> {
+        // Check cache
+        {
+            let cache = self.mailbox_cache.read().await;
+            if let Some((ref list, fetched_at)) = *cache {
+                if fetched_at.elapsed() < MAILBOX_CACHE_TTL {
+                    return Ok(list.clone());
+                }
+            }
+        }
+
+        // Cache miss or stale — fetch from server
+        let list = super::helpers::fetch_mailbox_list_from_server(self).await?;
+        *self.mailbox_cache.write().await = Some((list.clone(), std::time::Instant::now()));
+        Ok(list)
+    }
+
+    /// Invalidate the mailbox cache (e.g. after creating/deleting a mailbox).
+    pub async fn invalidate_mailbox_cache(&self) {
+        *self.mailbox_cache.write().await = None;
     }
 
     /// Create a JMAP client from a DB account record.
@@ -46,6 +77,7 @@ impl JmapClient {
 
         Ok(Self {
             inner: Arc::new(client),
+            mailbox_cache: Arc::new(RwLock::new(None)),
         })
     }
 }

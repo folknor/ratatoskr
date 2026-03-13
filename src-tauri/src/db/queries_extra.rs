@@ -1379,6 +1379,7 @@ pub async fn db_delete_account(
     state: State<'_, DbState>,
     body_store: State<'_, crate::body_store::BodyStoreState>,
     inline_images: State<'_, crate::inline_image_store::InlineImageStoreState>,
+    app_state: State<'_, crate::state::AppState>,
     id: String,
 ) -> Result<(), String> {
     // Collect message IDs and inline image hashes BEFORE cascade-deleting
@@ -1413,6 +1414,14 @@ pub async fn db_delete_account(
     if !inline_hashes.is_empty() {
         let _ = inline_images.delete_unreferenced(&state, inline_hashes).await;
     }
+
+    // Evict file-based attachment cache entries now over the limit
+    let _ = ratatoskr_core::attachment_cache::enforce_cache_limit(
+        &state,
+        &app_state.app_data_dir,
+    )
+    .await;
+
     Ok(())
 }
 

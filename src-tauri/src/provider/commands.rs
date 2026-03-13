@@ -202,6 +202,7 @@ pub async fn provider_prepare_account_resync(
     db: State<'_, DbState>,
     body_store: State<'_, BodyStoreState>,
     inline_images: State<'_, InlineImageStoreState>,
+    app_state: State<'_, AppState>,
     account_id: String,
 ) -> Result<(), String> {
     let (message_ids, inline_hashes) = db
@@ -249,6 +250,15 @@ pub async fn provider_prepare_account_resync(
     if !inline_hashes.is_empty() {
         let _ = inline_images.delete_unreferenced(&db, inline_hashes).await;
     }
+
+    // Evict file-based attachment cache entries that are now over the limit
+    // (cascade-deleted attachment rows freed their cache_size quota)
+    let _ = ratatoskr_core::attachment_cache::enforce_cache_limit(
+        &db,
+        &app_state.app_data_dir,
+    )
+    .await;
+
     Ok(())
 }
 

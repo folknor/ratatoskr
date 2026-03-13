@@ -448,6 +448,7 @@ impl ProviderOps for JmapOps {
             .await
             .map_err(|e| format!("Mailbox/set create: {e}"))?;
 
+        self.client.invalidate_mailbox_cache().await;
         let id = mb.take_id();
         Ok(ProviderFolderMutation {
             id: format!("jmap-{id}"),
@@ -475,6 +476,7 @@ impl ProviderOps for JmapOps {
             .mailbox_rename(&mailbox_id, new_name)
             .await
             .map_err(|e| format!("Mailbox/set rename: {e}"))?;
+        self.client.invalidate_mailbox_cache().await;
 
         Ok(ProviderFolderMutation {
             id: folder_id.to_string(),
@@ -495,6 +497,7 @@ impl ProviderOps for JmapOps {
             .mailbox_destroy(&mailbox_id, true)
             .await
             .map_err(|e| format!("Mailbox/set destroy: {e}"))?;
+        self.client.invalidate_mailbox_cache().await;
         Ok(())
     }
 

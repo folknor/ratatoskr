@@ -331,14 +331,22 @@ impl ProviderOps for ImapOps {
             .await?;
 
         let grouped = group_by_folder(&refs);
-        for (folder, uids) in grouped {
-            if folder == archive_folder {
-                continue;
-            }
-            with_session!(&config, session => {
-                imap_client::move_messages(&mut session, folder, &uid_set(&uids), &archive_folder).await
-            })?;
-        }
+        let futs: Vec<_> = grouped
+            .iter()
+            .filter(|(folder, _)| **folder != archive_folder)
+            .map(|(folder, uids)| {
+                let config = config.clone();
+                let folder = folder.to_string();
+                let uids = uid_set(uids);
+                let dest = archive_folder.clone();
+                async move {
+                    with_session!(&config, session => {
+                        imap_client::move_messages(&mut session, &folder, &uids, &dest).await
+                    })
+                }
+            })
+            .collect();
+        futures::future::try_join_all(futs).await?;
 
         Ok(())
     }
@@ -364,14 +372,22 @@ impl ProviderOps for ImapOps {
             .await?;
 
         let grouped = group_by_folder(&refs);
-        for (folder, uids) in grouped {
-            if folder == trash_folder {
-                continue;
-            }
-            with_session!(&config, session => {
-                imap_client::move_messages(&mut session, folder, &uid_set(&uids), &trash_folder).await
-            })?;
-        }
+        let futs: Vec<_> = grouped
+            .iter()
+            .filter(|(folder, _)| **folder != trash_folder)
+            .map(|(folder, uids)| {
+                let config = config.clone();
+                let folder = folder.to_string();
+                let uids = uid_set(uids);
+                let dest = trash_folder.clone();
+                async move {
+                    with_session!(&config, session => {
+                        imap_client::move_messages(&mut session, &folder, &uids, &dest).await
+                    })
+                }
+            })
+            .collect();
+        futures::future::try_join_all(futs).await?;
 
         Ok(())
     }
@@ -392,11 +408,20 @@ impl ProviderOps for ImapOps {
             .await?;
 
         let grouped = group_by_folder(&refs);
-        for (folder, uids) in grouped {
-            with_session!(&config, session => {
-                imap_client::delete_messages(&mut session, folder, &uid_set(&uids)).await
-            })?;
-        }
+        let futs: Vec<_> = grouped
+            .iter()
+            .map(|(folder, uids)| {
+                let config = config.clone();
+                let folder = folder.to_string();
+                let uids = uid_set(uids);
+                async move {
+                    with_session!(&config, session => {
+                        imap_client::delete_messages(&mut session, &folder, &uids).await
+                    })
+                }
+            })
+            .collect();
+        futures::future::try_join_all(futs).await?;
 
         Ok(())
     }
@@ -423,11 +448,20 @@ impl ProviderOps for ImapOps {
 
         let flag_op = if read { "+FLAGS" } else { "-FLAGS" };
         let grouped = group_by_folder(&refs);
-        for (folder, uids) in grouped {
-            with_session!(&config, session => {
-                imap_client::set_flags(&mut session, folder, &uid_set(&uids), flag_op, "(\\Seen)").await
-            })?;
-        }
+        let futs: Vec<_> = grouped
+            .iter()
+            .map(|(folder, uids)| {
+                let config = config.clone();
+                let folder = folder.to_string();
+                let uids = uid_set(uids);
+                async move {
+                    with_session!(&config, session => {
+                        imap_client::set_flags(&mut session, &folder, &uids, flag_op, "(\\Seen)").await
+                    })
+                }
+            })
+            .collect();
+        futures::future::try_join_all(futs).await?;
 
         Ok(())
     }
@@ -454,11 +488,20 @@ impl ProviderOps for ImapOps {
 
         let flag_op = if starred { "+FLAGS" } else { "-FLAGS" };
         let grouped = group_by_folder(&refs);
-        for (folder, uids) in grouped {
-            with_session!(&config, session => {
-                imap_client::set_flags(&mut session, folder, &uid_set(&uids), flag_op, "(\\Flagged)").await
-            })?;
-        }
+        let futs: Vec<_> = grouped
+            .iter()
+            .map(|(folder, uids)| {
+                let config = config.clone();
+                let folder = folder.to_string();
+                let uids = uid_set(uids);
+                async move {
+                    with_session!(&config, session => {
+                        imap_client::set_flags(&mut session, &folder, &uids, flag_op, "(\\Flagged)").await
+                    })
+                }
+            })
+            .collect();
+        futures::future::try_join_all(futs).await?;
 
         Ok(())
     }
@@ -488,16 +531,28 @@ impl ProviderOps for ImapOps {
             })
             .await?;
 
-        let destination = if is_spam { &junk_folder } else { "INBOX" };
+        let destination = if is_spam {
+            junk_folder.clone()
+        } else {
+            "INBOX".to_string()
+        };
         let grouped = group_by_folder(&refs);
-        for (folder, uids) in grouped {
-            if folder == destination {
-                continue;
-            }
-            with_session!(&config, session => {
-                imap_client::move_messages(&mut session, folder, &uid_set(&uids), destination).await
-            })?;
-        }
+        let futs: Vec<_> = grouped
+            .iter()
+            .filter(|(folder, _)| **folder != destination)
+            .map(|(folder, uids)| {
+                let config = config.clone();
+                let folder = folder.to_string();
+                let uids = uid_set(uids);
+                let dest = destination.clone();
+                async move {
+                    with_session!(&config, session => {
+                        imap_client::move_messages(&mut session, &folder, &uids, &dest).await
+                    })
+                }
+            })
+            .collect();
+        futures::future::try_join_all(futs).await?;
 
         Ok(())
     }
@@ -524,14 +579,22 @@ impl ProviderOps for ImapOps {
             .await?;
 
         let grouped = group_by_folder(&refs);
-        for (folder, uids) in grouped {
-            if folder == dest.as_str() {
-                continue;
-            }
-            with_session!(&config, session => {
-                imap_client::move_messages(&mut session, folder, &uid_set(&uids), &dest).await
-            })?;
-        }
+        let futs: Vec<_> = grouped
+            .iter()
+            .filter(|(folder, _)| **folder != dest)
+            .map(|(folder, uids)| {
+                let config = config.clone();
+                let folder = folder.to_string();
+                let uids = uid_set(uids);
+                let dest = dest.clone();
+                async move {
+                    with_session!(&config, session => {
+                        imap_client::move_messages(&mut session, &folder, &uids, &dest).await
+                    })
+                }
+            })
+            .collect();
+        futures::future::try_join_all(futs).await?;
 
         Ok(())
     }
