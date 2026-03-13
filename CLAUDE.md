@@ -5,6 +5,7 @@ Tauri v2 desktop email client migrating to pure Rust (iced UI). Cargo workspace 
 - **`ratatoskr-core`** (`src-tauri/core/`, ~22k lines) — Framework-agnostic business logic: providers, sync, threading, filters, search, DB, etc.
 - **`ratatoskr`** (`src-tauri/src/`, ~16.5k lines) — Tauri app shell: `#[tauri::command]` wrappers, `TauriProgressReporter`, window/tray management.
 - **Frontend** — React 19 + TypeScript (~73k lines), to be replaced by iced.
+- **`squeeze`** (`squeeze/`) — Standalone attachment compression crate (CLI + library). NOT a workspace member — compiles independently to avoid adding to main build time. Compresses images (mozjpeg-rs + oxipng), PDFs (lopdf image recompression + `save_modern` structural compression), and OOXML/ODF documents (ZIP archive image compression). Designed for later integration via `squeeze = { path = "squeeze", optional = true }` with a feature flag. Run `cargo check` / `cargo test` from inside `squeeze/`.
 
 ## Commands
 
