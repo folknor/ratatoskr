@@ -472,6 +472,19 @@ pub fn lookup(domain: &str) -> Vec<ProtocolOption> {
     Vec::new()
 }
 
+/// Quick check whether a domain belongs to a known JMAP provider in the registry.
+/// Returns `true` for domains like `fastmail.com` without running the full discovery cascade.
+pub fn is_known_jmap_provider(domain: &str) -> bool {
+    let lower = domain.to_lowercase();
+    REGISTRY.iter().any(|entry| {
+        entry.domains.iter().any(|d| *d == lower)
+            && entry
+                .options
+                .iter()
+                .any(|(proto, _)| matches!(proto, RegistryProtocol::Jmap { .. }))
+    })
+}
+
 /// Look up OAuth endpoints for a domain (used by autoconfig when XML says OAuth2).
 pub fn lookup_oauth_for_domain(domain: &str) -> Option<AuthMethod> {
     let lower = domain.to_lowercase();

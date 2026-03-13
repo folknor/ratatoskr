@@ -87,6 +87,6 @@
 
 - [x] **Batch JMAP send into a single request** — `send_email` now runs `upload()` and `Identity/get` concurrently, then batches `Email/import` + `EmailSubmission/set` (with `onSuccessUpdateEmail` to clear `$draft`) into a single JMAP request. Reduced from 5 sequential round-trips to 2 steps.
 
-- [ ] **Add `is_known_jmap_provider()` quick-check utility** — The autodiscovery system (`discovery/`) can detect JMAP support, but only via the full cascade (registry + autoconfig + MX + .well-known probe). A lightweight utility that checks just the registry for known JMAP providers (currently only Fastmail) would be useful for UI hints during account setup (e.g., "JMAP supported" badge). Could be a simple function in `discovery/registry.rs` exposed as a Tauri command, or folded into the existing `discover_email_config` response.
+- [x] **Add `is_known_jmap_provider()` quick-check utility** — `registry::is_known_jmap_provider(domain)` checks the hardcoded registry for JMAP support (no network calls). Exposed as a Tauri command for UI hints during account setup.
 
 - [ ] **JMAP for Calendars** — `jmap-client` has no calendar support (upstream Issue #3). JMAP for Calendars (RFC 8984) would unify calendar sync for providers like Fastmail that support it. Blocked until `jmap-client` adds calendar types, or we build raw JMAP calendar requests. Low priority — CalDAV covers calendar sync for now.

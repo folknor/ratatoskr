@@ -490,6 +490,7 @@ pub fn run() {
             seen_addresses::commands::backfill_seen_addresses,
             // Discovery
             discovery::commands::discover_email_config,
+            discovery::commands::is_known_jmap_provider,
         ])
         .setup(|app| {
             {
