@@ -330,6 +330,7 @@ pub fn run() {
             db::queries_extra::db_get_inbox_threads_for_backfill,
             db::queries_extra::db_update_scheduled_email_attachments,
             db::queries_extra::db_query_raw_select,
+            db::queries_extra::db_get_categories,
             // Body store (Phase 2 — compressed body storage)
             body_store::commands::body_store_put,
             body_store::commands::body_store_put_batch,

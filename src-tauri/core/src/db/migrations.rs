@@ -905,6 +905,26 @@ static MIGRATIONS: &[Migration] = &[
             INSERT OR IGNORE INTO settings (key, value) VALUES ('default_read_receipt_policy', 'never');
         "#,
     },
+    Migration {
+        version: 36,
+        description: "Master category list for provider-agnostic color categories",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS categories (
+                id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                display_name TEXT NOT NULL,
+                color_preset TEXT,
+                color_bg TEXT,
+                color_fg TEXT,
+                provider_id TEXT,
+                sync_state TEXT NOT NULL DEFAULT 'synced',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(account_id, display_name)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_categories_account ON categories(account_id);
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks

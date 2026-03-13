@@ -14,7 +14,7 @@ Every feature gets a **local-only implementation** as the baseline. Provider-nat
 
 | Feature | Status | Exchange (Graph) | Gmail API | JMAP | IMAP | Local Fallback |
 |---|---|---|---|---|---|---|
-| [Categories](categories.md) | ⚠️ Partial | Native (`categories`) | Labels (partial overlap) | `keywords` | IMAP keywords (limited) | Local-only labels+colors |
+| [Categories](categories.md) | ⚠️ Partial (master list sync added) | Native (`categories`) | Labels (partial overlap) | `keywords` | IMAP keywords (limited) | Local-only labels+colors |
 | [Contacts](contacts.md) | ⚠️ Partial | Native (`/me/contacts`) | People API | Not standardized | Nothing | Local address book |
 | Auto-collected contacts | ⚠️ Partial | People API (ranked) | "Other Contacts" | Nothing | Nothing | `seen_addresses` table |
 | [@Mentions](mentions.md) | ❌ | Native (`mentions`) | Nothing | Nothing | Nothing | Local-only, no server flag |

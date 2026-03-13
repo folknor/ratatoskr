@@ -5,7 +5,7 @@ use tauri::State;
 
 use super::DbState;
 use super::types::{
-    AttachmentSender, AttachmentWithContext, BackfillRow, BundleSummary, BundleSummarySingle,
+    AttachmentSender, AttachmentWithContext, BackfillRow, BundleSummary, BundleSummarySingle, DbCategory,
     CachedAttachmentRow, ContactAttachmentRow, ContactStats, DbAccount, DbAllowlistEntry,
     DbBundleRule, DbCalendar, DbCalendarEvent, DbContact, DbContactGroup, DbContactGroupMember,
     DbFilterRule, DbFolderSyncState,
@@ -2321,4 +2321,12 @@ pub async fn db_query_raw_select(
     params: Vec<serde_json::Value>,
 ) -> Result<Vec<serde_json::Map<String, serde_json::Value>>, String> {
     ratatoskr_core::db::queries_extra::db_query_raw_select(&state, sql, params).await
+}
+
+#[tauri::command]
+pub async fn db_get_categories(
+    state: State<'_, DbState>,
+    account_id: String,
+) -> Result<Vec<DbCategory>, String> {
+    ratatoskr_core::db::queries_extra::db_get_categories(&state, account_id).await
 }

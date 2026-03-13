@@ -1,6 +1,6 @@
 use super::super::DbState;
 use super::super::types::{
-    BackfillRow, CachedAttachmentRow, ImapMessageRow, SnoozedThread, SpecialFolderRow,
+    BackfillRow, CachedAttachmentRow, DbCategory, ImapMessageRow, SnoozedThread, SpecialFolderRow,
     SubscriptionEntry,
 };
 use rusqlite::params;
@@ -487,4 +487,37 @@ fn base64_encode(data: &[u8]) -> String {
         }
     }
     s
+}
+
+/// Get all categories for an account, ordered by sort_order.
+pub async fn db_get_categories(
+    db: &DbState,
+    account_id: String,
+) -> Result<Vec<DbCategory>, String> {
+    db.with_conn(move |conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, account_id, display_name, color_preset, color_bg, color_fg, \
+                 provider_id, sync_state, sort_order \
+                 FROM categories WHERE account_id = ?1 ORDER BY sort_order ASC",
+            )
+            .map_err(|e| format!("prepare categories query: {e}"))?;
+        stmt.query_map(params![account_id], |row| {
+            Ok(DbCategory {
+                id: row.get(0)?,
+                account_id: row.get(1)?,
+                display_name: row.get(2)?,
+                color_preset: row.get(3)?,
+                color_bg: row.get(4)?,
+                color_fg: row.get(5)?,
+                provider_id: row.get(6)?,
+                sync_state: row.get(7)?,
+                sort_order: row.get(8)?,
+            })
+        })
+        .map_err(|e| format!("query categories: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("collect categories: {e}"))
+    })
+    .await
 }

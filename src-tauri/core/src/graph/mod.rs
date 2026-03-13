@@ -1,3 +1,4 @@
+pub mod category_sync;
 pub mod client;
 pub mod contact_sync;
 pub mod folder_mapper;

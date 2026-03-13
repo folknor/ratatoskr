@@ -141,11 +141,15 @@ pub(crate) async fn graph_initial_sync(
         }
     }
 
-    // Phase 4: Sync Exchange contacts
+    // Phase 4: Sync Exchange contacts and categories (non-fatal)
     if let Err(e) =
         super::contact_sync::graph_contacts_initial_sync(client, ctx.account_id, ctx.db).await
     {
         log::warn!("Contact initial sync failed (non-fatal): {e}");
+    }
+    match super::category_sync::graph_categories_sync(client, ctx.account_id, ctx.db).await {
+        Ok(count) => log::info!("Synced {count} Exchange categories"),
+        Err(e) => log::warn!("Category sync failed (non-fatal): {e}"),
     }
 
     let aid = ctx.account_id.to_string();
@@ -268,12 +272,17 @@ pub(crate) async fn graph_delta_sync(
         affected_thread_ids.extend(folder_affected);
     }
 
-    // Contacts delta sync: every 20th cycle (contacts change rarely)
+    // Contacts + categories delta sync: every 20th cycle (change rarely)
     if cycle.is_multiple_of(20) {
         if let Err(e) =
             super::contact_sync::graph_contacts_delta_sync(client, ctx.account_id, ctx.db).await
         {
             log::warn!("Contact delta sync failed (non-fatal): {e}");
+        }
+        if let Err(e) =
+            super::category_sync::graph_categories_sync(client, ctx.account_id, ctx.db).await
+        {
+            log::warn!("Category delta sync failed (non-fatal): {e}");
         }
     }
 
