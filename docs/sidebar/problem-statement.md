@@ -233,3 +233,57 @@ These are explicitly out of scope for the sidebar, handled by the command palett
 5. **Smart Folder interaction with scope**: When a user is scoped to "Foo Corp" and clicks a Smart Folder (which is cross-account by definition), what happens to the scope indicator? Options: (a) scope visually switches to "All" for the duration, (b) scope stays on "Foo Corp" but the content pane shows cross-account results with an indicator, (c) Smart Folders filter to the current scope (breaking their cross-account nature). This affects whether scope is a global filter or a sidebar-local concern.
 
 6. **Scope in URL/router state**: Should the active scope be part of the URL so that deep links and browser back/forward preserve it? If scope is purely in-memory UI state, refreshing the app loses the user's account context. If it's in the URL, the routing model gets more complex. The current React app uses TanStack Router with hash history — scope could be a search param (`#/inbox?scope=foo-corp`) without affecting the route structure.
+
+## Implementation Phases
+
+### Phase 1: Scoped sidebar (no palette dependency)
+
+Ship the new sidebar model against the existing React frontend. The sidebar gains scope awareness and consumes the new backend APIs. No action removal yet — label editing, context menus, etc. stay in place until the palette can absorb them.
+
+**Backend glue:**
+- Add `#[tauri::command]` wrappers for `get_navigation_state`, `get_threads_scoped`, `get_starred_threads`, `get_snoozed_threads`, `get_draft_threads`. These are thin pass-throughs (~5-10 lines each) that acquire `DbState`, lock the connection, and call the core function.
+- Wire up smart folder unread counts in `get_navigation_state` (currently scaffolded as 0). This requires calling `count_smart_folder_unread` from the smart folder engine for each folder — evaluate whether the cost is acceptable per sidebar refresh or whether it needs caching.
+
+**Frontend — scope state:**
+- Add a `sidebarScopeStore` (Zustand) with `scope: AccountScope` and `setScope()`. Default to `All`. Persist to `localStorage` so it survives refresh (resolves open question #6 for now without touching the router).
+
+**Frontend — scope selector:**
+- Start with Option A (dropdown/popover) at the top of the sidebar. It's the simplest to build, doesn't require layout changes, and can be swapped later. Shows current scope (account avatar + name, or "All Accounts"), opens a list on click.
+
+**Frontend — sidebar rewire:**
+- Replace the hardcoded `ALL_NAV_ITEMS` + separate label/smart-folder queries with a single call to `get_navigation_state(scope)`. The response drives the entire sidebar: universal folders, smart folders, and (when scoped) account labels.
+- Unread counts come from the response instead of separate queries.
+- Remove Tasks, Calendar, Attachments from the sidebar navigation.
+
+**Frontend — thread list rewire:**
+- When viewing a universal folder, call the appropriate scoped query (`get_threads_scoped` for label-based folders, `get_starred_threads` for Starred, etc.) with the current `AccountScope` from the store.
+- The thread list component doesn't need to know about scoping — it receives threads the same way it does today. The change is in what the parent passes down.
+
+**What ships:**
+- Unified inbox across accounts (the headline feature).
+- Scope selector to narrow to one account.
+- Account-specific labels visible when scoped.
+- Correct unread counts (aggregated or per-account).
+- Sidebar actions (label edit, context menus) still work as before — no regression.
+
+### Phase 2: Strip actions from sidebar (palette dependency)
+
+Remove action-related code from the sidebar once the command palette handles those responsibilities. This phase is gated on the command palette being functional enough to replace:
+
+- Label creation/editing/deletion → palette commands
+- Context menus (sync folder, delete label) → palette commands
+- Any inline modals triggered from the sidebar → palette second-stage UI
+
+**What changes:**
+- Remove `DroppableLabelItem`'s inline edit button and `LabelForm` component from the sidebar.
+- Remove `SidebarNavContextMenu` and `SidebarLabelContextMenu`.
+- Remove the "Create label" button from the Labels section header.
+- The sidebar becomes a pure read-only navigation list — click to navigate, nothing else.
+
+**Prerequisite:** The command palette must support `Navigate > [Label]` with cross-account disambiguation (see unified view prerequisite note above). Without this, removing labels from the unified sidebar creates a discoverability regression.
+
+### Phase 3: Scope selector iteration (optional, post-ship)
+
+Once phase 1 is in users' hands, evaluate whether the dropdown is sufficient or whether a different form factor (icon rail, vertical tabs, chips) better serves the 3+ account use case. This is informed by real usage patterns — how often users switch scope, whether they stay scoped or return to "All", whether they miss the visual account indicator.
+
+This phase is pure UI polish with no backend or data model changes.
