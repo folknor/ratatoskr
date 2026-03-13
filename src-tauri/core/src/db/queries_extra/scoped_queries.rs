@@ -153,7 +153,7 @@ pub fn get_thread_count_scoped(
 
     if let Some(lid) = label_id {
         let sql = format!(
-            "SELECT COUNT(DISTINCT t.id) FROM threads t
+            "SELECT COUNT(DISTINCT t.account_id || '/' || t.id) FROM threads t
              INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
              WHERE {scope_clause} AND tl.label_id = ?{next_idx}"
         );
@@ -388,6 +388,11 @@ pub fn get_snoozed_threads(
 }
 
 /// Draft threads (via `thread_labels` DRAFT label), scoped by `AccountScope`.
+///
+/// **Note**: This only returns server-synced drafts that have threads. Local-only
+/// drafts (in the `local_drafts` table) are not included because they have a
+/// different schema and no `DbThread` representation. Use
+/// `get_draft_count_with_local()` for a count that includes both.
 pub fn get_draft_threads(
     conn: &Connection,
     scope: &AccountScope,
@@ -464,4 +469,43 @@ fn flag_column(folder_id: &str) -> &'static str {
         "SNOOZED" => "is_snoozed",
         _ => "is_starred", // fallback, shouldn't be reached
     }
+}
+
+/// Count of all drafts (server-synced thread drafts + local-only drafts),
+/// scoped by `AccountScope`.
+///
+/// This is the correct count for the sidebar's "Drafts" folder, per the
+/// documented requirement that draft counts include local-only drafts
+/// (docs/sidebar/problem-statement.md).
+pub fn get_draft_count_with_local(
+    conn: &Connection,
+    scope: &AccountScope,
+) -> Result<i64, String> {
+    // Count server-synced drafts (threads with DRAFT label)
+    let synced = get_thread_count_scoped(conn, scope, Some("DRAFT"))?;
+
+    // Count local-only drafts (pending or new, not yet synced to a thread)
+    let local = count_local_drafts(conn, scope)?;
+
+    Ok(synced + local)
+}
+
+/// Count local drafts that don't yet have a server-synced thread.
+fn count_local_drafts(
+    conn: &Connection,
+    scope: &AccountScope,
+) -> Result<i64, String> {
+    let (scope_clause, scope_params) = account_scope_clause(scope, 1);
+    // Rewrite "t.account_id" references to just "account_id" for local_drafts table
+    let clause = scope_clause.replace("t.account_id", "account_id");
+
+    let sql = format!(
+        "SELECT COUNT(*) FROM local_drafts WHERE {clause} AND sync_status != 'synced'"
+    );
+
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+        scope_params.iter().map(AsRef::as_ref).collect();
+
+    conn.query_row(&sql, param_refs.as_slice(), |row| row.get::<_, i64>(0))
+        .map_err(|e| e.to_string())
 }

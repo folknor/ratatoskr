@@ -5,7 +5,7 @@ use crate::db::queries::get_labels;
 use crate::db::types::{AccountScope, DbSmartFolder};
 use crate::provider::folder_roles::SYSTEM_FOLDER_ROLES;
 
-use super::scoped_queries::get_unread_counts_by_folder;
+use super::scoped_queries::{get_draft_count_with_local, get_unread_counts_by_folder};
 use super::row_to_smart_folder;
 
 // ── Types ───────────────────────────────────────────────────
@@ -73,25 +73,50 @@ pub fn get_navigation_state(
 
 // ── Helpers (each ≤100 lines) ───────────────────────────────
 
+/// The ordered set of universal sidebar folders.
+///
+/// Per docs/sidebar/problem-statement.md: Spam and All Mail are omitted from
+/// the unified view. Snoozed is included (local feature, works across all
+/// providers). Spam only appears when scoped to a specific account.
+///
+/// Note: SNOOZED is not in `SYSTEM_FOLDER_ROLES` because it has no provider
+/// mapping — it's a purely local feature. We define it inline here.
+const SIDEBAR_UNIVERSAL_FOLDERS: &[(&str, &str)] = &[
+    ("INBOX", "Inbox"),
+    ("STARRED", "Starred"),
+    ("SNOOZED", "Snoozed"),
+    ("SENT", "Sent"),
+    ("DRAFT", "Drafts"),
+    ("TRASH", "Trash"),
+];
+
 /// Universal folders with their unread counts.
+///
+/// For Drafts, the count includes local-only drafts (from `local_drafts`
+/// table) in addition to server-synced draft threads, per the documented
+/// requirement in docs/sidebar/problem-statement.md.
 fn build_universal_folders(
     conn: &Connection,
     scope: &AccountScope,
 ) -> Result<Vec<NavigationFolder>, String> {
     let counts = get_unread_counts_by_folder(conn, scope)?;
+    let draft_count = get_draft_count_with_local(conn, scope)?;
 
-    let folders = SYSTEM_FOLDER_ROLES
+    let folders = SIDEBAR_UNIVERSAL_FOLDERS
         .iter()
-        .filter(|role| is_sidebar_universal_folder(role.label_id))
-        .map(|role| {
-            let unread = counts
-                .iter()
-                .find(|c| c.folder_id == role.label_id)
-                .map_or(0, |c| c.unread_count);
+        .map(|(id, name)| {
+            let unread = if *id == "DRAFT" {
+                draft_count
+            } else {
+                counts
+                    .iter()
+                    .find(|c| c.folder_id == *id)
+                    .map_or(0, |c| c.unread_count)
+            };
 
             NavigationFolder {
-                id: role.label_id.to_owned(),
-                name: role.label_name.to_owned(),
+                id: (*id).to_owned(),
+                name: (*name).to_owned(),
                 folder_kind: FolderKind::Universal,
                 unread_count: unread,
                 account_id: None,
@@ -100,14 +125,6 @@ fn build_universal_folders(
         .collect();
 
     Ok(folders)
-}
-
-/// Which system folders appear in the sidebar as universal items.
-fn is_sidebar_universal_folder(label_id: &str) -> bool {
-    matches!(
-        label_id,
-        "INBOX" | "STARRED" | "SENT" | "DRAFT" | "TRASH" | "SPAM"
-    )
 }
 
 /// Smart folders from the database, scoped appropriately.
@@ -123,7 +140,10 @@ fn build_smart_folders(
             id: sf.id,
             name: sf.name,
             folder_kind: FolderKind::SmartFolder,
-            unread_count: 0, // smart folders don't have a traditional unread count
+            // TODO(scaffolding): Smart folder unread counts require executing
+            // each folder's query with an is_read=0 filter. Intentionally 0
+            // until the smart folder query engine is wired in here.
+            unread_count: 0,
             account_id: sf.account_id,
         })
         .collect())
@@ -178,7 +198,10 @@ fn build_account_labels(
             id: label.id,
             name: label.name,
             folder_kind: FolderKind::AccountLabel,
-            unread_count: 0, // label-level unread counts require a separate query
+            // TODO(scaffolding): Per-label unread counts require a query per
+            // label (or a batched GROUP BY). Intentionally 0 until we decide
+            // whether the cost is acceptable for every navigation refresh.
+            unread_count: 0,
             account_id: Some(label.account_id),
         })
         .collect())
