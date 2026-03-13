@@ -114,12 +114,12 @@ fn estimate_image(
 
     // Calculate target dimensions after resize.
     let longest = width.max(height);
-    let (target_w, target_h) = if longest > config.max_dimension {
+    let (target_w, target_h) = if longest > config.max_dimension && longest > 0 {
         let scale = f64::from(config.max_dimension) / f64::from(longest);
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let tw = (f64::from(width) * scale) as u32;
+        let tw = ((f64::from(width) * scale) as u32).max(1);
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let th = (f64::from(height) * scale) as u32;
+        let th = ((f64::from(height) * scale) as u32).max(1);
         (tw, th)
     } else {
         (width, height)
@@ -256,9 +256,9 @@ fn estimate_pdf_doc(
         let (tw, th) = if longest > config.pdf_image_max_dim {
             let scale = f64::from(config.pdf_image_max_dim) / f64::from(longest);
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-            let tw = (f64::from(width) * scale) as u32;
+            let tw = ((f64::from(width) * scale) as u32).max(1);
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-            let th = (f64::from(height) * scale) as u32;
+            let th = ((f64::from(height) * scale) as u32).max(1);
             (tw, th)
         } else {
             (width, height)
@@ -315,15 +315,7 @@ fn estimate_pdf_file(
 
 fn get_pdf_int(dict: &lopdf::Dictionary, key: &[u8]) -> Option<u32> {
     match dict.get(key).ok()? {
-        lopdf::Object::Integer(n) => {
-            let val = *n;
-            if val > 0 {
-                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-                Some(val as u32)
-            } else {
-                None
-            }
-        }
+        lopdf::Object::Integer(n) => u32::try_from(*n).ok().filter(|&v| v > 0),
         _ => None,
     }
 }
@@ -343,7 +335,9 @@ fn estimate_archive_reader<R: Read + Seek>(
     let mut image_bytes: u64 = 0;
     let mut estimated_image_output: u64 = 0;
 
-    for i in 0..archive.len() {
+    // Cap iteration to avoid spending excessive time on pathological archives.
+    let entry_count = archive.len().min(50_000);
+    for i in 0..entry_count {
         let Ok(entry) = archive.by_index_raw(i) else {
             continue;
         };
@@ -486,8 +480,13 @@ fn estimate_svg_reader<R: Read + Seek>(
     })
 }
 
+/// Maximum bytes to read searching for a closing quote (100 MB).
+/// A data URI longer than this is pathological.
+const MAX_QUOTE_SEARCH_BYTES: u64 = 100 * 1024 * 1024;
+
 /// Count bytes from current position until a closing quote (`"` or `'`).
 /// If the quote isn't in `local_buf`, continues reading from the reader.
+/// Stops searching after `MAX_QUOTE_SEARCH_BYTES` to avoid unbounded reads.
 fn find_quote_distance<R: Read>(local_buf: &[u8], reader: &mut R) -> Result<u64, SqueezeError> {
     // Check the local buffer first.
     for (i, &b) in local_buf.iter().enumerate() {
@@ -500,6 +499,9 @@ fn find_quote_distance<R: Read>(local_buf: &[u8], reader: &mut R) -> Result<u64,
     let mut distance = local_buf.len() as u64;
     let mut small_buf = [0u8; 8192];
     loop {
+        if distance > MAX_QUOTE_SEARCH_BYTES {
+            return Ok(distance);
+        }
         let n = reader.read(&mut small_buf).map_err(SqueezeError::Io)?;
         if n == 0 {
             return Ok(distance);

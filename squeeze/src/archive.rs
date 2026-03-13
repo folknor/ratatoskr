@@ -10,6 +10,13 @@ use crate::error::SqueezeError;
 use crate::image::compress_image_raw;
 use crate::{CompressOutput, CompressResult};
 
+/// Maximum number of ZIP entries we'll process.
+const MAX_ARCHIVE_ENTRIES: usize = 50_000;
+/// Maximum decompressed size of a single ZIP entry (512 MB).
+const MAX_ARCHIVE_ENTRY_BYTES: u64 = 512 * 1024 * 1024;
+/// Maximum total decompressed bytes across all entries (2 GB).
+const MAX_ARCHIVE_TOTAL_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
 /// Kind of ZIP-based document archive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArchiveKind {
@@ -51,6 +58,17 @@ pub fn compress_archive(
     let mut any_compressed = false;
     let prefixes = kind.image_prefixes();
 
+    if archive.len() > MAX_ARCHIVE_ENTRIES {
+        return Ok(CompressResult {
+            original_size: input.len(),
+            compressed_size: input.len(),
+            output: CompressOutput::Unchanged,
+            new_mime_type: None,
+        });
+    }
+
+    let mut total_decompressed: u64 = 0;
+
     for i in 0..archive.len() {
         let mut entry = archive
             .by_index(i)
@@ -58,6 +76,20 @@ pub fn compress_archive(
 
         let name = entry.name().to_string();
         let is_image_entry = is_compressible_image(&name, prefixes);
+
+        // Guard against zip bombs: check declared size before reading.
+        let declared_size = entry.size();
+        if declared_size > MAX_ARCHIVE_ENTRY_BYTES {
+            return Err(SqueezeError::ArchiveRead(format!(
+                "entry '{name}' declares {declared_size} bytes decompressed, exceeds limit"
+            )));
+        }
+        total_decompressed = total_decompressed.saturating_add(declared_size);
+        if total_decompressed > MAX_ARCHIVE_TOTAL_BYTES {
+            return Err(SqueezeError::ArchiveRead(
+                "archive total decompressed size exceeds limit".into(),
+            ));
+        }
 
         // Read the entry content.
         let mut content = Vec::new();

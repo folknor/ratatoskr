@@ -154,15 +154,7 @@ fn classify_image_xobject(obj: &Object) -> Option<ImageInfo> {
 
 fn get_int(dict: &lopdf::Dictionary, key: &[u8]) -> Option<u32> {
     match dict.get(key).ok()? {
-        Object::Integer(n) => {
-            let val = *n;
-            if val > 0 {
-                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-                Some(val as u32)
-            } else {
-                None
-            }
-        }
+        Object::Integer(n) => u32::try_from(*n).ok().filter(|&v| v > 0),
         _ => None,
     }
 }
@@ -202,6 +194,9 @@ fn try_recompress_dct(doc: &mut Document, id: ObjectId, info: &ImageInfo, config
     }
 }
 
+/// Maximum raw pixel buffer we'll allocate for a single PDF image (256 MB).
+const MAX_PDF_RAW_IMAGE_BYTES: u64 = 256 * 1024 * 1024;
+
 fn try_recompress_flat(doc: &mut Document, id: ObjectId, info: &ImageInfo, config: &Config) {
     if info.components == 4 {
         return;
@@ -220,7 +215,24 @@ fn try_recompress_flat(doc: &mut Document, id: ObjectId, info: &ImageInfo, confi
         stream.content.clone()
     };
 
-    let expected_len = (info.width * info.height * info.components) as usize;
+    // Use checked arithmetic to prevent overflow on crafted dimensions.
+    let Some(expected_len) = u64::from(info.width)
+        .checked_mul(u64::from(info.height))
+        .and_then(|n| n.checked_mul(u64::from(info.components)))
+    else {
+        recompress_flat_stream(doc, id);
+        return;
+    };
+
+    // Bail if the raw pixel buffer would be unreasonably large.
+    if expected_len > MAX_PDF_RAW_IMAGE_BYTES {
+        recompress_flat_stream(doc, id);
+        return;
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    let expected_len = expected_len as usize;
+
     if raw_pixels.len() < expected_len {
         recompress_flat_stream(doc, id);
         return;
@@ -392,46 +404,52 @@ fn remove_unused_objects(doc: &mut Document) {
 
 fn collect_referenced_ids(doc: &Document) -> HashSet<ObjectId> {
     let mut visited = HashSet::new();
+    let mut stack: Vec<ObjectId> = Vec::new();
 
-    if let Ok(root) = doc.trailer.get(b"Root")
-        && let Ok(id) = root.as_reference()
-    {
-        walk_refs(doc, id, &mut visited);
+    // Seed from trailer references.
+    if let Ok(root) = doc.trailer.get(b"Root") {
+        if let Ok(id) = root.as_reference() {
+            stack.push(id);
+        }
     }
-    if let Ok(info) = doc.trailer.get(b"Info")
-        && let Ok(id) = info.as_reference()
-    {
-        walk_refs(doc, id, &mut visited);
+    if let Ok(info) = doc.trailer.get(b"Info") {
+        if let Ok(id) = info.as_reference() {
+            stack.push(id);
+        }
+    }
+
+    // Iterative traversal — avoids stack overflow on deep object chains.
+    while let Some(id) = stack.pop() {
+        if !visited.insert(id) {
+            continue;
+        }
+        if let Some(obj) = doc.objects.get(&id) {
+            collect_refs_into(obj, &mut stack);
+        }
     }
 
     visited
 }
 
-fn walk_refs(doc: &Document, id: ObjectId, visited: &mut HashSet<ObjectId>) {
-    if !visited.insert(id) {
-        return;
-    }
-    if let Some(obj) = doc.objects.get(&id) {
-        collect_refs_from(doc, obj, visited);
-    }
-}
-
-fn collect_refs_from(doc: &Document, obj: &Object, visited: &mut HashSet<ObjectId>) {
+/// Collect all object-id references from a single PDF object (non-recursive).
+/// Nested arrays/dicts within one object are traversed recursively, but that
+/// nesting is always shallow (< 20 levels) in practice.
+fn collect_refs_into(obj: &Object, stack: &mut Vec<ObjectId>) {
     match obj {
-        Object::Reference(id) => walk_refs(doc, *id, visited),
+        Object::Reference(id) => stack.push(*id),
         Object::Array(arr) => {
             for item in arr {
-                collect_refs_from(doc, item, visited);
+                collect_refs_into(item, stack);
             }
         }
         Object::Dictionary(dict) => {
             for (_, value) in dict {
-                collect_refs_from(doc, value, visited);
+                collect_refs_into(value, stack);
             }
         }
         Object::Stream(stream) => {
             for (_, value) in &stream.dict {
-                collect_refs_from(doc, value, visited);
+                collect_refs_into(value, stack);
             }
         }
         _ => {}

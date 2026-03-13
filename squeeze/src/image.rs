@@ -126,15 +126,15 @@ fn maybe_resize(img: &DynamicImage, max_dim: u32) -> DynamicImage {
     let h = img.height();
     let longest = w.max(h);
 
-    if longest <= max_dim {
+    if longest <= max_dim || longest == 0 {
         return img.clone();
     }
 
     let scale = f64::from(max_dim) / f64::from(longest);
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let new_w = (f64::from(w) * scale) as u32;
+    let new_w = ((f64::from(w) * scale) as u32).max(1);
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let new_h = (f64::from(h) * scale) as u32;
+    let new_h = ((f64::from(h) * scale) as u32).max(1);
 
     img.resize(new_w, new_h, FilterType::Lanczos3)
 }
