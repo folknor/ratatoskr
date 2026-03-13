@@ -85,6 +85,17 @@ The palette's primary interaction mode is typing fragments and getting scored ma
 
 The `nucleo-matcher` crate (used by Helix editor and Walker launcher) implements this algorithm and is a strong candidate.
 
+#### Ranking Beyond Fuzzy Score
+
+Fuzzy match score alone is not sufficient for good ranking. The registry must support additional ranking signals, combined with the fuzzy score into a final sort order:
+
+- **Recency**: Recently executed commands rank higher. The registry tracks a usage-count or last-used timestamp per command. This is what makes the palette learn the user's habits — "Archive" floats to the top for someone who archives constantly.
+- **Context boost**: Commands relevant to the current context rank higher than commands that happen to match but aren't applicable. An enabled command should always outrank a disabled one with a better fuzzy score. Within enabled commands, commands whose context predicate is a tight match (e.g., "Star" when a thread is selected) rank above loosely relevant ones (e.g., "Toggle Sidebar").
+- **Static commands over second-stage entities**: When the palette shows both top-level commands and second-stage options (if it ever does mixed results), static commands should generally rank above dynamic entities to avoid folder names drowning out commands.
+- **Exact and alias hits**: An exact match on a command name or a defined alias (e.g., "delete" matching "Trash") should rank at or near the top regardless of fuzzy score.
+
+The ranking model is part of the registry's query API, not something the app layer implements ad hoc. The weights and combination strategy are deferred to implementation, but the signals themselves must be designed into the registry from the start.
+
 ### 4. Three Command Tiers
 
 #### Tier 1: Universal Commands
@@ -127,9 +138,23 @@ Ratatoskr supports multiple accounts across four providers (Gmail API, JMAP, Mic
 | Snoozed (local feature) | Shared mailboxes, distribution lists |
 | "Unread" as a filter concept | Custom mailbox structures per account |
 
-When a thread is selected, the active account is implied. When no thread is selected, the palette must either:
-- Use the currently viewed account as context, or
-- Show options from all accounts (disambiguated)
+When a thread is selected, the active account is implied. When no thread is selected, the palette must either use the currently viewed account as context or show options from all accounts (disambiguated).
+
+#### CommandContext
+
+For the registry to determine command availability without leaking logic back into the app layer, it needs a concrete context snapshot. The app layer is responsible for assembling this struct from its own state (Zustand stores, Tauri state, iced model — whatever the framework uses) and passing it to the registry on each query. Core defines the shape; the app fills it in.
+
+The context must include at minimum:
+
+- **Selection**: selected thread IDs (zero, one, or many), active/focused message ID within a thread
+- **Route/View**: current view type (inbox, label, smart folder, settings, calendar, tasks, attachments, compose), current label/folder ID if applicable
+- **Account**: active account ID, provider type for that account (Gmail, JMAP, Graph, IMAP)
+- **Provider capabilities**: what the active account's provider supports (labels vs folders, categories, shared mailboxes, server-side search). This avoids showing "Add Label" for an IMAP account that only has folders.
+- **Entity state**: whether the selected thread is read/unread, starred, muted, pinned, in trash, is a draft — so toggle commands show the right label ("Star" vs "Unstar") and destructive commands resolve correctly ("Delete" in trash = permanent delete)
+- **App state**: online/offline, whether the composer is open, whether multi-select is active, selection count
+- **Focused UI region**: which panel has focus (thread list, reading pane, sidebar, composer) — some commands only apply in certain panels
+
+Each command declares its context requirements as a predicate over this struct. The registry evaluates predicates to determine availability and filters the command list accordingly. This keeps all enablement logic in core, co-located with the command definitions, rather than scattered across app-layer UI code.
 
 ### 6. Framework Agnosticism
 
@@ -166,18 +191,48 @@ Command execution can fail (network errors, permission denied on shared mailboxe
 
 ### 9. Undo
 
-Each command can declare an undo counterpart at registration time: archive → unarchive, move → move back to previous folder, add label → remove label. The registry tracks this as metadata (`undo: Option<CommandId>` or a reversal closure). Not every command is undoable (compose, send, permanent delete), and that's explicit — `undo: None`.
+Commands can be undoable or not. This is declared at registration time — not every command supports undo (send, permanent delete), and that's explicit.
 
-This is wired at the registry level from the start, even if not every undo is implemented immediately. The dispatch layer maintains a short undo stack so the app can offer "Undo" after mutations.
+However, undo is not simply "run another command." Most real undos need runtime state captured from the original execution: the previous folder (for move), the prior read/starred/pinned state (for toggles), the old label set (for label changes), the previous pane position (for UI changes). A static `undo: Option<CommandId>` is insufficient because it doesn't carry this payload.
+
+The backend framing: command execution may return an **undo token** — an opaque, serializable compensation payload that captures everything needed to reverse the action. The app layer maintains a short stack of these tokens. "Undo" pops the stack and executes the compensation. The token model must be framework-agnostic (core defines the token types; the app layer executes them), and tokens that reference ephemeral state (e.g., a thread that was permanently deleted) must be invalidated.
+
+The full design of undo tokens, stack depth, expiration, and multi-step undo is deferred to implementation planning.
 
 ## Decisions
 
-1. **Enum for command IDs, runtime for metadata**: Command identity is a Rust enum — the compiler enforces that every command is handled. The ~80-100 user-facing commands are small enough for this to be practical. Dynamic data (folder lists, label lists, account lists) is not command identity — it's Tier 3 second-stage parameters, fetched at runtime.
+1. **Enum for command IDs, runtime for descriptors**: Command identity is a Rust enum (`CommandId`) — the compiler enforces that every command is handled. The ~80-100 user-facing commands today are small enough for this. Dynamic data (folder lists, label lists, account lists) is not command identity — it's Tier 3 second-stage parameters, fetched at runtime.
+
+   However, the enum will grow as compound variants, view-local operations, and future features are added. To contain churn, the design must separate two layers:
+
+   - **`CommandId` enum** — stable, top-level intents only. `Archive`, `MoveToFolder`, `ToggleSidebar`, `ComposeNew`. This changes infrequently. Adding a new user-facing action means adding a variant here, which is intentional friction — it forces you to handle it everywhere.
+   - **`CommandDescriptor` (runtime)** — the context-resolved, display-ready representation of a command. Carries the resolved display label (possibly localized), resolved keybinding (user overrides applied), current availability (enabled/disabled given context), category path, and parameter schema. Built from the enum + current app state. This is what the palette UI and keyboard dispatch consume.
+
+   The enum is the identity; the descriptor is the materialized view. The registry maps one to the other given a context snapshot.
 
 2. **Command sequences, not composition**: "Archive and Next" is a registered compound command (`email.archive_and_next`) with its own ID, not a user-defined pipeline. This keeps the enum exhaustive and behavior predictable. If user-definable macros are needed later, they can be added as a separate feature on top.
 
 ## Open Questions
 
-1. **How to express context requirements**: Should each command declare what context it needs (e.g., "I need a selected thread", "I need an active account"), and the registry filters based on current state? Or should the app layer handle enablement logic?
+1. **Parameterized command execution contract**: The current description of Tier 3 commands ("second stage populated with options") understates the problem. "Pick from a list" is only one input shape. Real commands have diverse input requirements:
 
-2. **Second-stage data fetching**: When a parameterized command is selected, who provides the options? A callback/trait method on the command? A separate "parameter provider" registry? This must work across both Tauri and iced.
+   - **List picker**: Move to Folder (pick one folder), Add Label (pick one label), Switch Account (pick one account)
+   - **Date/time picker**: Snooze Until (pick a datetime)
+   - **Multi-parameter**: Compose with Template (pick template + pick account), Create Filter from Sender (pick criteria + pick action)
+   - **Enum/toggle**: Switch Theme (pick from fixed set of light/dark/system)
+   - **Free text**: Rename Folder (type a name), Search (type a query)
+
+   The backend needs a typed model for this. At minimum, each parameterized command must declare:
+
+   - **Input schema**: What parameters it needs and their types (list selection, date, text, multi-step)
+   - **Option identity vs display**: A folder has an internal ID and a display path — the registry must distinguish these so fuzzy search operates on the display label while execution uses the ID
+   - **Validation**: Can the user submit this combination of parameters? (e.g., can't move a thread to the folder it's already in)
+   - **Execution payload**: The final structured input passed to the command handler — not just "which option was picked" but the full typed arguments
+
+   This is the hardest part of the backend design and must be resolved during implementation planning. The solution must be framework-agnostic (Tauri and iced will render these input shapes differently) while keeping the type contracts in core.
+
+2. **Disabled command visibility**: Should commands that are currently unavailable (e.g., "Archive" with no thread selected) appear in palette results as greyed-out entries, or be hidden entirely? Showing them is discoverable (users learn what's possible), hiding them is less noisy (shorter, more relevant results). This is a product decision that affects the registry's query API — "return all commands with availability flags" vs "return only enabled commands."
+
+3. **Palette visibility vs bindability**: Must every registered command be searchable in the palette, or can some be keyboard-only? Examples: `nav.next` / `nav.prev` (j/k) are essential keybindings but arguably noise in the palette — no one opens the palette to move down one thread. If commands can opt out of palette visibility, the registry needs a `palette_visible: bool` (or a visibility enum) on the command metadata.
+
+4. **Scope of "single source of truth"**: The document states that keyboard dispatch and the palette UI consume the registry. But what about context menus, toolbars, right-click menus, and touch/mobile surfaces? If those also consume command metadata (label, icon, enabled state, keybinding hint), the registry is the app's entire action layer, not just the palette's backend. This is probably the right answer, but it expands the contract — the registry must serve any UI surface that can trigger or display a command, not just two.
