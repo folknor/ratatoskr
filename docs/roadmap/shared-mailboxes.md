@@ -57,3 +57,253 @@ A user may have Full Access but not Send As (can read but not impersonate), or S
 ## Work
 
 Delegated mailbox discovery (manual-add baseline, EWS auto-mapping as enhancement for Exchange), uniform presentation regardless of mailbox type, sync with configurable depth, auto-set From address with Send As / Send on Behalf distinction, respect per-permission capabilities in UI, shared state delta sync, Sent Items routing, request `*.Shared` OAuth scopes.
+
+---
+
+## Research
+
+**Date**: March 2026
+**Context**: Ground-up implementation research for the iced (pure Rust) rewrite. No assumptions about existing Tauri/React schemas or backend architecture.
+
+---
+
+### 1. Exchange Graph API for Shared Mailboxes
+
+#### Accessing another user's mailbox
+
+All mailbox types are accessed uniformly via `/users/{id-or-upn}`:
+
+```
+GET /users/{shared-mailbox-email}/messages
+GET /users/{shared-mailbox-email}/mailFolders
+POST /users/{shared-mailbox-email}/sendMail
+```
+
+Same API surface as personal mailbox, just a different user identifier. No special "shared mailbox" endpoints.
+
+#### OAuth scopes
+
+| Scope | Allows | Admin consent required? |
+|---|---|---|
+| `Mail.Read.Shared` | Read messages in shared/delegated folders | No |
+| `Mail.ReadWrite.Shared` | Read, write, delete messages in shared/delegated folders | No |
+| `Mail.Send.Shared` | Send mail from shared/delegated mailboxes | No |
+
+**Key differences from personal scopes:**
+
+- **Delegated-only.** No application permission equivalents.
+- **Superset behavior.** `Mail.Read.Shared` grants access to both personal and shared mailboxes.
+- **Silent failure.** If the app registration only has `Mail.Read`/`Mail.ReadWrite`/`Mail.Send`, accessing `/users/{shared-mailbox}/messages` returns 403 with no indication that `.Shared` scopes are needed.
+
+Change notification subscriptions on shared mailboxes do **not** work with `.Shared` delegated scopes — require application `Mail.Read` instead.
+
+#### The discovery problem
+
+**There is no Graph API endpoint that returns "all mailboxes this user has access to."** Every approach has significant drawbacks:
+
+**Approach 1: EWS Autodiscover XML.** Exchange auto-mapping records accessible mailboxes. The XML Autodiscover endpoint can be called with an OAuth token against `https://outlook.office365.com/autodiscover/autodiscover.xml`. Parse `AlternativeMailbox` elements. However: no Rust EWS crate exists, auto-mapping can be disabled per-grant (`-AutoMapping $false`), and security-group-granted access never auto-maps. Won't find everything.
+
+**Approach 2: Probing `/users/{email}/mailFolders`.** 200=access, 403=no access, 404=doesn't exist. Requires already knowing which addresses to try. Viable as validation, useless for discovery.
+
+**Approach 3: User manually adds by email.** Outlook's own "Open Another Mailbox" pattern. Always works regardless of Exchange configuration. **The reliable baseline.**
+
+**Approach 4: Exchange Online PowerShell / admin APIs.** `Get-MailboxPermission` requires Exchange admin privileges. Not viable for a desktop client.
+
+**Approach 5: Graph beta endpoints.** None exist as of March 2026.
+
+**Approach 6: Autodiscover v2 (HTTP/JSON).** Returns connectivity info (EWS URL, ActiveSync URL), not auto-mapped mailboxes. Doesn't help.
+
+**Recommended strategy**: Manual-add as baseline (Approach 3), with Autodiscover XML as an enhancement for Exchange accounts (Approach 1). The XML endpoint accepts OAuth tokens. Parse `AlternativeMailbox` elements — ~100-200 lines of focused XML parsing code, not a full EWS client.
+
+#### Send As vs Send on Behalf
+
+Both use `POST /users/{shared-mailbox-upn}/sendMail`:
+
+**Send As**: Set `from` to shared mailbox. Message appears to come directly from it.
+
+**Send on Behalf**: Set `from` to shared mailbox AND `sender` to delegate. Recipient sees "Delegate on behalf of SharedMailbox".
+
+Exchange enforces permissions server-side. If user only has Send on Behalf and omits `sender`, Exchange rejects or auto-fills.
+
+#### saveToSentItems behavior
+
+`saveToSentItems: true` saves to the **sender's** (delegate's) Sent Items. Exchange admin settings (`MessageCopyForSentAsEnabled`, `MessageCopyForSendOnBehalfEnabled`) independently control whether a copy goes to the **shared mailbox's** Sent Items. The client cannot control the shared mailbox copy — it's an admin setting. Default `saveToSentItems: false` for shared mailbox sends.
+
+#### Delta sync for shared mailboxes
+
+Works identically: `GET /users/{shared-mailbox-id}/mailFolders/{folderId}/messages/delta`. Same token mechanism. Each shared mailbox maintains independent delta state.
+
+#### Notification preferences
+
+Exchange does not expose per-delegate notification preferences via Graph. Must be a client-side setting per delegate per shared mailbox.
+
+---
+
+### 2. Gmail Delegation
+
+#### Send-As aliases (`users.settings.sendAs`)
+
+Already supported. Outbound identity only — does not grant ability to read the aliased mailbox.
+
+#### Account-level delegation (`users.settings.delegates`)
+
+`users.settings.delegates.list` lists who the signed-in user has *delegated to* (outbound), **not** who has delegated to them (inbound). Cannot query "which accounts have delegated to me?" through the Gmail API.
+
+Full delegation grants read/send/delete access to the entire account. No per-folder delegation.
+
+**Accessing a delegated mailbox**: Use delegator's email as `userId` in API calls. However, this requires either domain-wide delegation (admin-level service account) or internal session mechanisms not exposed via public API.
+
+**Practical strategy**: Support Send-As aliases (done). Document that full delegation requires Google Workspace admin configuration. Real limitation but affects fewer users than Exchange shared mailboxes.
+
+---
+
+### 3. JMAP Sharing (RFC 9670)
+
+#### What it specifies
+
+RFC 9670 (published November 2024, Standards Track) defines:
+
+- **Principal**: Users, groups, resources. Methods: get/query/set/changes.
+- **ShareNotification**: Permission change tracking. Read-only.
+- Three properties on shareable objects (like Mailbox): `isSubscribed`, `myRights`, `shareWith`.
+
+**Discovery is built into the protocol**: The JMAP Session object's `accounts` array includes all accounts the user has access to. Elegant — unlike Graph where discovery is absent.
+
+#### Implementation status
+
+Stalwart has documented ACL/sharing support, but specific RFC 9670 implementation status is unclear (published November 2024, so full implementation would be recent).
+
+`jmap-client` v0.4 has a `principal` module but doesn't document RFC 9670 compliance. Sharing-specific types and methods would likely need to be added.
+
+---
+
+### 4. IMAP ACL (RFC 4314)
+
+#### Commands
+
+| Command | Purpose |
+|---|---|
+| `GETACL <mailbox>` | List all ACL entries (requires `a` right) |
+| `SETACL <mailbox> <id> <rights>` | Set/modify ACL |
+| `DELETEACL <mailbox> <id>` | Remove ACL entry |
+| `LISTRIGHTS <mailbox> <id>` | Query grantable rights |
+| `MYRIGHTS <mailbox>` | Get authenticated user's rights |
+
+Rights: `l` (lookup), `r` (read), `s` (set seen), `w` (write flags), `i` (insert), `p` (post), `k` (create child), `x` (delete), `t` (set deleted), `e` (expunge), `a` (admin).
+
+#### Accessing shared namespaces
+
+RFC 2342 (Namespace) exposes shared mailboxes under separate prefixes: `"Other Users/"`, `"#user/"`, etc. Server-specific. Discovered via `NAMESPACE` command.
+
+#### Server support
+
+| Server | ACL | Notes |
+|---|---|---|
+| **Dovecot** | Full (v1.2+) | Requires `acl_shared_dict` config for discovery |
+| **Cyrus IMAP** | Full | Best-in-class ACL |
+| **Stalwart** | Supported | Maps to JMAP sharing internally |
+| **Exchange IMAP** | **Not supported** | Shared access only via Graph |
+| **Gmail IMAP** | **Not supported** | Compatibility layer only |
+
+**Practical reality**: ACL only relevant for self-hosted Dovecot/Cyrus. The two largest providers don't support it.
+
+#### async-imap ACL support
+
+`async-imap` has **no built-in ACL commands**. Use `Session::run_command_and_check_ok()` for raw commands + custom response parsing. ACL responses have a simple format. `NAMESPACE` similarly needs raw command approach. `imap-codec` doesn't have ACL support either — any implementation will be custom.
+
+---
+
+### 5. Identity Management for Send
+
+#### The data model
+
+```rust
+struct SendIdentity {
+    id: String,
+    account_id: String,
+    email: String,
+    display_name: String,
+    mailbox_id: Option<String>,       // For shared mailboxes
+    send_mode: SendMode,              // SendAs vs SendOnBehalf
+    send_endpoint: String,            // e.g., "/users/support@contoso.com/sendMail"
+    save_to_personal_sent: bool,
+    signature: Option<String>,
+}
+```
+
+A user may have 6+ possible From addresses across 3 accounts.
+
+#### Auto-selecting the right From address
+
+Priority rules:
+1. **Replying from shared mailbox context**: Use shared mailbox identity
+2. **Replying to a message sent to a specific alias**: Match To/Cc against known identities
+3. **Composing from shared mailbox sidebar**: Default to shared mailbox identity
+4. **Composing from personal context**: Account's primary identity
+5. **Fallback**: Account's primary identity
+
+This is where Ratatoskr can be significantly better than Outlook. The common failure mode in every client: user replies from personal address when they meant to reply from shared mailbox.
+
+#### How other clients handle it
+
+**Thunderbird**: Manual identity configuration. Matches To/Cc on reply. Works but requires setup.
+**Apple Mail**: Auto-detects Exchange Send-As. Unreliable for shared mailbox identity selection.
+**Outlook**: Most sophisticated — auto-maps shared identities, defaults based on folder context. But From switching UI is buried and users frequently send from wrong address.
+
+---
+
+### 6. Multi-Mailbox Sync Architecture
+
+#### Sync depth per mailbox
+
+| Setting | Purpose | Default |
+|---|---|---|
+| Sync enabled | Sync vs fetch-on-demand | true |
+| Sync depth | Time range | 30 days |
+| Sync folders | Which folders | Inbox + Sent |
+| Push notifications | Real-time connection | false (poll on open) |
+
+#### Separate sync contexts
+
+Each shared mailbox is a separate "account" from the API:
+- **Graph**: Independent delta tokens, independent throttling per mailbox. 10 shared mailboxes = 10x API quota.
+- **JMAP**: Independent state tokens per account.
+- **IMAP**: Independent UIDVALIDITY/UID space per namespace.
+
+The sync engine should model each delegated mailbox as a separate sync context with its own state tokens, schedule, local DB partition, and error/retry state.
+
+#### Bandwidth considerations
+
+Prioritize the mailbox the user currently has open. Batch sync for background mailboxes. Respect `Retry-After` per-mailbox. Exponential backoff per-mailbox, not global.
+
+---
+
+### 7. Relevant Rust Crates
+
+#### EWS client crates
+
+**None exist.** For Autodiscover XML parsing, use `quick-xml` or `roxmltree` (both mature). ~100-200 lines of focused code.
+
+#### graph-rs-sdk
+
+Auto-generated Rust wrapper for Microsoft Graph. Extremely large. Not recommended — our custom Graph client is sufficient. Shared mailbox access is just changing `/me/` to `/users/{shared-mailbox}/`.
+
+#### IMAP ACL
+
+Neither `async-imap` nor `imap-codec` support ACL. Custom implementation via raw commands regardless of library choice.
+
+---
+
+### Summary: Implementation Priority
+
+| Area | Difficulty | Impact | Priority |
+|---|---|---|---|
+| Graph shared mailbox read/write (paths + scopes) | Low | Critical | P0 |
+| Manual-add shared mailbox UX | Low | Critical (baseline) | P0 |
+| Send identity auto-selection | Medium | Critical for UX | P0 |
+| Send As / Send on Behalf via Graph | Low | High | P1 |
+| Per-mailbox sync depth | Medium | High for scale | P1 |
+| Autodiscover XML for auto-mapping | Medium | High for enterprise UX | P1 |
+| IMAP ACL (Dovecot/Cyrus) | Medium | Low (niche) | P2 |
+| JMAP Sharing (RFC 9670) | Medium-High | Low (Stalwart only) | P3 |
+| Gmail delegation | Blocked | Low | P3 (document limitation) |
