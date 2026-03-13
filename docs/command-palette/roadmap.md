@@ -36,21 +36,36 @@ The hardest backend slice. Commands like "Move to Folder" need a typed model for
 - `ParamDef` enum (`ListPicker`, `DateTime`, `Enum`, `Text`)
 - `OptionItem` struct (flat: `id`, `label`, `path`, `keywords`, `disabled`)
 - `CommandArgs` enum — one variant per parameterized command family, typed fields
-- `OptionProvider` trait — `fn get_options(command_id, param_index, ctx) -> Result<Vec<OptionItem>, String>`
+- `CommandInputResolver` trait — `get_options()` and `validate_option()`, app-implemented
 - Register `InputSchema` on parameterized `CommandDescriptor`s
 - Fuzzy search over `OptionItem` lists (reuse nucleo-matcher)
 
 ### What needs to be built in the app crate
 
-- `TauriOptionProvider` implementing `OptionProvider` — queries `DbState` for folders, labels, accounts, templates
-- Registration of the provider in app state alongside the `CommandRegistry`
-- Tauri command for parameter resolution: `command_palette_get_options(command_id, param_index, ctx) -> Vec<OptionItem>`
+- `TauriInputResolver` implementing `CommandInputResolver` — queries `DbState` for folders, labels, accounts, templates; validates selections against current state
+- Registration of the resolver in app state alongside the `CommandRegistry`
+- Tauri commands for parameter resolution:
+  - `command_palette_get_options(command_id, param_index, ctx) -> Vec<OptionItem>`
+  - `command_palette_validate_option(command_id, param_index, option_id, ctx) -> Result<(), String>`
 
 ### Ownership boundary
 
-Core owns the `OptionProvider` trait, `InputSchema`, `ParamDef`, `OptionItem`, and `CommandArgs` types. The app layer implements the trait. This is the same pattern as `ProgressReporter`: core defines the contract, the app provides the concrete implementation backed by `DbState`, account state, and provider clients.
+```
+CommandRegistry (core, static, immutable):
+  - CommandId, descriptors, availability, input schema declarations, search
 
-The `OptionProvider` is a separate object from the `CommandRegistry`. The registry is immutable static data. The option provider needs live DB/state access.
+CommandInputResolver (core trait, app-implemented, live state):
+  - Resolving dynamic options for parameterized command steps
+  - Validating selected option IDs against current state
+  - Future: previews, step transitions
+
+App layer (framework-specific):
+  - Constructing CommandContext
+  - Holding the concrete resolver
+  - Orchestrating: registry → schema → resolver → user input → typed args → execute
+```
+
+The resolver is a separate object from the registry. The registry is immutable static data. The resolver needs live DB/state access. Same pattern as `ProgressReporter`.
 
 ### Commands that become parameterized
 

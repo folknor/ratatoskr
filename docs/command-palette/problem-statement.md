@@ -261,26 +261,59 @@ The full design of undo tokens, stack depth, expiration, and multi-step undo is 
 
    This leaves room to add richer branching later (conditional steps, validation between steps) without pretending slice 2 is a full declarative form engine.
 
-   ### Option Provider (Trait)
+   ### Command Input Resolver (Trait)
 
-   For `ListPicker` parameters, the caller needs to fetch the available options. This is a trait defined in core, implemented by the app layer:
+   Parameterized commands need runtime data — option lists, validation, step transitions. This is a trait defined in core, implemented by the app layer:
 
    ```
-   trait OptionProvider: Send + Sync {
+   trait CommandInputResolver: Send + Sync {
+       /// Return available options for a ListPicker parameter step.
        fn get_options(
            &self,
            command_id: CommandId,
            param_index: usize,
            ctx: &CommandContext,
        ) -> Result<Vec<OptionItem>, String>;
+
+       /// Validate a selected option ID against current state.
+       /// Returns Ok(()) if valid, Err with reason if not.
+       fn validate_option(
+           &self,
+           command_id: CommandId,
+           param_index: usize,
+           option_id: &str,
+           ctx: &CommandContext,
+       ) -> Result<(), String>;
    }
    ```
 
-   The `OptionProvider` is a **separate object from the registry**. The registry is immutable static data. The option provider needs DB access and live account state — things core cannot depend on. This follows the same pattern as `ProgressReporter`: core defines the trait, the app layer provides a concrete implementation.
+   The name `CommandInputResolver` rather than `OptionProvider` reflects that this trait handles more than just listing options — it also validates selections and may grow to handle step transitions and preview data as input shapes expand.
 
-   - Tauri's implementation (`TauriOptionProvider`) queries `DbState` for folders, labels, accounts, templates.
+   The `CommandInputResolver` is a **separate object from the registry**. The registry is immutable static data. The resolver needs DB access and live account state — things core cannot depend on. This follows the same pattern as `ProgressReporter`: core defines the trait, the app layer provides a concrete implementation.
+
+   - Tauri's implementation (`TauriInputResolver`) queries `DbState` for folders, labels, accounts, templates.
    - The future iced implementation queries its own model.
-   - The provider is registered in the app layer at startup, alongside but separate from the `CommandRegistry`.
+   - The resolver is registered in the app layer at startup, alongside but separate from the `CommandRegistry`.
+
+   ### Ownership Summary
+
+   ```
+   CommandRegistry (core, static, immutable):
+     - CommandId enum
+     - CommandDescriptor (label, category, availability predicate, input schema)
+     - Top-level command search (query)
+     - Input schema declarations (what parameters a command needs)
+
+   CommandInputResolver (core trait, app-implemented, live state):
+     - Resolving dynamic options for a parameterized command step
+     - Validating selected option IDs against current state
+     - Future: hydrating labels/paths/previews, step transitions
+
+   App layer (framework-specific):
+     - Constructing CommandContext from framework state
+     - Holding the concrete resolver implementation
+     - Orchestrating the flow: registry → schema → resolver → user input → typed args → execute
+   ```
 
    ### Option Items (Flat, Not Trees)
 
