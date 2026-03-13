@@ -44,6 +44,37 @@ pub enum InputSchema {
     Sequence { params: &'static [ParamDef] },
 }
 
+impl InputSchema {
+    /// Return the `ParamDef` at the given index, or `None` if out of bounds.
+    pub fn param_at(&self, index: usize) -> Option<ParamDef> {
+        match self {
+            Self::Single { param } if index == 0 => Some(*param),
+            Self::Sequence { params } => params.get(index).copied(),
+            _ => None,
+        }
+    }
+
+    /// Total number of parameter steps.
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Single { .. } => 1,
+            Self::Sequence { params } => params.len(),
+        }
+    }
+
+    /// Whether this schema has zero steps (always false for valid schemas).
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl ParamDef {
+    /// Whether this step requires dynamic option resolution via the resolver.
+    pub fn is_list_picker(&self) -> bool {
+        matches!(self, Self::ListPicker { .. })
+    }
+}
+
 /// Carried on `CommandMatch`, tells the frontend what to do after the user
 /// picks a command from the palette.
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -82,6 +113,10 @@ pub struct OptionItem {
 pub struct OptionMatch {
     pub item: OptionItem,
     pub score: u32,
+    /// The concatenated search haystack that was matched against.
+    /// Format: `"{path} > {label} {keywords}"` (path/keywords omitted if absent).
+    /// `match_positions` are byte offsets into this string.
+    pub match_text: String,
     pub match_positions: Vec<u32>,
 }
 
@@ -98,6 +133,7 @@ pub fn search_options(items: &[OptionItem], query: &str) -> Vec<OptionMatch> {
         return items
             .iter()
             .map(|item| OptionMatch {
+                match_text: build_haystack(item),
                 item: item.clone(),
                 score: 0,
                 match_positions: vec![],
@@ -128,6 +164,7 @@ fn search_options_fuzzy(items: &[OptionItem], query: &str) -> Vec<OptionMatch> {
             results.push(OptionMatch {
                 item: item.clone(),
                 score,
+                match_text: haystack_str,
                 match_positions: indices.clone(),
             });
         }

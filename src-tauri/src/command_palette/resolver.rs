@@ -9,10 +9,17 @@ use super::{CommandContext, CommandId, CommandInputResolver, OptionItem};
 /// `app.manage()` and `State<'_, InputResolverState>`.
 pub struct InputResolverState(pub Arc<dyn CommandInputResolver>);
 
-/// Stub resolver — returns empty results for all commands.
+/// **Non-functional stub.** Returns empty option lists and accepts any value.
 ///
-/// Real implementation (querying `DbState` for folders, labels, accounts)
-/// is future work. The trait boundary is what matters for this slice.
+/// The four parameterized commands (`EmailMoveToFolder`, `EmailAddLabel`,
+/// `EmailRemoveLabel`, `EmailSnooze`) have schema metadata in the registry
+/// but will dead-end through this resolver — `get_options` returns nothing,
+/// `validate_option` accepts everything. The frontend must NOT present
+/// second-stage input UI for these commands until a real resolver replaces
+/// this stub.
+///
+/// Real implementation will query `DbState` for folders, labels, accounts,
+/// and validate selections against current state.
 pub struct TauriInputResolver;
 
 impl CommandInputResolver for TauriInputResolver {

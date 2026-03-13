@@ -48,6 +48,37 @@ impl CommandRegistry {
             .map(|d| d.id)
     }
 
+    /// Validate that `command_id` is a parameterized command and that
+    /// `param_index` is within its schema bounds. Returns the `ParamDef`
+    /// for the step on success.
+    ///
+    /// Also validates that `prior_selections` length matches `param_index`
+    /// (one prior value per completed step).
+    pub fn validate_param_request(
+        &self,
+        command_id: CommandId,
+        param_index: usize,
+        prior_selections: &[String],
+    ) -> Result<super::input::ParamDef, String> {
+        let desc = self
+            .get(command_id)
+            .ok_or_else(|| format!("unknown command: {command_id:?}"))?;
+        let schema = desc
+            .input_schema
+            .ok_or_else(|| format!("{command_id:?} is not a parameterized command"))?;
+        let param = schema
+            .param_at(param_index)
+            .ok_or_else(|| format!("{command_id:?}: param_index {param_index} out of bounds (schema has {} steps)", schema.len()))?;
+        if prior_selections.len() != param_index {
+            return Err(format!(
+                "{command_id:?}: expected {} prior selections for step {param_index}, got {}",
+                param_index,
+                prior_selections.len()
+            ));
+        }
+        Ok(param)
+    }
+
     pub fn query(&self, ctx: &CommandContext, query: &str) -> Vec<CommandMatch> {
         if query.is_empty() {
             return self.query_empty(ctx);
@@ -656,6 +687,52 @@ mod tests {
                 Some(InputMode::Direct)
             ),
             "EmailArchive should be Direct"
+        );
+    }
+
+    #[test]
+    fn validate_param_request_accepts_valid_list_picker() {
+        let registry = CommandRegistry::new();
+        let result = registry.validate_param_request(CommandId::EmailMoveToFolder, 0, &[]);
+        assert!(result.is_ok());
+        assert!(result.map_or(false, |p| p.is_list_picker()));
+    }
+
+    #[test]
+    fn validate_param_request_rejects_non_parameterized() {
+        let registry = CommandRegistry::new();
+        let result = registry.validate_param_request(CommandId::EmailArchive, 0, &[]);
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("not a parameterized command"),
+            "should reject non-parameterized command"
+        );
+    }
+
+    #[test]
+    fn validate_param_request_rejects_out_of_bounds() {
+        let registry = CommandRegistry::new();
+        let result = registry.validate_param_request(CommandId::EmailMoveToFolder, 1, &["x".into()]);
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("out of bounds"),
+            "should reject out-of-bounds param_index"
+        );
+    }
+
+    #[test]
+    fn validate_param_request_rejects_wrong_prior_selections_count() {
+        let registry = CommandRegistry::new();
+        // Step 0 should have 0 prior selections, not 1
+        let result = registry.validate_param_request(
+            CommandId::EmailMoveToFolder,
+            0,
+            &["unexpected".into()],
+        );
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("prior selections"),
+            "should reject mismatched prior_selections count"
         );
     }
 

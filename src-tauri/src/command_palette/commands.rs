@@ -16,6 +16,7 @@ pub fn command_palette_query(
 
 #[tauri::command]
 pub fn command_palette_get_options(
+    registry: State<'_, CommandRegistry>,
     resolver: State<'_, InputResolverState>,
     command_id: CommandId,
     param_index: usize,
@@ -23,12 +24,19 @@ pub fn command_palette_get_options(
     query: String,
     ctx: CommandContext,
 ) -> Result<Vec<OptionMatch>, String> {
+    let param = registry.validate_param_request(command_id, param_index, &prior_selections)?;
+    if !param.is_list_picker() {
+        return Err(format!(
+            "{command_id:?} step {param_index} is not a ListPicker — options are not resolved via the backend"
+        ));
+    }
     let items = resolver.0.get_options(command_id, param_index, &prior_selections, &ctx)?;
     Ok(search_options(&items, &query))
 }
 
 #[tauri::command]
 pub fn command_palette_validate_option(
+    registry: State<'_, CommandRegistry>,
     resolver: State<'_, InputResolverState>,
     command_id: CommandId,
     param_index: usize,
@@ -36,6 +44,7 @@ pub fn command_palette_validate_option(
     prior_selections: Vec<String>,
     ctx: CommandContext,
 ) -> Result<(), String> {
+    registry.validate_param_request(command_id, param_index, &prior_selections)?;
     resolver
         .0
         .validate_option(command_id, param_index, &value, &prior_selections, &ctx)
