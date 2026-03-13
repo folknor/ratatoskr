@@ -248,16 +248,18 @@ The full design of undo tokens, stack depth, expiration, and multi-step undo is 
    ```
    ParamDef::ListPicker { label }                 — pick one item from a dynamic list (folders, labels, accounts)
    ParamDef::DateTime { label }                   — pick a date/time (snooze)
-   ParamDef::Enum { label, options: &[&str] }     — pick from a fixed set (theme: light/dark/system)
+   ParamDef::Enum { label, options: &[EnumOption] } — pick from a fixed set; EnumOption { value, label } separates machine ID from display text
    ParamDef::Text { label, placeholder }           — free text input (rename folder, search query)
    ```
 
+   `EnumOption` separates machine identifier (`value`) from display text (`label`). The frontend sends `value` back, not `label` — no localization hazard.
+
    Examples:
-   - **Move to Folder**: `Single(ListPicker { label: "Folder" })`
-   - **Snooze**: `Single(DateTime { label: "Snooze until" })`
-   - **Compose with Template**: `Sequence(&[ListPicker { label: "Template" }, ListPicker { label: "Account" }])`
-   - **Switch Theme**: `Single(Enum { label: "Theme", options: &["Light", "Dark", "System"] })`
-   - **Rename Folder**: `Single(Text { label: "New name", placeholder: "Folder name" })`
+   - **Move to Folder**: `Single { param: ListPicker { label: "Folder" } }`
+   - **Snooze**: `Single { param: DateTime { label: "Snooze until" } }`
+   - **Compose with Template**: `Sequence { params: &[ListPicker { label: "Template" }, ListPicker { label: "Account" }] }`
+   - **Switch Theme**: `Single { param: Enum { label: "Theme", options: &[EnumOption { value: "light", label: "Light" }, ...] } }`
+   - **Rename Folder**: `Single { param: Text { label: "New name", placeholder: "Folder name" } }`
 
    This leaves room to add richer branching later (conditional steps, validation between steps) without pretending slice 2 is a full declarative form engine.
 
@@ -268,30 +270,40 @@ The full design of undo tokens, stack depth, expiration, and multi-step undo is 
    ```
    trait CommandInputResolver: Send + Sync {
        /// Return available options for a ListPicker parameter step.
+       /// Only called for ListPicker steps — DateTime, Text, and Enum are
+       /// frontend-only input steps (the schema carries all needed info).
+       /// prior_selections contains values chosen in steps 0..param_index
+       /// for Sequence schemas (empty for Single).
        fn get_options(
            &self,
            command_id: CommandId,
            param_index: usize,
+           prior_selections: &[String],
            ctx: &CommandContext,
        ) -> Result<Vec<OptionItem>, String>;
 
-       /// Validate a selected option ID against current state.
-       /// Returns Ok(()) if valid, Err with reason if not.
+       /// Validate a selected value for any step type.
+       /// - ListPicker: value is OptionItem.id
+       /// - DateTime: value is stringified unix timestamp
+       /// - Enum: value is EnumOption.value
+       /// - Text: value is the user's input string
+       /// prior_selections enables cross-field validation for sequences.
        fn validate_option(
            &self,
            command_id: CommandId,
            param_index: usize,
-           option_id: &str,
+           value: &str,
+           prior_selections: &[String],
            ctx: &CommandContext,
        ) -> Result<(), String>;
    }
    ```
 
-   The name `CommandInputResolver` rather than `OptionProvider` reflects that this trait handles more than just listing options — it also validates selections and may grow to handle step transitions and preview data as input shapes expand.
+   The name `CommandInputResolver` rather than `OptionProvider` reflects that this trait handles more than just listing options — it also validates selections and may grow to handle step transitions and preview data as input shapes expand. The `prior_selections` parameter on both methods enables sequence-aware resolution and cross-field validation from day one.
 
    The `CommandInputResolver` is a **separate object from the registry**. The registry is immutable static data. The resolver needs DB access and live account state — things core cannot depend on. This follows the same pattern as `ProgressReporter`: core defines the trait, the app layer provides a concrete implementation.
 
-   - Tauri's implementation (`TauriInputResolver`) queries `DbState` for folders, labels, accounts, templates.
+   - Tauri's implementation (`TauriInputResolver`) is wrapped in an `InputResolverState` newtype for Tauri managed state (Tauri's `State<'_>` lookup is concrete-type based; `Arc<dyn Trait>` directly is brittle).
    - The future iced implementation queries its own model.
    - The resolver is registered in the app layer at startup, alongside but separate from the `CommandRegistry`.
 
@@ -329,8 +341,8 @@ The full design of undo tokens, stack depth, expiration, and multi-step undo is 
    }
    ```
 
-   Search operates on `label` (and `keywords` if present). The UI reconstructs hierarchical display from `path`. Execution uses `id`. This gives:
-   - Flat fuzzy search over all options
+   Search operates on `label`, `path` segments (joined with " > "), and `keywords`. Including `path` in the search text means ancestor names are searchable — typing "q2" finds "Projects / Q2 / Reviews" without the resolver duplicating ancestors into keywords. The UI reconstructs hierarchical display from `path`. Execution uses `id`. This gives:
+   - Flat fuzzy search over all options (including hierarchy)
    - Hierarchical display when desired (folder trees, nested labels)
    - No tree traversal API in core
    - Reusable structure for folders, labels, accounts, templates, and any future option type

@@ -16,37 +16,40 @@ Phased implementation plan for the command palette backend. Each slice builds on
 
 **Files:** `src-tauri/core/src/command_palette/`, `src-tauri/src/command_palette/`
 
-## Slice 2: Parameterized Commands
+## Slice 2: Parameterized Commands — Input Schema & Resolver Trait ✅
 
-The hardest backend slice. Commands like "Move to Folder" need a typed model for their input — not just "pick from a list." Design is fully specified in `problem-statement.md` decision #3.
+**Status: Complete (infrastructure scaffolding)**
 
-### Design Summary
+This slice adds the typed input model and resolver trait. The four parameterized commands gain schema metadata but the resolver stub returns empty results — real option resolution (querying DbState) is future work. The execution contract (`CommandArgs`, dispatch endpoint) is deferred to avoid defining a payload without a consumer.
 
-**Stage separation:** `query()` stays a command search API. Parameterized commands appear in results with `input_mode: InputMode::Parameterized { schema }`. Parameter resolution uses a separate `OptionProvider` trait.
+### What was built
 
-**Caller flow:**
-1. `registry.query(ctx, query)` → user picks a `CommandMatch`
-2. If `input_mode == Direct` → execute with `CommandId` alone
-3. If `Parameterized` → call `OptionProvider::get_options()` for each step in the schema, user picks, build `CommandArgs`, execute
+**Core crate (`src-tauri/core/src/command_palette/`):**
+- `input.rs` — `EnumOption` (value/label separation), `ParamDef` (ListPicker, DateTime, Enum, Text), `InputSchema` (Single, Sequence), `InputMode` (Direct, Parameterized) — all `Copy`, zero-allocation
+- `input.rs` — `OptionItem` (flat, allocating runtime data from DB), `OptionMatch` (scored), `search_options()` with nucleo-matcher (searches label + path + keywords)
+- `resolver.rs` — `CommandInputResolver` trait with sequence-aware `prior_selections: &[String]` on both `get_options()` and `validate_option()`
+- `descriptor.rs` — `input_schema: Option<InputSchema>` on `CommandDescriptor`, `input_mode: InputMode` on `CommandMatch`
+- Four commands registered as parameterized: `EmailMoveToFolder`, `EmailAddLabel`, `EmailRemoveLabel`, `EmailSnooze`
+- 9 new tests (7 for search_options, 2 for input_mode)
 
-### What needs to be built in core
+**App crate (`src-tauri/src/command_palette/`):**
+- `resolver.rs` — `InputResolverState` newtype wrapper (for Tauri managed state), `TauriInputResolver` stub
+- `commands.rs` — `command_palette_get_options` and `command_palette_validate_option` Tauri commands
 
-- `InputMode` enum (`Direct`, `Parameterized`) on `CommandMatch`
-- `InputSchema` enum (`Single(ParamDef)`, `Sequence(&'static [ParamDef])`)
-- `ParamDef` enum (`ListPicker`, `DateTime`, `Enum`, `Text`)
-- `OptionItem` struct (flat: `id`, `label`, `path`, `keywords`, `disabled`)
-- `CommandArgs` enum — one variant per parameterized command family, typed fields
-- `CommandInputResolver` trait — `get_options()` and `validate_option()`, app-implemented
-- Register `InputSchema` on parameterized `CommandDescriptor`s
-- Fuzzy search over `OptionItem` lists (reuse nucleo-matcher)
+### Design decisions made during implementation
 
-### What needs to be built in the app crate
+- **`CommandArgs` deferred** — introducing the execution payload without a dispatch endpoint would leave the hardest contract implicit and risk duplicating argument assembly in TypeScript
+- **`prior_selections: &[String]`** on both trait methods — enables sequence-aware resolution and cross-field validation from day one, no breaking change when multi-step commands arrive
+- **`EnumOption { value, label }`** instead of raw `&[&str]` — separates machine identifier from display text, no localization hazard
+- **`search_options()` includes `path` in search text** — ancestor names are searchable ("q2" finds "Projects / Q2 / Reviews") without the resolver duplicating ancestors into keywords
+- **`get_options()` only for ListPicker steps** — DateTime/Text/Enum are frontend-only input steps; the schema carries all info the frontend needs
+- **`InputResolverState` newtype** — Tauri's `State<'_>` lookup is concrete-type based; `Arc<dyn Trait>` directly is brittle
 
-- `TauriInputResolver` implementing `CommandInputResolver` — queries `DbState` for folders, labels, accounts, templates; validates selections against current state
-- Registration of the resolver in app state alongside the `CommandRegistry`
-- Tauri commands for parameter resolution:
-  - `command_palette_get_options(command_id, param_index, ctx) -> Vec<OptionItem>`
-  - `command_palette_validate_option(command_id, param_index, option_id, ctx) -> Result<(), String>`
+### What remains (future slices)
+
+- `CommandArgs` enum and the execution endpoint that consumes it
+- Real `TauriInputResolver` querying `DbState` for folders, labels, accounts, templates
+- Frontend changes to honor `input_mode`
 
 ### Ownership boundary
 
@@ -55,28 +58,29 @@ CommandRegistry (core, static, immutable):
   - CommandId, descriptors, availability, input schema declarations, search
 
 CommandInputResolver (core trait, app-implemented, live state):
-  - Resolving dynamic options for parameterized command steps
-  - Validating selected option IDs against current state
+  - Resolving dynamic options for ListPicker parameter steps
+  - Validating selected values (any step type) against current state
+  - Sequence-aware: prior_selections flows through both methods
   - Future: previews, step transitions
 
 App layer (framework-specific):
   - Constructing CommandContext
-  - Holding the concrete resolver
+  - Holding the concrete resolver (InputResolverState newtype)
   - Orchestrating: registry → schema → resolver → user input → typed args → execute
 ```
 
-The resolver is a separate object from the registry. The registry is immutable static data. The resolver needs live DB/state access. Same pattern as `ProgressReporter`.
+### Commands with input schemas
 
-### Commands that become parameterized
-
-| Command | Schema | Args variant |
-|---------|--------|-------------|
-| `EmailMoveToFolder` | `Single(ListPicker)` | `MoveToFolder { folder_id }` |
-| `EmailAddLabel` | `Single(ListPicker)` | `AddLabel { label_id }` |
-| `EmailRemoveLabel` | `Single(ListPicker)` | `RemoveLabel { label_id }` |
-| `EmailSnooze` | `Single(DateTime)` | `Snooze { until }` |
+| Command | Schema | ParamDef |
+|---------|--------|----------|
+| `EmailMoveToFolder` | `Single` | `ListPicker { label: "Folder" }` |
+| `EmailAddLabel` | `Single` | `ListPicker { label: "Label" }` |
+| `EmailRemoveLabel` | `Single` | `ListPicker { label: "Label" }` |
+| `EmailSnooze` | `Single` | `DateTime { label: "Snooze until" }` |
 
 Additional parameterized commands (templates, filters, etc.) will be added incrementally.
+
+**Files:** `src-tauri/core/src/command_palette/input.rs`, `src-tauri/core/src/command_palette/resolver.rs`, `src-tauri/src/command_palette/resolver.rs`
 
 **Depends on:** Slice 1
 
@@ -176,8 +180,8 @@ No core changes needed. The work is entirely in the iced app layer.
 
 ```
 Slice 1 (registry) ✅
-  ├── Slice 2 (parameterized commands)
-  │     └── needs app-side OptionProvider adapter
+  ├── Slice 2 (parameterized commands) ✅ (schema + trait; CommandArgs & real resolver deferred)
+  │     └── needs real TauriInputResolver (queries DbState) and CommandArgs/dispatch endpoint
   ├── Slice 3 (keybindings)
   │     └── binding resolution API for keyboard dispatch
   ├── Slice 4 (ranking)
@@ -193,4 +197,4 @@ Slice 1 (registry) ✅
           └── CommandContext assembly adapter
 ```
 
-Slices 2, 3, and 5 can be worked in parallel after slice 1. Slice 4's ranking infrastructure can be built in parallel, but recency tracking becomes useful only after slice 6. Slice 6 is incremental and can begin as soon as slices 1 + 3 are done.
+Slices 3 and 5 can be worked in parallel. Slice 4's ranking infrastructure can be built in parallel, but recency tracking becomes useful only after slice 6. Slice 6 is incremental and can begin as soon as slices 1 + 3 are done. Slice 2's remaining work (real resolver, CommandArgs, execution dispatch) is needed before the palette UI in slice 6 can use parameterized commands.

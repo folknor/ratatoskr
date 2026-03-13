@@ -4,6 +4,7 @@ use nucleo_matcher::{Config, Matcher, Utf32Str};
 use super::context::CommandContext;
 use super::descriptor::{CommandDescriptor, CommandMatch};
 use super::id::CommandId;
+use super::input::{InputMode, InputSchema};
 
 pub struct CommandRegistry {
     descriptors: Vec<CommandDescriptor>,
@@ -64,6 +65,7 @@ impl CommandRegistry {
                 category: d.category,
                 keybinding: d.keybinding,
                 available: (d.is_available)(ctx),
+                input_mode: input_mode_for(d),
                 score: 0,
                 match_positions: vec![],
             })
@@ -97,6 +99,7 @@ impl CommandRegistry {
                     category: d.category,
                     keybinding: d.keybinding,
                     available: (d.is_available)(ctx),
+                    input_mode: input_mode_for(d),
                     score,
                     match_positions: indices.clone(),
                 });
@@ -105,6 +108,13 @@ impl CommandRegistry {
 
         results.sort_by_key(|r| std::cmp::Reverse(r.score));
         results
+    }
+}
+
+fn input_mode_for(d: &CommandDescriptor) -> InputMode {
+    match d.input_schema {
+        Some(schema) => InputMode::Parameterized { schema },
+        None => InputMode::Direct,
     }
 }
 
@@ -135,6 +145,7 @@ fn desc(
         active_label: None,
         is_available,
         is_active: None,
+        input_schema: None,
     }
 }
 
@@ -155,6 +166,27 @@ fn toggle(
         active_label: Some(active_label),
         is_available,
         is_active: Some(is_active),
+        input_schema: None,
+    }
+}
+
+fn parameterized(
+    id: CommandId,
+    label: &'static str,
+    category: &'static str,
+    keybinding: Option<&'static str>,
+    is_available: fn(&CommandContext) -> bool,
+    input_schema: InputSchema,
+) -> CommandDescriptor {
+    CommandDescriptor {
+        id,
+        label,
+        category,
+        keybinding,
+        active_label: None,
+        is_available,
+        is_active: None,
+        input_schema: Some(input_schema),
     }
 }
 
@@ -297,16 +329,46 @@ fn register_email_other(out: &mut Vec<CommandDescriptor>) {
         Some("u"),
         needs_single_selection,
     ));
-    out.push(desc(
+    out.push(parameterized(
         CommandId::EmailMoveToFolder,
         "Move to Folder",
         "Email",
         Some("v"),
         needs_selection,
+        InputSchema::Single {
+            param: super::input::ParamDef::ListPicker { label: "Folder" },
+        },
     ));
-    out.push(desc(CommandId::EmailAddLabel, "Add Label", "Email", None, needs_selection));
-    out.push(desc(CommandId::EmailRemoveLabel, "Remove Label", "Email", None, needs_selection));
-    out.push(desc(CommandId::EmailSnooze, "Snooze", "Email", None, needs_selection));
+    out.push(parameterized(
+        CommandId::EmailAddLabel,
+        "Add Label",
+        "Email",
+        None,
+        needs_selection,
+        InputSchema::Single {
+            param: super::input::ParamDef::ListPicker { label: "Label" },
+        },
+    ));
+    out.push(parameterized(
+        CommandId::EmailRemoveLabel,
+        "Remove Label",
+        "Email",
+        None,
+        needs_selection,
+        InputSchema::Single {
+            param: super::input::ParamDef::ListPicker { label: "Label" },
+        },
+    ));
+    out.push(parameterized(
+        CommandId::EmailSnooze,
+        "Snooze",
+        "Email",
+        None,
+        needs_selection,
+        InputSchema::Single {
+            param: super::input::ParamDef::DateTime { label: "Snooze until" },
+        },
+    ));
     out.push(desc(CommandId::EmailSelectAll, "Select All", "Email", Some("Ctrl+A"), always));
     out.push(desc(
         CommandId::EmailSelectFromHere,
@@ -393,6 +455,7 @@ fn register_app(out: &mut Vec<CommandDescriptor>) {
 mod tests {
     use super::*;
     use crate::command_palette::context::ViewType;
+    use crate::command_palette::input::InputMode;
 
     fn empty_context() -> CommandContext {
         CommandContext {
@@ -560,6 +623,40 @@ mod tests {
         let registry = CommandRegistry::new();
         assert_eq!(registry.command_for_key("e"), Some(CommandId::EmailArchive));
         assert_eq!(registry.command_for_key("nonexistent"), None);
+    }
+
+    #[test]
+    fn parameterized_command_has_input_mode() {
+        let registry = CommandRegistry::new();
+        let ctx = context_with_selection();
+        let results = registry.query(&ctx, "");
+        let move_to = results
+            .iter()
+            .find(|r| r.id == CommandId::EmailMoveToFolder);
+        assert!(move_to.is_some());
+        assert!(
+            matches!(
+                move_to.map(|m| m.input_mode),
+                Some(InputMode::Parameterized { .. })
+            ),
+            "EmailMoveToFolder should be Parameterized"
+        );
+    }
+
+    #[test]
+    fn direct_command_has_direct_mode() {
+        let registry = CommandRegistry::new();
+        let ctx = context_with_selection();
+        let results = registry.query(&ctx, "");
+        let archive = results.iter().find(|r| r.id == CommandId::EmailArchive);
+        assert!(archive.is_some());
+        assert!(
+            matches!(
+                archive.map(|m| m.input_mode),
+                Some(InputMode::Direct)
+            ),
+            "EmailArchive should be Direct"
+        );
     }
 
     #[test]

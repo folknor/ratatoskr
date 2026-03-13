@@ -2,6 +2,10 @@ use std::sync::Arc;
 use tauri::Manager;
 
 pub fn init_app_state(app: &tauri::App) -> tauri::Result<()> {
+    // Command palette: resolver for parameterized command options
+    app.manage(crate::command_palette::resolver::InputResolverState(
+        Arc::new(crate::command_palette::resolver::TauriInputResolver),
+    ));
     let app_data_dir = app
         .path()
         .app_data_dir()

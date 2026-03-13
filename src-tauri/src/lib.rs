@@ -473,6 +473,8 @@ pub fn run() {
             provider::commands::provider_delete_folder,
             // Command palette
             command_palette::commands::command_palette_query,
+            command_palette::commands::command_palette_get_options,
+            command_palette::commands::command_palette_validate_option,
             // Discovery
             discovery::commands::discover_email_config,
         ])

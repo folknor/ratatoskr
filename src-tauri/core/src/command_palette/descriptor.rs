@@ -2,6 +2,7 @@ use serde::Serialize;
 
 use super::context::CommandContext;
 use super::id::CommandId;
+use super::input::{InputMode, InputSchema};
 
 pub struct CommandDescriptor {
     pub id: CommandId,
@@ -11,6 +12,7 @@ pub struct CommandDescriptor {
     pub active_label: Option<&'static str>,
     pub is_available: fn(&CommandContext) -> bool,
     pub is_active: Option<fn(&CommandContext) -> bool>,
+    pub input_schema: Option<InputSchema>,
 }
 
 impl CommandDescriptor {
@@ -33,6 +35,7 @@ pub struct CommandMatch {
     pub category: &'static str,
     pub keybinding: Option<&'static str>,
     pub available: bool,
+    pub input_mode: InputMode,
     pub score: u32,
     pub match_positions: Vec<u32>,
 }
