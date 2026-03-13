@@ -186,3 +186,31 @@ toRecipients,ccRecipients,bccRecipients,replyTo,\
 receivedDateTime,sentDateTime,isRead,isDraft,hasAttachments,\
 importance,parentFolderId,categories,flag,\
 inferenceClassification,internetMessageHeaders,internetMessageId";
+
+// ── Contact types ─────────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphContact {
+    pub id: String,
+    pub display_name: Option<String>,
+    pub email_addresses: Option<Vec<GraphContactEmail>>,
+    pub parent_folder_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphContactEmail {
+    pub name: Option<String>,
+    pub address: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphContactFolder {
+    pub id: String,
+    pub display_name: String,
+}
+
+/// The `$select` fields we request for contact sync.
+pub const CONTACT_SELECT: &str = "id,displayName,emailAddresses,parentFolderId";

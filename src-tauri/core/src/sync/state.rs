@@ -145,3 +145,71 @@ pub async fn delete_graph_delta_token(
     })
     .await
 }
+
+// ── Graph contact delta tokens ────────────────────────────
+
+pub async fn save_graph_contact_delta_token(
+    db: &DbState,
+    account_id: &str,
+    folder_id: &str,
+    delta_link: &str,
+) -> Result<(), String> {
+    let aid = account_id.to_string();
+    let fid = folder_id.to_string();
+    let dl = delta_link.to_string();
+
+    db.with_conn(move |conn| {
+        conn.execute(
+            "INSERT OR REPLACE INTO graph_contact_delta_tokens \
+             (account_id, folder_id, delta_link, updated_at) \
+             VALUES (?1, ?2, ?3, strftime('%s', 'now'))",
+            rusqlite::params![aid, fid, dl],
+        )
+        .map_err(|e| format!("save contact delta token: {e}"))?;
+        Ok(())
+    })
+    .await
+}
+
+pub async fn load_graph_contact_delta_tokens(
+    db: &DbState,
+    account_id: &str,
+) -> Result<HashMap<String, String>, String> {
+    let aid = account_id.to_string();
+
+    db.with_conn(move |conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT folder_id, delta_link FROM graph_contact_delta_tokens \
+                 WHERE account_id = ?1",
+            )
+            .map_err(|e| format!("prepare: {e}"))?;
+        stmt.query_map(rusqlite::params![aid], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| format!("query: {e}"))?
+        .collect::<Result<HashMap<_, _>, _>>()
+        .map_err(|e| format!("collect: {e}"))
+    })
+    .await
+}
+
+pub async fn delete_graph_contact_delta_token(
+    db: &DbState,
+    account_id: &str,
+    folder_id: &str,
+) -> Result<(), String> {
+    let aid = account_id.to_string();
+    let fid = folder_id.to_string();
+
+    db.with_conn(move |conn| {
+        conn.execute(
+            "DELETE FROM graph_contact_delta_tokens \
+             WHERE account_id = ?1 AND folder_id = ?2",
+            rusqlite::params![aid, fid],
+        )
+        .map_err(|e| format!("delete contact delta token: {e}"))?;
+        Ok(())
+    })
+    .await
+}

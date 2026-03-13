@@ -57,7 +57,11 @@ pub async fn db_update_contact(
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute(
-            "UPDATE contacts SET display_name = ?1, updated_at = unixepoch() WHERE id = ?2",
+            "UPDATE contacts SET \
+               display_name = ?1, \
+               display_name_overridden = CASE WHEN source = 'graph' THEN 1 ELSE display_name_overridden END, \
+               updated_at = unixepoch() \
+             WHERE id = ?2",
             params![display_name, id],
         )
         .map_err(|e| e.to_string())?;

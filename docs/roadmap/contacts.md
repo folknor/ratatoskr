@@ -1,7 +1,7 @@
 # Contacts & Groups
 
 **Tier**: 1 — Blocks switching from Outlook
-**Status**: ⚠️ **Partial** — Local contact DB with frequency ranking, avatars, notes. `seen_addresses` auto-collected during sync with direction-weighted ranking (Phase 1). FTS5 prefix search on contacts with email-aware tokenizer, two-tier ranking (explicit > observed), LIKE fallback for seen_addresses (Phase 2). Compose autocomplete returns both explicit contacts and observed addresses. Gravatar integration, contact sidebar with stats/colleagues/shared files. **Missing**: server-side sync (Exchange `/me/contacts`, Google People API), distribution list/group resolution, contact photos from server.
+**Status**: ⚠️ **Partial** — Local contact DB with frequency ranking, avatars, notes. `seen_addresses` auto-collected during sync with direction-weighted ranking (Phase 1). FTS5 prefix search on contacts with email-aware tokenizer, two-tier ranking (explicit > observed), LIKE fallback for seen_addresses (Phase 2). Exchange personal contacts sync via Graph `/me/contacts` with per-folder delta sync, 410 fallback, reference-counted deletes, `display_name_overridden` flag for user edit protection (Phase 3). Compose autocomplete returns explicit contacts, server-synced contacts, and observed addresses. Gravatar integration, contact sidebar with stats/colleagues/shared files. **Missing**: Google People API sync, distribution list/group resolution, contact photos from server.
 
 ---
 
@@ -36,9 +36,9 @@ Parse `From`/`To`/`Cc`/`Reply-To` during sync via `mail-parser`. Populate `seen_
 
 Add `contacts_fts` (FTS5) with email-aware tokenizer (`tokenchars='@._-'`), prefix indexes, and content-sync triggers. Two-tier ranking: explicit contacts above observed addresses. LIKE fallback for graceful degradation. Validates the explicit > observed ranking model before provider sync lands.
 
-### Phase 3 — Exchange personal contacts sync
+### Phase 3 — Exchange personal contacts sync ✅
 
-Graph `/me/contacts` with delta sync per `(account, contact_folder)`. Handle `$deltatoken` storage, `410 Gone` fallback to full sync. `$select` to limit fields. This is the heaviest provider and the primary target user base.
+Graph `/me/contacts` with per-folder delta sync via `graph_contact_delta_tokens`. Source tracking (`source` column: `'user'` vs `'graph'`), `display_name_overridden` flag to protect user edits from sync overwrites. Reference-counted deletes via `graph_contact_map` — shared emails only removed when no mappings remain. 410 Gone fallback to full sync with stale contact pruning. Syncs every 20th mail cycle. Top-level contact folders only (nested folders deferred).
 
 ### Phase 4 — Local groups + compose expansion
 

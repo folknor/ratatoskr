@@ -842,6 +842,32 @@ static MIGRATIONS: &[Migration] = &[
             END;
         "#,
     },
+    Migration {
+        version: 33,
+        description: "Graph contact sync: source tracking, contact map, delta tokens",
+        sql: r#"
+            ALTER TABLE contacts ADD COLUMN source TEXT NOT NULL DEFAULT 'user';
+            ALTER TABLE contacts ADD COLUMN display_name_overridden INTEGER NOT NULL DEFAULT 0;
+
+            CREATE TABLE IF NOT EXISTS graph_contact_map (
+                account_id TEXT NOT NULL,
+                graph_contact_id TEXT NOT NULL,
+                email TEXT NOT NULL,
+                PRIMARY KEY (account_id, graph_contact_id, email),
+                FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_graph_contact_map_email ON graph_contact_map(email);
+
+            CREATE TABLE IF NOT EXISTS graph_contact_delta_tokens (
+                account_id TEXT NOT NULL,
+                folder_id TEXT NOT NULL,
+                delta_link TEXT NOT NULL,
+                updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                PRIMARY KEY (account_id, folder_id),
+                FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+            );
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -1081,6 +1107,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))
             .expect("query");
-        assert_eq!(max_ver, 32);
+        assert_eq!(max_ver, 33);
     }
 }

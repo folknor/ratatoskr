@@ -129,6 +129,13 @@ pub(crate) async fn graph_initial_sync(
         );
     }
 
+    // Phase 4: Sync Exchange contacts
+    if let Err(e) =
+        super::contact_sync::graph_contacts_initial_sync(client, ctx.account_id, ctx.db).await
+    {
+        log::warn!("Contact initial sync failed (non-fatal): {e}");
+    }
+
     let aid = ctx.account_id.to_string();
     ctx.db
         .with_conn(move |conn| crate::sync::pipeline::mark_initial_sync_completed(conn, &aid))
@@ -247,6 +254,15 @@ pub(crate) async fn graph_delta_sync(
             sync_folder_delta(&sctx, folder_id, delta_link, &folder_map).await?;
         new_inbox_ids.extend(folder_new);
         affected_thread_ids.extend(folder_affected);
+    }
+
+    // Contacts delta sync: every 20th cycle (contacts change rarely)
+    if cycle.is_multiple_of(20) {
+        if let Err(e) =
+            super::contact_sync::graph_contacts_delta_sync(client, ctx.account_id, ctx.db).await
+        {
+            log::warn!("Contact delta sync failed (non-fatal): {e}");
+        }
     }
 
     Ok(SyncResult {
