@@ -1,7 +1,7 @@
 # IMAP CONDSTORE/QRESYNC (RFC 7162)
 
 **Tier**: 1 — Blocks switching from Outlook
-**Status**: ❌ **Not implemented** — The `modseq` column exists in `folder_sync_state` and `ImapFolderStatus` parses it from SELECT responses, but it's unused (`_modseq`). Sync relies on UID comparison only. No capability detection, no `CHANGEDSINCE`/`VANISHED` handling.
+**Status**: ⚠️ **Phase 1 (modseq tracking + fast-path skip) implemented** — HIGHESTMODSEQ from SELECT is now persisted in `folder_sync_state.modseq` and compared on each delta check. When the server's HIGHESTMODSEQ matches the cached value, the folder is skipped entirely (no UID SEARCH). Phase 2 (CHANGEDSINCE flag sync) and Phase 3 (QRESYNC VANISHED) are not yet implemented — async-imap lacks typed CHANGEDSINCE/VANISHED support.
 
 ---
 

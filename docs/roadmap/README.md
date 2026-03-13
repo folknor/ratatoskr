@@ -63,7 +63,7 @@ These are features enterprise users actively rely on daily. Missing any of these
 - [Contacts & Groups](contacts.md) — ⚠️ Partial
 - [Tracking Pixel / Read Receipt Blocking](tracking-blocking.md) — ⚠️ Mostly done
 - [Cloud Attachment Linking](cloud-attachments.md) — ❌ Not implemented
-- [IMAP CONDSTORE/QRESYNC](imap-condstore-qresync.md) — ❌ Not implemented
+- [IMAP CONDSTORE/QRESYNC](imap-condstore-qresync.md) — ⚠️ Phase 1 (modseq tracking)
 - [Shared / Delegated Mailboxes](shared-mailboxes.md) — ❌ Not implemented
 - [Public Folders](public-folders.md) — ❌ Not implemented
 

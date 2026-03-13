@@ -475,7 +475,9 @@ async fn sync_single_folder(
         let fp = folder.raw_path.clone();
         let sync_at = chrono::Utc::now().timestamp();
         db.with_conn(move |conn| {
-            pipeline::upsert_folder_sync_state(conn, &aid, &fp, uidvalidity, last_uid, sync_at)
+            pipeline::upsert_folder_sync_state(
+                conn, &aid, &fp, uidvalidity, last_uid, sync_at, None,
+            )
         })
         .await?;
     }

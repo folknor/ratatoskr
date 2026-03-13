@@ -594,6 +594,7 @@ pub async fn delta_check_folders(
             };
 
         let current_uidvalidity = mailbox.uid_validity.unwrap_or(0);
+        let server_modseq = mailbox.highest_modseq;
         let uidvalidity_changed = req.uidvalidity != 0 && current_uidvalidity != req.uidvalidity;
 
         if uidvalidity_changed {
@@ -602,6 +603,32 @@ pub async fn delta_check_folders(
                 uidvalidity: current_uidvalidity,
                 new_uids: vec![],
                 uidvalidity_changed: true,
+                highest_modseq: server_modseq,
+                modseq_unchanged: false,
+            });
+            continue;
+        }
+
+        // CONDSTORE fast path: if server's HIGHESTMODSEQ matches our cached
+        // value, nothing changed (no new messages, no flag changes, no deletions).
+        let modseq_unchanged = match (req.last_modseq, server_modseq) {
+            (Some(cached), Some(server)) if cached == server => true,
+            _ => false,
+        };
+
+        if modseq_unchanged {
+            log::debug!(
+                "delta_check: {} modseq unchanged ({}), skipping UID SEARCH",
+                req.folder,
+                server_modseq.unwrap_or(0)
+            );
+            results.push(DeltaCheckResult {
+                folder: req.folder.clone(),
+                uidvalidity: current_uidvalidity,
+                new_uids: vec![],
+                uidvalidity_changed: false,
+                highest_modseq: server_modseq,
+                modseq_unchanged: true,
             });
             continue;
         }
@@ -635,6 +662,8 @@ pub async fn delta_check_folders(
             uidvalidity: current_uidvalidity,
             new_uids,
             uidvalidity_changed: false,
+            highest_modseq: server_modseq,
+            modseq_unchanged: false,
         });
     }
 

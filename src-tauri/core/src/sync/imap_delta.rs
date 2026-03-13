@@ -148,6 +148,7 @@ pub async fn imap_delta_sync(
                     folder: f.raw_path.clone(),
                     last_uid: s.last_uid,
                     uidvalidity: s.uidvalidity.unwrap_or(0),
+                    last_modseq: s.modseq,
                 })
             })
             .collect();
@@ -309,6 +310,8 @@ async fn per_folder_check(
             uidvalidity: status.uidvalidity,
             new_uids: vec![],
             uidvalidity_changed: true,
+            highest_modseq: status.highest_modseq,
+            modseq_unchanged: false,
         });
     }
 
@@ -320,6 +323,8 @@ async fn per_folder_check(
         uidvalidity: status.uidvalidity,
         new_uids,
         uidvalidity_changed: false,
+        highest_modseq: status.highest_modseq,
+        modseq_unchanged: false,
     })
 }
 
@@ -349,9 +354,12 @@ async fn fetch_folder_uids(
         let aid = account_id.to_string();
         let fp = folder.raw_path.clone();
         let uv = sr.folder_status.uidvalidity;
+        let ms = sr.folder_status.highest_modseq;
         let sat = chrono::Utc::now().timestamp();
-        db.with_conn(move |conn| pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, 0, sat))
-            .await?;
+        db.with_conn(move |conn| {
+            pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, 0, sat, ms)
+        })
+        .await?;
         return Ok(());
     }
 
@@ -374,9 +382,10 @@ async fn fetch_folder_uids(
     let aid = account_id.to_string();
     let fp = folder.raw_path.clone();
     let uv = sr.folder_status.uidvalidity;
+    let ms = sr.folder_status.highest_modseq;
     let sat = chrono::Utc::now().timestamp();
     db.with_conn(move |conn| {
-        pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, last_uid, sat)
+        pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, last_uid, sat, ms)
     })
     .await?;
 
@@ -466,6 +475,25 @@ async fn process_folder_delta(
     all_meta: &mut HashMap<String, MessageMeta>,
     labels_by_rfc_id: &mut HashMap<String, HashSet<String>>,
 ) -> Result<(), String> {
+    // CONDSTORE fast path: modseq unchanged means no flags, no new messages,
+    // no deletions. Update the modseq in sync state (in case it was None before)
+    // and skip all further processing.
+    if delta.modseq_unchanged {
+        // Still update sync state to persist the modseq value
+        if let Some(modseq) = delta.highest_modseq {
+            let aid = account_id.to_string();
+            let fp = folder.raw_path.clone();
+            let uv = delta.uidvalidity;
+            let lu = saved.last_uid;
+            let sat = chrono::Utc::now().timestamp();
+            db.with_conn(move |conn| {
+                pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, lu, sat, Some(modseq))
+            })
+            .await?;
+        }
+        return Ok(());
+    }
+
     if delta.uidvalidity_changed {
         log::warn!(
             "[sync] UIDVALIDITY changed for {} ({:?} → {}), full resync",
@@ -485,9 +513,10 @@ async fn process_folder_delta(
             let aid = account_id.to_string();
             let fp = folder.raw_path.clone();
             let uv = sr.folder_status.uidvalidity;
+            let ms = sr.folder_status.highest_modseq;
             let sat = chrono::Utc::now().timestamp();
             db.with_conn(move |conn| {
-                pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, 0, sat)
+                pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, 0, sat, ms)
             })
             .await?;
             return Ok(());
@@ -512,15 +541,31 @@ async fn process_folder_delta(
         let aid = account_id.to_string();
         let fp = folder.raw_path.clone();
         let uv = sr.folder_status.uidvalidity;
+        let ms = sr.folder_status.highest_modseq;
         let sat = chrono::Utc::now().timestamp();
-        db.with_conn(move |conn| pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, lu, sat))
-            .await?;
+        db.with_conn(move |conn| {
+            pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, lu, sat, ms)
+        })
+        .await?;
 
         let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
         return Ok(());
     }
 
     if delta.new_uids.is_empty() {
+        // Even when no new UIDs, persist the server's modseq so we track it
+        if delta.highest_modseq != saved.modseq {
+            let aid = account_id.to_string();
+            let fp = folder.raw_path.clone();
+            let uv = delta.uidvalidity;
+            let lu = saved.last_uid;
+            let ms = delta.highest_modseq;
+            let sat = chrono::Utc::now().timestamp();
+            db.with_conn(move |conn| {
+                pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, lu, sat, ms)
+            })
+            .await?;
+        }
         return Ok(());
     }
 
@@ -544,9 +589,10 @@ async fn process_folder_delta(
     let last_uid = saved.last_uid.max(dlu);
     let aid = account_id.to_string();
     let fp = folder.raw_path.clone();
+    let ms = delta.highest_modseq;
     let sat = chrono::Utc::now().timestamp();
     db.with_conn(move |conn| {
-        pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, last_uid, sat)
+        pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, last_uid, sat, ms)
     })
     .await?;
 

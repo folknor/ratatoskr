@@ -563,12 +563,15 @@ pub fn upsert_folder_sync_state(
     uidvalidity: u32,
     last_uid: u32,
     last_sync_at: i64,
+    modseq: Option<u64>,
 ) -> Result<(), String> {
+    #[allow(clippy::cast_possible_wrap)]
+    let modseq_i64 = modseq.map(|v| v as i64);
     conn.execute(
         "INSERT OR REPLACE INTO folder_sync_state \
          (account_id, folder_path, uidvalidity, last_uid, modseq, last_sync_at) \
-         VALUES (?1, ?2, ?3, ?4, NULL, ?5)",
-        rusqlite::params![account_id, folder_path, uidvalidity, last_uid, last_sync_at],
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![account_id, folder_path, uidvalidity, last_uid, modseq_i64, last_sync_at],
     )
     .map_err(|e| format!("upsert folder sync state: {e}"))?;
     Ok(())
@@ -646,11 +649,12 @@ pub fn get_all_folder_sync_states(
 
     let rows = stmt
         .query_map(rusqlite::params![account_id], |row| {
+            #[allow(clippy::cast_sign_loss)]
             Ok(FolderSyncState {
                 folder_path: row.get(0)?,
                 uidvalidity: row.get(1)?,
                 last_uid: row.get(2)?,
-                _modseq: row.get(3)?,
+                modseq: row.get::<_, Option<i64>>(3)?.map(|v| v as u64),
                 _last_sync_at: row.get(4)?,
             })
         })
@@ -667,7 +671,7 @@ pub struct FolderSyncState {
     pub folder_path: String,
     pub uidvalidity: Option<u32>,
     pub last_uid: u32,
-    pub _modseq: Option<i64>,
+    pub modseq: Option<u64>,
     pub _last_sync_at: Option<i64>,
 }
 

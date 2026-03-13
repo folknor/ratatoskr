@@ -99,6 +99,9 @@ pub struct DeltaCheckRequest {
     pub folder: String,
     pub last_uid: u32,
     pub uidvalidity: u32,
+    /// Cached HIGHESTMODSEQ from the last sync. `None` if CONDSTORE not supported
+    /// or first sync.
+    pub last_modseq: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,4 +110,10 @@ pub struct DeltaCheckResult {
     pub uidvalidity: u32,
     pub new_uids: Vec<u32>,
     pub uidvalidity_changed: bool,
+    /// Server's HIGHESTMODSEQ from the SELECT response. `None` if the server
+    /// does not support CONDSTORE or didn't return it for this mailbox.
+    pub highest_modseq: Option<u64>,
+    /// True when CONDSTORE is available and the server's HIGHESTMODSEQ matches
+    /// the cached value — meaning no flag or metadata changes occurred.
+    pub modseq_unchanged: bool,
 }
