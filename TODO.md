@@ -49,7 +49,7 @@
 
 ### Code Quality
 
-- [ ] **Category add/remove is racy** — `src-tauri/src/graph/ops.rs` does read-then-write for categories. Two concurrent actions can clobber each other. Graph has no atomic array-update primitive, so this likely needs client-side locking if we want to address it.
+- [x] **Category add/remove is racy** — Fixed with a per-account `category_lock` mutex on `GraphClient` that serializes the read-modify-write. Also batched the GET and PATCH phases via `/$batch` to reduce round-trips.
 
 - [x] **Add Graph `$batch` optimization for thread actions** — `move_messages`, `patch_messages`, and `permanent_delete` now batch up to 20 operations per `POST /$batch` call. Category add/remove still uses per-message GET-then-PATCH (read-modify-write pattern not batchable).
 

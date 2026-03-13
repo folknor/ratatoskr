@@ -39,6 +39,8 @@ struct ClientInner {
     account_id: String,
     token: RwLock<TokenState>,
     refresh_lock: Mutex<()>,
+    /// Serializes category read-modify-write to prevent concurrent clobber.
+    category_lock: Mutex<()>,
     client_id: String,
     encryption_key: [u8; 32],
     semaphore: Arc<Semaphore>,
@@ -110,6 +112,7 @@ impl GraphClient {
                 account_id: account_id.to_string(),
                 token: RwLock::new(token_state),
                 refresh_lock: Mutex::new(()),
+                category_lock: Mutex::new(()),
                 client_id,
                 encryption_key,
                 semaphore: Arc::new(Semaphore::new(CONCURRENCY_LIMIT)),
@@ -145,6 +148,11 @@ impl GraphClient {
             .sync_cycle_counter
             .fetch_add(1, Ordering::Relaxed)
             + 1
+    }
+
+    /// Acquire the category lock to serialize read-modify-write operations.
+    pub async fn lock_categories(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.inner.category_lock.lock().await
     }
 
     /// Record that the folder map was just synced from the server.

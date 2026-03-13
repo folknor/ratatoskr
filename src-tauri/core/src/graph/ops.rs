@@ -141,13 +141,19 @@ impl ProviderOps for GraphOps {
         thread_id: &str,
         tag_id: &str,
     ) -> Result<(), String> {
-        // Tags map to Graph categories
         let category = tag_id.strip_prefix("cat:").unwrap_or(tag_id);
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
-        for msg_id in &msg_ids {
-            add_category(&self.client, ctx, msg_id, category).await?;
+        // Hold category lock for the entire read-modify-write to prevent clobber
+        let _guard = self.client.lock_categories().await;
+        let current = batch_get_categories(&self.client, ctx, &msg_ids).await?;
+        let mut patches = Vec::new();
+        for (msg_id, mut cats) in current {
+            if !cats.iter().any(|c| c == category) {
+                cats.push(category.to_string());
+                patches.push((msg_id, cats));
+            }
         }
-        Ok(())
+        batch_set_categories(&self.client, ctx, &patches).await
     }
 
     async fn remove_tag(
@@ -158,10 +164,17 @@ impl ProviderOps for GraphOps {
     ) -> Result<(), String> {
         let category = tag_id.strip_prefix("cat:").unwrap_or(tag_id);
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
-        for msg_id in &msg_ids {
-            remove_category(&self.client, ctx, msg_id, category).await?;
+        let _guard = self.client.lock_categories().await;
+        let current = batch_get_categories(&self.client, ctx, &msg_ids).await?;
+        let mut patches = Vec::new();
+        for (msg_id, mut cats) in current {
+            let before_len = cats.len();
+            cats.retain(|c| c != category);
+            if cats.len() != before_len {
+                patches.push((msg_id, cats));
+            }
         }
-        Ok(())
+        batch_set_categories(&self.client, ctx, &patches).await
     }
 
     async fn send_email(
@@ -609,62 +622,114 @@ fn content_type_json() -> std::collections::HashMap<String, String> {
     m
 }
 
-/// Add a category to a single message.
-async fn add_category(
+/// Fetch current categories for multiple messages.
+///
+/// Returns `(message_id, categories)` pairs. Uses `/$batch` when there are
+/// multiple messages, falls back to a single GET for one message.
+async fn batch_get_categories(
     client: &GraphClient,
     ctx: &ProviderCtx<'_>,
-    message_id: &str,
-    category: &str,
-) -> Result<(), String> {
-    // Fetch current categories, add the new one
-    let enc_id = urlencoding::encode(message_id);
-    let msg: serde_json::Value = client
-        .get_json(&format!("/me/messages/{enc_id}?$select=categories"), ctx.db)
-        .await?;
-    let mut cats: Vec<String> = msg
-        .get("categories")
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
-    if !cats.iter().any(|c| c == category) {
-        cats.push(category.to_string());
-        let patch = GraphMessagePatch {
-            categories: Some(cats),
-            ..Default::default()
-        };
-        client
-            .patch(&format!("/me/messages/{enc_id}"), &patch, ctx.db)
-            .await?;
+    message_ids: &[String],
+) -> Result<Vec<(String, Vec<String>)>, String> {
+    if message_ids.is_empty() {
+        return Ok(Vec::new());
     }
-    Ok(())
+
+    // Single message: skip batch overhead
+    if message_ids.len() == 1 {
+        let enc_id = urlencoding::encode(&message_ids[0]);
+        let msg: serde_json::Value = client
+            .get_json(&format!("/me/messages/{enc_id}?$select=categories"), ctx.db)
+            .await?;
+        let cats: Vec<String> = msg
+            .get("categories")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        return Ok(vec![(message_ids[0].clone(), cats)]);
+    }
+
+    let mut results = Vec::with_capacity(message_ids.len());
+
+    for chunk in message_ids.chunks(BATCH_CHUNK_SIZE) {
+        let items: Vec<BatchRequestItem> = chunk
+            .iter()
+            .enumerate()
+            .map(|(i, msg_id)| {
+                let enc_id = urlencoding::encode(msg_id);
+                BatchRequestItem {
+                    id: i.to_string(),
+                    method: "GET".to_string(),
+                    url: format!("/me/messages/{enc_id}?$select=categories"),
+                    body: None,
+                    headers: None,
+                }
+            })
+            .collect();
+
+        let batch = BatchRequest {
+            requests: items,
+        };
+        let response = client.post_batch(&batch, ctx.db).await?;
+
+        for resp in &response.responses {
+            let idx: usize = resp
+                .id
+                .parse()
+                .map_err(|_| format!("Invalid batch response id: {}", resp.id))?;
+            if resp.status >= 400 {
+                let detail = resp
+                    .body
+                    .as_ref()
+                    .map(|b| b.to_string())
+                    .unwrap_or_default();
+                return Err(format!(
+                    "Batch GET categories for message {} failed: {detail}",
+                    chunk[idx]
+                ));
+            }
+            let cats: Vec<String> = resp
+                .body
+                .as_ref()
+                .and_then(|b| b.get("categories"))
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+            results.push((chunk[idx].clone(), cats));
+        }
+    }
+
+    Ok(results)
 }
 
-/// Remove a category from a single message.
-async fn remove_category(
+/// PATCH categories on multiple messages via `/$batch`.
+async fn batch_set_categories(
     client: &GraphClient,
     ctx: &ProviderCtx<'_>,
-    message_id: &str,
-    category: &str,
+    patches: &[(String, Vec<String>)],
 ) -> Result<(), String> {
-    let enc_id = urlencoding::encode(message_id);
-    let msg: serde_json::Value = client
-        .get_json(&format!("/me/messages/{enc_id}?$select=categories"), ctx.db)
-        .await?;
-    let mut cats: Vec<String> = msg
-        .get("categories")
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
-    let before_len = cats.len();
-    cats.retain(|c| c != category);
-    if cats.len() != before_len {
-        let patch = GraphMessagePatch {
-            categories: Some(cats),
-            ..Default::default()
-        };
-        client
-            .patch(&format!("/me/messages/{enc_id}"), &patch, ctx.db)
-            .await?;
+    if patches.is_empty() {
+        return Ok(());
     }
-    Ok(())
+
+    let items: Vec<BatchRequestItem> = patches
+        .iter()
+        .enumerate()
+        .map(|(i, (msg_id, cats))| {
+            let enc_id = urlencoding::encode(msg_id);
+            let patch = GraphMessagePatch {
+                categories: Some(cats.clone()),
+                ..Default::default()
+            };
+            BatchRequestItem {
+                id: i.to_string(),
+                method: "PATCH".to_string(),
+                url: format!("/me/messages/{enc_id}"),
+                body: serde_json::to_value(&patch).ok(),
+                headers: Some(content_type_json()),
+            }
+        })
+        .collect();
+
+    execute_batch(client, ctx, &items).await
 }
 
 // ── Send via create-draft-then-send ─────────────────────────
