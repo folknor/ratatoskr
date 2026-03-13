@@ -5,6 +5,7 @@ use super::context::CommandContext;
 use super::descriptor::{CommandDescriptor, CommandMatch};
 use super::id::CommandId;
 use super::input::{InputMode, InputSchema};
+use super::keybinding::{current_platform, KeyBinding, NamedKey};
 
 pub struct CommandRegistry {
     descriptors: Vec<CommandDescriptor>,
@@ -41,11 +42,12 @@ impl CommandRegistry {
         self.descriptors.iter().find(|d| d.id == id)
     }
 
-    pub fn command_for_key(&self, key: &str) -> Option<CommandId> {
+    /// Iterate over `(CommandId, KeyBinding)` for all commands with default
+    /// bindings. Used by `BindingTable::new()` to populate defaults.
+    pub fn default_bindings(&self) -> impl Iterator<Item = (CommandId, KeyBinding)> + '_ {
         self.descriptors
             .iter()
-            .find(|d| d.keybinding == Some(key))
-            .map(|d| d.id)
+            .filter_map(|d| d.keybinding.map(|kb| (d.id, kb)))
     }
 
     /// Validate that `command_id` is a parameterized command and that
@@ -87,6 +89,7 @@ impl CommandRegistry {
     }
 
     fn query_empty(&self, ctx: &CommandContext) -> Vec<CommandMatch> {
+        let platform = current_platform();
         let mut results: Vec<CommandMatch> = self
             .descriptors
             .iter()
@@ -94,7 +97,7 @@ impl CommandRegistry {
                 id: d.id,
                 label: d.resolved_label(ctx),
                 category: d.category,
-                keybinding: d.keybinding,
+                keybinding: d.keybinding.map(|kb| kb.display(platform)),
                 available: (d.is_available)(ctx),
                 input_mode: input_mode_for(d),
                 score: 0,
@@ -106,6 +109,7 @@ impl CommandRegistry {
     }
 
     fn query_fuzzy(&self, ctx: &CommandContext, query: &str) -> Vec<CommandMatch> {
+        let platform = current_platform();
         let mut matcher = Matcher::new(Config::DEFAULT);
         let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
         let mut buf = Vec::new();
@@ -128,7 +132,7 @@ impl CommandRegistry {
                     id: d.id,
                     label,
                     category: d.category,
-                    keybinding: d.keybinding,
+                    keybinding: d.keybinding.map(|kb| kb.display(platform)),
                     available: (d.is_available)(ctx),
                     input_mode: input_mode_for(d),
                     score,
@@ -165,7 +169,7 @@ fn desc(
     id: CommandId,
     label: &'static str,
     category: &'static str,
-    keybinding: Option<&'static str>,
+    keybinding: Option<KeyBinding>,
     is_available: fn(&CommandContext) -> bool,
 ) -> CommandDescriptor {
     CommandDescriptor {
@@ -185,7 +189,7 @@ fn toggle(
     label: &'static str,
     active_label: &'static str,
     category: &'static str,
-    keybinding: Option<&'static str>,
+    keybinding: Option<KeyBinding>,
     is_available: fn(&CommandContext) -> bool,
     is_active: fn(&CommandContext) -> bool,
 ) -> CommandDescriptor {
@@ -205,7 +209,7 @@ fn parameterized(
     id: CommandId,
     label: &'static str,
     category: &'static str,
-    keybinding: Option<&'static str>,
+    keybinding: Option<KeyBinding>,
     is_available: fn(&CommandContext) -> bool,
     input_schema: InputSchema,
 ) -> CommandDescriptor {
@@ -222,27 +226,27 @@ fn parameterized(
 }
 
 fn register_navigation(out: &mut Vec<CommandDescriptor>) {
-    out.push(desc(CommandId::NavNext, "Next Thread", "Navigation", Some("j"), always));
-    out.push(desc(CommandId::NavPrev, "Previous Thread", "Navigation", Some("k"), always));
-    out.push(desc(CommandId::NavOpen, "Open Thread", "Navigation", Some("o"), needs_selection));
+    out.push(desc(CommandId::NavNext, "Next Thread", "Navigation", Some(KeyBinding::key('j')), always));
+    out.push(desc(CommandId::NavPrev, "Previous Thread", "Navigation", Some(KeyBinding::key('k')), always));
+    out.push(desc(CommandId::NavOpen, "Open Thread", "Navigation", Some(KeyBinding::key('o')), needs_selection));
     out.push(desc(
         CommandId::NavMsgNext,
         "Next Message",
         "Navigation",
-        Some("ArrowDown"),
+        Some(KeyBinding::named(NamedKey::ArrowDown)),
         |ctx| ctx.active_message_id.is_some(),
     ));
     out.push(desc(
         CommandId::NavMsgPrev,
         "Previous Message",
         "Navigation",
-        Some("ArrowUp"),
+        Some(KeyBinding::named(NamedKey::ArrowUp)),
         |ctx| ctx.active_message_id.is_some(),
     ));
-    out.push(desc(CommandId::NavGoInbox, "Go to Inbox", "Navigation", Some("g then i"), always));
-    out.push(desc(CommandId::NavGoStarred, "Go to Starred", "Navigation", Some("g then s"), always));
-    out.push(desc(CommandId::NavGoSent, "Go to Sent", "Navigation", Some("g then t"), always));
-    out.push(desc(CommandId::NavGoDrafts, "Go to Drafts", "Navigation", Some("g then d"), always));
+    out.push(desc(CommandId::NavGoInbox, "Go to Inbox", "Navigation", Some(KeyBinding::seq('g', 'i')), always));
+    out.push(desc(CommandId::NavGoStarred, "Go to Starred", "Navigation", Some(KeyBinding::seq('g', 's')), always));
+    out.push(desc(CommandId::NavGoSent, "Go to Sent", "Navigation", Some(KeyBinding::seq('g', 't')), always));
+    out.push(desc(CommandId::NavGoDrafts, "Go to Drafts", "Navigation", Some(KeyBinding::seq('g', 'd')), always));
     out.push(desc(CommandId::NavGoSnoozed, "Go to Snoozed", "Navigation", None, always));
     out.push(desc(CommandId::NavGoTrash, "Go to Trash", "Navigation", None, always));
     out.push(desc(CommandId::NavGoAllMail, "Go to All Mail", "Navigation", None, always));
@@ -250,47 +254,47 @@ fn register_navigation(out: &mut Vec<CommandDescriptor>) {
 }
 
 fn register_navigation_categories(out: &mut Vec<CommandDescriptor>) {
-    out.push(desc(CommandId::NavGoPrimary, "Go to Primary", "Navigation", Some("g then p"), always));
-    out.push(desc(CommandId::NavGoUpdates, "Go to Updates", "Navigation", Some("g then u"), always));
+    out.push(desc(CommandId::NavGoPrimary, "Go to Primary", "Navigation", Some(KeyBinding::seq('g', 'p')), always));
+    out.push(desc(CommandId::NavGoUpdates, "Go to Updates", "Navigation", Some(KeyBinding::seq('g', 'u')), always));
     out.push(desc(
         CommandId::NavGoPromotions,
         "Go to Promotions",
         "Navigation",
-        Some("g then o"),
+        Some(KeyBinding::seq('g', 'o')),
         always,
     ));
-    out.push(desc(CommandId::NavGoSocial, "Go to Social", "Navigation", Some("g then c"), always));
+    out.push(desc(CommandId::NavGoSocial, "Go to Social", "Navigation", Some(KeyBinding::seq('g', 'c')), always));
     out.push(desc(
         CommandId::NavGoNewsletters,
         "Go to Newsletters",
         "Navigation",
-        Some("g then n"),
+        Some(KeyBinding::seq('g', 'n')),
         always,
     ));
-    out.push(desc(CommandId::NavGoTasks, "Go to Tasks", "Navigation", Some("g then k"), always));
+    out.push(desc(CommandId::NavGoTasks, "Go to Tasks", "Navigation", Some(KeyBinding::seq('g', 'k')), always));
     out.push(desc(
         CommandId::NavGoAttachments,
         "Go to Attachments",
         "Navigation",
-        Some("g then a"),
+        Some(KeyBinding::seq('g', 'a')),
         always,
     ));
     out.push(desc(
         CommandId::NavEscape,
         "Close / Go Back",
         "Navigation",
-        Some("Escape"),
+        Some(KeyBinding::named(NamedKey::Escape)),
         |ctx| ctx.has_selection() || ctx.composer_is_open,
     ));
 }
 
 fn register_email(out: &mut Vec<CommandDescriptor>) {
-    out.push(desc(CommandId::EmailArchive, "Archive", "Email", Some("e"), needs_selection));
+    out.push(desc(CommandId::EmailArchive, "Archive", "Email", Some(KeyBinding::key('e')), needs_selection));
     out.push(desc(
         CommandId::EmailTrash,
         "Move to Trash",
         "Email",
-        Some("#"),
+        Some(KeyBinding::key('#')),
         |ctx| ctx.has_selection() && ctx.thread_in_trash != Some(true),
     ));
     out.push(desc(
@@ -305,7 +309,7 @@ fn register_email(out: &mut Vec<CommandDescriptor>) {
         "Report Spam",
         "Not Spam",
         "Email",
-        Some("!"),
+        Some(KeyBinding::key('!')),
         needs_selection,
         |ctx| ctx.thread_in_spam == Some(true),
     ));
@@ -328,7 +332,7 @@ fn register_email_toggles(out: &mut Vec<CommandDescriptor>) {
         "Star",
         "Unstar",
         "Email",
-        Some("s"),
+        Some(KeyBinding::key('s')),
         needs_selection,
         |ctx| ctx.thread_is_starred == Some(true),
     ));
@@ -337,7 +341,7 @@ fn register_email_toggles(out: &mut Vec<CommandDescriptor>) {
         "Pin",
         "Unpin",
         "Email",
-        Some("p"),
+        Some(KeyBinding::key('p')),
         needs_selection,
         |ctx| ctx.thread_is_pinned == Some(true),
     ));
@@ -346,7 +350,7 @@ fn register_email_toggles(out: &mut Vec<CommandDescriptor>) {
         "Mute",
         "Unmute",
         "Email",
-        Some("m"),
+        Some(KeyBinding::key('m')),
         needs_selection,
         |ctx| ctx.thread_is_muted == Some(true),
     ));
@@ -357,14 +361,14 @@ fn register_email_other(out: &mut Vec<CommandDescriptor>) {
         CommandId::EmailUnsubscribe,
         "Unsubscribe",
         "Email",
-        Some("u"),
+        Some(KeyBinding::key('u')),
         needs_single_selection,
     ));
     out.push(parameterized(
         CommandId::EmailMoveToFolder,
         "Move to Folder",
         "Email",
-        Some("v"),
+        Some(KeyBinding::key('v')),
         needs_selection,
         InputSchema::Single {
             param: super::input::ParamDef::ListPicker { label: "Folder" },
@@ -400,21 +404,21 @@ fn register_email_other(out: &mut Vec<CommandDescriptor>) {
             param: super::input::ParamDef::DateTime { label: "Snooze until" },
         },
     ));
-    out.push(desc(CommandId::EmailSelectAll, "Select All", "Email", Some("Ctrl+A"), always));
+    out.push(desc(CommandId::EmailSelectAll, "Select All", "Email", Some(KeyBinding::cmd_or_ctrl('a')), always));
     out.push(desc(
         CommandId::EmailSelectFromHere,
         "Select All From Here",
         "Email",
-        Some("Ctrl+Shift+A"),
+        Some(KeyBinding::cmd_or_ctrl_shift('a')),
         needs_selection,
     ));
 }
 
 fn register_compose(out: &mut Vec<CommandDescriptor>) {
-    out.push(desc(CommandId::ComposeNew, "Compose New Email", "Compose", Some("c"), always));
-    out.push(desc(CommandId::ComposeReply, "Reply", "Compose", Some("r"), needs_selection));
-    out.push(desc(CommandId::ComposeReplyAll, "Reply All", "Compose", Some("a"), needs_selection));
-    out.push(desc(CommandId::ComposeForward, "Forward", "Compose", Some("f"), needs_selection));
+    out.push(desc(CommandId::ComposeNew, "Compose New Email", "Compose", Some(KeyBinding::key('c')), always));
+    out.push(desc(CommandId::ComposeReply, "Reply", "Compose", Some(KeyBinding::key('r')), needs_selection));
+    out.push(desc(CommandId::ComposeReplyAll, "Reply All", "Compose", Some(KeyBinding::key('a')), needs_selection));
+    out.push(desc(CommandId::ComposeForward, "Forward", "Compose", Some(KeyBinding::key('f')), needs_selection));
 }
 
 fn register_tasks(out: &mut Vec<CommandDescriptor>) {
@@ -423,11 +427,12 @@ fn register_tasks(out: &mut Vec<CommandDescriptor>) {
         CommandId::TaskCreateFromEmail,
         "Create Task from Email",
         "Tasks",
-        Some("t"),
+        Some(KeyBinding::key('t')),
         needs_selection,
     ));
     out.push(desc(CommandId::TaskTogglePanel, "Toggle Task Panel", "Tasks", None, always));
-    out.push(desc(CommandId::TaskViewAll, "View All Tasks", "Tasks", Some("g then k"), always));
+    // No default binding — NavGoTasks already owns "g then k".
+    out.push(desc(CommandId::TaskViewAll, "View All Tasks", "Tasks", None, always));
 }
 
 fn register_view(out: &mut Vec<CommandDescriptor>) {
@@ -435,7 +440,7 @@ fn register_view(out: &mut Vec<CommandDescriptor>) {
         CommandId::ViewToggleSidebar,
         "Toggle Sidebar",
         "View",
-        Some("Ctrl+Shift+E"),
+        Some(KeyBinding::cmd_or_ctrl_shift('e')),
         always,
     ));
     out.push(desc(CommandId::ViewSetThemeLight, "Light Theme", "View", None, always));
@@ -470,14 +475,14 @@ fn register_view_reading_pane(out: &mut Vec<CommandDescriptor>) {
 }
 
 fn register_app(out: &mut Vec<CommandDescriptor>) {
-    out.push(desc(CommandId::AppSearch, "Search", "App", Some("/"), always));
-    out.push(desc(CommandId::AppAskAi, "Ask AI", "App", Some("i"), always));
-    out.push(desc(CommandId::AppHelp, "Keyboard Shortcuts", "App", Some("?"), always));
+    out.push(desc(CommandId::AppSearch, "Search", "App", Some(KeyBinding::key('/')), always));
+    out.push(desc(CommandId::AppAskAi, "Ask AI", "App", Some(KeyBinding::key('i')), always));
+    out.push(desc(CommandId::AppHelp, "Keyboard Shortcuts", "App", Some(KeyBinding::key('?')), always));
     out.push(desc(
         CommandId::AppSyncFolder,
         "Sync Current Folder",
         "App",
-        Some("F5"),
+        Some(KeyBinding::named(NamedKey::F5)),
         |ctx| ctx.active_account_id.is_some(),
     ));
 }
@@ -647,13 +652,6 @@ mod tests {
         let results2 = registry.query(&ctx2, "");
         let star2 = results2.iter().find(|r| r.id == CommandId::EmailStar);
         assert_eq!(star2.map(|s| s.label), Some("Unstar"));
-    }
-
-    #[test]
-    fn command_for_key_finds_binding() {
-        let registry = CommandRegistry::new();
-        assert_eq!(registry.command_for_key("e"), Some(CommandId::EmailArchive));
-        assert_eq!(registry.command_for_key("nonexistent"), None);
     }
 
     #[test]

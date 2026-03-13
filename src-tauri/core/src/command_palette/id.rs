@@ -130,6 +130,12 @@ const TABLE: &[(CommandId, &str)] = &[
 ];
 
 impl CommandId {
+    /// Returns the canonical stable string identifier for this command.
+    ///
+    /// This is the persistence and IPC format — keybinding overrides, frontend
+    /// references, and serialized settings depend on these values. Do not change
+    /// existing entries without an explicit data migration. Use `parse()` as the
+    /// inverse.
     pub fn as_str(self) -> &'static str {
         TABLE
             .iter()

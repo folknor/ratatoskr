@@ -84,20 +84,49 @@ Additional parameterized commands (templates, filters, etc.) will be added incre
 
 **Depends on:** Slice 1
 
-## Slice 3: Keybinding Model
+## Slice 3: Keybinding Model ✅
 
-Move keybinding ownership from the frontend into the registry.
+**Status: Complete (backend-only groundwork)**
 
-**What needs to be built:**
-- Default keybindings are already on `CommandDescriptor` (slice 1). This slice adds:
-- User override storage (`CommandId → KeyBinding` map, persisted in settings DB)
-- Resolved binding lookup: check user overrides first, fall back to defaults
-- Per-platform defaults (`Cmd` vs `Ctrl`)
-- Conflict detection: warn when a rebinding collides with an existing binding
-- Sequence support formalization: the `"g then i"` pattern needs a state machine in the dispatch layer, currently implemented ad-hoc in `useKeyboardShortcuts.ts`
-- **Binding resolution API** (`resolve_binding(&self, key: &str) -> Option<CommandId>`): a direct lookup path that works without running a palette query. This is what keyboard dispatch uses — it does not go through the search/filter pipeline.
+This slice is backend-only — no user-visible behavior changes until slice 6. The frontend's `shortcutStore.ts` and `useKeyboardShortcuts.ts` continue driving real keyboard behavior. The two systems remain independent until slice 6 unifies them.
 
-**What this replaces:** `src/constants/shortcuts.ts` and the keybinding resolution logic in `useKeyboardShortcuts.ts`.
+### What was built
+
+**Core crate (`src-tauri/core/src/command_palette/keybinding.rs`):**
+- Structured keybinding model: `Key` (Char/Named), `NamedKey` (26 variants matching DOM `KeyboardEvent.key`), `Modifiers` (with `CmdOrCtrl` abstraction), `Chord` (key + modifiers), `KeyBinding` (single chord or two-chord sequence), `Platform` (Mac/Windows/Linux)
+- Const constructors: `KeyBinding::key('j')`, `::named(Escape)`, `::cmd_or_ctrl('a')`, `::cmd_or_ctrl_shift('e')`, `::seq('g', 'i')`
+- Parse/display with canonical string format (`"CmdOrCtrl+Shift+E"`, `"g then i"`) and platform-resolved display (`"Ctrl"` on Linux, `"Cmd"` on Mac)
+- Custom serde `Serialize`/`Deserialize` using canonical string format
+- `BindingTable` — defaults + overrides (`Option<KeyBinding>` for explicit unbind) + O(1) reverse index + sequence-aware resolution (`resolve_chord`/`resolve_sequence` with `Pending` state) + conflict detection (chord vs chord, chord vs sequence first, sequence vs single) + primitive mutations (`set_override`, `unbind`, `remove_override`, `reset_all`)
+- 27 tests (parse/display, serde, resolution, overrides, conflicts, display binding)
+
+**Changes to existing types:**
+- `CommandDescriptor::keybinding`: `Option<&'static str>` → `Option<KeyBinding>`
+- `CommandMatch::keybinding`: `Option<&'static str>` → `Option<String>` (platform-resolved display)
+- `CommandRegistry::command_for_key()` removed → replaced by `BindingTable::resolve_chord()`/`resolve_sequence()`
+- `CommandRegistry::default_bindings()` added for `BindingTable` construction
+- All 55 command registrations updated to use `KeyBinding` constructors
+- `query()` produces platform-resolved display strings via `cfg!`-detected platform
+- `CommandId::as_str()` documented as canonical stable external identifier
+- TaskViewAll duplicate binding ("g then k", same as NavGoTasks) removed
+
+### Design decisions
+
+- **Backend-only**: No Tauri commands for binding management, no override persistence, no `custom_shortcuts` interaction. The frontend still owns that setting. Prevents two writers with different schemas against the same persisted setting.
+- **`CmdOrCtrl` abstraction**: A single modifier that resolves per-platform at display time. Storage/wire format is always `"CmdOrCtrl"`, never platform-specific.
+- **Sequences modeled properly**: `KeyBinding::Sequence(Chord, Chord)` with two-level resolution (`Pending` → `resolve_sequence`). Not removed — the UI layer handles timeout/pending state.
+- **`Option<KeyBinding>` overrides**: `None` = explicitly unbound (prevents default fallback when a conflict forced unbinding). Absent = use default.
+- **Primitive mutations only**: Core provides `set_override` (rejects conflicts), `unbind`, `remove_override`. No `force_override` — the app layer decides conflict resolution policy.
+- **Conflict rules**: single vs single, single vs sequence-first, sequence-first vs single, duplicate sequence. Different sequences sharing a first chord is allowed (they coexist via the pending state).
+
+### What remains (slice 6)
+
+- Tauri commands for binding management (set, reset, unbind)
+- Override persistence to `custom_shortcuts` setting
+- `query()` signature change to accept `&BindingTable` for effective bindings
+- Frontend migration: replace `shortcutStore.ts` and `useKeyboardShortcuts.ts`
+
+**Files:** `src-tauri/core/src/command_palette/keybinding.rs` (new), `descriptor.rs`, `registry.rs`, `id.rs`, `mod.rs` (modified)
 
 **Depends on:** Slice 1
 
@@ -182,8 +211,8 @@ No core changes needed. The work is entirely in the iced app layer.
 Slice 1 (registry) ✅
   ├── Slice 2 (parameterized commands) ✅ (schema + trait; CommandArgs & real resolver deferred)
   │     └── needs real TauriInputResolver (queries DbState) and CommandArgs/dispatch endpoint
-  ├── Slice 3 (keybindings)
-  │     └── binding resolution API for keyboard dispatch
+  ├── Slice 3 (keybindings) ✅ (backend-only; Tauri commands + persistence + frontend migration deferred to slice 6)
+  │     └── needs Tauri commands for binding management, override persistence, query() integration
   ├── Slice 4 (ranking)
   │     └── recency accuracy requires slice 6 dispatch unification
   └── Slice 5 (undo)
@@ -194,7 +223,8 @@ Slice 1 (registry) ✅
           ├── palette UI (needs 1, 2)
           ├── keyboard dispatch (needs 1, 3)
           ├── context menus (needs 1)
+          ├── keybinding management Tauri commands + persistence (needs 3)
           └── CommandContext assembly adapter
 ```
 
-Slices 3 and 5 can be worked in parallel. Slice 4's ranking infrastructure can be built in parallel, but recency tracking becomes useful only after slice 6. Slice 6 is incremental and can begin as soon as slices 1 + 3 are done. Slice 2's remaining work (real resolver, CommandArgs, execution dispatch) is needed before the palette UI in slice 6 can use parameterized commands.
+Slice 5 can be worked in parallel with anything. Slice 4's ranking infrastructure can be built in parallel, but recency tracking becomes useful only after slice 6. Slice 6 is incremental and can begin as soon as slices 1-3 are done. Slice 2's remaining work (real resolver, CommandArgs, execution dispatch) is needed before the palette UI in slice 6 can use parameterized commands. Slice 3's remaining work (Tauri commands, override persistence, query() integration) lands as part of slice 6's keyboard dispatch migration.
