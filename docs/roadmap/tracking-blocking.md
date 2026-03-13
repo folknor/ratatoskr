@@ -1,7 +1,7 @@
 # Tracking Pixel / Read Receipt Blocking
 
 **Tier**: 1 — Blocks switching from Outlook
-**Status**: ⚠️ **Mostly done** — Remote image blocking is fully implemented: blocked by default, CSP enforcement on iframe, per-sender allowlist (`image_allowlist` table), "load images" / "always load from sender" buttons. **Missing**: MDN (`Disposition-Notification-To`) suppression, per-account/per-sender read receipt policy.
+**Status**: ⚠️ **Mostly done** — Remote image blocking is fully implemented: blocked by default, CSP enforcement on iframe, per-sender allowlist (`image_allowlist` table), "load images" / "always load from sender" buttons. MDN infrastructure is in place: `Disposition-Notification-To` header is detected during sync across all four providers and persisted as `mdn_requested` on messages; `read_receipt_policy` table exists with per-account/per-sender scoping; default policy is `never` (suppress silently). **Remaining**: UI for read receipt prompts and policy management.
 
 ---
 

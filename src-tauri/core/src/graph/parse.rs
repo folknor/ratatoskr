@@ -47,6 +47,7 @@ pub struct ParsedGraphMessage {
     pub auth_results: Option<String>,
     pub list_unsubscribe: Option<String>,
     pub list_unsubscribe_post: Option<String>,
+    pub mdn_requested: bool,
     pub attachments: Vec<ParsedGraphAttachment>,
 }
 
@@ -148,6 +149,7 @@ pub fn parse_graph_message(
     let auth_results = get_header(headers, "Authentication-Results");
     let list_unsubscribe = get_header(headers, "List-Unsubscribe");
     let list_unsubscribe_post = get_header(headers, "List-Unsubscribe-Post");
+    let mdn_requested = get_header(headers, "Disposition-Notification-To").is_some();
 
     // Attachments
     let attachments: Vec<ParsedGraphAttachment> = msg
@@ -208,6 +210,7 @@ pub fn parse_graph_message(
         auth_results,
         list_unsubscribe,
         list_unsubscribe_post,
+        mdn_requested,
         attachments,
     })
 }

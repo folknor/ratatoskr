@@ -431,9 +431,10 @@ fn upsert_single_message(
           cc_addresses, bcc_addresses, reply_to, subject, snippet, date, \
           is_read, is_starred, raw_size, internal_date, \
           list_unsubscribe, list_unsubscribe_post, auth_results, \
-          message_id_header, references_header, in_reply_to_header, body_cached) \
+          message_id_header, references_header, in_reply_to_header, body_cached, \
+          mdn_requested) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, \
-                 ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+                 ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
         rusqlite::params![
             msg.id,
             account_id,
@@ -458,6 +459,7 @@ fn upsert_single_message(
             msg.references_header,
             msg.in_reply_to_header,
             if has_body { 1i64 } else { 0i64 },
+            msg.mdn_requested,
         ],
     )
     .map_err(|e| format!("upsert message: {e}"))?;

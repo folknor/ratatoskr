@@ -109,6 +109,13 @@ pub fn parse_message(
         "Authentication-Results".into(),
     )));
 
+    // MDN request detection (Disposition-Notification-To)
+    let mdn_requested = message
+        .header(mail_parser::HeaderName::Other(
+            "Disposition-Notification-To".into(),
+        ))
+        .is_some();
+
     // Build a map from mail-parser part index → IMAP MIME section path.
     // IMAP numbers children of multipart containers starting at 1 (e.g. "1", "2", "1.2.3").
     // mail-parser stores all parts flat in a Vec, with Multipart variants holding child indices.
@@ -213,6 +220,7 @@ pub fn parse_message(
         list_unsubscribe,
         list_unsubscribe_post,
         auth_results,
+        mdn_requested,
         attachments,
     })
 }

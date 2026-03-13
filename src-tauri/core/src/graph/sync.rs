@@ -113,20 +113,32 @@ pub(crate) async fn graph_initial_sync(
         total_messages,
     );
 
-    for (i, &(folder_id, _)) in folder_list.iter().enumerate() {
-        let delta_link = bootstrap_delta_token(client, ctx.db, folder_id).await?;
-        save_delta_token(ctx.db, ctx.account_id, folder_id, &delta_link).await?;
+    {
+        // Bootstrap delta tokens concurrently. The GraphClient semaphore (3 permits)
+        // naturally caps actual API concurrency, so we can launch all at once.
+        let folder_ids: Vec<String> = folder_list.iter().map(|&(id, _)| id.to_string()).collect();
+        let futs: Vec<_> = folder_ids
+            .iter()
+            .map(|folder_id| async {
+                let delta_link = bootstrap_delta_token(client, ctx.db, folder_id).await?;
+                save_delta_token(ctx.db, ctx.account_id, folder_id, &delta_link).await
+            })
+            .collect();
 
-        #[allow(clippy::cast_possible_truncation)]
-        let current = (i + 1) as u64;
-        emit_progress(
-            &sctx,
-            "delta-bootstrap",
-            "",
-            current,
-            total_folders,
-            total_messages,
-        );
+        let results = futures::future::join_all(futs).await;
+        for (i, result) in results.into_iter().enumerate() {
+            result?;
+            #[allow(clippy::cast_possible_truncation)]
+            let current = (i + 1) as u64;
+            emit_progress(
+                &sctx,
+                "delta-bootstrap",
+                "",
+                current,
+                total_folders,
+                total_messages,
+            );
+        }
     }
 
     // Phase 4: Sync Exchange contacts
@@ -901,9 +913,10 @@ fn upsert_messages(
               cc_addresses, bcc_addresses, reply_to, subject, snippet, date, \
               is_read, is_starred, raw_size, internal_date, \
               list_unsubscribe, list_unsubscribe_post, auth_results, \
-              message_id_header, references_header, in_reply_to_header, body_cached) \
+              message_id_header, references_header, in_reply_to_header, body_cached, \
+              mdn_requested) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, \
-                     ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+                     ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
             rusqlite::params![
                 msg.id,
                 account_id,
@@ -928,6 +941,7 @@ fn upsert_messages(
                 msg.references_header,
                 msg.in_reply_to_header,
                 if has_body { 1i64 } else { 0i64 },
+                msg.mdn_requested,
             ],
         )
         .map_err(|e| format!("upsert message: {e}"))?;

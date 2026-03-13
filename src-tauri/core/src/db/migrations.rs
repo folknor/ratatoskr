@@ -887,6 +887,24 @@ static MIGRATIONS: &[Migration] = &[
             );
         "#,
     },
+    Migration {
+        version: 35,
+        description: "MDN suppression: mdn_requested flag and read receipt policy table",
+        sql: r#"
+            ALTER TABLE messages ADD COLUMN mdn_requested INTEGER NOT NULL DEFAULT 0;
+
+            CREATE TABLE IF NOT EXISTS read_receipt_policy (
+                id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL,
+                scope TEXT NOT NULL,
+                policy TEXT NOT NULL DEFAULT 'never',
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                UNIQUE(account_id, scope)
+            );
+
+            INSERT OR IGNORE INTO settings (key, value) VALUES ('default_read_receipt_policy', 'never');
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks

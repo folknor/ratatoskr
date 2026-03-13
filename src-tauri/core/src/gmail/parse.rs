@@ -52,6 +52,7 @@ pub struct ParsedGmailMessage {
     pub list_unsubscribe: Option<String>,
     pub list_unsubscribe_post: Option<String>,
     pub auth_results: Option<String>,
+    pub mdn_requested: bool,
     pub message_id_header: Option<String>,
     pub references_header: Option<String>,
     pub in_reply_to_header: Option<String>,
@@ -128,6 +129,7 @@ pub fn parse_gmail_message(msg: &GmailMessage) -> ParsedGmailMessage {
         list_unsubscribe: get_header(headers, "List-Unsubscribe"),
         list_unsubscribe_post: get_header(headers, "List-Unsubscribe-Post"),
         auth_results,
+        mdn_requested: get_header(headers, "Disposition-Notification-To").is_some(),
         message_id_header: get_header(headers, "Message-ID")
             .or_else(|| get_header(headers, "Message-Id")),
         references_header: get_header(headers, "References"),

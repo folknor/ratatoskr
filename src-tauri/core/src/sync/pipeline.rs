@@ -52,6 +52,7 @@ pub(crate) struct DbInsertData {
     imap_uid: u32,
     imap_folder: String,
     has_body: bool,
+    mdn_requested: bool,
     attachments: Vec<DbAttachment>,
 }
 
@@ -96,6 +97,7 @@ impl DbInsertData {
             imap_uid: imap.uid,
             imap_folder: imap.folder.clone(),
             has_body: imap.body_html.is_some() || imap.body_text.is_some(),
+            mdn_requested: imap.mdn_requested,
             attachments: imap
                 .attachments
                 .iter()
@@ -143,9 +145,9 @@ impl DbInsertData {
               is_read, is_starred, raw_size, internal_date, \
               list_unsubscribe, list_unsubscribe_post, auth_results, \
               message_id_header, references_header, in_reply_to_header, \
-              imap_uid, imap_folder, body_cached) \
+              imap_uid, imap_folder, body_cached, mdn_requested) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, \
-                     ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
+                     ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
             rusqlite::params![
                 self.id,
                 self.account_id,
@@ -172,6 +174,7 @@ impl DbInsertData {
                 self.imap_uid as i64,
                 self.imap_folder,
                 if self.has_body { 1i64 } else { 0i64 },
+                self.mdn_requested,
             ],
         )
         .map_err(|e| format!("upsert message: {e}"))?;

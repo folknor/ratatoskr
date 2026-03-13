@@ -41,6 +41,8 @@ pub struct ParsedJmapMessage {
     pub list_unsubscribe: Option<String>,
     /// List-Unsubscribe-Post header (RFC 8058)
     pub list_unsubscribe_post: Option<String>,
+    /// Whether the sender requested a read receipt (Disposition-Notification-To)
+    pub mdn_requested: bool,
 }
 
 impl crate::seen_addresses::MessageAddresses for ParsedJmapMessage {
@@ -101,6 +103,7 @@ pub fn email_get_properties() -> Vec<Property> {
         Property::Attachments,
         Property::Header(Header::as_text("List-Unsubscribe", false)),
         Property::Header(Header::as_text("List-Unsubscribe-Post", false)),
+        Property::Header(Header::as_text("Disposition-Notification-To", false)),
     ]
 }
 
@@ -190,6 +193,11 @@ pub fn parse_jmap_email(
     let list_unsubscribe_post =
         extract_header_text(email.header(&Header::as_text("List-Unsubscribe-Post", false)));
 
+    // MDN request detection (Disposition-Notification-To)
+    let mdn_requested = email
+        .header(&Header::as_text("Disposition-Notification-To", false))
+        .is_some();
+
     let raw_size = i64::try_from(email.size()).unwrap_or(i64::MAX);
 
     Ok(ParsedJmapMessage {
@@ -218,6 +226,7 @@ pub fn parse_jmap_email(
         in_reply_to_header,
         list_unsubscribe,
         list_unsubscribe_post,
+        mdn_requested,
     })
 }
 

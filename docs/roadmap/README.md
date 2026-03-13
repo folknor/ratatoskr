@@ -61,7 +61,7 @@ These are features enterprise users actively rely on daily. Missing any of these
 
 - [Categories (Color Flags)](categories.md) — ⚠️ Partial
 - [Contacts & Groups](contacts.md) — ⚠️ Partial
-- [Tracking Pixel / Read Receipt Blocking](tracking-blocking.md) — ⚠️ Mostly done
+- [Tracking Pixel / Read Receipt Blocking](tracking-blocking.md) — ⚠️ Mostly done (MDN detection + policy table added)
 - [Cloud Attachment Linking](cloud-attachments.md) — ❌ Not implemented
 - [IMAP CONDSTORE/QRESYNC](imap-condstore-qresync.md) — ⚠️ Phase 1 (modseq tracking)
 - [Shared / Delegated Mailboxes](shared-mailboxes.md) — ❌ Not implemented
