@@ -1,5 +1,19 @@
 use serde::{Deserialize, Serialize};
 
+// ── Account Scope ───────────────────────────────────────────
+
+/// Specifies which accounts to include in a cross-account query.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value")]
+pub enum AccountScope {
+    /// A single account (equivalent to the existing `account_id` parameter).
+    Single(String),
+    /// A specific set of accounts.
+    Multiple(Vec<String>),
+    /// All accounts in the database.
+    All,
+}
+
 // ── Account ─────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -595,6 +609,23 @@ pub struct DbTaskTag {
     pub color: Option<String>,
     pub sort_order: i64,
     pub created_at: i64,
+}
+
+// ── Folder Unread Count ─────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderUnreadCount {
+    pub folder_id: String,
+    pub unread_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderAccountUnreadCount {
+    pub folder_id: String,
+    pub account_id: String,
+    pub unread_count: i64,
 }
 
 // ── Snoozed thread ─────────────────────────────────────────

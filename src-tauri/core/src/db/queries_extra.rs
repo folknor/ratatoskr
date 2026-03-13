@@ -15,6 +15,8 @@ mod filters_smart;
 mod follow_up_quick;
 mod labels_attachments;
 mod misc;
+pub mod navigation;
+mod scoped_queries;
 mod tasks;
 
 pub use accounts_messages::*;
@@ -28,6 +30,8 @@ pub use filters_smart::*;
 pub use follow_up_quick::*;
 pub use labels_attachments::*;
 pub use misc::*;
+pub use navigation::*;
+pub use scoped_queries::*;
 pub use tasks::*;
 
 pub(super) fn dynamic_update(

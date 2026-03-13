@@ -9,7 +9,7 @@ use super::types::{
 use crate::body_store::{BodyStoreState, MessageBody};
 use crate::provider::crypto::{decrypt_value, is_encrypted};
 
-fn row_to_thread(row: &Row<'_>) -> rusqlite::Result<DbThread> {
+pub(crate) fn row_to_thread(row: &Row<'_>) -> rusqlite::Result<DbThread> {
     Ok(DbThread {
         id: row.get("id")?,
         account_id: row.get("account_id")?,
