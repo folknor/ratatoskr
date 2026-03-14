@@ -647,9 +647,9 @@ async fn process_folder_delta(
     }
 
     if delta.new_uids.is_empty() {
-        // No new UIDs, but modseq changed → flags changed somewhere.
-        // Use CHANGEDSINCE to fetch only the changed flags (CONDSTORE Phase 2).
+        // No new UIDs — check for flag changes.
         if let (Some(cached_modseq), Some(server_modseq)) = (saved.modseq, delta.highest_modseq) {
+            // CONDSTORE path: modseq changed → use CHANGEDSINCE for efficient diff.
             if server_modseq > cached_modseq {
                 log::info!(
                     "[sync] {} modseq changed ({cached_modseq} → {server_modseq}), fetching flag changes",
@@ -680,6 +680,25 @@ async fn process_folder_delta(
                 }
                 let _ =
                     tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+            }
+        } else if delta.highest_modseq.is_none() {
+            // Non-CONDSTORE fallback: server doesn't support CONDSTORE, so we
+            // periodically fetch all flags and diff against local cache.
+            // This covers Exchange IMAP, Courier, hMailServer, etc.
+            match sync_flags_without_condstore(config, &folder.raw_path, account_id, db).await {
+                Ok(updated) if updated > 0 => {
+                    log::info!(
+                        "[sync] Non-CONDSTORE flag sync for {}: {updated} flags updated",
+                        folder.path
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    log::warn!(
+                        "[sync] Non-CONDSTORE flag sync failed for {}: {e}",
+                        folder.path
+                    );
+                }
             }
         }
 
@@ -716,6 +735,26 @@ async fn process_folder_delta(
     )
     .await?;
 
+    // Non-CONDSTORE: also sync flags on existing messages while we're at it,
+    // since we can't rely on CHANGEDSINCE to detect changes.
+    if delta.highest_modseq.is_none() {
+        match sync_flags_without_condstore(config, &folder.raw_path, account_id, db).await {
+            Ok(updated) if updated > 0 => {
+                log::info!(
+                    "[sync] Non-CONDSTORE flag sync for {} (with new UIDs): {updated} flags updated",
+                    folder.path
+                );
+            }
+            Ok(_) => {}
+            Err(e) => {
+                log::warn!(
+                    "[sync] Non-CONDSTORE flag sync failed for {}: {e}",
+                    folder.path
+                );
+            }
+        }
+    }
+
     let last_uid = saved.last_uid.max(dlu);
     let aid = account_id.to_string();
     let fp = folder.raw_path.clone();
@@ -728,6 +767,97 @@ async fn process_folder_delta(
 
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
     Ok(())
+}
+
+/// Minimum interval between non-CONDSTORE flag sync checks per folder (seconds).
+/// `UID FETCH 1:* (FLAGS)` is cheaper than body fetches but still non-trivial
+/// on large folders.
+const FLAG_SYNC_INTERVAL_SECS: i64 = 300; // 5 minutes
+
+/// Sync flags for servers that don't support CONDSTORE.
+///
+/// Fetches all current flags via `UID FETCH 1:* (FLAGS)`, diffs against
+/// locally cached flags, and applies any changes. This is the fallback for
+/// servers like Exchange IMAP, Courier, and hMailServer that lack CONDSTORE.
+///
+/// Returns the number of flags updated.
+pub async fn sync_flags_without_condstore(
+    config: &ImapConfig,
+    folder_path: &str,
+    account_id: &str,
+    db: &DbState,
+) -> Result<u64, String> {
+    // Throttle: only check every FLAG_SYNC_INTERVAL_SECS
+    let now = chrono::Utc::now().timestamp();
+    let aid = account_id.to_string();
+    let fp = folder_path.to_string();
+    let last_sync = db
+        .with_conn(move |conn| {
+            pipeline::get_last_deletion_check_at(conn, &aid, &fp)
+        })
+        .await;
+
+    // Reuse the deletion check timestamp table for throttling. If we can't
+    // read it, proceed anyway (first run).
+    if let Ok(Some(last)) = &last_sync {
+        if now - last < FLAG_SYNC_INTERVAL_SECS {
+            return Ok(0);
+        }
+    }
+
+    // Get local flags
+    let aid = account_id.to_string();
+    let fp = folder_path.to_string();
+    let local_flags = db
+        .with_conn(move |conn| pipeline::get_local_flags_for_folder(conn, &aid, &fp))
+        .await?;
+
+    if local_flags.is_empty() {
+        return Ok(0);
+    }
+
+    let local_map: std::collections::HashMap<u32, (bool, bool)> = local_flags
+        .into_iter()
+        .map(|(uid, is_read, is_starred)| (uid, (is_read, is_starred)))
+        .collect();
+
+    // Fetch current flags from server
+    let mut session = connect(config).await?;
+    let server_flags = client::fetch_all_flags(&mut session, folder_path).await?;
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+
+    // Diff: only include UIDs where flags actually changed
+    let changes: Vec<crate::imap::types::FlagChange> = server_flags
+        .into_iter()
+        .filter(|sf| {
+            match local_map.get(&sf.uid) {
+                Some(&(local_read, local_starred)) => {
+                    sf.is_read != local_read || sf.is_starred != local_starred
+                }
+                None => false, // UID not in local DB, skip (will be fetched as new)
+            }
+        })
+        .collect();
+
+    if changes.is_empty() {
+        log::debug!(
+            "[sync] Non-CONDSTORE flag sync for {folder_path}: no changes"
+        );
+        return Ok(0);
+    }
+
+    log::info!(
+        "[sync] Non-CONDSTORE flag sync for {folder_path}: {} flag changes",
+        changes.len()
+    );
+
+    let aid = account_id.to_string();
+    let fp = folder_path.to_string();
+    let updated = db
+        .with_conn(move |conn| pipeline::apply_flag_changes(conn, &aid, &fp, &changes))
+        .await?;
+
+    Ok(updated)
 }
 
 /// Detect messages deleted on the IMAP server by comparing `UID SEARCH ALL`

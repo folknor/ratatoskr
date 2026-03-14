@@ -860,6 +860,40 @@ pub fn get_local_uids_for_folder(
     Ok(result)
 }
 
+/// Get locally cached flags for all messages in a folder.
+///
+/// Returns `(imap_uid, is_read, is_starred)` tuples for diffing against
+/// server-side flags (non-CONDSTORE fallback).
+pub fn get_local_flags_for_folder(
+    conn: &Connection,
+    account_id: &str,
+    folder_path: &str,
+) -> Result<Vec<(u32, bool, bool)>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT imap_uid, is_read, is_starred FROM messages \
+             WHERE account_id = ?1 AND imap_folder = ?2 AND imap_uid IS NOT NULL",
+        )
+        .map_err(|e| format!("prepare get_local_flags: {e}"))?;
+
+    #[allow(clippy::cast_sign_loss)]
+    let rows = stmt
+        .query_map(rusqlite::params![account_id, folder_path], |row| {
+            Ok((
+                row.get::<_, i64>(0)? as u32,
+                row.get::<_, bool>(1)?,
+                row.get::<_, bool>(2)?,
+            ))
+        })
+        .map_err(|e| format!("query local flags: {e}"))?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row.map_err(|e| format!("read flag row: {e}"))?);
+    }
+    Ok(result)
+}
+
 /// Remove messages that were deleted on the server and update/remove their
 /// parent threads accordingly.
 ///

@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use mail_parser::MimeHeaders;
 
+use crate::db::DbState;
 use crate::provider::ops::ProviderOps;
 use crate::provider::types::{
     AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation, ProviderProfile,
@@ -529,6 +530,221 @@ impl GraphOps {
     }
 }
 
+// ── Shared mailbox send ─────────────────────────────────────
+
+impl GraphOps {
+    /// Send as a shared mailbox ("Send As" permission).
+    ///
+    /// Sets `from` to the shared mailbox address and sends via
+    /// `POST /users/{shared_mailbox}/messages/{id}/send`. The delegate's
+    /// identity is invisible to the recipient — the message appears to come
+    /// directly from the shared mailbox.
+    ///
+    /// Requires `Mail.Send.Shared` OAuth scope and "Send As" permission
+    /// on the shared mailbox in Exchange.
+    pub async fn send_as_shared_mailbox(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        shared_mailbox_email: &str,
+        raw_base64url: &str,
+        _thread_id: Option<&str>,
+    ) -> Result<String, String> {
+        use super::types::{GraphEmailAddress, GraphRecipient};
+
+        let raw_bytes = crate::provider::encoding::decode_base64url_nopad(raw_base64url)
+            .map_err(|e| format!("Failed to decode base64url: {e}"))?;
+        let parsed = mail_parser::MessageParser::default()
+            .parse(&raw_bytes)
+            .ok_or("Failed to parse MIME message")?;
+
+        let mut create_msg = mime_to_graph_message(&parsed)?;
+        create_msg.from = Some(GraphRecipient {
+            email_address: GraphEmailAddress {
+                name: None,
+                address: shared_mailbox_email.to_string(),
+            },
+        });
+
+        let enc_mailbox = urlencoding::encode(shared_mailbox_email);
+
+        // Create draft in the shared mailbox
+        let draft: serde_json::Value = self
+            .client
+            .post(
+                &format!("/users/{enc_mailbox}/messages"),
+                &create_msg,
+                ctx.db,
+            )
+            .await?;
+
+        let draft_id = draft
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or("Draft response missing id")?
+            .to_string();
+
+        // Upload attachments to the shared mailbox draft
+        upload_attachments_to_user_mailbox(&self.client, ctx, &enc_mailbox, &draft_id, &parsed)
+            .await?;
+
+        // Send via the shared mailbox
+        let enc_draft_id = urlencoding::encode(&draft_id);
+        self.client
+            .post_no_content::<()>(
+                &format!("/users/{enc_mailbox}/messages/{enc_draft_id}/send"),
+                None,
+                ctx.db,
+            )
+            .await?;
+
+        log::info!(
+            "Sent as shared mailbox {shared_mailbox_email}, draft_id={draft_id}"
+        );
+        Ok(draft_id)
+    }
+
+    /// Send on behalf of a shared mailbox ("Send on Behalf" permission).
+    ///
+    /// Sets `from` to the shared mailbox and `sender` to the delegate.
+    /// The recipient sees "Delegate Name on behalf of Shared Mailbox"
+    /// in their mail client. Sends via
+    /// `POST /users/{shared_mailbox}/messages/{id}/send`.
+    ///
+    /// Requires `Mail.Send.Shared` OAuth scope and "Send on Behalf"
+    /// permission on the shared mailbox in Exchange.
+    pub async fn send_on_behalf_shared_mailbox(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        shared_mailbox_email: &str,
+        delegate_email: &str,
+        delegate_name: &str,
+        raw_base64url: &str,
+        _thread_id: Option<&str>,
+    ) -> Result<String, String> {
+        use super::types::{GraphEmailAddress, GraphRecipient};
+
+        let raw_bytes = crate::provider::encoding::decode_base64url_nopad(raw_base64url)
+            .map_err(|e| format!("Failed to decode base64url: {e}"))?;
+        let parsed = mail_parser::MessageParser::default()
+            .parse(&raw_bytes)
+            .ok_or("Failed to parse MIME message")?;
+
+        let mut create_msg = mime_to_graph_message(&parsed)?;
+        create_msg.from = Some(GraphRecipient {
+            email_address: GraphEmailAddress {
+                name: None,
+                address: shared_mailbox_email.to_string(),
+            },
+        });
+        create_msg.sender = Some(GraphRecipient {
+            email_address: GraphEmailAddress {
+                name: Some(delegate_name.to_string()),
+                address: delegate_email.to_string(),
+            },
+        });
+
+        let enc_mailbox = urlencoding::encode(shared_mailbox_email);
+
+        // Create draft in the shared mailbox
+        let draft: serde_json::Value = self
+            .client
+            .post(
+                &format!("/users/{enc_mailbox}/messages"),
+                &create_msg,
+                ctx.db,
+            )
+            .await?;
+
+        let draft_id = draft
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or("Draft response missing id")?
+            .to_string();
+
+        // Upload attachments to the shared mailbox draft
+        upload_attachments_to_user_mailbox(&self.client, ctx, &enc_mailbox, &draft_id, &parsed)
+            .await?;
+
+        // Send via the shared mailbox
+        let enc_draft_id = urlencoding::encode(&draft_id);
+        self.client
+            .post_no_content::<()>(
+                &format!("/users/{enc_mailbox}/messages/{enc_draft_id}/send"),
+                None,
+                ctx.db,
+            )
+            .await?;
+
+        log::info!(
+            "Sent on behalf of {shared_mailbox_email} (delegate: {delegate_email}), draft_id={draft_id}"
+        );
+        Ok(draft_id)
+    }
+}
+
+/// Upload attachments from a parsed MIME to a draft in a specific user's mailbox.
+///
+/// Similar to `upload_attachments_from_mime` but uses `/users/{user}/messages/{id}/attachments`
+/// instead of `/me/messages/{id}/attachments`.
+async fn upload_attachments_to_user_mailbox(
+    client: &GraphClient,
+    ctx: &ProviderCtx<'_>,
+    enc_user: &str,
+    draft_id: &str,
+    parsed: &mail_parser::Message<'_>,
+) -> Result<(), String> {
+    use super::types::GraphAttachmentInput;
+
+    let enc_draft_id = urlencoding::encode(draft_id);
+    for attachment in parsed.attachments() {
+        let name = attachment
+            .attachment_name()
+            .unwrap_or("attachment")
+            .to_string();
+        let content_type = attachment
+            .content_type()
+            .map(|ct| {
+                if let Some(st) = ct.subtype() {
+                    format!("{}/{st}", ct.ctype())
+                } else {
+                    ct.ctype().to_string()
+                }
+            })
+            .unwrap_or_else(|| "application/octet-stream".to_string());
+        let is_inline = attachment
+            .content_disposition()
+            .is_some_and(|d| d.ctype() == "inline");
+        let raw_bytes = attachment.contents();
+
+        // For shared mailbox drafts, only inline (base64) attachments are supported.
+        // Large attachment upload sessions on /users/{id} require application
+        // permissions, so we skip the resumable path here.
+        let content_bytes = crate::provider::encoding::encode_base64_standard(raw_bytes);
+        let content_id = attachment
+            .content_id()
+            .map(|id| id.trim_matches(&['<', '>'] as &[char]).to_string());
+
+        let input = GraphAttachmentInput {
+            odata_type: "#microsoft.graph.fileAttachment".to_string(),
+            name,
+            content_type,
+            content_bytes,
+            is_inline: if is_inline { Some(true) } else { None },
+            content_id,
+        };
+
+        let _: serde_json::Value = client
+            .post(
+                &format!("/users/{enc_user}/messages/{enc_draft_id}/attachments"),
+                &input,
+                ctx.db,
+            )
+            .await?;
+    }
+
+    Ok(())
+}
+
 // ── Helper functions ────────────────────────────────────────
 
 /// Get the cached folder map or return an error if not built yet.
@@ -1029,6 +1245,8 @@ fn mime_to_graph_message(
         internet_message_id: message_id,
         single_value_extended_properties: None,
         mentions: None,
+        from: None,
+        sender: None,
     })
 }
 
@@ -1162,6 +1380,47 @@ async fn upload_large_attachment(
     log::info!(
         "Uploaded large attachment '{name}' ({} bytes) via resumable session",
         total
+    );
+    Ok(())
+}
+
+/// Create a reference attachment (cloud file link) on a draft message.
+///
+/// Uses the Graph **beta** endpoint because `referenceAttachment` is not
+/// available on v1.0.
+pub async fn create_reference_attachment(
+    client: &GraphClient,
+    message_id: &str,
+    source_url: &str,
+    file_name: &str,
+    file_size: Option<i64>,
+    provider_type: &str,
+    db: &DbState,
+) -> Result<(), String> {
+    let enc_id = urlencoding::encode(message_id);
+    let path = format!("/me/messages/{enc_id}/attachments");
+
+    let mut body = serde_json::json!({
+        "@odata.type": "#microsoft.graph.referenceAttachment",
+        "name": file_name,
+        "sourceUrl": source_url,
+        "providerType": provider_type,
+        "permission": "view",
+        "isFolder": false,
+    });
+
+    if let Some(size) = file_size {
+        body.as_object_mut()
+            .expect("body is an object")
+            .insert("size".to_string(), serde_json::json!(size));
+    }
+
+    let _response: serde_json::Value = client.post_beta(&path, &body, db).await?;
+
+    log::info!(
+        "Created reference attachment '{}' on message {}",
+        file_name,
+        message_id
     );
     Ok(())
 }

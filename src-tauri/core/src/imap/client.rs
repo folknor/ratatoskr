@@ -805,6 +805,65 @@ pub async fn fetch_changed_flags(
     Ok(changes)
 }
 
+/// Fetch flags for all messages in a folder (non-CONDSTORE fallback).
+///
+/// Issues `UID FETCH 1:* (FLAGS)` to get the current flag state for every
+/// message, then diffs against the locally cached flags to produce a list
+/// of changes. This is the fallback for servers that don't support
+/// CONDSTORE (e.g. Exchange IMAP, Courier, hMailServer).
+///
+/// The folder must NOT already be SELECTed — this function SELECTs it.
+pub async fn fetch_all_flags(
+    session: &mut ImapSession,
+    folder: &str,
+) -> Result<Vec<FlagChange>, String> {
+    let _mailbox = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
+        .await
+        .map_err(|_| timeout_err(&format!("SELECT {folder}"), IMAP_CMD_TIMEOUT))?
+        .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
+
+    let stream = tokio::time::timeout(IMAP_FETCH_TIMEOUT, session.uid_fetch("1:*", "(FLAGS)"))
+        .await
+        .map_err(|_| timeout_err(&format!("UID FETCH FLAGS {folder}"), IMAP_FETCH_TIMEOUT))?
+        .map_err(|e| format!("UID FETCH FLAGS {folder} failed: {e}"))?;
+
+    let raw: Vec<_> = tokio::time::timeout(
+        IMAP_FETCH_TIMEOUT,
+        stream.collect::<Vec<_>>(),
+    )
+    .await
+    .map_err(|_| timeout_err(&format!("FLAGS stream {folder}"), IMAP_FETCH_TIMEOUT))?;
+
+    let mut flags = Vec::new();
+    for item in raw {
+        match item {
+            Ok(fetch) => {
+                let uid = match fetch.uid {
+                    Some(u) => u,
+                    None => continue,
+                };
+                let flag_list: Vec<_> = fetch.flags().collect();
+                let is_read = flag_list.iter().any(|f| matches!(f, Flag::Seen));
+                let is_starred = flag_list.iter().any(|f| matches!(f, Flag::Flagged));
+                flags.push(FlagChange {
+                    uid,
+                    is_read,
+                    is_starred,
+                });
+            }
+            Err(e) => {
+                log::warn!("FLAGS fetch stream error in {folder}: {e}");
+            }
+        }
+    }
+
+    log::info!(
+        "IMAP fetch_all_flags {folder}: {} messages",
+        flags.len()
+    );
+    Ok(flags)
+}
+
 /// Search a folder: SELECT → UID SEARCH, returning UIDs and folder status without fetching bodies.
 ///
 /// This is a lightweight alternative to `sync_folder` for callers that want to

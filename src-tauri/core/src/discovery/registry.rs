@@ -144,7 +144,10 @@ static REGISTRY: &[RegistryEntry] = &[
                         token_url: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
                         scopes: &[
                             "Mail.ReadWrite",
+                            "Mail.ReadWrite.Shared",
                             "Mail.Send",
+                            "Mail.Send.Shared",
+                            "Mail.Read.Shared",
                             "MailboxSettings.ReadWrite",
                             "offline_access",
                             "openid",

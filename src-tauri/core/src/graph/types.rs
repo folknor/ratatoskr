@@ -160,6 +160,10 @@ pub struct GraphCreateMessage {
     pub single_value_extended_properties: Option<Vec<SingleValueExtendedProperty>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mentions: Option<Vec<GraphMention>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<GraphRecipient>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sender: Option<GraphRecipient>,
 }
 
 #[derive(Debug, Serialize)]

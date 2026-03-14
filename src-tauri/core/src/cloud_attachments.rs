@@ -1,8 +1,12 @@
 use std::sync::LazyLock;
 
+use base64::Engine as _;
 use regex::{Regex, RegexSet};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+
+use crate::db::DbState;
+use crate::graph::client::GraphClient;
 
 /// Cloud storage provider that hosts the linked file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -320,6 +324,153 @@ pub fn insert_incoming_cloud_links(
     Ok(count)
 }
 
+// ---------------------------------------------------------------------------
+// Metadata enrichment
+// ---------------------------------------------------------------------------
+
+/// Metadata fetched from a cloud provider about a shared file.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CloudMetadata {
+    pub file_name: Option<String>,
+    pub file_size: Option<i64>,
+    pub mime_type: Option<String>,
+}
+
+/// OneDrive/SharePoint sharing API response.
+#[derive(Debug, Deserialize)]
+struct SharesDriveItemResponse {
+    name: Option<String>,
+    size: Option<i64>,
+    file: Option<SharesDriveItemFile>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SharesDriveItemFile {
+    mime_type: Option<String>,
+}
+
+/// Fetch metadata for a OneDrive/SharePoint sharing link via the Graph API.
+///
+/// Uses the `GET /shares/{encoded}/driveItem` endpoint. The sharing URL is
+/// encoded as `u!` + base64url(url).
+pub async fn enrich_onedrive_link(
+    client: &GraphClient,
+    cloud_url: &str,
+    db: &DbState,
+) -> Result<CloudMetadata, String> {
+    let encoded = encode_sharing_url(cloud_url);
+    let path = format!("/shares/{encoded}/driveItem?$select=name,size,file");
+
+    let item: SharesDriveItemResponse = client.get_json(&path, db).await?;
+
+    Ok(CloudMetadata {
+        file_name: item.name,
+        file_size: item.size,
+        mime_type: item.file.and_then(|f| f.mime_type),
+    })
+}
+
+/// Encode a sharing URL for the Graph `/shares` endpoint.
+///
+/// Format: `u!` prefix + base64url-encoded URL (no padding).
+fn encode_sharing_url(url: &str) -> String {
+    let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(url);
+    format!("u!{encoded}")
+}
+
+/// Google Drive file metadata response.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GDriveFileResponse {
+    name: Option<String>,
+    size: Option<String>,
+    mime_type: Option<String>,
+}
+
+/// Fetch metadata for a Google Drive file link.
+///
+/// Extracts the file ID from the URL, then calls
+/// `GET /drive/v3/files/{id}?fields=name,size,mimeType`.
+pub async fn enrich_gdrive_link(
+    client: &reqwest::Client,
+    cloud_url: &str,
+    access_token: &str,
+) -> Result<CloudMetadata, String> {
+    let file_id = extract_gdrive_file_id(cloud_url)
+        .ok_or_else(|| format!("Cannot extract Google Drive file ID from URL: {cloud_url}"))?;
+
+    let url = format!(
+        "https://www.googleapis.com/drive/v3/files/{file_id}?fields=name,size,mimeType&supportsAllDrives=true"
+    );
+
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {access_token}"))
+        .send()
+        .await
+        .map_err(|e| format!("Google Drive metadata request failed: {e}"))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("Google Drive API error: {status} {body}"));
+    }
+
+    let file: GDriveFileResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Google Drive response: {e}"))?;
+
+    Ok(CloudMetadata {
+        file_name: file.name,
+        file_size: file.size.and_then(|s| s.parse::<i64>().ok()),
+        mime_type: file.mime_type,
+    })
+}
+
+/// Regex for extracting file IDs from Google Drive and Google Docs URLs.
+///
+/// Matches:
+/// - `drive.google.com/file/d/{id}/...`
+/// - `docs.google.com/document/d/{id}/...`
+/// - `docs.google.com/spreadsheets/d/{id}/...`
+/// - `docs.google.com/presentation/d/{id}/...`
+/// - `drive.google.com/open?id={id}`
+static GDRIVE_ID_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?:drive\.google\.com/file/d/|docs\.google\.com/(?:document|spreadsheets|presentation)/d/|drive\.google\.com/open\?id=)([a-zA-Z0-9_-]+)",
+    )
+    .expect("Google Drive ID regex should be valid")
+});
+
+/// Extract a Google Drive file ID from various URL formats.
+///
+/// Returns `None` if the URL does not match any known Google Drive pattern.
+pub fn extract_gdrive_file_id(url: &str) -> Option<String> {
+    GDRIVE_ID_RE
+        .captures(url)
+        .and_then(|caps| caps.get(1))
+        .map(|m| m.as_str().to_owned())
+}
+
+/// Update the metadata columns of a `cloud_attachments` row.
+pub fn update_cloud_attachment_metadata(
+    conn: &Connection,
+    id: i64,
+    metadata: &CloudMetadata,
+) -> Result<(), rusqlite::Error> {
+    conn.execute(
+        "UPDATE cloud_attachments
+         SET file_name = COALESCE(?1, file_name),
+             file_size = COALESCE(?2, file_size),
+             mime_type = COALESCE(?3, mime_type)
+         WHERE id = ?4",
+        rusqlite::params![metadata.file_name, metadata.file_size, metadata.mime_type, id],
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -412,5 +563,68 @@ mod tests {
         assert_eq!(links[0].provider, CloudProvider::OneDrive);
         assert_eq!(links[1].provider, CloudProvider::GoogleDrive);
         assert_eq!(links[2].provider, CloudProvider::Box);
+    }
+
+    // ── Metadata enrichment tests ────────────────────────────
+
+    #[test]
+    fn encode_sharing_url_format() {
+        let encoded = encode_sharing_url("https://1drv.ms/w/s!AjJk");
+        assert!(encoded.starts_with("u!"));
+        // Should be base64url with no padding
+        let b64_part = &encoded[2..];
+        assert!(!b64_part.contains('='));
+        assert!(!b64_part.contains('+'));
+        assert!(!b64_part.contains('/'));
+    }
+
+    #[test]
+    fn extract_gdrive_file_id_from_file_url() {
+        let url = "https://drive.google.com/file/d/1aBcDeFgHiJkLmNoPqRsTuVwXyZ/view?usp=sharing";
+        assert_eq!(
+            extract_gdrive_file_id(url),
+            Some("1aBcDeFgHiJkLmNoPqRsTuVwXyZ".to_owned())
+        );
+    }
+
+    #[test]
+    fn extract_gdrive_file_id_from_docs_url() {
+        let url = "https://docs.google.com/document/d/1aBcDeFgHiJk/edit";
+        assert_eq!(
+            extract_gdrive_file_id(url),
+            Some("1aBcDeFgHiJk".to_owned())
+        );
+    }
+
+    #[test]
+    fn extract_gdrive_file_id_from_spreadsheets_url() {
+        let url = "https://docs.google.com/spreadsheets/d/1aBcDeFgHiJk/edit#gid=0";
+        assert_eq!(
+            extract_gdrive_file_id(url),
+            Some("1aBcDeFgHiJk".to_owned())
+        );
+    }
+
+    #[test]
+    fn extract_gdrive_file_id_from_open_url() {
+        let url = "https://drive.google.com/open?id=1aBcDeFgHiJk";
+        assert_eq!(
+            extract_gdrive_file_id(url),
+            Some("1aBcDeFgHiJk".to_owned())
+        );
+    }
+
+    #[test]
+    fn extract_gdrive_file_id_returns_none_for_non_drive_url() {
+        assert_eq!(extract_gdrive_file_id("https://example.com/file"), None);
+    }
+
+    #[test]
+    fn extract_gdrive_file_id_from_presentation_url() {
+        let url = "https://docs.google.com/presentation/d/1aBcDeFgHiJk/edit";
+        assert_eq!(
+            extract_gdrive_file_id(url),
+            Some("1aBcDeFgHiJk".to_owned())
+        );
     }
 }

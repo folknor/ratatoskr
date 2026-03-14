@@ -301,3 +301,114 @@ async fn authenticate(
             .map_err(|(e, _)| format!("Login failed: {e}")),
     }
 }
+
+/// Negotiated CONDSTORE/QRESYNC capability state for a session.
+#[derive(Debug, Clone)]
+pub struct ImapCapabilities {
+    /// Server supports CONDSTORE (RFC 4551) — HIGHESTMODSEQ in SELECT and
+    /// CHANGEDSINCE modifier for UID FETCH.
+    pub condstore: bool,
+    /// Server supports QRESYNC (RFC 7162) and successfully responded to
+    /// `ENABLE QRESYNC`. False if the server advertises QRESYNC but has a
+    /// broken implementation (e.g. iCloud).
+    pub qresync: bool,
+}
+
+/// Probe the server's CONDSTORE/QRESYNC capabilities and negotiate QRESYNC
+/// if available.
+///
+/// iCloud is known to advertise QRESYNC in CAPABILITY but not actually
+/// respond with `ENABLED QRESYNC` after the `ENABLE` command. This function
+/// detects that case and falls back to CONDSTORE-only mode.
+pub async fn negotiate_condstore_qresync(
+    session: &mut ImapSession,
+) -> Result<ImapCapabilities, String> {
+    let caps = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.capabilities())
+        .await
+        .map_err(|_| format!(
+            "CAPABILITY timed out after {}s",
+            IMAP_CMD_TIMEOUT.as_secs()
+        ))?
+        .map_err(|e| format!("CAPABILITY failed: {e}"))?;
+
+    let has_condstore = caps.has_str("CONDSTORE");
+    let has_qresync_cap = caps.has_str("QRESYNC");
+
+    if !has_condstore && !has_qresync_cap {
+        log::info!("IMAP: server supports neither CONDSTORE nor QRESYNC");
+        return Ok(ImapCapabilities {
+            condstore: false,
+            qresync: false,
+        });
+    }
+
+    if !has_qresync_cap {
+        log::info!("IMAP: server supports CONDSTORE but not QRESYNC");
+        return Ok(ImapCapabilities {
+            condstore: true,
+            qresync: false,
+        });
+    }
+
+    // Server advertises QRESYNC — try to ENABLE it and verify the ENABLED
+    // response.  QRESYNC implicitly enables CONDSTORE (RFC 7162 §3.2.3).
+    let qresync_enabled = tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
+        let tag = session
+            .run_command("ENABLE QRESYNC")
+            .await
+            .map_err(|e| format!("ENABLE QRESYNC send failed: {e}"))?;
+
+        // Read responses until the tagged OK. Look for an ENABLED response
+        // containing QRESYNC. imap-proto parses `* ENABLED QRESYNC` as
+        // `Response::Capabilities([Atom("QRESYNC")])`.
+        let mut saw_enabled = false;
+        loop {
+            let resp = session
+                .read_response()
+                .await
+                .map_err(|e| format!("ENABLE QRESYNC read failed: {e}"))?
+                .ok_or_else(|| "Connection lost during ENABLE QRESYNC".to_string())?;
+
+            match resp.parsed() {
+                async_imap::imap_proto::Response::Capabilities(caps) => {
+                    for cap in caps {
+                        if let async_imap::imap_proto::types::Capability::Atom(name) = cap {
+                            if name.eq_ignore_ascii_case("QRESYNC") {
+                                saw_enabled = true;
+                            }
+                        }
+                    }
+                }
+                async_imap::imap_proto::Response::Done { tag: resp_tag, .. } if *resp_tag == tag => {
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        Ok::<bool, String>(saw_enabled)
+    })
+    .await
+    .map_err(|_| format!(
+        "ENABLE QRESYNC timed out after {}s",
+        IMAP_CMD_TIMEOUT.as_secs()
+    ))??;
+
+    if qresync_enabled {
+        log::info!("IMAP: QRESYNC successfully enabled (implies CONDSTORE)");
+        Ok(ImapCapabilities {
+            condstore: true,
+            qresync: true,
+        })
+    } else {
+        log::warn!(
+            "IMAP: server advertises QRESYNC in CAPABILITY but did not respond with \
+             ENABLED QRESYNC — likely iCloud or similar broken implementation. \
+             Falling back to CONDSTORE-only mode."
+        );
+        Ok(ImapCapabilities {
+            condstore: has_condstore,
+            qresync: false,
+        })
+    }
+}

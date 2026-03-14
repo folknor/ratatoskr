@@ -30,9 +30,12 @@ const MICROSOFT_GRAPH_AUTH_URL: &str =
     "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
 const MICROSOFT_GRAPH_TOKEN_URL: &str =
     "https://login.microsoftonline.com/common/oauth2/v2.0/token";
-const MICROSOFT_GRAPH_SCOPES: [&str; 7] = [
+const MICROSOFT_GRAPH_SCOPES: [&str; 10] = [
     "Mail.ReadWrite",
+    "Mail.ReadWrite.Shared",
     "Mail.Send",
+    "Mail.Send.Shared",
+    "Mail.Read.Shared",
     "MailboxSettings.ReadWrite",
     "offline_access",
     "openid",

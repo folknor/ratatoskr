@@ -145,7 +145,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **OneDrive sharing link creation** — Implemented in `graph/onedrive.rs`: `create_sharing_link()` with configurable scope ("organization" or "anonymous"). Returns web URL.
 
-- [ ] **Exchange `referenceAttachment` for cloud links** — When sending an email with a cloud attachment on an Exchange account, `POST /beta/me/messages/{id}/attachments` with `@odata.type: "#microsoft.graph.referenceAttachment"`, `sourceUrl`, `providerType: "oneDriveBusiness"`, and `permission: "view"`. This makes cloud attachments render as proper attachment chips in Outlook recipients' UI instead of bare URLs.
+- [x] **Exchange `referenceAttachment` for cloud links** — Implemented in `graph/ops.rs`: `create_reference_attachment()` via `post_beta()` with `@odata.type`, `sourceUrl`, `providerType`, `permission`, optional `size`.
 
 - [ ] **Google Drive resumable upload** — Initiate with `POST /upload/drive/v3/files?uploadType=resumable`, then `PUT` chunks to the resumable URI. Requires adding `drive.file` OAuth scope to the Google auth flow (minimal scope — only grants access to files the app creates, not the user's entire Drive).
 
@@ -153,7 +153,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **Incoming cloud link detection via `RegexSet`** — Implemented in `cloud_attachments.rs`: `LazyLock<RegexSet>` with 8 patterns, `detect_cloud_links()` extracts hrefs and matches, `insert_incoming_cloud_links()` persists to DB. `CloudProvider` enum. 10 unit tests.
 
-- [ ] **Cloud link metadata enrichment** — For detected incoming cloud links, fetch file metadata: OneDrive uses `GET /shares/{base64-encoded-url}/driveItem`; Google Drive uses `GET /files/{id}?fields=name,size,mimeType,iconLink` (requires extracting the file ID from the sharing URL). Cache name, size, and MIME type in `cloud_attachments` so the UI can show "Budget.xlsx (2.3 MB)" instead of a bare URL.
+- [x] **Cloud link metadata enrichment** — Implemented in `cloud_attachments.rs`: `enrich_onedrive_link()` via `/shares/{encoded}/driveItem`, `enrich_gdrive_link()` via Drive API with `extract_gdrive_file_id()` (5 URL formats). `update_cloud_attachment_metadata()` persists results. 6 unit tests.
 
 - [x] **Offline upload queue state machine** — Implemented in `cloud_attachments.rs`: `UploadStatus` enum, `CloudAttachment` struct, `get_pending_uploads()`, `update_upload_status()`, `mark_upload_failed()` with retry tracking, `reset_interrupted_uploads()` for app restart, `create_outgoing_upload()`, `get_permanently_failed()`.
 
@@ -167,19 +167,19 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **HIGHESTMODSEQ reset defense** — Implemented: `modseq_reset: bool` on `DeltaCheckResult`, detected in both `delta_check_folders()` and `per_folder_check()`. On reset, fetches all flags with `since_modseq = 1` and persists the server's new lower modseq.
 
-- [ ] **iCloud QRESYNC workaround** — iCloud advertises QRESYNC in CAPABILITY but has a broken implementation. After sending `ENABLE QRESYNC`, verify the server actually responds with an `ENABLED` response. If not, fall back to CONDSTORE-only mode for that session. Prevents hard failures on iCloud accounts.
+- [x] **iCloud QRESYNC workaround** — Implemented in `imap/connection.rs`: `negotiate_condstore_qresync()` sends `ENABLE QRESYNC`, reads response stream for `ENABLED` confirmation, falls back to CONDSTORE-only if missing. `ImapCapabilities` struct tracks per-session state.
 
-- [ ] **UID-based fallback for non-CONDSTORE servers** — For servers without CONDSTORE support (Exchange IMAP, Courier, hMailServer), add periodic `UID FETCH 1:* (FLAGS)` to diff flag changes and `UID SEARCH ALL` for deletion detection. These servers currently have no incremental flag sync path — every sync re-fetches all flags, which is wasteful for large mailboxes.
+- [x] **UID-based fallback for non-CONDSTORE servers** — Implemented: `fetch_all_flags()` in IMAP client, `get_local_flags_for_folder()` in pipeline, `sync_flags_without_condstore()` in imap_delta with 5-minute throttle. Integrated into `process_folder_delta()` for servers without CONDSTORE.
 
 ### Shared Mailboxes (Tier 1)
 
-- [ ] **Request `*.Shared` OAuth scopes for Graph** — Add `Mail.Read.Shared`, `Mail.ReadWrite.Shared`, `Mail.Send.Shared` to the Graph OAuth scope set. Without these, accessing `/users/{shared-mailbox}/messages` returns 403 even if the user has delegate access in Exchange. The scopes are admin-consentable and don't require additional Azure AD app configuration beyond listing them.
+- [x] **Request `*.Shared` OAuth scopes for Graph** — Added `Mail.Read.Shared`, `Mail.ReadWrite.Shared`, `Mail.Send.Shared` to both `MICROSOFT_GRAPH_SCOPES` in `oauth.rs` and the discovery registry.
 
 - [ ] **Shared mailbox read/write via Graph API** — Change the API path from `/me/...` to `/users/{shared-mailbox-id}/...` for all message operations (list, get, update, delete, send). Same API surface, different path prefix. Delta sync tokens are independent per mailbox, so each shared mailbox needs its own sync state entries. The `GraphClient` needs a `mailbox_id: Option<String>` field to switch path prefixes.
 
-- [ ] **Autodiscover XML parsing for shared mailbox discovery** — Call `https://outlook.office365.com/autodiscover/autodiscover.xml` with the user's OAuth token. Parse `AlternativeMailbox` elements from the SOAP response using `quick-xml` or `roxmltree` (~100–200 lines). Returns the list of auto-mapped shared mailboxes the user has access to, avoiding manual mailbox address entry.
+- [x] **Autodiscover XML parsing for shared mailbox discovery** — Implemented in `graph/autodiscover.rs`: `discover_shared_mailboxes()` sends SOAP request, `parse_alternative_mailboxes()` uses `quick-xml` event-driven parsing. Returns `Vec<SharedMailbox>`. 4 unit tests.
 
-- [ ] **Send As vs Send on Behalf implementation** — Two distinct send modes for shared mailboxes: Send As sets `from` to the shared mailbox address (message appears to come from the shared mailbox); Send on Behalf sets both `from` (shared mailbox) and `sender` (delegate's address, shows "sent on behalf of"). Exchange enforces permissions server-side — the API call just sets the right headers.
+- [x] **Send As vs Send on Behalf implementation** — Implemented: `send_as_shared_mailbox()` and `send_on_behalf_shared_mailbox()` on `GraphOps`. Added `from`/`sender` fields to `GraphCreateMessage`. Routes through `/users/{shared_mailbox}/` API path.
 
 - [x] **`send_identities` table** — Migration v42: table with `(account_id, email, display_name, mailbox_id, send_mode, save_to_personal_sent, is_primary)`, UNIQUE on `(account_id, email)`, index on `(account_id)`.
 
