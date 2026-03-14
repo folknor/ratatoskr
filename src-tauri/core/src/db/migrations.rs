@@ -1080,6 +1080,70 @@ static MIGRATIONS: &[Migration] = &[
             ALTER TABLE messages ADD COLUMN mdn_sent INTEGER NOT NULL DEFAULT 0;
         "#,
     },
+    Migration {
+        version: 47,
+        description: "Public folder schema: folders, items, pins, sync state",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS public_folders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id TEXT NOT NULL,
+                folder_id TEXT NOT NULL,
+                parent_id TEXT,
+                display_name TEXT NOT NULL,
+                folder_class TEXT,
+                unread_count INTEGER NOT NULL DEFAULT 0,
+                total_count INTEGER NOT NULL DEFAULT 0,
+                can_create_items INTEGER NOT NULL DEFAULT 0,
+                can_modify INTEGER NOT NULL DEFAULT 0,
+                can_delete INTEGER NOT NULL DEFAULT 0,
+                can_read INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(account_id, folder_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_public_folders_parent ON public_folders(account_id, parent_id);
+
+            CREATE TABLE IF NOT EXISTS public_folder_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id TEXT NOT NULL,
+                folder_id TEXT NOT NULL,
+                item_id TEXT NOT NULL,
+                change_key TEXT,
+                subject TEXT,
+                sender_email TEXT,
+                sender_name TEXT,
+                received_at INTEGER,
+                body_preview TEXT,
+                is_read INTEGER NOT NULL DEFAULT 0,
+                item_class TEXT NOT NULL DEFAULT 'IPM.Note',
+                UNIQUE(account_id, item_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_public_folder_items_folder ON public_folder_items(account_id, folder_id, received_at DESC);
+
+            CREATE TABLE IF NOT EXISTS public_folder_pins (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id TEXT NOT NULL,
+                folder_id TEXT NOT NULL,
+                sync_enabled INTEGER NOT NULL DEFAULT 1,
+                sync_depth_days INTEGER NOT NULL DEFAULT 30,
+                last_sync_at INTEGER,
+                UNIQUE(account_id, folder_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS public_folder_sync_state (
+                account_id TEXT NOT NULL,
+                folder_id TEXT NOT NULL,
+                last_sync_timestamp INTEGER,
+                last_full_scan_at INTEGER,
+                PRIMARY KEY(account_id, folder_id)
+            );
+        "#,
+    },
+    Migration {
+        version: 48,
+        description: "Add last_deletion_check_at to folder_sync_state for IMAP deletion detection",
+        sql: r#"
+            ALTER TABLE folder_sync_state ADD COLUMN last_deletion_check_at INTEGER;
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -1319,6 +1383,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))
             .expect("query");
-        assert_eq!(max_ver, 46);
+        assert_eq!(max_ver, 48);
     }
 }

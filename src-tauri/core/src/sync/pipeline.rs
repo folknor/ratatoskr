@@ -798,3 +798,146 @@ pub fn clear_all_folder_sync_states(conn: &Connection, account_id: &str) -> Resu
     .map_err(|e| format!("clear folder sync states: {e}"))?;
     Ok(())
 }
+
+/// Get the timestamp of the last deletion detection check for a folder.
+pub fn get_last_deletion_check_at(
+    conn: &Connection,
+    account_id: &str,
+    folder_path: &str,
+) -> Result<Option<i64>, String> {
+    conn.query_row(
+        "SELECT last_deletion_check_at FROM folder_sync_state \
+         WHERE account_id = ?1 AND folder_path = ?2",
+        rusqlite::params![account_id, folder_path],
+        |row| row.get(0),
+    )
+    .map_err(|e| format!("get last deletion check: {e}"))
+}
+
+/// Update the last deletion detection check timestamp for a folder.
+pub fn set_last_deletion_check_at(
+    conn: &Connection,
+    account_id: &str,
+    folder_path: &str,
+    timestamp: i64,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE folder_sync_state SET last_deletion_check_at = ?1 \
+         WHERE account_id = ?2 AND folder_path = ?3",
+        rusqlite::params![timestamp, account_id, folder_path],
+    )
+    .map_err(|e| format!("set last deletion check: {e}"))?;
+    Ok(())
+}
+
+/// Get all locally-cached IMAP UIDs for a given folder+account.
+///
+/// Returns `(message_id, imap_uid)` pairs so callers can identify which
+/// messages to delete by their local ID.
+pub fn get_local_uids_for_folder(
+    conn: &Connection,
+    account_id: &str,
+    folder_path: &str,
+) -> Result<Vec<(String, u32)>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, imap_uid FROM messages \
+             WHERE account_id = ?1 AND imap_folder = ?2 AND imap_uid IS NOT NULL",
+        )
+        .map_err(|e| format!("prepare get_local_uids: {e}"))?;
+
+    #[allow(clippy::cast_sign_loss)]
+    let rows = stmt
+        .query_map(rusqlite::params![account_id, folder_path], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u32))
+        })
+        .map_err(|e| format!("query local uids: {e}"))?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row.map_err(|e| format!("read uid row: {e}"))?);
+    }
+    Ok(result)
+}
+
+/// Remove messages that were deleted on the server and update/remove their
+/// parent threads accordingly.
+///
+/// Returns the list of affected thread IDs (for UI refresh).
+pub fn remove_deleted_messages(
+    conn: &Connection,
+    account_id: &str,
+    deleted_message_ids: &[String],
+) -> Result<Vec<String>, String> {
+    if deleted_message_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("deletion tx: {e}"))?;
+
+    // Collect affected thread IDs before deleting
+    let mut affected_threads: HashSet<String> = HashSet::new();
+    for id in deleted_message_ids {
+        if let Ok(tid) = tx.query_row(
+            "SELECT thread_id FROM messages WHERE account_id = ?1 AND id = ?2",
+            rusqlite::params![account_id, id],
+            |row| row.get::<_, String>(0),
+        ) {
+            affected_threads.insert(tid);
+        }
+    }
+
+    // Delete the messages
+    for id in deleted_message_ids {
+        tx.execute(
+            "DELETE FROM messages WHERE account_id = ?1 AND id = ?2",
+            rusqlite::params![account_id, id],
+        )
+        .map_err(|e| format!("delete message: {e}"))?;
+    }
+
+    // Update or remove affected threads
+    for tid in &affected_threads {
+        let remaining: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND account_id = ?2",
+                rusqlite::params![tid, account_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("count remaining: {e}"))?;
+
+        if remaining == 0 {
+            // Orphan thread — remove it and its labels
+            tx.execute(
+                "DELETE FROM threads WHERE id = ?1 AND account_id = ?2",
+                rusqlite::params![tid, account_id],
+            )
+            .map_err(|e| format!("delete orphan thread: {e}"))?;
+            tx.execute(
+                "DELETE FROM thread_labels WHERE thread_id = ?1 AND account_id = ?2",
+                rusqlite::params![tid, account_id],
+            )
+            .map_err(|e| format!("delete orphan thread labels: {e}"))?;
+        } else {
+            // Re-aggregate thread fields from remaining messages
+            let aggregate =
+                super::persistence::compute_thread_aggregate(&tx, account_id, tid)?;
+            super::persistence::upsert_thread_aggregate(
+                &tx, account_id, tid, &aggregate, None,
+            )?;
+        }
+    }
+
+    tx.commit()
+        .map_err(|e| format!("deletion commit: {e}"))?;
+
+    log::info!(
+        "[sync] Removed {} deleted messages, {} threads affected",
+        deleted_message_ids.len(),
+        affected_threads.len()
+    );
+
+    Ok(affected_threads.into_iter().collect())
+}

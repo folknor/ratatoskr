@@ -23,6 +23,10 @@ const CIRCUIT_BREAKER_THRESHOLD: u32 = 3;
 const CIRCUIT_BREAKER_DELAY_MS: u64 = 15_000;
 const CIRCUIT_BREAKER_MAX_FAILURES: u32 = 5;
 
+/// Minimum interval between deletion detection checks per folder (seconds).
+/// UID SEARCH ALL can be expensive on large folders, so we throttle it.
+const DELETION_CHECK_INTERVAL_SECS: i64 = 600; // 10 minutes
+
 fn is_connection_error(err: &str) -> bool {
     let lower = err.to_lowercase();
     lower.contains("timed out")
@@ -191,6 +195,18 @@ pub async fn imap_delta_sync(
         }
     }
 
+    // Run deletion detection (throttled per-folder, only checks every 10 min)
+    let deletion_affected = run_deletion_detection(
+        config,
+        account_id,
+        db,
+        body_store,
+        search,
+        &syncable_folders,
+        &state_map,
+    )
+    .await;
+
     if all_threadable.is_empty() && !delta_errors.is_empty() {
         return Err(format!("All folders failed: {}", delta_errors[0]));
     }
@@ -200,7 +216,7 @@ pub async fn imap_delta_sync(
             stored_count: 0,
             thread_count: 0,
             new_inbox_message_ids: vec![],
-            affected_thread_ids: vec![],
+            affected_thread_ids: deletion_affected,
         });
     }
 
@@ -215,7 +231,7 @@ pub async fn imap_delta_sync(
             .await?
     };
 
-    let affected = {
+    let mut affected = {
         let aid = account_id.to_string();
         let tg = thread_groups.clone();
         let m = all_meta.clone();
@@ -224,6 +240,9 @@ pub async fn imap_delta_sync(
         db.with_conn(move |conn| pipeline::store_threads(conn, &aid, &tg, &m, &l, &s))
             .await?
     };
+
+    // Merge deletion-affected thread IDs
+    affected.extend(deletion_affected);
 
     let inbox_ids: Vec<String> = all_meta
         .values()
@@ -709,4 +728,141 @@ async fn process_folder_delta(
 
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
     Ok(())
+}
+
+/// Detect messages deleted on the IMAP server by comparing `UID SEARCH ALL`
+/// results against locally-cached UIDs.
+///
+/// This is the core detection function: it connects to the server, gets all
+/// UIDs for the folder, diffs against the local DB, and returns the local
+/// message IDs whose server-side UIDs no longer exist.
+///
+/// Only runs if enough time has elapsed since the last check (controlled by
+/// `DELETION_CHECK_INTERVAL_SECS`).
+pub async fn detect_deleted_messages(
+    config: &ImapConfig,
+    folder_path: &str,
+    account_id: &str,
+    db: &DbState,
+) -> Result<Vec<String>, String> {
+    // Throttle: only check every DELETION_CHECK_INTERVAL_SECS
+    let now = chrono::Utc::now().timestamp();
+    let aid = account_id.to_string();
+    let fp = folder_path.to_string();
+    let should_run = db
+        .with_conn(move |conn| {
+            match pipeline::get_last_deletion_check_at(conn, &aid, &fp) {
+                Ok(Some(last)) if now - last < DELETION_CHECK_INTERVAL_SECS => Ok(false),
+                Ok(_) => Ok(true),
+                Err(e) => {
+                    // If the row doesn't exist yet (new folder), skip
+                    log::debug!("get_last_deletion_check_at: {e}");
+                    Ok(false)
+                }
+            }
+        })
+        .await?;
+
+    if !should_run {
+        return Ok(vec![]);
+    }
+
+    // Get all UIDs currently on server
+    let mut session = connect(config).await?;
+    let server_uids = client::search_all_uids(&mut session, folder_path).await?;
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+
+    let server_uid_set: HashSet<u32> = server_uids.into_iter().collect();
+
+    // Get locally-cached UIDs for this folder
+    let aid = account_id.to_string();
+    let fp = folder_path.to_string();
+    let local_entries = db
+        .with_conn(move |conn| pipeline::get_local_uids_for_folder(conn, &aid, &fp))
+        .await?;
+
+    // Diff: local UIDs not on server = deleted
+    let deleted_ids: Vec<String> = local_entries
+        .into_iter()
+        .filter(|(_, uid)| !server_uid_set.contains(uid))
+        .map(|(id, _)| id)
+        .collect();
+
+    // Update the last check timestamp
+    let aid = account_id.to_string();
+    let fp = folder_path.to_string();
+    db.with_conn(move |conn| pipeline::set_last_deletion_check_at(conn, &aid, &fp, now))
+        .await?;
+
+    if !deleted_ids.is_empty() {
+        log::info!(
+            "[sync] Deletion detection for {folder_path}: {} messages deleted on server",
+            deleted_ids.len()
+        );
+    }
+
+    Ok(deleted_ids)
+}
+
+/// Run deletion detection across all synced folders and remove deleted messages.
+///
+/// Designed to be called from the delta sync flow. For each folder that has
+/// a saved sync state, checks if enough time has elapsed, then runs
+/// `UID SEARCH ALL` to find deletions.
+///
+/// Returns the list of affected thread IDs (for UI refresh).
+pub async fn run_deletion_detection(
+    config: &ImapConfig,
+    account_id: &str,
+    db: &DbState,
+    body_store: &BodyStoreState,
+    search: &SearchState,
+    syncable_folders: &[&crate::imap::types::ImapFolder],
+    state_map: &HashMap<String, pipeline::FolderSyncState>,
+) -> Vec<String> {
+    let mut all_affected = Vec::new();
+
+    for folder in syncable_folders {
+        // Only check folders we've already synced
+        if !state_map.contains_key(&folder.raw_path) {
+            continue;
+        }
+
+        match detect_deleted_messages(config, &folder.raw_path, account_id, db).await {
+            Ok(deleted_ids) if !deleted_ids.is_empty() => {
+                // Remove from body store
+                if let Err(e) = body_store.delete(deleted_ids.clone()).await {
+                    log::warn!("[sync] Failed to delete bodies for removed messages: {e}");
+                }
+
+                // Remove from search index
+                let id_refs: Vec<&str> = deleted_ids.iter().map(String::as_str).collect();
+                if let Err(e) = search.delete_messages_batch(&id_refs).await {
+                    log::warn!("[sync] Failed to remove deleted messages from search: {e}");
+                }
+
+                // Remove from DB and update threads
+                let aid = account_id.to_string();
+                let ids = deleted_ids;
+                match db
+                    .with_conn(move |conn| pipeline::remove_deleted_messages(conn, &aid, &ids))
+                    .await
+                {
+                    Ok(affected) => all_affected.extend(affected),
+                    Err(e) => {
+                        log::error!("[sync] Failed to remove deleted messages from DB: {e}");
+                    }
+                }
+            }
+            Ok(_) => {} // No deletions or throttled
+            Err(e) => {
+                log::warn!(
+                    "[sync] Deletion detection failed for {}: {e}",
+                    folder.path
+                );
+            }
+        }
+    }
+
+    all_affected
 }

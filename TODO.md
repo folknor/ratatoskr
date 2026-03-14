@@ -141,9 +141,9 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **`cloud_attachments` DB table** — Migration v39: table with all columns, indexes on `(message_id)` and partial on `(upload_status)` excluding 'sent'.
 
-- [ ] **OneDrive resumable upload via Graph API** — Two-phase upload: `POST /me/drive/items/root:/Ratatoskr Attachments/{filename}:/createUploadSession` to get an upload URL, then sequential `PUT` requests with `Content-Range` headers. Chunks must be multiples of 320 KiB (Microsoft requirement). Handle resume via `GET` to `uploadUrl` which returns `nextExpectedRanges`. Uses raw `reqwest` — no OneDrive SDK crate needed since the Graph client already exists.
+- [x] **OneDrive resumable upload via Graph API** — Implemented in `graph/onedrive.rs`: `create_upload_session()`, `upload_file_chunked()` (5 MiB chunks, 320 KiB aligned), `resume_upload()` parses `nextExpectedRanges`.
 
-- [ ] **OneDrive sharing link creation** — After upload completes, `POST /me/drive/items/{item-id}/createLink` with `{ "type": "view", "scope": "organization" }`. Parse response for `link.webUrl`. For personal accounts, use `"scope": "anonymous"` instead. The sharing URL is what gets inserted into the email body.
+- [x] **OneDrive sharing link creation** — Implemented in `graph/onedrive.rs`: `create_sharing_link()` with configurable scope ("organization" or "anonymous"). Returns web URL.
 
 - [ ] **Exchange `referenceAttachment` for cloud links** — When sending an email with a cloud attachment on an Exchange account, `POST /beta/me/messages/{id}/attachments` with `@odata.type: "#microsoft.graph.referenceAttachment"`, `sourceUrl`, `providerType: "oneDriveBusiness"`, and `permission: "view"`. This makes cloud attachments render as proper attachment chips in Outlook recipients' UI instead of bare URLs.
 
@@ -155,13 +155,13 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [ ] **Cloud link metadata enrichment** — For detected incoming cloud links, fetch file metadata: OneDrive uses `GET /shares/{base64-encoded-url}/driveItem`; Google Drive uses `GET /files/{id}?fields=name,size,mimeType,iconLink` (requires extracting the file ID from the sharing URL). Cache name, size, and MIME type in `cloud_attachments` so the UI can show "Budget.xlsx (2.3 MB)" instead of a bare URL.
 
-- [ ] **Offline upload queue state machine** — Manage outgoing cloud attachment lifecycle: `pending → uploading → uploaded → linked → sent` (plus `failed` with retry). On app restart, reset any `uploading` rows to `pending`, check if upload session URLs are still valid (sessions expire after ~7 days), and resume or restart. Wire into the existing offline action queue pattern.
+- [x] **Offline upload queue state machine** — Implemented in `cloud_attachments.rs`: `UploadStatus` enum, `CloudAttachment` struct, `get_pending_uploads()`, `update_upload_status()`, `mark_upload_failed()` with retry tracking, `reset_interrupted_uploads()` for app restart, `create_outgoing_upload()`, `get_permanently_failed()`.
 
 ### IMAP CONDSTORE/QRESYNC (Tier 1)
 
 - [x] **Wire up `modseq` writes in `upsert_folder_sync_state()`** — Fixed: `imap_initial.rs` was the only call site passing `None` — now passes `highest_modseq` from folder status. Delta sync in `imap_delta.rs` was already correct. `FolderSyncState.modseq` was already properly named.
 
-- [ ] **Deletion detection without QRESYNC** — For servers that support CONDSTORE but not QRESYNC (most servers), add periodic `UID SEARCH ALL` to get the full UID set, then diff against locally cached UIDs to find server-side deletions. Run at lower frequency (every 5–10 minutes) since deletion detection is less latency-sensitive than flag changes. Currently deletions are only caught during full syncs.
+- [x] **Deletion detection without QRESYNC** — Implemented: `detect_deleted_messages()` does UID SEARCH ALL + local diff, throttled to 10-minute intervals via `last_deletion_check_at` (migration v48). `run_deletion_detection()` cleans up DB/body store/search index. Integrated into `imap_delta_sync()` with thread reaggregation.
 
 - [ ] **QRESYNC VANISHED parsing (Phase 3)** — Send `ENABLE QRESYNC` via raw command, then `SELECT mailbox (QRESYNC (<uidvalidity> <modseq> [<known-uids>]))`. Parse `VANISHED (EARLIER) <uid-set>` untagged responses to get deleted UIDs in a single round-trip instead of the UID SEARCH diff approach. Requires a custom response parser since `imap-proto` doesn't handle VANISHED responses. Blocked on async-imap CHANGEDSINCE support (Issue #130).
 
@@ -197,7 +197,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [ ] **`PR_REPLICA_LIST` decoding for content mailbox routing** — Fetch extended property `0x6698` (Binary) from the FindFolder response to determine which content mailbox hosts a specific folder's items. Decode the base64 blob to extract the content mailbox GUID, construct `{GUID}@{domain}` as an SMTP address, then autodiscover that address to get the correct EWS endpoint. Track per-folder content mailbox mappings.
 
-- [ ] **Public folder DB schema** — Create tables: `public_folders` (hierarchy cache with folder_id, parent_id, display_name, folder_class, unread_count, effective_rights), `public_folder_items` (synced items), `public_folder_pins` (user-favorited folders + sync settings like depth and frequency), `public_folder_sync_state` (per-folder sync cursors using timestamps, since public folders don't support delta tokens).
+- [x] **Public folder DB schema** — Migration v47: `public_folders` (hierarchy + permissions), `public_folder_items` (messages), `public_folder_pins` (favorites + sync settings), `public_folder_sync_state` (per-folder cursors).
 
 - [ ] **Offline sync for pinned public folders** — Polling-based sync: `FindItem` with `DateTimeReceived >= last_sync_timestamp` for new items, match by `ItemId + ChangeKey` for updates, and periodic full `ItemId`-only `FindItem` + local diff for deletion detection. No change notifications or delta tokens available for public folders, so polling is the only option.
 
@@ -221,7 +221,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **Gmail `sendAs` signature fetch** — Implemented: `sync_signatures()` / `persist_signatures()` in `gmail/sync.rs`. Fetches via `list_send_as()`, upserts with SHA-256 hash for conflict detection, hooked into both initial and delta sync paths.
 
-- [ ] **Gmail bidirectional signature sync** — On local signature edit, push to Gmail via `PUT /gmail/v1/users/me/settings/sendAs/{sendAsEmail}`. Conflict resolution uses hash comparison (`server_html_hash`): if server changed and local didn't, update local; if local changed and server didn't, push; if both changed, prefer server and surface a conflict notification.
+- [x] **Gmail bidirectional signature sync** — Implemented: `sync_signatures()` now does full bidirectional sync with SHA-256 hash comparison. `push_signature_to_gmail()` via `update_send_as_signature()` API. Four-way conflict resolution (no-op, pull, push, server-wins).
 
 - [x] **JMAP Identity signature sync** — Implemented in `jmap/signatures.rs`: `sync_jmap_identity_signatures()` fetches all identities and upserts signatures with SHA-256 hashing. `push_signature_to_jmap()` pushes local edits back via `Identity/set`.
 

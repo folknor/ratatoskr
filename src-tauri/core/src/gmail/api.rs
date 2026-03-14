@@ -289,4 +289,23 @@ impl GmailClient {
         let resp: ListSendAsResponse = self.get("/settings/sendAs", db).await?;
         Ok(resp.send_as)
     }
+
+    /// Update the signature for a sendAs alias.
+    ///
+    /// Uses `PUT /settings/sendAs/{sendAsEmail}` with only the `signature` field.
+    /// Returns the updated `GmailSendAs` resource.
+    pub async fn update_send_as_signature(
+        &self,
+        send_as_email: &str,
+        signature_html: &str,
+        db: &DbState,
+    ) -> Result<GmailSendAs, String> {
+        let encoded = urlencoding::encode(send_as_email);
+        self.put(
+            &format!("/settings/sendAs/{encoded}"),
+            &json!({ "signature": signature_html }),
+            db,
+        )
+        .await
+    }
 }
