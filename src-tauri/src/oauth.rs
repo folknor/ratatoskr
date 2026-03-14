@@ -29,6 +29,13 @@ const GOOGLE_SCOPES: &str = concat!(
     "https://www.googleapis.com/auth/contacts.readonly ",
     "https://www.googleapis.com/auth/contacts.other.readonly"
 );
+/// Default Azure AD app registration for Ratatoskr (multi-tenant, public client).
+/// Users can override per-account via oauth_client_id in the accounts table.
+pub const MICROSOFT_DEFAULT_CLIENT_ID: &str = "6cc5a95e-c892-4f8c-a35f-9803d2685039";
+
+pub fn default_microsoft_client_id() -> &'static str {
+    MICROSOFT_DEFAULT_CLIENT_ID
+}
 const MICROSOFT_GRAPH_AUTH_URL: &str =
     "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
 const MICROSOFT_GRAPH_TOKEN_URL: &str =
@@ -175,6 +182,10 @@ impl GenericOAuthProvider {
             client_id,
             client_secret: None,
         }
+    }
+
+    pub fn microsoft_graph_default() -> Self {
+        Self::microsoft_graph(MICROSOFT_DEFAULT_CLIENT_ID.to_string())
     }
 
     fn is_microsoft(&self) -> bool {

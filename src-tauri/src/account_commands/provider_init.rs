@@ -232,15 +232,15 @@ pub async fn account_create_imap_oauth(
 #[tauri::command]
 pub async fn account_create_graph_via_oauth(
     app: AppHandle,
-    client_id: String,
+    client_id: Option<String>,
     db: State<'_, DbState>,
     graph: State<'_, GraphState>,
 ) -> Result<AccountResult, String> {
-    let oauth = crate::oauth::authorize_with_provider(
-        &app,
-        &GenericOAuthProvider::microsoft_graph(client_id.clone()),
-    )
-    .await?;
+    let provider = match &client_id {
+        Some(id) if !id.is_empty() => GenericOAuthProvider::microsoft_graph(id.clone()),
+        _ => GenericOAuthProvider::microsoft_graph_default(),
+    };
+    let oauth = crate::oauth::authorize_with_provider(&app, &provider).await?;
 
     let account_id = uuid::Uuid::new_v4().to_string();
     let expires_at = chrono::Utc::now().timestamp() + oauth.tokens.expires_in as i64;
@@ -254,7 +254,8 @@ pub async fn account_create_graph_via_oauth(
             .ok_or("Microsoft did not return a refresh token")?,
     )?;
 
-    let encrypted_client_id = encrypt_value(graph.encryption_key(), &client_id)?;
+    let actual_client_id = client_id.unwrap_or_else(|| crate::oauth::default_microsoft_client_id().to_string());
+    let encrypted_client_id = encrypt_value(graph.encryption_key(), &actual_client_id)?;
 
     db.with_conn({
         let id = account_id.clone();
@@ -492,16 +493,17 @@ pub async fn account_reauthorize_graph(
                 |row| row.get::<_, Option<String>>(0),
             )
             .map_err(|e| format!("Failed to read account credentials: {e}"))
-            .and_then(|cid| {
-                let cid = cid.filter(|s| !s.is_empty()).ok_or_else(|| {
-                    "Account has no stored OAuth credentials. Provide client_id to reauthorize."
-                        .to_string()
-                })?;
-                Ok(if crate::provider::crypto::is_encrypted(&cid) {
-                    crate::provider::crypto::decrypt_value(&encryption_key, &cid).unwrap_or(cid)
-                } else {
-                    cid
-                })
+            .map(|cid| {
+                match cid.filter(|s| !s.is_empty()) {
+                    Some(encrypted) => {
+                        if crate::provider::crypto::is_encrypted(&encrypted) {
+                            crate::provider::crypto::decrypt_value(&encryption_key, &encrypted).unwrap_or(encrypted)
+                        } else {
+                            encrypted
+                        }
+                    }
+                    None => crate::oauth::default_microsoft_client_id().to_string(),
+                }
             })
         })
         .await?
