@@ -21,9 +21,12 @@ pub fn compute_thread_aggregate(
     account_id: &str,
     thread_id: &str,
 ) -> Result<ThreadAggregate, String> {
+    // Exclude reaction-only messages (is_reaction = 1) from thread aggregates
+    // so emoji reactions don't inflate counts or override snippets.
     let message_count: i64 = tx
         .query_row(
-            "SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND account_id = ?2",
+            "SELECT COUNT(*) FROM messages \
+             WHERE thread_id = ?1 AND account_id = ?2 AND is_reaction = 0",
             rusqlite::params![thread_id, account_id],
             |row| row.get(0),
         )
@@ -32,7 +35,7 @@ pub fn compute_thread_aggregate(
     let is_read: bool = tx
         .query_row(
             "SELECT COUNT(*) FROM messages \
-             WHERE thread_id = ?1 AND account_id = ?2 AND is_read = 0",
+             WHERE thread_id = ?1 AND account_id = ?2 AND is_read = 0 AND is_reaction = 0",
             rusqlite::params![thread_id, account_id],
             |row| row.get::<_, i64>(0),
         )
@@ -42,7 +45,7 @@ pub fn compute_thread_aggregate(
     let is_starred: bool = tx
         .query_row(
             "SELECT COUNT(*) FROM messages \
-             WHERE thread_id = ?1 AND account_id = ?2 AND is_starred = 1",
+             WHERE thread_id = ?1 AND account_id = ?2 AND is_starred = 1 AND is_reaction = 0",
             rusqlite::params![thread_id, account_id],
             |row| row.get::<_, i64>(0),
         )
@@ -53,7 +56,7 @@ pub fn compute_thread_aggregate(
         .query_row(
             "SELECT COUNT(*) FROM attachments a \
              JOIN messages m ON a.message_id = m.id \
-             WHERE m.thread_id = ?1 AND m.account_id = ?2",
+             WHERE m.thread_id = ?1 AND m.account_id = ?2 AND m.is_reaction = 0",
             rusqlite::params![thread_id, account_id],
             |row| row.get::<_, i64>(0),
         )
@@ -63,7 +66,7 @@ pub fn compute_thread_aggregate(
     let (snippet, last_date): (String, i64) = tx
         .query_row(
             "SELECT COALESCE(snippet, ''), date FROM messages \
-             WHERE thread_id = ?1 AND account_id = ?2 \
+             WHERE thread_id = ?1 AND account_id = ?2 AND is_reaction = 0 \
              ORDER BY date DESC LIMIT 1",
             rusqlite::params![thread_id, account_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
@@ -73,7 +76,7 @@ pub fn compute_thread_aggregate(
     let subject: Option<String> = tx
         .query_row(
             "SELECT subject FROM messages \
-             WHERE thread_id = ?1 AND account_id = ?2 \
+             WHERE thread_id = ?1 AND account_id = ?2 AND is_reaction = 0 \
              ORDER BY date ASC LIMIT 1",
             rusqlite::params![thread_id, account_id],
             |row| row.get(0),

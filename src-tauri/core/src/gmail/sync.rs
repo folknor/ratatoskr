@@ -404,6 +404,7 @@ fn store_thread_to_db(
     upsert_attachments(&tx, account_id, messages)?;
     upsert_thread_record(&tx, account_id, thread_id, messages)?;
     set_thread_labels(&tx, account_id, thread_id, messages)?;
+    insert_reactions(&tx, account_id, messages)?;
 
     tx.commit().map_err(|e| format!("commit: {e}"))?;
     Ok(())
@@ -479,9 +480,9 @@ fn upsert_single_message(
           is_read, is_starred, raw_size, internal_date, \
           list_unsubscribe, list_unsubscribe_post, auth_results, \
           message_id_header, references_header, in_reply_to_header, body_cached, \
-          mdn_requested) \
+          mdn_requested, is_reaction) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, \
-                 ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
+                 ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
         rusqlite::params![
             msg.id,
             account_id,
@@ -507,6 +508,7 @@ fn upsert_single_message(
             msg.in_reply_to_header,
             if has_body { 1i64 } else { 0i64 },
             msg.mdn_requested,
+            msg.is_reaction,
         ],
     )
     .map_err(|e| format!("upsert message: {e}"))?;
@@ -544,6 +546,59 @@ fn upsert_attachments(
             )
             .map_err(|e| format!("upsert attachment: {e}"))?;
         }
+    }
+    Ok(())
+}
+
+/// For each reaction message, resolve the target message via `In-Reply-To` header
+/// and insert into `message_reactions`.
+fn insert_reactions(
+    tx: &rusqlite::Transaction,
+    account_id: &str,
+    messages: &[ParsedGmailMessage],
+) -> Result<(), String> {
+    for msg in messages {
+        let Some(emoji) = &msg.reaction_emoji else {
+            continue;
+        };
+        let Some(in_reply_to) = &msg.in_reply_to_header else {
+            log::warn!(
+                "Reaction message {} has no In-Reply-To header, skipping",
+                msg.id
+            );
+            continue;
+        };
+        let Some(reactor_email) = &msg.from_address else {
+            continue;
+        };
+
+        // Look up the target message by its Message-ID header
+        let target_message_id: Option<String> = tx
+            .query_row(
+                "SELECT id FROM messages WHERE message_id_header = ?1 AND account_id = ?2 LIMIT 1",
+                rusqlite::params![in_reply_to, account_id],
+                |row| row.get(0),
+            )
+            .ok();
+
+        let target_id = target_message_id.as_deref().unwrap_or(in_reply_to.as_str());
+
+        tx.execute(
+            "INSERT INTO message_reactions \
+             (message_id, account_id, reactor_email, reactor_name, reaction_type, reacted_at, source) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'gmail_mime') \
+             ON CONFLICT(message_id, account_id, reactor_email, reaction_type) DO UPDATE SET \
+               reactor_name = ?4, reacted_at = ?6",
+            rusqlite::params![
+                target_id,
+                account_id,
+                reactor_email,
+                msg.from_name,
+                emoji,
+                msg.date,
+            ],
+        )
+        .map_err(|e| format!("insert reaction: {e}"))?;
     }
     Ok(())
 }

@@ -28,6 +28,11 @@ pub const SYSTEM_FOLDER_ROLES: &[SystemFolderRole] = &[
             "draftbox",
             "brouillons",
             "[gmail]/drafts",
+            "entwuerfe",
+            "entw\u{00FC}rfe",
+            "borradores",
+            "bozze",
+            "rascunhos",
         ],
     },
     SystemFolderRole {
@@ -36,7 +41,15 @@ pub const SYSTEM_FOLDER_ROLES: &[SystemFolderRole] = &[
         jmap_role: Some("sent"),
         graph_alias: Some("sentitems"),
         imap_special_use: Some("\\Sent"),
-        imap_name_aliases: &["sent", "sent items", "sent mail", "[gmail]/sent mail"],
+        imap_name_aliases: &[
+            "sent",
+            "sent items",
+            "sent mail",
+            "[gmail]/sent mail",
+            "gesendet",
+            "enviados",
+            "posta inviata",
+        ],
     },
     SystemFolderRole {
         label_id: "TRASH",
@@ -53,6 +66,10 @@ pub const SYSTEM_FOLDER_ROLES: &[SystemFolderRole] = &[
             "corbeille",
             "unsolbox",
             "[gmail]/trash",
+            "papierkorb",
+            "papelera",
+            "cestino",
+            "lixeira",
         ],
     },
     SystemFolderRole {
@@ -61,7 +78,7 @@ pub const SYSTEM_FOLDER_ROLES: &[SystemFolderRole] = &[
         jmap_role: Some("junk"),
         graph_alias: Some("junkemail"),
         imap_special_use: Some("\\Junk"),
-        imap_name_aliases: &["junk", "junk e-mail", "spam", "[gmail]/spam"],
+        imap_name_aliases: &["junk", "junk e-mail", "spam", "[gmail]/spam", "bulk mail"],
     },
     SystemFolderRole {
         label_id: "archive",

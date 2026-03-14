@@ -132,6 +132,8 @@ pub struct GraphCreateMessage {
     pub importance: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub internet_message_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub single_value_extended_properties: Option<Vec<SingleValueExtendedProperty>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -139,6 +141,15 @@ pub struct GraphCreateMessage {
 pub struct GraphBodyInput {
     pub content_type: String,
     pub content: String,
+}
+
+/// A single-value legacy extended property (MAPI named property).
+///
+/// Used for Exchange-specific features like `PidTagDeferredSendTime` (tag 0x3FEF).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SingleValueExtendedProperty {
+    pub id: String,
+    pub value: String,
 }
 
 /// For PATCH updates to existing messages.
@@ -151,6 +162,8 @@ pub struct GraphMessagePatch {
     pub flag: Option<GraphFlagInput>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub categories: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub single_value_extended_properties: Option<Vec<SingleValueExtendedProperty>>,
 }
 
 #[derive(Debug, Serialize)]

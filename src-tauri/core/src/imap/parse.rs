@@ -24,6 +24,9 @@ pub fn detect_special_use(name: &async_imap::types::Name) -> Option<String> {
             NameAttribute::Archive => Some("\\Archive"),
             NameAttribute::All => Some("\\All"),
             NameAttribute::Flagged => Some("\\Flagged"),
+            NameAttribute::Extension(s) if s.eq_ignore_ascii_case("\\Important") => {
+                Some("\\Important")
+            }
             _ => None,
         };
         if let Some(s) = special {
@@ -89,9 +92,27 @@ pub fn parse_message(
     let bcc_addresses = format_address_list(message.bcc());
     let reply_to = format_address_list(message.reply_to());
 
-    // Body
+    // Body — skip AMP parts (text/x-amp-html) which contain tracking-heavy content.
+    // mail-parser already classifies these as TextOther (not TextHtml), so body_html()
+    // won't return them, but we guard against future parser changes.
     let body_text = message.body_text(0).map(|s| s.to_string());
-    let body_html = message.body_html(0).map(|s| s.to_string());
+    let body_html = message.body_html(0).and_then(|html| {
+        // Verify the selected HTML part isn't AMP by checking its content type
+        if let Some(&part_idx) = message.html_body.first() {
+            if let Some(part) = message.parts.get(part_idx as usize) {
+                if let Some(ct) = part.content_type() {
+                    if let Some(subtype) = ct.subtype() {
+                        if crate::provider::email_parsing::is_amp_content_type(
+                            &format!("{}/{subtype}", ct.ctype()),
+                        ) {
+                            return None;
+                        }
+                    }
+                }
+            }
+        }
+        Some(html.to_string())
+    });
 
     let snippet = body_text
         .as_ref()

@@ -67,3 +67,4 @@ xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 sha2 = "0.10"
 unicode-segmentation = "1.12"
 nucleo-matcher = "0.3"
+resvg = { version = "0.47", default-features = false }

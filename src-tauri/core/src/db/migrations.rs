@@ -925,6 +925,140 @@ static MIGRATIONS: &[Migration] = &[
             CREATE INDEX IF NOT EXISTS idx_categories_account ON categories(account_id);
         "#,
     },
+    Migration {
+        version: 37,
+        description: "Message reactions table for exchange/gmail/imap emoji reactions",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS message_reactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                reactor_email TEXT NOT NULL,
+                reactor_name TEXT,
+                reaction_type TEXT NOT NULL,
+                reacted_at INTEGER,
+                source TEXT NOT NULL,
+                UNIQUE(message_id, account_id, reactor_email, reaction_type)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_message_reactions_message ON message_reactions(message_id, account_id);
+        "#,
+    },
+    Migration {
+        version: 38,
+        description: "BIMI indicator cache for sender domain logo lookups",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS bimi_cache (
+                domain TEXT PRIMARY KEY,
+                has_bimi INTEGER NOT NULL DEFAULT 0,
+                logo_uri TEXT,
+                authority_uri TEXT,
+                fetched_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                expires_at INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_bimi_cache_expires ON bimi_cache(expires_at);
+        "#,
+    },
+    Migration {
+        version: 39,
+        description: "Cloud attachments table for large file upload tracking",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS cloud_attachments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id TEXT,
+                account_id TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                cloud_url TEXT,
+                file_name TEXT,
+                file_size INTEGER,
+                mime_type TEXT,
+                drive_item_id TEXT,
+                upload_session_url TEXT,
+                upload_status TEXT NOT NULL DEFAULT 'pending',
+                bytes_uploaded INTEGER NOT NULL DEFAULT 0,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_cloud_attachments_message ON cloud_attachments(message_id);
+            CREATE INDEX IF NOT EXISTS idx_cloud_attachments_status ON cloud_attachments(upload_status) WHERE upload_status != 'sent';
+        "#,
+    },
+    Migration {
+        version: 40,
+        description: "Mentions table and is_mentioned flag on messages",
+        sql: r#"
+            ALTER TABLE messages ADD COLUMN is_mentioned INTEGER NOT NULL DEFAULT 0;
+            CREATE INDEX IF NOT EXISTS idx_messages_is_mentioned ON messages(is_mentioned) WHERE is_mentioned = 1;
+
+            CREATE TABLE IF NOT EXISTS mentions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                mention_id TEXT,
+                mentioned_name TEXT,
+                mentioned_address TEXT NOT NULL,
+                created_by_name TEXT,
+                created_by_address TEXT,
+                created_at INTEGER,
+                UNIQUE(message_id, account_id, mentioned_address)
+            );
+            CREATE INDEX IF NOT EXISTS idx_mentions_message ON mentions(message_id, account_id);
+        "#,
+    },
+    Migration {
+        version: 41,
+        description: "Signature sync columns for bidirectional provider sync",
+        sql: r#"
+            ALTER TABLE signatures ADD COLUMN server_id TEXT;
+            ALTER TABLE signatures ADD COLUMN body_text TEXT;
+            ALTER TABLE signatures ADD COLUMN is_reply_default INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE signatures ADD COLUMN source TEXT NOT NULL DEFAULT 'local';
+            ALTER TABLE signatures ADD COLUMN last_synced_at INTEGER;
+            ALTER TABLE signatures ADD COLUMN server_html_hash TEXT;
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_signatures_server ON signatures(account_id, server_id);
+        "#,
+    },
+    Migration {
+        version: 42,
+        description: "Send identities table for unified From/delegate/alias management",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS send_identities (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id TEXT NOT NULL,
+                email TEXT NOT NULL,
+                display_name TEXT,
+                mailbox_id TEXT,
+                send_mode TEXT NOT NULL DEFAULT 'send_as',
+                save_to_personal_sent INTEGER NOT NULL DEFAULT 1,
+                is_primary INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(account_id, email)
+            );
+            CREATE INDEX IF NOT EXISTS idx_send_identities_account ON send_identities(account_id);
+        "#,
+    },
+    Migration {
+        version: 43,
+        description: "Server delegation columns for scheduled emails",
+        sql: r#"
+            ALTER TABLE scheduled_emails ADD COLUMN delegation TEXT NOT NULL DEFAULT 'local';
+            ALTER TABLE scheduled_emails ADD COLUMN remote_message_id TEXT;
+            ALTER TABLE scheduled_emails ADD COLUMN remote_status TEXT;
+            ALTER TABLE scheduled_emails ADD COLUMN timezone TEXT;
+            ALTER TABLE scheduled_emails ADD COLUMN from_email TEXT;
+            ALTER TABLE scheduled_emails ADD COLUMN error_message TEXT;
+            ALTER TABLE scheduled_emails ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0;
+        "#,
+    },
+    Migration {
+        version: 44,
+        description: "Flag reaction-only messages for hiding from thread display",
+        sql: r#"
+            ALTER TABLE messages ADD COLUMN is_reaction INTEGER NOT NULL DEFAULT 0;
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -1164,6 +1298,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))
             .expect("query");
-        assert_eq!(max_ver, 34);
+        assert_eq!(max_ver, 44);
     }
 }

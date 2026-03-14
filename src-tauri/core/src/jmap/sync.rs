@@ -639,6 +639,7 @@ fn store_thread_to_db(
     upsert_attachments(tx, account_id, messages)?;
     upsert_thread_record(tx, account_id, thread_id, messages)?;
     set_thread_labels(tx, account_id, thread_id, messages)?;
+    sync_keyword_categories(tx, account_id, thread_id, messages)?;
     Ok(())
 }
 
@@ -767,6 +768,67 @@ fn upsert_attachments(
             .map_err(|e| format!("upsert attachment: {e}"))?;
         }
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Keyword → category sync
+// ---------------------------------------------------------------------------
+
+/// Ensure non-system JMAP keywords exist in the `categories` table and link
+/// the thread to the first keyword category found across its messages.
+///
+/// JMAP keywords have no color metadata, so colors are left NULL.
+/// Only updates `thread_categories` when the existing assignment is not manual.
+fn sync_keyword_categories(
+    tx: &rusqlite::Transaction,
+    account_id: &str,
+    thread_id: &str,
+    messages: &[ParsedJmapMessage],
+) -> Result<(), String> {
+    // Collect all unique keyword categories across messages in this thread
+    let mut unique_keywords: Vec<String> = messages
+        .iter()
+        .flat_map(|msg| msg.keyword_categories.iter().cloned())
+        .collect();
+    unique_keywords.sort();
+    unique_keywords.dedup();
+
+    if unique_keywords.is_empty() {
+        return Ok(());
+    }
+
+    // Upsert each keyword into the categories table
+    for keyword in &unique_keywords {
+        tx.execute(
+            "INSERT INTO categories \
+             (id, account_id, display_name, color_preset, color_bg, color_fg, \
+              provider_id, sync_state, sort_order) \
+             VALUES (?1, ?2, ?3, NULL, NULL, NULL, ?4, 'synced', 0) \
+             ON CONFLICT(account_id, display_name) DO UPDATE SET \
+               provider_id = ?4, sync_state = 'synced'",
+            rusqlite::params![
+                format!("kw_{keyword}"),
+                account_id,
+                keyword,
+                keyword,
+            ],
+        )
+        .map_err(|e| format!("upsert jmap keyword category: {e}"))?;
+    }
+
+    // Link thread to the first keyword category (don't overwrite manual assignments)
+    let first_category = &unique_keywords[0];
+    tx.execute(
+        "INSERT INTO thread_categories (account_id, thread_id, category, is_manual) \
+         VALUES (?1, ?2, ?3, 0) \
+         ON CONFLICT(account_id, thread_id) DO UPDATE SET \
+           category = ?3 \
+         WHERE is_manual = 0",
+        rusqlite::params![account_id, thread_id, first_category],
+    )
+    .map_err(|e| format!("upsert jmap thread keyword category: {e}"))?;
+
     Ok(())
 }
 

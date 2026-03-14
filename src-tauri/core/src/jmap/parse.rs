@@ -43,6 +43,8 @@ pub struct ParsedJmapMessage {
     pub list_unsubscribe_post: Option<String>,
     /// Whether the sender requested a read receipt (Disposition-Notification-To)
     pub mdn_requested: bool,
+    /// Non-system JMAP keywords (those not starting with `$`) that map to categories.
+    pub keyword_categories: Vec<String>,
 }
 
 impl crate::seen_addresses::MessageAddresses for ParsedJmapMessage {
@@ -149,6 +151,13 @@ pub fn parse_jmap_email(
     let is_read = keywords.contains(&"$seen");
     let is_starred = keywords.contains(&"$flagged");
 
+    // Non-system keywords are user-defined categories (system keywords start with '$')
+    let keyword_categories: Vec<String> = keywords
+        .iter()
+        .filter(|kw| !kw.starts_with('$'))
+        .map(|kw| (*kw).to_string())
+        .collect();
+
     let mailbox_ids = email.mailbox_ids();
     let label_ids = get_labels_for_email(&mailbox_ids, &keywords, mailbox_map);
 
@@ -227,6 +236,7 @@ pub fn parse_jmap_email(
         list_unsubscribe,
         list_unsubscribe_post,
         mdn_requested,
+        keyword_categories,
     })
 }
 
@@ -249,6 +259,10 @@ fn extract_header_text(hv: Option<&HeaderValue>) -> Option<String> {
 }
 
 /// Extract body text or HTML from the email's bodyValues.
+///
+/// When extracting HTML, skips any `text/x-amp-html` parts — AMP emails contain
+/// tracking-heavy interactive content. Falls through to subsequent parts so the
+/// caller gets `text/html` if available.
 fn extract_body_value(email: &Email, html: bool) -> Option<String> {
     let parts = if html {
         email.html_body()?
@@ -256,9 +270,21 @@ fn extract_body_value(email: &Email, html: bool) -> Option<String> {
         email.text_body()?
     };
 
-    let part = parts.first()?;
-    let part_id = part.part_id()?;
+    for part in parts {
+        // Skip AMP body parts — prefer regular text/html
+        if html {
+            if let Some(ct) = part.content_type() {
+                if crate::provider::email_parsing::is_amp_content_type(ct) {
+                    continue;
+                }
+            }
+        }
 
-    // Access bodyValues through the email's body_values field
-    email.body_value(part_id).map(|bv| bv.value().to_string())
+        let part_id = part.part_id()?;
+        if let Some(bv) = email.body_value(part_id) {
+            return Some(bv.value().to_string());
+        }
+    }
+
+    None
 }

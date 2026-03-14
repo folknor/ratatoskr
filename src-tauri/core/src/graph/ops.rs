@@ -12,10 +12,15 @@ use super::folder_mapper::FolderMap;
 use super::types::{
     BatchRequest, BatchRequestItem, GraphAttachment, GraphCreateFolderRequest, GraphFlagInput,
     GraphMailFolder, GraphMessagePatch, GraphMoveRequest, GraphRenameFolderRequest,
+    SingleValueExtendedProperty,
 };
 
 /// Microsoft Graph allows max 20 requests per `/$batch` call.
 const BATCH_CHUNK_SIZE: usize = 20;
+
+/// MAPI property tag for `PidTagDeferredSendTime` — tells Exchange to hold
+/// the message server-side until the specified UTC time before sending.
+const PID_TAG_DEFERRED_SEND_TIME: &str = "SystemTime 0x3FEF";
 
 /// Graph implementation of the provider operations trait.
 pub struct GraphOps {
@@ -412,6 +417,83 @@ impl ProviderOps for GraphOps {
     }
 }
 
+// ── Deferred delivery (Exchange scheduled send) ─────────────
+
+impl GraphOps {
+    /// Schedule a deferred send via Exchange's `PidTagDeferredSendTime`.
+    ///
+    /// Creates a draft from raw MIME, sets the deferred send time as a
+    /// `singleValueLegacyExtendedProperty`, and then sends it. Exchange
+    /// holds the message server-side until `send_at_utc` before delivering.
+    ///
+    /// Returns the draft/message ID.
+    pub async fn schedule_send(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        raw_base64url: &str,
+        thread_id: Option<&str>,
+        send_at_utc: &str,
+    ) -> Result<String, String> {
+        let draft_id =
+            create_draft_with_deferred_time(&self.client, ctx, raw_base64url, thread_id, send_at_utc)
+                .await?;
+
+        // Send the draft — Exchange will hold it until the deferred time
+        let enc_draft_id = urlencoding::encode(&draft_id);
+        self.client
+            .post_no_content::<()>(&format!("/me/messages/{enc_draft_id}/send"), None, ctx.db)
+            .await?;
+
+        log::info!("Scheduled deferred send for {send_at_utc}, draft_id={draft_id}");
+        Ok(draft_id)
+    }
+
+    /// Cancel a deferred send by deleting the message before its scheduled time.
+    ///
+    /// The message must still be in the Drafts/Outbox folder (not yet sent).
+    /// After the deferred send time has passed, the message is already delivered
+    /// and cannot be cancelled.
+    pub async fn cancel_scheduled_send(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        message_id: &str,
+    ) -> Result<(), String> {
+        let enc_id = urlencoding::encode(message_id);
+        self.client
+            .delete(&format!("/me/messages/{enc_id}"), ctx.db)
+            .await?;
+        log::info!("Cancelled deferred send for message_id={message_id}");
+        Ok(())
+    }
+
+    /// Reschedule a deferred send by updating the `PidTagDeferredSendTime`
+    /// extended property on the message to a new UTC time.
+    ///
+    /// The message must still be pending (not yet delivered by Exchange).
+    pub async fn reschedule_send(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        message_id: &str,
+        new_send_at_utc: &str,
+    ) -> Result<(), String> {
+        let enc_id = urlencoding::encode(message_id);
+        let patch = GraphMessagePatch {
+            single_value_extended_properties: Some(vec![SingleValueExtendedProperty {
+                id: PID_TAG_DEFERRED_SEND_TIME.to_string(),
+                value: new_send_at_utc.to_string(),
+            }]),
+            ..Default::default()
+        };
+        self.client
+            .patch(&format!("/me/messages/{enc_id}"), &patch, ctx.db)
+            .await?;
+        log::info!(
+            "Rescheduled deferred send to {new_send_at_utc} for message_id={message_id}"
+        );
+        Ok(())
+    }
+}
+
 // ── Helper functions ────────────────────────────────────────
 
 /// Get the cached folder map or return an error if not built yet.
@@ -750,6 +832,45 @@ async fn send_via_draft(
     Ok(draft_id)
 }
 
+/// Create a draft with the `PidTagDeferredSendTime` extended property set.
+///
+/// This is the same as `create_draft_impl` but injects the deferred send time
+/// into the message body before creating it on the server.
+async fn create_draft_with_deferred_time(
+    client: &GraphClient,
+    ctx: &ProviderCtx<'_>,
+    raw_base64url: &str,
+    _thread_id: Option<&str>,
+    send_at_utc: &str,
+) -> Result<String, String> {
+    let raw_bytes = crate::provider::encoding::decode_base64url_nopad(raw_base64url)
+        .map_err(|e| format!("Failed to decode base64url: {e}"))?;
+
+    let parsed = mail_parser::MessageParser::default()
+        .parse(&raw_bytes)
+        .ok_or("Failed to parse MIME message")?;
+
+    let mut create_msg = mime_to_graph_message(&parsed)?;
+
+    // Inject the deferred send time extended property
+    create_msg.single_value_extended_properties = Some(vec![SingleValueExtendedProperty {
+        id: PID_TAG_DEFERRED_SEND_TIME.to_string(),
+        value: send_at_utc.to_string(),
+    }]);
+
+    let draft: serde_json::Value = client.post("/me/messages", &create_msg, ctx.db).await?;
+
+    let draft_id = draft
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or("Draft response missing id")?
+        .to_string();
+
+    upload_attachments_from_mime(client, ctx, &draft_id, &parsed).await?;
+
+    Ok(draft_id)
+}
+
 /// Create a draft message from raw MIME (base64url-encoded).
 #[allow(clippy::too_many_lines)]
 async fn create_draft_impl(
@@ -842,6 +963,7 @@ fn mime_to_graph_message(
         reply_to,
         importance: None,
         internet_message_id: message_id,
+        single_value_extended_properties: None,
     })
 }
 

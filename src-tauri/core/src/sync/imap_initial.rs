@@ -355,6 +355,7 @@ async fn sync_single_folder(
     }
 
     let uidvalidity = search_result.folder_status.uidvalidity;
+    let highest_modseq = search_result.folder_status.highest_modseq;
     let mut last_uid: u32 = 0;
     let mut folder_fetched: u64 = 0;
     let mut folder_stored: u64 = 0;
@@ -476,7 +477,7 @@ async fn sync_single_folder(
         let sync_at = chrono::Utc::now().timestamp();
         db.with_conn(move |conn| {
             pipeline::upsert_folder_sync_state(
-                conn, &aid, &fp, uidvalidity, last_uid, sync_at, None,
+                conn, &aid, &fp, uidvalidity, last_uid, sync_at, highest_modseq,
             )
         })
         .await?;

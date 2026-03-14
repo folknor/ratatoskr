@@ -1,4 +1,5 @@
 pub mod attachment_cache;
+pub mod bimi;
 pub mod body_store;
 pub mod categorization;
 pub mod command_palette;

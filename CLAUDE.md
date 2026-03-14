@@ -1,5 +1,7 @@
 # Ratatoskr
 
+**Subagents must always be launched in the foreground** (never use `run_in_background: true`) so the user can approve tool requests.
+
 Tauri v2 desktop email client migrating to pure Rust (iced UI). Cargo workspace with two crates:
 
 - **`ratatoskr-core`** (`src-tauri/core/`, ~22k lines) — Framework-agnostic business logic: providers, sync, threading, filters, search, DB, etc.

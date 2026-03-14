@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::provider::attachment_dedup::{
     dedup_by_key, prefer_missing_clone, prefer_non_placeholder_filename,
@@ -9,6 +9,16 @@ use crate::provider::headers::find_header_value_case_insensitive;
 
 use super::auth_parser::parse_authentication_results;
 use super::types::{GmailHeader, GmailMessage, GmailPayload};
+
+/// The MIME type used by Gmail for emoji reaction messages.
+const REACTION_MIME_TYPE: &str = "text/vnd.google.email-reaction+json";
+
+/// JSON payload inside a Gmail reaction MIME part.
+#[derive(Debug, Deserialize)]
+struct GmailReactionPayload {
+    emoji: String,
+    // version field is present but unused
+}
 
 /// A parsed attachment extracted from a Gmail message.
 #[derive(Debug, Clone, Serialize)]
@@ -56,6 +66,10 @@ pub struct ParsedGmailMessage {
     pub message_id_header: Option<String>,
     pub references_header: Option<String>,
     pub in_reply_to_header: Option<String>,
+    /// True when this message is a Gmail emoji reaction (not a real message).
+    pub is_reaction: bool,
+    /// The emoji from a reaction message, if any.
+    pub reaction_emoji: Option<String>,
 }
 
 impl crate::seen_addresses::MessageAddresses for ParsedGmailMessage {
@@ -99,6 +113,10 @@ pub fn parse_gmail_message(msg: &GmailMessage) -> ParsedGmailMessage {
     let auth_results =
         parse_authentication_results(headers).and_then(|r| serde_json::to_string(&r).ok());
 
+    // Detect Gmail emoji reaction messages
+    let reaction_emoji = payload.and_then(extract_reaction_emoji);
+    let is_reaction = reaction_emoji.is_some();
+
     let internal_date = msg
         .internal_date
         .as_deref()
@@ -134,6 +152,8 @@ pub fn parse_gmail_message(msg: &GmailMessage) -> ParsedGmailMessage {
             .or_else(|| get_header(headers, "Message-Id")),
         references_header: get_header(headers, "References"),
         in_reply_to_header: get_header(headers, "In-Reply-To"),
+        is_reaction,
+        reaction_emoji,
     }
 }
 
@@ -142,8 +162,12 @@ fn get_header(headers: &[GmailHeader], name: &str) -> Option<String> {
 }
 
 /// Recursively extract a body part matching the given MIME type.
+///
+/// Skips `text/x-amp-html` parts — AMP emails contain tracking-heavy
+/// interactive content that should never be selected as the body.
 fn extract_body(part: &GmailPayload, mime_type: &str) -> Option<String> {
-    if part.mime_type == mime_type
+    if !crate::provider::email_parsing::is_amp_content_type(&part.mime_type)
+        && part.mime_type == mime_type
         && let Some(body) = &part.body
         && let Some(data) = &body.data
     {
@@ -255,6 +279,30 @@ fn collect_attachments(part: &GmailPayload, results: &mut Vec<ParsedAttachment>)
     for child in &part.parts {
         collect_attachments(child, results);
     }
+}
+
+/// Recursively search for a `text/vnd.google.email-reaction+json` MIME part
+/// and parse the emoji from its JSON body.
+fn extract_reaction_emoji(part: &GmailPayload) -> Option<String> {
+    if part.mime_type == REACTION_MIME_TYPE {
+        if let Some(body) = &part.body
+            && let Some(data) = &body.data
+            && let Some(decoded) = decode_base64url(data)
+        {
+            if let Ok(payload) = serde_json::from_str::<GmailReactionPayload>(&decoded) {
+                return Some(payload.emoji);
+            }
+        }
+        return None;
+    }
+
+    for child in &part.parts {
+        if let Some(emoji) = extract_reaction_emoji(child) {
+            return Some(emoji);
+        }
+    }
+
+    None
 }
 
 /// Decode Gmail's base64url-encoded body data to a UTF-8 string.

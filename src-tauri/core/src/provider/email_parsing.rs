@@ -1,3 +1,11 @@
+/// Returns `true` if the MIME type represents AMP email content (`text/x-amp-html`).
+///
+/// AMP emails contain tracking-heavy interactive content that should be blocked.
+/// Prefer `text/html` (or `text/plain` as fallback) over AMP parts.
+pub fn is_amp_content_type(mime_type: &str) -> bool {
+    mime_type.eq_ignore_ascii_case("text/x-amp-html")
+}
+
 pub fn parse_single_address_header(raw: Option<&str>) -> (Option<String>, Option<String>) {
     let Some(raw) = raw else {
         return (None, None);
@@ -44,7 +52,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{format_address_list, format_name_addr, parse_single_address_header};
+    use super::{
+        format_address_list, format_name_addr, is_amp_content_type, parse_single_address_header,
+    };
 
     #[test]
     fn parses_name_addr_header() {
@@ -70,6 +80,16 @@ mod tests {
             format_name_addr(None, "test@example.com"),
             "test@example.com"
         );
+    }
+
+    #[test]
+    fn detects_amp_content_type() {
+        assert!(is_amp_content_type("text/x-amp-html"));
+        assert!(is_amp_content_type("Text/X-Amp-Html"));
+        assert!(is_amp_content_type("TEXT/X-AMP-HTML"));
+        assert!(!is_amp_content_type("text/html"));
+        assert!(!is_amp_content_type("text/plain"));
+        assert!(!is_amp_content_type("application/x-amp-html"));
     }
 
     #[test]
