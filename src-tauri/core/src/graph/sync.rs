@@ -274,6 +274,21 @@ pub(crate) async fn graph_delta_sync(
         affected_thread_ids.extend(folder_affected);
     }
 
+    // Reaction refresh: every 5th cycle.
+    // Exchange reactions do NOT update lastModifiedDateTime or changeKey on messages,
+    // so delta queries miss reaction changes entirely. To compensate, we periodically
+    // re-fetch reaction extended properties for messages that already have reactions.
+    if cycle.is_multiple_of(5) {
+        match refresh_reactions_for_recent_messages(client, ctx.db, ctx.account_id).await {
+            Ok(count) => {
+                if count > 0 {
+                    log::info!("Graph reaction refresh: updated {count} message(s)");
+                }
+            }
+            Err(e) => log::warn!("Graph reaction refresh failed (non-fatal): {e}"),
+        }
+    }
+
     // Contacts + categories delta sync: every 20th cycle (change rarely)
     if cycle.is_multiple_of(20) {
         if let Err(e) =
@@ -1064,6 +1079,205 @@ fn insert_exchange_reactions(
     }
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Reaction delta refresh
+// ---------------------------------------------------------------------------
+
+/// Re-fetch Exchange reaction extended properties for messages that already
+/// have reactions in the DB.
+///
+/// Exchange reactions do NOT update `lastModifiedDateTime` or `changeKey` on
+/// messages, so delta queries miss reaction changes entirely. This function
+/// compensates by periodically polling reaction properties for messages that
+/// we know have had reactions before (i.e., have rows in `message_reactions`).
+///
+/// Uses `$batch` to fetch up to 20 messages per API call (Graph batch limit).
+/// Returns the number of messages whose reactions were updated.
+pub(crate) async fn refresh_reactions_for_recent_messages(
+    client: &GraphClient,
+    db: &DbState,
+    account_id: &str,
+) -> Result<usize, String> {
+    use super::types::{
+        BatchRequest, BatchRequestItem, REACTIONS_GUID, SingleValueExtendedProperty,
+    };
+
+    // Find message IDs that have existing reaction rows (excluding the __count__ metadata)
+    // or were recently viewed. Limit to 60 to keep API cost bounded (3 batch calls max).
+    let aid = account_id.to_string();
+    let message_ids: Vec<String> = db
+        .with_conn(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT DISTINCT mr.message_id FROM message_reactions mr \
+                     JOIN messages m ON m.id = mr.message_id AND m.account_id = mr.account_id \
+                     WHERE mr.account_id = ?1 AND mr.source = 'exchange_native' \
+                     ORDER BY m.date DESC \
+                     LIMIT 60",
+                )
+                .map_err(|e| format!("prepare reaction refresh query: {e}"))?;
+            let rows = stmt
+                .query_map(rusqlite::params![aid], |row| row.get::<_, String>(0))
+                .map_err(|e| format!("query reaction messages: {e}"))?;
+            let mut ids = Vec::new();
+            for row in rows {
+                ids.push(row.map_err(|e| format!("read reaction message id: {e}"))?);
+            }
+            Ok(ids)
+        })
+        .await?;
+
+    if message_ids.is_empty() {
+        return Ok(0);
+    }
+
+    let owner_reaction_id = format!("String {REACTIONS_GUID} Name OwnerReactionType");
+    let reactions_count_id = format!("Integer {REACTIONS_GUID} Name ReactionsCount");
+    let expand_filter = format!(
+        "$filter=id eq '{}' or id eq '{}'",
+        owner_reaction_id, reactions_count_id
+    );
+
+    // Look up the authenticated user's email for reaction rows
+    let aid2 = account_id.to_string();
+    let owner_email: String = db
+        .with_conn(move |conn| {
+            conn.query_row(
+                "SELECT email FROM accounts WHERE id = ?1",
+                rusqlite::params![aid2],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("lookup account email: {e}"))
+        })
+        .await?;
+
+    let mut updated_count: usize = 0;
+
+    // Process in batches of 20 (Graph batch limit)
+    for chunk in message_ids.chunks(20) {
+        let requests: Vec<BatchRequestItem> = chunk
+            .iter()
+            .enumerate()
+            .map(|(i, msg_id)| {
+                let enc_id = urlencoding::encode(msg_id);
+                BatchRequestItem {
+                    id: i.to_string(),
+                    method: "GET".to_string(),
+                    url: format!(
+                        "/me/messages/{enc_id}/singleValueExtendedProperties?{expand_filter}"
+                    ),
+                    body: None,
+                    headers: None,
+                }
+            })
+            .collect();
+
+        let batch_req = BatchRequest { requests };
+        let batch_resp = client.post_batch(&batch_req, db).await?;
+
+        // Collect reaction updates from batch responses
+        let mut reaction_updates: Vec<(String, Option<String>, Option<i64>)> = Vec::new();
+
+        for resp_item in &batch_resp.responses {
+            if resp_item.status != 200 {
+                continue;
+            }
+
+            let idx: usize = resp_item.id.parse().unwrap_or(usize::MAX);
+            let Some(msg_id) = chunk.get(idx) else {
+                continue;
+            };
+
+            // Parse the extended properties from the response
+            let mut owner_reaction: Option<String> = None;
+            let mut reactions_count: Option<i64> = None;
+
+            if let Some(body) = &resp_item.body {
+                if let Some(values) = body.get("value").and_then(|v| v.as_array()) {
+                    for prop_val in values {
+                        if let Ok(prop) =
+                            serde_json::from_value::<SingleValueExtendedProperty>(prop_val.clone())
+                        {
+                            if prop.id.eq_ignore_ascii_case(&owner_reaction_id) {
+                                let val = prop.value.trim();
+                                if !val.is_empty() {
+                                    owner_reaction = Some(val.to_string());
+                                }
+                            } else if prop.id.eq_ignore_ascii_case(&reactions_count_id) {
+                                reactions_count = prop.value.trim().parse::<i64>().ok();
+                            }
+                        }
+                    }
+                }
+            }
+
+            reaction_updates.push((msg_id.clone(), owner_reaction, reactions_count));
+        }
+
+        // Write updates to DB
+        if !reaction_updates.is_empty() {
+            let aid3 = account_id.to_string();
+            let email = owner_email.clone();
+            let batch_updated = db
+                .with_conn(move |conn| {
+                    let tx = conn
+                        .unchecked_transaction()
+                        .map_err(|e| format!("begin tx: {e}"))?;
+
+                    let mut count: usize = 0;
+                    for (msg_id, owner_reaction, reactions_count) in &reaction_updates {
+                        if let Some(emoji) = owner_reaction {
+                            let changes = tx
+                                .execute(
+                                    "INSERT INTO message_reactions \
+                                     (message_id, account_id, reactor_email, reactor_name, \
+                                      reaction_type, reacted_at, source) \
+                                     VALUES (?1, ?2, ?3, NULL, ?4, NULL, 'exchange_native') \
+                                     ON CONFLICT(message_id, account_id, reactor_email, reaction_type) \
+                                     DO UPDATE SET reaction_type = ?4",
+                                    rusqlite::params![msg_id, aid3, email, emoji],
+                                )
+                                .map_err(|e| format!("upsert reaction: {e}"))?;
+                            if changes > 0 {
+                                count += 1;
+                            }
+                        } else {
+                            // Owner reaction was removed — delete the row if it exists
+                            tx.execute(
+                                "DELETE FROM message_reactions \
+                                 WHERE message_id = ?1 AND account_id = ?2 \
+                                   AND reactor_email = ?3 AND source = 'exchange_native'",
+                                rusqlite::params![msg_id, aid3, email],
+                            )
+                            .map_err(|e| format!("delete removed reaction: {e}"))?;
+                        }
+
+                        if let Some(c) = reactions_count {
+                            tx.execute(
+                                "INSERT INTO message_reactions \
+                                 (message_id, account_id, reactor_email, reactor_name, \
+                                  reaction_type, reacted_at, source) \
+                                 VALUES (?1, ?2, '__count__', NULL, ?3, NULL, 'exchange_native') \
+                                 ON CONFLICT(message_id, account_id, reactor_email, reaction_type) \
+                                 DO UPDATE SET reaction_type = ?3",
+                                rusqlite::params![msg_id, aid3, c.to_string()],
+                            )
+                            .map_err(|e| format!("upsert reaction count: {e}"))?;
+                        }
+                    }
+
+                    tx.commit().map_err(|e| format!("commit reaction refresh: {e}"))?;
+                    Ok(count)
+                })
+                .await?;
+
+            updated_count += batch_updated;
+        }
+    }
+
+    Ok(updated_count)
 }
 
 // ---------------------------------------------------------------------------

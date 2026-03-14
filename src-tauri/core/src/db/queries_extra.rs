@@ -9,7 +9,7 @@ mod ai_state;
 mod allowlists;
 mod bundles_categories;
 mod calendars;
-mod compose;
+pub(crate) mod compose;
 mod contact_groups;
 mod contacts;
 mod filters_smart;

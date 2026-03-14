@@ -1100,6 +1100,9 @@ pub async fn db_insert_scheduled_email(
     thread_id: Option<String>,
     scheduled_at: i64,
     signature_id: Option<String>,
+    delegation: Option<String>,
+    from_email: Option<String>,
+    timezone: Option<String>,
 ) -> Result<String, String> {
     ratatoskr_core::db::queries_extra::db_insert_scheduled_email(
         &state,
@@ -1113,6 +1116,9 @@ pub async fn db_insert_scheduled_email(
         thread_id,
         scheduled_at,
         signature_id,
+        delegation.unwrap_or_else(|| "local".to_string()),
+        from_email,
+        timezone,
     )
     .await
 }

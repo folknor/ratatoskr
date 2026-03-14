@@ -68,4 +68,5 @@ sha2 = "0.10"
 unicode-segmentation = "1.12"
 nucleo-matcher = "0.3"
 regex = "1"
+url = "2"
 resvg = { version = "0.47", default-features = false }

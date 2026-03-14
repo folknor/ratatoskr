@@ -100,6 +100,13 @@ async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), Strin
 // ---------------------------------------------------------------------------
 
 /// Run delta Gmail sync via History API.
+///
+/// Note on reactions: Gmail reactions appear as new messages with a special
+/// MIME type (detected by `is_reaction` / `reaction_emoji` during parsing).
+/// Because they are actual messages, they show up in `history.list` like any
+/// other new message and are handled by the normal incremental sync path —
+/// no special reaction polling is needed (unlike Exchange, where reactions
+/// update extended properties without changing `lastModifiedDateTime`).
 #[allow(clippy::too_many_arguments)]
 pub async fn gmail_delta_sync(
     client: &GmailClient,

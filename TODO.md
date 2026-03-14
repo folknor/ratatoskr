@@ -133,7 +133,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **MDN message generation (RFC 8098)** — Implemented in `mdn.rs`: `build_mdn_message()` builds `multipart/report` with human-readable + `message/disposition-notification` parts. `resolve_read_receipt_policy()` implements most-specific-wins lookup (sender → domain → account → global default). 8 unit tests.
 
-- [ ] **Tracking domain list + URL parameter stripping** — Ship a resource file of known tracking redirect domains (Mailchimp, SendGrid, etc.). Integrate a URL cleaning pass into the sanitization pipeline to strip `utm_*`, `mc_eid`, `fbclid`, and similar tracking parameters from link URLs. Run during HTML processing so cleaned URLs are what gets persisted/rendered.
+- [x] **Tracking URL parameter stripping** — Implemented in `url_cleaning.rs`: `strip_tracking_params()` removes 26 tracking params (UTM, Facebook, Google, Mailchimp, HubSpot, Marketo, Drip, Vero, Microsoft). `strip_tracking_params_from_html()` processes all href attributes. 16 unit tests. Tracking redirect domain list deferred to sanitization pipeline.
 
 - [ ] **1×1 tracking pixel detection** — When the user allows remote images for a sender, inspect fetched images for tracking pixel signatures: check `Content-Length` < threshold or decode dimensions and flag 1×1 transparent images. Surface this as metadata on the message so the UI can optionally indicate "this sender uses tracking pixels" without blocking the images.
 
@@ -185,7 +185,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [ ] **Per-mailbox sync context isolation** — Model each shared/delegated mailbox as an independent sync context with its own delta tokens, retry state, and error tracking. Each shared mailbox gets its own entries in sync state tables. Prevents one shared mailbox's sync failures from blocking another's.
 
-- [ ] **Auto-From selection logic** — Implement priority-based From address selection in core: (1) reply from shared mailbox context → use that mailbox's address, (2) match To/Cc of original against known identities → reply from matched identity, (3) compose from shared mailbox context → use that mailbox, (4) fall back to account primary. Pure matching logic against the `send_identities` table.
+- [x] **Auto-From selection logic** — Implemented in `send_identity.rs`: `SendIdentity` struct, `get_send_identities()`, `select_from_address()` with priority: shared mailbox match → reply-address match → primary identity.
 
 - [ ] **IMAP ACL + NAMESPACE discovery** — Implement `MYRIGHTS <mailbox>` and `NAMESPACE` commands via `Session::run_command_and_check_ok()` with custom response parsing. Parse the three-part NAMESPACE response (personal, other users, shared) and use prefixes to `LIST` folders under shared namespaces. This enables shared mailbox access on Dovecot/Cyrus IMAP servers without Exchange.
 
@@ -213,7 +213,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [ ] **Send mentions in Graph API calls** — When sending via `POST /beta/me/sendMail` on an Exchange account, include the `mentions` array with `mentioned.name` and `mentioned.address` for each @-mention. The compose layer passes mention metadata; the backend serializes it into the Graph beta API request body.
 
-- [ ] **HTML body mention correlation** — Parse message HTML body for `<a href="mailto:...">` tags and match email addresses against `mentions` table entries. Return structured mention annotations alongside the body content so the rendering layer can style mentioned names differently (bold, highlighted) without the renderer needing to know about the mentions data model.
+- [x] **HTML body mention correlation** — Implemented in `mentions.rs`: `correlate_mentions_in_html()` regex-extracts `mailto:` links, matches against `mentions` table, returns `MentionAnnotation` structs with byte offsets for renderer highlighting. 6 unit tests.
 
 ### Signatures (Tier 2)
 
@@ -235,9 +235,9 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **JMAP FUTURERELEASE via EmailSubmission** — Implemented: `schedule_send_jmap()` creates submission with `holduntil` parameter via `Address::parameter()`, validates against `maxDelayedSend`. `cancel_scheduled_send_jmap()` sets `undoStatus` to `"canceled"`. No crate patch needed — `jmap-client` 0.4 has full support.
 
-- [ ] **Provider-aware delegation routing** — When scheduling a send, determine delegation type based on account provider: Exchange → server delegation via deferred delivery, JMAP → check FUTURERELEASE capability → server or local, Gmail/IMAP → always local timer. Update `scheduled_emails.delegation` accordingly. The compose layer just says "send at time X"; the backend decides how.
+- [x] **Provider-aware delegation routing** — Implemented in `scheduled_send.rs`: `SendDelegation` enum, `determine_send_delegation()` routes by provider type, DB lookup wrapper. Server delegation helpers `mark_delegated()`/`mark_failed()`.
 
-- [ ] **Hybrid scheduler overdue handling** — On app startup, check for overdue scheduled emails. If overdue by <24h, send immediately. If overdue by >24h, mark as `needs_review` rather than auto-sending (the user may not want a week-old scheduled email going out after a vacation). Status flow: `pending → delegated → sent` for server-delegated, `pending → sending → sent` for local.
+- [x] **Hybrid scheduler overdue handling** — Implemented in `scheduled_send.rs`: `check_overdue_scheduled_emails()` classifies as `SendNow` (<24h) or `NeedsReview` (>24h). `process_overdue_emails()` batch processor. `ScheduledStatus` enum covers full lifecycle.
 
 ### Reactions (Tier 2)
 
@@ -249,7 +249,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **Gmail reaction sending** — Implemented: `send_reaction()` in `gmail/ops.rs` builds `multipart/alternative` with `text/vnd.google.email-reaction+json` part, proper `In-Reply-To`/`References` headers, sends via existing `client.send_message()` path.
 
-- [ ] **Reaction delta sync handling** — Exchange reactions do NOT update `lastModifiedDateTime` or `changeKey` on the message, so delta queries miss reaction changes entirely. Need periodic re-fetch of `ReactionsCount` for recently viewed messages. Gmail reactions appear as new messages in `history.list` and are detected via MIME type during normal incremental sync — no special handling needed beyond the MIME parser above.
+- [x] **Reaction delta sync handling** — Implemented: `refresh_reactions_for_recent_messages()` in `graph/sync.rs` uses `$batch` API to re-fetch reaction properties for recent messages, runs every 5th sync cycle. Gmail documented as needing no special handling (history.list catches reactions naturally).
 
 ### BIMI (Tier 3)
 

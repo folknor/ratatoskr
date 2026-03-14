@@ -570,6 +570,14 @@ pub struct DbScheduledEmail {
     pub attachment_paths: Option<String>,
     pub status: String,
     pub created_at: i64,
+    // v43 delegation columns
+    pub delegation: String,
+    pub remote_message_id: Option<String>,
+    pub remote_status: Option<String>,
+    pub timezone: Option<String>,
+    pub from_email: Option<String>,
+    pub error_message: Option<String>,
+    pub retry_count: i64,
 }
 
 // ── Attachment with context (for library view) ─────────────

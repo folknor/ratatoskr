@@ -495,7 +495,7 @@ pub async fn db_delete_local_draft(db: &DbState, id: String) -> Result<(), Strin
     .await
 }
 
-fn row_to_scheduled_email(row: &Row<'_>) -> rusqlite::Result<DbScheduledEmail> {
+pub(crate) fn row_to_scheduled_email(row: &Row<'_>) -> rusqlite::Result<DbScheduledEmail> {
     Ok(DbScheduledEmail {
         id: row.get("id")?,
         account_id: row.get("account_id")?,
@@ -511,6 +511,13 @@ fn row_to_scheduled_email(row: &Row<'_>) -> rusqlite::Result<DbScheduledEmail> {
         attachment_paths: row.get("attachment_paths")?,
         status: row.get("status")?,
         created_at: row.get("created_at")?,
+        delegation: row.get("delegation")?,
+        remote_message_id: row.get("remote_message_id")?,
+        remote_status: row.get("remote_status")?,
+        timezone: row.get("timezone")?,
+        from_email: row.get("from_email")?,
+        error_message: row.get("error_message")?,
+        retry_count: row.get("retry_count")?,
     })
 }
 
@@ -562,13 +569,16 @@ pub async fn db_insert_scheduled_email(
     thread_id: Option<String>,
     scheduled_at: i64,
     signature_id: Option<String>,
+    delegation: String,
+    from_email: Option<String>,
+    timezone: Option<String>,
 ) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
     let id_clone = id.clone();
     db.with_conn(move |conn| {
         conn.execute(
-            "INSERT INTO scheduled_emails (id, account_id, to_addresses, cc_addresses, bcc_addresses, subject, body_html, reply_to_message_id, thread_id, scheduled_at, signature_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO scheduled_emails (id, account_id, to_addresses, cc_addresses, bcc_addresses, subject, body_html, reply_to_message_id, thread_id, scheduled_at, signature_id, delegation, from_email, timezone)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 id_clone,
                 account_id,
@@ -581,6 +591,9 @@ pub async fn db_insert_scheduled_email(
                 thread_id,
                 scheduled_at,
                 signature_id,
+                delegation,
+                from_email,
+                timezone,
             ],
         )
         .map_err(|e| e.to_string())?;
