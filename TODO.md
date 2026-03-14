@@ -42,7 +42,7 @@
 
 ### Microsoft Graph
 
-- [ ] **Decide on Azure AD app registration model** — Currently users must provide their own `microsoft_client_id` during account setup. Product/policy decision, not a code gap.
+- [ ] **Ship a default Microsoft OAuth client ID** — Register a multi-tenant Azure AD app ("Accounts in any organizational directory and personal Microsoft accounts"), set as public client (no client secret), configure `http://localhost` redirect URI, request Mail.ReadWrite/Mail.Send/etc. scopes. Ship the client ID as a constant in `oauth.rs`. Then remove the per-account credential UI (the "Update OAuth App" flow in settings that asks users for client_id/client_secret) — users should never see this. Keep the per-account `oauth_client_id` DB column as an optional override for enterprise users who need to use their own tenant-restricted app.
 
 ### JMAP
 
