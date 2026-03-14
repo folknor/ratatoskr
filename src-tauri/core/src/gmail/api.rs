@@ -187,6 +187,7 @@ impl GmailClient {
     ) -> Result<GmailHistoryResponse, String> {
         let mut params = vec![
             format!("startHistoryId={start_history_id}"),
+            "maxResults=500".to_string(),
             "historyTypes=messageAdded".to_string(),
             "historyTypes=messageDeleted".to_string(),
             "historyTypes=labelAdded".to_string(),
@@ -241,8 +242,24 @@ impl GmailClient {
     }
 
     pub async fn list_drafts(&self, db: &DbState) -> Result<Vec<GmailDraftStub>, String> {
-        let resp: ListDraftsResponse = self.get("/drafts?maxResults=500", db).await?;
-        Ok(resp.drafts)
+        let mut all_drafts = Vec::new();
+        let mut page_token: Option<String> = None;
+
+        loop {
+            let url = match &page_token {
+                Some(pt) => format!("/drafts?maxResults=500&pageToken={pt}"),
+                None => "/drafts?maxResults=500".to_string(),
+            };
+            let resp: ListDraftsResponse = self.get(&url, db).await?;
+            all_drafts.extend(resp.drafts);
+
+            match resp.next_page_token {
+                Some(pt) => page_token = Some(pt),
+                None => break,
+            }
+        }
+
+        Ok(all_drafts)
     }
 }
 

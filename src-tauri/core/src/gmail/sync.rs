@@ -162,7 +162,10 @@ async fn sync_labels(ctx: &SyncCtx<'_>) -> Result<(), String> {
 
     let aid = ctx.account_id.to_string();
     ctx.db
-        .with_conn(move |conn| persist_labels(conn, &aid, &labels))
+        .with_conn(move |conn| {
+            persist_labels(conn, &aid, &labels)?;
+            sync_labels_to_categories(conn, &aid, &labels)
+        })
         .await
 }
 
@@ -185,6 +188,50 @@ fn persist_labels(
             ],
         )
         .map_err(|e| format!("upsert label: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Sync user labels with colors into the categories table for unified category display.
+///
+/// Only user-created labels are synced (system labels like INBOX, SENT are not categories).
+/// Gmail colors are hex strings — they go directly into color_bg/color_fg.
+fn sync_labels_to_categories(
+    conn: &rusqlite::Connection,
+    account_id: &str,
+    labels: &[GmailLabel],
+) -> Result<(), String> {
+    for (i, label) in labels.iter().enumerate() {
+        // Only user labels are categories — skip system labels
+        if label.label_type.as_deref() == Some("system") {
+            continue;
+        }
+        // Skip CATEGORY_* labels (automated inbox tabs, not user categories)
+        if label.id.starts_with("CATEGORY_") {
+            continue;
+        }
+
+        let color_bg = label.color.as_ref().map(|c| c.background_color.as_str());
+        let color_fg = label.color.as_ref().map(|c| c.text_color.as_str());
+
+        conn.execute(
+            "INSERT INTO categories \
+             (id, account_id, display_name, color_preset, color_bg, color_fg, \
+              provider_id, sync_state, sort_order) \
+             VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, 'synced', ?7) \
+             ON CONFLICT(account_id, display_name) DO UPDATE SET \
+               color_bg = ?4, color_fg = ?5, provider_id = ?6, sync_state = 'synced'",
+            rusqlite::params![
+                label.id,
+                account_id,
+                label.name,
+                color_bg,
+                color_fg,
+                label.id,
+                i as i64,
+            ],
+        )
+        .map_err(|e| format!("upsert gmail category: {e}"))?;
     }
     Ok(())
 }

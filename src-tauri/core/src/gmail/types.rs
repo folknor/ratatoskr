@@ -185,9 +185,11 @@ pub struct GmailDraftMessageRef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ListDraftsResponse {
     #[serde(default)]
     pub drafts: Vec<GmailDraftStub>,
+    pub next_page_token: Option<String>,
 }
 
 // ── Send-as ─────────────────────────────────────────────────
