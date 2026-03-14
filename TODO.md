@@ -109,7 +109,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **Populate `message_categories` during sync** — Migration v45: `message_categories` join table. `insert_message_categories()` shared helper. Graph: parses `categories[]` array. Gmail: matches label IDs against categories table. JMAP: extended to link at message level alongside thread level.
 
-- [ ] **Unified color model with Exchange presets as canonical palette** — Implement a const array mapping Exchange's 25 preset names to hex values. When syncing Gmail label colors, map to the nearest Exchange preset by color distance. Store both `color_preset` (for Exchange round-tripping) and `color_bg`/`color_fg` (for rendering) in the `categories` table. This gives a consistent color picker vocabulary across providers.
+- [x] **Unified color model with Exchange presets as canonical palette** — Implemented in `category_colors.rs`: 25-preset const array, `preset_to_hex()`, `nearest_exchange_preset()` via Euclidean RGB distance, `all_presets()`. Deduplicated from `graph/category_sync.rs`. 13 unit tests.
 
 ### Contacts (Tier 1)
 
@@ -129,7 +129,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **AMP email content blocking** — Implemented: shared `is_amp_content_type()` utility, filtering in JMAP `extract_body_value()`, defense-in-depth guards in Gmail and IMAP parsers. Graph unaffected (pre-rendered body).
 
-- [ ] **`$MDNSent` keyword management across providers** — Before sending a read receipt (MDN), check if the `$MDNSent` keyword is already set on the message to avoid duplicate receipts. After sending, set the keyword. Provider-specific: JMAP uses lowercase `$mdnsent`; IMAP uses `$MDNSent` (check `PERMANENTFLAGS` first to see if the server accepts custom keywords); Graph uses the `isReadReceiptRequested` property. Prevents the "send receipt every time you open the message" problem.
+- [x] **`$MDNSent` keyword management across providers** — Implemented in `mdn.rs`: DB-level `is_mdn_already_sent()`/`mark_mdn_sent_local()`, JMAP `$mdnsent` via `Email/set`, IMAP `$MDNSent` via `UID STORE` gated by PERMANENTFLAGS, Graph `mdn_requested` read-only check. Migration v46 adds `mdn_sent` column. 5 unit tests.
 
 - [x] **MDN message generation (RFC 8098)** — Implemented in `mdn.rs`: `build_mdn_message()` builds `multipart/report` with human-readable + `message/disposition-notification` parts. `resolve_read_receipt_policy()` implements most-specific-wins lookup (sender → domain → account → global default). 8 unit tests.
 
@@ -209,9 +209,9 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **Exchange `mentionsPreview` sync via Graph beta** — Implemented: `MentionsPreview` struct, `mentions_preview` on `GraphMessage`, `mentionsPreview` added to `MESSAGE_SELECT` (v1.0 silently ignores it). `is_mentioned` written to messages table during sync.
 
-- [ ] **Lazy-load full mention details on message open** — When opening a message where `is_mentioned = 1`, fetch `GET /beta/me/messages/{id}?$expand=mentions` to get the full mentions array (who mentioned whom, with names and addresses). Upsert into the `mentions` table. Avoids fetching mention details for every message during sync — only loads them on demand.
+- [x] **Lazy-load full mention details on message open** — Implemented in `graph/mentions.rs`: `fetch_and_store_mentions()` calls Graph beta `$expand=mentions`, parses `GraphMention` structs, upserts into `mentions` table with `ON CONFLICT DO UPDATE`.
 
-- [ ] **Send mentions in Graph API calls** — When sending via `POST /beta/me/sendMail` on an Exchange account, include the `mentions` array with `mentioned.name` and `mentioned.address` for each @-mention. The compose layer passes mention metadata; the backend serializes it into the Graph beta API request body.
+- [x] **Send mentions in Graph API calls** — Implemented: `mentions` field on `GraphCreateMessage`, `post_beta()` on `GraphClient`, `mentions` parameter added to `ProviderOps::send_email`/`create_draft` across all providers. Graph uses beta endpoint when mentions present; others ignore.
 
 - [x] **HTML body mention correlation** — Implemented in `mentions.rs`: `correlate_mentions_in_html()` regex-extracts `mailto:` links, matches against `mentions` table, returns `MentionAnnotation` structs with byte offsets for renderer highlighting. 6 unit tests.
 
@@ -225,7 +225,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **JMAP Identity signature sync** — Implemented in `jmap/signatures.rs`: `sync_jmap_identity_signatures()` fetches all identities and upserts signatures with SHA-256 hashing. `push_signature_to_jmap()` pushes local edits back via `Identity/set`.
 
-- [ ] **Signature inline image handling on import** — Parse fetched signature HTML for `<img src="cid:...">` tags and base64 data URIs. Resolve CID images from the MIME structure, decode base64 data URIs, store in the inline image store, and rewrite references to local paths. Without this, synced signatures with logos or headshots show broken images.
+- [x] **Signature inline image handling on import** — Implemented in `provider/signature_images.rs`: `process_signature_images()` extracts data URI images, decodes base64, generates xxh3 content hashes, rewrites to `inline-image:<hash>` references. `store_signature_images()` async wrapper for batch insertion. CID/HTTP refs preserved. 8 unit tests.
 
 ### Scheduled Send (Tier 2)
 

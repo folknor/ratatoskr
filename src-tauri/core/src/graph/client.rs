@@ -14,6 +14,7 @@ use crate::provider::token::{self, TokenState};
 use super::folder_mapper::FolderMap;
 
 const GRAPH_API_BASE: &str = "https://graph.microsoft.com/v1.0";
+const GRAPH_API_BETA: &str = "https://graph.microsoft.com/beta";
 const MS_TOKEN_ENDPOINT: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
 
 /// Graph allows max 4 concurrent requests per app per mailbox.
@@ -186,6 +187,17 @@ impl GraphClient {
         db: &DbState,
     ) -> Result<T, String> {
         let url = format!("{GRAPH_API_BASE}{path}");
+        self.request(&url, "POST", Some(body), db).await
+    }
+
+    /// Authenticated POST against the Graph **beta** API.
+    pub async fn post_beta<T: DeserializeOwned, B: Serialize>(
+        &self,
+        path: &str,
+        body: &B,
+        db: &DbState,
+    ) -> Result<T, String> {
+        let url = format!("{GRAPH_API_BETA}{path}");
         self.request(&url, "POST", Some(body), db).await
     }
 

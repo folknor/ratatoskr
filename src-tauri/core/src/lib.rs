@@ -2,6 +2,7 @@ pub mod attachment_cache;
 pub mod bimi;
 pub mod body_store;
 pub mod categorization;
+pub mod category_colors;
 pub mod cloud_attachments;
 pub mod command_palette;
 pub mod db;

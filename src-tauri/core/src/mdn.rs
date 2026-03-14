@@ -173,6 +173,127 @@ pub fn build_mdn_message(
 }
 
 // ---------------------------------------------------------------------------
+// $MDNSent keyword management
+// ---------------------------------------------------------------------------
+
+/// Check whether an MDN has already been sent for a message, using the local
+/// `mdn_sent` flag in the database.
+///
+/// This is provider-agnostic: regardless of whether the provider supports
+/// the `$MDNSent` keyword natively, we always track it locally.
+pub fn is_mdn_already_sent(conn: &Connection, account_id: &str, message_id: &str) -> bool {
+    conn.query_row(
+        "SELECT mdn_sent FROM messages WHERE account_id = ?1 AND id = ?2",
+        params![account_id, message_id],
+        |row| row.get::<_, bool>(0),
+    )
+    .unwrap_or(false)
+}
+
+/// Mark an MDN as sent in the local database.
+///
+/// This should be called after successfully sending the MDN (or after
+/// setting the provider-side keyword). It sets the `mdn_sent` flag so
+/// we never send a duplicate, even if the provider doesn't support
+/// custom keywords.
+pub fn mark_mdn_sent_local(
+    conn: &Connection,
+    account_id: &str,
+    message_id: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE messages SET mdn_sent = 1 WHERE account_id = ?1 AND id = ?2",
+        params![account_id, message_id],
+    )
+    .map_err(|e| format!("mark mdn_sent: {e}"))?;
+    Ok(())
+}
+
+/// Set the `$mdnsent` keyword on a JMAP message via `Email/set`.
+///
+/// JMAP keywords are case-sensitive; the canonical form is lowercase `$mdnsent`.
+pub async fn mark_mdn_sent_jmap(
+    client: &jmap_client::client::Client,
+    message_id: &str,
+) -> Result<(), String> {
+    let mut request = client.build();
+    let set_req = request.set_email();
+    set_req.update(message_id).keyword("$mdnsent", true);
+    request
+        .send_single::<jmap_client::core::response::EmailSetResponse>()
+        .await
+        .map_err(|e| format!("JMAP Email/set $mdnsent: {e}"))?;
+    Ok(())
+}
+
+/// Set the `$MDNSent` keyword on an IMAP message via `UID STORE +FLAGS`.
+///
+/// Checks PERMANENTFLAGS first — if the server does not support custom
+/// keywords (`\*` not in PERMANENTFLAGS), this is a silent no-op.
+/// The caller should always also call [`mark_mdn_sent_local`] to ensure
+/// local tracking regardless of server support.
+pub async fn mark_mdn_sent_imap(
+    session: &mut crate::imap::connection::ImapSession,
+    folder: &str,
+    uid: u32,
+) -> Result<(), String> {
+    crate::imap::client::set_keyword_if_supported(
+        session, folder, uid, "+FLAGS", "$MDNSent",
+    )
+    .await
+}
+
+/// Check whether the `$MDNSent` keyword is already set on an IMAP message.
+///
+/// Performs a `UID SEARCH KEYWORD $MDNSent` scoped to the single UID.
+/// Returns `true` if the server reports the keyword is present.
+///
+/// If the search fails (e.g. server doesn't support custom keywords),
+/// returns `false` — the caller should fall back to the local DB check.
+pub async fn is_mdn_sent_imap(
+    session: &mut crate::imap::connection::ImapSession,
+    folder: &str,
+    uid: u32,
+) -> bool {
+    use crate::imap::connection::IMAP_CMD_TIMEOUT;
+
+    // SELECT the folder first
+    if tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
+        .await
+        .is_err()
+    {
+        return false;
+    }
+
+    let query = format!("UID {uid} KEYWORD $MDNSent");
+    let result = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.uid_search(&query)).await;
+    match result {
+        Ok(Ok(uids)) => uids.contains(&uid),
+        _ => false,
+    }
+}
+
+/// For Graph (Microsoft), `isReadReceiptRequested` is read-only on the API
+/// side — there is no server-side keyword to set. We only track MDN sent
+/// status locally via [`mark_mdn_sent_local`].
+///
+/// This function checks whether the original message had
+/// `isReadReceiptRequested` set, using the `mdn_requested` column that
+/// was populated during sync.
+pub fn is_mdn_requested_graph(
+    conn: &Connection,
+    account_id: &str,
+    message_id: &str,
+) -> bool {
+    conn.query_row(
+        "SELECT mdn_requested FROM messages WHERE account_id = ?1 AND id = ?2",
+        params![account_id, message_id],
+        |row| row.get::<_, bool>(0),
+    )
+    .unwrap_or(false)
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -185,7 +306,20 @@ mod tests {
     fn setup_db() -> Connection {
         let conn = Connection::open_in_memory().expect("open in-memory db");
         conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS read_receipt_policy (
+            "CREATE TABLE IF NOT EXISTS accounts (
+                id TEXT PRIMARY KEY,
+                email TEXT NOT NULL,
+                provider TEXT NOT NULL DEFAULT 'gmail_api'
+            );
+            CREATE TABLE IF NOT EXISTS messages (
+                id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                thread_id TEXT,
+                mdn_requested INTEGER NOT NULL DEFAULT 0,
+                mdn_sent INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (account_id, id)
+            );
+            CREATE TABLE IF NOT EXISTS read_receipt_policy (
                 id TEXT PRIMARY KEY,
                 account_id TEXT NOT NULL,
                 scope TEXT NOT NULL,
@@ -302,5 +436,59 @@ mod tests {
         let text = String::from_utf8(raw).expect("valid utf8");
         assert!(text.contains("From: <me@myhost.com>"));
         assert!(text.contains("automatic-action/MDN-sent-automatically;displayed"));
+    }
+
+    // ── MDN sent tracking tests ──────────────────────────────────
+
+    fn insert_test_message(conn: &Connection, account_id: &str, msg_id: &str, mdn_requested: bool) {
+        conn.execute(
+            "INSERT INTO messages (id, account_id, thread_id, mdn_requested, mdn_sent) \
+             VALUES (?1, ?2, 'thread1', ?3, 0)",
+            params![msg_id, account_id, mdn_requested],
+        )
+        .expect("insert message");
+    }
+
+    #[test]
+    fn test_is_mdn_already_sent_false_by_default() {
+        let conn = setup_db();
+        insert_test_message(&conn, "acct1", "msg1", true);
+        assert!(!is_mdn_already_sent(&conn, "acct1", "msg1"));
+    }
+
+    #[test]
+    fn test_mark_mdn_sent_local() {
+        let conn = setup_db();
+        insert_test_message(&conn, "acct1", "msg1", true);
+        assert!(!is_mdn_already_sent(&conn, "acct1", "msg1"));
+
+        mark_mdn_sent_local(&conn, "acct1", "msg1").expect("mark sent");
+        assert!(is_mdn_already_sent(&conn, "acct1", "msg1"));
+    }
+
+    #[test]
+    fn test_is_mdn_already_sent_missing_message() {
+        let conn = setup_db();
+        // Nonexistent message should return false, not error
+        assert!(!is_mdn_already_sent(&conn, "acct1", "nonexistent"));
+    }
+
+    #[test]
+    fn test_is_mdn_requested_graph() {
+        let conn = setup_db();
+        insert_test_message(&conn, "acct1", "msg1", true);
+        assert!(is_mdn_requested_graph(&conn, "acct1", "msg1"));
+
+        insert_test_message(&conn, "acct1", "msg2", false);
+        assert!(!is_mdn_requested_graph(&conn, "acct1", "msg2"));
+    }
+
+    #[test]
+    fn test_mark_mdn_sent_idempotent() {
+        let conn = setup_db();
+        insert_test_message(&conn, "acct1", "msg1", true);
+        mark_mdn_sent_local(&conn, "acct1", "msg1").expect("first mark");
+        mark_mdn_sent_local(&conn, "acct1", "msg1").expect("second mark");
+        assert!(is_mdn_already_sent(&conn, "acct1", "msg1"));
     }
 }

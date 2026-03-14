@@ -126,6 +126,16 @@ pub struct GraphProfile {
 
 // ── Request body types ──────────────────────────────────────
 
+/// An @mention on a Graph message (beta API only).
+///
+/// When included, the message must be created/sent via `/beta/` endpoints.
+/// Exchange automatically sets `mentionsPreview.isMentioned` on the recipient.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphMention {
+    pub mentioned: GraphEmailAddress,
+}
+
 /// For creating/updating Graph messages (drafts).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -148,6 +158,8 @@ pub struct GraphCreateMessage {
     pub internet_message_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub single_value_extended_properties: Option<Vec<SingleValueExtendedProperty>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mentions: Option<Vec<GraphMention>>,
 }
 
 #[derive(Debug, Serialize)]

@@ -445,13 +445,19 @@ pub async fn provider_send_email(
     account_id: String,
     raw_base64url: String,
     thread_id: Option<String>,
+    mentions: Option<Vec<(String, String)>>,
     app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
     let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
-    ops.send_email(&ctx, &raw_base64url, thread_id.as_deref())
-        .await
+    ops.send_email(
+        &ctx,
+        &raw_base64url,
+        thread_id.as_deref(),
+        &mentions.unwrap_or_default(),
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -460,13 +466,19 @@ pub async fn provider_create_draft(
     account_id: String,
     raw_base64url: String,
     thread_id: Option<String>,
+    mentions: Option<Vec<(String, String)>>,
     app_state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
     let reporter = TauriProgressReporter::from_ref(&app_handle);
     let (ops, ctx) = resolve_provider_command(None, &account_id, &app_state, &reporter).await?;
-    ops.create_draft(&ctx, &raw_base64url, thread_id.as_deref())
-        .await
+    ops.create_draft(
+        &ctx,
+        &raw_base64url,
+        thread_id.as_deref(),
+        &mentions.unwrap_or_default(),
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]

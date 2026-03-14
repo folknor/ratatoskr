@@ -304,6 +304,7 @@ impl ProviderOps for JmapOps {
         _ctx: &ProviderCtx<'_>,
         raw_base64url: &str,
         _thread_id: Option<&str>,
+        _mentions: &[(String, String)],
     ) -> Result<String, String> {
         let raw_bytes = crate::provider::encoding::decode_base64url_nopad(raw_base64url)?;
         let client = self.client.inner();
@@ -368,6 +369,7 @@ impl ProviderOps for JmapOps {
         _ctx: &ProviderCtx<'_>,
         raw_base64url: &str,
         _thread_id: Option<&str>,
+        _mentions: &[(String, String)],
     ) -> Result<String, String> {
         let raw_bytes = crate::provider::encoding::decode_base64url_nopad(raw_base64url)?;
 
@@ -403,7 +405,7 @@ impl ProviderOps for JmapOps {
             .email_destroy(draft_id)
             .await
             .map_err(|e| format!("delete old draft: {e}"))?;
-        self.create_draft(_ctx, raw_base64url, _thread_id).await
+        self.create_draft(_ctx, raw_base64url, _thread_id, &[]).await
     }
 
     async fn delete_draft(&self, _ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), String> {

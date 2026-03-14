@@ -220,8 +220,9 @@ impl ProviderOps for GraphOps {
         ctx: &ProviderCtx<'_>,
         raw_base64url: &str,
         thread_id: Option<&str>,
+        mentions: &[(String, String)],
     ) -> Result<String, String> {
-        send_via_draft(&self.client, ctx, raw_base64url, thread_id).await
+        send_via_draft(&self.client, ctx, raw_base64url, thread_id, mentions).await
     }
 
     async fn create_draft(
@@ -229,8 +230,9 @@ impl ProviderOps for GraphOps {
         ctx: &ProviderCtx<'_>,
         raw_base64url: &str,
         thread_id: Option<&str>,
+        mentions: &[(String, String)],
     ) -> Result<String, String> {
-        create_draft_impl(&self.client, ctx, raw_base64url, thread_id).await
+        create_draft_impl(&self.client, ctx, raw_base64url, thread_id, mentions).await
     }
 
     async fn update_draft(
@@ -245,7 +247,7 @@ impl ProviderOps for GraphOps {
         self.client
             .delete(&format!("/me/messages/{enc_id}"), ctx.db)
             .await?;
-        create_draft_impl(&self.client, ctx, raw_base64url, thread_id).await
+        create_draft_impl(&self.client, ctx, raw_base64url, thread_id, &[]).await
     }
 
     async fn delete_draft(&self, ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), String> {
@@ -855,8 +857,9 @@ async fn send_via_draft(
     ctx: &ProviderCtx<'_>,
     raw_base64url: &str,
     thread_id: Option<&str>,
+    mentions: &[(String, String)],
 ) -> Result<String, String> {
-    let draft_id = create_draft_impl(client, ctx, raw_base64url, thread_id).await?;
+    let draft_id = create_draft_impl(client, ctx, raw_base64url, thread_id, mentions).await?;
     // Send the draft — no response body (202 Accepted)
     let enc_draft_id = urlencoding::encode(&draft_id);
     client
@@ -905,13 +908,19 @@ async fn create_draft_with_deferred_time(
 }
 
 /// Create a draft message from raw MIME (base64url-encoded).
+///
+/// When `mentions` is non-empty, uses the beta endpoint (`/beta/me/messages`)
+/// because the mentions resource is only available in the Graph beta API.
 #[allow(clippy::too_many_lines)]
 async fn create_draft_impl(
     client: &GraphClient,
     ctx: &ProviderCtx<'_>,
     raw_base64url: &str,
     _thread_id: Option<&str>,
+    mentions: &[(String, String)],
 ) -> Result<String, String> {
+    use super::types::GraphMention;
+
     // Decode base64url → raw MIME bytes
     let raw_bytes = crate::provider::encoding::decode_base64url_nopad(raw_base64url)
         .map_err(|e| format!("Failed to decode base64url: {e}"))?;
@@ -922,10 +931,32 @@ async fn create_draft_impl(
         .ok_or("Failed to parse MIME message")?;
 
     // Build Graph message JSON from parsed MIME
-    let create_msg = mime_to_graph_message(&parsed)?;
+    let mut create_msg = mime_to_graph_message(&parsed)?;
 
-    // Create draft via POST /me/messages
-    let draft: serde_json::Value = client.post("/me/messages", &create_msg, ctx.db).await?;
+    // Inject mentions if provided
+    let use_beta = if mentions.is_empty() {
+        false
+    } else {
+        create_msg.mentions = Some(
+            mentions
+                .iter()
+                .map(|(name, address)| GraphMention {
+                    mentioned: super::types::GraphEmailAddress {
+                        name: Some(name.clone()),
+                        address: address.clone(),
+                    },
+                })
+                .collect(),
+        );
+        true
+    };
+
+    // Create draft — use beta endpoint when mentions are present
+    let draft: serde_json::Value = if use_beta {
+        client.post_beta("/me/messages", &create_msg, ctx.db).await?
+    } else {
+        client.post("/me/messages", &create_msg, ctx.db).await?
+    };
 
     let draft_id = draft
         .get("id")
@@ -997,6 +1028,7 @@ fn mime_to_graph_message(
         importance: None,
         internet_message_id: message_id,
         single_value_extended_properties: None,
+        mentions: None,
     })
 }
 

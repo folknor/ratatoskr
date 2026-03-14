@@ -1073,6 +1073,13 @@ static MIGRATIONS: &[Migration] = &[
             CREATE INDEX IF NOT EXISTS idx_message_categories_cat ON message_categories(account_id, category);
         "#,
     },
+    Migration {
+        version: 46,
+        description: "MDN sent tracking: local flag to avoid duplicate read receipts",
+        sql: r#"
+            ALTER TABLE messages ADD COLUMN mdn_sent INTEGER NOT NULL DEFAULT 0;
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -1312,6 +1319,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))
             .expect("query");
-        assert_eq!(max_ver, 44);
+        assert_eq!(max_ver, 46);
     }
 }

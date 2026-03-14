@@ -206,6 +206,7 @@ impl ProviderOps for GmailOps {
         ctx: &ProviderCtx<'_>,
         raw_base64url: &str,
         thread_id: Option<&str>,
+        _mentions: &[(String, String)],
     ) -> Result<String, String> {
         let msg = self
             .client
@@ -219,6 +220,7 @@ impl ProviderOps for GmailOps {
         ctx: &ProviderCtx<'_>,
         raw_base64url: &str,
         thread_id: Option<&str>,
+        _mentions: &[(String, String)],
     ) -> Result<String, String> {
         let draft = self
             .client
