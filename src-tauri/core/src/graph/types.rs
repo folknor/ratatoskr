@@ -189,6 +189,35 @@ receivedDateTime,sentDateTime,isRead,isDraft,hasAttachments,\
 importance,parentFolderId,categories,flag,\
 inferenceClassification,isReadReceiptRequested,internetMessageHeaders,internetMessageId";
 
+// ── Large attachment upload session types ─────────────────
+
+/// Request body for `POST /me/messages/{id}/attachments/createUploadSession`.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateUploadSessionRequest {
+    pub attachment_item: UploadSessionAttachmentItem,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadSessionAttachmentItem {
+    #[serde(rename = "@odata.type")]
+    pub odata_type: String,
+    pub name: String,
+    pub size: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_inline: Option<bool>,
+}
+
+/// Response from `POST createUploadSession`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadSession {
+    pub upload_url: String,
+}
+
 // ── Batch request types ──────────────────────────────────
 
 /// A single request within a `POST /$batch` call.

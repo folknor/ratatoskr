@@ -332,8 +332,13 @@ async fn sync_mailboxes(
         "system".to_string(),
     ));
 
-    // Persist labels to DB
-    let aid2 = aid.clone();
+    // Persist labels + categories to DB
+    let category_rows: Vec<(String, String)> = label_rows
+        .iter()
+        .filter(|(_, _, _, lt)| lt == "user")
+        .map(|(id, _, name, _)| (id.clone(), name.clone()))
+        .collect();
+
     ctx.db
         .with_conn(move |conn| {
             let tx = conn
@@ -347,12 +352,23 @@ async fn sync_mailboxes(
                 )
                 .map_err(|e| format!("upsert label: {e}"))?;
             }
+            // Sync user mailboxes into categories table (no colors in JMAP)
+            for (i, (provider_id, name)) in category_rows.iter().enumerate() {
+                tx.execute(
+                    "INSERT INTO categories \
+                     (id, account_id, display_name, color_preset, color_bg, color_fg, \
+                      provider_id, sync_state, sort_order) \
+                     VALUES (?1, ?2, ?3, NULL, NULL, NULL, ?4, 'synced', ?5) \
+                     ON CONFLICT(account_id, display_name) DO UPDATE SET \
+                       provider_id = ?4, sync_state = 'synced'",
+                    rusqlite::params![provider_id, aid, name, provider_id, i as i64],
+                )
+                .map_err(|e| format!("upsert jmap category: {e}"))?;
+            }
             tx.commit().map_err(|e| format!("commit labels: {e}"))?;
             Ok(())
         })
         .await?;
-
-    let _ = aid2;
 
     Ok((mailbox_map, mailbox_data))
 }

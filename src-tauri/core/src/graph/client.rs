@@ -271,6 +271,47 @@ impl GraphClient {
         check_response_status(response).await
     }
 
+    /// Upload a byte range to an absolute URL (for resumable upload sessions).
+    ///
+    /// Sends `PUT` with `Content-Range: bytes {start}-{end}/{total}` header.
+    /// The upload URL is pre-authenticated — no Bearer token needed.
+    pub async fn put_bytes_range(
+        &self,
+        url: &str,
+        data: &[u8],
+        start: usize,
+        end: usize,
+        total: usize,
+    ) -> Result<(), String> {
+        let _permit = self
+            .inner
+            .semaphore
+            .acquire()
+            .await
+            .map_err(|e| format!("Semaphore closed: {e}"))?;
+
+        let content_range = format!("bytes {start}-{end}/{total}");
+        let response = self
+            .inner
+            .http
+            .put(url)
+            .header("Content-Range", &content_range)
+            .header("Content-Length", data.len().to_string())
+            .body(data.to_vec())
+            .send()
+            .await
+            .map_err(|e| format!("Upload chunk failed: {e}"))?;
+
+        let status = response.status().as_u16();
+        // 200/201 = final chunk accepted, 202 = more chunks expected
+        if status == 200 || status == 201 || status == 202 {
+            Ok(())
+        } else {
+            let body = response.text().await.unwrap_or_default();
+            Err(format!("Upload chunk failed: {status} {body}"))
+        }
+    }
+
     /// Execute a batch of up to 20 requests in a single `POST /$batch` call.
     ///
     /// Returns per-request results. Callers should check each `BatchResponseItem.status`

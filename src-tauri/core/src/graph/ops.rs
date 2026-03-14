@@ -845,6 +845,13 @@ fn mime_to_graph_message(
     })
 }
 
+/// Graph API inline attachment size limit (3 MB).
+/// Attachments larger than this must use a resumable upload session.
+const GRAPH_INLINE_ATTACHMENT_LIMIT: usize = 3 * 1024 * 1024;
+
+/// Chunk size for resumable upload sessions (4 MB, must be multiple of 320 KB per Microsoft docs).
+const UPLOAD_CHUNK_SIZE: usize = 4 * 1024 * 1024;
+
 /// Upload attachments from a parsed MIME message to a Graph draft.
 async fn upload_attachments_from_mime(
     client: &GraphClient,
@@ -870,32 +877,104 @@ async fn upload_attachments_from_mime(
                 }
             })
             .unwrap_or_else(|| "application/octet-stream".to_string());
-        let content_bytes =
-            crate::provider::encoding::encode_base64_standard(attachment.contents());
         let is_inline = attachment
             .content_disposition()
             .is_some_and(|d| d.ctype() == "inline");
-        let content_id = attachment
-            .content_id()
-            .map(|id| id.trim_matches(&['<', '>'] as &[char]).to_string());
+        let raw_bytes = attachment.contents();
 
-        let input = GraphAttachmentInput {
-            odata_type: "#microsoft.graph.fileAttachment".to_string(),
-            name,
-            content_type,
-            content_bytes,
-            is_inline: if is_inline { Some(true) } else { None },
-            content_id,
-        };
-
-        let _: serde_json::Value = client
-            .post(
-                &format!("/me/messages/{enc_draft_id}/attachments"),
-                &input,
-                ctx.db,
+        if raw_bytes.len() > GRAPH_INLINE_ATTACHMENT_LIMIT {
+            // Large attachment: use resumable upload session
+            upload_large_attachment(
+                client,
+                ctx,
+                &enc_draft_id,
+                &name,
+                &content_type,
+                is_inline,
+                raw_bytes,
             )
             .await?;
+        } else {
+            // Small attachment: inline base64
+            let content_bytes =
+                crate::provider::encoding::encode_base64_standard(raw_bytes);
+            let content_id = attachment
+                .content_id()
+                .map(|id| id.trim_matches(&['<', '>'] as &[char]).to_string());
+
+            let input = GraphAttachmentInput {
+                odata_type: "#microsoft.graph.fileAttachment".to_string(),
+                name,
+                content_type,
+                content_bytes,
+                is_inline: if is_inline { Some(true) } else { None },
+                content_id,
+            };
+
+            let _: serde_json::Value = client
+                .post(
+                    &format!("/me/messages/{enc_draft_id}/attachments"),
+                    &input,
+                    ctx.db,
+                )
+                .await?;
+        }
     }
 
+    Ok(())
+}
+
+/// Upload a large attachment using a resumable upload session (RFC-compliant chunked PUT).
+async fn upload_large_attachment(
+    client: &GraphClient,
+    ctx: &ProviderCtx<'_>,
+    enc_draft_id: &str,
+    name: &str,
+    content_type: &str,
+    is_inline: bool,
+    data: &[u8],
+) -> Result<(), String> {
+    use super::types::{CreateUploadSessionRequest, UploadSession, UploadSessionAttachmentItem};
+
+    #[allow(clippy::cast_possible_wrap)]
+    let size = data.len() as i64;
+
+    // Step 1: Create upload session
+    let session_req = CreateUploadSessionRequest {
+        attachment_item: UploadSessionAttachmentItem {
+            odata_type: "#microsoft.graph.fileAttachment".to_string(),
+            name: name.to_string(),
+            size,
+            content_type: Some(content_type.to_string()),
+            is_inline: if is_inline { Some(true) } else { None },
+        },
+    };
+
+    let session: UploadSession = client
+        .post(
+            &format!("/me/messages/{enc_draft_id}/attachments/createUploadSession"),
+            &session_req,
+            ctx.db,
+        )
+        .await?;
+
+    // Step 2: Upload in chunks
+    let total = data.len();
+    let mut offset = 0;
+    while offset < total {
+        let end = (offset + UPLOAD_CHUNK_SIZE).min(total);
+        let chunk = &data[offset..end];
+
+        client
+            .put_bytes_range(&session.upload_url, chunk, offset, end - 1, total)
+            .await?;
+
+        offset = end;
+    }
+
+    log::info!(
+        "Uploaded large attachment '{name}' ({} bytes) via resumable session",
+        total
+    );
     Ok(())
 }

@@ -635,6 +635,30 @@ pub fn sync_folders_to_labels(
     )
     .map_err(|e| format!("upsert UNREAD label: {e}"))?;
 
+    // Sync user folders into categories table (no colors for IMAP)
+    for (i, folder) in folders.iter().enumerate() {
+        let mapping = super::folder_mapper::map_folder_to_label(folder);
+        if mapping.label_type != "user" {
+            continue;
+        }
+        conn.execute(
+            "INSERT INTO categories \
+             (id, account_id, display_name, color_preset, color_bg, color_fg, \
+              provider_id, sync_state, sort_order) \
+             VALUES (?1, ?2, ?3, NULL, NULL, NULL, ?4, 'synced', ?5) \
+             ON CONFLICT(account_id, display_name) DO UPDATE SET \
+               provider_id = ?4, sync_state = 'synced'",
+            rusqlite::params![
+                mapping.label_id,
+                account_id,
+                mapping.label_name,
+                folder.raw_path,
+                i as i64,
+            ],
+        )
+        .map_err(|e| format!("upsert imap category: {e}"))?;
+    }
+
     Ok(())
 }
 
