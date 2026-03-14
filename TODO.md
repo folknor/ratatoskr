@@ -44,11 +44,7 @@
 
 - [ ] **Decide on Azure AD app registration model** — Currently users must provide their own `microsoft_client_id` during account setup. Product/policy decision, not a code gap.
 
-- [ ] **Wire up Graph webhook notification listener** — Subscription CRUD and notification parsing are implemented (`graph/webhooks.rs`). What's missing: a local HTTP server (or relay) to actually receive the POST notifications from Microsoft, and integration into the sync loop to trigger immediate delta syncs on notification receipt.
-
 ### JMAP
-
-- [ ] **Add JMAP Sieve filter management** — `jmap-client` supports full Sieve CRUD (RFC 6785 over JMAP). This would allow users to manage server-side mail filters directly from the UI. Nice-to-have feature, not blocking.
 
 - [ ] **JMAP for Calendars** — `jmap-client` has no calendar support (upstream Issue #3). Blocked until `jmap-client` adds calendar types. Low priority — CalDAV covers calendar sync for now.
 
@@ -62,8 +58,4 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 ### Public Folders (Tier 1)
 
-- [ ] **Autodiscover for public folder routing** — Public folder access requires two autodiscover lookups: a SOAP call to get `PublicFolderInformation` (the hierarchy mailbox), and a POX autodiscover for the content mailbox routing. Set `X-AnchorMailbox` and `X-PublicFolderMailbox` headers on each request.
-
-- [ ] **Offline sync for pinned public folders** — Polling-based sync: `FindItem` with `DateTimeReceived >= last_sync_timestamp` for new items, match by `ItemId + ChangeKey` for updates, and periodic full `ItemId`-only `FindItem` + local diff for deletion detection. No change notifications or delta tokens available for public folders.
-
-- [ ] **IMAP NAMESPACE-based public folder access** — For non-Exchange IMAP servers (Dovecot, Cyrus), discover public namespaces via the `NAMESPACE` command and `LIST` folders under the public prefix. Access with standard IMAP `SELECT`/`FETCH`. Add a `namespace_type` column to the existing folder table to distinguish personal, other-users, and shared folders.
+- [ ] **IMAP NAMESPACE-based public folder access** — For non-Exchange IMAP servers (Dovecot, Cyrus), discover public namespaces via the `NAMESPACE` command and `LIST` folders under the public prefix. Access with standard IMAP `SELECT`/`FETCH`. The `namespace_type` column already exists on the labels table (migration v54).
