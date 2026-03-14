@@ -887,6 +887,17 @@ fn store_thread_to_db(
     upsert_thread_record(tx, account_id, thread_id, messages)?;
     set_thread_labels(tx, account_id, thread_id, messages)?;
     insert_exchange_reactions(tx, account_id, messages)?;
+    sync_persistence::insert_message_categories(
+        tx,
+        account_id,
+        messages
+            .iter()
+            .flat_map(|msg| {
+                msg.categories
+                    .iter()
+                    .map(move |cat| (msg.id.as_str(), cat.as_str()))
+            }),
+    )?;
     Ok(())
 }
 
@@ -950,9 +961,9 @@ fn upsert_messages(
               is_read, is_starred, raw_size, internal_date, \
               list_unsubscribe, list_unsubscribe_post, auth_results, \
               message_id_header, references_header, in_reply_to_header, body_cached, \
-              mdn_requested) \
+              mdn_requested, is_mentioned) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, \
-                     ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
+                     ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
             rusqlite::params![
                 msg.id,
                 account_id,
@@ -978,6 +989,7 @@ fn upsert_messages(
                 msg.in_reply_to_header,
                 if has_body { 1i64 } else { 0i64 },
                 msg.mdn_requested,
+                msg.is_mentioned,
             ],
         )
         .map_err(|e| format!("upsert message: {e}"))?;

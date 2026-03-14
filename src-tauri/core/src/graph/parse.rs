@@ -49,10 +49,14 @@ pub struct ParsedGraphMessage {
     pub list_unsubscribe_post: Option<String>,
     pub mdn_requested: bool,
     pub attachments: Vec<ParsedGraphAttachment>,
+    /// Exchange categories assigned to this message (e.g. "Red Category", "Blue Category").
+    pub categories: Vec<String>,
     /// The authenticated user's reaction emoji from Exchange extended properties.
     pub owner_reaction_type: Option<String>,
     /// Total reactions count from Exchange extended properties.
     pub reactions_count: Option<i64>,
+    /// Whether the authenticated user is @mentioned in this message (Exchange beta API).
+    pub is_mentioned: bool,
 }
 
 impl crate::seen_addresses::MessageAddresses for ParsedGraphMessage {
@@ -161,6 +165,12 @@ pub fn parse_graph_message(
     // Exchange reaction extended properties
     let (owner_reaction_type, reactions_count) = extract_reaction_properties(msg);
 
+    // Exchange @mention detection (beta API mentionsPreview)
+    let is_mentioned = msg
+        .mentions_preview
+        .as_ref()
+        .is_some_and(|mp| mp.is_mentioned);
+
     // Attachments
     let attachments: Vec<ParsedGraphAttachment> = msg
         .attachments
@@ -222,8 +232,10 @@ pub fn parse_graph_message(
         list_unsubscribe_post,
         mdn_requested,
         attachments,
+        categories: categories.to_vec(),
         owner_reaction_type,
         reactions_count,
+        is_mentioned,
     })
 }
 

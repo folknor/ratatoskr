@@ -1059,6 +1059,20 @@ static MIGRATIONS: &[Migration] = &[
             ALTER TABLE messages ADD COLUMN is_reaction INTEGER NOT NULL DEFAULT 0;
         "#,
     },
+    Migration {
+        version: 45,
+        description: "Message-level categories join table for per-message category tracking",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS message_categories (
+                account_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                category TEXT NOT NULL,
+                PRIMARY KEY (account_id, message_id, category),
+                FOREIGN KEY (account_id, message_id) REFERENCES messages(account_id, id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_message_categories_cat ON message_categories(account_id, category);
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks

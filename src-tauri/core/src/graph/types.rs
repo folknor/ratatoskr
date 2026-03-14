@@ -35,6 +35,19 @@ pub struct GraphMessage {
     pub internet_message_headers: Option<Vec<GraphInternetHeader>>,
     pub attachments: Option<Vec<GraphAttachment>>,
     pub single_value_extended_properties: Option<Vec<SingleValueExtendedProperty>>,
+    /// Exchange `mentionsPreview` (beta API). Present when the user is @mentioned.
+    #[serde(default)]
+    pub mentions_preview: Option<MentionsPreview>,
+}
+
+/// The `mentionsPreview` object from Graph beta API.
+///
+/// Only contains `isMentioned` — true when the authenticated user is @mentioned
+/// in the message body.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MentionsPreview {
+    pub is_mentioned: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -201,7 +214,7 @@ id,conversationId,subject,bodyPreview,body,uniqueBody,from,\
 toRecipients,ccRecipients,bccRecipients,replyTo,\
 receivedDateTime,sentDateTime,isRead,isDraft,hasAttachments,\
 importance,parentFolderId,categories,flag,\
-inferenceClassification,isReadReceiptRequested,internetMessageHeaders,internetMessageId";
+inferenceClassification,isReadReceiptRequested,internetMessageHeaders,internetMessageId,mentionsPreview";
 
 /// GUID for Exchange reaction extended properties.
 pub const REACTIONS_GUID: &str = "{41F28F13-83F4-4114-A584-EEDB5A6B0BFF}";

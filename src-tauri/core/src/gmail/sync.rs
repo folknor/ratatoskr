@@ -208,20 +208,43 @@ fn persist_labels(
 
 /// Sync user labels with colors into the categories table for unified category display.
 ///
-/// Only user-created labels are synced (system labels like INBOX, SENT are not categories).
+/// Only user-created labels that look like "categories" (flat, tag-like) are
+/// synced. Labels that look like folders (nested hierarchy, hidden from message
+/// or label lists) stay as mailbox folders only.
+///
+/// Classification heuristic:
+/// - System labels (type = "system") are never categories.
+/// - `CATEGORY_*` labels (inbox tabs) are already handled separately.
+/// - Folder-like: contains `/` (nested), OR `messageListVisibility = "hide"`,
+///   OR `labelListVisibility = "labelHide"`.
+/// - Category-like: everything else (flat name, visible or null visibility).
+///
 /// Gmail colors are hex strings — they go directly into color_bg/color_fg.
 fn sync_labels_to_categories(
     conn: &rusqlite::Connection,
     account_id: &str,
     labels: &[GmailLabel],
 ) -> Result<(), String> {
-    for (i, label) in labels.iter().enumerate() {
+    let mut sort = 0i64;
+    for label in labels {
         // Only user labels are categories — skip system labels
         if label.label_type.as_deref() == Some("system") {
             continue;
         }
         // Skip CATEGORY_* labels (automated inbox tabs, not user categories)
         if label.id.starts_with("CATEGORY_") {
+            continue;
+        }
+        // Folder-like: nested hierarchy (contains `/`)
+        if label.name.contains('/') {
+            continue;
+        }
+        // Folder-like: hidden from message list
+        if label.message_list_visibility.as_deref() == Some("hide") {
+            continue;
+        }
+        // Folder-like: hidden from label list
+        if label.label_list_visibility.as_deref() == Some("labelHide") {
             continue;
         }
 
@@ -242,10 +265,12 @@ fn sync_labels_to_categories(
                 color_bg,
                 color_fg,
                 label.id,
-                i as i64,
+                sort,
             ],
         )
         .map_err(|e| format!("upsert gmail category: {e}"))?;
+
+        sort += 1;
     }
     Ok(())
 }
@@ -512,6 +537,7 @@ fn store_thread_to_db(
     upsert_thread_record(&tx, account_id, thread_id, messages)?;
     set_thread_labels(&tx, account_id, thread_id, messages)?;
     insert_reactions(&tx, account_id, messages)?;
+    sync_message_categories(&tx, account_id, messages)?;
 
     tx.commit().map_err(|e| format!("commit: {e}"))?;
     Ok(())
@@ -708,6 +734,51 @@ fn insert_reactions(
         .map_err(|e| format!("insert reaction: {e}"))?;
     }
     Ok(())
+}
+
+/// Link messages to their categories via the `message_categories` join table.
+///
+/// Gmail categories are user labels that were synced into the `categories` table
+/// during label sync. We query the categories table to build a label_id → display_name
+/// map, then match each message's label_ids against it.
+fn sync_message_categories(
+    tx: &rusqlite::Transaction,
+    account_id: &str,
+    messages: &[ParsedGmailMessage],
+) -> Result<(), String> {
+    // Build label_id → display_name map from the categories table for this account
+    let mut stmt = tx
+        .prepare(
+            "SELECT provider_id, display_name FROM categories \
+             WHERE account_id = ?1 AND provider_id IS NOT NULL",
+        )
+        .map_err(|e| format!("prepare category lookup: {e}"))?;
+    let category_map: std::collections::HashMap<String, String> = stmt
+        .query_map(rusqlite::params![account_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| format!("query categories: {e}"))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    if category_map.is_empty() {
+        return Ok(());
+    }
+
+    let entries: Vec<(&str, String)> = messages
+        .iter()
+        .flat_map(|msg| {
+            msg.label_ids
+                .iter()
+                .filter_map(|lid| category_map.get(lid).map(|name| (msg.id.as_str(), name.clone())))
+        })
+        .collect();
+
+    sync_persistence::insert_message_categories(
+        tx,
+        account_id,
+        entries.iter().map(|(mid, cat)| (*mid, cat.as_str())),
+    )
 }
 
 // ---------------------------------------------------------------------------

@@ -1,9 +1,13 @@
+use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use futures::stream::{self, StreamExt};
 use hickory_resolver::TokioResolver;
-use log::{debug, warn};
+use log::{debug, info, warn};
 use rusqlite::Connection;
 use rusqlite::OptionalExtension;
 use sha2::{Digest, Sha256};
@@ -503,6 +507,268 @@ fn cache_negative(domain: &str, conn: &Connection) {
 }
 
 // ---------------------------------------------------------------------------
+// In-memory LRU cache
+// ---------------------------------------------------------------------------
+
+/// Default LRU capacity.
+const LRU_CAPACITY: usize = 500;
+
+/// In-memory LRU cache wrapping the DB/filesystem BIMI lookup.
+///
+/// Avoids hitting the DB and filesystem on every message render.
+/// The outer `Option` in `get()` indicates cache miss (`None`) vs hit
+/// (`Some(None)` = no BIMI, `Some(Some(path))` = logo path).
+pub struct BimiLruCache {
+    cache: Mutex<LruMap>,
+}
+
+/// Simple LRU built on a `HashMap` + insertion-order `Vec` for eviction.
+struct LruMap {
+    entries: HashMap<String, Option<PathBuf>>,
+    order: Vec<String>,
+    capacity: usize,
+}
+
+impl LruMap {
+    fn new(capacity: usize) -> Self {
+        Self {
+            entries: HashMap::with_capacity(capacity),
+            order: Vec::with_capacity(capacity),
+            capacity,
+        }
+    }
+
+    fn get(&mut self, key: &str) -> Option<Option<PathBuf>> {
+        if self.entries.contains_key(key) {
+            // Move to back (most recently used)
+            self.order.retain(|k| k != key);
+            self.order.push(key.to_string());
+            self.entries.get(key).cloned()
+        } else {
+            None
+        }
+    }
+
+    fn insert(&mut self, key: String, value: Option<PathBuf>) {
+        if self.entries.contains_key(&key) {
+            self.order.retain(|k| k != &key);
+        } else if self.entries.len() >= self.capacity {
+            // Evict oldest
+            if let Some(oldest) = self.order.first().cloned() {
+                self.order.remove(0);
+                self.entries.remove(&oldest);
+            }
+        }
+        self.order.push(key.clone());
+        self.entries.insert(key, value);
+    }
+}
+
+impl BimiLruCache {
+    /// Create a new LRU cache with the default capacity (500).
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            cache: Mutex::new(LruMap::new(LRU_CAPACITY)),
+        }
+    }
+
+    /// Create a new LRU cache with a specific capacity.
+    #[must_use]
+    pub fn with_capacity(capacity: NonZeroUsize) -> Self {
+        Self {
+            cache: Mutex::new(LruMap::new(capacity.get())),
+        }
+    }
+
+    /// Look up a domain in the in-memory cache.
+    ///
+    /// Returns `None` on cache miss. Returns `Some(None)` if the domain is
+    /// known to have no BIMI. Returns `Some(Some(path))` with the logo path.
+    pub fn get(&self, domain: &str) -> Option<Option<PathBuf>> {
+        match self.cache.lock() {
+            Ok(mut map) => map.get(domain),
+            Err(_) => None,
+        }
+    }
+
+    /// Insert a lookup result into the in-memory cache.
+    pub fn insert(&self, domain: String, result: Option<PathBuf>) {
+        if let Ok(mut map) = self.cache.lock() {
+            map.insert(domain, result);
+        }
+    }
+}
+
+impl Default for BimiLruCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Cache warming
+// ---------------------------------------------------------------------------
+
+/// Maximum number of recent messages to scan for sender domains.
+const WARM_MAX_MESSAGES: u32 = 1000;
+
+/// Number of days to look back for recent messages.
+const WARM_LOOKBACK_DAYS: i64 = 7;
+
+/// Extract unique sender domains from recent messages that are not already
+/// cached (or whose cache has expired).
+fn domains_to_warm(conn: &Connection) -> Result<Vec<String>, String> {
+    let cutoff = chrono::Utc::now().timestamp() - (WARM_LOOKBACK_DAYS * 24 * 3600);
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT DISTINCT LOWER(SUBSTR(m.from_address, INSTR(m.from_address, '@') + 1)) AS domain \
+             FROM messages m \
+             WHERE m.from_address IS NOT NULL \
+               AND m.from_address LIKE '%@%' \
+               AND m.date > ?1 \
+             ORDER BY domain \
+             LIMIT ?2",
+        )
+        .map_err(|e| format!("prepare domain query: {e}"))?;
+
+    let rows = stmt
+        .query_map(
+            rusqlite::params![cutoff, WARM_MAX_MESSAGES],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|e| format!("query sender domains: {e}"))?;
+
+    let mut domains = Vec::new();
+    for row in rows {
+        let domain = row.map_err(|e| format!("read domain row: {e}"))?;
+        if domain.is_empty() || !domain.contains('.') {
+            continue;
+        }
+        // Check if already cached and not expired
+        match get_bimi_cache(conn, &domain) {
+            Ok(Some(_)) => continue, // still valid
+            Ok(None) | Err(_) => domains.push(domain),
+        }
+    }
+
+    Ok(domains)
+}
+
+/// Pre-fetch BIMI logos for unique sender domains from recent messages.
+///
+/// This runs DNS lookups and SVG fetches concurrently (up to `max_concurrent`)
+/// for domains not already in the cache. Cache warming is best-effort: failures
+/// for individual domains are logged but do not abort the overall operation.
+///
+/// Returns the count of domains that were newly looked up (both positive and
+/// negative results count).
+pub async fn warm_bimi_cache(
+    conn: &Connection,
+    cache_dir: &Path,
+    max_concurrent: usize,
+) -> Result<usize, String> {
+    let domains = domains_to_warm(conn)?;
+    let total = domains.len();
+
+    if total == 0 {
+        debug!("BIMI cache warm: no domains to process");
+        return Ok(0);
+    }
+
+    info!("BIMI cache warm: processing {total} domains (concurrency {max_concurrent})");
+
+    // We need to collect results synchronously back to update the DB, so we
+    // run the async lookups and collect (domain, result) pairs.
+    let results: Vec<(String, Option<(PathBuf, String, Option<String>)>)> =
+        stream::iter(domains)
+            .map(|domain| {
+                let cache_dir = cache_dir.to_path_buf();
+                async move {
+                    let result = lookup_bimi_dns_and_fetch(&domain, &cache_dir).await;
+                    (domain, result)
+                }
+            })
+            .buffer_unordered(max_concurrent)
+            .collect()
+            .await;
+
+    let mut warmed = 0usize;
+    for (domain, result) in &results {
+        let now = chrono::Utc::now().timestamp();
+        match result {
+            Some((_path, logo_uri, authority_uri)) => {
+                let expires = now + POSITIVE_TTL_SECS;
+                let _ = upsert_bimi_cache(
+                    conn,
+                    domain,
+                    true,
+                    Some(logo_uri.as_str()),
+                    authority_uri.as_deref(),
+                    expires,
+                );
+            }
+            None => {
+                cache_negative(domain, conn);
+            }
+        }
+        warmed += 1;
+    }
+
+    info!("BIMI cache warm: completed {warmed} domains");
+    Ok(warmed)
+}
+
+/// Perform a DNS lookup and SVG fetch for a single domain (no DB caching).
+/// Returns `Some((png_path, logo_uri, authority_uri))` on success, `None` if
+/// no BIMI record or fetch failure.
+async fn lookup_bimi_dns_and_fetch(
+    domain: &str,
+    cache_dir: &Path,
+) -> Option<(PathBuf, String, Option<String>)> {
+    let record = match lookup_bimi_dns(domain).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            debug!("BIMI warm: no DNS record for {domain}");
+            return None;
+        }
+        Err(e) => {
+            debug!("BIMI warm: DNS error for {domain}: {e}");
+            return None;
+        }
+    };
+
+    let logo_uri = match record.logo_uri {
+        Some(ref uri) if !uri.is_empty() => uri.clone(),
+        _ => {
+            debug!("BIMI warm: no logo URI for {domain}");
+            return None;
+        }
+    };
+
+    let path = cache_path(cache_dir, &logo_uri);
+    if path.exists() {
+        return Some((path, logo_uri, record.authority_uri));
+    }
+
+    let svg_data = match fetch_and_validate_svg(&logo_uri).await {
+        Ok(data) => data,
+        Err(e) => {
+            debug!("BIMI warm: SVG fetch failed for {domain}: {e}");
+            return None;
+        }
+    };
+
+    if let Err(e) = rasterize_svg_to_png(&svg_data, &path) {
+        debug!("BIMI warm: rasterize failed for {domain}: {e}");
+        return None;
+    }
+
+    Some((path, logo_uri, record.authority_uri))
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -612,5 +878,61 @@ mod tests {
     fn test_hex_encode() {
         assert_eq!(hex_encode([0xde, 0xad, 0xbe, 0xef]), "deadbeef");
         assert_eq!(hex_encode([0x00, 0xff]), "00ff");
+    }
+
+    #[test]
+    fn test_lru_cache_basic() {
+        let cache = BimiLruCache::new();
+
+        // Miss on empty cache
+        assert!(cache.get("example.com").is_none());
+
+        // Insert positive
+        cache.insert(
+            "example.com".to_string(),
+            Some(PathBuf::from("/tmp/logo.png")),
+        );
+        let result = cache.get("example.com");
+        assert!(result.is_some());
+        assert_eq!(
+            result.as_ref().and_then(|r| r.as_ref()),
+            Some(&PathBuf::from("/tmp/logo.png"))
+        );
+
+        // Insert negative
+        cache.insert("nodomain.com".to_string(), None);
+        let result = cache.get("nodomain.com");
+        assert_eq!(result, Some(None));
+    }
+
+    #[test]
+    fn test_lru_cache_eviction() {
+        let cache = BimiLruCache::with_capacity(NonZeroUsize::new(2).expect("nonzero"));
+
+        cache.insert("a.com".to_string(), None);
+        cache.insert("b.com".to_string(), None);
+        cache.insert("c.com".to_string(), None); // should evict a.com
+
+        assert!(cache.get("a.com").is_none()); // evicted
+        assert!(cache.get("b.com").is_some());
+        assert!(cache.get("c.com").is_some());
+    }
+
+    #[test]
+    fn test_lru_cache_access_refreshes() {
+        let cache = BimiLruCache::with_capacity(NonZeroUsize::new(2).expect("nonzero"));
+
+        cache.insert("a.com".to_string(), None);
+        cache.insert("b.com".to_string(), None);
+
+        // Access a.com to make it most-recently-used
+        let _ = cache.get("a.com");
+
+        // Insert c.com — should evict b.com (oldest), not a.com
+        cache.insert("c.com".to_string(), None);
+
+        assert!(cache.get("a.com").is_some());
+        assert!(cache.get("b.com").is_none()); // evicted
+        assert!(cache.get("c.com").is_some());
     }
 }

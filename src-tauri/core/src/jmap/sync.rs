@@ -829,6 +829,17 @@ fn sync_keyword_categories(
     )
     .map_err(|e| format!("upsert jmap thread keyword category: {e}"))?;
 
+    // Link each message to its keyword categories
+    sync_persistence::insert_message_categories(
+        tx,
+        account_id,
+        messages.iter().flat_map(|msg| {
+            msg.keyword_categories
+                .iter()
+                .map(move |kw| (msg.id.as_str(), kw.as_str()))
+        }),
+    )?;
+
     Ok(())
 }
 

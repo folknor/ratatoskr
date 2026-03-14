@@ -99,7 +99,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **Gmail label color sync** — Already implemented: `GmailLabelColor` struct, `GmailLabel.color` field, and `sync_labels_to_categories()` with `ON CONFLICT DO UPDATE` for color persistence.
 
-- [ ] **Gmail label-as-category classification heuristic** — Not all Gmail labels are "categories" — some are folder-like. Distinguish them using `messageListVisibility` (show vs hide), nesting (`/` in name = folder hierarchy), and `labelListVisibility`. Labels that behave as tags get synced to `categories`; folder-like ones stay as mailbox folders.
+- [x] **Gmail label-as-category classification heuristic** — Implemented: `sync_labels_to_categories` now filters out nested (`/` in name), hidden from message list, and hidden from label list labels. Only flat, visible, user-type labels sync as categories.
 
 - [x] **JMAP keyword-to-category mapping** — Implemented: `parse_jmap_email` extracts non-`$` keywords into `keyword_categories`, `sync_keyword_categories()` upserts them into `categories` table with `kw_` prefix and links to threads via `thread_categories`.
 
@@ -107,7 +107,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **`ProviderOps` methods for category mutation** — Implemented: `apply_category`/`remove_category` on `ProviderOps` trait with default no-op. Graph: read-modify-write with category lock. Gmail: `modify_message` with label ID resolution. JMAP: `Email/set` keyword patches. IMAP: `UID STORE +/-FLAGS` gated by `supports_custom_keywords`.
 
-- [ ] **Populate `message_categories` during sync** — When messages are fetched/synced, parse their category associations (Graph `categories[]` array, Gmail label IDs matched against category-classified labels, JMAP non-system keywords) and populate the `message_categories` join table. Currently sync writes messages but doesn't link them to categories.
+- [x] **Populate `message_categories` during sync** — Migration v45: `message_categories` join table. `insert_message_categories()` shared helper. Graph: parses `categories[]` array. Gmail: matches label IDs against categories table. JMAP: extended to link at message level alongside thread level.
 
 - [ ] **Unified color model with Exchange presets as canonical palette** — Implement a const array mapping Exchange's 25 preset names to hex values. When syncing Gmail label colors, map to the nearest Exchange preset by color distance. Store both `color_preset` (for Exchange round-tripping) and `color_bg`/`color_fg` (for rendering) in the `categories` table. This gives a consistent color picker vocabulary across providers.
 
@@ -135,7 +135,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **Tracking URL parameter stripping** — Implemented in `url_cleaning.rs`: `strip_tracking_params()` removes 26 tracking params (UTM, Facebook, Google, Mailchimp, HubSpot, Marketo, Drip, Vero, Microsoft). `strip_tracking_params_from_html()` processes all href attributes. 16 unit tests. Tracking redirect domain list deferred to sanitization pipeline.
 
-- [ ] **1×1 tracking pixel detection** — When the user allows remote images for a sender, inspect fetched images for tracking pixel signatures: check `Content-Length` < threshold or decode dimensions and flag 1×1 transparent images. Surface this as metadata on the message so the UI can optionally indicate "this sender uses tracking pixels" without blocking the images.
+- [x] **1×1 tracking pixel detection** — Implemented in `provider/tracking_pixels.rs`: `detect_tracking_pixels_in_html()` checks tiny dimensions (0/1 width+height), hidden styles (display:none, visibility:hidden), and known tracker domains/paths (Mailchimp, SendGrid, HubSpot, etc.). 14 unit tests.
 
 ### Cloud Attachments (Tier 1)
 
@@ -207,7 +207,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **`mentions` table and `is_mentioned` column** — Migration v40: `mentions` table with indexes, `is_mentioned` column on `messages` with partial index.
 
-- [ ] **Exchange `mentionsPreview` sync via Graph beta** — Switch to the Graph beta endpoint for message sync to include `mentionsPreview` in `$select`. Extract `mentionsPreview.isMentioned` and populate `messages.is_mentioned` during delta sync. The beta endpoint is identical to v1.0 for all other fields — only `mentions` requires beta. This is a lightweight sync-time flag, not the full mention details.
+- [x] **Exchange `mentionsPreview` sync via Graph beta** — Implemented: `MentionsPreview` struct, `mentions_preview` on `GraphMessage`, `mentionsPreview` added to `MESSAGE_SELECT` (v1.0 silently ignores it). `is_mentioned` written to messages table during sync.
 
 - [ ] **Lazy-load full mention details on message open** — When opening a message where `is_mentioned = 1`, fetch `GET /beta/me/messages/{id}?$expand=mentions` to get the full mentions array (who mentioned whom, with names and addresses). Upsert into the `mentions` table. Avoids fetching mention details for every message during sync — only loads them on demand.
 
@@ -263,7 +263,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **SVG fetch, validation, and rasterization pipeline** — Implemented in `bimi.rs`: `fetch_and_validate_svg()` (32KB limit, Tiny PS check, external URI rejection) + `rasterize_svg_to_png()` via `resvg` to 128×128 PNG. Full `lookup_bimi()` orchestrator function with DB caching (7-day positive, 24h negative TTL). 10 unit tests.
 
-- [ ] **BIMI cache warming** — Background task: collect unique sender domains from visible/recent messages, batch concurrent DNS lookups (limit ~20 concurrent), fetch/rasterize/cache logos for new domains. Run on sync completion and when scrolling through message lists. In-memory LRU (N=500 domains) for active rendering to avoid filesystem reads on every message display.
+- [x] **BIMI cache warming** — Implemented in `bimi.rs`: `warm_bimi_cache()` queries recent sender domains, filters cached, runs concurrent lookups via `buffer_unordered`. `BimiLruCache` in-memory LRU (500 entries) wraps DB lookups. 3 additional tests.
 
 ### IMAP SPECIAL-USE Polish (Tier 3)
 

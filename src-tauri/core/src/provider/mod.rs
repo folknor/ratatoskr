@@ -10,4 +10,5 @@ pub mod ops;
 pub mod router;
 pub mod text;
 pub mod token;
+pub mod tracking_pixels;
 pub mod types;

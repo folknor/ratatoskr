@@ -205,6 +205,27 @@ pub fn replace_thread_labels<'a>(
     Ok(())
 }
 
+/// Insert message-level category associations.
+///
+/// Uses `INSERT OR IGNORE` for idempotency during repeated syncs.
+/// Each `(message_id, category)` pair from the iterator is linked in the
+/// `message_categories` join table.
+pub fn insert_message_categories<'a>(
+    tx: &Transaction,
+    account_id: &str,
+    entries: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> Result<(), String> {
+    for (message_id, category) in entries {
+        tx.execute(
+            "INSERT OR IGNORE INTO message_categories (account_id, message_id, category) \
+             VALUES (?1, ?2, ?3)",
+            rusqlite::params![account_id, message_id, category],
+        )
+        .map_err(|e| format!("insert message category: {e}"))?;
+    }
+    Ok(())
+}
+
 pub async fn store_message_bodies<T, FId, FHtml, FText>(
     body_store: &BodyStoreState,
     messages: &[T],
