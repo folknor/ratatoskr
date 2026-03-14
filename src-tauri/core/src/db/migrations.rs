@@ -1288,6 +1288,21 @@ static MIGRATIONS: &[Migration] = &[
                 ON graph_subscriptions(expiration_date_time);
         "#,
     },
+    Migration {
+        version: 58,
+        description: "Public folder content routing cache",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS public_folder_content_routing (
+                account_id TEXT NOT NULL,
+                folder_id TEXT NOT NULL,
+                replica_guid TEXT,
+                content_mailbox TEXT NOT NULL,
+                discovered_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                PRIMARY KEY (account_id, folder_id),
+                FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+            );
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -1527,6 +1542,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))
             .expect("query");
-        assert_eq!(max_ver, 57);
+        assert_eq!(max_ver, 58);
     }
 }
