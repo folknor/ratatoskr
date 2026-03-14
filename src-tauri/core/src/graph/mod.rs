@@ -8,5 +8,6 @@ pub mod mentions;
 pub mod onedrive;
 pub mod ops;
 pub mod parse;
+pub mod shared_mailbox_sync;
 pub mod sync;
 pub mod types;

@@ -123,7 +123,7 @@ pub(crate) async fn graph_initial_sync(
             .iter()
             .map(|folder_id| async {
                 let delta_link = bootstrap_delta_token(client, ctx.db, folder_id).await?;
-                save_delta_token(ctx.db, ctx.account_id, folder_id, &delta_link).await
+                save_delta_token(client, ctx.db, ctx.account_id, folder_id, &delta_link).await
             })
             .collect();
 
@@ -206,7 +206,7 @@ pub(crate) async fn graph_delta_sync(
     let cycle = client.increment_sync_cycle();
 
     // Load stored delta tokens
-    let mut tokens = load_delta_tokens(ctx.db, ctx.account_id).await?;
+    let mut tokens = load_delta_tokens(client, ctx.db, ctx.account_id).await?;
     if tokens.is_empty() {
         return Err("GRAPH_NO_DELTA_STATE".to_string());
     }
@@ -226,7 +226,7 @@ pub(crate) async fn graph_delta_sync(
                 log::info!("Graph delta sync: bootstrapping new folder {folder_id}");
                 match bootstrap_delta_token_latest(client, ctx.db, folder_id).await {
                     Ok(delta_link) => {
-                        save_delta_token(ctx.db, ctx.account_id, folder_id, &delta_link).await?;
+                        save_delta_token(client, ctx.db, ctx.account_id, folder_id, &delta_link).await?;
                         tokens.insert(folder_id.to_string(), delta_link);
                     }
                     Err(e) => {
@@ -244,7 +244,7 @@ pub(crate) async fn graph_delta_sync(
             .collect();
         for stale_id in &stale_ids {
             log::info!("Graph delta sync: removing stale delta token for folder {stale_id}");
-            delete_delta_token(ctx.db, ctx.account_id, stale_id).await?;
+            delete_delta_token(client, ctx.db, ctx.account_id, stale_id).await?;
             tokens.remove(stale_id);
         }
 
@@ -392,7 +392,7 @@ async fn sync_folder_delta(
         if let Some(ref next_link) = page.next_link {
             current_link = next_link.clone();
         } else if let Some(ref new_delta) = page.delta_link {
-            save_delta_token(sctx.db, sctx.account_id, folder_id, new_delta).await?;
+            save_delta_token(sctx.client, sctx.db, sctx.account_id, folder_id, new_delta).await?;
             break;
         } else {
             // No next or delta link — shouldn't happen, but break to avoid infinite loop
@@ -661,21 +661,40 @@ async fn bootstrap_delta_token(
 }
 
 /// Save a delta token for a folder.
+///
+/// Routes to shared mailbox storage when the client is scoped to one.
 async fn save_delta_token(
+    client: &GraphClient,
     db: &DbState,
     account_id: &str,
     folder_id: &str,
     delta_link: &str,
 ) -> Result<(), String> {
-    sync_state::save_graph_delta_token(db, account_id, folder_id, delta_link).await
+    match client.mailbox_id() {
+        Some(mailbox_id) => {
+            sync_state::save_shared_mailbox_delta_token(
+                db, account_id, mailbox_id, folder_id, delta_link,
+            )
+            .await
+        }
+        None => sync_state::save_graph_delta_token(db, account_id, folder_id, delta_link).await,
+    }
 }
 
-/// Load all delta tokens for an account.
+/// Load all delta tokens for an account (or shared mailbox).
+///
+/// Routes to shared mailbox storage when the client is scoped to one.
 async fn load_delta_tokens(
+    client: &GraphClient,
     db: &DbState,
     account_id: &str,
 ) -> Result<HashMap<String, String>, String> {
-    sync_state::load_graph_delta_tokens(db, account_id).await
+    match client.mailbox_id() {
+        Some(mailbox_id) => {
+            sync_state::load_shared_mailbox_delta_tokens(db, account_id, mailbox_id).await
+        }
+        None => sync_state::load_graph_delta_tokens(db, account_id).await,
+    }
 }
 
 /// Bootstrap a delta token for a folder using `$deltatoken=latest`.
@@ -704,8 +723,21 @@ async fn bootstrap_delta_token_latest(
 }
 
 /// Delete a delta token for a folder that no longer exists.
-async fn delete_delta_token(db: &DbState, account_id: &str, folder_id: &str) -> Result<(), String> {
-    sync_state::delete_graph_delta_token(db, account_id, folder_id).await
+///
+/// Routes to shared mailbox storage when the client is scoped to one.
+async fn delete_delta_token(
+    client: &GraphClient,
+    db: &DbState,
+    account_id: &str,
+    folder_id: &str,
+) -> Result<(), String> {
+    match client.mailbox_id() {
+        Some(mailbox_id) => {
+            sync_state::delete_shared_mailbox_delta_token(db, account_id, mailbox_id, folder_id)
+                .await
+        }
+        None => sync_state::delete_graph_delta_token(db, account_id, folder_id).await,
+    }
 }
 
 // ---------------------------------------------------------------------------

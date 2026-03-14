@@ -714,6 +714,34 @@ async fn parse_bytes_response(response: reqwest::Response) -> Result<Vec<u8>, St
 }
 
 #[cfg(test)]
+impl GraphClient {
+    /// Build a test GraphClient without DB access.
+    /// Available to other modules' tests within the crate.
+    pub(crate) fn test_with_mailbox(mailbox_id: Option<String>) -> Self {
+        Self {
+            inner: Arc::new(ClientInner {
+                http: reqwest::Client::new(),
+                account_id: "test-account".to_string(),
+                mailbox_id,
+                token: RwLock::new(TokenState {
+                    access_token: "test".to_string(),
+                    refresh_token: "test".to_string(),
+                    expires_at: 0,
+                }),
+                refresh_lock: Mutex::new(()),
+                category_lock: Mutex::new(()),
+                client_id: "test-client-id".to_string(),
+                encryption_key: [0u8; 32],
+                semaphore: Arc::new(Semaphore::new(CONCURRENCY_LIMIT)),
+                folder_map: RwLock::new(None),
+                folder_map_last_sync: RwLock::new(None),
+                sync_cycle_counter: AtomicU32::new(0),
+            }),
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

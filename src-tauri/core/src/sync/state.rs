@@ -397,3 +397,140 @@ pub async fn delete_shared_mailbox_delta_tokens(
     })
     .await
 }
+
+/// Delete a single delta token for a specific folder within a shared mailbox.
+pub async fn delete_shared_mailbox_delta_token(
+    db: &DbState,
+    account_id: &str,
+    mailbox_id: &str,
+    folder_id: &str,
+) -> Result<(), String> {
+    let aid = account_id.to_string();
+    let mid = mailbox_id.to_string();
+    let fid = folder_id.to_string();
+
+    db.with_conn(move |conn| {
+        conn.execute(
+            "DELETE FROM graph_shared_mailbox_delta_tokens \
+             WHERE account_id = ?1 AND mailbox_id = ?2 AND folder_id = ?3",
+            rusqlite::params![aid, mid, fid],
+        )
+        .map_err(|e| format!("delete shared mailbox delta token: {e}"))?;
+        Ok(())
+    })
+    .await
+}
+
+// ── Shared mailbox sync state management ─────────────────
+
+/// A shared mailbox that is tracked for sync.
+#[derive(Debug, Clone)]
+pub struct SharedMailboxSyncEntry {
+    pub mailbox_id: String,
+    pub display_name: Option<String>,
+    pub last_synced_at: Option<i64>,
+    pub sync_error: Option<String>,
+}
+
+/// Get all enabled shared mailboxes for an account.
+pub async fn get_enabled_shared_mailboxes(
+    db: &DbState,
+    account_id: &str,
+) -> Result<Vec<SharedMailboxSyncEntry>, String> {
+    let aid = account_id.to_string();
+
+    db.with_conn(move |conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT mailbox_id, display_name, last_synced_at, sync_error \
+                 FROM shared_mailbox_sync_state \
+                 WHERE account_id = ?1 AND is_sync_enabled = 1",
+            )
+            .map_err(|e| format!("prepare: {e}"))?;
+        stmt.query_map(rusqlite::params![aid], |row| {
+            Ok(SharedMailboxSyncEntry {
+                mailbox_id: row.get(0)?,
+                display_name: row.get(1)?,
+                last_synced_at: row.get(2)?,
+                sync_error: row.get(3)?,
+            })
+        })
+        .map_err(|e| format!("query: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("collect: {e}"))
+    })
+    .await
+}
+
+/// Update the sync status for a shared mailbox after a sync attempt.
+pub async fn update_shared_mailbox_sync_status(
+    db: &DbState,
+    account_id: &str,
+    mailbox_id: &str,
+    last_synced_at: i64,
+    sync_error: Option<&str>,
+) -> Result<(), String> {
+    let aid = account_id.to_string();
+    let mid = mailbox_id.to_string();
+    let err = sync_error.map(String::from);
+
+    db.with_conn(move |conn| {
+        conn.execute(
+            "UPDATE shared_mailbox_sync_state \
+             SET last_synced_at = ?1, sync_error = ?2 \
+             WHERE account_id = ?3 AND mailbox_id = ?4",
+            rusqlite::params![last_synced_at, err, aid, mid],
+        )
+        .map_err(|e| format!("update shared mailbox sync status: {e}"))?;
+        Ok(())
+    })
+    .await
+}
+
+/// Enable sync for a shared mailbox, inserting a row if it doesn't exist.
+pub async fn enable_shared_mailbox_sync(
+    db: &DbState,
+    account_id: &str,
+    mailbox_id: &str,
+    display_name: Option<&str>,
+) -> Result<(), String> {
+    let aid = account_id.to_string();
+    let mid = mailbox_id.to_string();
+    let dn = display_name.map(String::from);
+
+    db.with_conn(move |conn| {
+        conn.execute(
+            "INSERT INTO shared_mailbox_sync_state \
+             (account_id, mailbox_id, display_name, is_sync_enabled) \
+             VALUES (?1, ?2, ?3, 1) \
+             ON CONFLICT(account_id, mailbox_id) DO UPDATE \
+             SET is_sync_enabled = 1, display_name = COALESCE(?3, display_name)",
+            rusqlite::params![aid, mid, dn],
+        )
+        .map_err(|e| format!("enable shared mailbox sync: {e}"))?;
+        Ok(())
+    })
+    .await
+}
+
+/// Disable sync for a shared mailbox.
+pub async fn disable_shared_mailbox_sync(
+    db: &DbState,
+    account_id: &str,
+    mailbox_id: &str,
+) -> Result<(), String> {
+    let aid = account_id.to_string();
+    let mid = mailbox_id.to_string();
+
+    db.with_conn(move |conn| {
+        conn.execute(
+            "UPDATE shared_mailbox_sync_state \
+             SET is_sync_enabled = 0 \
+             WHERE account_id = ?1 AND mailbox_id = ?2",
+            rusqlite::params![aid, mid],
+        )
+        .map_err(|e| format!("disable shared mailbox sync: {e}"))?;
+        Ok(())
+    })
+    .await
+}

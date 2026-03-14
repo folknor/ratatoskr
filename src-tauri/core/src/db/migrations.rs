@@ -1237,6 +1237,37 @@ static MIGRATIONS: &[Migration] = &[
             ALTER TABLE labels ADD COLUMN namespace_type TEXT;
         "#,
     },
+    Migration {
+        version: 55,
+        description: "CardDAV contact sync mapping table",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS carddav_contact_map (
+                uri TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                contact_email TEXT NOT NULL,
+                etag TEXT,
+                PRIMARY KEY (uri, account_id),
+                FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_carddav_contact_map_email
+                ON carddav_contact_map(contact_email);
+        "#,
+    },
+    Migration {
+        version: 56,
+        description: "JMAP WebSocket push subscription state tracking",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS jmap_push_state (
+                account_id TEXT NOT NULL PRIMARY KEY,
+                push_state TEXT,
+                ws_url TEXT,
+                is_push_enabled INTEGER NOT NULL DEFAULT 0,
+                last_connected_at INTEGER,
+                consecutive_failures INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+            );
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -1476,6 +1507,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))
             .expect("query");
-        assert_eq!(max_ver, 54);
+        assert_eq!(max_ver, 56);
     }
 }

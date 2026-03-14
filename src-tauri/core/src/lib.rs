@@ -1,6 +1,7 @@
 pub mod attachment_cache;
 pub mod bimi;
 pub mod body_store;
+pub mod carddav;
 pub mod categorization;
 pub mod contact_photos;
 pub mod category_colors;
