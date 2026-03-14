@@ -1268,6 +1268,26 @@ static MIGRATIONS: &[Migration] = &[
             );
         "#,
     },
+    Migration {
+        version: 57,
+        description: "Graph webhook subscription tracking",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS graph_subscriptions (
+                id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL,
+                resource TEXT NOT NULL,
+                notification_url TEXT NOT NULL,
+                client_state TEXT NOT NULL,
+                expiration_date_time TEXT NOT NULL,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_graph_subscriptions_account
+                ON graph_subscriptions(account_id);
+            CREATE INDEX IF NOT EXISTS idx_graph_subscriptions_expiry
+                ON graph_subscriptions(expiration_date_time);
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -1507,6 +1527,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))
             .expect("query");
-        assert_eq!(max_ver, 56);
+        assert_eq!(max_ver, 57);
     }
 }
