@@ -32,6 +32,11 @@ impl GraphOps {
     pub fn new(client: GraphClient) -> Self {
         Self { client }
     }
+
+    /// Dynamic API path prefix: `/me` for primary, `/users/{id}` for shared.
+    fn me(&self) -> String {
+        self.client.api_path_prefix()
+    }
 }
 
 #[async_trait]
@@ -245,16 +250,18 @@ impl ProviderOps for GraphOps {
     ) -> Result<String, String> {
         // Graph has no draft mutation — delete and recreate
         let enc_id = urlencoding::encode(draft_id);
+        let me = self.me();
         self.client
-            .delete(&format!("/me/messages/{enc_id}"), ctx.db)
+            .delete(&format!("{me}/messages/{enc_id}"), ctx.db)
             .await?;
         create_draft_impl(&self.client, ctx, raw_base64url, thread_id, &[]).await
     }
 
     async fn delete_draft(&self, ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), String> {
         let enc_id = urlencoding::encode(draft_id);
+        let me = self.me();
         self.client
-            .delete(&format!("/me/messages/{enc_id}"), ctx.db)
+            .delete(&format!("{me}/messages/{enc_id}"), ctx.db)
             .await
     }
 
@@ -267,10 +274,11 @@ impl ProviderOps for GraphOps {
     ) -> Result<AttachmentData, String> {
         let enc_msg_id = urlencoding::encode(message_id);
         let enc_att_id = urlencoding::encode(attachment_id);
+        let me = self.me();
         let attachment: GraphAttachment = self
             .client
             .get_json(
-                &format!("/me/messages/{enc_msg_id}/attachments/{enc_att_id}"),
+                &format!("{me}/messages/{enc_msg_id}/attachments/{enc_att_id}"),
                 ctx.db,
             )
             .await?;
@@ -282,7 +290,7 @@ impl ProviderOps for GraphOps {
             let raw = self
                 .client
                 .get_bytes(
-                    &format!("/me/messages/{enc_msg_id}/attachments/{enc_att_id}/$value"),
+                    &format!("{me}/messages/{enc_msg_id}/attachments/{enc_att_id}/$value"),
                     ctx.db,
                 )
                 .await?;
@@ -362,17 +370,20 @@ impl ProviderOps for GraphOps {
         let body = GraphCreateFolderRequest {
             display_name: name.to_string(),
         };
+        let me = self.me();
         let created: GraphMailFolder = if let Some(parent_graph_id) = parent_graph_id {
             let enc_parent_id = urlencoding::encode(&parent_graph_id);
             self.client
                 .post(
-                    &format!("/me/mailFolders/{enc_parent_id}/childFolders"),
+                    &format!("{me}/mailFolders/{enc_parent_id}/childFolders"),
                     &body,
                     ctx.db,
                 )
                 .await?
         } else {
-            self.client.post("/me/mailFolders", &body, ctx.db).await?
+            self.client
+                .post(&format!("{me}/mailFolders"), &body, ctx.db)
+                .await?
         };
 
         refresh_folder_map(&self.client, ctx).await?;
@@ -392,8 +403,9 @@ impl ProviderOps for GraphOps {
         let body = GraphRenameFolderRequest {
             display_name: new_name.to_string(),
         };
+        let me = self.me();
         self.client
-            .patch(&format!("/me/mailFolders/{enc_folder_id}"), &body, ctx.db)
+            .patch(&format!("{me}/mailFolders/{enc_folder_id}"), &body, ctx.db)
             .await?;
 
         refresh_folder_map(&self.client, ctx).await?;
@@ -412,8 +424,9 @@ impl ProviderOps for GraphOps {
     async fn delete_folder(&self, ctx: &ProviderCtx<'_>, folder_id: &str) -> Result<(), String> {
         let graph_folder_id = resolve_graph_folder_id(&self.client, ctx, folder_id, true).await?;
         let enc_folder_id = urlencoding::encode(&graph_folder_id);
+        let me = self.me();
         self.client
-            .delete(&format!("/me/mailFolders/{enc_folder_id}"), ctx.db)
+            .delete(&format!("{me}/mailFolders/{enc_folder_id}"), ctx.db)
             .await?;
         delete_folder_delta_token(ctx, &graph_folder_id).await?;
         refresh_folder_map(&self.client, ctx).await?;
@@ -421,9 +434,13 @@ impl ProviderOps for GraphOps {
     }
 
     async fn test_connection(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, String> {
+        let me = self.me();
         let profile: super::types::GraphProfile = self
             .client
-            .get_json("/me?$select=displayName,mail,userPrincipalName", ctx.db)
+            .get_json(
+                &format!("{me}?$select=displayName,mail,userPrincipalName"),
+                ctx.db,
+            )
             .await?;
         let display = profile
             .mail
@@ -438,9 +455,13 @@ impl ProviderOps for GraphOps {
     }
 
     async fn get_profile(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, String> {
+        let me = self.me();
         let profile: super::types::GraphProfile = self
             .client
-            .get_json("/me?$select=displayName,mail,userPrincipalName", ctx.db)
+            .get_json(
+                &format!("{me}?$select=displayName,mail,userPrincipalName"),
+                ctx.db,
+            )
             .await?;
 
         Ok(ProviderProfile {
@@ -476,8 +497,9 @@ impl GraphOps {
 
         // Send the draft — Exchange will hold it until the deferred time
         let enc_draft_id = urlencoding::encode(&draft_id);
+        let me = self.me();
         self.client
-            .post_no_content::<()>(&format!("/me/messages/{enc_draft_id}/send"), None, ctx.db)
+            .post_no_content::<()>(&format!("{me}/messages/{enc_draft_id}/send"), None, ctx.db)
             .await?;
 
         log::info!("Scheduled deferred send for {send_at_utc}, draft_id={draft_id}");
@@ -495,8 +517,9 @@ impl GraphOps {
         message_id: &str,
     ) -> Result<(), String> {
         let enc_id = urlencoding::encode(message_id);
+        let me = self.me();
         self.client
-            .delete(&format!("/me/messages/{enc_id}"), ctx.db)
+            .delete(&format!("{me}/messages/{enc_id}"), ctx.db)
             .await?;
         log::info!("Cancelled deferred send for message_id={message_id}");
         Ok(())
@@ -520,8 +543,9 @@ impl GraphOps {
             }]),
             ..Default::default()
         };
+        let me = self.me();
         self.client
-            .patch(&format!("/me/messages/{enc_id}"), &patch, ctx.db)
+            .patch(&format!("{me}/messages/{enc_id}"), &patch, ctx.db)
             .await?;
         log::info!(
             "Rescheduled deferred send to {new_send_at_utc} for message_id={message_id}"
@@ -784,14 +808,13 @@ async fn resolve_graph_folder_id(
         .unwrap_or(folder_id)
         .to_string();
 
-    if require_user_folder {
-        if let Some(mapping) = folder_map.get_by_folder_id(&graph_folder_id) {
-            if mapping.label_type == "system" {
-                return Err(
-                    "System folders cannot be renamed or deleted for Graph accounts.".to_string(),
-                );
-            }
-        }
+    if require_user_folder
+        && let Some(mapping) = folder_map.get_by_folder_id(&graph_folder_id)
+        && mapping.label_type == "system"
+    {
+        return Err(
+            "System folders cannot be renamed or deleted for Graph accounts.".to_string(),
+        );
     }
 
     Ok(graph_folder_id)
@@ -849,6 +872,7 @@ async fn move_messages(
     })
     .map_err(|e| format!("serialize move body: {e}"))?;
 
+    let me = client.api_path_prefix();
     let items: Vec<BatchRequestItem> = message_ids
         .iter()
         .enumerate()
@@ -857,7 +881,7 @@ async fn move_messages(
             BatchRequestItem {
                 id: i.to_string(),
                 method: "POST".to_string(),
-                url: format!("/me/messages/{enc_id}/move"),
+                url: format!("{me}/messages/{enc_id}/move"),
                 body: Some(body.clone()),
                 headers: Some(content_type_json()),
             }
@@ -876,6 +900,7 @@ async fn patch_messages(
 ) -> Result<(), String> {
     let body = serde_json::to_value(patch).map_err(|e| format!("serialize patch body: {e}"))?;
 
+    let me = client.api_path_prefix();
     let items: Vec<BatchRequestItem> = message_ids
         .iter()
         .enumerate()
@@ -884,7 +909,7 @@ async fn patch_messages(
             BatchRequestItem {
                 id: i.to_string(),
                 method: "PATCH".to_string(),
-                url: format!("/me/messages/{enc_id}"),
+                url: format!("{me}/messages/{enc_id}"),
                 body: Some(body.clone()),
                 headers: Some(content_type_json()),
             }
@@ -900,6 +925,7 @@ async fn delete_messages(
     ctx: &ProviderCtx<'_>,
     message_ids: &[String],
 ) -> Result<(), String> {
+    let me = client.api_path_prefix();
     let items: Vec<BatchRequestItem> = message_ids
         .iter()
         .enumerate()
@@ -908,7 +934,7 @@ async fn delete_messages(
             BatchRequestItem {
                 id: i.to_string(),
                 method: "DELETE".to_string(),
-                url: format!("/me/messages/{enc_id}"),
+                url: format!("{me}/messages/{enc_id}"),
                 body: None,
                 headers: None,
             }
@@ -937,7 +963,7 @@ async fn execute_batch(
                 let detail = resp
                     .body
                     .as_ref()
-                    .map(|b| b.to_string())
+                    .map(ToString::to_string)
                     .unwrap_or_default();
                 return Err(format!(
                     "Batch request {} failed with status {}: {detail}",
@@ -968,11 +994,16 @@ async fn batch_get_categories(
         return Ok(Vec::new());
     }
 
+    let me = client.api_path_prefix();
+
     // Single message: skip batch overhead
     if message_ids.len() == 1 {
         let enc_id = urlencoding::encode(&message_ids[0]);
         let msg: serde_json::Value = client
-            .get_json(&format!("/me/messages/{enc_id}?$select=categories"), ctx.db)
+            .get_json(
+                &format!("{me}/messages/{enc_id}?$select=categories"),
+                ctx.db,
+            )
             .await?;
         let cats: Vec<String> = msg
             .get("categories")
@@ -992,7 +1023,7 @@ async fn batch_get_categories(
                 BatchRequestItem {
                     id: i.to_string(),
                     method: "GET".to_string(),
-                    url: format!("/me/messages/{enc_id}?$select=categories"),
+                    url: format!("{me}/messages/{enc_id}?$select=categories"),
                     body: None,
                     headers: None,
                 }
@@ -1013,7 +1044,7 @@ async fn batch_get_categories(
                 let detail = resp
                     .body
                     .as_ref()
-                    .map(|b| b.to_string())
+                    .map(ToString::to_string)
                     .unwrap_or_default();
                 return Err(format!(
                     "Batch GET categories for message {} failed: {detail}",
@@ -1043,6 +1074,7 @@ async fn batch_set_categories(
         return Ok(());
     }
 
+    let me = client.api_path_prefix();
     let items: Vec<BatchRequestItem> = patches
         .iter()
         .enumerate()
@@ -1055,7 +1087,7 @@ async fn batch_set_categories(
             BatchRequestItem {
                 id: i.to_string(),
                 method: "PATCH".to_string(),
-                url: format!("/me/messages/{enc_id}"),
+                url: format!("{me}/messages/{enc_id}"),
                 body: serde_json::to_value(&patch).ok(),
                 headers: Some(content_type_json()),
             }
@@ -1078,8 +1110,9 @@ async fn send_via_draft(
     let draft_id = create_draft_impl(client, ctx, raw_base64url, thread_id, mentions).await?;
     // Send the draft — no response body (202 Accepted)
     let enc_draft_id = urlencoding::encode(&draft_id);
+    let me = client.api_path_prefix();
     client
-        .post_no_content::<()>(&format!("/me/messages/{enc_draft_id}/send"), None, ctx.db)
+        .post_no_content::<()>(&format!("{me}/messages/{enc_draft_id}/send"), None, ctx.db)
         .await?;
     Ok(draft_id)
 }
@@ -1110,7 +1143,10 @@ async fn create_draft_with_deferred_time(
         value: send_at_utc.to_string(),
     }]);
 
-    let draft: serde_json::Value = client.post("/me/messages", &create_msg, ctx.db).await?;
+    let me = client.api_path_prefix();
+    let draft: serde_json::Value = client
+        .post(&format!("{me}/messages"), &create_msg, ctx.db)
+        .await?;
 
     let draft_id = draft
         .get("id")
@@ -1168,10 +1204,15 @@ async fn create_draft_impl(
     };
 
     // Create draft — use beta endpoint when mentions are present
+    let me = client.api_path_prefix();
     let draft: serde_json::Value = if use_beta {
-        client.post_beta("/me/messages", &create_msg, ctx.db).await?
+        client
+            .post_beta(&format!("{me}/messages"), &create_msg, ctx.db)
+            .await?
     } else {
-        client.post("/me/messages", &create_msg, ctx.db).await?
+        client
+            .post(&format!("{me}/messages"), &create_msg, ctx.db)
+            .await?
     };
 
     let draft_id = draft
@@ -1316,9 +1357,10 @@ async fn upload_attachments_from_mime(
                 content_id,
             };
 
+            let me = client.api_path_prefix();
             let _: serde_json::Value = client
                 .post(
-                    &format!("/me/messages/{enc_draft_id}/attachments"),
+                    &format!("{me}/messages/{enc_draft_id}/attachments"),
                     &input,
                     ctx.db,
                 )
@@ -1355,9 +1397,10 @@ async fn upload_large_attachment(
         },
     };
 
+    let me = client.api_path_prefix();
     let session: UploadSession = client
         .post(
-            &format!("/me/messages/{enc_draft_id}/attachments/createUploadSession"),
+            &format!("{me}/messages/{enc_draft_id}/attachments/createUploadSession"),
             &session_req,
             ctx.db,
         )
@@ -1378,8 +1421,7 @@ async fn upload_large_attachment(
     }
 
     log::info!(
-        "Uploaded large attachment '{name}' ({} bytes) via resumable session",
-        total
+        "Uploaded large attachment '{name}' ({total} bytes) via resumable session"
     );
     Ok(())
 }
@@ -1398,7 +1440,8 @@ pub async fn create_reference_attachment(
     db: &DbState,
 ) -> Result<(), String> {
     let enc_id = urlencoding::encode(message_id);
-    let path = format!("/me/messages/{enc_id}/attachments");
+    let me = client.api_path_prefix();
+    let path = format!("{me}/messages/{enc_id}/attachments");
 
     let mut body = serde_json::json!({
         "@odata.type": "#microsoft.graph.referenceAttachment",
@@ -1418,9 +1461,7 @@ pub async fn create_reference_attachment(
     let _response: serde_json::Value = client.post_beta(&path, &body, db).await?;
 
     log::info!(
-        "Created reference attachment '{}' on message {}",
-        file_name,
-        message_id
+        "Created reference attachment '{file_name}' on message {message_id}"
     );
     Ok(())
 }

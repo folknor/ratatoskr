@@ -1159,6 +1159,46 @@ static MIGRATIONS: &[Migration] = &[
                 ON google_contact_map(contact_email);
         "#,
     },
+    Migration {
+        version: 50,
+        description: "Google otherContacts mapping table",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS google_other_contact_map (
+                resource_name TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                contact_email TEXT NOT NULL,
+                PRIMARY KEY (resource_name, account_id),
+                FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_google_other_contact_map_email
+                ON google_other_contact_map(contact_email);
+        "#,
+    },
+    Migration {
+        version: 51,
+        description: "Shared mailbox sync state and delta token tables",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS graph_shared_mailbox_delta_tokens (
+                account_id TEXT NOT NULL,
+                mailbox_id TEXT NOT NULL,
+                folder_id TEXT NOT NULL,
+                delta_link TEXT NOT NULL,
+                updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                PRIMARY KEY (account_id, mailbox_id, folder_id),
+                FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS shared_mailbox_sync_state (
+                account_id TEXT NOT NULL,
+                mailbox_id TEXT NOT NULL,
+                display_name TEXT,
+                is_sync_enabled INTEGER NOT NULL DEFAULT 0,
+                last_synced_at INTEGER,
+                sync_error TEXT,
+                PRIMARY KEY (account_id, mailbox_id),
+                FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+            );
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -1398,6 +1438,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))
             .expect("query");
-        assert_eq!(max_ver, 48);
+        assert_eq!(max_ver, 51);
     }
 }

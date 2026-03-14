@@ -142,7 +142,8 @@ async fn query_email_page(
     position: usize,
     calculate_total: bool,
 ) -> Result<QueryResponse, String> {
-    let mut request = client.inner().build();
+    let inner = client.inner();
+    let mut request = inner.build();
     let query_request = request.query_email();
     query_request.filter(email::query::Filter::after(since_ts));
     query_request.sort([email::query::Comparator::received_at()]);
@@ -207,8 +208,8 @@ pub async fn jmap_delta_sync(
     let mut affected_thread_ids = HashSet::new();
 
     loop {
-        let changes = client
-            .inner()
+        let inner = client.inner();
+        let changes = inner
             .email_changes(&since_state, None)
             .await
             .map_err(|e| {
@@ -375,7 +376,8 @@ async fn sync_mailboxes(
 
 /// Handle Mailbox/changes during delta sync.
 async fn sync_mailbox_changes(ctx: &SyncCtx<'_>, since_state: &str) -> Result<(), String> {
-    let result = ctx.client.inner().mailbox_changes(since_state, 500).await;
+    let inner = ctx.client.inner();
+    let result = inner.mailbox_changes(since_state, 500).await;
 
     match result {
         Ok(changes) => {
@@ -412,7 +414,8 @@ async fn fetch_email_batch(
     ids: &[&str],
 ) -> Result<Vec<jmap_client::email::Email>, String> {
     // Use request builder to specify all needed properties + body values
-    let mut request = client.inner().build();
+    let inner = client.inner();
+    let mut request = inner.build();
     let get_req = request.get_email();
     get_req.ids(ids.iter().copied());
     get_req.properties(email_get_properties());
@@ -901,7 +904,8 @@ async fn store_inline_images(ctx: &SyncCtx<'_>, messages: &[ParsedJmapMessage]) 
     // Download unique blobs in parallel with bounded concurrency
     let blob_cache: HashMap<String, (String, Vec<u8>, String)> = stream::iter(unique_blobs)
         .map(|(blob_id, mime_type)| async move {
-            match ctx.client.inner().download(&blob_id).await {
+            let inner = ctx.client.inner();
+            match inner.download(&blob_id).await {
                 Ok(data) if data.len() <= MAX_INLINE_SIZE => {
                     let content_hash = hash_bytes(&data);
                     Some((blob_id, (content_hash, data, mime_type)))
@@ -1023,7 +1027,8 @@ async fn load_sync_state(
 
 async fn get_mailbox_state(client: &JmapClient) -> Result<String, String> {
     // Fetch mailboxes to get the state string
-    let mut request = client.inner().build();
+    let inner = client.inner();
+    let mut request = inner.build();
     request.get_mailbox();
     let response = request
         .send()
@@ -1039,7 +1044,8 @@ async fn get_mailbox_state(client: &JmapClient) -> Result<String, String> {
 }
 
 async fn get_email_state(client: &JmapClient) -> Result<String, String> {
-    let mut request = client.inner().build();
+    let inner = client.inner();
+    let mut request = inner.build();
     let get_req = request.get_email();
     get_req.ids(std::iter::empty::<&str>());
 
@@ -1064,7 +1070,8 @@ async fn get_email_state(client: &JmapClient) -> Result<String, String> {
 pub async fn fetch_all_mailboxes(
     client: &JmapClient,
 ) -> Result<Vec<jmap_client::mailbox::Mailbox<jmap_client::Get>>, String> {
-    let mut request = client.inner().build();
+    let inner = client.inner();
+    let mut request = inner.build();
     request.get_mailbox();
     let response = request
         .send()

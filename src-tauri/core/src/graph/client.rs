@@ -38,6 +38,8 @@ pub struct GraphClient {
 struct ClientInner {
     http: reqwest::Client,
     account_id: String,
+    /// When `Some`, API calls target `/users/{mailbox_id}` instead of `/me`.
+    mailbox_id: Option<String>,
     token: RwLock<TokenState>,
     refresh_lock: Mutex<()>,
     /// Serializes category read-modify-write to prevent concurrent clobber.
@@ -111,6 +113,7 @@ impl GraphClient {
             inner: Arc::new(ClientInner {
                 http: reqwest::Client::new(),
                 account_id: account_id.to_string(),
+                mailbox_id: None,
                 token: RwLock::new(token_state),
                 refresh_lock: Mutex::new(()),
                 category_lock: Mutex::new(()),
@@ -122,6 +125,64 @@ impl GraphClient {
                 sync_cycle_counter: AtomicU32::new(0),
             }),
         })
+    }
+
+    /// Return the API path prefix: `/me` for the primary mailbox,
+    /// `/users/{mailbox_id}` for a shared/delegated mailbox.
+    pub fn api_path_prefix(&self) -> String {
+        match &self.inner.mailbox_id {
+            Some(id) => format!("/users/{}", urlencoding::encode(id)),
+            None => "/me".to_string(),
+        }
+    }
+
+    /// Create a new client scoped to a shared mailbox.
+    ///
+    /// Shares the HTTP client, token infrastructure, and semaphore with the
+    /// parent client (the delegate authenticates with their own token to access
+    /// the shared mailbox). Has its own folder map, sync cycle counter, and
+    /// category lock because the shared mailbox is a separate folder tree.
+    pub fn for_shared_mailbox(&self, mailbox_id: String) -> Self {
+        // We need a separate ClientInner because folder_map/sync_cycle/category_lock
+        // are per-mailbox, but we share the token state via Arc.
+        // Since ClientInner isn't Arc-wrapped for individual fields, we clone
+        // the token state snapshot — the parent's ensure_valid_token/do_refresh
+        // will keep the DB in sync, and the shared client will re-read on 401.
+        //
+        // The semaphore is shared because Graph rate limits are per-app per-user,
+        // not per-mailbox.
+        Self {
+            inner: Arc::new(ClientInner {
+                http: self.inner.http.clone(),
+                account_id: self.inner.account_id.clone(),
+                mailbox_id: Some(mailbox_id),
+                // Token refresh works via DB — shared client gets fresh tokens
+                // from the same account row, so copying the snapshot is fine.
+                token: RwLock::new(TokenState {
+                    access_token: String::new(),
+                    refresh_token: String::new(),
+                    expires_at: 0, // Forces refresh on first call
+                }),
+                refresh_lock: Mutex::new(()),
+                category_lock: Mutex::new(()),
+                client_id: self.inner.client_id.clone(),
+                encryption_key: self.inner.encryption_key,
+                semaphore: Arc::clone(&self.inner.semaphore),
+                folder_map: RwLock::new(None),
+                folder_map_last_sync: RwLock::new(None),
+                sync_cycle_counter: AtomicU32::new(0),
+            }),
+        }
+    }
+
+    /// Whether this client is scoped to a shared mailbox.
+    pub fn is_shared_mailbox(&self) -> bool {
+        self.inner.mailbox_id.is_some()
+    }
+
+    /// The shared mailbox ID, if any.
+    pub fn mailbox_id(&self) -> Option<&str> {
+        self.inner.mailbox_id.as_deref()
     }
 
     /// Get or rebuild the cached folder map.
@@ -650,4 +711,72 @@ async fn parse_bytes_response(response: reqwest::Response) -> Result<Vec<u8>, St
         .await
         .map(|b| b.to_vec())
         .map_err(|e| format!("Failed to read Graph API response bytes: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper to build a GraphClient without DB access (for unit tests).
+    fn test_client(mailbox_id: Option<String>) -> GraphClient {
+        let token_state = TokenState {
+            access_token: "test".to_string(),
+            refresh_token: "test".to_string(),
+            expires_at: 0,
+        };
+        GraphClient {
+            inner: Arc::new(ClientInner {
+                http: reqwest::Client::new(),
+                account_id: "test-account".to_string(),
+                mailbox_id,
+                token: RwLock::new(token_state),
+                refresh_lock: Mutex::new(()),
+                category_lock: Mutex::new(()),
+                client_id: "test-client-id".to_string(),
+                encryption_key: [0u8; 32],
+                semaphore: Arc::new(Semaphore::new(CONCURRENCY_LIMIT)),
+                folder_map: RwLock::new(None),
+                folder_map_last_sync: RwLock::new(None),
+                sync_cycle_counter: AtomicU32::new(0),
+            }),
+        }
+    }
+
+    #[test]
+    fn api_path_prefix_returns_me_for_primary_mailbox() {
+        let client = test_client(None);
+        assert_eq!(client.api_path_prefix(), "/me");
+    }
+
+    #[test]
+    fn api_path_prefix_returns_users_path_for_shared_mailbox() {
+        let client = test_client(Some("shared@example.com".to_string()));
+        assert_eq!(client.api_path_prefix(), "/users/shared%40example.com");
+    }
+
+    #[test]
+    fn for_shared_mailbox_creates_scoped_client() {
+        let client = test_client(None);
+        assert!(!client.is_shared_mailbox());
+        assert!(client.mailbox_id().is_none());
+
+        let shared = client.for_shared_mailbox("team@contoso.com".to_string());
+        assert!(shared.is_shared_mailbox());
+        assert_eq!(shared.mailbox_id(), Some("team@contoso.com"));
+        assert_eq!(shared.api_path_prefix(), "/users/team%40contoso.com");
+    }
+
+    #[test]
+    fn shared_mailbox_path_construction() {
+        let client = test_client(Some("shared@example.com".to_string()));
+        let prefix = client.api_path_prefix();
+        let msg_path = format!("{prefix}/messages/ABC123");
+        assert_eq!(msg_path, "/users/shared%40example.com/messages/ABC123");
+
+        let folder_path = format!("{prefix}/mailFolders/inbox");
+        assert_eq!(
+            folder_path,
+            "/users/shared%40example.com/mailFolders/inbox"
+        );
+    }
 }

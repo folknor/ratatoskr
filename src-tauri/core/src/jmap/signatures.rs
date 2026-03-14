@@ -24,7 +24,7 @@ pub async fn sync_jmap_identity_signatures(
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs() as i64;
+        .as_secs().cast_signed();
 
     // Collect data before moving into the closure.
     let rows: Vec<IdentityRow> = identities
@@ -107,7 +107,8 @@ pub async fn push_signature_to_jmap(
 ) -> Result<(), String> {
     use jmap_client::core::response::IdentitySetResponse;
 
-    let mut request = client.inner().build();
+    let inner = client.inner();
+    let mut request = inner.build();
     let set_req = request.set_identity();
     set_req
         .update(identity_id)
@@ -145,7 +146,8 @@ async fn fetch_all_identities(
 ) -> Result<Vec<jmap_client::identity::Identity>, String> {
     use jmap_client::core::response::IdentityGetResponse;
 
-    let mut request = client.inner().build();
+    let inner = client.inner();
+    let mut request = inner.build();
     request.get_identity();
     let mut response = request
         .send_single::<IdentityGetResponse>()

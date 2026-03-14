@@ -408,9 +408,10 @@ pub(crate) async fn sync_folders_public(
 async fn sync_folders(client: &GraphClient, ctx: &ProviderCtx<'_>) -> Result<FolderMap, String> {
     // Phase 1: Resolve well-known aliases to opaque IDs
     let mut resolved = HashMap::new();
+    let me = client.api_path_prefix();
     for (alias, label_id, label_name) in FolderMap::well_known_aliases() {
         match client
-            .get_json::<GraphMailFolder>(&format!("/me/mailFolders/{alias}"), ctx.db)
+            .get_json::<GraphMailFolder>(&format!("{me}/mailFolders/{alias}"), ctx.db)
             .await
         {
             Ok(folder) => {
@@ -488,8 +489,9 @@ async fn fetch_folder_messages(
 ) -> Result<Vec<ParsedGraphMessage>, String> {
     let mut messages = Vec::new();
     let enc_folder_id = urlencoding::encode(folder_id);
+    let me = client.api_path_prefix();
     let initial_url = format!(
-        "/me/mailFolders/{enc_folder_id}/messages\
+        "{me}/mailFolders/{enc_folder_id}/messages\
          ?$filter=receivedDateTime ge {since_iso}\
          &$select={MESSAGE_SELECT}\
          &$expand=attachments($select=id,name,contentType,size,isInline,contentId,contentBytes),{REACTIONS_EXPAND}\
@@ -538,7 +540,10 @@ async fn fetch_all_folders(
         let page: ODataCollection<GraphMailFolder> = if let Some(ref link) = next_link {
             client.get_absolute(link, db).await?
         } else {
-            client.get_json("/me/mailFolders?$top=250", db).await?
+            let me = client.api_path_prefix();
+            client
+                .get_json(&format!("{me}/mailFolders?$top=250"), db)
+                .await?
         };
 
         for folder in &page.value {
@@ -568,7 +573,8 @@ fn fetch_child_folders<'a>(
     Box::pin(async move {
         let mut children = Vec::new();
         let enc_parent_id = urlencoding::encode(parent_id);
-        let initial_url = format!("/me/mailFolders/{enc_parent_id}/childFolders?$top=250");
+        let me = client.api_path_prefix();
+        let initial_url = format!("{me}/mailFolders/{enc_parent_id}/childFolders?$top=250");
         let mut next_link: Option<String> = None;
 
         loop {
@@ -612,8 +618,9 @@ async fn bootstrap_delta_token(
     folder_id: &str,
 ) -> Result<String, String> {
     let enc_folder_id = urlencoding::encode(folder_id);
+    let me = client.api_path_prefix();
     let initial_url = format!(
-        "/me/mailFolders/{enc_folder_id}/messages/delta\
+        "{me}/mailFolders/{enc_folder_id}/messages/delta\
          ?$select={MESSAGE_SELECT}\
          &$expand=attachments($select=id,name,contentType,size,isInline,contentId,contentBytes),{REACTIONS_EXPAND}"
     );
@@ -670,8 +677,9 @@ async fn bootstrap_delta_token_latest(
     folder_id: &str,
 ) -> Result<String, String> {
     let enc_folder_id = urlencoding::encode(folder_id);
+    let me = client.api_path_prefix();
     let url = format!(
-        "/me/mailFolders/{enc_folder_id}/messages/delta\
+        "{me}/mailFolders/{enc_folder_id}/messages/delta\
          ?$select={MESSAGE_SELECT}\
          &$expand=attachments($select=id,name,contentType,size,isInline,contentId,contentBytes),{REACTIONS_EXPAND}\
          &$deltatoken=latest"
@@ -1148,8 +1156,7 @@ pub(crate) async fn refresh_reactions_for_recent_messages(
     let owner_reaction_id = format!("String {REACTIONS_GUID} Name OwnerReactionType");
     let reactions_count_id = format!("Integer {REACTIONS_GUID} Name ReactionsCount");
     let expand_filter = format!(
-        "$filter=id eq '{}' or id eq '{}'",
-        owner_reaction_id, reactions_count_id
+        "$filter=id eq '{owner_reaction_id}' or id eq '{reactions_count_id}'"
     );
 
     // Look up the authenticated user's email for reaction rows
@@ -1168,6 +1175,7 @@ pub(crate) async fn refresh_reactions_for_recent_messages(
     let mut updated_count: usize = 0;
 
     // Process in batches of 20 (Graph batch limit)
+    let me = client.api_path_prefix();
     for chunk in message_ids.chunks(20) {
         let requests: Vec<BatchRequestItem> = chunk
             .iter()
@@ -1178,7 +1186,7 @@ pub(crate) async fn refresh_reactions_for_recent_messages(
                     id: i.to_string(),
                     method: "GET".to_string(),
                     url: format!(
-                        "/me/messages/{enc_id}/singleValueExtendedProperties?{expand_filter}"
+                        "{me}/messages/{enc_id}/singleValueExtendedProperties?{expand_filter}"
                     ),
                     body: None,
                     headers: None,
@@ -1206,20 +1214,20 @@ pub(crate) async fn refresh_reactions_for_recent_messages(
             let mut owner_reaction: Option<String> = None;
             let mut reactions_count: Option<i64> = None;
 
-            if let Some(body) = &resp_item.body {
-                if let Some(values) = body.get("value").and_then(|v| v.as_array()) {
-                    for prop_val in values {
-                        if let Ok(prop) =
-                            serde_json::from_value::<SingleValueExtendedProperty>(prop_val.clone())
-                        {
-                            if prop.id.eq_ignore_ascii_case(&owner_reaction_id) {
-                                let val = prop.value.trim();
-                                if !val.is_empty() {
-                                    owner_reaction = Some(val.to_string());
-                                }
-                            } else if prop.id.eq_ignore_ascii_case(&reactions_count_id) {
-                                reactions_count = prop.value.trim().parse::<i64>().ok();
+            if let Some(body) = &resp_item.body
+                && let Some(values) = body.get("value").and_then(|v| v.as_array())
+            {
+                for prop_val in values {
+                    if let Ok(prop) =
+                        serde_json::from_value::<SingleValueExtendedProperty>(prop_val.clone())
+                    {
+                        if prop.id.eq_ignore_ascii_case(&owner_reaction_id) {
+                            let val = prop.value.trim();
+                            if !val.is_empty() {
+                                owner_reaction = Some(val.to_string());
                             }
+                        } else if prop.id.eq_ignore_ascii_case(&reactions_count_id) {
+                            reactions_count = prop.value.trim().parse::<i64>().ok();
                         }
                     }
                 }

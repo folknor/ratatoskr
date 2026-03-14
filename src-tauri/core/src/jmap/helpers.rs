@@ -9,8 +9,8 @@ pub async fn query_thread_email_ids(
 
     let filter: jmap_client::core::query::Filter<email::query::Filter> =
         email::query::Filter::in_thread(thread_id).into();
-    let result = client
-        .inner()
+    let inner = client.inner();
+    let result = inner
         .email_query(Some(filter), None::<Vec<_>>)
         .await
         .map_err(|e| format!("Email/query inThread: {e}"))?;

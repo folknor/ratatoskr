@@ -97,6 +97,13 @@ async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), Strin
         log::warn!("Google contacts initial sync failed (non-fatal): {e}");
     }
 
+    // Phase 4b: Sync Google otherContacts (non-fatal)
+    if let Err(e) =
+        super::contacts::sync_google_other_contacts(ctx.client, ctx.account_id, ctx.db).await
+    {
+        log::warn!("Google otherContacts initial sync failed (non-fatal): {e}");
+    }
+
     let total = thread_ids.len() as u64;
     emit_progress(ctx, "done", total, total);
     Ok(())
@@ -149,11 +156,17 @@ async fn run_delta_sync(ctx: &SyncCtx<'_>) -> Result<GmailSyncResult, String> {
     sync_signatures(ctx).await?;
 
     // Contacts delta sync: every 20th cycle (contacts change rarely)
-    if cycle.is_multiple_of(20)
-        && let Err(e) =
+    if cycle.is_multiple_of(20) {
+        if let Err(e) =
             super::contacts::sync_google_contacts(ctx.client, ctx.account_id, ctx.db).await
-    {
-        log::warn!("Google contacts delta sync failed (non-fatal): {e}");
+        {
+            log::warn!("Google contacts delta sync failed (non-fatal): {e}");
+        }
+        if let Err(e) =
+            super::contacts::sync_google_other_contacts(ctx.client, ctx.account_id, ctx.db).await
+        {
+            log::warn!("Google otherContacts delta sync failed (non-fatal): {e}");
+        }
     }
 
     // Paginate History API

@@ -42,8 +42,9 @@ pub async fn jmap_test_connection(
     account_id: String,
     jmap: State<'_, JmapState>,
 ) -> Result<JmapTestResult, String> {
-    let client = jmap.get(&account_id).await?;
-    let session = client.inner().session();
+    let jmap_client = jmap.get(&account_id).await?;
+    let inner = jmap_client.inner();
+    let session = inner.session();
     Ok(JmapTestResult {
         success: true,
         message: format!("Connected as {}", session.username()),
@@ -62,8 +63,9 @@ pub async fn jmap_get_profile(
     account_id: String,
     jmap: State<'_, JmapState>,
 ) -> Result<JmapProfile, String> {
-    let client = jmap.get(&account_id).await?;
-    let session = client.inner().session();
+    let jmap_client = jmap.get(&account_id).await?;
+    let inner = jmap_client.inner();
+    let session = inner.session();
     Ok(JmapProfile {
         email: session.username().to_string(),
     })
@@ -189,11 +191,11 @@ pub async fn jmap_create_folder(
     parent_id: Option<String>,
     jmap: State<'_, JmapState>,
 ) -> Result<JmapFolder, String> {
-    let client = jmap.get(&account_id).await?;
+    let jmap_client = jmap.get(&account_id).await?;
 
     use jmap_client::mailbox::Role;
-    let mut mb = client
-        .inner()
+    let inner = jmap_client.inner();
+    let mut mb = inner
         .mailbox_create(&name, parent_id, Role::None)
         .await
         .map_err(|e| format!("Mailbox/set create: {e}"))?;
@@ -217,10 +219,10 @@ pub async fn jmap_rename_folder(
     new_name: String,
     jmap: State<'_, JmapState>,
 ) -> Result<(), String> {
-    let client = jmap.get(&account_id).await?;
-    let mailbox_id = resolve_mailbox_id(&client, &folder_id).await?;
-    client
-        .inner()
+    let jmap_client = jmap.get(&account_id).await?;
+    let mailbox_id = resolve_mailbox_id(&jmap_client, &folder_id).await?;
+    let inner = jmap_client.inner();
+    inner
         .mailbox_rename(&mailbox_id, &new_name)
         .await
         .map_err(|e| format!("Mailbox/set rename: {e}"))?;
@@ -233,10 +235,10 @@ pub async fn jmap_delete_folder(
     folder_id: String,
     jmap: State<'_, JmapState>,
 ) -> Result<(), String> {
-    let client = jmap.get(&account_id).await?;
-    let mailbox_id = resolve_mailbox_id(&client, &folder_id).await?;
-    client
-        .inner()
+    let jmap_client = jmap.get(&account_id).await?;
+    let mailbox_id = resolve_mailbox_id(&jmap_client, &folder_id).await?;
+    let inner = jmap_client.inner();
+    inner
         .mailbox_destroy(&mailbox_id, true)
         .await
         .map_err(|e| format!("Mailbox/set destroy: {e}"))?;
@@ -254,10 +256,10 @@ pub async fn jmap_fetch_attachment(
     blob_id: String,
     jmap: State<'_, JmapState>,
 ) -> Result<JmapAttachmentData, String> {
-    let client = jmap.get(&account_id).await?;
+    let jmap_client = jmap.get(&account_id).await?;
 
-    let data = client
-        .inner()
+    let inner = jmap_client.inner();
+    let data = inner
         .download(&blob_id)
         .await
         .map_err(|e| format!("Blob download: {e}"))?;

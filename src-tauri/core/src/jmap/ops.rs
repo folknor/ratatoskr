@@ -36,6 +36,7 @@ impl ProviderOps for JmapOps {
         ctx: &ProviderCtx<'_>,
         days_back: i64,
     ) -> Result<SyncResult, String> {
+        self.client.ensure_valid_token().await?;
         super::sync::jmap_initial_sync(
             &self.client,
             ctx.account_id,
@@ -55,6 +56,7 @@ impl ProviderOps for JmapOps {
         ctx: &ProviderCtx<'_>,
         _days_back: Option<i64>,
     ) -> Result<SyncResult, String> {
+        self.client.ensure_valid_token().await?;
         let result = super::sync::jmap_delta_sync(
             &self.client,
             ctx.account_id,
@@ -72,13 +74,15 @@ impl ProviderOps for JmapOps {
     }
 
     async fn archive(&self, _ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
+        self.client.ensure_valid_token().await?;
         let mailboxes = get_mailbox_list(&self.client).await?;
         let inbox_id =
             find_mailbox_id_by_role(&mailboxes, "inbox").ok_or("No inbox mailbox found")?;
         let archive_id = find_mailbox_id_by_role(&mailboxes, "archive");
 
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
-        let mut request = self.client.inner().build();
+        let client = self.client.inner();
+        let mut request = client.build();
         let set_req = request.set_email();
         for eid in &email_ids {
             let update = set_req.update(eid);
@@ -95,13 +99,15 @@ impl ProviderOps for JmapOps {
     }
 
     async fn trash(&self, _ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
+        self.client.ensure_valid_token().await?;
         let mailboxes = get_mailbox_list(&self.client).await?;
         let trash_id =
             find_mailbox_id_by_role(&mailboxes, "trash").ok_or("No trash mailbox found")?;
         let inbox_id = find_mailbox_id_by_role(&mailboxes, "inbox");
 
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
-        let mut request = self.client.inner().build();
+        let client = self.client.inner();
+        let mut request = client.build();
         let set_req = request.set_email();
         for eid in &email_ids {
             let update = set_req.update(eid);
@@ -122,8 +128,10 @@ impl ProviderOps for JmapOps {
         _ctx: &ProviderCtx<'_>,
         thread_id: &str,
     ) -> Result<(), String> {
+        self.client.ensure_valid_token().await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
-        let mut request = self.client.inner().build();
+        let client = self.client.inner();
+        let mut request = client.build();
         request
             .set_email()
             .destroy(email_ids.iter().map(String::as_str));
@@ -140,8 +148,10 @@ impl ProviderOps for JmapOps {
         thread_id: &str,
         read: bool,
     ) -> Result<(), String> {
+        self.client.ensure_valid_token().await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
-        let mut request = self.client.inner().build();
+        let client = self.client.inner();
+        let mut request = client.build();
         let set_req = request.set_email();
         for eid in &email_ids {
             set_req.update(eid).keyword("$seen", read);
@@ -159,8 +169,10 @@ impl ProviderOps for JmapOps {
         thread_id: &str,
         starred: bool,
     ) -> Result<(), String> {
+        self.client.ensure_valid_token().await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
-        let mut request = self.client.inner().build();
+        let client = self.client.inner();
+        let mut request = client.build();
         let set_req = request.set_email();
         for eid in &email_ids {
             set_req.update(eid).keyword("$flagged", starred);
@@ -178,6 +190,7 @@ impl ProviderOps for JmapOps {
         thread_id: &str,
         is_spam: bool,
     ) -> Result<(), String> {
+        self.client.ensure_valid_token().await?;
         let mailboxes = get_mailbox_list(&self.client).await?;
         let junk_id =
             find_mailbox_id_by_role(&mailboxes, "junk").ok_or("No junk/spam mailbox found")?;
@@ -185,7 +198,8 @@ impl ProviderOps for JmapOps {
             find_mailbox_id_by_role(&mailboxes, "inbox").ok_or("No inbox mailbox found")?;
 
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
-        let mut request = self.client.inner().build();
+        let client = self.client.inner();
+        let mut request = client.build();
         let set_req = request.set_email();
         for eid in &email_ids {
             if is_spam {
@@ -213,9 +227,11 @@ impl ProviderOps for JmapOps {
         thread_id: &str,
         folder_id: &str,
     ) -> Result<(), String> {
+        self.client.ensure_valid_token().await?;
         let target_id = resolve_mailbox_id(&self.client, folder_id).await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
-        let mut request = self.client.inner().build();
+        let client = self.client.inner();
+        let mut request = client.build();
         let set_req = request.set_email();
         for eid in &email_ids {
             set_req.update(eid).mailbox_ids([target_id.as_str()]);
@@ -233,9 +249,11 @@ impl ProviderOps for JmapOps {
         thread_id: &str,
         tag_id: &str,
     ) -> Result<(), String> {
+        self.client.ensure_valid_token().await?;
         let mailbox_id = resolve_mailbox_id(&self.client, tag_id).await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
-        let mut request = self.client.inner().build();
+        let client = self.client.inner();
+        let mut request = client.build();
         let set_req = request.set_email();
         for eid in &email_ids {
             set_req.update(eid).mailbox_id(&mailbox_id, true);
@@ -253,9 +271,11 @@ impl ProviderOps for JmapOps {
         thread_id: &str,
         tag_id: &str,
     ) -> Result<(), String> {
+        self.client.ensure_valid_token().await?;
         let mailbox_id = resolve_mailbox_id(&self.client, tag_id).await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
-        let mut request = self.client.inner().build();
+        let client = self.client.inner();
+        let mut request = client.build();
         let set_req = request.set_email();
         for eid in &email_ids {
             set_req.update(eid).mailbox_id(&mailbox_id, false);
@@ -273,7 +293,9 @@ impl ProviderOps for JmapOps {
         message_id: &str,
         category_name: &str,
     ) -> Result<(), String> {
-        let mut request = self.client.inner().build();
+        self.client.ensure_valid_token().await?;
+        let client = self.client.inner();
+        let mut request = client.build();
         let set_req = request.set_email();
         set_req.update(message_id).keyword(category_name, true);
         request
@@ -289,7 +311,9 @@ impl ProviderOps for JmapOps {
         message_id: &str,
         category_name: &str,
     ) -> Result<(), String> {
-        let mut request = self.client.inner().build();
+        self.client.ensure_valid_token().await?;
+        let client = self.client.inner();
+        let mut request = client.build();
         let set_req = request.set_email();
         set_req.update(message_id).keyword(category_name, false);
         request
@@ -306,6 +330,7 @@ impl ProviderOps for JmapOps {
         _thread_id: Option<&str>,
         _mentions: &[(String, String)],
     ) -> Result<String, String> {
+        self.client.ensure_valid_token().await?;
         let raw_bytes = crate::provider::encoding::decode_base64url_nopad(raw_base64url)?;
         let client = self.client.inner();
 
@@ -317,7 +342,7 @@ impl ProviderOps for JmapOps {
                     .await
                     .map_err(|e| format!("Blob upload: {e}"))
             },
-            get_first_identity_id(client),
+            get_first_identity_id(&client),
         )?;
         let blob_id = upload_res.take_blob_id();
 
@@ -371,15 +396,15 @@ impl ProviderOps for JmapOps {
         _thread_id: Option<&str>,
         _mentions: &[(String, String)],
     ) -> Result<String, String> {
+        self.client.ensure_valid_token().await?;
         let raw_bytes = crate::provider::encoding::decode_base64url_nopad(raw_base64url)?;
 
         let mailboxes = get_mailbox_list(&self.client).await?;
         let drafts_id =
             find_mailbox_id_by_role(&mailboxes, "drafts").ok_or("No drafts mailbox found")?;
 
-        let mut email = self
-            .client
-            .inner()
+        let client = self.client.inner();
+        let mut email = client
             .email_import(
                 raw_bytes,
                 vec![drafts_id],
@@ -399,9 +424,10 @@ impl ProviderOps for JmapOps {
         raw_base64url: &str,
         _thread_id: Option<&str>,
     ) -> Result<String, String> {
+        self.client.ensure_valid_token().await?;
         // JMAP has no draft mutation — delete old, create new
-        self.client
-            .inner()
+        let client = self.client.inner();
+        client
             .email_destroy(draft_id)
             .await
             .map_err(|e| format!("delete old draft: {e}"))?;
@@ -409,8 +435,9 @@ impl ProviderOps for JmapOps {
     }
 
     async fn delete_draft(&self, _ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), String> {
-        self.client
-            .inner()
+        self.client.ensure_valid_token().await?;
+        let client = self.client.inner();
+        client
             .email_destroy(draft_id)
             .await
             .map_err(|e| format!("delete draft: {e}"))?;
@@ -423,9 +450,9 @@ impl ProviderOps for JmapOps {
         _message_id: &str,
         attachment_id: &str,
     ) -> Result<AttachmentData, String> {
-        let data = self
-            .client
-            .inner()
+        self.client.ensure_valid_token().await?;
+        let client = self.client.inner();
+        let data = client
             .download(attachment_id)
             .await
             .map_err(|e| format!("Blob download: {e}"))?;
@@ -440,6 +467,7 @@ impl ProviderOps for JmapOps {
         &self,
         _ctx: &ProviderCtx<'_>,
     ) -> Result<Vec<ProviderFolderEntry>, String> {
+        self.client.ensure_valid_token().await?;
         let mailboxes = super::sync::fetch_all_mailboxes(&self.client).await?;
 
         let mut folders = Vec::new();
@@ -478,9 +506,9 @@ impl ProviderOps for JmapOps {
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
     ) -> Result<ProviderFolderMutation, String> {
-        let mut mb = self
-            .client
-            .inner()
+        self.client.ensure_valid_token().await?;
+        let client = self.client.inner();
+        let mut mb = client
             .mailbox_create(name, parent_id.map(ToOwned::to_owned), Role::None)
             .await
             .map_err(|e| format!("Mailbox/set create: {e}"))?;
@@ -507,9 +535,10 @@ impl ProviderOps for JmapOps {
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
     ) -> Result<ProviderFolderMutation, String> {
+        self.client.ensure_valid_token().await?;
         let mailbox_id = resolve_mailbox_id(&self.client, folder_id).await?;
-        self.client
-            .inner()
+        let client = self.client.inner();
+        client
             .mailbox_rename(&mailbox_id, new_name)
             .await
             .map_err(|e| format!("Mailbox/set rename: {e}"))?;
@@ -528,9 +557,10 @@ impl ProviderOps for JmapOps {
     }
 
     async fn delete_folder(&self, _ctx: &ProviderCtx<'_>, folder_id: &str) -> Result<(), String> {
+        self.client.ensure_valid_token().await?;
         let mailbox_id = resolve_mailbox_id(&self.client, folder_id).await?;
-        self.client
-            .inner()
+        let client = self.client.inner();
+        client
             .mailbox_destroy(&mailbox_id, true)
             .await
             .map_err(|e| format!("Mailbox/set destroy: {e}"))?;
@@ -539,6 +569,7 @@ impl ProviderOps for JmapOps {
     }
 
     async fn test_connection(&self, _ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, String> {
+        self.client.ensure_valid_token().await?;
         let session = self.client.inner().session();
         Ok(ProviderTestResult {
             success: true,
@@ -547,6 +578,7 @@ impl ProviderOps for JmapOps {
     }
 
     async fn get_profile(&self, _ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, String> {
+        self.client.ensure_valid_token().await?;
         let session = self.client.inner().session();
         Ok(ProviderProfile {
             email: session.username().to_string(),
@@ -610,6 +642,7 @@ pub async fn schedule_send_jmap(
         if delay_secs <= 0 {
             return Err("send_at must be in the future".to_string());
         }
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         if (delay_secs as usize) > max_delay {
             return Err(format!(
                 "Requested delay ({delay_secs}s) exceeds server maximum ({max_delay}s)"

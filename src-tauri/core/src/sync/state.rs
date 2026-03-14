@@ -269,3 +269,131 @@ pub async fn delete_google_contacts_sync_token(
     })
     .await
 }
+
+// ── Google People API otherContacts sync tokens ──────────
+
+pub async fn save_google_other_contacts_sync_token(
+    db: &DbState,
+    account_id: &str,
+    sync_token: &str,
+) -> Result<(), String> {
+    let key = format!("google_other_contacts_sync_token:{account_id}");
+    let val = sync_token.to_string();
+
+    db.with_conn(move |conn| {
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+            rusqlite::params![key, val],
+        )
+        .map_err(|e| format!("save google other contacts sync token: {e}"))?;
+        Ok(())
+    })
+    .await
+}
+
+pub async fn load_google_other_contacts_sync_token(
+    db: &DbState,
+    account_id: &str,
+) -> Result<Option<String>, String> {
+    let key = format!("google_other_contacts_sync_token:{account_id}");
+
+    db.with_conn(move |conn| {
+        conn.query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            rusqlite::params![key],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| format!("load google other contacts sync token: {e}"))
+    })
+    .await
+}
+
+pub async fn delete_google_other_contacts_sync_token(
+    db: &DbState,
+    account_id: &str,
+) -> Result<(), String> {
+    let key = format!("google_other_contacts_sync_token:{account_id}");
+
+    db.with_conn(move |conn| {
+        conn.execute(
+            "DELETE FROM settings WHERE key = ?1",
+            rusqlite::params![key],
+        )
+        .map_err(|e| format!("delete google other contacts sync token: {e}"))?;
+        Ok(())
+    })
+    .await
+}
+
+// ── Graph shared mailbox delta tokens ────────────────────
+
+pub async fn save_shared_mailbox_delta_token(
+    db: &DbState,
+    account_id: &str,
+    mailbox_id: &str,
+    folder_id: &str,
+    delta_link: &str,
+) -> Result<(), String> {
+    let aid = account_id.to_string();
+    let mid = mailbox_id.to_string();
+    let fid = folder_id.to_string();
+    let dl = delta_link.to_string();
+
+    db.with_conn(move |conn| {
+        conn.execute(
+            "INSERT OR REPLACE INTO graph_shared_mailbox_delta_tokens \
+             (account_id, mailbox_id, folder_id, delta_link, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, strftime('%s', 'now'))",
+            rusqlite::params![aid, mid, fid, dl],
+        )
+        .map_err(|e| format!("save shared mailbox delta token: {e}"))?;
+        Ok(())
+    })
+    .await
+}
+
+pub async fn load_shared_mailbox_delta_tokens(
+    db: &DbState,
+    account_id: &str,
+    mailbox_id: &str,
+) -> Result<HashMap<String, String>, String> {
+    let aid = account_id.to_string();
+    let mid = mailbox_id.to_string();
+
+    db.with_conn(move |conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT folder_id, delta_link FROM graph_shared_mailbox_delta_tokens \
+                 WHERE account_id = ?1 AND mailbox_id = ?2",
+            )
+            .map_err(|e| format!("prepare: {e}"))?;
+        stmt.query_map(rusqlite::params![aid, mid], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| format!("query: {e}"))?
+        .collect::<Result<HashMap<_, _>, _>>()
+        .map_err(|e| format!("collect: {e}"))
+    })
+    .await
+}
+
+pub async fn delete_shared_mailbox_delta_tokens(
+    db: &DbState,
+    account_id: &str,
+    mailbox_id: &str,
+) -> Result<(), String> {
+    let aid = account_id.to_string();
+    let mid = mailbox_id.to_string();
+
+    db.with_conn(move |conn| {
+        conn.execute(
+            "DELETE FROM graph_shared_mailbox_delta_tokens \
+             WHERE account_id = ?1 AND mailbox_id = ?2",
+            rusqlite::params![aid, mid],
+        )
+        .map_err(|e| format!("delete shared mailbox delta tokens: {e}"))?;
+        Ok(())
+    })
+    .await
+}
