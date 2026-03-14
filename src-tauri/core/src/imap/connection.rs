@@ -412,3 +412,397 @@ pub async fn negotiate_condstore_qresync(
         })
     }
 }
+
+// ---------- NAMESPACE discovery (RFC 2342) ----------
+
+/// Parse a NAMESPACE response line into a `NamespaceInfo`.
+///
+/// The response format is three sections (personal, other_users, shared),
+/// each either `NIL` or a parenthesized list of `(prefix delimiter)` pairs:
+/// ```text
+/// (("" "/")) (("Other Users/" "/")) (("Shared/" "/"))
+/// ```
+pub fn parse_namespace_response(line: &str) -> Result<NamespaceInfo, String> {
+    let line = line.trim();
+    let mut info = NamespaceInfo::default();
+    let mut pos = 0;
+    let bytes = line.as_bytes();
+
+    // Parse three sections in order: personal, other_users, shared
+    let sections = [&mut info.personal, &mut info.other_users, &mut info.shared];
+
+    for section in sections {
+        // Skip whitespace
+        while pos < bytes.len() && bytes[pos] == b' ' {
+            pos += 1;
+        }
+        if pos >= bytes.len() {
+            break;
+        }
+
+        // Check for NIL
+        if bytes[pos..].starts_with(b"NIL") || bytes[pos..].starts_with(b"nil") {
+            pos += 3;
+            continue;
+        }
+
+        // Expect opening '(' for the section list
+        if bytes[pos] != b'(' {
+            return Err(format!(
+                "Expected '(' or NIL at position {pos} in NAMESPACE response: {line}"
+            ));
+        }
+        pos += 1;
+
+        // Parse entries: each is (prefix delimiter)
+        loop {
+            // Skip whitespace
+            while pos < bytes.len() && bytes[pos] == b' ' {
+                pos += 1;
+            }
+            if pos >= bytes.len() || bytes[pos] == b')' {
+                pos += 1; // consume closing ')'
+                break;
+            }
+
+            // Expect '(' for entry
+            if bytes[pos] != b'(' {
+                return Err(format!(
+                    "Expected '(' for entry at position {pos} in NAMESPACE response: {line}"
+                ));
+            }
+            pos += 1;
+
+            // Parse prefix (quoted string)
+            let prefix = parse_ns_string(bytes, &mut pos)?;
+
+            // Skip space
+            while pos < bytes.len() && bytes[pos] == b' ' {
+                pos += 1;
+            }
+
+            // Parse delimiter (quoted string or NIL)
+            let delimiter = if bytes[pos..].starts_with(b"NIL") || bytes[pos..].starts_with(b"nil")
+            {
+                pos += 3;
+                None
+            } else {
+                Some(parse_ns_string(bytes, &mut pos)?)
+            };
+
+            // Skip whitespace before closing ')'
+            while pos < bytes.len() && bytes[pos] == b' ' {
+                pos += 1;
+            }
+
+            // Consume optional extension data before closing ')'
+            // Some servers include extra data like TRANSLATION after the delimiter
+            while pos < bytes.len() && bytes[pos] != b')' {
+                if bytes[pos] == b'"' {
+                    // Skip quoted string
+                    let _ = parse_ns_string(bytes, &mut pos)?;
+                } else if bytes[pos] == b'(' {
+                    // Skip parenthesized list
+                    let mut depth = 1;
+                    pos += 1;
+                    while pos < bytes.len() && depth > 0 {
+                        if bytes[pos] == b'(' {
+                            depth += 1;
+                        } else if bytes[pos] == b')' {
+                            depth -= 1;
+                        }
+                        pos += 1;
+                    }
+                } else {
+                    pos += 1;
+                }
+            }
+
+            if pos < bytes.len() && bytes[pos] == b')' {
+                pos += 1; // consume entry closing ')'
+            }
+
+            section.push(NamespaceEntry { prefix, delimiter });
+        }
+    }
+
+    Ok(info)
+}
+
+/// Parse a quoted string from the NAMESPACE response at the given position.
+fn parse_ns_string(bytes: &[u8], pos: &mut usize) -> Result<String, String> {
+    if *pos >= bytes.len() || bytes[*pos] != b'"' {
+        return Err(format!(
+            "Expected '\"' at position {pos} in NAMESPACE string",
+            pos = *pos
+        ));
+    }
+    *pos += 1; // skip opening quote
+
+    let start = *pos;
+    while *pos < bytes.len() && bytes[*pos] != b'"' {
+        if bytes[*pos] == b'\\' {
+            *pos += 1; // skip escaped char
+        }
+        *pos += 1;
+    }
+    let s = String::from_utf8_lossy(&bytes[start..*pos]).to_string();
+    if *pos < bytes.len() {
+        *pos += 1; // skip closing quote
+    }
+    Ok(s)
+}
+
+/// Discover IMAP namespaces by sending the NAMESPACE command (RFC 2342).
+///
+/// Returns the personal, other-users, and shared namespace prefixes and
+/// delimiters. This is used to identify shared/delegated mailbox prefixes
+/// for Dovecot/Cyrus servers.
+pub async fn discover_namespaces(
+    session: &mut ImapSession,
+) -> Result<NamespaceInfo, String> {
+    tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
+        let tag = session
+            .run_command("NAMESPACE")
+            .await
+            .map_err(|e| format!("NAMESPACE send failed: {e}"))?;
+
+        let mut result = NamespaceInfo::default();
+        loop {
+            let resp = session
+                .read_response()
+                .await
+                .map_err(|e| format!("NAMESPACE read failed: {e}"))?
+                .ok_or_else(|| "Connection lost during NAMESPACE".to_string())?;
+
+            match resp.parsed() {
+                async_imap::imap_proto::Response::Done { tag: resp_tag, .. }
+                    if *resp_tag == tag =>
+                {
+                    break;
+                }
+                _ => {
+                    // Look for untagged NAMESPACE response in raw bytes.
+                    // imap_proto does not have a NAMESPACE parser, so we
+                    // inspect the raw response line.
+                    let raw = String::from_utf8_lossy(resp.borrow_owner());
+                    if let Some(ns_start) = raw.find("NAMESPACE ") {
+                        let ns_data = &raw[ns_start + "NAMESPACE ".len()..];
+                        // Strip trailing \r\n
+                        let ns_data = ns_data.trim_end();
+                        match parse_namespace_response(ns_data) {
+                            Ok(info) => {
+                                result = info;
+                                log::info!(
+                                    "IMAP NAMESPACE: personal={:?}, other_users={:?}, shared={:?}",
+                                    result.personal,
+                                    result.other_users,
+                                    result.shared
+                                );
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to parse NAMESPACE response: {e}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(result)
+    })
+    .await
+    .map_err(|_| format!(
+        "NAMESPACE timed out after {}s",
+        IMAP_CMD_TIMEOUT.as_secs()
+    ))?
+}
+
+// ---------- ACL discovery: MYRIGHTS (RFC 4314) ----------
+
+/// Discover the current user's access rights on a folder via MYRIGHTS (RFC 4314).
+///
+/// Returns the rights string (e.g. `"lrswipcda"`). Common right characters:
+/// - `l` lookup, `r` read, `s` seen, `w` write flags, `i` insert
+/// - `p` post, `c`/`k` create subfolder, `d`/`t` delete, `e` expunge, `a` admin
+pub async fn discover_myrights(
+    session: &mut ImapSession,
+    folder: &str,
+) -> Result<String, String> {
+    tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
+        let cmd = format!("MYRIGHTS \"{}\"", folder.replace('"', "\\\""));
+        let tag = session
+            .run_command(&cmd)
+            .await
+            .map_err(|e| format!("MYRIGHTS send failed: {e}"))?;
+
+        let mut rights = String::new();
+        loop {
+            let resp = session
+                .read_response()
+                .await
+                .map_err(|e| format!("MYRIGHTS read failed: {e}"))?
+                .ok_or_else(|| "Connection lost during MYRIGHTS".to_string())?;
+
+            match resp.parsed() {
+                async_imap::imap_proto::Response::Done {
+                    tag: resp_tag,
+                    status,
+                    information,
+                    ..
+                } if *resp_tag == tag => {
+                    if !matches!(status, async_imap::imap_proto::Status::Ok) {
+                        let info = information
+                            .as_deref()
+                            .unwrap_or("unknown error");
+                        return Err(format!("MYRIGHTS failed: {info}"));
+                    }
+                    break;
+                }
+                async_imap::imap_proto::Response::MyRights(my_rights) => {
+                    // imap_proto parses MYRIGHTS into AclRight variants;
+                    // convert back to the compact character string.
+                    rights = my_rights
+                        .rights
+                        .iter()
+                        .map(|r| char::from(*r))
+                        .collect();
+                }
+                _ => {}
+            }
+        }
+
+        log::info!("IMAP MYRIGHTS \"{folder}\": {rights}");
+        Ok(rights)
+    })
+    .await
+    .map_err(|_| format!(
+        "MYRIGHTS timed out after {}s",
+        IMAP_CMD_TIMEOUT.as_secs()
+    ))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_standard_namespace() {
+        let input = r#"(("" "/")) (("Other Users/" "/")) (("Shared/" "/"))"#;
+        let info = parse_namespace_response(input).unwrap();
+        assert_eq!(info.personal.len(), 1);
+        assert_eq!(info.personal[0].prefix, "");
+        assert_eq!(info.personal[0].delimiter.as_deref(), Some("/"));
+        assert_eq!(info.other_users.len(), 1);
+        assert_eq!(info.other_users[0].prefix, "Other Users/");
+        assert_eq!(info.other_users[0].delimiter.as_deref(), Some("/"));
+        assert_eq!(info.shared.len(), 1);
+        assert_eq!(info.shared[0].prefix, "Shared/");
+        assert_eq!(info.shared[0].delimiter.as_deref(), Some("/"));
+    }
+
+    #[test]
+    fn parse_namespace_with_nil_sections() {
+        let input = r#"(("INBOX." ".")) NIL NIL"#;
+        let info = parse_namespace_response(input).unwrap();
+        assert_eq!(info.personal.len(), 1);
+        assert_eq!(info.personal[0].prefix, "INBOX.");
+        assert_eq!(info.personal[0].delimiter.as_deref(), Some("."));
+        assert!(info.other_users.is_empty());
+        assert!(info.shared.is_empty());
+    }
+
+    #[test]
+    fn parse_namespace_multiple_entries() {
+        let input =
+            r##"(("" "/")("#mbox" "/")) NIL (("Public Folders/" "/"))"##;
+        let info = parse_namespace_response(input).unwrap();
+        assert_eq!(info.personal.len(), 2);
+        assert_eq!(info.personal[0].prefix, "");
+        assert_eq!(info.personal[1].prefix, "#mbox");
+        assert!(info.other_users.is_empty());
+        assert_eq!(info.shared.len(), 1);
+        assert_eq!(info.shared[0].prefix, "Public Folders/");
+    }
+
+    #[test]
+    fn parse_namespace_all_nil() {
+        let input = "NIL NIL NIL";
+        let info = parse_namespace_response(input).unwrap();
+        assert!(info.personal.is_empty());
+        assert!(info.other_users.is_empty());
+        assert!(info.shared.is_empty());
+    }
+
+    #[test]
+    fn parse_namespace_nil_delimiter() {
+        let input = r#"(("" NIL)) NIL NIL"#;
+        let info = parse_namespace_response(input).unwrap();
+        assert_eq!(info.personal.len(), 1);
+        assert_eq!(info.personal[0].prefix, "");
+        assert!(info.personal[0].delimiter.is_none());
+    }
+
+    #[test]
+    fn rights_string_has_read_access() {
+        let rights = "lrswipcda";
+        assert!(rights.contains('l'), "should have lookup");
+        assert!(rights.contains('r'), "should have read");
+        assert!(rights.contains('s'), "should have seen");
+    }
+
+    #[test]
+    fn rights_string_read_only() {
+        let rights = "lr";
+        assert!(rights.contains('l'));
+        assert!(rights.contains('r'));
+        assert!(!rights.contains('w'), "should not have write");
+        assert!(!rights.contains('i'), "should not have insert");
+        assert!(!rights.contains('d'), "should not have delete");
+    }
+
+    #[test]
+    fn namespace_type_classification() {
+        let info = parse_namespace_response(
+            r#"(("" "/")) (("Other Users/" "/")) (("Shared/" "/"))"#,
+        )
+        .unwrap();
+
+        // A folder path can be classified by checking which namespace prefix it matches
+        let folder = "Shared/team-inbox";
+        let ns_type = classify_folder_namespace(&info, folder);
+        assert_eq!(ns_type, Some(NamespaceType::Shared));
+
+        let folder = "Other Users/bob/INBOX";
+        let ns_type = classify_folder_namespace(&info, folder);
+        assert_eq!(ns_type, Some(NamespaceType::OtherUsers));
+
+        let folder = "INBOX";
+        let ns_type = classify_folder_namespace(&info, folder);
+        assert_eq!(ns_type, Some(NamespaceType::Personal));
+    }
+}
+
+/// Classify which namespace a folder path belongs to based on prefix matching.
+pub fn classify_folder_namespace(info: &NamespaceInfo, folder_path: &str) -> Option<NamespaceType> {
+    // Check other_users and shared first (they have non-empty prefixes),
+    // then fall back to personal.
+    for entry in &info.other_users {
+        if !entry.prefix.is_empty() && folder_path.starts_with(&entry.prefix) {
+            return Some(NamespaceType::OtherUsers);
+        }
+    }
+    for entry in &info.shared {
+        if !entry.prefix.is_empty() && folder_path.starts_with(&entry.prefix) {
+            return Some(NamespaceType::Shared);
+        }
+    }
+    // If the personal namespace has a non-empty prefix, check it; otherwise
+    // treat everything not matched above as personal.
+    for entry in &info.personal {
+        if entry.prefix.is_empty() || folder_path.starts_with(&entry.prefix) {
+            return Some(NamespaceType::Personal);
+        }
+    }
+    None
+}

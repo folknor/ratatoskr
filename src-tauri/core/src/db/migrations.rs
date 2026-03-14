@@ -1199,6 +1199,44 @@ static MIGRATIONS: &[Migration] = &[
             );
         "#,
     },
+    Migration {
+        version: 52,
+        description: "Add Exchange group sync tracking columns to contact_groups",
+        sql: r#"
+            ALTER TABLE contact_groups ADD COLUMN source TEXT NOT NULL DEFAULT 'user';
+            ALTER TABLE contact_groups ADD COLUMN account_id TEXT;
+            ALTER TABLE contact_groups ADD COLUMN server_id TEXT;
+            ALTER TABLE contact_groups ADD COLUMN email TEXT;
+            ALTER TABLE contact_groups ADD COLUMN group_type TEXT;
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_contact_groups_server
+              ON contact_groups(account_id, server_id) WHERE server_id IS NOT NULL;
+        "#,
+    },
+    Migration {
+        version: 53,
+        description: "Contact photo cache table",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS contact_photo_cache (
+                email TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                etag TEXT,
+                fetched_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                last_accessed_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                PRIMARY KEY (email, account_id)
+            );
+        "#,
+    },
+    Migration {
+        version: 54,
+        description: "Track IMAP namespace type on labels/folders",
+        sql: r#"
+            ALTER TABLE labels ADD COLUMN namespace_type TEXT;
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -1438,6 +1476,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))
             .expect("query");
-        assert_eq!(max_ver, 51);
+        assert_eq!(max_ver, 54);
     }
 }

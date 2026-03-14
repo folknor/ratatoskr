@@ -89,7 +89,100 @@ pub async fn list_folders(session: &mut ImapSession) -> Result<Vec<ImapFolder>, 
             special_use,
             exists,
             unseen,
+            namespace_type: None,
         });
+    }
+
+    Ok(folders)
+}
+
+/// List shared and other-users folders discovered via NAMESPACE.
+///
+/// For each entry in `namespace_info.other_users` and `namespace_info.shared`,
+/// sends `LIST "" "{prefix}*"` to discover all folders under that namespace.
+/// Each folder is tagged with its `NamespaceType`.
+pub async fn list_shared_folders(
+    session: &mut ImapSession,
+    namespace_info: &NamespaceInfo,
+) -> Result<Vec<ImapFolder>, String> {
+    let mut folders = Vec::new();
+
+    // Collect (prefix, namespace_type) pairs to query
+    let mut queries: Vec<(&str, NamespaceType)> = Vec::new();
+    for entry in &namespace_info.other_users {
+        queries.push((&entry.prefix, NamespaceType::OtherUsers));
+    }
+    for entry in &namespace_info.shared {
+        queries.push((&entry.prefix, NamespaceType::Shared));
+    }
+
+    for (prefix, ns_type) in &queries {
+        if prefix.is_empty() {
+            continue;
+        }
+
+        let pattern = format!("{prefix}*");
+        let names_stream =
+            tokio::time::timeout(IMAP_CMD_TIMEOUT, session.list(Some(""), Some(&pattern)))
+                .await
+                .map_err(|_| timeout_err(&format!("LIST {pattern}"), IMAP_CMD_TIMEOUT))?
+                .map_err(|e| format!("LIST {pattern} failed: {e}"))?;
+
+        let names: Vec<_> =
+            tokio::time::timeout(IMAP_CMD_TIMEOUT, names_stream.collect::<Vec<_>>())
+                .await
+                .map_err(|_| timeout_err(&format!("LIST stream {pattern}"), IMAP_CMD_TIMEOUT))?
+                .into_iter()
+                .filter_map(Result::ok)
+                .collect();
+
+        for name in &names {
+            let raw_path = name.name().to_string();
+            let delimiter = name.delimiter().unwrap_or("/").to_string();
+            let path = utf7_imap::decode_utf7_imap(raw_path.clone());
+            let display_name = path
+                .rsplit_once(&delimiter)
+                .map(|(_, last)| last.to_string())
+                .unwrap_or_else(|| path.clone());
+
+            // Skip non-selectable container folders
+            if name
+                .attributes()
+                .iter()
+                .any(|a| matches!(a, async_imap::types::NameAttribute::NoSelect))
+            {
+                continue;
+            }
+
+            let special_use = detect_special_use(name);
+
+            // Get message counts — use raw_path for IMAP commands
+            let (exists, unseen) = match tokio::time::timeout(
+                IMAP_CMD_TIMEOUT,
+                session.status(&raw_path, "(MESSAGES UNSEEN)"),
+            )
+            .await
+            {
+                Ok(Ok(mailbox)) => (mailbox.exists, mailbox.unseen.unwrap_or(0)),
+                _ => (0, 0),
+            };
+
+            folders.push(ImapFolder {
+                path,
+                raw_path,
+                name: display_name,
+                delimiter,
+                special_use,
+                exists,
+                unseen,
+                namespace_type: Some(ns_type.clone()),
+            });
+        }
+
+        log::info!(
+            "IMAP LIST shared folders under \"{prefix}\": found {} selectable folders",
+            folders.len()
+        );
     }
 
     Ok(folders)

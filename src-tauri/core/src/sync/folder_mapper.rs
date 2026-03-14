@@ -96,6 +96,7 @@ mod tests {
             special_use: special_use.map(ToString::to_string),
             exists: 10,
             unseen: 2,
+            namespace_type: None,
         }
     }
 

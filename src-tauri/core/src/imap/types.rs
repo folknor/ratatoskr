@@ -1,5 +1,30 @@
 use serde::{Deserialize, Serialize};
 
+// ---------- Namespace / ACL types (RFC 2342 / RFC 4314) ----------
+
+/// Which IMAP namespace a folder belongs to.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum NamespaceType {
+    Personal,
+    OtherUsers,
+    Shared,
+}
+
+/// A single entry from a NAMESPACE response section.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NamespaceEntry {
+    pub prefix: String,
+    pub delimiter: Option<String>,
+}
+
+/// Parsed result of the IMAP NAMESPACE command (RFC 2342).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NamespaceInfo {
+    pub personal: Vec<NamespaceEntry>,
+    pub other_users: Vec<NamespaceEntry>,
+    pub shared: Vec<NamespaceEntry>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImapConfig {
     pub host: String,
@@ -21,6 +46,8 @@ pub struct ImapFolder {
     pub special_use: Option<String>, // "\Sent", "\Trash", "\Drafts", "\Junk", "\Archive", "\All"
     pub exists: u32,
     pub unseen: u32,
+    /// Which IMAP namespace this folder belongs to (populated by `list_shared_folders`).
+    pub namespace_type: Option<NamespaceType>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
