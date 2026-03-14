@@ -6,8 +6,6 @@
 
 - [ ] **Decide whether AI inference execution should move to Rust** — Rust already owns provider/runtime/config selection, but TypeScript still owns prompt assembly and actual inference calls for summaries, smart replies, transforms, ask-inbox, task extraction, smart-label AI, category inference, and auto-drafts. This needs an explicit boundary decision, not ad-hoc drift.
 
-- [x] **Deduplicate the shared `callAi` wrapper** — `aiService.ts` and `writingStyleService.ts` still define the same `callAi(systemPrompt, userContent)` helper. If inference remains in TypeScript, this should collapse to one shared wrapper or direct `completeAi` use.
-
 ### Regression Coverage
 
 - [ ] **Expand regression coverage around migrated sync/bootstrap behavior** — Add focused tests for sync status events, background sync start/stop, post-sync hook triggering, and account bootstrap paths that now rely on Rust-backed summary DTOs.
@@ -16,20 +14,11 @@
 
 ## Inline Image Store Eviction
 
-- [ ] **Wire up user-configurable eviction for `inline_images.db`** — The file-based attachment cache (`attachment_cache/`) has full user-facing eviction: a configurable max size in settings, `evictOldestCached()` in `cacheManager.ts` that respects content-hash dedup, and `clearAllCache()`. The inline image store has none of this plumbing on the TS/UI side, even though the Rust backend already has the building blocks (`prune_to_size()`, `delete_unreferenced()`, `stats()`, `clear()`).
-
-  **What exists today (Rust side)**:
-  - `prune_to_size(max_bytes)` — evicts oldest rows by `created_at ASC` until total size fits under the cap. Already called automatically after every `put()` and `put_batch()` with a hardcoded 128 MB ceiling (`MAX_INLINE_STORE_BYTES`).
-  - `delete_unreferenced(db, hashes)` — cross-references `attachments` table to find orphaned blobs (no remaining `is_inline = 1` rows with that `content_hash`), then deletes them.
-  - `stats()` — returns `{ image_count, total_bytes }`.
-  - `clear()` — deletes all rows.
-  - `inline_image_stats` and `inline_image_clear` Tauri commands already exposed.
+- [ ] **Wire up user-configurable eviction for `inline_images.db`** — The Rust backend has the building blocks (`prune_to_size()`, `delete_unreferenced()`, `stats()`, `clear()`), but the TS/UI side has no settings or scheduled eviction plumbing.
 
   **What's missing**:
-  1. **Settings UI**: No user-facing control for inline image store size. The 128 MB cap is hardcoded in Rust. The settings page should expose this alongside the existing attachment cache size slider, or at minimum show the current usage via `inline_image_stats`.
-  2. ~~**Orphan cleanup on account/message deletion**~~: Done — `db_delete_account` and `provider_prepare_account_resync` now collect inline content hashes before deletion, then call `delete_unreferenced()` to clean orphaned blobs.
-  3. **Scheduled eviction**: The file cache runs eviction after every `provider_fetch_attachment` cache-on-miss (via `enforce_cache_limit`). The inline store's `prune_to_size` runs after `put`/`put_batch` which covers sync-time inserts, but there's no periodic sweep to catch edge cases (e.g., if `MAX_INLINE_STORE_BYTES` is lowered in a future update). Consider adding a periodic call in `preCacheManager.ts` or a dedicated background task.
-  4. ~~**Tauri command for configurable limit**~~: Done — `inline_image_prune` command accepts a custom `max_bytes` limit and triggers immediate eviction. The 128 MB default constant remains for automatic post-insert pruning; the command enables UI-driven limit changes.
+  1. **Settings UI**: No user-facing control for inline image store size. The 128 MB cap is hardcoded in Rust.
+  2. **Scheduled eviction**: No periodic sweep to catch edge cases (e.g., if `MAX_INLINE_STORE_BYTES` is lowered in a future update).
 
 ## Iced Rewrite
 
@@ -37,7 +26,7 @@
   - https://github.com/hecrj/iced_fontello — Icon font integration for iced
   - https://github.com/hecrj/iced_palace — Hecrj's iced showcase/playground
   - https://github.com/pop-os/cosmic-edit — COSMIC text editor (large real-world iced app)
-  - https://github.com/pop-os/iced/blob/master/widget/src/markdown.rs — COSMIC fork's markdown widget: two-phase architecture using `pulldown_cmark` to parse into an `Item` enum, then a `Viewer` trait to render items as iced widgets (`rich_text` for text/headings, `container` for code blocks, `row`+`column` for lists, `table` for tables, syntax highlighting via `highlighter` feature). Supports incremental parsing and span caching. Relevant for rendering HTML email bodies.
+  - https://github.com/pop-os/iced/blob/master/widget/src/markdown.rs — COSMIC fork's markdown widget
 
 ## Non-Migration Cleanup
 
@@ -49,226 +38,32 @@
 
 ### Code Quality
 
-- [x] **Category add/remove is racy** — Fixed with a per-account `category_lock` mutex on `GraphClient` that serializes the read-modify-write. Also batched the GET and PATCH phases via `/$batch` to reduce round-trips.
-
-- [x] **Add Graph `$batch` optimization for thread actions** — `move_messages`, `patch_messages`, and `permanent_delete` now batch up to 20 operations per `POST /$batch` call. Category add/remove still uses per-message GET-then-PATCH (read-modify-write pattern not batchable).
-
 - [ ] **Decide whether Graph `raw_size = 0` should stay accepted** — Graph still lacks a clean size field for the current query path. Either keep this as an accepted cosmetic limitation or document a better fallback if one exists.
-
-- [x] **Deduplicate account-to-store mapping in the React entry points** — The shared account-store shaping now lives in `src/services/accounts/basicInfo.ts::mapAccountBasicInfos()`, and `App.tsx`, `ComposerWindow.tsx`, and `ThreadWindow.tsx` all use that helper.
-
-### Per-Account OAuth Credentials
-
-- [x] **Add per-account credential editing UI for existing accounts** — Gmail and Graph accounts now expose an explicit per-account “Update OAuth App” reauth path in settings. The UI reads that account’s stored credentials, lets the user inspect or change them, and reauthorizes without any cross-account prefill/default behavior.
-
-- [x] **Clean up orphaned global credential settings rows** — Migration v29 backfilled per-account `oauth_client_id`/`oauth_client_secret` from the global `settings` table, but the original `google_client_id`, `google_client_secret`, and `microsoft_client_id` rows remain in the `settings` table as dead data. Add a follow-up migration or cleanup step to delete these rows once the per-account migration has been live long enough.
 
 ### Microsoft Graph
 
-- [ ] **Decide on Azure AD app registration model** — Currently users must provide their own `microsoft_client_id` during account setup. No default client ID is shipped. The open question is whether to register and ship a default Entra ID app registration (simpler onboarding, but requires maintaining an Azure AD app, handling consent prompts, and staying within Microsoft's rate limits across all users) or keep requiring user-provided credentials (friction for non-technical users, but zero shared infrastructure). Credentials are now stored per-account — this is a product/policy decision, not a code gap.
+- [ ] **Decide on Azure AD app registration model** — Currently users must provide their own `microsoft_client_id` during account setup. Product/policy decision, not a code gap.
 
-- [x] **Implement large attachment upload sessions (>3MB)** — Graph API rejects inline base64 attachments over 3MB. Larger files require a multi-step resumable upload session: `POST /me/messages/{id}/attachments/createUploadSession` → chunked `PUT` to the returned upload URL. Currently `graph/ops.rs` uses simple `POST /me/messages/{id}/attachments` which will fail silently or error for large files. Need to detect size threshold, create upload session, chunk the file (recommended 5-10MB chunks per Microsoft docs), and handle resume on failure. Affects `send_message` (create-draft-then-send pattern in `ops.rs` lines ~211-249) and `save_draft`.
-
-- [ ] **Add Graph webhook subscriptions for real-time sync** — Currently Graph sync is purely poll-based via delta queries with priority-based folder scheduling (`sync.rs`). Microsoft Graph supports change notifications via webhooks (`POST /subscriptions` with `changeType: "created,updated,deleted"` on `/me/messages`). This would enable near-instant inbox updates instead of waiting for the next sync cycle. Requires: a notification endpoint (likely a Tauri localhost server or push notification relay), subscription lifecycle management (create, renew before 3-day expiry, handle validation tokens), and delta sync as fallback when subscriptions lapse. Low priority while polling works acceptably.
-
-- [x] **Wire up Focused Inbox data from Graph** — `inferenceClassification` is now deserialized into `GraphMessage` and surfaced as a "FOCUSED" pseudo-label in `thread_labels` (same pattern as UNREAD/STARRED). Persisted via the existing label pipeline — no schema migration needed.
+- [ ] **Wire up Graph webhook notification listener** — Subscription CRUD and notification parsing are implemented (`graph/webhooks.rs`). What's missing: a local HTTP server (or relay) to actually receive the POST notifications from Microsoft, and integration into the sync loop to trigger immediate delta syncs on notification receipt.
 
 ### JMAP
 
-- [ ] **Add Bearer/OAuth authentication for JMAP** — Currently `jmap/client.rs` uses `Credentials::basic()` only, ignoring the `auth_method` column in the accounts table. This means JMAP providers that require OAuth2 (e.g., Fastmail's OAuth flow) can't be used. Implementation needs: (a) read `auth_method` from DB in `read_jmap_credentials()` and branch on `"oauth2"`/`"bearer"` to use `Credentials::bearer(token)`, (b) handle token refresh — `jmap-client` binds credentials at construction, so either rebuild `JmapClientInner` on refresh or patch the crate for a credential callback, (c) per-provider OAuth endpoint config (Fastmail has its own auth/token URLs and scopes, distinct from Microsoft/Google), (d) account setup UI flow for OAuth JMAP providers. The `auth_method` column and IMAP/Graph OAuth infra already exist as reference patterns.
+- [ ] **Add JMAP Sieve filter management** — `jmap-client` supports full Sieve CRUD (RFC 6785 over JMAP). This would allow users to manage server-side mail filters directly from the UI. Nice-to-have feature, not blocking.
 
-- [ ] **Add JMAP push notifications via WebSocket** — Currently JMAP sync is purely poll-based via `email_changes()`/`mailbox_changes()` state strings in `sync.rs`. The JMAP spec (RFC 8620 §7) defines push via EventSource or WebSocket, and `jmap-client` 0.4 supports WebSocket push. This would enable near-instant sync instead of waiting for the next poll cycle. Requires: WebSocket connection lifecycle management, state change event parsing, and triggering delta sync on push events. Delta polling remains as fallback. Low priority while polling works.
-
-- [ ] **Add JMAP Sieve filter management** — `jmap-client` supports full Sieve CRUD (RFC 6785 over JMAP). This would allow users to manage server-side mail filters (filing rules, vacation replies, forwarding) directly from the UI. Currently no Sieve code exists. Requires: Sieve script CRUD commands, a filter rule editor UI, and testing against Fastmail/Stalwart/Cyrus Sieve implementations. Nice-to-have feature, not blocking.
-
-- [x] **Fetch `List-Unsubscribe` header in JMAP sync** — The `messages` table has `list_unsubscribe` and `list_unsubscribe_post` columns, but JMAP sync sets them to NULL. JMAP can fetch arbitrary headers via `header:List-Unsubscribe:asText` and `header:List-Unsubscribe-Post:asText` properties in `Email/get`. Add these to the property list in `parse.rs`'s `email_get_properties()`, parse the values, and persist them. This enables one-click unsubscribe UI for JMAP accounts (IMAP and Gmail already populate these columns).
-
-- [x] **Batch `Email/set` for JMAP thread actions** — All thread-level actions in `jmap/ops.rs` (archive, trash, move, mark read, star, spam) loop through email IDs and call `email_set_mailbox()`/`email_set_keyword()` per-email sequentially — one API round-trip per email in the thread. Should build a single `Email/set` request with patches for all email IDs using jmap-client's request builder, reducing N API calls to 1. The per-email convenience methods (`email_set_mailbox`, `email_set_keyword`) don't support batching; need to drop to the lower-level `set_email()` builder with explicit patch operations.
-
-- [x] **Batch JMAP send into a single request** — `send_email` now runs `upload()` and `Identity/get` concurrently, then batches `Email/import` + `EmailSubmission/set` (with `onSuccessUpdateEmail` to clear `$draft`) into a single JMAP request. Reduced from 5 sequential round-trips to 2 steps.
-
-- [x] **Add `is_known_jmap_provider()` quick-check utility** — `registry::is_known_jmap_provider(domain)` checks the hardcoded registry for JMAP support (no network calls). Exposed as a Tauri command for UI hints during account setup.
-
-- [ ] **JMAP for Calendars** — `jmap-client` has no calendar support (upstream Issue #3). JMAP for Calendars (RFC 8984) would unify calendar sync for providers like Fastmail that support it. Blocked until `jmap-client` adds calendar types, or we build raw JMAP calendar requests. Low priority — CalDAV covers calendar sync for now.
+- [ ] **JMAP for Calendars** — `jmap-client` has no calendar support (upstream Issue #3). Blocked until `jmap-client` adds calendar types. Low priority — CalDAV covers calendar sync for now.
 
 ## Roadmap — Backend-Only Work
 
 Items below are derived from `docs/roadmap/` and scoped to Rust backend work only (no UI/frontend). See the individual roadmap docs for full context.
 
-### Categories (Tier 1)
-
-- [x] **Gmail label color sync** — Already implemented: `GmailLabelColor` struct, `GmailLabel.color` field, and `sync_labels_to_categories()` with `ON CONFLICT DO UPDATE` for color persistence.
-
-- [x] **Gmail label-as-category classification heuristic** — Implemented: `sync_labels_to_categories` now filters out nested (`/` in name), hidden from message list, and hidden from label list labels. Only flat, visible, user-type labels sync as categories.
-
-- [x] **JMAP keyword-to-category mapping** — Implemented: `parse_jmap_email` extracts non-`$` keywords into `keyword_categories`, `sync_keyword_categories()` upserts them into `categories` table with `kw_` prefix and links to threads via `thread_categories`.
-
-- [x] **IMAP PERMANENTFLAGS detection for category writeback** — Implemented: `supports_custom_keywords: bool` on `ImapFolderStatus`, populated from `Flag::MayCreate` in SELECT responses across all 4 construction sites. Raw TCP fallback also handles it.
-
-- [x] **`ProviderOps` methods for category mutation** — Implemented: `apply_category`/`remove_category` on `ProviderOps` trait with default no-op. Graph: read-modify-write with category lock. Gmail: `modify_message` with label ID resolution. JMAP: `Email/set` keyword patches. IMAP: `UID STORE +/-FLAGS` gated by `supports_custom_keywords`.
-
-- [x] **Populate `message_categories` during sync** — Migration v45: `message_categories` join table. `insert_message_categories()` shared helper. Graph: parses `categories[]` array. Gmail: matches label IDs against categories table. JMAP: extended to link at message level alongside thread level.
-
-- [x] **Unified color model with Exchange presets as canonical palette** — Implemented in `category_colors.rs`: 25-preset const array, `preset_to_hex()`, `nearest_exchange_preset()` via Euclidean RGB distance, `all_presets()`. Deduplicated from `graph/category_sync.rs`. 13 unit tests.
-
-### Contacts (Tier 1)
-
-- [ ] **Google People API sync (Phase 5)** — Implement `people.connections.list` with `personFields` mask (names, emailAddresses, phoneNumbers, organizations, photos), `pageToken` pagination, and `syncToken` storage (tokens expire after 7 days — fall back to full resync). Map Google contact fields to the existing `contacts` table schema. Requires `contacts.readonly` OAuth scope added to the Google auth flow.
-
-- [ ] **Google `otherContacts` ingestion** — Fetch `GET /v1/otherContacts` with separate `contacts.other.readonly` scope. These are auto-collected contacts Google tracks (similar to our `seen_addresses`). Insert as lower-priority autocomplete candidates — they rank above locally-observed addresses but below explicit contacts.
-
-- [ ] **Exchange group/distribution list resolution (Phase 6)** — Call `GET /groups/{id}/transitiveMembers/microsoft.graph.user` to resolve M365 Groups and distribution lists into individual recipients. The Graph API handles recursion (nested groups) server-side. Track partial resolution when hidden membership count > resolved count, so the UI can indicate "12 members + others".
-
-- [ ] **Contact photo fetching and caching (Phase 7)** — Exchange: `GET /me/contacts/{id}/photo/$value` returns JPEG, cache keyed by `changeKey` for invalidation. Google: public photo URLs from People API with `?sz=` size parameter. Store photos on disk in `{app_data}/contact_photos/` with an eviction policy. Photos are optional enrichment — autocomplete and display work without them.
-
-- [ ] **CardDAV sync (Phase 8)** — Add `libdav` + `calcard` crate dependencies. Implement etag-based contact sync: PROPFIND for etags, GET changed vCards, PUT local changes. Targets Fastmail, Stalwart, and other CardDAV-capable servers. Parses vCard 3.0/4.0 responses via `calcard` into the existing `contacts` schema.
-
-### Tracking Blocking (Tier 1)
-
-- [ ] **`sanitize_html_body()` pipeline in core** — Implement the three-stage HTML sanitization function: (1) `css-inline` to inline `<style>` blocks into element attributes, (2) `lol_html` for streaming removal of `<link>`, `<script>`, `<iframe>`, remote `<img>` sources, `@import` rules, and `meta refresh` tags, (3) `ammonia` for whitelist-based DOM sanitization as a final safety net. This is a framework-agnostic core function called before any rendering backend (React webview or future iced HTML renderer). Three new crate dependencies.
-
-- [x] **AMP email content blocking** — Implemented: shared `is_amp_content_type()` utility, filtering in JMAP `extract_body_value()`, defense-in-depth guards in Gmail and IMAP parsers. Graph unaffected (pre-rendered body).
-
-- [x] **`$MDNSent` keyword management across providers** — Implemented in `mdn.rs`: DB-level `is_mdn_already_sent()`/`mark_mdn_sent_local()`, JMAP `$mdnsent` via `Email/set`, IMAP `$MDNSent` via `UID STORE` gated by PERMANENTFLAGS, Graph `mdn_requested` read-only check. Migration v46 adds `mdn_sent` column. 5 unit tests.
-
-- [x] **MDN message generation (RFC 8098)** — Implemented in `mdn.rs`: `build_mdn_message()` builds `multipart/report` with human-readable + `message/disposition-notification` parts. `resolve_read_receipt_policy()` implements most-specific-wins lookup (sender → domain → account → global default). 8 unit tests.
-
-- [x] **Tracking URL parameter stripping** — Implemented in `url_cleaning.rs`: `strip_tracking_params()` removes 26 tracking params (UTM, Facebook, Google, Mailchimp, HubSpot, Marketo, Drip, Vero, Microsoft). `strip_tracking_params_from_html()` processes all href attributes. 16 unit tests. Tracking redirect domain list deferred to sanitization pipeline.
-
-- [x] **1×1 tracking pixel detection** — Implemented in `provider/tracking_pixels.rs`: `detect_tracking_pixels_in_html()` checks tiny dimensions (0/1 width+height), hidden styles (display:none, visibility:hidden), and known tracker domains/paths (Mailchimp, SendGrid, HubSpot, etc.). 14 unit tests.
-
-### Cloud Attachments (Tier 1)
-
-- [x] **`cloud_attachments` DB table** — Migration v39: table with all columns, indexes on `(message_id)` and partial on `(upload_status)` excluding 'sent'.
-
-- [x] **OneDrive resumable upload via Graph API** — Implemented in `graph/onedrive.rs`: `create_upload_session()`, `upload_file_chunked()` (5 MiB chunks, 320 KiB aligned), `resume_upload()` parses `nextExpectedRanges`.
-
-- [x] **OneDrive sharing link creation** — Implemented in `graph/onedrive.rs`: `create_sharing_link()` with configurable scope ("organization" or "anonymous"). Returns web URL.
-
-- [x] **Exchange `referenceAttachment` for cloud links** — Implemented in `graph/ops.rs`: `create_reference_attachment()` via `post_beta()` with `@odata.type`, `sourceUrl`, `providerType`, `permission`, optional `size`.
-
-- [ ] **Google Drive resumable upload** — Initiate with `POST /upload/drive/v3/files?uploadType=resumable`, then `PUT` chunks to the resumable URI. Requires adding `drive.file` OAuth scope to the Google auth flow (minimal scope — only grants access to files the app creates, not the user's entire Drive).
-
-- [ ] **Google Drive permission creation** — After upload, `POST /drive/v3/files/{fileId}/permissions` with `{ "role": "reader", "type": "anyone" }` (or `"type": "domain"` for org-restricted sharing). Returns the sharing URL for email body insertion.
-
-- [x] **Incoming cloud link detection via `RegexSet`** — Implemented in `cloud_attachments.rs`: `LazyLock<RegexSet>` with 8 patterns, `detect_cloud_links()` extracts hrefs and matches, `insert_incoming_cloud_links()` persists to DB. `CloudProvider` enum. 10 unit tests.
-
-- [x] **Cloud link metadata enrichment** — Implemented in `cloud_attachments.rs`: `enrich_onedrive_link()` via `/shares/{encoded}/driveItem`, `enrich_gdrive_link()` via Drive API with `extract_gdrive_file_id()` (5 URL formats). `update_cloud_attachment_metadata()` persists results. 6 unit tests.
-
-- [x] **Offline upload queue state machine** — Implemented in `cloud_attachments.rs`: `UploadStatus` enum, `CloudAttachment` struct, `get_pending_uploads()`, `update_upload_status()`, `mark_upload_failed()` with retry tracking, `reset_interrupted_uploads()` for app restart, `create_outgoing_upload()`, `get_permanently_failed()`.
-
 ### IMAP CONDSTORE/QRESYNC (Tier 1)
 
-- [x] **Wire up `modseq` writes in `upsert_folder_sync_state()`** — Fixed: `imap_initial.rs` was the only call site passing `None` — now passes `highest_modseq` from folder status. Delta sync in `imap_delta.rs` was already correct. `FolderSyncState.modseq` was already properly named.
-
-- [x] **Deletion detection without QRESYNC** — Implemented: `detect_deleted_messages()` does UID SEARCH ALL + local diff, throttled to 10-minute intervals via `last_deletion_check_at` (migration v48). `run_deletion_detection()` cleans up DB/body store/search index. Integrated into `imap_delta_sync()` with thread reaggregation.
-
-- [ ] **QRESYNC VANISHED parsing (Phase 3)** — Send `ENABLE QRESYNC` via raw command, then `SELECT mailbox (QRESYNC (<uidvalidity> <modseq> [<known-uids>]))`. Parse `VANISHED (EARLIER) <uid-set>` untagged responses to get deleted UIDs in a single round-trip instead of the UID SEARCH diff approach. Requires a custom response parser since `imap-proto` doesn't handle VANISHED responses. Blocked on async-imap CHANGEDSINCE support (Issue #130).
-
-- [x] **HIGHESTMODSEQ reset defense** — Implemented: `modseq_reset: bool` on `DeltaCheckResult`, detected in both `delta_check_folders()` and `per_folder_check()`. On reset, fetches all flags with `since_modseq = 1` and persists the server's new lower modseq.
-
-- [x] **iCloud QRESYNC workaround** — Implemented in `imap/connection.rs`: `negotiate_condstore_qresync()` sends `ENABLE QRESYNC`, reads response stream for `ENABLED` confirmation, falls back to CONDSTORE-only if missing. `ImapCapabilities` struct tracks per-session state.
-
-- [x] **UID-based fallback for non-CONDSTORE servers** — Implemented: `fetch_all_flags()` in IMAP client, `get_local_flags_for_folder()` in pipeline, `sync_flags_without_condstore()` in imap_delta with 5-minute throttle. Integrated into `process_folder_delta()` for servers without CONDSTORE.
-
-### Shared Mailboxes (Tier 1)
-
-- [x] **Request `*.Shared` OAuth scopes for Graph** — Added `Mail.Read.Shared`, `Mail.ReadWrite.Shared`, `Mail.Send.Shared` to both `MICROSOFT_GRAPH_SCOPES` in `oauth.rs` and the discovery registry.
-
-- [ ] **Shared mailbox read/write via Graph API** — Change the API path from `/me/...` to `/users/{shared-mailbox-id}/...` for all message operations (list, get, update, delete, send). Same API surface, different path prefix. Delta sync tokens are independent per mailbox, so each shared mailbox needs its own sync state entries. The `GraphClient` needs a `mailbox_id: Option<String>` field to switch path prefixes.
-
-- [x] **Autodiscover XML parsing for shared mailbox discovery** — Implemented in `graph/autodiscover.rs`: `discover_shared_mailboxes()` sends SOAP request, `parse_alternative_mailboxes()` uses `quick-xml` event-driven parsing. Returns `Vec<SharedMailbox>`. 4 unit tests.
-
-- [x] **Send As vs Send on Behalf implementation** — Implemented: `send_as_shared_mailbox()` and `send_on_behalf_shared_mailbox()` on `GraphOps`. Added `from`/`sender` fields to `GraphCreateMessage`. Routes through `/users/{shared_mailbox}/` API path.
-
-- [x] **`send_identities` table** — Migration v42: table with `(account_id, email, display_name, mailbox_id, send_mode, save_to_personal_sent, is_primary)`, UNIQUE on `(account_id, email)`, index on `(account_id)`.
-
-- [ ] **Per-mailbox sync context isolation** — Model each shared/delegated mailbox as an independent sync context with its own delta tokens, retry state, and error tracking. Each shared mailbox gets its own entries in sync state tables. Prevents one shared mailbox's sync failures from blocking another's.
-
-- [x] **Auto-From selection logic** — Implemented in `send_identity.rs`: `SendIdentity` struct, `get_send_identities()`, `select_from_address()` with priority: shared mailbox match → reply-address match → primary identity.
-
-- [ ] **IMAP ACL + NAMESPACE discovery** — Implement `MYRIGHTS <mailbox>` and `NAMESPACE` commands via `Session::run_command_and_check_ok()` with custom response parsing. Parse the three-part NAMESPACE response (personal, other users, shared) and use prefixes to `LIST` folders under shared namespaces. This enables shared mailbox access on Dovecot/Cyrus IMAP servers without Exchange.
+- [ ] **QRESYNC VANISHED parsing (Phase 3)** — Send `ENABLE QRESYNC` via raw command, then `SELECT mailbox (QRESYNC (<uidvalidity> <modseq> [<known-uids>]))`. Parse `VANISHED (EARLIER) <uid-set>` untagged responses. Blocked on async-imap CHANGEDSINCE support (Issue #130).
 
 ### Public Folders (Tier 1)
 
-- [ ] **Minimal EWS SOAP client** — Build a focused Exchange Web Services client using `quick-xml` + `reqwest`: SOAP envelope boilerplate (~30 lines), support for `FindFolder`, `GetFolder`, `FindItem`, `GetItem`, `CreateItem` operations. Estimated ~1500–2500 lines total. Reuse existing Graph OAuth tokens with the additional `EWS.AccessAsUser.All` scope. No Graph API equivalent exists for public folders — Microsoft has no plans to add one.
+- [ ] **Autodiscover for public folder routing** — Public folder access requires two autodiscover lookups: a SOAP call to get `PublicFolderInformation` (the hierarchy mailbox), and a POX autodiscover for the content mailbox routing. Set `X-AnchorMailbox` and `X-PublicFolderMailbox` headers on each request.
 
-- [ ] **Autodiscover for public folder routing** — Public folder access requires two autodiscover lookups: a SOAP call to get `PublicFolderInformation` (the hierarchy mailbox), and a POX autodiscover for the content mailbox routing. Set `X-AnchorMailbox` and `X-PublicFolderMailbox` headers on each request. Different folders may route to different content mailboxes.
-
-- [ ] **`PR_REPLICA_LIST` decoding for content mailbox routing** — Fetch extended property `0x6698` (Binary) from the FindFolder response to determine which content mailbox hosts a specific folder's items. Decode the base64 blob to extract the content mailbox GUID, construct `{GUID}@{domain}` as an SMTP address, then autodiscover that address to get the correct EWS endpoint. Track per-folder content mailbox mappings.
-
-- [x] **Public folder DB schema** — Migration v47: `public_folders` (hierarchy + permissions), `public_folder_items` (messages), `public_folder_pins` (favorites + sync settings), `public_folder_sync_state` (per-folder cursors).
-
-- [ ] **Offline sync for pinned public folders** — Polling-based sync: `FindItem` with `DateTimeReceived >= last_sync_timestamp` for new items, match by `ItemId + ChangeKey` for updates, and periodic full `ItemId`-only `FindItem` + local diff for deletion detection. No change notifications or delta tokens available for public folders, so polling is the only option.
+- [ ] **Offline sync for pinned public folders** — Polling-based sync: `FindItem` with `DateTimeReceived >= last_sync_timestamp` for new items, match by `ItemId + ChangeKey` for updates, and periodic full `ItemId`-only `FindItem` + local diff for deletion detection. No change notifications or delta tokens available for public folders.
 
 - [ ] **IMAP NAMESPACE-based public folder access** — For non-Exchange IMAP servers (Dovecot, Cyrus), discover public namespaces via the `NAMESPACE` command and `LIST` folders under the public prefix. Access with standard IMAP `SELECT`/`FETCH`. Add a `namespace_type` column to the existing folder table to distinguish personal, other-users, and shared folders.
-
-### Mentions (Tier 2)
-
-- [x] **`mentions` table and `is_mentioned` column** — Migration v40: `mentions` table with indexes, `is_mentioned` column on `messages` with partial index.
-
-- [x] **Exchange `mentionsPreview` sync via Graph beta** — Implemented: `MentionsPreview` struct, `mentions_preview` on `GraphMessage`, `mentionsPreview` added to `MESSAGE_SELECT` (v1.0 silently ignores it). `is_mentioned` written to messages table during sync.
-
-- [x] **Lazy-load full mention details on message open** — Implemented in `graph/mentions.rs`: `fetch_and_store_mentions()` calls Graph beta `$expand=mentions`, parses `GraphMention` structs, upserts into `mentions` table with `ON CONFLICT DO UPDATE`.
-
-- [x] **Send mentions in Graph API calls** — Implemented: `mentions` field on `GraphCreateMessage`, `post_beta()` on `GraphClient`, `mentions` parameter added to `ProviderOps::send_email`/`create_draft` across all providers. Graph uses beta endpoint when mentions present; others ignore.
-
-- [x] **HTML body mention correlation** — Implemented in `mentions.rs`: `correlate_mentions_in_html()` regex-extracts `mailto:` links, matches against `mentions` table, returns `MentionAnnotation` structs with byte offsets for renderer highlighting. 6 unit tests.
-
-### Signatures (Tier 2)
-
-- [x] **Signature sync DB schema** — Migration v41: six columns added (`server_id`, `body_text`, `is_reply_default`, `source`, `last_synced_at`, `server_html_hash`) with unique index on `(account_id, server_id)`.
-
-- [x] **Gmail `sendAs` signature fetch** — Implemented: `sync_signatures()` / `persist_signatures()` in `gmail/sync.rs`. Fetches via `list_send_as()`, upserts with SHA-256 hash for conflict detection, hooked into both initial and delta sync paths.
-
-- [x] **Gmail bidirectional signature sync** — Implemented: `sync_signatures()` now does full bidirectional sync with SHA-256 hash comparison. `push_signature_to_gmail()` via `update_send_as_signature()` API. Four-way conflict resolution (no-op, pull, push, server-wins).
-
-- [x] **JMAP Identity signature sync** — Implemented in `jmap/signatures.rs`: `sync_jmap_identity_signatures()` fetches all identities and upserts signatures with SHA-256 hashing. `push_signature_to_jmap()` pushes local edits back via `Identity/set`.
-
-- [x] **Signature inline image handling on import** — Implemented in `provider/signature_images.rs`: `process_signature_images()` extracts data URI images, decodes base64, generates xxh3 content hashes, rewrites to `inline-image:<hash>` references. `store_signature_images()` async wrapper for batch insertion. CID/HTTP refs preserved. 8 unit tests.
-
-### Scheduled Send (Tier 2)
-
-- [x] **Scheduled send DB schema for server delegation** — Migration v43: seven columns added (`delegation`, `remote_message_id`, `remote_status`, `timezone`, `from_email`, `error_message`, `retry_count`).
-
-- [x] **Exchange deferred delivery via `PidTagDeferredSendTime`** — Implemented: `schedule_send`, `cancel_scheduled_send`, `reschedule_send` methods on `GraphOps`. Uses `SingleValueExtendedProperty` type with `SystemTime 0x3FEF`. Creates draft with deferred time then sends; cancellation via DELETE, reschedule via PATCH.
-
-- [x] **JMAP FUTURERELEASE via EmailSubmission** — Implemented: `schedule_send_jmap()` creates submission with `holduntil` parameter via `Address::parameter()`, validates against `maxDelayedSend`. `cancel_scheduled_send_jmap()` sets `undoStatus` to `"canceled"`. No crate patch needed — `jmap-client` 0.4 has full support.
-
-- [x] **Provider-aware delegation routing** — Implemented in `scheduled_send.rs`: `SendDelegation` enum, `determine_send_delegation()` routes by provider type, DB lookup wrapper. Server delegation helpers `mark_delegated()`/`mark_failed()`.
-
-- [x] **Hybrid scheduler overdue handling** — Implemented in `scheduled_send.rs`: `check_overdue_scheduled_emails()` classifies as `SendNow` (<24h) or `NeedsReview` (>24h). `process_overdue_emails()` batch processor. `ScheduledStatus` enum covers full lifecycle.
-
-### Reactions (Tier 2)
-
-- [x] **`message_reactions` DB table** — Migration v37: table with UNIQUE constraint on `(message_id, account_id, reactor_email, reaction_type)`, index on `(message_id, account_id)`.
-
-- [x] **Gmail reaction MIME parsing** — Implemented: `extract_reaction_emoji()` parses MIME parts, `insert_reactions()` resolves targets via `In-Reply-To`, `is_reaction` column (migration v44) on messages, thread aggregates exclude reaction messages from counts/snippets.
-
-- [x] **Exchange reaction extended property reading** — Implemented: `REACTIONS_EXPAND` filter added to Graph sync queries, `extract_reaction_properties()` parses `OwnerReactionType` and `ReactionsCount` from extended properties, `insert_exchange_reactions()` stores to `message_reactions` with `source = 'exchange_native'`.
-
-- [x] **Gmail reaction sending** — Implemented: `send_reaction()` in `gmail/ops.rs` builds `multipart/alternative` with `text/vnd.google.email-reaction+json` part, proper `In-Reply-To`/`References` headers, sends via existing `client.send_message()` path.
-
-- [x] **Reaction delta sync handling** — Implemented: `refresh_reactions_for_recent_messages()` in `graph/sync.rs` uses `$batch` API to re-fetch reaction properties for recent messages, runs every 5th sync cycle. Gmail documented as needing no special handling (history.list catches reactions naturally).
-
-### BIMI (Tier 3)
-
-- [x] **`bimi_cache` DB table and filesystem cache** — Migration v38: table with `domain` PK, `has_bimi`, `logo_uri`, `authority_uri`, `fetched_at`, `expires_at`. Filesystem cache at `{cache_dir}/bimi/{sha256}.png`.
-
-- [x] **DNS BIMI record lookup via `hickory-resolver`** — Implemented in `bimi.rs`: `lookup_bimi_dns()` queries `default._bimi.{domain}` TXT records with organizational domain fallback.
-
-- [x] **`Authentication-Results` header parsing for DMARC verification** — Implemented in `bimi.rs`: `dmarc_passed()` checks for `dmarc=pass` in header value.
-
-- [x] **`BIMI-Indicator` header shortcut** — Implemented in `bimi.rs`: `decode_bimi_indicator()` decodes base64 SVG from header.
-
-- [x] **SVG fetch, validation, and rasterization pipeline** — Implemented in `bimi.rs`: `fetch_and_validate_svg()` (32KB limit, Tiny PS check, external URI rejection) + `rasterize_svg_to_png()` via `resvg` to 128×128 PNG. Full `lookup_bimi()` orchestrator function with DB caching (7-day positive, 24h negative TTL). 10 unit tests.
-
-- [x] **BIMI cache warming** — Implemented in `bimi.rs`: `warm_bimi_cache()` queries recent sender domains, filters cached, runs concurrent lookups via `buffer_unordered`. `BimiLruCache` in-memory LRU (500 entries) wraps DB lookups. 3 additional tests.
-
-### IMAP SPECIAL-USE Polish (Tier 3)
-
-- [x] **Add `\Important` attribute detection** — Added `NameAttribute::Extension` match arm in `detect_special_use()` in `imap/parse.rs`.
-
-- [x] **Expand heuristic folder name aliases for non-English servers** — Added DE/ES/IT/PT aliases for Drafts, Sent, and Trash in `provider/folder_roles.rs`.
-
-- [x] **Add "Bulk Mail" to spam folder aliases** — Added to SPAM role's `imap_name_aliases` in `provider/folder_roles.rs`.
