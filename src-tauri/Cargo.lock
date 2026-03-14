@@ -4800,6 +4800,7 @@ dependencies = [
  "native-tls",
  "nucleo-matcher",
  "quick-xml 0.37.5",
+ "regex",
  "reqwest 0.13.2",
  "resvg",
  "rusqlite",

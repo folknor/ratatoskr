@@ -78,10 +78,11 @@ pub async fn raw_fetch_messages(
     let select_cmd = format!("a2 SELECT \"{folder}\"\r\n");
     let select_response = raw_send_and_wait(&mut reader, select_cmd.as_bytes(), "a2").await?;
 
-    // Parse SELECT response for UIDVALIDITY, EXISTS, UNSEEN
+    // Parse SELECT response for UIDVALIDITY, EXISTS, UNSEEN, PERMANENTFLAGS
     let mut exists = 0u32;
     let mut uidvalidity = 0u32;
     let mut unseen = 0u32;
+    let mut supports_custom_keywords = false;
     for line in select_response.lines() {
         if let Some(n) = parse_untagged_number(line, "EXISTS") {
             exists = n;
@@ -96,6 +97,10 @@ pub async fn raw_fetch_messages(
         {
             unseen = v;
         }
+        // PERMANENTFLAGS containing \* means custom keywords are allowed
+        if line.contains("PERMANENTFLAGS") && line.contains("\\*") {
+            supports_custom_keywords = true;
+        }
     }
 
     let folder_status = ImapFolderStatus {
@@ -104,6 +109,7 @@ pub async fn raw_fetch_messages(
         exists,
         unseen,
         highest_modseq: None,
+        supports_custom_keywords,
     };
 
     // UID FETCH with full body

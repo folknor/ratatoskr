@@ -9,6 +9,15 @@ use super::connection::{IMAP_CMD_TIMEOUT, IMAP_FETCH_TIMEOUT, IMAP_SEARCH_TIMEOU
 use super::parse::{build_imap_section_map, detect_special_use, parse_message};
 use super::types::*;
 
+/// Check whether a mailbox's PERMANENTFLAGS includes `\*` (Flag::MayCreate),
+/// indicating that the server allows clients to define arbitrary custom keywords.
+fn mailbox_supports_custom_keywords(mailbox: &async_imap::types::Mailbox) -> bool {
+    mailbox
+        .permanent_flags
+        .iter()
+        .any(|f| matches!(f, Flag::MayCreate))
+}
+
 /// Build a standardised timeout error message for IMAP operations.
 fn timeout_err(operation: &str, timeout: Duration) -> String {
     format!(
@@ -103,6 +112,7 @@ pub async fn fetch_messages(
         exists: mailbox.exists,
         unseen: mailbox.unseen.unwrap_or(0),
         highest_modseq: mailbox.highest_modseq,
+        supports_custom_keywords: mailbox_supports_custom_keywords(&mailbox),
     };
 
     log::info!(
@@ -445,6 +455,9 @@ pub async fn get_folder_status(
         exists: mailbox.exists,
         unseen: mailbox.unseen.unwrap_or(0),
         highest_modseq: mailbox.highest_modseq,
+        // STATUS doesn't return PERMANENTFLAGS; caller should use SELECT-based
+        // methods (fetch_messages, search_folder, etc.) to get this value.
+        supports_custom_keywords: false,
     })
 }
 
@@ -754,6 +767,7 @@ pub async fn search_folder(
         exists: mailbox.exists,
         unseen: mailbox.unseen.unwrap_or(0),
         highest_modseq: mailbox.highest_modseq,
+        supports_custom_keywords: mailbox_supports_custom_keywords(&mailbox),
     };
 
     // UID SEARCH with optional SINCE date filter (RFC 3501 §6.4.4)
@@ -813,6 +827,7 @@ pub async fn sync_folder(
         exists: mailbox.exists,
         unseen: mailbox.unseen.unwrap_or(0),
         highest_modseq: mailbox.highest_modseq,
+        supports_custom_keywords: mailbox_supports_custom_keywords(&mailbox),
     };
 
     // UID SEARCH with optional SINCE date filter (RFC 3501 §6.4.4)

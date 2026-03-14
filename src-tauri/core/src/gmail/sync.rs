@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
@@ -12,7 +13,7 @@ use crate::search::{SearchDocument, SearchState};
 
 use super::client::GmailClient;
 use super::parse::{ParsedGmailMessage, parse_gmail_message};
-use super::types::GmailLabel;
+use super::types::{GmailLabel, GmailSendAs};
 use crate::sync::{
     pending as sync_pending, persistence as sync_persistence, progress as sync_progress,
     state as sync_state,
@@ -75,6 +76,9 @@ async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), Strin
     sync_labels(ctx).await?;
     emit_progress(ctx, "labels", 1, 1);
 
+    // Phase 1b: Sync signatures from sendAs aliases
+    sync_signatures(ctx).await?;
+
     // Phase 2: Paginated thread list
     let thread_ids = list_thread_ids(ctx, days_back).await?;
 
@@ -124,6 +128,9 @@ async fn run_delta_sync(ctx: &SyncCtx<'_>) -> Result<GmailSyncResult, String> {
     let Some(last_history_id) = last_history_id else {
         return Err("No history_id found — run initial sync first".to_string());
     };
+
+    // Sync signatures on each delta (lightweight — single API call)
+    sync_signatures(ctx).await?;
 
     // Paginate History API
     let history_result = collect_history(ctx, &last_history_id).await?;
@@ -234,6 +241,99 @@ fn sync_labels_to_categories(
         .map_err(|e| format!("upsert gmail category: {e}"))?;
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Signature sync
+// ---------------------------------------------------------------------------
+
+/// Fetch Gmail sendAs aliases and upsert their signatures into the `signatures`
+/// table. Uses the v41 sync columns (`server_id`, `source`, `server_html_hash`,
+/// `last_synced_at`) for conflict detection and bidirectional sync.
+async fn sync_signatures(ctx: &SyncCtx<'_>) -> Result<(), String> {
+    let aliases = ctx.client.list_send_as(ctx.db).await?;
+
+    let aid = ctx.account_id.to_string();
+    ctx.db
+        .with_conn(move |conn| persist_signatures(conn, &aid, &aliases))
+        .await
+}
+
+fn persist_signatures(
+    conn: &rusqlite::Connection,
+    account_id: &str,
+    aliases: &[GmailSendAs],
+) -> Result<(), String> {
+    let now = chrono::Utc::now().timestamp();
+
+    for (i, alias) in aliases.iter().enumerate() {
+        // Skip aliases without a signature
+        let sig_html = match &alias.signature {
+            Some(s) if !s.is_empty() => s,
+            _ => continue,
+        };
+
+        let server_id = &alias.send_as_email;
+
+        // SHA-256 hash of the HTML for conflict detection
+        let mut hasher = Sha256::new();
+        hasher.update(sig_html.as_bytes());
+        let server_html_hash = hex_encode(hasher.finalize());
+
+        // Build a display name for the signature
+        let name = alias
+            .display_name
+            .as_deref()
+            .filter(|n| !n.is_empty())
+            .map_or_else(|| server_id.clone(), |n| format!("{n} ({server_id})"));
+
+        let is_default = i64::from(alias.is_default.unwrap_or(false));
+
+        // Generate a deterministic ID from account + server_id so re-syncs
+        // don't create duplicates even before the UNIQUE index catches them.
+        let id = format!("gmail_sig_{account_id}_{server_id}");
+
+        conn.execute(
+            "INSERT INTO signatures \
+             (id, account_id, name, body_html, is_default, sort_order, \
+              server_id, source, server_html_hash, last_synced_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'gmail_sync', ?8, ?9) \
+             ON CONFLICT(account_id, server_id) DO UPDATE SET \
+               name = excluded.name, \
+               body_html = excluded.body_html, \
+               is_default = excluded.is_default, \
+               sort_order = excluded.sort_order, \
+               server_html_hash = excluded.server_html_hash, \
+               last_synced_at = excluded.last_synced_at \
+             WHERE server_html_hash != excluded.server_html_hash \
+                OR server_html_hash IS NULL",
+            rusqlite::params![
+                id,
+                account_id,
+                name,
+                sig_html,
+                is_default,
+                i as i64,
+                server_id,
+                server_html_hash,
+                now,
+            ],
+        )
+        .map_err(|e| format!("upsert gmail signature: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Minimal hex encoding (same pattern as bimi.rs).
+fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
+    use std::fmt::Write;
+    bytes
+        .as_ref()
+        .iter()
+        .fold(String::new(), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
 }
 
 // ---------------------------------------------------------------------------

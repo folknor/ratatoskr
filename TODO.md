@@ -103,7 +103,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **JMAP keyword-to-category mapping** — Implemented: `parse_jmap_email` extracts non-`$` keywords into `keyword_categories`, `sync_keyword_categories()` upserts them into `categories` table with `kw_` prefix and links to threads via `thread_categories`.
 
-- [ ] **IMAP PERMANENTFLAGS detection for category writeback** — Parse `PERMANENTFLAGS` from the IMAP SELECT response to determine if the server supports arbitrary custom keywords (`\*` flag). Store this capability per-folder or per-account. Without it, category assignment on IMAP accounts must be local-only since the server will reject unknown flags.
+- [x] **IMAP PERMANENTFLAGS detection for category writeback** — Implemented: `supports_custom_keywords: bool` on `ImapFolderStatus`, populated from `Flag::MayCreate` in SELECT responses across all 4 construction sites. Raw TCP fallback also handles it.
 
 - [ ] **`ProviderOps` methods for category mutation** — Add `apply_category` / `remove_category` trait methods with provider-specific implementations: Graph uses `PATCH /me/messages/{id}` with full `categories` array replacement; Gmail uses `messages.modify` with `addLabelIds`/`removeLabelIds`; JMAP uses `Email/set` keyword patches; IMAP uses `UID STORE +FLAGS`/`-FLAGS`. Default impl does local-only DB write. Wire into the offline action queue.
 
@@ -131,7 +131,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [ ] **`$MDNSent` keyword management across providers** — Before sending a read receipt (MDN), check if the `$MDNSent` keyword is already set on the message to avoid duplicate receipts. After sending, set the keyword. Provider-specific: JMAP uses lowercase `$mdnsent`; IMAP uses `$MDNSent` (check `PERMANENTFLAGS` first to see if the server accepts custom keywords); Graph uses the `isReadReceiptRequested` property. Prevents the "send receipt every time you open the message" problem.
 
-- [ ] **MDN message generation (RFC 8098)** — Build `multipart/report; report-type=disposition-notification` messages using `mail-builder`. Construct the machine-readable body part with `Reporting-UA`, `Final-Recipient`, `Original-Message-ID`, and `Disposition` fields. Send via the existing provider send paths. The read receipt policy resolution logic (most-specific-wins: sender → domain → account → global default) already exists.
+- [x] **MDN message generation (RFC 8098)** — Implemented in `mdn.rs`: `build_mdn_message()` builds `multipart/report` with human-readable + `message/disposition-notification` parts. `resolve_read_receipt_policy()` implements most-specific-wins lookup (sender → domain → account → global default). 8 unit tests.
 
 - [ ] **Tracking domain list + URL parameter stripping** — Ship a resource file of known tracking redirect domains (Mailchimp, SendGrid, etc.). Integrate a URL cleaning pass into the sanitization pipeline to strip `utm_*`, `mc_eid`, `fbclid`, and similar tracking parameters from link URLs. Run during HTML processing so cleaned URLs are what gets persisted/rendered.
 
@@ -151,7 +151,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [ ] **Google Drive permission creation** — After upload, `POST /drive/v3/files/{fileId}/permissions` with `{ "role": "reader", "type": "anyone" }` (or `"type": "domain"` for org-restricted sharing). Returns the sharing URL for email body insertion.
 
-- [ ] **Incoming cloud link detection via `RegexSet`** — Compile a `regex::RegexSet` at startup matching OneDrive (`1drv.ms`, `sharepoint.com`), Google Drive (`drive.google.com`, `docs.google.com`), Dropbox (`dropbox.com/s/`), and Box (`app.box.com/s/`) URL patterns. Run against `<a href>` attributes extracted during HTML sanitization. Insert detected links into `cloud_attachments` with `direction = 'incoming'`.
+- [x] **Incoming cloud link detection via `RegexSet`** — Implemented in `cloud_attachments.rs`: `LazyLock<RegexSet>` with 8 patterns, `detect_cloud_links()` extracts hrefs and matches, `insert_incoming_cloud_links()` persists to DB. `CloudProvider` enum. 10 unit tests.
 
 - [ ] **Cloud link metadata enrichment** — For detected incoming cloud links, fetch file metadata: OneDrive uses `GET /shares/{base64-encoded-url}/driveItem`; Google Drive uses `GET /files/{id}?fields=name,size,mimeType,iconLink` (requires extracting the file ID from the sharing URL). Cache name, size, and MIME type in `cloud_attachments` so the UI can show "Budget.xlsx (2.3 MB)" instead of a bare URL.
 
@@ -219,11 +219,11 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **Signature sync DB schema** — Migration v41: six columns added (`server_id`, `body_text`, `is_reply_default`, `source`, `last_synced_at`, `server_html_hash`) with unique index on `(account_id, server_id)`.
 
-- [ ] **Gmail `sendAs` signature fetch** — On account setup and periodic sync, call `GET /gmail/v1/users/me/settings/sendAs` and extract the `signature` HTML field from each alias. The `GmailSendAs` struct and `send_as_aliases` table already exist with a `signature_id` FK. Insert fetched HTML into `signatures` table with `source = 'gmail_sync'`.
+- [x] **Gmail `sendAs` signature fetch** — Implemented: `sync_signatures()` / `persist_signatures()` in `gmail/sync.rs`. Fetches via `list_send_as()`, upserts with SHA-256 hash for conflict detection, hooked into both initial and delta sync paths.
 
 - [ ] **Gmail bidirectional signature sync** — On local signature edit, push to Gmail via `PUT /gmail/v1/users/me/settings/sendAs/{sendAsEmail}`. Conflict resolution uses hash comparison (`server_html_hash`): if server changed and local didn't, update local; if local changed and server didn't, push; if both changed, prefer server and surface a conflict notification.
 
-- [ ] **JMAP Identity signature sync** — `Identity/get` reads `htmlSignature` and `textSignature`; `Identity/set` pushes local edits back. `jmap-client` already has `identity.html_signature()` / `identity.text_signature()` accessors, so this is a clean round-trip. Insert into `signatures` with `source = 'jmap_sync'`.
+- [x] **JMAP Identity signature sync** — Implemented in `jmap/signatures.rs`: `sync_jmap_identity_signatures()` fetches all identities and upserts signatures with SHA-256 hashing. `push_signature_to_jmap()` pushes local edits back via `Identity/set`.
 
 - [ ] **Signature inline image handling on import** — Parse fetched signature HTML for `<img src="cid:...">` tags and base64 data URIs. Resolve CID images from the MIME structure, decode base64 data URIs, store in the inline image store, and rewrite references to local paths. Without this, synced signatures with logos or headshots show broken images.
 

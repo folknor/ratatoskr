@@ -74,6 +74,10 @@ pub struct ImapFolderStatus {
     pub exists: u32,
     pub unseen: u32,
     pub highest_modseq: Option<u64>,
+    /// Whether this folder's PERMANENTFLAGS includes `\*`, meaning the server
+    /// allows clients to create arbitrary custom keywords (needed for category
+    /// writeback via IMAP flags like `$label1`, `category_Work`, etc.).
+    pub supports_custom_keywords: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
