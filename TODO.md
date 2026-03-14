@@ -2,9 +2,9 @@
 
 ## Migration Backlog
 
-### AI Boundary
+### AI Migration
 
-- [ ] **Decide whether AI inference execution should move to Rust** — Rust already owns provider/runtime/config selection, but TypeScript still owns prompt assembly and actual inference calls for summaries, smart replies, transforms, ask-inbox, task extraction, smart-label AI, category inference, and auto-drafts. This needs an explicit boundary decision, not ad-hoc drift.
+- [ ] **Port AI inference execution to Rust** — Rust already owns provider/runtime/config selection. TypeScript still owns prompt assembly and actual inference calls for summaries, smart replies, transforms, ask-inbox, task extraction, smart-label AI, category inference, and auto-drafts. All of this needs to move to the core crate as part of the iced migration.
 
 ### Regression Coverage
 
