@@ -1144,6 +1144,21 @@ static MIGRATIONS: &[Migration] = &[
             ALTER TABLE folder_sync_state ADD COLUMN last_deletion_check_at INTEGER;
         "#,
     },
+    Migration {
+        version: 49,
+        description: "Google People API contact mapping table",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS google_contact_map (
+                resource_name TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                contact_email TEXT NOT NULL,
+                PRIMARY KEY (resource_name, account_id),
+                FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_google_contact_map_email
+                ON google_contact_map(contact_email);
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks

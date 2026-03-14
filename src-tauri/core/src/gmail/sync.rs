@@ -90,6 +90,13 @@ async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), Strin
         sync_state::save_account_history_id(ctx.db, ctx.account_id, &history_id).await?;
     }
 
+    // Phase 4: Sync Google contacts (non-fatal)
+    if let Err(e) =
+        super::contacts::sync_google_contacts(ctx.client, ctx.account_id, ctx.db).await
+    {
+        log::warn!("Google contacts initial sync failed (non-fatal): {e}");
+    }
+
     let total = thread_ids.len() as u64;
     emit_progress(ctx, "done", total, total);
     Ok(())
@@ -136,8 +143,18 @@ async fn run_delta_sync(ctx: &SyncCtx<'_>) -> Result<GmailSyncResult, String> {
         return Err("No history_id found — run initial sync first".to_string());
     };
 
+    let cycle = ctx.client.increment_sync_cycle();
+
     // Sync signatures on each delta (lightweight — single API call)
     sync_signatures(ctx).await?;
+
+    // Contacts delta sync: every 20th cycle (contacts change rarely)
+    if cycle.is_multiple_of(20)
+        && let Err(e) =
+            super::contacts::sync_google_contacts(ctx.client, ctx.account_id, ctx.db).await
+    {
+        log::warn!("Google contacts delta sync failed (non-fatal): {e}");
+    }
 
     // Paginate History API
     let history_result = collect_history(ctx, &last_history_id).await?;
@@ -365,6 +382,7 @@ async fn sync_signatures(ctx: &SyncCtx<'_>) -> Result<(), String> {
                 let sid = server_id.clone();
                 let html = server_html.to_string();
                 let hash = server_hash_now.clone();
+                #[allow(clippy::cast_possible_wrap)]
                 let sort = i as i64;
 
                 ctx.db
@@ -453,6 +471,7 @@ async fn push_signature_to_gmail(
 }
 
 /// Upsert a signature row from server data (pull path).
+#[allow(clippy::too_many_arguments)]
 fn upsert_signature_from_server(
     conn: &rusqlite::Connection,
     id: &str,
@@ -945,7 +964,7 @@ fn sync_message_categories(
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })
         .map_err(|e| format!("query categories: {e}"))?
-        .filter_map(|r| r.ok())
+        .filter_map(std::result::Result::ok)
         .collect();
 
     if category_map.is_empty() {

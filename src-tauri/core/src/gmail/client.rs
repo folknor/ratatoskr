@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -33,6 +34,7 @@ struct ClientInner {
     client_id: String,
     client_secret: Option<String>,
     encryption_key: [u8; 32],
+    sync_cycle_counter: AtomicU32,
 }
 
 /// Tauri-managed state holding all Gmail clients and the encryption key.
@@ -104,6 +106,7 @@ impl GmailClient {
                 client_id,
                 client_secret,
                 encryption_key,
+                sync_cycle_counter: AtomicU32::new(0),
             }),
         })
     }
@@ -125,10 +128,27 @@ impl GmailClient {
         self.force_refresh(db).await
     }
 
+    /// Atomically increment the sync cycle counter and return the new value.
+    pub fn increment_sync_cycle(&self) -> u32 {
+        self.inner
+            .sync_cycle_counter
+            .fetch_add(1, Ordering::Relaxed)
+            + 1
+    }
+
     /// Make an authenticated GET request to the Gmail API.
     pub async fn get<T: DeserializeOwned>(&self, path: &str, db: &DbState) -> Result<T, String> {
         let url = format!("{GMAIL_API_BASE}{path}");
         self.request::<T, ()>(&url, "GET", None, db).await
+    }
+
+    /// Make an authenticated GET request to an absolute URL (e.g. People API).
+    pub async fn get_absolute<T: DeserializeOwned>(
+        &self,
+        url: &str,
+        db: &DbState,
+    ) -> Result<T, String> {
+        self.request::<T, ()>(url, "GET", None, db).await
     }
 
     /// Make an authenticated POST request to the Gmail API.

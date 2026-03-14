@@ -213,3 +213,59 @@ pub async fn delete_graph_contact_delta_token(
     })
     .await
 }
+
+// ── Google People API contact sync tokens ────────────────
+
+pub async fn save_google_contacts_sync_token(
+    db: &DbState,
+    account_id: &str,
+    sync_token: &str,
+) -> Result<(), String> {
+    let key = format!("google_contacts_sync_token:{account_id}");
+    let val = sync_token.to_string();
+
+    db.with_conn(move |conn| {
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+            rusqlite::params![key, val],
+        )
+        .map_err(|e| format!("save google contacts sync token: {e}"))?;
+        Ok(())
+    })
+    .await
+}
+
+pub async fn load_google_contacts_sync_token(
+    db: &DbState,
+    account_id: &str,
+) -> Result<Option<String>, String> {
+    let key = format!("google_contacts_sync_token:{account_id}");
+
+    db.with_conn(move |conn| {
+        conn.query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            rusqlite::params![key],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| format!("load google contacts sync token: {e}"))
+    })
+    .await
+}
+
+pub async fn delete_google_contacts_sync_token(
+    db: &DbState,
+    account_id: &str,
+) -> Result<(), String> {
+    let key = format!("google_contacts_sync_token:{account_id}");
+
+    db.with_conn(move |conn| {
+        conn.execute(
+            "DELETE FROM settings WHERE key = ?1",
+            rusqlite::params![key],
+        )
+        .map_err(|e| format!("delete google contacts sync token: {e}"))?;
+        Ok(())
+    })
+    .await
+}

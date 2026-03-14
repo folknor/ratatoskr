@@ -70,3 +70,6 @@ nucleo-matcher = "0.3"
 regex = "1"
 url = "2"
 resvg = { version = "0.47", default-features = false }
+css-inline = "0.14"
+lol_html = "2"
+ammonia = "4"

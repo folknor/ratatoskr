@@ -24,7 +24,9 @@ const GOOGLE_SCOPES: &str = concat!(
     "https://www.googleapis.com/auth/userinfo.email ",
     "https://www.googleapis.com/auth/userinfo.profile ",
     "https://www.googleapis.com/auth/calendar.readonly ",
-    "https://www.googleapis.com/auth/calendar.events"
+    "https://www.googleapis.com/auth/calendar.events ",
+    "https://www.googleapis.com/auth/drive.file ",
+    "https://www.googleapis.com/auth/contacts.readonly"
 );
 const MICROSOFT_GRAPH_AUTH_URL: &str =
     "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";

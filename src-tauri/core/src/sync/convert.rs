@@ -112,6 +112,7 @@ mod tests {
             list_unsubscribe_post: None,
             auth_results: None,
             attachments: vec![],
+            mdn_requested: false,
         }
     }
 
