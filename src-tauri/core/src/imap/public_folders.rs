@@ -416,7 +416,7 @@ async fn upsert_public_folder_items(
                 msg.from_name,
                 msg.date,
                 msg.snippet,
-                (!msg.is_read) as i32, // invert: is_read in IMAP vs unread tracking
+                msg.is_read as i32,
                 "IPM.Note",
             ])
             .map_err(|e| format!("upsert public folder item {item_id}: {e}"))?;

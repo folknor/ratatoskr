@@ -93,8 +93,10 @@ pub fn strip_tracking_params(url: &str) -> String {
 }
 
 static HREF_RE: LazyLock<Regex> = LazyLock::new(|| {
-    // Match href="..." or href='...' (case-insensitive on href)
-    Regex::new(r#"(?i)(href\s*=\s*)(["'])([^"']*)\2"#)
+    // Match href="..." or href='...' (case-insensitive on href).
+    // Uses alternation instead of backreference (\2) since the regex crate
+    // does not support backreferences.
+    Regex::new(r#"(?i)(href\s*=\s*)(?:"([^"]*)"|'([^']*)')"#)
         .expect("href regex should compile")
 });
 
@@ -106,8 +108,14 @@ pub fn strip_tracking_params_from_html(html: &str) -> String {
     HREF_RE
         .replace_all(html, |caps: &regex::Captures<'_>| {
             let prefix = &caps[1]; // href=
-            let quote = &caps[2]; // " or '
-            let url = &caps[3];
+            // Group 2 matched double-quoted URL, group 3 matched single-quoted URL
+            let (quote, url) = if let Some(m) = caps.get(2) {
+                ("\"", m.as_str())
+            } else if let Some(m) = caps.get(3) {
+                ("'", m.as_str())
+            } else {
+                return caps[0].to_string();
+            };
             let cleaned = strip_tracking_params(url);
             format!("{prefix}{quote}{cleaned}{quote}")
         })

@@ -1,3 +1,4 @@
+pub mod ai;
 pub mod attachment_cache;
 pub mod bimi;
 pub mod body_store;
