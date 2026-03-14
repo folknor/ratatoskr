@@ -333,6 +333,43 @@ pub async fn set_flags(
     .map_err(|_| timeout_err("UID STORE", IMAP_CMD_TIMEOUT))?
 }
 
+/// Set a custom keyword flag on a message, but only if the folder's
+/// PERMANENTFLAGS includes `\*` (custom keywords allowed).
+///
+/// Returns `Ok(())` silently if the server does not support custom keywords.
+pub async fn set_keyword_if_supported(
+    session: &mut ImapSession,
+    folder: &str,
+    uid: u32,
+    flag_op: &str,
+    keyword: &str,
+) -> Result<(), String> {
+    let mailbox = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
+        .await
+        .map_err(|_| timeout_err(&format!("SELECT {folder}"), IMAP_CMD_TIMEOUT))?
+        .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
+
+    if !mailbox_supports_custom_keywords(&mailbox) {
+        log::debug!(
+            "IMAP: folder {folder} does not support custom keywords, skipping keyword {keyword}"
+        );
+        return Ok(());
+    }
+
+    let uid_set = uid.to_string();
+    let query = format!("{flag_op} ({keyword})");
+    tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
+        let stream = session
+            .uid_store(&uid_set, &query)
+            .await
+            .map_err(|e| format!("UID STORE failed: {e}"))?;
+        let _: Vec<_> = stream.collect().await;
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|_| timeout_err("UID STORE", IMAP_CMD_TIMEOUT))?
+}
+
 /// Move messages between folders.
 ///
 /// Tries MOVE first; falls back to COPY + flag Deleted + EXPUNGE.
@@ -618,13 +655,33 @@ pub async fn delta_check_folders(
                 uidvalidity_changed: true,
                 highest_modseq: server_modseq,
                 modseq_unchanged: false,
+                modseq_reset: false,
             });
             continue;
         }
 
+        // CONDSTORE: detect modseq reset (server < cached with same UIDVALIDITY).
+        // This can happen during server migration or mailbox repair.
+        let modseq_reset = match (req.last_modseq, server_modseq) {
+            (Some(cached), Some(server)) if server < cached => true,
+            _ => false,
+        };
+
+        if modseq_reset {
+            log::warn!(
+                "delta_check: {} HIGHESTMODSEQ reset detected (cached {} > server {}), \
+                 will trigger full flag resync",
+                req.folder,
+                req.last_modseq.unwrap_or(0),
+                server_modseq.unwrap_or(0)
+            );
+            // Still do the UID SEARCH for new messages, but signal the reset
+            // so the caller knows to do a full flag resync instead of CHANGEDSINCE.
+        }
+
         // CONDSTORE fast path: if server's HIGHESTMODSEQ matches our cached
         // value, nothing changed (no new messages, no flag changes, no deletions).
-        let modseq_unchanged = match (req.last_modseq, server_modseq) {
+        let modseq_unchanged = !modseq_reset && match (req.last_modseq, server_modseq) {
             (Some(cached), Some(server)) if cached == server => true,
             _ => false,
         };
@@ -642,6 +699,7 @@ pub async fn delta_check_folders(
                 uidvalidity_changed: false,
                 highest_modseq: server_modseq,
                 modseq_unchanged: true,
+                modseq_reset: false,
             });
             continue;
         }
@@ -677,6 +735,7 @@ pub async fn delta_check_folders(
             uidvalidity_changed: false,
             highest_modseq: server_modseq,
             modseq_unchanged: false,
+            modseq_reset,
         });
     }
 

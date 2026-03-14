@@ -1,5 +1,5 @@
 use super::folder_mapper::FolderMap;
-use super::types::{GraphMessage, GraphRecipient};
+use super::types::{GraphMessage, GraphRecipient, REACTIONS_GUID};
 use crate::provider::email_parsing::format_address_list;
 use crate::provider::encoding::decode_base64_standard;
 use crate::provider::headers::find_header_value_case_insensitive;
@@ -49,6 +49,10 @@ pub struct ParsedGraphMessage {
     pub list_unsubscribe_post: Option<String>,
     pub mdn_requested: bool,
     pub attachments: Vec<ParsedGraphAttachment>,
+    /// The authenticated user's reaction emoji from Exchange extended properties.
+    pub owner_reaction_type: Option<String>,
+    /// Total reactions count from Exchange extended properties.
+    pub reactions_count: Option<i64>,
 }
 
 impl crate::seen_addresses::MessageAddresses for ParsedGraphMessage {
@@ -154,6 +158,9 @@ pub fn parse_graph_message(
         .is_read_receipt_requested
         .unwrap_or_else(|| get_header(headers, "Disposition-Notification-To").is_some());
 
+    // Exchange reaction extended properties
+    let (owner_reaction_type, reactions_count) = extract_reaction_properties(msg);
+
     // Attachments
     let attachments: Vec<ParsedGraphAttachment> = msg
         .attachments
@@ -215,7 +222,39 @@ pub fn parse_graph_message(
         list_unsubscribe_post,
         mdn_requested,
         attachments,
+        owner_reaction_type,
+        reactions_count,
     })
+}
+
+/// Extract Exchange reaction extended properties from a Graph message.
+///
+/// Looks for `OwnerReactionType` (string) and `ReactionsCount` (integer)
+/// under the GUID `{41F28F13-83F4-4114-A584-EEDB5A6B0BFF}`.
+fn extract_reaction_properties(msg: &GraphMessage) -> (Option<String>, Option<i64>) {
+    let props = match &msg.single_value_extended_properties {
+        Some(p) if !p.is_empty() => p,
+        _ => return (None, None),
+    };
+
+    let owner_reaction_id = format!("String {REACTIONS_GUID} Name OwnerReactionType");
+    let reactions_count_id = format!("Integer {REACTIONS_GUID} Name ReactionsCount");
+
+    let mut owner_reaction: Option<String> = None;
+    let mut reactions_count: Option<i64> = None;
+
+    for prop in props {
+        if prop.id.eq_ignore_ascii_case(&owner_reaction_id) {
+            let val = prop.value.trim();
+            if !val.is_empty() {
+                owner_reaction = Some(val.to_string());
+            }
+        } else if prop.id.eq_ignore_ascii_case(&reactions_count_id) {
+            reactions_count = prop.value.trim().parse::<i64>().ok();
+        }
+    }
+
+    (owner_reaction, reactions_count)
 }
 
 /// Extract body HTML and text from a Graph message.

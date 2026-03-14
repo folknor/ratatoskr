@@ -105,7 +105,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **IMAP PERMANENTFLAGS detection for category writeback** — Implemented: `supports_custom_keywords: bool` on `ImapFolderStatus`, populated from `Flag::MayCreate` in SELECT responses across all 4 construction sites. Raw TCP fallback also handles it.
 
-- [ ] **`ProviderOps` methods for category mutation** — Add `apply_category` / `remove_category` trait methods with provider-specific implementations: Graph uses `PATCH /me/messages/{id}` with full `categories` array replacement; Gmail uses `messages.modify` with `addLabelIds`/`removeLabelIds`; JMAP uses `Email/set` keyword patches; IMAP uses `UID STORE +FLAGS`/`-FLAGS`. Default impl does local-only DB write. Wire into the offline action queue.
+- [x] **`ProviderOps` methods for category mutation** — Implemented: `apply_category`/`remove_category` on `ProviderOps` trait with default no-op. Graph: read-modify-write with category lock. Gmail: `modify_message` with label ID resolution. JMAP: `Email/set` keyword patches. IMAP: `UID STORE +/-FLAGS` gated by `supports_custom_keywords`.
 
 - [ ] **Populate `message_categories` during sync** — When messages are fetched/synced, parse their category associations (Graph `categories[]` array, Gmail label IDs matched against category-classified labels, JMAP non-system keywords) and populate the `message_categories` join table. Currently sync writes messages but doesn't link them to categories.
 
@@ -165,7 +165,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [ ] **QRESYNC VANISHED parsing (Phase 3)** — Send `ENABLE QRESYNC` via raw command, then `SELECT mailbox (QRESYNC (<uidvalidity> <modseq> [<known-uids>]))`. Parse `VANISHED (EARLIER) <uid-set>` untagged responses to get deleted UIDs in a single round-trip instead of the UID SEARCH diff approach. Requires a custom response parser since `imap-proto` doesn't handle VANISHED responses. Blocked on async-imap CHANGEDSINCE support (Issue #130).
 
-- [ ] **HIGHESTMODSEQ reset defense** — If the server's HIGHESTMODSEQ is lower than our cached value but UIDVALIDITY is unchanged, treat it as a mod-sequence counter reset (can happen on server migration or mailbox repair) and trigger a full resync of that folder. Without this, the client would skip changes that happened during the reset window.
+- [x] **HIGHESTMODSEQ reset defense** — Implemented: `modseq_reset: bool` on `DeltaCheckResult`, detected in both `delta_check_folders()` and `per_folder_check()`. On reset, fetches all flags with `since_modseq = 1` and persists the server's new lower modseq.
 
 - [ ] **iCloud QRESYNC workaround** — iCloud advertises QRESYNC in CAPABILITY but has a broken implementation. After sending `ENABLE QRESYNC`, verify the server actually responds with an `ENABLED` response. If not, fall back to CONDSTORE-only mode for that session. Prevents hard failures on iCloud accounts.
 
@@ -233,7 +233,7 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **Exchange deferred delivery via `PidTagDeferredSendTime`** — Implemented: `schedule_send`, `cancel_scheduled_send`, `reschedule_send` methods on `GraphOps`. Uses `SingleValueExtendedProperty` type with `SystemTime 0x3FEF`. Creates draft with deferred time then sends; cancellation via DELETE, reschedule via PATCH.
 
-- [ ] **JMAP FUTURERELEASE via EmailSubmission** — Create `EmailSubmission` with `HOLDUNTIL` or `HOLDFOR` parameters in `envelope.mailFrom.parameters` per RFC 4865. Check server capability `maxDelayedSend` from `urn:ietf:params:jmap:submission` to enforce limits. Cancellation: `EmailSubmission/set` update `undoStatus` to `"canceled"`. May require patching `jmap-client` if `Address.parameters` is not exposed in the submission builder.
+- [x] **JMAP FUTURERELEASE via EmailSubmission** — Implemented: `schedule_send_jmap()` creates submission with `holduntil` parameter via `Address::parameter()`, validates against `maxDelayedSend`. `cancel_scheduled_send_jmap()` sets `undoStatus` to `"canceled"`. No crate patch needed — `jmap-client` 0.4 has full support.
 
 - [ ] **Provider-aware delegation routing** — When scheduling a send, determine delegation type based on account provider: Exchange → server delegation via deferred delivery, JMAP → check FUTURERELEASE capability → server or local, Gmail/IMAP → always local timer. Update `scheduled_emails.delegation` accordingly. The compose layer just says "send at time X"; the backend decides how.
 
@@ -245,9 +245,9 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 - [x] **Gmail reaction MIME parsing** — Implemented: `extract_reaction_emoji()` parses MIME parts, `insert_reactions()` resolves targets via `In-Reply-To`, `is_reaction` column (migration v44) on messages, thread aggregates exclude reaction messages from counts/snippets.
 
-- [ ] **Exchange reaction extended property reading** — Fetch `ReactionsCount` and `OwnerReactionType` via `singleValueExtendedProperties` with GUID `{41F28F13-83F4-4114-A584-EEDB5A6B0BFF}`. Store the owner's reaction and aggregate count in `message_reactions`. The full `ReactionsSummary` binary blob format is undocumented — defer parsing it until Microsoft documents it or someone reverse-engineers the format.
+- [x] **Exchange reaction extended property reading** — Implemented: `REACTIONS_EXPAND` filter added to Graph sync queries, `extract_reaction_properties()` parses `OwnerReactionType` and `ReactionsCount` from extended properties, `insert_exchange_reactions()` stores to `message_reactions` with `source = 'exchange_native'`.
 
-- [ ] **Gmail reaction sending** — Compose and send a MIME message with a `text/vnd.google.email-reaction+json` part containing `{"emoji":"...","version":1}`, proper `In-Reply-To` and `References` headers pointing to the target message, and the expected multipart structure Gmail uses. Sent via the existing Gmail API send path.
+- [x] **Gmail reaction sending** — Implemented: `send_reaction()` in `gmail/ops.rs` builds `multipart/alternative` with `text/vnd.google.email-reaction+json` part, proper `In-Reply-To`/`References` headers, sends via existing `client.send_message()` path.
 
 - [ ] **Reaction delta sync handling** — Exchange reactions do NOT update `lastModifiedDateTime` or `changeKey` on the message, so delta queries miss reaction changes entirely. Need periodic re-fetch of `ReactionsCount` for recently viewed messages. Gmail reactions appear as new messages in `history.list` and are detected via MIME type during normal incremental sync — no special handling needed beyond the MIME parser above.
 

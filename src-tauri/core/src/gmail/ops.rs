@@ -1,3 +1,5 @@
+use crate::db::DbState;
+use crate::provider::encoding::encode_base64url_nopad;
 use crate::provider::ops::ProviderOps;
 use crate::provider::types::{
     AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation, ProviderProfile,
@@ -167,6 +169,34 @@ impl ProviderOps for GmailOps {
         let remove = vec![tag_id.to_string()];
         self.client
             .modify_thread(thread_id, &[], &remove, ctx.db)
+            .await?;
+        Ok(())
+    }
+
+    async fn apply_category(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        message_id: &str,
+        category_name: &str,
+    ) -> Result<(), String> {
+        let label_id = find_label_id_by_name(&self.client, ctx, category_name).await?;
+        let add = vec![label_id];
+        self.client
+            .modify_message(message_id, &add, &[], ctx.db)
+            .await?;
+        Ok(())
+    }
+
+    async fn remove_category(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        message_id: &str,
+        category_name: &str,
+    ) -> Result<(), String> {
+        let label_id = find_label_id_by_name(&self.client, ctx, category_name).await?;
+        let remove = vec![label_id];
+        self.client
+            .modify_message(message_id, &[], &remove, ctx.db)
             .await?;
         Ok(())
     }
@@ -348,4 +378,120 @@ impl ProviderOps for GmailOps {
             name: None,
         })
     }
+}
+
+// ── Helpers ──────────────────────────────────────────────────
+
+/// Find a Gmail label ID by its display name (case-insensitive).
+async fn find_label_id_by_name(
+    client: &GmailClient,
+    ctx: &ProviderCtx<'_>,
+    name: &str,
+) -> Result<String, String> {
+    let labels = client.list_labels(ctx.db).await?;
+    let lower = name.to_lowercase();
+    labels
+        .into_iter()
+        .find(|l| l.name.to_lowercase() == lower)
+        .map(|l| l.id)
+        .ok_or_else(|| format!("No Gmail label found matching category name '{name}'"))
+}
+
+// ── Gmail-specific operations (not part of ProviderOps) ─────
+
+/// The MIME type Gmail uses to identify emoji reaction messages.
+const REACTION_MIME_TYPE: &str = "text/vnd.google.email-reaction+json";
+
+/// Build a raw RFC 2822 MIME message that Gmail will interpret as an emoji
+/// reaction to an existing message.
+///
+/// The resulting message has a single MIME part with content type
+/// `text/vnd.google.email-reaction+json` containing `{"emoji":"<emoji>","version":1}`.
+fn build_reaction_mime(
+    from: &str,
+    to: &str,
+    subject: &str,
+    in_reply_to: &str,
+    references: &str,
+    emoji: &str,
+) -> Vec<u8> {
+    let payload = format!(r#"{{"emoji":"{emoji}","version":1}}"#);
+    let boundary = format!("reaction_{:016x}", {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos() as u64)
+    });
+
+    let mut msg = String::with_capacity(512);
+    msg.push_str(&format!("From: {from}\r\n"));
+    msg.push_str(&format!("To: {to}\r\n"));
+    msg.push_str(&format!("Subject: {subject}\r\n"));
+    msg.push_str(&format!("In-Reply-To: {in_reply_to}\r\n"));
+    msg.push_str(&format!("References: {references}\r\n"));
+    msg.push_str("MIME-Version: 1.0\r\n");
+    msg.push_str(&format!(
+        "Content-Type: multipart/alternative; boundary=\"{boundary}\"\r\n"
+    ));
+    msg.push_str("\r\n");
+
+    // The reaction MIME part
+    msg.push_str(&format!("--{boundary}\r\n"));
+    msg.push_str(&format!("Content-Type: {REACTION_MIME_TYPE}; charset=utf-8\r\n"));
+    msg.push_str("\r\n");
+    msg.push_str(&payload);
+    msg.push_str("\r\n");
+
+    // Closing boundary
+    msg.push_str(&format!("--{boundary}--\r\n"));
+
+    msg.into_bytes()
+}
+
+/// Send an emoji reaction to an existing Gmail message.
+///
+/// # Arguments
+///
+/// * `client` — Authenticated Gmail API client for the account.
+/// * `db` — Database state (needed for token refresh).
+/// * `from` — The sender address (the reacting user's email).
+/// * `to` — The address of the original message's sender.
+/// * `original_message_id` — RFC 2822 `Message-ID` of the message being reacted to
+///   (e.g. `<CAB...@mail.gmail.com>`).
+/// * `original_references` — The `References` header value from the original message,
+///   or an empty string if none.
+/// * `original_subject` — The `Subject` of the original message (used for `Re:` prefix).
+/// * `thread_id` — Gmail thread ID to keep the reaction in the same thread.
+/// * `emoji` — The emoji character to react with (e.g. "👍").
+pub async fn send_reaction(
+    client: &GmailClient,
+    db: &DbState,
+    from: &str,
+    to: &str,
+    original_message_id: &str,
+    original_references: &str,
+    original_subject: &str,
+    thread_id: &str,
+    emoji: &str,
+) -> Result<String, String> {
+    // Build References header: original references + the message being reacted to
+    let references = if original_references.is_empty() {
+        original_message_id.to_string()
+    } else {
+        format!("{original_references} {original_message_id}")
+    };
+
+    let subject = if original_subject.starts_with("Re:") || original_subject.starts_with("re:") {
+        original_subject.to_string()
+    } else {
+        format!("Re: {original_subject}")
+    };
+
+    let raw_bytes = build_reaction_mime(from, to, &subject, original_message_id, &references, emoji);
+    let raw_b64url = encode_base64url_nopad(&raw_bytes);
+
+    let msg = client
+        .send_message(&raw_b64url, Some(thread_id), db)
+        .await?;
+    Ok(msg.id)
 }

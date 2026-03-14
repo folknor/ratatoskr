@@ -312,8 +312,20 @@ async fn per_folder_check(
             uidvalidity_changed: true,
             highest_modseq: status.highest_modseq,
             modseq_unchanged: false,
+            modseq_reset: false,
         });
     }
+
+    let modseq_reset = match (saved.modseq, status.highest_modseq) {
+        (Some(cached), Some(server)) if server < cached => {
+            log::warn!(
+                "[sync] per_folder_check: {} HIGHESTMODSEQ reset (cached {cached} > server {server})",
+                folder_path
+            );
+            true
+        }
+        _ => false,
+    };
 
     let new_uids = client::fetch_new_uids(&mut session, folder_path, saved.last_uid).await?;
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
@@ -325,6 +337,7 @@ async fn per_folder_check(
         uidvalidity_changed: false,
         highest_modseq: status.highest_modseq,
         modseq_unchanged: false,
+        modseq_reset,
     })
 }
 
@@ -492,6 +505,68 @@ async fn process_folder_delta(
             .await?;
         }
         return Ok(());
+    }
+
+    // HIGHESTMODSEQ reset: server's modseq went backwards while UIDVALIDITY
+    // stayed the same.  This happens during server migration or mailbox repair.
+    // Using CHANGEDSINCE with our stale (higher) cached value would return zero
+    // results, silently missing all flag updates.  Fix: fetch ALL flags via
+    // CHANGEDSINCE 1, then persist the server's new (lower) modseq.
+    if delta.modseq_reset {
+        log::warn!(
+            "[sync] HIGHESTMODSEQ reset for {} (cached {:?} > server {:?}), full flag resync",
+            folder.path,
+            saved.modseq,
+            delta.highest_modseq
+        );
+
+        let mut session = connect(config).await?;
+        match client::fetch_changed_flags(&mut session, &folder.raw_path, 1).await {
+            Ok(changes) if !changes.is_empty() => {
+                log::info!(
+                    "[sync] Modseq reset resync for {}: {} flag updates",
+                    folder.path,
+                    changes.len()
+                );
+                let aid = account_id.to_string();
+                let fp = folder.raw_path.clone();
+                let ch = changes;
+                db.with_conn(move |conn| pipeline::apply_flag_changes(conn, &aid, &fp, &ch))
+                    .await?;
+            }
+            Ok(_) => {
+                log::info!(
+                    "[sync] Modseq reset resync for {}: no flag changes found",
+                    folder.path
+                );
+            }
+            Err(e) => {
+                log::warn!(
+                    "[sync] Modseq reset flag resync failed for {}: {e}",
+                    folder.path
+                );
+            }
+        }
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+
+        // Persist the server's new (lower) modseq so future syncs use CHANGEDSINCE
+        // with the correct baseline.
+        let aid = account_id.to_string();
+        let fp = folder.raw_path.clone();
+        let uv = delta.uidvalidity;
+        let lu = saved.last_uid;
+        let ms = delta.highest_modseq;
+        let sat = chrono::Utc::now().timestamp();
+        db.with_conn(move |conn| {
+            pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, lu, sat, ms)
+        })
+        .await?;
+
+        // If there are also new UIDs, fall through to fetch them below.
+        // Otherwise we're done.
+        if delta.new_uids.is_empty() {
+            return Ok(());
+        }
     }
 
     if delta.uidvalidity_changed {

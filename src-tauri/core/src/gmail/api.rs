@@ -162,6 +162,25 @@ impl GmailClient {
         self.post("/messages/send", &body, db).await
     }
 
+    /// Modify labels on a single message.
+    pub async fn modify_message(
+        &self,
+        message_id: &str,
+        add_labels: &[String],
+        remove_labels: &[String],
+        db: &DbState,
+    ) -> Result<GmailMessage, String> {
+        self.post(
+            &format!("/messages/{message_id}/modify"),
+            &json!({
+                "addLabelIds": add_labels,
+                "removeLabelIds": remove_labels,
+            }),
+            db,
+        )
+        .await
+    }
+
     pub async fn get_attachment(
         &self,
         message_id: &str,

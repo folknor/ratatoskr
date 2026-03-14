@@ -143,6 +143,32 @@ pub trait ProviderOps: Send + Sync {
     ) -> Result<ProviderFolderMutation, String>;
     async fn delete_folder(&self, ctx: &ProviderCtx<'_>, folder_id: &str) -> Result<(), String>;
 
+    // ── Categories ────────────────────────────────────────────────
+
+    /// Apply a category to a single message on the remote provider.
+    ///
+    /// Default implementation is a no-op (local-only fallback).
+    async fn apply_category(
+        &self,
+        _ctx: &ProviderCtx<'_>,
+        _message_id: &str,
+        _category_name: &str,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// Remove a category from a single message on the remote provider.
+    ///
+    /// Default implementation is a no-op (local-only fallback).
+    async fn remove_category(
+        &self,
+        _ctx: &ProviderCtx<'_>,
+        _message_id: &str,
+        _category_name: &str,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
     // ── Connection / Profile ────────────────────────────────────
 
     async fn test_connection(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, String>;

@@ -19,6 +19,10 @@ pub fn decode_base64url_nopad(input: &str) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("base64url decode: {e}"))
 }
 
+pub fn encode_base64url_nopad(data: &[u8]) -> String {
+    URL_SAFE_NO_PAD.encode(data)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{decode_base64_standard, decode_base64url_nopad, encode_base64_standard};

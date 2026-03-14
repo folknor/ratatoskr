@@ -10,7 +10,9 @@ use crate::search::{SearchDocument, SearchState};
 use super::client::GraphClient;
 use super::folder_mapper::FolderMap;
 use super::parse::{ParsedGraphMessage, parse_graph_message};
-use super::types::{GraphMailFolder, GraphMessage, MESSAGE_SELECT, ODataCollection};
+use super::types::{
+    GraphMailFolder, GraphMessage, MESSAGE_SELECT, ODataCollection, REACTIONS_EXPAND,
+};
 use crate::sync::{
     pending as sync_pending, persistence as sync_persistence, progress as sync_progress,
     state as sync_state,
@@ -475,7 +477,7 @@ async fn fetch_folder_messages(
         "/me/mailFolders/{enc_folder_id}/messages\
          ?$filter=receivedDateTime ge {since_iso}\
          &$select={MESSAGE_SELECT}\
-         &$expand=attachments($select=id,name,contentType,size,isInline,contentId,contentBytes)\
+         &$expand=attachments($select=id,name,contentType,size,isInline,contentId,contentBytes),{REACTIONS_EXPAND}\
          &$top={BATCH_SIZE}\
          &$orderby=receivedDateTime desc"
     );
@@ -595,7 +597,11 @@ async fn bootstrap_delta_token(
     folder_id: &str,
 ) -> Result<String, String> {
     let enc_folder_id = urlencoding::encode(folder_id);
-    let initial_url = format!("/me/mailFolders/{enc_folder_id}/messages/delta?$select=id");
+    let initial_url = format!(
+        "/me/mailFolders/{enc_folder_id}/messages/delta\
+         ?$select={MESSAGE_SELECT}\
+         &$expand=attachments($select=id,name,contentType,size,isInline,contentId,contentBytes),{REACTIONS_EXPAND}"
+    );
     let mut next_link: Option<String> = None;
 
     loop {
@@ -649,7 +655,12 @@ async fn bootstrap_delta_token_latest(
     folder_id: &str,
 ) -> Result<String, String> {
     let enc_folder_id = urlencoding::encode(folder_id);
-    let url = format!("/me/mailFolders/{enc_folder_id}/messages/delta?$deltatoken=latest");
+    let url = format!(
+        "/me/mailFolders/{enc_folder_id}/messages/delta\
+         ?$select={MESSAGE_SELECT}\
+         &$expand=attachments($select=id,name,contentType,size,isInline,contentId,contentBytes),{REACTIONS_EXPAND}\
+         &$deltatoken=latest"
+    );
     let page: ODataCollection<serde_json::Value> = client.get_json(&url, db).await?;
 
     page.delta_link.ok_or_else(|| {
@@ -860,6 +871,7 @@ fn store_thread_to_db(
     upsert_attachments(tx, account_id, messages)?;
     upsert_thread_record(tx, account_id, thread_id, messages)?;
     set_thread_labels(tx, account_id, thread_id, messages)?;
+    insert_exchange_reactions(tx, account_id, messages)?;
     Ok(())
 }
 
@@ -990,6 +1002,67 @@ fn upsert_attachments(
             .map_err(|e| format!("upsert attachment: {e}"))?;
         }
     }
+    Ok(())
+}
+
+/// Insert Exchange reactions from extended properties into `message_reactions`.
+///
+/// For each message with `owner_reaction_type` set, inserts a reaction row with
+/// `source = 'exchange_native'`. The reactor email is looked up from the
+/// `accounts` table. `reactions_count` is stored as a separate metadata row
+/// with `reactor_email = '__count__'` so it can be read back without a
+/// separate column.
+fn insert_exchange_reactions(
+    tx: &rusqlite::Transaction,
+    account_id: &str,
+    messages: &[ParsedGraphMessage],
+) -> Result<(), String> {
+    // Check if any message has reaction data before looking up the account email
+    let has_reactions = messages
+        .iter()
+        .any(|m| m.owner_reaction_type.is_some() || m.reactions_count.is_some());
+    if !has_reactions {
+        return Ok(());
+    }
+
+    // Look up the authenticated user's email address
+    let owner_email: String = tx
+        .query_row(
+            "SELECT email FROM accounts WHERE id = ?1",
+            rusqlite::params![account_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("lookup account email for reactions: {e}"))?;
+
+    for msg in messages {
+        // Insert the owner's reaction if present
+        if let Some(emoji) = &msg.owner_reaction_type {
+            tx.execute(
+                "INSERT INTO message_reactions \
+                 (message_id, account_id, reactor_email, reactor_name, reaction_type, reacted_at, source) \
+                 VALUES (?1, ?2, ?3, NULL, ?4, ?5, 'exchange_native') \
+                 ON CONFLICT(message_id, account_id, reactor_email, reaction_type) DO UPDATE SET \
+                   reacted_at = ?5",
+                rusqlite::params![msg.id, account_id, owner_email, emoji, msg.date],
+            )
+            .map_err(|e| format!("insert exchange reaction: {e}"))?;
+        }
+
+        // Store the total reactions count as a metadata row so we know
+        // there are other reactions beyond the owner's.
+        if let Some(count) = msg.reactions_count {
+            tx.execute(
+                "INSERT INTO message_reactions \
+                 (message_id, account_id, reactor_email, reactor_name, reaction_type, reacted_at, source) \
+                 VALUES (?1, ?2, '__count__', NULL, ?3, NULL, 'exchange_native') \
+                 ON CONFLICT(message_id, account_id, reactor_email, reaction_type) DO UPDATE SET \
+                   reaction_type = ?3",
+                rusqlite::params![msg.id, account_id, count.to_string()],
+            )
+            .map_err(|e| format!("insert exchange reaction count: {e}"))?;
+        }
+    }
+
     Ok(())
 }
 

@@ -1,7 +1,10 @@
 use async_trait::async_trait;
-use jmap_client::core::response::EmailSetResponse;
+use chrono::{DateTime, Utc};
+use jmap_client::core::response::{EmailSetResponse, EmailSubmissionSetResponse};
 use jmap_client::core::set::SetObject;
+use jmap_client::email_submission::{Address as SubmissionAddress, UndoStatus};
 use jmap_client::mailbox::Role;
+use jmap_client::Set;
 
 use crate::provider::ops::ProviderOps;
 use crate::provider::types::{
@@ -264,6 +267,38 @@ impl ProviderOps for JmapOps {
         Ok(())
     }
 
+    async fn apply_category(
+        &self,
+        _ctx: &ProviderCtx<'_>,
+        message_id: &str,
+        category_name: &str,
+    ) -> Result<(), String> {
+        let mut request = self.client.inner().build();
+        let set_req = request.set_email();
+        set_req.update(message_id).keyword(category_name, true);
+        request
+            .send_single::<EmailSetResponse>()
+            .await
+            .map_err(|e| format!("apply category: {e}"))?;
+        Ok(())
+    }
+
+    async fn remove_category(
+        &self,
+        _ctx: &ProviderCtx<'_>,
+        message_id: &str,
+        category_name: &str,
+    ) -> Result<(), String> {
+        let mut request = self.client.inner().build();
+        let set_req = request.set_email();
+        set_req.update(message_id).keyword(category_name, false);
+        request
+            .send_single::<EmailSetResponse>()
+            .await
+            .map_err(|e| format!("remove category: {e}"))?;
+        Ok(())
+    }
+
     async fn send_email(
         &self,
         _ctx: &ProviderCtx<'_>,
@@ -516,4 +551,134 @@ impl ProviderOps for JmapOps {
             name: None,
         })
     }
+}
+
+// ---------------------------------------------------------------------------
+// JMAP FUTURERELEASE — Scheduled send via EmailSubmission
+// ---------------------------------------------------------------------------
+//
+// RFC 4865 FUTURERELEASE uses the SMTP MAIL FROM parameter `HOLDUNTIL` to
+// defer delivery.  In JMAP this is exposed through the `envelope.mailFrom
+// .parameters` object on `EmailSubmission` (RFC 8621 §7).
+//
+// The server advertises the capability via the `urn:ietf:params:jmap:submission`
+// session capability object whose `maxDelayedSend` property (seconds) declares
+// the maximum deferral the server supports.  A value of 0 means scheduled send
+// is not supported.
+
+/// Schedule an email for future delivery via JMAP FUTURERELEASE.
+///
+/// Creates an `EmailSubmission` with an explicit envelope whose `mailFrom`
+/// carries the `holduntil` parameter set to the requested UTC timestamp
+/// (RFC 4865 / RFC 8621 §7).
+///
+/// # Arguments
+///
+/// * `client`       – Authenticated JMAP client.
+/// * `email_id`     – ID of an already-imported `Email` object on the server.
+/// * `identity_id`  – Identity to send from (see `get_first_identity_id`).
+/// * `sender_email` – RFC 5321 MAIL FROM address (used in the envelope).
+/// * `recipients`   – RFC 5321 RCPT TO addresses (used in the envelope).
+/// * `send_at`      – Desired delivery time (UTC).  Must be in the future.
+///
+/// # Returns
+///
+/// The server-assigned `EmailSubmission` ID, which can be passed to
+/// [`cancel_scheduled_send_jmap`] to abort the deferred delivery.
+pub async fn schedule_send_jmap(
+    client: &JmapClient,
+    email_id: &str,
+    identity_id: &str,
+    sender_email: &str,
+    recipients: &[String],
+    send_at: DateTime<Utc>,
+) -> Result<String, String> {
+    let inner = client.inner();
+
+    // --- Validate against maxDelayedSend -----------------------------------
+    let session = inner.session();
+    if let Some(sub_caps) = session.submission_capabilities() {
+        let max_delay = sub_caps.max_delayed_send(); // seconds
+        if max_delay == 0 {
+            return Err(
+                "Server does not support scheduled send (maxDelayedSend = 0)".to_string(),
+            );
+        }
+        let delay_secs = (send_at - Utc::now()).num_seconds();
+        if delay_secs <= 0 {
+            return Err("send_at must be in the future".to_string());
+        }
+        if (delay_secs as usize) > max_delay {
+            return Err(format!(
+                "Requested delay ({delay_secs}s) exceeds server maximum ({max_delay}s)"
+            ));
+        }
+    }
+    // If submission_capabilities is None the server didn't advertise the
+    // submission capability at all — we still attempt the call and let the
+    // server reject it if it doesn't support FUTURERELEASE.
+
+    // --- Build the envelope with HOLDUNTIL ---------------------------------
+    // RFC 4865 §4: HOLDUNTIL value is an ISO 8601 UTC timestamp.
+    let holduntil_value = send_at.to_rfc3339();
+
+    let mail_from =
+        SubmissionAddress::<Set>::new(sender_email).parameter("holduntil", Some(&holduntil_value));
+
+    let rcpt_to: Vec<SubmissionAddress<Set>> = recipients
+        .iter()
+        .map(|r| SubmissionAddress::<Set>::new(r.as_str()))
+        .collect();
+
+    // --- Create the EmailSubmission ----------------------------------------
+    let mut request = inner.build();
+    let sub_req = request.set_email_submission();
+    let create_id = sub_req
+        .create()
+        .email_id(email_id)
+        .identity_id(identity_id)
+        .envelope(mail_from, rcpt_to)
+        .create_id()
+        .ok_or("Failed to obtain submission create ID")?;
+
+    let mut response = request
+        .send_single::<EmailSubmissionSetResponse>()
+        .await
+        .map_err(|e| format!("EmailSubmission/set (schedule): {e}"))?;
+
+    let mut submission = response
+        .created(&create_id)
+        .map_err(|e| format!("EmailSubmission create failed: {e}"))?;
+
+    Ok(submission.take_id())
+}
+
+/// Cancel a previously scheduled send by setting `undoStatus` to `"canceled"`.
+///
+/// This only works while the submission's `undoStatus` is still `"pending"`.
+/// Once the server transitions it to `"final"` (i.e. the message has been
+/// handed off to the MTA), cancellation is no longer possible and the server
+/// will return an error.
+pub async fn cancel_scheduled_send_jmap(
+    client: &JmapClient,
+    submission_id: &str,
+) -> Result<(), String> {
+    let inner = client.inner();
+
+    let mut request = inner.build();
+    request
+        .set_email_submission()
+        .update(submission_id)
+        .undo_status(UndoStatus::Canceled);
+
+    let mut response = request
+        .send_single::<EmailSubmissionSetResponse>()
+        .await
+        .map_err(|e| format!("EmailSubmission/set (cancel): {e}"))?;
+
+    response
+        .updated(submission_id)
+        .map_err(|e| format!("EmailSubmission cancel failed: {e}"))?;
+
+    Ok(())
 }

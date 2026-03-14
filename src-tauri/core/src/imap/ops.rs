@@ -57,6 +57,23 @@ impl ImapOps {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Parse an IMAP message ID (`imap-{accountId}-{folder}-{uid}`) into folder + UID.
+fn parse_imap_message_id(message_id: &str, account_id: &str) -> Result<(String, u32), String> {
+    let prefix = format!("imap-{account_id}-");
+    if !message_id.starts_with(&prefix) {
+        return Err(format!("Invalid IMAP message ID: {message_id}"));
+    }
+    let remainder = &message_id[prefix.len()..];
+    let last_dash = remainder
+        .rfind('-')
+        .ok_or_else(|| format!("Invalid message ID format: {message_id}"))?;
+    let folder = &remainder[..last_dash];
+    let uid: u32 = remainder[last_dash + 1..]
+        .parse()
+        .map_err(|_| format!("Invalid UID in message ID: {message_id}"))?;
+    Ok((folder.to_string(), uid))
+}
+
 /// Minimal info needed to locate a message on the IMAP server.
 struct ImapMessageRef {
     folder: String,
@@ -620,6 +637,44 @@ impl ProviderOps for ImapOps {
         // IMAP doesn't have native labels/tags.
         log::debug!("IMAP: remove_tag is a no-op (IMAP has no native labels)");
         Ok(())
+    }
+
+    async fn apply_category(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        message_id: &str,
+        category_name: &str,
+    ) -> Result<(), String> {
+        let (folder, uid) = parse_imap_message_id(message_id, ctx.account_id)?;
+        let config = crate::imap::account_config::load_imap_config(
+            ctx.db,
+            ctx.account_id,
+            &self.encryption_key,
+        )
+        .await?;
+
+        with_session!(&config, session => {
+            imap_client::set_keyword_if_supported(&mut session, &folder, uid, "+FLAGS", category_name).await
+        })
+    }
+
+    async fn remove_category(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        message_id: &str,
+        category_name: &str,
+    ) -> Result<(), String> {
+        let (folder, uid) = parse_imap_message_id(message_id, ctx.account_id)?;
+        let config = crate::imap::account_config::load_imap_config(
+            ctx.db,
+            ctx.account_id,
+            &self.encryption_key,
+        )
+        .await?;
+
+        with_session!(&config, session => {
+            imap_client::set_keyword_if_supported(&mut session, &folder, uid, "-FLAGS", category_name).await
+        })
     }
 
     // ── Send + Drafts ───────────────────────────────────────────────────

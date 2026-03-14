@@ -34,6 +34,7 @@ pub struct GraphMessage {
     pub is_read_receipt_requested: Option<bool>,
     pub internet_message_headers: Option<Vec<GraphInternetHeader>>,
     pub attachments: Option<Vec<GraphAttachment>>,
+    pub single_value_extended_properties: Option<Vec<SingleValueExtendedProperty>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -201,6 +202,19 @@ toRecipients,ccRecipients,bccRecipients,replyTo,\
 receivedDateTime,sentDateTime,isRead,isDraft,hasAttachments,\
 importance,parentFolderId,categories,flag,\
 inferenceClassification,isReadReceiptRequested,internetMessageHeaders,internetMessageId";
+
+/// GUID for Exchange reaction extended properties.
+pub const REACTIONS_GUID: &str = "{41F28F13-83F4-4114-A584-EEDB5A6B0BFF}";
+
+/// `$expand` clause to fetch Exchange reaction extended properties alongside messages.
+///
+/// - `OwnerReactionType` — the authenticated user's reaction emoji (string)
+/// - `ReactionsCount` — total number of reactions on the message (integer)
+pub const REACTIONS_EXPAND: &str = "\
+singleValueExtendedProperties(\
+$filter=id eq 'String {41F28F13-83F4-4114-A584-EEDB5A6B0BFF} Name OwnerReactionType' \
+or id eq 'Integer {41F28F13-83F4-4114-A584-EEDB5A6B0BFF} Name ReactionsCount'\
+)";
 
 // ── Large attachment upload session types ─────────────────
 
