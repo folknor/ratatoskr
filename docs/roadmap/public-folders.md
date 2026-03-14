@@ -1,7 +1,7 @@
 # Public Folders
 
 **Tier**: 1 — Blocks switching from Outlook
-**Status**: ❌ **Not implemented**
+**Status**: 🟡 **In progress** — Minimal EWS SOAP client implemented (FindFolder, GetFolder, FindItem, GetItem, CreateItem), PR_REPLICA_LIST decoder done, EffectiveRights parsing done. Missing: Autodiscover routing, offline sync, IMAP NAMESPACE public folders, UI integration.
 
 ---
 
@@ -213,6 +213,8 @@ Thunderbird (Mozilla) has built a Rust EWS crate: [thunderbird/ews-rs](https://g
 **Option C: Hybrid.** Use `quick-xml` for serialization (like Thunderbird does) but build our own operation types. Avoids the `xml_struct` dependency while still getting correct namespace handling.
 
 **Recommendation**: Option B. A focused EWS client is more maintainable than depending on Thunderbird's crate (which will evolve for Thunderbird's needs, not ours). The shared-mailboxes research already identified `quick-xml` or `roxmltree` for Autodiscover XML parsing (~100-200 lines). Public folders extend this to a larger but still bounded EWS surface.
+
+**Update (March 2026)**: Option B was implemented in `core/src/graph/ews.rs` (~1000 lines). Uses `quick-xml` + `reqwest` with OAuth bearer auth. Covers FindFolder, GetFolder, FindItem (with paging), GetItem, CreateItem, plus `decode_replica_list()` for PR_REPLICA_LIST binary parsing and `EwsEffectiveRights` extraction. The estimate of 1500-2500 lines was conservative — the focused approach came in under 1100 lines.
 
 #### Authentication
 
@@ -445,20 +447,20 @@ Public folders will exist in Exchange Online for years to come. Microsoft cannot
 
 ### Summary: Implementation Priority
 
-| Area | Difficulty | Impact | Priority |
-|---|---|---|---|
-| Minimal EWS client (quick-xml + reqwest) | Medium | Critical (enables everything) | P0 |
-| EWS OAuth token acquisition (reuse existing flow) | Low | Critical | P0 |
-| Autodiscover for public folder routing | Medium | Critical | P0 |
-| FindFolder hierarchy browsing (lazy-load) | Medium | Critical | P0 |
-| FindItem for folder contents | Medium | Critical | P0 |
-| Pin/favorite folders to sidebar | Low | Critical for UX | P0 |
-| EffectiveRights permission checking | Low | High | P1 |
-| Offline sync for pinned folders | Medium-High | High | P1 |
-| Mail-enabled folder reply/forward | Medium | High | P1 |
-| CreateItem (post to public folder) | Low | Medium | P2 |
-| IMAP NAMESPACE discovery | Low | Low-Medium (self-hosted only) | P2 |
-| IMAP shared namespace folder access | Low | Low-Medium | P2 |
-| Content mailbox routing (PR_REPLICA_LIST) | High | Medium (correctness) | P1 |
+| Area | Difficulty | Impact | Priority | Status |
+|---|---|---|---|---|
+| Minimal EWS client (quick-xml + reqwest) | Medium | Critical (enables everything) | P0 | ✅ Done — `graph/ews.rs`, ~1000 lines. FindFolder, GetFolder, FindItem, GetItem, CreateItem with full XML request/response parsing. |
+| EWS OAuth token acquisition (reuse existing flow) | Low | Critical | P0 | ✅ Done — reuses existing Graph OAuth bearer tokens. |
+| PR_REPLICA_LIST decoding | Medium | Medium (correctness) | P1 | ✅ Done — `decode_replica_list()` extracts content mailbox GUIDs from binary extended property. |
+| EffectiveRights permission checking | Low | High | P1 | ✅ Done — `EwsEffectiveRights` struct parsed from FindFolder/GetFolder responses. |
+| Autodiscover for public folder routing | Medium | Critical | P0 | ❌ Not started — need GetUserSettings SOAP for hierarchy routing headers + POX Autodiscover for content routing. |
+| FindFolder hierarchy browsing (lazy-load) | Medium | Critical | P0 | 🟡 API ready — FindFolder operation implemented, but no lazy-load UI or hierarchy caching yet. |
+| FindItem for folder contents | Medium | Critical | P0 | 🟡 API ready — FindItem operation implemented with paging, but no sync loop or local storage yet. |
+| Pin/favorite folders to sidebar | Low | Critical for UX | P0 | ❌ Not started |
+| Offline sync for pinned folders | Medium-High | High | P1 | ❌ Not started |
+| Mail-enabled folder reply/forward | Medium | High | P1 | 🟡 API ready — CreateItem operation implemented. |
+| CreateItem (post to public folder) | Low | Medium | P2 | 🟡 API ready — CreateItem operation implemented. |
+| IMAP NAMESPACE discovery | Low | Low-Medium (self-hosted only) | P2 | ❌ Not started |
+| IMAP shared namespace folder access | Low | Low-Medium | P2 | ❌ Not started |
 
 The critical path is: EWS client + Autodiscover + FindFolder + FindItem + pin UX. This gives users the ability to browse and read public folders. Everything else layers on top.

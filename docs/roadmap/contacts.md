@@ -1,7 +1,7 @@
 # Contacts & Groups
 
 **Tier**: 1 — Blocks switching from Outlook
-**Status**: ⚠️ **Partial** — Local contact DB with frequency ranking, avatars, notes. `seen_addresses` auto-collected during sync with direction-weighted ranking (Phase 1). FTS5 prefix search on contacts with email-aware tokenizer, two-tier ranking (explicit > observed), LIKE fallback for seen_addresses (Phase 2). Exchange personal contacts sync via Graph `/me/contacts` with per-folder delta sync, 410 fallback, reference-counted deletes, `display_name_overridden` flag for user edit protection (Phase 3). Local contact groups with nested group support, DFS expansion with cycle detection, compose autocomplete integration with union suggestion model, group management UI in Settings (Phase 4). Compose autocomplete returns explicit contacts, server-synced contacts, observed addresses, and contact groups. Gravatar integration, contact sidebar with stats/colleagues/shared files. **Missing**: Google People API sync, Exchange group resolution, contact photos from server.
+**Status**: ✅ **Complete** — Local contact DB with frequency ranking, avatars, notes. `seen_addresses` auto-collected during sync with direction-weighted ranking (Phase 1). FTS5 prefix search on contacts with email-aware tokenizer, two-tier ranking (explicit > observed), LIKE fallback for seen_addresses (Phase 2). Exchange personal contacts sync via Graph `/me/contacts` with per-folder delta sync, 410 fallback, reference-counted deletes, `display_name_overridden` flag for user edit protection (Phase 3). Local contact groups with nested group support, DFS expansion with cycle detection, compose autocomplete integration with union suggestion model, group management UI in Settings (Phase 4). Google People API sync with sync tokens and `otherContacts` as lower-priority autocomplete candidates (Phase 5). Exchange group/distribution list resolution via `/groups/{id}/transitiveMembers` with server-side recursion (Phase 6). Contact photo fetching and local disk caching with LRU eviction for Exchange and Google providers (Phase 7). CardDAV contact sync via CTag/ETag-based change detection with vCard parsing (Phase 8). Compose autocomplete returns explicit contacts, server-synced contacts, observed addresses, and contact groups. Gravatar integration, contact sidebar with stats/colleagues/shared files.
 
 ---
 
@@ -44,21 +44,21 @@ Graph `/me/contacts` with per-folder delta sync via `graph_contact_delta_tokens`
 
 Local contact groups in SQLite (`contact_groups` + `contact_group_members` with `member_type` for nesting). DFS expansion with cycle detection via visited set. Compose autocomplete refactored to union suggestion model (`AutocompleteSuggestion` discriminated union) supporting both contacts and groups. Groups expand to individual emails on selection. Group management UI in Settings → People tab (create, rename, delete, add/remove email and nested-group members). Delete cleanup removes inbound nested-group references to prevent dangling pointers.
 
-### Phase 5 — Google People API sync
+### Phase 5 — Google People API sync ✅
 
-`people.connections.list` with sync tokens (7-day expiry). `otherContacts` as lower-priority autocomplete candidates. Respect quota limits on full syncs.
+`people.connections.list` with sync tokens (7-day expiry) and paginated fetching (1000 per page). Full sync with `requestSyncToken=true`, incremental sync via stored token, 410 Gone fallback to full sync with stale contact pruning. Contacts upserted into `contacts` table (source `'google'`) via `google_contact_map` for reference-counted deletes. Cross-provider awareness: deletion checks both `google_contact_map` and `graph_contact_map` to avoid removing contacts synced from Exchange. Separate `otherContacts` sync populates `seen_addresses` with source `'google_other'` as lower-priority autocomplete candidates via `google_other_contact_map`.
 
-### Phase 6 — Exchange group resolution
+### Phase 6 — Exchange group resolution ✅
 
-`/groups/{id}/transitiveMembers` for M365 Groups and distribution lists. Server handles recursion and cycle detection. Track partial resolution (hidden members). Skip dynamic DLs and personal DLs for now.
+`/groups/{id}/transitiveMembers/microsoft.graph.user` for M365 Groups, distribution lists, and mail-enabled security groups — server handles recursion and cycle detection. `fetch_user_groups` queries `/me/memberOf/microsoft.graph.group` filtered to `mailEnabled eq true`, classifies groups into `ExchangeGroupType` (`M365Group`, `DistributionList`, `MailEnabledSecurityGroup`), skips security-only groups. Groups upserted into `contact_groups` with source `'exchange'`, members persisted via `contact_group_members`. Stale group pruning removes groups no longer present on server.
 
-### Phase 7 — Contact photos
+### Phase 7 — Contact photos ✅
 
-Schema and cache hooks can be designed earlier, but actual photo fetching lands here to avoid request volume and complexity before core sync/search is proven. Exchange: one request per photo, cache by `changeKey`. Google: public URLs with `?sz=` resizing. Local disk cache with eviction.
+Provider-specific photo fetching: Exchange via `GET /me/contacts/{id}/photo/$value` (one request per photo, auth required), Google via public `lh3.googleusercontent.com` URLs with `?sz=128` resizing (no auth). Local disk cache under `contact_photos/` with xxh3 content-hash filenames. `contact_photo_cache` table tracks metadata (content hash, file path, size, etag, fetch/access timestamps). LRU eviction to 50 MB cap via `last_accessed_at` ordering. Cached paths written back to `contacts.avatar_url`. Only fetches photos for contacts missing a cache entry.
 
-### Phase 8 — CardDAV follow-up
+### Phase 8 — CardDAV contact sync ✅
 
-`libdav` + `calcard` for Fastmail, Stalwart, and other CardDAV servers. Etag-based sync. Covers JMAP accounts once server support matures.
+CTag-based change detection: skip sync entirely when CTag is unchanged. ETag comparison to identify new/changed/deleted contacts, fetching only changed vCards. vCard parsing via `parse` module extracts email, display name, and photo URL. Contacts upserted into `contacts` table (source `'carddav'`) via `carddav_contact_map` with ETag tracking. Reference-counted deletes check `carddav_contact_map`, `google_contact_map`, and `graph_contact_map` before removing orphaned contacts. CTag and ETags persisted for incremental sync on subsequent runs.
 
 ---
 

@@ -1,7 +1,7 @@
 # Tracking Pixel / Read Receipt Blocking
 
 **Tier**: 1 — Blocks switching from Outlook
-**Status**: ⚠️ **Mostly done** — Remote image blocking is fully implemented: blocked by default, CSP enforcement on iframe, per-sender allowlist (`image_allowlist` table), "load images" / "always load from sender" buttons. MDN infrastructure is in place: `Disposition-Notification-To` header is detected during sync across all four providers and persisted as `mdn_requested` on messages; `read_receipt_policy` table exists with per-account/per-sender scoping; default policy is `never` (suppress silently). **Remaining**: UI for read receipt prompts and policy management. HTML sanitization pipeline (`sanitize_html_body()`) now implemented in core with css-inline + lol_html + ammonia.
+**Status**: ⚠️ **Mostly done** — Remote image blocking is fully implemented: blocked by default, CSP enforcement on iframe, per-sender allowlist (`image_allowlist` table), "load images" / "always load from sender" buttons. MDN infrastructure is in place: `Disposition-Notification-To` header is detected during sync across all four providers and persisted as `mdn_requested` on messages; `read_receipt_policy` table exists with per-account/per-sender scoping; default policy is `never` (suppress silently). HTML sanitization pipeline is implemented: `sanitize_html_body()` in `core/src/provider/html_sanitizer.rs` runs the three-stage `css-inline` + `lol_html` + `ammonia` pipeline (CSS inlining, streaming dangerous-element removal, whitelist sanitization). **Remaining**: UI for read receipt prompts and policy management, remote image blocking integration into the sanitization pipeline (strip remote `<img src>` unless allowlisted), link tracking detection, AMP blocking.
 
 ---
 
@@ -387,7 +387,7 @@ The tracking domain list should be a shipped resource file (like ad-blocker filt
 
 ### 9. Implementation priority
 
-1. **Sanitization pipeline** (`css-inline` + `lol_html` + `ammonia`) — prerequisite for all HTML rendering. Implement in `ratatoskr-core` as a `sanitize_html_body()` function. This is needed regardless of tracking protection, since we must sanitize before passing to litehtml/Blitz.
+1. ✅ **Sanitization pipeline** (`css-inline` + `lol_html` + `ammonia`) — implemented in `core/src/provider/html_sanitizer.rs` as `sanitize_html_body()`. Three-stage pipeline: CSS inlining, streaming removal of `<script>`/`<iframe>`/`<form>`/event handlers/`javascript:` URLs/`@import` in inline styles via `lol_html`, then whitelist sanitization via `ammonia` (allowed tags, attributes, URL schemes, `noopener noreferrer` on links).
 2. **Remote image blocking** — already implemented in the DB layer (`image_allowlist`, `block_remote_images` setting). Wire into the sanitization pipeline: strip remote `<img src>` unless sender is allowlisted.
 3. **MDN suppression** — detect `Disposition-Notification-To` header during message parsing, store `mdn_requested` flag, implement policy table and resolution logic. No UI needed initially (default policy: suppress silently).
 4. **Read receipt policy UI** — settings screen for per-account/per-sender policies. Banner in reading pane when MDN is requested.

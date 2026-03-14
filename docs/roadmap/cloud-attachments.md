@@ -1,7 +1,7 @@
 # Cloud Attachment Linking (OneDrive / Google Drive)
 
 **Tier**: 1 — Blocks switching from Outlook
-**Status**: ❌ **Not implemented**
+**Status**: ⚠️ **Partially implemented** — Google Drive upload (resumable chunked upload via Drive API v3, `drive.file` OAuth scope, sharing permissions with `anyone` or `domain` scoping, web view link retrieval) is implemented in `core/src/gmail/gdrive.rs`. OneDrive upload (resumable 320 KiB-aligned chunked upload via Graph API, `Ratatoskr Attachments` folder, `organization`-scoped sharing links, `referenceAttachment` creation via beta endpoint) is implemented in `core/src/graph/onedrive.rs` and `core/src/graph/ops.rs`. Raw reqwest is used for both providers (no SDK crate). **Remaining**: incoming cloud link detection (URL pattern matching), UI for cloud attachment compose flow, offline upload queue, JMAP/IMAP graceful degradation, `cloud_attachments` DB table.
 
 ---
 
@@ -475,29 +475,23 @@ When the user composes offline with a large attachment destined for cloud upload
 
 ### Recommendations
 
-#### Phase 1: OneDrive for Exchange accounts (highest value)
+#### Phase 1: OneDrive for Exchange accounts (highest value) — ✅ upload done
 
-This is the Tier 1 blocker. Enterprise Outlook users constantly send and receive OneDrive/SharePoint links.
+~~This is the Tier 1 blocker. Enterprise Outlook users constantly send and receive OneDrive/SharePoint links.~~
 
-1. **Outgoing**: Upload via Graph API resumable upload to `/me/drive/items/root:/Ratatoskr Attachments/{filename}:/createUploadSession`. Create an `organization`-scoped `view` link via `createLink`. Create a `referenceAttachment` on the message via the beta endpoint.
+1. **Outgoing**: ✅ Upload via Graph API resumable upload to `Ratatoskr Attachments` folder is implemented (`core/src/graph/onedrive.rs`). Creates `organization`-scoped `view` sharing links via `createLink`. Creates `referenceAttachment` on draft messages via the beta endpoint (`core/src/graph/ops.rs`). Uses raw reqwest against Graph API — no SDK crate.
 
-2. **Incoming**: Detect OneDrive/SharePoint URLs in HTML body via regex. Fetch `driveItem` metadata via the Graph sharing API for enriched display. Fall back to link text + generic icon.
+2. **Incoming**: ❌ Not started. Detect OneDrive/SharePoint URLs in HTML body via regex. Fetch `driveItem` metadata via the Graph sharing API for enriched display. Fall back to link text + generic icon.
 
-3. **Threshold**: Default 10 MB, configurable per account. Prompt user on attach: "Upload to OneDrive and share as link?" with a "Always do this for files over X MB" checkbox.
+3. **Threshold**: ❌ Not started. Default 10 MB, configurable per account. Prompt user on attach: "Upload to OneDrive and share as link?" with a "Always do this for files over X MB" checkbox.
 
-Raw reqwest against Graph API — no SDK crate dependency.
+#### Phase 2: Google Drive for Gmail accounts — ✅ upload done
 
-#### Phase 2: Google Drive for Gmail accounts
+1. **Outgoing**: ✅ Upload via resumable chunked upload to Drive is implemented (`core/src/gmail/gdrive.rs`). Creates sharing permissions with `anyone` or `domain` scoping. Retrieves web view link for insertion into message body. Uses raw reqwest — `google-drive3` crate was not needed. The `drive.file` OAuth scope has been added to the Google OAuth flow (`src/oauth.rs`).
 
-Same flow as OneDrive but against the Drive API v3:
+2. **Incoming**: ❌ Not started. Detect `drive.google.com` / `docs.google.com` URLs. Fetch file metadata via Drive API for enrichment.
 
-1. **Outgoing**: Upload via resumable upload to Drive. Create `{ "role": "reader", "type": "anyone" }` permission. Insert `<a>` link into message HTML body (no `referenceAttachment` equivalent).
-
-2. **Incoming**: Detect `drive.google.com` / `docs.google.com` URLs. Fetch file metadata via Drive API for enrichment.
-
-3. **Scope**: Use `drive.file` — requires adding this scope to our existing Gmail OAuth flow. It is a non-sensitive scope, so no additional Google verification needed.
-
-Evaluate `google-drive3` crate vs raw reqwest based on dependency tree impact.
+3. ~~**Scope**: Use `drive.file` — requires adding this scope to our existing Gmail OAuth flow.~~ ✅ Done.
 
 #### Phase 3: Incoming link detection for all providers
 

@@ -1,7 +1,7 @@
 # Shared / Delegated Mailboxes
 
 **Tier**: 1 — Blocks switching from Outlook
-**Status**: ❌ **Not implemented** — Gmail Send-As aliases are functional (fetch, store, FromSelector in compose, smart alias selection for replies), but this is outbound identity only, not shared mailbox access. No `*.Shared` OAuth scopes requested for Graph. No delegation discovery, no shared mailbox reading, no IMAP ACL, no JMAP Sharing.
+**Status**: 🟡 **Partially implemented** — Exchange (Graph) shared mailbox read/write/sync and IMAP shared namespace discovery are implemented in the core crate. Gmail delegation and JMAP Sharing remain unimplemented.
 
 ---
 
@@ -54,9 +54,36 @@ A user may have Full Access but not Send As (can read but not impersonate), or S
 - **IMAP ACL inconsistency**: RFC 4314 defines ACLs, but implementation varies wildly. Some servers support it fully, some partially, some not at all. Need capability detection and graceful degradation.
 - **Gmail delegation quirks**: Gmail delegation is account-level (full inbox access), not per-folder. The delegated account appears as a separate "account" in the Gmail UI. Mapping this to the shared-mailbox mental model requires special handling — it's closer to "additional account" than "shared folder."
 
-## Work
+## Implementation Status
 
-Delegated mailbox discovery (manual-add baseline, EWS auto-mapping as enhancement for Exchange), uniform presentation regardless of mailbox type, sync with configurable depth, auto-set From address with Send As / Send on Behalf distinction, respect per-permission capabilities in UI, shared state delta sync, Sent Items routing, request `*.Shared` OAuth scopes.
+### Done
+
+**Exchange (Graph) — shared mailbox access and sync:**
+- `*.Shared` OAuth scopes (`Mail.ReadWrite.Shared`, `Mail.Send.Shared`, `Mail.Read.Shared`) requested during auth (`oauth.rs`, `discovery/registry.rs`).
+- `GraphClient::for_shared_mailbox(mailbox_id)` creates a scoped client that shares the parent's HTTP client, token, and semaphore but has its own folder map, sync cycle, and category lock (`graph/client.rs`).
+- `GraphClient::api_path_prefix()` returns `/me` for primary or `/users/{mailbox_id}` for shared. All operations in `graph/ops.rs` use `self.me()` (delegates to `api_path_prefix()`), and all sync URLs in `graph/sync.rs` use `client.api_path_prefix()` — so every API call (read, write, move, delete, folder list, delta sync) transparently works against shared mailboxes.
+- `send_as_shared_mailbox()` and `send_on_behalf_shared_mailbox()` in `graph/ops.rs` implement Send As (only `from` set) and Send on Behalf (`from` + `sender` set) via `POST /users/{shared}/messages` + `/send`.
+- Autodiscover XML discovery (`graph/autodiscover.rs`): `discover_shared_mailboxes()` calls `outlook.office365.com/autodiscover/autodiscover.xml` with OAuth token, parses `AlternativeMailbox` elements via `quick-xml`. Returns SMTP address, display name, and type (Delegate, TeamMailbox, etc.).
+- Per-shared-mailbox sync orchestration (`graph/shared_mailbox_sync.rs`): `sync_shared_mailbox()` creates a scoped client and runs initial (30-day lookback) or delta sync depending on existing delta tokens. `sync_all_shared_mailboxes()` iterates all enabled shared mailboxes; failures are independent.
+- DB schema: migration v51 adds `graph_shared_mailbox_delta_tokens` (per-mailbox, per-folder delta links) and `shared_mailbox_sync_state` (enable/disable sync, last sync time, error tracking).
+- Sync state management (`sync/state.rs`): `enable_shared_mailbox_sync()`, `disable_shared_mailbox_sync()`, `get_enabled_shared_mailboxes()`, `update_shared_mailbox_sync_status()`, plus CRUD for shared mailbox delta tokens.
+
+**IMAP — namespace and ACL discovery:**
+- NAMESPACE command (RFC 2342): `discover_namespaces()` in `imap/connection.rs` sends the raw `NAMESPACE` command and parses the response into `NamespaceInfo` (personal, other_users, shared entries with prefix and delimiter). Full parser with tests for standard, NIL, and multi-entry responses.
+- `classify_folder_namespace()` maps a folder path to `NamespaceType` (Personal, OtherUsers, Shared) by prefix matching.
+- `list_shared_folders()` in `imap/client.rs` lists folders under other-users and shared namespace prefixes via `LIST {prefix}*`, annotating each with its `NamespaceType`.
+- MYRIGHTS (RFC 4314): `discover_myrights()` in `imap/connection.rs` queries the authenticated user's rights on a folder. Parses the `AclRight` variants into a compact rights string.
+- DB schema: migration v54 adds `namespace_type TEXT` column to `labels`, storing the IMAP namespace classification per folder.
+- Types (`imap/types.rs`): `NamespaceType` enum, `NamespaceEntry`, `NamespaceInfo` structs. `ImapFolder` has an optional `namespace_type` field.
+
+### Remaining
+
+- **Gmail delegation**: Account-level delegation is not implementable via public Gmail API (cannot discover inbound delegation; accessing delegated mailbox requires domain-wide delegation or internal session mechanisms). Documented as a known limitation. Send-As aliases work.
+- **JMAP Sharing (RFC 9670)**: Not implemented. Low priority (Stalwart-only). `jmap-client` would need sharing-specific types.
+- **UI/UX for shared mailboxes**: No frontend implementation yet (sidebar sections, per-mailbox unread counts, manual-add flow, identity auto-selection in compose). Blocked on iced migration.
+- **Configurable sync depth per shared mailbox**: Currently hardcoded to 30 days initial lookback. No per-mailbox sync depth setting.
+- **Notification routing**: Client-side per-delegate notification preferences not implemented.
+- **Sent Items routing configuration**: `saveToSentItems` behavior not yet configurable per shared mailbox.
 
 ---
 
@@ -296,14 +323,15 @@ Neither `async-imap` nor `imap-codec` support ACL. Custom implementation via raw
 
 ### Summary: Implementation Priority
 
-| Area | Difficulty | Impact | Priority |
-|---|---|---|---|
-| Graph shared mailbox read/write (paths + scopes) | Low | Critical | P0 |
-| Manual-add shared mailbox UX | Low | Critical (baseline) | P0 |
-| Send identity auto-selection | Medium | Critical for UX | P0 |
-| Send As / Send on Behalf via Graph | Low | High | P1 |
-| Per-mailbox sync depth | Medium | High for scale | P1 |
-| Autodiscover XML for auto-mapping | Medium | High for enterprise UX | P1 |
-| IMAP ACL (Dovecot/Cyrus) | Medium | Low (niche) | P2 |
-| JMAP Sharing (RFC 9670) | Medium-High | Low (Stalwart only) | P3 |
-| Gmail delegation | Blocked | Low | P3 (document limitation) |
+| Area | Difficulty | Impact | Priority | Status |
+|---|---|---|---|---|
+| Graph shared mailbox read/write (paths + scopes) | Low | Critical | P0 | **Done** |
+| Send As / Send on Behalf via Graph | Low | High | P1 | **Done** |
+| Autodiscover XML for auto-mapping | Medium | High for enterprise UX | P1 | **Done** |
+| Per-shared-mailbox delta sync | Medium | Critical | P0 | **Done** |
+| IMAP namespace/ACL discovery | Medium | Medium (Dovecot/Cyrus) | P2 | **Done** |
+| Manual-add shared mailbox UX | Low | Critical (baseline) | P0 | Not started (needs iced UI) |
+| Send identity auto-selection | Medium | Critical for UX | P0 | Not started (needs iced UI) |
+| Per-mailbox sync depth config | Medium | High for scale | P1 | Not started |
+| JMAP Sharing (RFC 9670) | Medium-High | Low (Stalwart only) | P3 | Not started |
+| Gmail delegation | Blocked | Low | P3 | Blocked (API limitation) |
