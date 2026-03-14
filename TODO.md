@@ -4,7 +4,7 @@
 
 ### AI Migration
 
-- [ ] **Port AI inference execution to Rust** — Rust already owns provider/runtime/config selection. TypeScript still owns prompt assembly and actual inference calls for summaries, smart replies, transforms, ask-inbox, task extraction, smart-label AI, category inference, and auto-drafts. All of this needs to move to the core crate as part of the iced migration.
+- [x] **Port AI inference execution to Rust** — Done: `core/src/ai/` module with prompts, types, `AiCompleter` trait, 11 orchestration functions (summarize, smart replies, ask inbox, categorize, smart labels, extract task, transform, compose, reply, writing style, auto-draft), defensive response parsers, DB caching integration. App crate provides the `AiCompleter` implementation with HTTP calls.
 
 ### Regression Coverage
 
@@ -58,4 +58,4 @@ Items below are derived from `docs/roadmap/` and scoped to Rust backend work onl
 
 ### Public Folders (Tier 1)
 
-- [ ] **IMAP NAMESPACE-based public folder access** — For non-Exchange IMAP servers (Dovecot, Cyrus), discover public namespaces via the `NAMESPACE` command and `LIST` folders under the public prefix. Access with standard IMAP `SELECT`/`FETCH`. The `namespace_type` column already exists on the labels table (migration v54).
+- [x] **IMAP NAMESPACE-based public folder access** — Done: `imap/public_folders.rs` discovers shared folders via NAMESPACE, checks permissions via MYRIGHTS, syncs messages via SELECT/FETCH into `public_folder_items`.
