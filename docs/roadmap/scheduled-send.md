@@ -1,7 +1,7 @@
 # Scheduled Send
 
 **Tier**: 2 — Keeps users from going back
-**Status**: ✅ **Done (local)** — Full implementation: schedule dialog with presets (tomorrow 9am/1pm, Monday 9am) + custom date/time picker, `scheduled_emails` table with status tracking (pending/sending/sent/failed/cancelled), background sender service. Currently local-only (client holds and sends). **Missing**: server-native delegation to Exchange/Gmail/JMAP for reliability when client is offline.
+**Status**: ✅ **Done** — Full implementation with server-native delegation. `scheduled_send.rs`: delegation routing (`determine_send_delegation_for_account` routes Exchange/JMAP to server, Gmail/IMAP to local), overdue handling (auto-send if <24h, flag for review if >24h). Exchange deferred delivery via `PidTagDeferredSendTime` extended property (`schedule_send`, `cancel_scheduled_send`, `reschedule_send` in `graph/ops.rs`). JMAP FUTURERELEASE via `EmailSubmission` with `HOLDUNTIL` parameter (`schedule_send_jmap`, `cancel_scheduled_send_jmap` in `jmap/ops.rs`). Gmail/IMAP use local timer.
 
 ---
 
@@ -26,7 +26,14 @@
 
 ## Work
 
-Schedule picker in compose, server-native send for Exchange/Gmail/JMAP, local timer+queue for IMAP, "Scheduled" virtual view, cancel/reschedule support.
+- ✅ DB schema with delegation columns (`delegation`, `remote_message_id`, `remote_status`, `timezone`, `from_email`, `error_message`, `retry_count`)
+- ✅ Delegation routing — `determine_send_delegation_for_account` maps provider type to `SendDelegation` enum (`Local`/`Exchange`/`Jmap`)
+- ✅ Exchange deferred delivery — `schedule_send` sets `PidTagDeferredSendTime` (0x3FEF) extended property; `cancel_scheduled_send` deletes draft; `reschedule_send` PATCHes timestamp
+- ✅ JMAP FUTURERELEASE — `schedule_send_jmap` creates `EmailSubmission` with `HOLDUNTIL` parameter; `cancel_scheduled_send_jmap` sets `undoStatus` to `canceled`; checks `maxDelayedSend` capability
+- ✅ Overdue handling — `check_overdue_scheduled_emails` classifies locally-delegated overdue emails: `SendNow` if <24h, `NeedsReview` if >24h; `process_overdue_emails` applies resolutions
+- ✅ Gmail/IMAP local scheduling (no server API available)
+- ⬚ Schedule picker UI (iced compose work)
+- ⬚ "Scheduled" virtual folder view
 
 ---
 

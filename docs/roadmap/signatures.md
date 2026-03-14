@@ -1,7 +1,7 @@
 # Roaming Signatures
 
 **Tier**: 2 — Keeps users from going back
-**Status**: ⚠️ **Partial** — Local signature editor and DB storage (`signatures` table) are fully functional: create/edit/delete, per-account defaults, HTML body, sort order. **Missing**: server-side sync — no fetch from Exchange Graph roaming settings or Gmail `users.settings.sendAs` signatures. First-run experience doesn't auto-populate.
+**Status**: ✅ **Done** — DB schema with sync columns (`server_id`, `server_html_hash`, `source`, `last_synced_at`, `is_reply_default`, `body_text`). Gmail bidirectional sync via `sendAs` (pull server signatures on initial+delta sync, push local edits). JMAP Identity signature sync (`sync_jmap_identity_signatures`). Inline image extraction from signature HTML (base64 data-URI and CID parsing, dedup via xxh3, storage in inline image store). Exchange has no public API for signatures (see Research §1–2).
 
 ---
 
@@ -27,7 +27,13 @@
 
 ## Work
 
-Fetch server-side signature on account setup for Exchange/Gmail, local signature editor for all accounts, handle HTML signatures in compose, smart default selection for reply vs new.
+- ✅ DB schema extended with sync columns (`server_id`, `server_html_hash`, `source`, `last_synced_at`, `is_reply_default`, `body_text`)
+- ✅ Gmail `sendAs` signature fetch — pulled on initial sync and delta sync (`sync_signatures` in `gmail/sync.rs`)
+- ✅ Gmail bidirectional sync — local edits pushed via `update_send_as_signature`, conflict resolution by server HTML hash
+- ✅ JMAP Identity signature sync — `sync_jmap_identity_signatures` in `jmap/signatures.rs`, upserts `htmlSignature`/`textSignature` keyed by `(account_id, server_id)`
+- ✅ Inline image handling — `provider/signature_images.rs` extracts base64 data-URIs and CID references from signature HTML, deduplicates via xxh3, stores in inline image store
+- ⬚ Exchange — no public Graph API exists for roaming signatures (see Research §1–2); sent-mail heuristic deferred to post-MVP
+- ⬚ Signature placement in compose (iced UI work)
 
 ---
 

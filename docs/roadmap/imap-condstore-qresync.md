@@ -1,7 +1,7 @@
 # IMAP CONDSTORE/QRESYNC (RFC 7162)
 
 **Tier**: 1 — Blocks switching from Outlook
-**Status**: ⚠️ **Phase 1+2 implemented** — HIGHESTMODSEQ tracking with fast-path skip (Phase 1) and CHANGEDSINCE flag sync (Phase 2). When modseq is unchanged, folders are skipped entirely. When modseq changes but no new UIDs, `UID FETCH 1:* (FLAGS) (CHANGEDSINCE <modseq>)` fetches only changed flags and updates the local DB. Phase 3 (QRESYNC VANISHED for deletion detection) is not yet implemented. Upstream issue filed: https://github.com/chatmail/async-imap/issues/130
+**Status**: ✅ **Phases 1-2 complete, Phase 3 blocked** — Full CONDSTORE implementation: capability detection and QRESYNC negotiation (`connection.rs::negotiate_condstore_qresync`), `select_condstore()` for HIGHESTMODSEQ tracking, fast-path skip when modseq unchanged, `CHANGEDSINCE` flag sync when modseq changes, modseq persisted in `folder_sync_state`, HIGHESTMODSEQ reset detection (server modseq went backwards). iCloud QRESYNC workaround implemented (detects missing `ENABLED` response, falls back to CONDSTORE-only). UID-based deletion detection without QRESYNC implemented (`imap_delta.rs::run_deletion_detection`), throttled per-folder. Phase 3 (QRESYNC VANISHED parsing) blocked on upstream async-imap: https://github.com/chatmail/async-imap/issues/130
 
 ---
 

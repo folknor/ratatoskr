@@ -1,7 +1,7 @@
 # BIMI (Brand Indicators for Message Identification)
 
 **Tier**: 3 — Differentiators and polish
-**Status**: ❌ **Not implemented**
+**Status**: ✅ **Phase 1 complete** — DNS lookup, SVG fetch/validation/rasterization, DB caching, LRU, cache warming all implemented in `core/src/bimi.rs`
 
 ---
 
@@ -261,17 +261,20 @@ For Gmail, JMAP (Fastmail): decode base64 SVG from header, rasterize, cache by d
 
 ### Implementation Plan
 
-**Phase 1 (ship with iced MVP)**:
-- Parse `Authentication-Results` for `dmarc=pass`
-- Check `BIMI-Indicator` header first (covers Gmail, Fastmail)
-- DNS lookup via hickory-resolver, SVG fetch via reqwest
-- SVG Tiny PS validation before rendering
-- Render with resvg to bitmap, display in iced avatar slot
-- SQLite + filesystem caching with negative caching
+**Phase 1 (ship with iced MVP)**: ✅ Done — `core/src/bimi.rs`, migration v38
+- ✅ Parse `Authentication-Results` for `dmarc=pass` — `dmarc_passed()` string check
+- ✅ Check `BIMI-Indicator` header first — `decode_bimi_indicator()` base64 decode shortcut
+- ✅ DNS lookup via hickory-resolver — `lookup_bimi_dns()` with org-domain fallback
+- ✅ SVG fetch via reqwest — `fetch_and_validate_svg()` with HTTPS-only, 32KB limit
+- ✅ SVG Tiny PS validation — `validate_svg()` checks baseProfile, rejects external refs
+- ✅ Render with resvg to 128x128 PNG — `rasterize_svg_to_png()` using usvg + tiny-skia
+- ✅ SQLite `bimi_cache` table + filesystem PNG cache with 7d positive / 24h negative TTL
+- ✅ In-memory LRU (500 entries) — `BimiLruCache` avoids DB/FS on every render
+- ✅ Cache warming — `warm_bimi_cache()` scans recent sender domains, concurrent DNS+fetch
 
 **Phase 2 (post-launch)**:
 - VMC/CMC validation using x509-parser + rustls-webpki
 - "Verified" badge for VMC-validated logos
 - DMARC policy DNS lookup (verify p=quarantine/reject ourselves)
 
-**Dependencies to add**: `hickory-resolver` (DNS), `resvg` + `usvg` (SVG), `reqwest` (HTTP). Phase 2: `x509-parser`.
+**Dependencies added**: `hickory-resolver` (DNS), `resvg` + `usvg` (SVG), `reqwest` (HTTP). Phase 2: `x509-parser`.

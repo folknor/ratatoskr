@@ -1,7 +1,7 @@
 # Reactions
 
 **Tier**: 2 — Keeps users from going back
-**Status**: ❌ **Not implemented**
+**Status**: ✅ **Phases 1–4 complete** — DB table, Exchange extended property parsing/sync/delta refresh, Gmail MIME parsing/sync/sending all implemented
 
 ---
 
@@ -162,8 +162,8 @@ Serde's default behavior is to **silently ignore unknown fields** — exactly wh
 
 ### 9. Implementation Priority
 
-1. **Phase 1 (defensive)**: Ensure all Graph/Gmail deserialization tolerates reaction fields. For Gmail, detect and skip `text/vnd.google.email-reaction+json` MIME parts so they don't render as body text.
-2. **Phase 2 (Gmail read)**: Parse reaction MIME parts during sync, populate `message_reactions`, aggregate and display emoji chips below messages in threads. Hide reaction-only messages from thread list.
-3. **Phase 3 (Exchange read)**: Fetch `ReactionsCount` and `OwnerReactionType` extended properties. Display the owner's reaction and total count. Defer full `ReactionsSummary` binary parsing.
-4. **Phase 4 (Gmail write)**: Send reaction emails with correct MIME structure.
+1. ✅ **Phase 1 (defensive)**: Serde default ignore-unknown-fields handles reaction fields. Gmail `is_reaction` flag on messages prevents reaction MIME from rendering as body text.
+2. ✅ **Phase 2 (Gmail read)**: `extract_reaction_emoji()` parses `text/vnd.google.email-reaction+json` MIME parts during sync. `insert_reactions()` resolves target via `In-Reply-To` and populates `message_reactions` with `source = 'gmail_mime'`. Migration v37.
+3. ✅ **Phase 3 (Exchange read)**: `extract_reaction_properties()` reads `OwnerReactionType` and `ReactionsCount` extended properties (GUID `{41F28F13-...}`). `insert_exchange_reactions()` stores owner reaction + count metadata. `refresh_reactions_for_recent_messages()` polls via `$batch` every 5th sync cycle to catch reaction changes missed by delta queries.
+4. ✅ **Phase 4 (Gmail write)**: `send_reaction()` in `gmail/ops.rs` builds correct MIME structure with `build_reaction_mime()` and sends via Gmail API.
 5. **Phase 5 (Exchange write)**: Blocked on Microsoft providing a public API. Do not reverse-engineer.

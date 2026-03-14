@@ -1,7 +1,7 @@
 # Categories (Color Flags)
 
 **Tier**: 1 — Blocks switching from Outlook
-**Status**: ⚠️ **Partial** — Gmail `CATEGORY_*` labels are mapped, Graph `categories` field is parsed to `cat:` prefixed labels, and a rule engine + AI pipeline handles inbox triage (Primary/Updates/Promotions/Social/Newsletters). **Master category list sync** from Exchange Graph is now implemented: `GET /me/outlook/masterCategories` fetched during initial sync and every 20th delta cycle, persisted in `categories` table with preset→hex color mapping. Exposed via `db_get_categories` Tauri command. **Still missing**: unified color mapping for Gmail/JMAP, user-applied categories on individual messages, category picker UI.
+**Status**: ✅ **Backend complete** — All provider backends implemented. Exchange Graph master category list sync (`graph/category_sync.rs`), Gmail label→category sync with hex colors (`gmail/sync.rs`), JMAP keyword→category mapping (`jmap/sync.rs`), IMAP PERMANENTFLAGS detection (`imap/client.rs`, `imap/raw.rs`). Unified color model using Exchange's 25 presets as canonical palette with nearest-match mapping (`category_colors.rs`). `ProviderOps` trait has `apply_category`/`remove_category` mutation methods (`provider/ops.rs`). `message_categories` join table populated during sync for all three API providers (Graph, Gmail, JMAP). `categories` table with full schema (display_name, color_preset, color_bg, color_fg, provider_id, sync_state). **Still missing**: category picker UI, user-initiated apply/remove from UI, IMAP keyword write-back for categories.
 
 ---
 
