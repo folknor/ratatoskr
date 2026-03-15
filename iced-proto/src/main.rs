@@ -3,13 +3,16 @@ mod db;
 mod font;
 mod icon;
 mod ui;
+mod window_state;
 
 use db::{Account, Db, Label, Thread};
 use iced::widget::pane_grid::{self, Configuration, PaneGrid};
-use iced::{Element, Task, Theme};
+use iced::{Element, Point, Size, Task, Theme};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 static DB: std::sync::OnceLock<Arc<Db>> = std::sync::OnceLock::new();
+static APP_DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
 fn main() -> iced::Result {
     let app_data_dir = dirs::data_dir()
@@ -19,12 +22,15 @@ fn main() -> iced::Result {
     let db = Db::open(&app_data_dir).expect("failed to open database");
     let _ = DB.set(Arc::new(db));
 
+    let window = window_state::WindowState::load(&app_data_dir);
+    let _ = APP_DATA_DIR.set(app_data_dir);
+
     let mut app = iced::application(App::boot, App::update, App::view)
         .title("Ratatoskr (iced prototype)")
         .theme(App::theme)
         .subscription(App::subscription)
         .default_font(font::TEXT)
-        .window_size((1280.0, 800.0));
+        .window(window.to_window_settings());
 
     for f in font::load() {
         app = app.font(f);
@@ -59,6 +65,9 @@ pub enum Message {
     ToggleLabelsSection,
     ToggleSmartFoldersSection,
     PaneResized(pane_grid::ResizeEvent),
+    WindowResized(Size),
+    WindowMoved(Point),
+    WindowCloseRequested(iced::window::Id),
 }
 
 struct App {
@@ -77,6 +86,7 @@ struct App {
     panes: pane_grid::State<PaneKind>,
     show_settings: bool,
     settings: ui::settings::SettingsState,
+    window: window_state::WindowState,
 }
 
 fn pane_configuration() -> Configuration<PaneKind> {
@@ -99,6 +109,8 @@ impl App {
     fn boot() -> (Self, Task<Message>) {
         let db = Arc::clone(DB.get().expect("DB not initialized"));
         let db_ref = Arc::clone(&db);
+        let data_dir = APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
+        let window = window_state::WindowState::load(data_dir);
         let app = Self {
             db,
             accounts: Vec::new(),
@@ -115,6 +127,7 @@ impl App {
             panes: pane_grid::State::with_configuration(pane_configuration()),
             show_settings: false,
             settings: ui::settings::SettingsState::default(),
+            window,
         };
         (app, Task::perform(load_accounts(db_ref), Message::AccountsLoaded))
     }
@@ -124,7 +137,18 @@ impl App {
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
-        appearance::subscription().map(Message::AppearanceChanged)
+        iced::Subscription::batch([
+            appearance::subscription().map(Message::AppearanceChanged),
+            iced::window::resize_events().map(|(_id, size)| Message::WindowResized(size)),
+            iced::window::close_requests().map(Message::WindowCloseRequested),
+            iced::event::listen_with(|event, _status, _id| {
+                if let iced::Event::Window(iced::window::Event::Moved(point)) = event {
+                    Some(Message::WindowMoved(point))
+                } else {
+                    None
+                }
+            }),
+        ])
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -263,6 +287,19 @@ impl App {
             Message::Settings(msg) => {
                 self.settings.update(msg);
                 Task::none()
+            }
+            Message::WindowResized(size) => {
+                self.window.set_size(size);
+                Task::none()
+            }
+            Message::WindowMoved(point) => {
+                self.window.set_position(point);
+                Task::none()
+            }
+            Message::WindowCloseRequested(id) => {
+                let data_dir = APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
+                self.window.save(data_dir);
+                iced::window::close(id)
             }
             Message::Compose | Message::Noop => Task::none(),
         }
