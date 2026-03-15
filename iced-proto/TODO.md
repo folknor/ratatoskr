@@ -2,7 +2,7 @@
 
 ## Widget Design Rule Violations
 
-Audit performed against the rules in CLAUDE.md. Originally 35 violations.
+Remaining violations from the CLAUDE.md audit.
 
 ### Widget constructors accept data, not UI elements (5)
 
@@ -12,44 +12,36 @@ Audit performed against the rules in CLAUDE.md. Originally 35 violations.
 - [ ] `widgets.rs` — `reply_button()` accepts `iced::widget::Text`, should accept icon identifier
 - [ ] `settings.rs` — `setting_row()` accepts `Element` for control param
 
-### All widgets belong in widgets.rs (7)
+### All widgets belong in widgets.rs (5)
 
 - [ ] `settings.rs` — `section()` is a reusable widget, move to widgets.rs
-- [ ] `settings.rs` — `setting_row()` is a reusable widget, move to widgets.rs
+- [ ] `settings.rs` — `setting_row()` / `settings_row_container()` are reusable, move to widgets.rs
 - [ ] `settings.rs` — `toggle_row()` is a reusable widget, move to widgets.rs
 - [ ] `settings.rs` — `info_row()` is a reusable widget, move to widgets.rs
-- [ ] `settings.rs` — `settings_pick_list()` is a styled widget, move to widgets.rs
 - [ ] `settings.rs` — `accent_color_row()` is a swatch picker widget, move to widgets.rs
-- [x] `settings.rs` — `settings_section_container()` is a style function — moved to theme.rs
 
-### Every slot gets its own container (10)
+## Layout & Interaction
 
-- [x] `widgets.rs` — `nav_item_with_badge` label text bare in row
-- [x] `widgets.rs` — `label_nav_item` text bare in row
-- [x] `widgets.rs` — `collapsible_section` header title and chevron bare in row
-- [x] `widgets.rs` — dropdown trigger chevron_slot has no container
-- [x] `widgets.rs` — `compose_button` icon and text bare in row
-- [x] `widgets.rs` — `settings_button` icon and text bare in row
-- [x] `widgets.rs` — `action_icon_button` icon and text bare in row
-- [x] `widgets.rs` — `reply_button` icon and text bare in row
-- [x] `settings.rs` — back button icon and text bare in row
-- [x] `settings.rs` — tab nav button icon and text bare in row
+- [ ] **Per-pane minimum resize limits** — PaneGrid uses a uniform `min_size(120)` for all panes. Should have per-pane minimums (e.g., sidebar can't go below 150px, thread list below 200px). Requires clamping ratios in the `PaneResized` handler since PaneGrid only supports a single global minimum.
 
-### No magic numbers (8)
+- [ ] **`responsive` for adaptive layout** — Wrap PaneGrid in `iced::widget::responsive` to collapse panels at narrow window sizes (e.g., hide contact sidebar below 900px, stack sidebar over thread list below 600px).
 
-- [x] `settings.rs` — settings nav width hardcoded as `200` — now `SETTINGS_NAV_WIDTH`
-- [x] `settings.rs` — `max_width(600)` hardcoded in general tab — now `SETTINGS_CONTENT_MAX_WIDTH`
-- [x] `settings.rs` — `max_width(600)` hardcoded in about tab — same
-- [x] `settings.rs` — `SWATCH_SIZE` defined locally — moved to layout.rs
-- [x] `settings.rs` — swatch border radius computed inline — now `RADIUS_ROUND`
-- [x] `settings.rs` — inline rule style with hardcoded alpha — now `theme::subtle_divider_rule`
-- [x] `settings.rs` — `Padding::from([SPACE_XXS, SPACE_SM])` in pick_list — now `PAD_PICK_LIST`
-- [x] `settings.rs` — `Padding::from([SPACE_SM, SPACE_MD])` repeated — now `PAD_SETTINGS_ROW`
+- [ ] **Animated toggler widget** — Port libcosmic's slerp-based toggle animation for smooth sliding pill togglers. Current iced built-in toggler snaps instantly. libcosmic's version uses `anim::slerp()` with configurable duration (200ms default). ~150-200 LOC to port.
 
-### No raw colors outside theme.rs (5)
+## Research
 
-- [x] `settings.rs` — `ACCENT_COLORS` array — moved to `theme::ACCENT_COLORS`
-- [x] `settings.rs` — `settings_pick_list()` inline style closure — now `theme::ghost_pick_list`
-- [x] `settings.rs` — `iced::Color::TRANSPARENT` in pick_list style — moved to theme.rs
-- [x] `settings.rs` — accent swatch button inline style — now `theme::swatch_button()`
-- [x] `settings.rs` — `Color::BLACK.scale_alpha(0.15)` — moved to `theme::settings_section_container`
+- [ ] **Investigate iced ecosystem projects** — Review for patterns, widget implementations, and architecture ideas:
+  - https://github.com/hecrj/iced_fontello — Icon font integration
+  - https://github.com/hecrj/iced_palace — Hecrj's iced showcase/playground
+  - https://github.com/pop-os/cosmic-edit — COSMIC text editor (large real-world iced app)
+  - https://github.com/pop-os/iced/blob/master/widget/src/markdown.rs — COSMIC fork's markdown widget
+
+## Done
+
+- [x] Persist window state across restarts
+- [x] Every slot gets its own container (10 violations fixed)
+- [x] No magic numbers (8 violations fixed)
+- [x] No raw colors outside theme.rs (5 violations fixed)
+- [x] Move `settings_section_container` style to theme.rs
+- [x] Replace `pick_list` with custom `select` widget
+- [x] Unify nav buttons across sidebar and settings

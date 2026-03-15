@@ -75,6 +75,12 @@ pub fn text_tertiary(theme: &Theme) -> text::Style {
     }
 }
 
+pub fn text_muted(theme: &Theme) -> text::Style {
+    text::Style {
+        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.6)),
+    }
+}
+
 // ── Button styles ───────────────────────────────────────
 // Built-in: button::primary, button::secondary, button::text,
 //           button::danger, button::subtle
@@ -114,6 +120,7 @@ pub fn dropdown_button(selected: bool) -> impl Fn(&Theme, button::Status) -> but
 pub fn nav_button(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
         let p = theme.extended_palette();
+        let inactive_text = p.background.base.text.scale_alpha(0.6);
         match status {
             button::Status::Hovered => button::Style {
                 background: Some(p.background.weak.color.into()),
@@ -123,7 +130,7 @@ pub fn nav_button(active: bool) -> impl Fn(&Theme, button::Status) -> button::St
             },
             _ => button::Style {
                 background: if active { Some(p.background.strong.color.into()) } else { None },
-                text_color: if active { p.primary.base.color } else { p.secondary.base.color },
+                text_color: if active { p.primary.base.color } else { inactive_text },
                 border: border::rounded(RADIUS_SM),
                 ..Default::default()
             },
@@ -206,9 +213,16 @@ pub fn action_button(theme: &Theme, status: button::Status) -> button::Style {
 // Built-in: container::transparent, container::bordered_box,
 //           container::dark, container::rounded_box
 
-pub fn sidebar_container(theme: &Theme) -> container::Style {
+pub fn content_container(theme: &Theme) -> container::Style {
     container::Style {
         background: Some(theme.extended_palette().background.weakest.color.into()),
+        ..Default::default()
+    }
+}
+
+pub fn sidebar_container(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(theme.extended_palette().background.weaker.color.into()),
         ..Default::default()
     }
 }
@@ -297,7 +311,7 @@ pub fn floating_container(theme: &Theme) -> container::Style {
 pub fn settings_section_container(theme: &Theme) -> container::Style {
     let p = theme.extended_palette();
     container::Style {
-        background: Some(p.background.weakest.color.into()),
+        background: Some(p.background.base.color.into()),
         border: iced::Border {
             color: p.background.strongest.color.scale_alpha(0.1),
             width: 1.0,
@@ -306,6 +320,24 @@ pub fn settings_section_container(theme: &Theme) -> container::Style {
         shadow: iced::Shadow {
             color: Color::BLACK.scale_alpha(0.15),
             offset: iced::Vector::ZERO,
+            blur_radius: RADIUS_LG,
+        },
+        ..Default::default()
+    }
+}
+
+pub fn select_menu_container(theme: &Theme) -> container::Style {
+    let p = theme.extended_palette();
+    container::Style {
+        background: Some(p.background.base.color.into()),
+        border: iced::Border {
+            color: p.background.strongest.color.scale_alpha(0.2),
+            width: 1.0,
+            radius: RADIUS_LG.into(),
+        },
+        shadow: iced::Shadow {
+            color: Color::BLACK.scale_alpha(0.25),
+            offset: iced::Vector::new(0.0, 2.0),
             blur_radius: RADIUS_LG,
         },
         ..Default::default()
@@ -323,9 +355,18 @@ pub fn divider_rule(theme: &Theme) -> rule::Style {
     }
 }
 
+pub fn sidebar_divider_rule(theme: &Theme) -> rule::Style {
+    rule::Style {
+        color: theme.extended_palette().background.weak.color,
+        radius: 0.0.into(),
+        fill_mode: rule::FillMode::Full,
+        snap: true,
+    }
+}
+
 pub fn subtle_divider_rule(theme: &Theme) -> rule::Style {
     rule::Style {
-        color: theme.extended_palette().background.strongest.color.scale_alpha(0.08),
+        color: theme.extended_palette().background.strongest.color.scale_alpha(0.15),
         radius: 0.0.into(),
         fill_mode: rule::FillMode::Full,
         snap: true,

@@ -225,6 +225,20 @@ pub const PAD_BADGE: Padding = Padding {
 /// Dropdown: trigger button and menu wrapper.
 pub const PAD_DROPDOWN: Padding = Padding::new(8.0);
 
+/// Settings content area (generous margins around fieldsets).
+pub const PAD_SETTINGS_CONTENT: Padding = Padding {
+    top: 32.0,
+    right: 48.0,
+    bottom: 32.0,
+    left: 48.0,
+};
+
+/// Minimum height for settings rows (ensures consistent row height
+/// whether the row contains a control or just text).
+pub const SETTINGS_ROW_HEIGHT: f32 = 52.0;
+/// Toggle rows with label + description need more room.
+pub const SETTINGS_TOGGLE_ROW_HEIGHT: f32 = 64.0;
+
 /// Settings row (label + control).
 pub const PAD_SETTINGS_ROW: Padding = Padding {
     top: 12.0,
@@ -256,6 +270,9 @@ pub const SETTINGS_NAV_WIDTH: f32 = 200.0;
 
 /// Settings content max width
 pub const SETTINGS_CONTENT_MAX_WIDTH: u32 = 600;
+
+/// Minimum width for select widget (trigger + menu)
+pub const SELECT_MIN_WIDTH: f32 = 140.0;
 
 /// Accent color swatch diameter
 pub const SWATCH_SIZE: f32 = 24.0;

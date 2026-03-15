@@ -28,7 +28,7 @@
   - https://github.com/pop-os/cosmic-edit — COSMIC text editor (large real-world iced app)
   - https://github.com/pop-os/iced/blob/master/widget/src/markdown.rs — COSMIC fork's markdown widget
 
-- [ ] **Persist window state across restarts** — Remember window size, position, maximized state, and which monitor the window was on. Restore on next launch. Likely serialize to a small JSON/TOML file in the app data dir.
+- [x] **Persist window state across restarts** — Done: `iced-proto/src/window_state.rs`, saves/loads `window.json` in app data dir. Size restored on launch; position saved but only effective on X11 (Wayland ignores app-requested positioning).
 
 - [ ] **Per-pane minimum resize limits** — PaneGrid currently uses a uniform `min_size(120)` for all panes. Should have per-pane minimums (e.g., sidebar can't go below 150px, thread list below 200px, contact sidebar below 180px). Requires clamping ratios in the `PaneResized` handler since PaneGrid only supports a single global minimum. Decide on actual values after visual testing.
 

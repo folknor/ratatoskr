@@ -42,6 +42,14 @@ Elm architecture (iced's `application()` — boot/update/view cycle). Single `Ap
 
 **`iced::Font::DEFAULT` is not Inter:** We set `default_font(font::TEXT)` which is `Font::with_name("Inter")`. If you construct a font with `iced::Font { weight, ..iced::Font::DEFAULT }` it will NOT use Inter. Always spread from `font::TEXT` instead: `iced::Font { weight, ..font::TEXT }`.
 
+**Button `text_color` doesn't reach children with explicit `.style()`.** If you set `text_color` on a button style but the `text()` or icon inside has its own `.style(some_fn)`, the explicit style wins. The button's `text_color` only affects children that don't override it. This means changing a button style's color has no visible effect when all children set their own style — you have to change the text/icon styles too.
+
+**Popover menu width is constrained to the trigger's width.** The `PopoverOverlay` layout uses `base_bounds.width` as the menu's max width. If the trigger is `Length::Shrink`, the menu will be tiny. For narrow triggers (like the `select` widget), set an explicit width on the trigger (e.g., `SELECT_MIN_WIDTH`) so the menu has room.
+
+**`height()` on containers is fixed, not minimum.** There's no `min_height()` on containers in this iced version. If you need rows to be "at least X tall but grow for bigger content," use a shared `height()` constant and accept that all rows are that exact height. Use different constants for different row types (e.g., `SETTINGS_ROW_HEIGHT` vs `SETTINGS_TOGGLE_ROW_HEIGHT`).
+
+**Extended palette background scale (dark mode).** `base` is the darkest. Each step lightens by a fixed deviation: `base` (0%) → `weakest` (3%) → `weaker` (7%) → `weak` (10%) → `neutral` (12.5%) → `strong` (15%) → `stronger` (17.5%) → `strongest` (20%). In light mode the direction reverses. Use this to create visual depth hierarchy — e.g., fieldsets at `base`, content area at `weakest`, sidebar at `weaker`.
+
 ## Layout module (`src/ui/layout.rs`)
 
 All sizing, spacing, padding, and radii are centralized here. Views import `use crate::ui::layout::*` and reference named constants. **No magic numbers in view or widget code** — every `.size()`, avatar diameter, border radius, and padding must reference a layout constant.
@@ -93,6 +101,10 @@ Name the slots and give each one a container:
 - `align_x(Alignment::Center)` + `align_y(Alignment::Center)` — centers without giving the content a size hint. Safest for mixed content types.
 
 Default to `align_x/y(Center)` for icon slots. Only use `center(Length::Fill)` when you specifically need the content to expand (e.g., centering a letter inside an avatar stack).
+
+### Style functions override button text_color.
+
+When a row has icon + text slots inside a button, don't rely on the button style's `text_color` to control their color. Each slot with an explicit `.style()` call must use the correct style function directly. If you add a `text_muted` style for inactive nav buttons, both the icon and label need to reference it — the button style alone won't propagate.
 
 ### Don't guess at visual issues.
 

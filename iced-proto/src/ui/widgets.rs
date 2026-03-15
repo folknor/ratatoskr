@@ -98,12 +98,12 @@ pub fn nav_button<'a, M: Clone + 'a>(
     let label_style: fn(&Theme) -> text::Style = if active {
         text::primary
     } else {
-        text::secondary
+        theme::text_muted
     };
     let icon_style: fn(&Theme) -> text::Style = if active {
         text::primary
     } else {
-        text::secondary
+        theme::text_muted
     };
     let pad = match size {
         NavSize::Compact => PAD_NAV_ITEM,
@@ -373,12 +373,16 @@ pub fn select<'a, M: Clone + 'a>(
     on_toggle: M,
     on_select: impl Fn(String) -> M + 'a,
 ) -> Element<'a, M> {
-    // trigger: label right-aligned, then chevron
+    // The trigger has a fixed minimum width (SELECT_MIN_WIDTH) because the
+    // popover overlay sizes its menu to the trigger's width. Without this,
+    // the shrink-to-fit trigger would be too narrow for the menu items.
+    // The fill spacer pushes label + chevron to the right edge.
     let trigger = button(
         row![
-            // label_slot: right-aligned
+            // right-align spacer
+            Space::new().width(Length::Fill),
+            // label_slot
             container(text(selected).size(TEXT_MD).style(text::base))
-                .width(Length::Shrink)
                 .align_y(Alignment::Center),
             // chevron_slot
             container(icon::chevron_down().size(ICON_SM).style(theme::text_tertiary))
@@ -390,7 +394,7 @@ pub fn select<'a, M: Clone + 'a>(
     .on_press(on_toggle.clone())
     .padding(PAD_SELECT_TRIGGER)
     .style(theme::ghost_button)
-    .width(Length::Shrink);
+    .width(SELECT_MIN_WIDTH);
 
     if !open {
         return trigger.into();
@@ -400,8 +404,22 @@ pub fn select<'a, M: Clone + 'a>(
         .iter()
         .map(|&option| {
             let is_selected = option == selected;
-            button(
+            let mut label_row = row![
                 container(text(option).size(TEXT_MD).style(text::base))
+                    .align_y(Alignment::Center),
+            ]
+            .spacing(SPACE_XS)
+            .align_y(Alignment::Center);
+
+            if is_selected {
+                label_row = label_row.push(
+                    container(icon::check().size(ICON_SM).style(text::primary))
+                        .align_y(Alignment::Center),
+                );
+            }
+
+            button(
+                container(label_row)
                     .width(Length::Fill)
                     .align_y(Alignment::Center),
             )
@@ -418,7 +436,7 @@ pub fn select<'a, M: Clone + 'a>(
         column(menu_items).spacing(SPACE_XXS).width(Length::Fill),
     )
     .padding(PAD_DROPDOWN)
-    .style(theme::floating_container);
+    .style(theme::select_menu_container);
 
     crate::ui::popover::popover(trigger)
         .popup(menu)

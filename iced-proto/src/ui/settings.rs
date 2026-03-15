@@ -160,10 +160,12 @@ pub fn view(state: &SettingsState) -> Element<'_, SettingsMessage> {
 
     row![
         nav,
+        iced::widget::rule::vertical(1).style(theme::sidebar_divider_rule),
         container(scrollable(content).height(Length::Fill))
             .width(Length::Fill)
             .height(Length::Fill)
-            .padding(PAD_CONTENT),
+            .padding(PAD_SETTINGS_CONTENT)
+            .style(theme::content_container),
     ]
     .into()
 }
@@ -350,21 +352,35 @@ fn section<'a>(
         col = col.push(item);
     }
     column![
-        text(title).size(TEXT_XL).style(text::base),
-        Space::new().height(SPACE_XS),
+        text(title)
+            .size(TEXT_XL)
+            .style(text::base)
+            .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::TEXT }),
         container(col)
             .width(Length::Fill)
             .style(theme::settings_section_container),
     ]
-    .spacing(SPACE_0)
+    .spacing(SPACE_XS)
     .into()
+}
+
+fn settings_row_container<'a>(
+    height: f32,
+    content: impl Into<iced::Element<'a, SettingsMessage>>,
+) -> Element<'a, SettingsMessage> {
+    container(content)
+        .padding(PAD_SETTINGS_ROW)
+        .width(Length::Fill)
+        .height(height)
+        .align_y(Alignment::Center)
+        .into()
 }
 
 fn setting_row<'a>(
     label: &'a str,
     control: Element<'a, SettingsMessage>,
 ) -> Element<'a, SettingsMessage> {
-    container(
+    settings_row_container(SETTINGS_ROW_HEIGHT,
         row![
             container(text(label).size(TEXT_LG).style(text::base))
                 .align_y(Alignment::Center),
@@ -373,9 +389,6 @@ fn setting_row<'a>(
         ]
         .align_y(Alignment::Center),
     )
-    .padding(PAD_SETTINGS_ROW)
-    .width(Length::Fill)
-    .into()
 }
 
 fn toggle_row<'a>(
@@ -384,7 +397,7 @@ fn toggle_row<'a>(
     value: bool,
     on_toggle: fn(bool) -> SettingsMessage,
 ) -> Element<'a, SettingsMessage> {
-    container(
+    settings_row_container(SETTINGS_TOGGLE_ROW_HEIGHT,
         row![
             column![
                 text(label).size(TEXT_LG).style(text::base),
@@ -396,13 +409,10 @@ fn toggle_row<'a>(
         ]
         .align_y(Alignment::Center),
     )
-    .padding(PAD_SETTINGS_ROW)
-    .width(Length::Fill)
-    .into()
 }
 
 fn info_row<'a>(label: &'a str, value: &'a str) -> Element<'a, SettingsMessage> {
-    container(
+    settings_row_container(SETTINGS_ROW_HEIGHT,
         row![
             container(text(label).size(TEXT_LG).style(theme::text_tertiary))
                 .align_y(Alignment::Center),
@@ -412,9 +422,6 @@ fn info_row<'a>(label: &'a str, value: &'a str) -> Element<'a, SettingsMessage> 
         ]
         .align_y(Alignment::Center),
     )
-    .padding(PAD_SETTINGS_ROW)
-    .width(Length::Fill)
-    .into()
 }
 
 
