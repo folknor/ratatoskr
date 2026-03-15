@@ -1,11 +1,11 @@
-use iced::widget::{column, container, scrollable, text, Space};
+use iced::widget::{column, container, scrollable, Space};
 use iced::{Element, Length};
 
 use crate::db::{Account, Label};
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
-use crate::ui::widgets::{self, DropdownEntry, NavItem};
+use crate::ui::widgets::{self, DropdownEntry, DropdownIcon, NavItem};
 use crate::Message;
 
 pub struct SidebarModel<'a> {
@@ -57,24 +57,21 @@ pub fn view<'a>(model: SidebarModel<'a>) -> Element<'a, Message> {
 
 fn scope_dropdown<'a>(model: &SidebarModel<'a>) -> Element<'a, Message> {
     // Determine trigger icon + label from current selection
-    let (trigger_icon, trigger_label): (Element<'a, Message>, &'a str) =
+    let (trigger_icon, trigger_label): (DropdownIcon<'a>, &'a str) =
         match model.selected_account {
             Some(idx) if model.accounts.get(idx).is_some() => {
                 let acc = &model.accounts[idx];
                 let name = acc.display_name.as_deref().unwrap_or(&acc.email);
-                (widgets::avatar_circle(name, AVATAR_DROPDOWN_TRIGGER), name)
+                (DropdownIcon::Avatar(name), name)
             }
-            _ => (
-                icon::inbox().size(ICON_XL).style(text::secondary).into(),
-                "All Accounts",
-            ),
+            _ => (DropdownIcon::Icon(icon::INBOX_CODEPOINT), "All Accounts"),
         };
 
     // Build dropdown entries
     let mut entries: Vec<DropdownEntry<'a>> = Vec::new();
 
     entries.push(DropdownEntry {
-        icon: icon::inbox().size(ICON_XL).style(text::secondary).into(),
+        icon: DropdownIcon::Icon(icon::INBOX_CODEPOINT),
         label: "All Accounts",
         selected: model.selected_account.is_none(),
         on_press: Message::SelectAllAccounts,
@@ -83,7 +80,7 @@ fn scope_dropdown<'a>(model: &SidebarModel<'a>) -> Element<'a, Message> {
     for (idx, acc) in model.accounts.iter().enumerate() {
         let name = acc.display_name.as_deref().unwrap_or(&acc.email);
         entries.push(DropdownEntry {
-            icon: widgets::avatar_circle(name, AVATAR_DROPDOWN_ITEM),
+            icon: DropdownIcon::Avatar(name),
             label: name,
             selected: model.selected_account == Some(idx),
             on_press: Message::SelectAccount(idx),

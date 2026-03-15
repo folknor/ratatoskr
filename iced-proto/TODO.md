@@ -4,21 +4,9 @@
 
 Remaining violations from the CLAUDE.md audit.
 
-### Widget constructors accept data, not UI elements (5)
+### Widget constructors accept data, not UI elements
 
-- [ ] `widgets.rs` — `DropdownEntry.icon` is `Element`, should accept data describing the icon
-- [ ] `widgets.rs` — `dropdown()` `trigger_icon` param is `Element`, same fix
-- [ ] `widgets.rs` — `action_icon_button()` accepts `iced::widget::Text`, should accept icon identifier
-- [ ] `widgets.rs` — `reply_button()` accepts `iced::widget::Text`, should accept icon identifier
-- [ ] `settings.rs` — `setting_row()` accepts `Element` for control param
-
-### All widgets belong in widgets.rs (5)
-
-- [ ] `settings.rs` — `section()` is a reusable widget, move to widgets.rs
-- [ ] `settings.rs` — `setting_row()` / `settings_row_container()` are reusable, move to widgets.rs
-- [ ] `settings.rs` — `toggle_row()` is a reusable widget, move to widgets.rs
-- [ ] `settings.rs` — `info_row()` is a reusable widget, move to widgets.rs
-- [ ] `settings.rs` — `accent_color_row()` is a swatch picker widget, move to widgets.rs
+All resolved. `DropdownEntry.icon` and `dropdown()` `trigger_icon` now use `DropdownIcon` enum.
 
 ## Layout & Interaction
 

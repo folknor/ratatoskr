@@ -271,9 +271,30 @@ pub fn collapsible_section<'a>(
 // two-slot (icon + label) structure for both the trigger
 // and every menu item.
 
+/// Icon type for dropdown items. The dropdown builds the
+/// Element internally — callers never pass pre-built UI.
+pub enum DropdownIcon<'a> {
+    /// Renders an avatar circle from a name string.
+    Avatar(&'a str),
+    /// Renders an icon glyph from a codepoint char.
+    Icon(char),
+}
+
+impl DropdownIcon<'_> {
+    fn into_element<'a>(self, size: f32) -> Element<'a, Message> {
+        match self {
+            DropdownIcon::Avatar(name) => avatar_circle(name, size),
+            DropdownIcon::Icon(codepoint) => icon::to_icon(codepoint)
+                .size(ICON_XL)
+                .style(text::secondary)
+                .into(),
+        }
+    }
+}
+
 /// One entry in a dropdown menu.
 pub struct DropdownEntry<'a> {
-    pub icon: Element<'a, Message>,
+    pub icon: DropdownIcon<'a>,
     pub label: &'a str,
     pub selected: bool,
     pub on_press: Message,
@@ -282,7 +303,7 @@ pub struct DropdownEntry<'a> {
 /// A complete dropdown: closed trigger + optional open menu.
 /// Both trigger and items share the same two-slot layout.
 pub fn dropdown<'a>(
-    trigger_icon: Element<'a, Message>,
+    trigger_icon: DropdownIcon<'a>,
     trigger_label: &'a str,
     open: bool,
     on_toggle: Message,
@@ -292,7 +313,7 @@ pub fn dropdown<'a>(
     let trigger = button(
         row![
             // icon_slot: fixed size, content centered
-            container(trigger_icon)
+            container(trigger_icon.into_element(AVATAR_DROPDOWN_TRIGGER))
                 .width(SLOT_DROPDOWN)
                 .height(SLOT_DROPDOWN)
                 .align_x(Alignment::Center)
@@ -324,7 +345,7 @@ pub fn dropdown<'a>(
             button(
                 row![
                     // icon_slot: fixed size, content centered
-                    container(entry.icon)
+                    container(entry.icon.into_element(AVATAR_DROPDOWN_ITEM))
                         .width(SLOT_DROPDOWN)
                         .height(SLOT_DROPDOWN)
                         .align_x(Alignment::Center)

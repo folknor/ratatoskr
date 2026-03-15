@@ -3,16 +3,23 @@ use iced::widget::text::{LineHeight, Text};
 pub const FONT: iced::Font = iced::Font::with_name("lucide");
 pub const SIZE: f32 = 14.0;
 
-fn to_text<'a>(unicode: char) -> Text<'a> {
+/// Build an icon Text from a codepoint. Used by widgets that accept
+/// icon codepoints as data instead of pre-built Text elements.
+pub fn to_icon<'a>(unicode: char) -> Text<'a> {
     iced::widget::text(unicode.to_string())
         .line_height(LineHeight::Relative(1.0))
         .size(SIZE)
         .font(FONT)
 }
 
+fn to_text<'a>(unicode: char) -> Text<'a> { to_icon(unicode) }
+
+// ── Codepoints (for data-driven widgets) ────────────────
+pub const INBOX_CODEPOINT: char = '\u{e0f7}';
+
 // ── Email actions ────────────────────────────────────────
 pub fn mail<'a>() -> Text<'a> { to_text('\u{e10f}') }
-pub fn inbox<'a>() -> Text<'a> { to_text('\u{e0f7}') }
+pub fn inbox<'a>() -> Text<'a> { to_text(INBOX_CODEPOINT) }
 pub fn send<'a>() -> Text<'a> { to_text('\u{e152}') }
 pub fn reply<'a>() -> Text<'a> { to_text('\u{e22a}') }
 pub fn reply_all<'a>() -> Text<'a> { to_text('\u{e22b}') }

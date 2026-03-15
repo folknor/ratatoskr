@@ -9,6 +9,10 @@ Prototype iced UI for the Ratatoskr email client. Renders a four-pane email inte
 - `cargo check` — type-check
 - `cargo clippy` — lint
 
+## Commits
+
+Don't create standalone commits for documentation-only changes (CLAUDE.md, TODO.md, comments). Fold them into the next real code commit instead. Keep the git history focused on meaningful changes.
+
 ## Architecture
 
 Elm architecture (iced's `application()` — boot/update/view cycle). Single `App` struct holds all state. All DB access is async via `tokio::task::spawn_blocking` through a shared `Arc<Mutex<Connection>>`.
