@@ -19,7 +19,7 @@ pub async fn get_ai_categorization_candidates(
             .query_row(
                 "SELECT value FROM settings WHERE key = 'ai_auto_categorize'",
                 [],
-                |row| row.get::<_, String>(0),
+                |row| row.get::<_, String>("value"),
             )
             .ok();
         if auto_categorize.as_deref() == Some("false") {
@@ -72,7 +72,7 @@ fn evaluate_notifications_sync(
         .query_row(
             "SELECT value FROM settings WHERE key = 'notifications_enabled'",
             [],
-            |row| row.get(0),
+            |row| row.get("value"),
         )
         .ok();
     if notifications_enabled.as_deref() == Some("false") {
@@ -83,7 +83,7 @@ fn evaluate_notifications_sync(
         .query_row(
             "SELECT value FROM settings WHERE key = 'smart_notifications'",
             [],
-            |row| row.get::<_, String>(0),
+            |row| row.get::<_, String>("value"),
         )
         .ok()
         .unwrap_or_else(|| "true".to_string())
@@ -92,7 +92,7 @@ fn evaluate_notifications_sync(
         .query_row(
             "SELECT value FROM settings WHERE key = 'notify_categories'",
             [],
-            |row| row.get::<_, String>(0),
+            |row| row.get::<_, String>("value"),
         )
         .ok()
         .unwrap_or_else(|| "Primary".to_string());
@@ -158,7 +158,7 @@ fn load_vip_senders(conn: &Connection, account_id: &str) -> Result<HashSet<Strin
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(rusqlite::params![account_id], |row| {
-            row.get::<_, String>(0)
+            row.get::<_, String>("email_address")
         })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
@@ -195,7 +195,7 @@ fn load_muted_thread_ids(
     let param_refs: Vec<&dyn rusqlite::types::ToSql> =
         param_values.iter().map(AsRef::as_ref).collect();
     let rows = stmt
-        .query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))
+        .query_map(param_refs.as_slice(), |row| row.get::<_, String>("id"))
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
@@ -231,7 +231,7 @@ fn load_thread_categories(
             param_values.iter().map(AsRef::as_ref).collect();
         let rows = stmt
             .query_map(param_refs.as_slice(), |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                Ok((row.get::<_, String>("thread_id")?, row.get::<_, String>("category")?))
             })
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()

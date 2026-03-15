@@ -13,7 +13,7 @@ pub fn gather_deletion_data(
             .prepare("SELECT id FROM messages WHERE account_id = ?1")
             .map_err(|e| format!("prepare account message query: {e}"))?;
         stmt.query_map(rusqlite::params![account_id], |row| {
-            row.get::<_, String>(0)
+            row.get::<_, String>("id")
         })
         .map_err(|e| format!("query account message ids: {e}"))?
         .collect::<Result<Vec<_>, _>>()
@@ -32,7 +32,7 @@ pub fn gather_deletion_data(
             )
             .map_err(|e| format!("prepare account cached attachment query: {e}"))?;
         stmt.query_map(rusqlite::params![account_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((row.get::<_, String>("local_path")?, row.get::<_, String>("content_hash")?))
         })
         .map_err(|e| format!("query account cached attachments: {e}"))?
         .collect::<Result<Vec<_>, _>>()
@@ -50,7 +50,7 @@ pub fn gather_deletion_data(
             )
             .map_err(|e| format!("prepare account inline hash query: {e}"))?;
         stmt.query_map(rusqlite::params![account_id], |row| {
-            row.get::<_, String>(0)
+            row.get::<_, String>("content_hash")
         })
         .map_err(|e| format!("query account inline hashes: {e}"))?
         .collect::<Result<Vec<_>, _>>()
@@ -67,10 +67,10 @@ pub fn gather_deletion_data(
 /// Count remaining cached attachment references for a given content hash.
 pub fn count_cached_refs(conn: &Connection, content_hash: &str) -> Result<i64, String> {
     conn.query_row(
-        "SELECT COUNT(*) FROM attachments
+        "SELECT COUNT(*) AS cnt FROM attachments
          WHERE content_hash = ?1 AND cached_at IS NOT NULL",
         rusqlite::params![content_hash],
-        |row| row.get(0),
+        |row| row.get("cnt"),
     )
     .map_err(|e| format!("count remaining cached attachment refs: {e}"))
 }
@@ -113,7 +113,7 @@ pub fn referenced_hashes_excluding_account(
         }
         let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
         let rows = stmt
-            .query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))
+            .query_map(param_refs.as_slice(), |row| row.get::<_, String>("content_hash"))
             .map_err(|e| format!("query batch ref count: {e}"))?;
         for row in rows {
             let hash = row.map_err(|e| format!("read batch ref count row: {e}"))?;

@@ -544,10 +544,10 @@ pub fn get_skipped_thread_ids(
     for tid in thread_ids {
         let count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM pending_operations \
+                "SELECT COUNT(*) AS cnt FROM pending_operations \
                  WHERE account_id = ?1 AND resource_id = ?2 AND status != 'failed'",
                 rusqlite::params![account_id, tid],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .map_err(|e| format!("check pending ops: {e}"))?;
         if count > 0 {
@@ -678,11 +678,11 @@ pub fn get_all_folder_sync_states(
         .query_map(rusqlite::params![account_id], |row| {
             #[allow(clippy::cast_sign_loss)]
             Ok(FolderSyncState {
-                folder_path: row.get(0)?,
-                uidvalidity: row.get(1)?,
-                last_uid: row.get(2)?,
-                modseq: row.get::<_, Option<i64>>(3)?.map(|v| v as u64),
-                _last_sync_at: row.get(4)?,
+                folder_path: row.get("folder_path")?,
+                uidvalidity: row.get("uidvalidity")?,
+                last_uid: row.get("last_uid")?,
+                modseq: row.get::<_, Option<i64>>("modseq")?.map(|v| v as u64),
+                _last_sync_at: row.get("last_sync_at")?,
             })
         })
         .map_err(|e| format!("query folder sync states: {e}"))?;
@@ -705,9 +705,9 @@ pub struct FolderSyncState {
 /// Get thread count for an account (used for recovery detection).
 pub fn get_thread_count(conn: &Connection, account_id: &str) -> Result<i64, String> {
     conn.query_row(
-        "SELECT COUNT(*) FROM threads WHERE account_id = ?1",
+        "SELECT COUNT(*) AS cnt FROM threads WHERE account_id = ?1",
         rusqlite::params![account_id],
-        |row| row.get(0),
+        |row| row.get("cnt"),
     )
     .map_err(|e| format!("get thread count: {e}"))
 }
@@ -766,7 +766,7 @@ pub fn apply_flag_changes(
             "SELECT thread_id FROM messages \
              WHERE account_id = ?1 AND imap_folder = ?2 AND imap_uid = ?3",
             rusqlite::params![account_id, folder, i64::from(change.uid)],
-            |row| row.get::<_, String>(0),
+            |row| row.get::<_, String>("thread_id"),
         ) {
             affected_threads.insert(tid);
         }
@@ -809,7 +809,7 @@ pub fn get_last_deletion_check_at(
         "SELECT last_deletion_check_at FROM folder_sync_state \
          WHERE account_id = ?1 AND folder_path = ?2",
         rusqlite::params![account_id, folder_path],
-        |row| row.get(0),
+        |row| row.get("last_deletion_check_at"),
     )
     .map_err(|e| format!("get last deletion check: {e}"))
 }
@@ -849,7 +849,7 @@ pub fn get_local_uids_for_folder(
     #[allow(clippy::cast_sign_loss)]
     let rows = stmt
         .query_map(rusqlite::params![account_id, folder_path], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u32))
+            Ok((row.get::<_, String>("id")?, row.get::<_, i64>("imap_uid")? as u32))
         })
         .map_err(|e| format!("query local uids: {e}"))?;
 
@@ -880,9 +880,9 @@ pub fn get_local_flags_for_folder(
     let rows = stmt
         .query_map(rusqlite::params![account_id, folder_path], |row| {
             Ok((
-                row.get::<_, i64>(0)? as u32,
-                row.get::<_, bool>(1)?,
-                row.get::<_, bool>(2)?,
+                row.get::<_, i64>("imap_uid")? as u32,
+                row.get::<_, bool>("is_read")?,
+                row.get::<_, bool>("is_starred")?,
             ))
         })
         .map_err(|e| format!("query local flags: {e}"))?;
@@ -917,7 +917,7 @@ pub fn remove_deleted_messages(
         if let Ok(tid) = tx.query_row(
             "SELECT thread_id FROM messages WHERE account_id = ?1 AND id = ?2",
             rusqlite::params![account_id, id],
-            |row| row.get::<_, String>(0),
+            |row| row.get::<_, String>("thread_id"),
         ) {
             affected_threads.insert(tid);
         }
@@ -936,9 +936,9 @@ pub fn remove_deleted_messages(
     for tid in &affected_threads {
         let remaining: i64 = tx
             .query_row(
-                "SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND account_id = ?2",
+                "SELECT COUNT(*) AS cnt FROM messages WHERE thread_id = ?1 AND account_id = ?2",
                 rusqlite::params![tid, account_id],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .map_err(|e| format!("count remaining: {e}"))?;
 

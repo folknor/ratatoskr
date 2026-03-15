@@ -30,7 +30,7 @@ pub async fn load_account_history_id(
         conn.query_row(
             "SELECT history_id FROM accounts WHERE id = ?1",
             rusqlite::params![aid],
-            |row| row.get(0),
+            |row| row.get("history_id"),
         )
         .optional()
         .map_err(|e| format!("read history_id: {e}"))
@@ -72,7 +72,7 @@ pub async fn load_jmap_sync_state(
         conn.query_row(
             "SELECT state FROM jmap_sync_state WHERE account_id = ?1 AND type = ?2",
             rusqlite::params![aid, st],
-            |row| row.get::<_, String>(0),
+            |row| row.get::<_, String>("state"),
         )
         .optional()
         .map_err(|e| format!("load jmap sync state: {e}"))
@@ -117,7 +117,7 @@ pub async fn load_graph_delta_tokens(
             )
             .map_err(|e| format!("prepare: {e}"))?;
         stmt.query_map(rusqlite::params![aid], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((row.get::<_, String>("folder_id")?, row.get::<_, String>("delta_link")?))
         })
         .map_err(|e| format!("query: {e}"))?
         .collect::<Result<HashMap<_, _>, _>>()
@@ -185,7 +185,7 @@ pub async fn load_graph_contact_delta_tokens(
             )
             .map_err(|e| format!("prepare: {e}"))?;
         stmt.query_map(rusqlite::params![aid], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((row.get::<_, String>("folder_id")?, row.get::<_, String>("delta_link")?))
         })
         .map_err(|e| format!("query: {e}"))?
         .collect::<Result<HashMap<_, _>, _>>()
@@ -245,7 +245,7 @@ pub async fn load_google_contacts_sync_token(
         conn.query_row(
             "SELECT value FROM settings WHERE key = ?1",
             rusqlite::params![key],
-            |row| row.get::<_, String>(0),
+            |row| row.get::<_, String>("value"),
         )
         .optional()
         .map_err(|e| format!("load google contacts sync token: {e}"))
@@ -301,7 +301,7 @@ pub async fn load_google_other_contacts_sync_token(
         conn.query_row(
             "SELECT value FROM settings WHERE key = ?1",
             rusqlite::params![key],
-            |row| row.get::<_, String>(0),
+            |row| row.get::<_, String>("value"),
         )
         .optional()
         .map_err(|e| format!("load google other contacts sync token: {e}"))
@@ -369,7 +369,7 @@ pub async fn load_shared_mailbox_delta_tokens(
             )
             .map_err(|e| format!("prepare: {e}"))?;
         stmt.query_map(rusqlite::params![aid, mid], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((row.get::<_, String>("folder_id")?, row.get::<_, String>("delta_link")?))
         })
         .map_err(|e| format!("query: {e}"))?
         .collect::<Result<HashMap<_, _>, _>>()
@@ -449,10 +449,10 @@ pub async fn get_enabled_shared_mailboxes(
             .map_err(|e| format!("prepare: {e}"))?;
         stmt.query_map(rusqlite::params![aid], |row| {
             Ok(SharedMailboxSyncEntry {
-                mailbox_id: row.get(0)?,
-                display_name: row.get(1)?,
-                last_synced_at: row.get(2)?,
-                sync_error: row.get(3)?,
+                mailbox_id: row.get("mailbox_id")?,
+                display_name: row.get("display_name")?,
+                last_synced_at: row.get("last_synced_at")?,
+                sync_error: row.get("sync_error")?,
             })
         })
         .map_err(|e| format!("query: {e}"))?

@@ -4,20 +4,9 @@ use super::super::types::{
     BundleSummary, BundleSummarySingle, DbBundleRule, ThreadCategoryWithManual, ThreadInfoRow,
 };
 use super::load_recent_rule_categorized_threads;
-use rusqlite::{Row, params};
-
-fn row_to_bundle_rule(row: &Row<'_>) -> rusqlite::Result<DbBundleRule> {
-    Ok(DbBundleRule {
-        id: row.get("id")?,
-        account_id: row.get("account_id")?,
-        category: row.get("category")?,
-        is_bundled: row.get("is_bundled")?,
-        delivery_enabled: row.get("delivery_enabled")?,
-        delivery_schedule: row.get("delivery_schedule")?,
-        last_delivered_at: row.get("last_delivered_at")?,
-        created_at: row.get("created_at")?,
-    })
-}
+use crate::db::from_row::FromRow;
+use crate::db::{query_as, query_one};
+use rusqlite::params;
 
 pub async fn db_set_thread_category(
     db: &DbState,
@@ -44,13 +33,11 @@ pub async fn db_get_bundle_rules(
     account_id: String,
 ) -> Result<Vec<DbBundleRule>, String> {
     db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare("SELECT * FROM bundle_rules WHERE account_id = ?1")
-            .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id], row_to_bundle_rule)
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())
+        query_as::<DbBundleRule>(
+            conn,
+            "SELECT * FROM bundle_rules WHERE account_id = ?1",
+            &[&account_id],
+        )
     })
     .await
 }
@@ -89,7 +76,7 @@ pub async fn db_get_bundle_summaries(
         let mut stmt = conn.prepare(&count_sql).map_err(|e| e.to_string())?;
         let count_rows: Vec<(String, i64)> = stmt
             .query_map(param_refs.as_slice(), |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                Ok((row.get::<_, String>("category")?, row.get::<_, i64>("count")?))
             })
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
@@ -109,9 +96,9 @@ pub async fn db_get_bundle_summaries(
         let latest_rows: Vec<(String, Option<String>, Option<String>)> = stmt2
             .query_map(param_refs.as_slice(), |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>("category")?,
+                    row.get::<_, Option<String>>("subject")?,
+                    row.get::<_, Option<String>>("from_name")?,
                 ))
             })
             .map_err(|e| e.to_string())?
@@ -159,7 +146,7 @@ pub async fn db_get_held_thread_ids(
                 "SELECT thread_id FROM bundled_threads WHERE account_id = ?1 AND held_until > ?2",
             )
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id, now], |row| row.get::<_, String>(0))
+        stmt.query_map(params![account_id, now], |row| row.get::<_, String>("thread_id"))
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())
@@ -173,17 +160,11 @@ pub async fn db_get_bundle_rule(
     category: String,
 ) -> Result<Option<DbBundleRule>, String> {
     db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare("SELECT * FROM bundle_rules WHERE account_id = ?1 AND category = ?2")
-            .map_err(|e| e.to_string())?;
-        let mut rows = stmt
-            .query_map(params![account_id, category], row_to_bundle_rule)
-            .map_err(|e| e.to_string())?;
-        match rows.next() {
-            Some(Ok(rule)) => Ok(Some(rule)),
-            Some(Err(e)) => Err(e.to_string()),
-            None => Ok(None),
-        }
+        query_one::<DbBundleRule>(
+            conn,
+            "SELECT * FROM bundle_rules WHERE account_id = ?1 AND category = ?2",
+            &[&account_id, &category],
+        )
     })
     .await
 }
@@ -241,9 +222,9 @@ pub async fn db_is_thread_held(
     db.with_conn(move |conn| {
         let count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM bundled_threads WHERE account_id = ?1 AND thread_id = ?2 AND held_until > ?3",
+                "SELECT COUNT(*) AS cnt FROM bundled_threads WHERE account_id = ?1 AND thread_id = ?2 AND held_until > ?3",
                 params![account_id, thread_id, now],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .map_err(|e| e.to_string())?;
         Ok(count > 0)
@@ -293,13 +274,13 @@ pub async fn db_get_bundle_summary(
     db.with_conn(move |conn| {
         let count: i64 = conn
             .query_row(
-                "SELECT COUNT(DISTINCT t.id)
+                "SELECT COUNT(DISTINCT t.id) AS cnt
                      FROM threads t
                      JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id AND tl.label_id = 'INBOX'
                      JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id AND tc.category = ?2
                      WHERE t.account_id = ?1",
                 params![account_id, category],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .map_err(|e| e.to_string())?;
         let latest = conn
@@ -314,8 +295,8 @@ pub async fn db_get_bundle_summary(
                 params![account_id, category],
                 |row| {
                     Ok((
-                        row.get::<_, Option<String>>(0)?,
-                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>("subject")?,
+                        row.get::<_, Option<String>>("from_name")?,
                     ))
                 },
             )
@@ -339,7 +320,7 @@ pub async fn db_get_thread_category(
         let result = conn.query_row(
             "SELECT category FROM thread_categories WHERE account_id = ?1 AND thread_id = ?2",
             params![account_id, thread_id],
-            |row| row.get::<_, String>(0),
+            |row| row.get::<_, String>("category"),
         );
         match result {
             Ok(category) => Ok(Some(category)),
@@ -359,12 +340,7 @@ pub async fn db_get_thread_category_with_manual(
         let result = conn.query_row(
             "SELECT category, is_manual FROM thread_categories WHERE account_id = ?1 AND thread_id = ?2",
             params![account_id, thread_id],
-            |row| {
-                Ok(ThreadCategoryWithManual {
-                    category: row.get(0)?,
-                    is_manual: row.get::<_, i64>(1)? != 0,
-                })
-            },
+            ThreadCategoryWithManual::from_row,
         );
         match result {
             Ok(tc) => Ok(Some(tc)),
@@ -430,17 +406,10 @@ pub async fn db_get_uncategorized_inbox_thread_ids(
                  LIMIT ?2"
         );
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id, lim], |row| {
-            Ok(ThreadInfoRow {
-                id: row.get(0)?,
-                subject: row.get(1)?,
-                snippet: row.get(2)?,
-                from_address: row.get(3)?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+        stmt.query_map(params![account_id, lim], ThreadInfoRow::from_row)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
     })
     .await
 }

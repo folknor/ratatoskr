@@ -4,6 +4,7 @@ use rusqlite::params;
 
 use super::super::DbState;
 use super::super::types::{DbContactGroup, DbContactGroupMember};
+use crate::db::from_row::FromRow;
 
 pub async fn db_create_contact_group(
     db: &DbState,
@@ -73,7 +74,7 @@ pub async fn db_get_all_contact_groups(
                  ORDER BY g.name ASC",
             )
             .map_err(|e| e.to_string())?;
-        stmt.query_map([], row_to_contact_group)
+        stmt.query_map([], DbContactGroup::from_row)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())
@@ -93,7 +94,7 @@ pub async fn db_get_contact_group(
              FROM contact_groups g
              WHERE g.id = ?1",
             params![id],
-            row_to_contact_group,
+            DbContactGroup::from_row,
         )
         .map_err(|e| e.to_string())
     })
@@ -113,12 +114,7 @@ pub async fn db_get_contact_group_members(
                  ORDER BY member_type ASC, member_value ASC",
             )
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![group_id], |row| {
-            Ok(DbContactGroupMember {
-                member_type: row.get(0)?,
-                member_value: row.get(1)?,
-            })
-        })
+        stmt.query_map(params![group_id], DbContactGroupMember::from_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
@@ -201,7 +197,7 @@ pub async fn db_search_contact_groups(
                  LIMIT ?2",
             )
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![pattern, limit], row_to_contact_group)
+        stmt.query_map(params![pattern, limit], DbContactGroup::from_row)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())
@@ -246,7 +242,7 @@ fn expand_recursive(
 
     let members: Vec<(String, String)> = stmt
         .query_map(params![group_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((row.get::<_, String>("member_type")?, row.get::<_, String>("member_value")?))
         })
         .map_err(|e| format!("query expand: {e}"))?
         .collect::<Result<Vec<_>, _>>()
@@ -269,12 +265,3 @@ fn expand_recursive(
     Ok(())
 }
 
-fn row_to_contact_group(row: &rusqlite::Row<'_>) -> rusqlite::Result<DbContactGroup> {
-    Ok(DbContactGroup {
-        id: row.get(0)?,
-        name: row.get(1)?,
-        member_count: row.get(2)?,
-        created_at: row.get(3)?,
-        updated_at: row.get(4)?,
-    })
-}

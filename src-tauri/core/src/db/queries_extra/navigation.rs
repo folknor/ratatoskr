@@ -5,8 +5,9 @@ use crate::db::queries::get_labels;
 use crate::db::types::{AccountScope, DbSmartFolder};
 use crate::provider::folder_roles::SYSTEM_FOLDER_ROLES;
 
+use crate::db::from_row::FromRow;
+
 use super::scoped_queries::{get_draft_count_with_local, get_unread_counts_by_folder};
-use super::row_to_smart_folder;
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -162,7 +163,7 @@ fn query_smart_folders_sync(
                      ORDER BY sort_order, created_at",
                 )
                 .map_err(|e| e.to_string())?;
-            stmt.query_map(rusqlite::params![account_id], row_to_smart_folder)
+            stmt.query_map(rusqlite::params![account_id], DbSmartFolder::from_row)
                 .map_err(|e| e.to_string())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| e.to_string())
@@ -174,7 +175,7 @@ fn query_smart_folders_sync(
                      ORDER BY sort_order, created_at",
                 )
                 .map_err(|e| e.to_string())?;
-            stmt.query_map([], row_to_smart_folder)
+            stmt.query_map([], DbSmartFolder::from_row)
                 .map_err(|e| e.to_string())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| e.to_string())

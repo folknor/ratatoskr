@@ -1,13 +1,14 @@
 use super::super::DbState;
 use super::super::types::{DbFolderSyncState, DbWritingStyleProfile, UncachedAttachment};
+use crate::db::{query_as, query_one};
 use rusqlite::params;
 
 pub async fn db_attachment_cache_total_size(db: &DbState) -> Result<i64, String> {
     db.with_conn(move |conn| {
         conn.query_row(
-            "SELECT COALESCE(SUM(cache_size), 0) FROM attachments WHERE cached_at IS NOT NULL",
+            "SELECT COALESCE(SUM(cache_size), 0) AS total FROM attachments WHERE cached_at IS NOT NULL",
             [],
-            |row| row.get(0),
+            |row| row.get("total"),
         )
         .map_err(|e| e.to_string())
     })
@@ -21,32 +22,19 @@ pub async fn db_uncached_recent_attachments(
     limit: i64,
 ) -> Result<Vec<UncachedAttachment>, String> {
     db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT a.id, a.message_id, a.account_id, a.size, a.gmail_attachment_id, a.imap_part_id
-                     FROM attachments a
-                     INNER JOIN messages m ON m.account_id = a.account_id AND m.id = a.message_id
-                     WHERE a.cached_at IS NULL
-                       AND a.is_inline = 0
-                       AND a.size IS NOT NULL AND a.size <= ?1
-                       AND m.date >= ?2
-                     ORDER BY m.date DESC
-                     LIMIT ?3",
-            )
-            .map_err(|e| e.to_string())?;
-        stmt.query_map(params![max_size, cutoff_epoch, limit], |row| {
-            Ok(UncachedAttachment {
-                id: row.get("id")?,
-                message_id: row.get("message_id")?,
-                account_id: row.get("account_id")?,
-                size: row.get("size")?,
-                gmail_attachment_id: row.get("gmail_attachment_id")?,
-                imap_part_id: row.get("imap_part_id")?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+        query_as::<UncachedAttachment>(
+            conn,
+            "SELECT a.id, a.message_id, a.account_id, a.size, a.gmail_attachment_id, a.imap_part_id
+                 FROM attachments a
+                 INNER JOIN messages m ON m.account_id = a.account_id AND m.id = a.message_id
+                 WHERE a.cached_at IS NULL
+                   AND a.is_inline = 0
+                   AND a.size IS NOT NULL AND a.size <= ?1
+                   AND m.date >= ?2
+                 ORDER BY m.date DESC
+                 LIMIT ?3",
+            &[&max_size, &cutoff_epoch, &limit],
+        )
     })
     .await
 }
@@ -63,7 +51,7 @@ pub async fn db_get_ai_cache(
             .map_err(|e| e.to_string())?;
         let mut rows = stmt
             .query_map(params![account_id, thread_id, cache_type], |row| {
-                row.get::<_, String>(0)
+                row.get::<_, String>("content")
             })
             .map_err(|e| e.to_string())?;
         match rows.next() {
@@ -126,7 +114,7 @@ pub async fn db_get_cached_scan_result(
             )
             .map_err(|e| e.to_string())?;
         let mut rows = stmt
-            .query_map(params![account_id, message_id], |row| row.get::<_, String>(0))
+            .query_map(params![account_id, message_id], |row| row.get::<_, String>("result_json"))
             .map_err(|e| e.to_string())?;
         match rows.next() {
             Some(Ok(val)) => Ok(Some(val)),
@@ -171,29 +159,12 @@ pub async fn db_get_writing_style_profile(
     account_id: String,
 ) -> Result<Option<DbWritingStyleProfile>, String> {
     db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, account_id, profile_text, sample_count, created_at, updated_at
-                     FROM writing_style_profiles WHERE account_id = ?1",
-            )
-            .map_err(|e| e.to_string())?;
-        let mut rows = stmt
-            .query_map(params![account_id], |row| {
-                Ok(DbWritingStyleProfile {
-                    id: row.get("id")?,
-                    account_id: row.get("account_id")?,
-                    profile_text: row.get("profile_text")?,
-                    sample_count: row.get("sample_count")?,
-                    created_at: row.get("created_at")?,
-                    updated_at: row.get("updated_at")?,
-                })
-            })
-            .map_err(|e| e.to_string())?;
-        match rows.next() {
-            Some(Ok(profile)) => Ok(Some(profile)),
-            Some(Err(e)) => Err(e.to_string()),
-            None => Ok(None),
-        }
+        query_one::<DbWritingStyleProfile>(
+            conn,
+            "SELECT id, account_id, profile_text, sample_count, created_at, updated_at
+                 FROM writing_style_profiles WHERE account_id = ?1",
+            &[&account_id],
+        )
     })
     .await
 }
@@ -240,29 +211,12 @@ pub async fn db_get_folder_sync_state(
     folder_path: String,
 ) -> Result<Option<DbFolderSyncState>, String> {
     db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT account_id, folder_path, uidvalidity, last_uid, modseq, last_sync_at
-                     FROM folder_sync_state WHERE account_id = ?1 AND folder_path = ?2",
-            )
-            .map_err(|e| e.to_string())?;
-        let mut rows = stmt
-            .query_map(params![account_id, folder_path], |row| {
-                Ok(DbFolderSyncState {
-                    account_id: row.get("account_id")?,
-                    folder_path: row.get("folder_path")?,
-                    uidvalidity: row.get("uidvalidity")?,
-                    last_uid: row.get("last_uid")?,
-                    modseq: row.get("modseq")?,
-                    last_sync_at: row.get("last_sync_at")?,
-                })
-            })
-            .map_err(|e| e.to_string())?;
-        match rows.next() {
-            Some(Ok(state)) => Ok(Some(state)),
-            Some(Err(e)) => Err(e.to_string()),
-            None => Ok(None),
-        }
+        query_one::<DbFolderSyncState>(
+            conn,
+            "SELECT account_id, folder_path, uidvalidity, last_uid, modseq, last_sync_at
+                 FROM folder_sync_state WHERE account_id = ?1 AND folder_path = ?2",
+            &[&account_id, &folder_path],
+        )
     })
     .await
 }
@@ -326,25 +280,12 @@ pub async fn db_get_all_folder_sync_states(
     account_id: String,
 ) -> Result<Vec<DbFolderSyncState>, String> {
     db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT account_id, folder_path, uidvalidity, last_uid, modseq, last_sync_at
-                     FROM folder_sync_state WHERE account_id = ?1 ORDER BY folder_path ASC",
-            )
-            .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id], |row| {
-            Ok(DbFolderSyncState {
-                account_id: row.get("account_id")?,
-                folder_path: row.get("folder_path")?,
-                uidvalidity: row.get("uidvalidity")?,
-                last_uid: row.get("last_uid")?,
-                modseq: row.get("modseq")?,
-                last_sync_at: row.get("last_sync_at")?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+        query_as::<DbFolderSyncState>(
+            conn,
+            "SELECT account_id, folder_path, uidvalidity, last_uid, modseq, last_sync_at
+                 FROM folder_sync_state WHERE account_id = ?1 ORDER BY folder_path ASC",
+            &[&account_id],
+        )
     })
     .await
 }

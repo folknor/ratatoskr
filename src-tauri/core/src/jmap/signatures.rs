@@ -53,9 +53,9 @@ pub async fn sync_jmap_identity_signatures(
         // Check whether the account already has a default signature.
         let has_default: bool = tx
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM signatures WHERE account_id = ?1 AND is_default = 1)",
+                "SELECT EXISTS(SELECT 1 FROM signatures WHERE account_id = ?1 AND is_default = 1) AS has_default",
                 rusqlite::params![aid],
-                |row| row.get(0),
+                |row| row.get("has_default"),
             )
             .unwrap_or(false);
 

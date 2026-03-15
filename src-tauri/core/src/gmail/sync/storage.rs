@@ -242,7 +242,7 @@ fn insert_reactions(
             .query_row(
                 "SELECT id FROM messages WHERE message_id_header = ?1 AND account_id = ?2 LIMIT 1",
                 rusqlite::params![in_reply_to, account_id],
-                |row| row.get(0),
+                |row| row.get("id"),
             )
             .ok();
 
@@ -287,7 +287,7 @@ fn sync_message_categories(
         .map_err(|e| format!("prepare category lookup: {e}"))?;
     let category_map: std::collections::HashMap<String, String> = stmt
         .query_map(rusqlite::params![account_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((row.get::<_, String>("provider_id")?, row.get::<_, String>("display_name")?))
         })
         .map_err(|e| format!("query categories: {e}"))?
         .filter_map(std::result::Result::ok)

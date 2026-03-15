@@ -143,8 +143,8 @@ impl BodyStoreState {
 
             let result = stmt
                 .query_row(params![message_id], |row| {
-                    let html_blob: Option<Vec<u8>> = row.get(0)?;
-                    let text_blob: Option<Vec<u8>> = row.get(1)?;
+                    let html_blob: Option<Vec<u8>> = row.get("body_html")?;
+                    let text_blob: Option<Vec<u8>> = row.get("body_text")?;
                     Ok((html_blob, text_blob))
                 })
                 .ok();
@@ -195,9 +195,9 @@ impl BodyStoreState {
 
                 let rows = stmt
                     .query_map(param_refs.as_slice(), |row| {
-                        let mid: String = row.get(0)?;
-                        let html_blob: Option<Vec<u8>> = row.get(1)?;
-                        let text_blob: Option<Vec<u8>> = row.get(2)?;
+                        let mid: String = row.get("message_id")?;
+                        let html_blob: Option<Vec<u8>> = row.get("body_html")?;
+                        let text_blob: Option<Vec<u8>> = row.get("body_text")?;
                         Ok((mid, html_blob, text_blob))
                     })
                     .map_err(|e| format!("query batch get: {e}"))?;
@@ -268,22 +268,22 @@ impl BodyStoreState {
     pub async fn stats(&self) -> Result<BodyStoreStats, String> {
         self.with_conn(|conn| {
             let count: i64 = conn
-                .query_row("SELECT COUNT(*) FROM bodies", [], |row| row.get(0))
+                .query_row("SELECT COUNT(*) AS cnt FROM bodies", [], |row| row.get("cnt"))
                 .map_err(|e| format!("count: {e}"))?;
 
             let total_html_bytes: i64 = conn
                 .query_row(
-                    "SELECT COALESCE(SUM(LENGTH(body_html)), 0) FROM bodies",
+                    "SELECT COALESCE(SUM(LENGTH(body_html)), 0) AS total FROM bodies",
                     [],
-                    |row| row.get(0),
+                    |row| row.get("total"),
                 )
                 .map_err(|e| format!("html size: {e}"))?;
 
             let total_text_bytes: i64 = conn
                 .query_row(
-                    "SELECT COALESCE(SUM(LENGTH(body_text)), 0) FROM bodies",
+                    "SELECT COALESCE(SUM(LENGTH(body_text)), 0) AS total FROM bodies",
                     [],
-                    |row| row.get(0),
+                    |row| row.get("total"),
                 )
                 .map_err(|e| format!("text size: {e}"))?;
 

@@ -1,5 +1,6 @@
 use super::super::DbState;
 use super::super::types::{DbAllowlistEntry, DbNotificationVip, DbPhishingAllowlistEntry};
+use crate::db::query_as;
 use rusqlite::params;
 
 pub async fn db_add_to_allowlist(
@@ -49,7 +50,7 @@ pub async fn db_get_allowlisted_senders(
             let param_refs: Vec<&dyn rusqlite::types::ToSql> =
                 param_values.iter().map(AsRef::as_ref).collect();
             let rows = stmt
-                .query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))
+                .query_map(param_refs.as_slice(), |row| row.get::<_, String>("sender_address"))
                 .map_err(|e| e.to_string())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| e.to_string())?;
@@ -103,9 +104,9 @@ pub async fn db_is_vip_sender(
     db.with_conn(move |conn| {
         let count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM notification_vips WHERE account_id = ?1 AND email_address = ?2",
+                "SELECT COUNT(*) AS cnt FROM notification_vips WHERE account_id = ?1 AND email_address = ?2",
                 params![account_id, email],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .map_err(|e| e.to_string())?;
         Ok(count > 0)
@@ -118,7 +119,7 @@ pub async fn db_get_vip_senders(db: &DbState, account_id: String) -> Result<Vec<
         let mut stmt = conn
             .prepare("SELECT email_address FROM notification_vips WHERE account_id = ?1")
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id], |row| row.get::<_, String>(0))
+        stmt.query_map(params![account_id], |row| row.get::<_, String>("email_address"))
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())
@@ -131,25 +132,13 @@ pub async fn db_get_all_vip_senders(
     account_id: String,
 ) -> Result<Vec<DbNotificationVip>, String> {
     db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, account_id, email_address, display_name, created_at
-                     FROM notification_vips WHERE account_id = ?1
-                     ORDER BY display_name, email_address",
-            )
-            .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id], |row| {
-            Ok(DbNotificationVip {
-                id: row.get("id")?,
-                account_id: row.get("account_id")?,
-                email_address: row.get("email_address")?,
-                display_name: row.get("display_name")?,
-                created_at: row.get("created_at")?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+        query_as::<DbNotificationVip>(
+            conn,
+            "SELECT id, account_id, email_address, display_name, created_at
+                 FROM notification_vips WHERE account_id = ?1
+                 ORDER BY display_name, email_address",
+            &[&account_id],
+        )
     })
     .await
 }
@@ -163,9 +152,9 @@ pub async fn db_is_allowlisted(
     db.with_conn(move |conn| {
         let count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM image_allowlist WHERE account_id = ?1 AND sender_address = ?2",
+                "SELECT COUNT(*) AS cnt FROM image_allowlist WHERE account_id = ?1 AND sender_address = ?2",
                 params![account_id, sender_address],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .map_err(|e| e.to_string())?;
         Ok(count > 0)
@@ -195,24 +184,13 @@ pub async fn db_get_allowlist_for_account(
     account_id: String,
 ) -> Result<Vec<DbAllowlistEntry>, String> {
     db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, account_id, sender_address, created_at
-                     FROM image_allowlist WHERE account_id = ?1
-                     ORDER BY sender_address",
-            )
-            .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id], |row| {
-            Ok(DbAllowlistEntry {
-                id: row.get("id")?,
-                account_id: row.get("account_id")?,
-                sender_address: row.get("sender_address")?,
-                created_at: row.get("created_at")?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+        query_as::<DbAllowlistEntry>(
+            conn,
+            "SELECT id, account_id, sender_address, created_at
+                 FROM image_allowlist WHERE account_id = ?1
+                 ORDER BY sender_address",
+            &[&account_id],
+        )
     })
     .await
 }
@@ -226,9 +204,9 @@ pub async fn db_is_phishing_allowlisted(
     db.with_conn(move |conn| {
         let count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM phishing_allowlist WHERE account_id = ?1 AND sender_address = ?2",
+                "SELECT COUNT(*) AS cnt FROM phishing_allowlist WHERE account_id = ?1 AND sender_address = ?2",
                 params![account_id, sender_address],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .map_err(|e| e.to_string())?;
         Ok(count > 0)
@@ -276,23 +254,13 @@ pub async fn db_get_phishing_allowlist(
     account_id: String,
 ) -> Result<Vec<DbPhishingAllowlistEntry>, String> {
     db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, sender_address, created_at
-                     FROM phishing_allowlist WHERE account_id = ?1
-                     ORDER BY sender_address",
-            )
-            .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id], |row| {
-            Ok(DbPhishingAllowlistEntry {
-                id: row.get("id")?,
-                sender_address: row.get("sender_address")?,
-                created_at: row.get("created_at")?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+        query_as::<DbPhishingAllowlistEntry>(
+            conn,
+            "SELECT id, sender_address, created_at
+                 FROM phishing_allowlist WHERE account_id = ?1
+                 ORDER BY sender_address",
+            &[&account_id],
+        )
     })
     .await
 }

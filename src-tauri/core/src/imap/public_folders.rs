@@ -304,7 +304,7 @@ async fn load_sync_state(
                  FROM public_folder_sync_state \
                  WHERE account_id = ?1 AND folder_id = ?2",
                 rusqlite::params![account_id, folder_id],
-                |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?)),
+                |row| Ok((row.get::<_, Option<i64>>("last_sync_timestamp")?, row.get::<_, Option<i64>>("last_full_scan_at")?)),
             )
             .ok();
 
@@ -350,7 +350,7 @@ async fn load_sync_depth_days(
                 "SELECT sync_depth_days FROM public_folder_pins \
                  WHERE account_id = ?1 AND folder_id = ?2",
                 rusqlite::params![account_id, folder_id],
-                |row| row.get::<_, i32>(0),
+                |row| row.get::<_, i32>("sync_depth_days"),
             )
             .unwrap_or(30);
         Ok(depth)
@@ -713,7 +713,7 @@ mod tests {
                 "SELECT display_name, total_count FROM public_folders \
                  WHERE account_id = 'acc1' AND folder_id = 'Shared/team'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get("display_name")?, row.get("total_count")?)),
             )
             .expect("query");
         assert_eq!(name, "team");
@@ -738,7 +738,7 @@ mod tests {
                 "SELECT display_name, total_count FROM public_folders \
                  WHERE account_id = 'acc1' AND folder_id = 'Shared/team'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get("display_name")?, row.get("total_count")?)),
             )
             .expect("query2");
         assert_eq!(name2, "team");
@@ -747,9 +747,9 @@ mod tests {
         // Should still be 1 row
         let count: i32 = conn
             .query_row(
-                "SELECT COUNT(*) FROM public_folders WHERE account_id = 'acc1'",
+                "SELECT COUNT(*) AS cnt FROM public_folders WHERE account_id = 'acc1'",
                 [],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .expect("count");
         assert_eq!(count, 1);
@@ -790,7 +790,7 @@ mod tests {
                 "SELECT can_read, can_create_items, can_modify, can_delete \
                  FROM public_folders WHERE account_id = 'acc1' AND folder_id = 'Shared/team'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| Ok((row.get("can_read")?, row.get("can_create_items")?, row.get("can_modify")?, row.get("can_delete")?)),
             )
             .expect("query rights");
 

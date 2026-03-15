@@ -113,27 +113,27 @@ async fn load_account_record(
              oauth_client_secret, oauth_token_url FROM accounts WHERE id = ?1",
             rusqlite::params![aid],
             |row| {
-                let accept_invalid_certs: Option<i64> = row.get(10)?;
+                let accept_invalid_certs: Option<i64> = row.get("accept_invalid_certs")?;
                 Ok(AccountConfigRecord {
-                    email: row.get(0)?,
-                    imap_host: row.get(1)?,
-                    imap_port: row.get(2)?,
-                    imap_security: row.get(3)?,
-                    smtp_host: row.get(4)?,
-                    smtp_port: row.get(5)?,
-                    smtp_security: row.get(6)?,
-                    imap_username: row.get(7)?,
-                    imap_password: row.get(8)?,
+                    email: row.get("email")?,
+                    imap_host: row.get("imap_host")?,
+                    imap_port: row.get("imap_port")?,
+                    imap_security: row.get("imap_security")?,
+                    smtp_host: row.get("smtp_host")?,
+                    smtp_port: row.get("smtp_port")?,
+                    smtp_security: row.get("smtp_security")?,
+                    imap_username: row.get("imap_username")?,
+                    imap_password: row.get("imap_password")?,
                     auth_method: row
-                        .get::<_, Option<String>>(9)?
+                        .get::<_, Option<String>>("auth_method")?
                         .unwrap_or_else(|| "password".to_string()),
                     accept_invalid_certs: accept_invalid_certs.unwrap_or(0) != 0,
-                    access_token: row.get(11)?,
-                    token_expires_at: row.get(12)?,
-                    oauth_provider: row.get(13)?,
-                    oauth_client_id: row.get(14)?,
-                    oauth_client_secret: row.get(15)?,
-                    oauth_token_url: row.get(16)?,
+                    access_token: row.get("access_token")?,
+                    token_expires_at: row.get("token_expires_at")?,
+                    oauth_provider: row.get("oauth_provider")?,
+                    oauth_client_id: row.get("oauth_client_id")?,
+                    oauth_client_secret: row.get("oauth_client_secret")?,
+                    oauth_token_url: row.get("oauth_token_url")?,
                 })
             },
         )
@@ -181,9 +181,9 @@ async fn ensure_oauth_access_token(
                 rusqlite::params![aid],
                 |row| {
                     Ok((
-                        row.get::<_, Option<String>>(0)?,
-                        row.get::<_, Option<i64>>(1)?,
-                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>("access_token")?,
+                        row.get::<_, Option<i64>>("token_expires_at")?,
+                        row.get::<_, Option<String>>("refresh_token")?,
                     ))
                 },
             )

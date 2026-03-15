@@ -95,9 +95,9 @@ pub(super) async fn delete_messages(ctx: &SyncCtx<'_>, message_ids: &[&str]) -> 
             for tid in &affected_threads {
                 let remaining: i64 = tx
                     .query_row(
-                        "SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND account_id = ?2",
+                        "SELECT COUNT(*) AS cnt FROM messages WHERE thread_id = ?1 AND account_id = ?2",
                         rusqlite::params![tid, aid],
-                        |row| row.get(0),
+                        |row| row.get("cnt"),
                     )
                     .map_err(|e| format!("count remaining: {e}"))?;
 

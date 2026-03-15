@@ -1,47 +1,7 @@
 use super::super::DbState;
 use super::super::types::{DbCalendar, DbCalendarEvent};
-use rusqlite::{Row, params};
-
-fn row_to_calendar(row: &Row<'_>) -> rusqlite::Result<DbCalendar> {
-    Ok(DbCalendar {
-        id: row.get("id")?,
-        account_id: row.get("account_id")?,
-        provider: row.get("provider")?,
-        remote_id: row.get("remote_id")?,
-        display_name: row.get("display_name")?,
-        color: row.get("color")?,
-        is_primary: row.get("is_primary")?,
-        is_visible: row.get("is_visible")?,
-        sync_token: row.get("sync_token")?,
-        ctag: row.get("ctag")?,
-        created_at: row.get("created_at")?,
-        updated_at: row.get("updated_at")?,
-    })
-}
-
-fn row_to_calendar_event(row: &Row<'_>) -> rusqlite::Result<DbCalendarEvent> {
-    Ok(DbCalendarEvent {
-        id: row.get("id")?,
-        account_id: row.get("account_id")?,
-        google_event_id: row.get("google_event_id")?,
-        summary: row.get("summary")?,
-        description: row.get("description")?,
-        location: row.get("location")?,
-        start_time: row.get("start_time")?,
-        end_time: row.get("end_time")?,
-        is_all_day: row.get("is_all_day")?,
-        status: row.get("status")?,
-        organizer_email: row.get("organizer_email")?,
-        attendees_json: row.get("attendees_json")?,
-        html_link: row.get("html_link")?,
-        updated_at: row.get("updated_at")?,
-        calendar_id: row.get("calendar_id")?,
-        remote_event_id: row.get("remote_event_id")?,
-        etag: row.get("etag")?,
-        ical_data: row.get("ical_data")?,
-        uid: row.get("uid")?,
-    })
-}
+use crate::db::from_row::FromRow;
+use rusqlite::params;
 
 pub async fn db_upsert_calendar(
     db: &DbState,
@@ -66,7 +26,7 @@ pub async fn db_upsert_calendar(
             .query_row(
                 "SELECT id FROM calendars WHERE account_id = ?1 AND remote_id = ?2",
                 params![account_id, remote_id],
-                |row| row.get(0),
+                |row| row.get("id"),
             )
             .map_err(|e| e.to_string())?;
         Ok(actual_id)
@@ -85,7 +45,7 @@ pub async fn db_get_calendars_for_account(
                      ORDER BY is_primary DESC, display_name ASC",
             )
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id], row_to_calendar)
+        stmt.query_map(params![account_id], DbCalendar::from_row)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())
@@ -104,7 +64,7 @@ pub async fn db_get_visible_calendars(
                      ORDER BY is_primary DESC, display_name ASC",
             )
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id], row_to_calendar)
+        stmt.query_map(params![account_id], DbCalendar::from_row)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())
@@ -168,7 +128,7 @@ pub async fn db_get_calendar_by_id(
         let result = conn.query_row(
             "SELECT * FROM calendars WHERE id = ?1",
             params![calendar_id],
-            row_to_calendar,
+            DbCalendar::from_row,
         );
         match result {
             Ok(calendar) => Ok(Some(calendar)),
@@ -234,7 +194,7 @@ pub async fn db_get_calendar_events_in_range(
             .map_err(|e| e.to_string())?;
         stmt.query_map(
             params![account_id, start_time, end_time],
-            row_to_calendar_event,
+            DbCalendarEvent::from_row,
         )
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
@@ -276,7 +236,7 @@ pub async fn db_get_calendar_events_in_range_multi(
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             param_values.iter().map(AsRef::as_ref).collect();
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-        stmt.query_map(param_refs.as_slice(), row_to_calendar_event)
+        stmt.query_map(param_refs.as_slice(), DbCalendarEvent::from_row)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())
@@ -308,7 +268,7 @@ pub async fn db_get_event_by_remote_id(
         let result = conn.query_row(
             "SELECT * FROM calendar_events WHERE calendar_id = ?1 AND remote_event_id = ?2",
             params![calendar_id, remote_event_id],
-            row_to_calendar_event,
+            DbCalendarEvent::from_row,
         );
         match result {
             Ok(event) => Ok(Some(event)),

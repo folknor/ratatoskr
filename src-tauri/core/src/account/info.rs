@@ -31,10 +31,10 @@ pub fn get_caldav_connection_info(
             rusqlite::params![account_id],
             |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>("email")?,
+                    row.get::<_, Option<String>>("caldav_url")?,
+                    row.get::<_, Option<String>>("caldav_username")?,
+                    row.get::<_, Option<String>>("caldav_password")?,
                 ))
             },
         )
@@ -78,12 +78,12 @@ pub fn get_basic_info(
         rusqlite::params![account_id],
         |row| {
             Ok(AccountBasicInfo {
-                id: row.get(0)?,
-                email: row.get(1)?,
-                display_name: row.get(2)?,
-                avatar_url: row.get(3)?,
-                provider: row.get(4)?,
-                is_active: row.get::<_, i64>(5)? != 0,
+                id: row.get("id")?,
+                email: row.get("email")?,
+                display_name: row.get("display_name")?,
+                avatar_url: row.get("avatar_url")?,
+                provider: row.get("provider")?,
+                is_active: row.get::<_, i64>("is_active")? != 0,
             })
         },
     )
@@ -100,12 +100,12 @@ pub fn list_basic_info(conn: &Connection) -> Result<Vec<AccountBasicInfo>, Strin
         .map_err(|e| format!("prepare account list: {e}"))?;
     stmt.query_map([], |row| {
         Ok(AccountBasicInfo {
-            id: row.get(0)?,
-            email: row.get(1)?,
-            display_name: row.get(2)?,
-            avatar_url: row.get(3)?,
-            provider: row.get(4)?,
-            is_active: row.get::<_, i64>(5)? != 0,
+            id: row.get("id")?,
+            email: row.get("email")?,
+            display_name: row.get("display_name")?,
+            avatar_url: row.get("avatar_url")?,
+            provider: row.get("provider")?,
+            is_active: row.get::<_, i64>("is_active")? != 0,
         })
     })
     .map_err(|e| format!("query account list: {e}"))?
@@ -123,7 +123,7 @@ pub fn get_caldav_settings_info(
          FROM accounts WHERE id = ?1",
         rusqlite::params![account_id],
         |row| {
-            let password_raw: Option<String> = row.get(4)?;
+            let password_raw: Option<String> = row.get("caldav_password")?;
             let caldav_password = password_raw.map(|raw| {
                 if is_encrypted(&raw) {
                     decrypt_value(encryption_key, &raw).unwrap_or(raw)
@@ -133,12 +133,12 @@ pub fn get_caldav_settings_info(
             });
 
             Ok(AccountCaldavSettingsInfo {
-                id: row.get(0)?,
-                email: row.get(1)?,
-                caldav_url: row.get(2)?,
-                caldav_username: row.get(3)?,
+                id: row.get("id")?,
+                email: row.get("email")?,
+                caldav_url: row.get("caldav_url")?,
+                caldav_username: row.get("caldav_username")?,
                 caldav_password,
-                calendar_provider: row.get(5)?,
+                calendar_provider: row.get("calendar_provider")?,
             })
         },
     )
@@ -158,9 +158,9 @@ pub fn get_oauth_credentials(
         rusqlite::params![account_id],
         |row| {
             Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, Option<String>>(2)?,
+                row.get::<_, String>("provider")?,
+                row.get::<_, Option<String>>("oauth_client_id")?,
+                row.get::<_, Option<String>>("oauth_client_secret")?,
             ))
         },
     )

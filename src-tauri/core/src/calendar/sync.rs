@@ -22,9 +22,9 @@ pub async fn calendar_sync_account_impl(
                     params![account_id],
                     |row| {
                         Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, Option<String>>(1)?,
-                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, String>("provider")?,
+                            row.get::<_, Option<String>>("calendar_provider")?,
+                            row.get::<_, Option<String>>("caldav_url")?,
                         ))
                     },
                 )
@@ -79,7 +79,7 @@ pub async fn upsert_discovered_calendars_impl(
                 .query_row(
                     "SELECT id FROM calendars WHERE account_id = ?1 AND remote_id = ?2",
                     params![&account_id, &calendar.remote_id],
-                    |row| row.get(0),
+                    |row| row.get("id"),
                 )
                 .optional()
                 .map_err(|e| e.to_string())?;
@@ -120,7 +120,7 @@ pub async fn apply_calendar_sync_result_impl(
             .query_row(
                 "SELECT id FROM calendars WHERE account_id = ?1 AND remote_id = ?2",
                 params![account_id, calendar_remote_id],
-                |row| row.get(0),
+                |row| row.get("id"),
             )
             .map_err(|e| e.to_string())?;
 
@@ -173,7 +173,7 @@ pub async fn upsert_provider_events_impl(
             .query_row(
                 "SELECT id FROM calendars WHERE account_id = ?1 AND remote_id = ?2",
                 params![account_id, calendar_remote_id],
-                |row| row.get(0),
+                |row| row.get("id"),
             )
             .optional()
             .map_err(|e| e.to_string())?
@@ -205,7 +205,7 @@ pub async fn delete_provider_event_impl(
             .query_row(
                 "SELECT id FROM calendars WHERE account_id = ?1 AND remote_id = ?2",
                 params![account_id, calendar_remote_id],
-                |row| row.get(0),
+                |row| row.get("id"),
             )
             .map_err(|e| e.to_string())?;
 

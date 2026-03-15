@@ -146,8 +146,8 @@ impl InlineImageStoreState {
                     "SELECT data, mime_type FROM inline_images WHERE content_hash = ?1",
                     params![content_hash],
                     |row| {
-                        let data: Vec<u8> = row.get(0)?;
-                        let mime_type: String = row.get(1)?;
+                        let data: Vec<u8> = row.get("data")?;
+                        let mime_type: String = row.get("mime_type")?;
                         Ok((data, mime_type))
                     },
                 )
@@ -161,13 +161,13 @@ impl InlineImageStoreState {
     pub async fn stats(&self) -> Result<InlineImageStats, String> {
         self.with_conn(|conn| {
             let count: i64 = conn
-                .query_row("SELECT COUNT(*) FROM inline_images", [], |row| row.get(0))
+                .query_row("SELECT COUNT(*) AS cnt FROM inline_images", [], |row| row.get("cnt"))
                 .map_err(|e| format!("count: {e}"))?;
             let total_bytes: i64 = conn
                 .query_row(
-                    "SELECT COALESCE(SUM(size), 0) FROM inline_images",
+                    "SELECT COALESCE(SUM(size), 0) AS total FROM inline_images",
                     [],
-                    |row| row.get(0),
+                    |row| row.get("total"),
                 )
                 .map_err(|e| format!("total size: {e}"))?;
 
@@ -229,9 +229,9 @@ impl InlineImageStoreState {
         self.with_conn(move |conn| {
             let total_bytes: i64 = conn
                 .query_row(
-                    "SELECT COALESCE(SUM(size), 0) FROM inline_images",
+                    "SELECT COALESCE(SUM(size), 0) AS total FROM inline_images",
                     [],
-                    |row| row.get(0),
+                    |row| row.get("total"),
                 )
                 .map_err(|e| format!("inline image total size: {e}"))?;
 
@@ -252,7 +252,7 @@ impl InlineImageStoreState {
                 .map_err(|e| format!("prepare inline image prune query: {e}"))?;
             let rows = stmt
                 .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                    Ok((row.get::<_, String>("content_hash")?, row.get::<_, i64>("size")?))
                 })
                 .map_err(|e| format!("query inline images for pruning: {e}"))?
                 .collect::<Result<Vec<_>, _>>()
@@ -302,10 +302,10 @@ impl InlineImageStoreState {
             let remaining_refs: i64 = db
                 .with_conn(move |conn| {
                     conn.query_row(
-                        "SELECT COUNT(*) FROM attachments
+                        "SELECT COUNT(*) AS cnt FROM attachments
                          WHERE is_inline = 1 AND content_hash = ?1",
                         params![hash_for_query],
-                        |row| row.get(0),
+                        |row| row.get("cnt"),
                     )
                     .map_err(|e| format!("count inline image refs: {e}"))
                 })
@@ -337,7 +337,7 @@ pub fn collect_inline_hashes_for_account(
         )
         .map_err(|e| format!("prepare inline hash query: {e}"))?;
     let hashes = stmt
-        .query_map(params![account_id], |row| row.get::<_, String>(0))
+        .query_map(params![account_id], |row| row.get::<_, String>("content_hash"))
         .map_err(|e| format!("query inline hashes: {e}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("collect inline hashes: {e}"))?;

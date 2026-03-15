@@ -140,7 +140,7 @@ pub async fn db_pending_ops_increment_retry(db: &DbState, id: String) -> Result<
             .query_row(
                 "SELECT retry_count, max_retries FROM pending_operations WHERE id = ?1",
                 params![id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get("retry_count")?, row.get("max_retries")?)),
             )
             .map_err(|e| format!("get retry info: {e}"))?;
 
@@ -182,16 +182,16 @@ pub async fn db_pending_ops_count(db: &DbState, account_id: Option<String>) -> R
         .with_conn(move |conn| {
             if let Some(ref aid) = account_id {
                 conn.query_row(
-                    "SELECT COUNT(*) FROM pending_operations WHERE account_id = ?1 AND status = 'pending'",
+                    "SELECT COUNT(*) AS cnt FROM pending_operations WHERE account_id = ?1 AND status = 'pending'",
                     params![aid],
-                    |row| row.get(0),
+                    |row| row.get("cnt"),
                 )
                 .map_err(|e| e.to_string())
             } else {
                 conn.query_row(
-                    "SELECT COUNT(*) FROM pending_operations WHERE status = 'pending'",
+                    "SELECT COUNT(*) AS cnt FROM pending_operations WHERE status = 'pending'",
                     [],
-                    |row| row.get(0),
+                    |row| row.get("cnt"),
                 )
                 .map_err(|e| e.to_string())
             }
@@ -207,16 +207,16 @@ pub async fn db_pending_ops_failed_count(
         .with_conn(move |conn| {
             if let Some(ref aid) = account_id {
                 conn.query_row(
-                    "SELECT COUNT(*) FROM pending_operations WHERE account_id = ?1 AND status = 'failed'",
+                    "SELECT COUNT(*) AS cnt FROM pending_operations WHERE account_id = ?1 AND status = 'failed'",
                     params![aid],
-                    |row| row.get(0),
+                    |row| row.get("cnt"),
                 )
                 .map_err(|e| e.to_string())
             } else {
                 conn.query_row(
-                    "SELECT COUNT(*) FROM pending_operations WHERE status = 'failed'",
+                    "SELECT COUNT(*) AS cnt FROM pending_operations WHERE status = 'failed'",
                     [],
-                    |row| row.get(0),
+                    |row| row.get("cnt"),
                 )
                 .map_err(|e| e.to_string())
             }

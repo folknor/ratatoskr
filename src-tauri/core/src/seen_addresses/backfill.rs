@@ -24,9 +24,9 @@ pub async fn backfill_seen_addresses(
         // Check if already done
         let done: bool = conn
             .query_row(
-                "SELECT COUNT(*) FROM settings WHERE key = ?1",
+                "SELECT COUNT(*) AS cnt FROM settings WHERE key = ?1",
                 params![settings_key],
-                |row| row.get::<_, i64>(0),
+                |row| row.get::<_, i64>("cnt"),
             )
             .unwrap_or(0)
             > 0;
@@ -111,12 +111,12 @@ fn fetch_message_batch(
     let rows = stmt
         .query_map(params![account_id, BATCH_SIZE, offset], |row| {
             Ok(MessageRow {
-                from_address: row.get(0)?,
-                from_name: row.get(1)?,
-                to_addresses: row.get(2)?,
-                cc_addresses: row.get(3)?,
-                bcc_addresses: row.get(4)?,
-                date_ms: row.get(5)?,
+                from_address: row.get("from_address")?,
+                from_name: row.get("from_name")?,
+                to_addresses: row.get("to_addresses")?,
+                cc_addresses: row.get("cc_addresses")?,
+                bcc_addresses: row.get("bcc_addresses")?,
+                date_ms: row.get("date")?,
             })
         })
         .map_err(|e| format!("query messages for backfill: {e}"))?;

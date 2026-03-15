@@ -95,9 +95,9 @@ pub fn find_cache_info(
             rusqlite::params![account_id, message_id, remote_attachment_id],
             |row| {
                 Ok(CacheInfo {
-                    id: row.get(0)?,
-                    content_hash: row.get(1)?,
-                    mime_type: row.get(2)?,
+                    id: row.get("id")?,
+                    content_hash: row.get("content_hash")?,
+                    mime_type: row.get("mime_type")?,
                 })
             },
         )
@@ -148,7 +148,7 @@ async fn attachment_cache_max_bytes(db: &DbState) -> Result<i64, String> {
             .query_row(
                 "SELECT value FROM settings WHERE key = 'attachment_cache_max_mb'",
                 [],
-                |row| row.get(0),
+                |row| row.get("value"),
             )
             .optional()
             .map_err(|e| format!("query attachment cache limit: {e}"))?;
@@ -173,9 +173,9 @@ pub async fn enforce_cache_limit(db: &DbState, app_data_dir: &Path) -> Result<()
         let current_size: i64 = db
             .with_conn(|conn| {
                 conn.query_row(
-                    "SELECT COALESCE(SUM(cache_size), 0) FROM attachments WHERE cached_at IS NOT NULL",
+                    "SELECT COALESCE(SUM(cache_size), 0) AS total FROM attachments WHERE cached_at IS NOT NULL",
                     [],
-                    |row| row.get(0),
+                    |row| row.get("total"),
                 )
                 .map_err(|e| format!("query attachment cache size: {e}"))
             })
@@ -195,9 +195,9 @@ pub async fn enforce_cache_limit(db: &DbState, app_data_dir: &Path) -> Result<()
                     [],
                     |row| {
                         Ok(CachedAttachmentRow {
-                            id: row.get(0)?,
-                            local_path: row.get(1)?,
-                            content_hash: row.get(2)?,
+                            id: row.get("id")?,
+                            local_path: row.get("local_path")?,
+                            content_hash: row.get("content_hash")?,
                         })
                     },
                 )
@@ -226,10 +226,10 @@ pub async fn enforce_cache_limit(db: &DbState, app_data_dir: &Path) -> Result<()
                     if let Some(hash) = content_hash {
                         return conn
                             .query_row(
-                                "SELECT COUNT(*) FROM attachments
+                                "SELECT COUNT(*) AS cnt FROM attachments
                                  WHERE content_hash = ?1 AND cached_at IS NOT NULL",
                                 rusqlite::params![hash],
-                                |db_row| db_row.get(0),
+                                |db_row| db_row.get("cnt"),
                             )
                             .map_err(|e| format!("count remaining cache refs: {e}"));
                     }

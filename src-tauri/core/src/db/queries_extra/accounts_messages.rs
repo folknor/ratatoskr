@@ -346,7 +346,7 @@ pub async fn db_get_muted_thread_ids(
         let mut stmt = conn
             .prepare("SELECT id FROM threads WHERE account_id = ?1 AND is_muted = 1")
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id], |row| row.get::<_, String>(0))
+        stmt.query_map(params![account_id], |row| row.get::<_, String>("id"))
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())
@@ -357,11 +357,11 @@ pub async fn db_get_muted_thread_ids(
 pub async fn db_get_unread_inbox_count(db: &DbState) -> Result<i64, String> {
     db.with_conn(move |conn| {
         conn.query_row(
-            "SELECT COUNT(*) FROM threads t
+            "SELECT COUNT(*) AS cnt FROM threads t
                  INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
                  WHERE tl.label_id = 'INBOX' AND t.is_read = 0",
             [],
-            |row| row.get::<_, i64>(0),
+            |row| row.get::<_, i64>("cnt"),
         )
         .map_err(|e| e.to_string())
     })

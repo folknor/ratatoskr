@@ -1,5 +1,5 @@
 use super::super::DbState;
-use super::super::queries::row_to_contact;
+use crate::db::FromRow;
 use super::super::types::{
     ContactAttachmentRow, ContactStats, DbContact, RecentThread, SameDomainContact,
 };
@@ -18,7 +18,7 @@ pub async fn db_get_all_contacts(
                 "SELECT * FROM contacts ORDER BY frequency DESC, display_name ASC LIMIT ?1 OFFSET ?2",
             )
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![lim, off], row_to_contact)
+        stmt.query_map(params![lim, off], DbContact::from_row)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())
@@ -103,13 +103,7 @@ pub async fn db_get_contact_stats(db: &DbState, email: String) -> Result<Contact
             "SELECT COUNT(*) as cnt, MIN(date) as first_date, MAX(date) as last_date
                  FROM messages WHERE from_address = ?1",
             params![normalized],
-            |row| {
-                Ok(ContactStats {
-                    email_count: row.get(0)?,
-                    first_email: row.get(1)?,
-                    last_email: row.get(2)?,
-                })
-            },
+            ContactStats::from_row,
         )
         .map_err(|e| e.to_string())
     })
@@ -136,13 +130,7 @@ pub async fn db_get_contacts_from_same_domain(
                      ORDER BY frequency DESC LIMIT ?3",
             )
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![domain, normalized, lim], |row| {
-            Ok(SameDomainContact {
-                email: row.get(0)?,
-                display_name: row.get(1)?,
-                avatar_url: row.get(2)?,
-            })
-        })
+        stmt.query_map(params![domain, normalized, lim], SameDomainContact::from_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
@@ -162,7 +150,7 @@ pub async fn db_get_latest_auth_result(
                      WHERE from_address = ?1 AND auth_results IS NOT NULL
                      ORDER BY date DESC LIMIT 1",
                 params![normalized],
-                |row| row.get::<_, String>(0),
+                |row| row.get::<_, String>("auth_results"),
             )
             .ok();
         Ok(result)
@@ -187,13 +175,7 @@ pub async fn db_get_recent_threads_with_contact(
                      ORDER BY t.last_message_at DESC LIMIT ?2",
             )
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![normalized, lim], |row| {
-            Ok(RecentThread {
-                thread_id: row.get(0)?,
-                subject: row.get(1)?,
-                last_message_at: row.get(2)?,
-            })
-        })
+        stmt.query_map(params![normalized, lim], RecentThread::from_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
@@ -218,14 +200,7 @@ pub async fn db_get_attachments_from_contact(
                      ORDER BY m.date DESC LIMIT ?2",
             )
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![normalized, lim], |row| {
-            Ok(ContactAttachmentRow {
-                filename: row.get(0)?,
-                mime_type: row.get(1)?,
-                size: row.get(2)?,
-                date: row.get(3)?,
-            })
-        })
+        stmt.query_map(params![normalized, lim], ContactAttachmentRow::from_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())

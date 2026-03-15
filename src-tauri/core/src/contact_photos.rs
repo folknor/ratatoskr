@@ -249,7 +249,7 @@ pub async fn get_cached_photo_path(
                 "SELECT file_path FROM contact_photo_cache \
                  WHERE email = ?1 AND account_id = ?2",
                 params![email_owned, account_id_owned],
-                |row| row.get(0),
+                |row| row.get("file_path"),
             )
             .optional()
             .map_err(|e| format!("query contact photo cache: {e}"))?;
@@ -282,9 +282,9 @@ pub async fn evict_photos_to_size(
         let total_size: i64 = db
             .with_conn(|conn| {
                 conn.query_row(
-                    "SELECT COALESCE(SUM(size_bytes), 0) FROM contact_photo_cache",
+                    "SELECT COALESCE(SUM(size_bytes), 0) AS total FROM contact_photo_cache",
                     [],
-                    |row| row.get(0),
+                    |row| row.get("total"),
                 )
                 .map_err(|e| format!("query contact photo cache size: {e}"))
             })
@@ -304,7 +304,7 @@ pub async fn evict_photos_to_size(
                      ORDER BY last_accessed_at ASC \
                      LIMIT 1",
                     [],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    |row| Ok((row.get("email")?, row.get("account_id")?, row.get("file_path")?)),
                 )
                 .optional()
                 .map_err(|e| format!("query oldest contact photo: {e}"))
@@ -409,7 +409,7 @@ async fn sync_graph_photos(
 
             let rows = stmt
                 .query_map(params![account_id_owned], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    Ok((row.get::<_, String>("email")?, row.get::<_, String>("graph_contact_id")?))
                 })
                 .map_err(|e| format!("query graph contacts for photos: {e}"))?
                 .collect::<Result<Vec<_>, _>>()
@@ -479,7 +479,7 @@ async fn sync_google_photos(
 
             let rows = stmt
                 .query_map(params![account_id_owned], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    Ok((row.get::<_, String>("email")?, row.get::<_, String>("avatar_url")?))
                 })
                 .map_err(|e| format!("query google contacts for photos: {e}"))?
                 .collect::<Result<Vec<_>, _>>()

@@ -349,13 +349,13 @@ fn read_local_signatures(
     let rows = stmt
         .query_map(rusqlite::params![account_id], |row| {
             Ok(LocalSignature {
-                id: row.get(0)?,
-                server_id: row.get(1)?,
-                body_html: row.get(2)?,
-                server_html_hash: row.get(3)?,
-                name: row.get(4)?,
-                is_default: row.get::<_, i64>(5)? != 0,
-                sort_order: row.get(6)?,
+                id: row.get("id")?,
+                server_id: row.get("server_id")?,
+                body_html: row.get("body_html")?,
+                server_html_hash: row.get("server_html_hash")?,
+                name: row.get("name")?,
+                is_default: row.get::<_, i64>("is_default")? != 0,
+                sort_order: row.get("sort_order")?,
             })
         })
         .map_err(|e| format!("query local signatures: {e}"))?;

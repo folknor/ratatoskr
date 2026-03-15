@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-use crate::db::queries::row_to_thread;
+use crate::db::FromRow;
 use crate::db::sql_fragments::LATEST_MESSAGE_SUBQUERY;
 use crate::db::types::{AccountScope, DbThread};
 
@@ -304,7 +304,7 @@ fn execute_thread_query(
         params.iter().map(AsRef::as_ref).collect();
 
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
-    stmt.query_map(param_refs.as_slice(), row_to_thread)
+    stmt.query_map(param_refs.as_slice(), DbThread::from_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())

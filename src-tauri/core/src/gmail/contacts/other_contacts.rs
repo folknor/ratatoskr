@@ -284,7 +284,7 @@ fn delete_other_contact(
             "SELECT contact_email FROM google_other_contact_map \
              WHERE resource_name = ?1 AND account_id = ?2",
             rusqlite::params![resource_name, account_id],
-            |row| row.get(0),
+            |row| row.get("contact_email"),
         )
         .ok();
 
@@ -302,9 +302,9 @@ fn delete_other_contact(
     if let Some(ref email) = email {
         let remaining: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM google_other_contact_map WHERE contact_email = ?1",
+                "SELECT COUNT(*) AS cnt FROM google_other_contact_map WHERE contact_email = ?1",
                 rusqlite::params![email],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .map_err(|e| format!("count remaining other contact mappings: {e}"))?;
 
@@ -336,7 +336,7 @@ fn prune_stale_other_contacts(
         .map_err(|e| format!("prepare stale other contacts: {e}"))?;
 
     let all_mapped: Vec<String> = stmt
-        .query_map(rusqlite::params![account_id], |row| row.get::<_, String>(0))
+        .query_map(rusqlite::params![account_id], |row| row.get::<_, String>("resource_name"))
         .map_err(|e| format!("query stale other contacts: {e}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("collect stale other contacts: {e}"))?;

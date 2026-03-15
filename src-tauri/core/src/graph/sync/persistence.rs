@@ -102,9 +102,9 @@ pub(super) async fn delete_messages(
             for tid in &affected_threads {
                 let remaining: i64 = tx
                     .query_row(
-                        "SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND account_id = ?2",
+                        "SELECT COUNT(*) AS cnt FROM messages WHERE thread_id = ?1 AND account_id = ?2",
                         rusqlite::params![tid, aid],
-                        |row| row.get(0),
+                        |row| row.get("cnt"),
                     )
                     .map_err(|e| format!("count remaining: {e}"))?;
 
@@ -341,7 +341,7 @@ fn insert_exchange_reactions(
         .query_row(
             "SELECT email FROM accounts WHERE id = ?1",
             rusqlite::params![account_id],
-            |row| row.get(0),
+            |row| row.get("email"),
         )
         .map_err(|e| format!("lookup account email for reactions: {e}"))?;
 
@@ -411,7 +411,7 @@ pub(super) async fn refresh_reactions_for_recent_messages(
                 )
                 .map_err(|e| format!("prepare reaction refresh query: {e}"))?;
             let rows = stmt
-                .query_map(rusqlite::params![aid], |row| row.get::<_, String>(0))
+                .query_map(rusqlite::params![aid], |row| row.get::<_, String>("message_id"))
                 .map_err(|e| format!("query reaction messages: {e}"))?;
             let mut ids = Vec::new();
             for row in rows {
@@ -438,7 +438,7 @@ pub(super) async fn refresh_reactions_for_recent_messages(
             conn.query_row(
                 "SELECT email FROM accounts WHERE id = ?1",
                 rusqlite::params![aid2],
-                |row| row.get(0),
+                |row| row.get("email"),
             )
             .map_err(|e| format!("lookup account email: {e}"))
         })

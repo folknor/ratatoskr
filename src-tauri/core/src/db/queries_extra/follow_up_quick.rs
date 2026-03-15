@@ -1,34 +1,7 @@
 use super::super::DbState;
 use super::super::types::{DbFollowUpReminder, DbQuickStep, TriggeredFollowUp};
-use rusqlite::{Row, params};
-
-fn row_to_follow_up(row: &Row<'_>) -> rusqlite::Result<DbFollowUpReminder> {
-    Ok(DbFollowUpReminder {
-        id: row.get("id")?,
-        account_id: row.get("account_id")?,
-        thread_id: row.get("thread_id")?,
-        message_id: row.get("message_id")?,
-        remind_at: row.get("remind_at")?,
-        status: row.get("status")?,
-        created_at: row.get("created_at")?,
-    })
-}
-
-fn row_to_quick_step(row: &Row<'_>) -> rusqlite::Result<DbQuickStep> {
-    Ok(DbQuickStep {
-        id: row.get("id")?,
-        account_id: row.get("account_id")?,
-        name: row.get("name")?,
-        description: row.get("description")?,
-        shortcut: row.get("shortcut")?,
-        actions_json: row.get("actions_json")?,
-        icon: row.get("icon")?,
-        is_enabled: row.get::<_, i64>("is_enabled")? != 0,
-        continue_on_error: row.get::<_, i64>("continue_on_error")? != 0,
-        sort_order: row.get("sort_order")?,
-        created_at: row.get("created_at")?,
-    })
-}
+use crate::db::from_row::FromRow;
+use rusqlite::params;
 
 pub async fn db_insert_follow_up_reminder(
     db: &DbState,
@@ -65,7 +38,7 @@ pub async fn db_get_follow_up_for_thread(
             )
             .map_err(|e| e.to_string())?;
         let mut rows = stmt
-            .query_map(params![account_id, thread_id], row_to_follow_up)
+            .query_map(params![account_id, thread_id], DbFollowUpReminder::from_row)
             .map_err(|e| e.to_string())?;
         match rows.next() {
             Some(Ok(reminder)) => Ok(Some(reminder)),
@@ -123,7 +96,7 @@ pub async fn db_get_active_follow_up_thread_ids(
             let param_refs: Vec<&dyn rusqlite::types::ToSql> =
                 param_values.iter().map(AsRef::as_ref).collect();
             let rows = stmt
-                .query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))
+                .query_map(param_refs.as_slice(), |row| row.get::<_, String>("thread_id"))
                 .map_err(|e| e.to_string())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| e.to_string())?;
@@ -150,7 +123,7 @@ pub async fn db_check_follow_up_reminders(db: &DbState) -> Result<Vec<TriggeredF
                 .prepare("SELECT * FROM follow_up_reminders WHERE status = 'pending' AND remind_at <= ?1")
                 .map_err(|e| e.to_string())?;
             let rows = stmt
-                .query_map(params![now], row_to_follow_up)
+                .query_map(params![now], DbFollowUpReminder::from_row)
                 .map_err(|e| e.to_string())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| e.to_string());
@@ -167,12 +140,12 @@ pub async fn db_check_follow_up_reminders(db: &DbState) -> Result<Vec<TriggeredF
         for reminder in &reminders {
             let reply_count: i64 = tx
                 .query_row(
-                    "SELECT COUNT(*) FROM messages m
+                    "SELECT COUNT(*) AS cnt FROM messages m
                          WHERE m.account_id = ?1 AND m.thread_id = ?2
                            AND m.date > (SELECT date FROM messages WHERE id = ?3 AND account_id = ?1)
                            AND m.from_address != (SELECT email FROM accounts WHERE id = ?1)",
                     params![reminder.account_id, reminder.thread_id, reminder.message_id],
-                    |row| row.get(0),
+                    |row| row.get("cnt"),
                 )
                 .map_err(|e| e.to_string())?;
 
@@ -191,9 +164,9 @@ pub async fn db_check_follow_up_reminders(db: &DbState) -> Result<Vec<TriggeredF
 
                 let subject: String = tx
                     .query_row(
-                        "SELECT COALESCE(subject, '') FROM threads WHERE account_id = ?1 AND id = ?2",
+                        "SELECT COALESCE(subject, '') AS subject FROM threads WHERE account_id = ?1 AND id = ?2",
                         params![reminder.account_id, reminder.thread_id],
-                        |row| row.get(0),
+                        |row| row.get("subject"),
                     )
                     .unwrap_or_default();
 
@@ -222,7 +195,7 @@ pub async fn db_get_quick_steps_for_account(
                 "SELECT * FROM quick_steps WHERE account_id = ?1 ORDER BY sort_order, created_at",
             )
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id], row_to_quick_step)
+        stmt.query_map(params![account_id], DbQuickStep::from_row)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())
@@ -241,7 +214,7 @@ pub async fn db_get_enabled_quick_steps_for_account(
                      ORDER BY sort_order, created_at",
             )
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id], row_to_quick_step)
+        stmt.query_map(params![account_id], DbQuickStep::from_row)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())

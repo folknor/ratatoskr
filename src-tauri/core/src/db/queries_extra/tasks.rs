@@ -277,9 +277,9 @@ pub async fn db_get_incomplete_task_count(
 ) -> Result<i64, String> {
     db.with_conn(move |conn| {
         conn.query_row(
-            "SELECT COUNT(*) FROM tasks WHERE (account_id = ?1 OR account_id IS NULL) AND is_completed = 0",
+            "SELECT COUNT(*) AS cnt FROM tasks WHERE (account_id = ?1 OR account_id IS NULL) AND is_completed = 0",
             params![account_id],
-            |row| row.get::<_, i64>(0),
+            |row| row.get::<_, i64>("cnt"),
         )
         .map_err(|e| e.to_string())
     })

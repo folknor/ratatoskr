@@ -25,51 +25,51 @@ pub fn compute_thread_aggregate(
     // so emoji reactions don't inflate counts or override snippets.
     let message_count: i64 = tx
         .query_row(
-            "SELECT COUNT(*) FROM messages \
+            "SELECT COUNT(*) AS cnt FROM messages \
              WHERE thread_id = ?1 AND account_id = ?2 AND is_reaction = 0",
             rusqlite::params![thread_id, account_id],
-            |row| row.get(0),
+            |row| row.get("cnt"),
         )
         .map_err(|e| format!("count messages: {e}"))?;
 
     let is_read: bool = tx
         .query_row(
-            "SELECT COUNT(*) FROM messages \
+            "SELECT COUNT(*) AS cnt FROM messages \
              WHERE thread_id = ?1 AND account_id = ?2 AND is_read = 0 AND is_reaction = 0",
             rusqlite::params![thread_id, account_id],
-            |row| row.get::<_, i64>(0),
+            |row| row.get::<_, i64>("cnt"),
         )
         .map(|unread| unread == 0)
         .map_err(|e| format!("check is_read: {e}"))?;
 
     let is_starred: bool = tx
         .query_row(
-            "SELECT COUNT(*) FROM messages \
+            "SELECT COUNT(*) AS cnt FROM messages \
              WHERE thread_id = ?1 AND account_id = ?2 AND is_starred = 1 AND is_reaction = 0",
             rusqlite::params![thread_id, account_id],
-            |row| row.get::<_, i64>(0),
+            |row| row.get::<_, i64>("cnt"),
         )
         .map(|starred| starred > 0)
         .map_err(|e| format!("check is_starred: {e}"))?;
 
     let has_attachments: bool = tx
         .query_row(
-            "SELECT COUNT(*) FROM attachments a \
+            "SELECT COUNT(*) AS cnt FROM attachments a \
              JOIN messages m ON a.message_id = m.id \
              WHERE m.thread_id = ?1 AND m.account_id = ?2 AND m.is_reaction = 0",
             rusqlite::params![thread_id, account_id],
-            |row| row.get::<_, i64>(0),
+            |row| row.get::<_, i64>("cnt"),
         )
         .map(|count| count > 0)
         .map_err(|e| format!("check has_attachments: {e}"))?;
 
     let (snippet, last_date): (String, i64) = tx
         .query_row(
-            "SELECT COALESCE(snippet, ''), date FROM messages \
+            "SELECT COALESCE(snippet, '') AS snippet, date FROM messages \
              WHERE thread_id = ?1 AND account_id = ?2 AND is_reaction = 0 \
              ORDER BY date DESC LIMIT 1",
             rusqlite::params![thread_id, account_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get("snippet")?, row.get("date")?)),
         )
         .map_err(|e| format!("get latest message: {e}"))?;
 
@@ -79,7 +79,7 @@ pub fn compute_thread_aggregate(
              WHERE thread_id = ?1 AND account_id = ?2 AND is_reaction = 0 \
              ORDER BY date ASC LIMIT 1",
             rusqlite::params![thread_id, account_id],
-            |row| row.get(0),
+            |row| row.get("subject"),
         )
         .map_err(|e| format!("get subject: {e}"))?;
 
@@ -103,9 +103,9 @@ pub fn upsert_thread_aggregate(
 ) -> Result<(), String> {
     let exists: bool = tx
         .query_row(
-            "SELECT COUNT(*) FROM threads WHERE id = ?1 AND account_id = ?2",
+            "SELECT COUNT(*) AS cnt FROM threads WHERE id = ?1 AND account_id = ?2",
             rusqlite::params![thread_id, account_id],
-            |row| row.get::<_, i64>(0),
+            |row| row.get::<_, i64>("cnt"),
         )
         .map(|c| c > 0)
         .map_err(|e| format!("check thread exists: {e}"))?;

@@ -33,8 +33,8 @@ pub fn correlate_mentions_in_html(
         std::collections::HashMap::new();
     let mut rows = stmt.query(rusqlite::params![message_id, account_id])?;
     while let Some(row) = rows.next()? {
-        let addr: String = row.get(0)?;
-        let name: Option<String> = row.get(1)?;
+        let addr: String = row.get("mentioned_address")?;
+        let name: Option<String> = row.get("mentioned_name")?;
         known.insert(addr.to_lowercase(), name);
     }
 

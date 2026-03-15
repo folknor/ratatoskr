@@ -98,7 +98,7 @@ pub(crate) fn get_self_emails(conn: &Connection, account_id: &str) -> Result<Vec
         .query_row(
             "SELECT email FROM accounts WHERE id = ?1",
             params![account_id],
-            |row| row.get(0),
+            |row| row.get("email"),
         )
         .map_err(|e| format!("get account email: {e}"))?;
 
@@ -107,7 +107,7 @@ pub(crate) fn get_self_emails(conn: &Connection, account_id: &str) -> Result<Vec
         .prepare("SELECT email FROM send_as_aliases WHERE account_id = ?1")
         .map_err(|e| format!("prepare aliases: {e}"))?;
     let rows = stmt
-        .query_map(params![account_id], |row| row.get::<_, String>(0))
+        .query_map(params![account_id], |row| row.get::<_, String>("email"))
         .map_err(|e| format!("query aliases: {e}"))?;
     for row in rows {
         aliases.push(row.map_err(|e| format!("read alias: {e}"))?);

@@ -1,9 +1,8 @@
 use super::DbState;
+use super::from_row::FromRow;
 use super::sql_fragments::LATEST_MESSAGE_SUBQUERY;
-use super::types::{
-    DbFilterRule, DbFollowUpReminder, DbQuickStep, DbSmartFolder, DbSmartLabelRule, ThreadInfoRow,
-};
-use rusqlite::{Connection, Row, params};
+use super::types::{DbFollowUpReminder, DbQuickStep, ThreadInfoRow};
+use rusqlite::{Connection, params};
 
 mod accounts_messages;
 mod ai_state;
@@ -83,57 +82,10 @@ pub fn load_recent_rule_categorized_threads(
          LIMIT ?2"
     );
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    stmt.query_map(params![account_id, limit], |row| {
-        Ok(ThreadInfoRow {
-            id: row.get(0)?,
-            subject: row.get(1)?,
-            snippet: row.get(2)?,
-            from_address: row.get(3)?,
-        })
-    })
+    stmt.query_map(params![account_id, limit], ThreadInfoRow::from_row)
     .map_err(|e| e.to_string())?
     .collect::<Result<Vec<_>, _>>()
     .map_err(|e| e.to_string())
-}
-
-pub(super) fn row_to_filter(row: &Row<'_>) -> rusqlite::Result<DbFilterRule> {
-    Ok(DbFilterRule {
-        id: row.get("id")?,
-        account_id: row.get("account_id")?,
-        name: row.get("name")?,
-        is_enabled: row.get::<_, i64>("is_enabled")? != 0,
-        criteria_json: row.get("criteria_json")?,
-        actions_json: row.get("actions_json")?,
-        sort_order: row.get("sort_order")?,
-        created_at: row.get("created_at")?,
-    })
-}
-
-pub(super) fn row_to_smart_folder(row: &Row<'_>) -> rusqlite::Result<DbSmartFolder> {
-    Ok(DbSmartFolder {
-        id: row.get("id")?,
-        account_id: row.get("account_id")?,
-        name: row.get("name")?,
-        query: row.get("query")?,
-        icon: row.get("icon")?,
-        color: row.get("color")?,
-        sort_order: row.get("sort_order")?,
-        is_default: row.get::<_, i64>("is_default")? != 0,
-        created_at: row.get("created_at")?,
-    })
-}
-
-pub(super) fn row_to_smart_label_rule(row: &Row<'_>) -> rusqlite::Result<DbSmartLabelRule> {
-    Ok(DbSmartLabelRule {
-        id: row.get("id")?,
-        account_id: row.get("account_id")?,
-        label_id: row.get("label_id")?,
-        ai_description: row.get("ai_description")?,
-        criteria_json: row.get("criteria_json")?,
-        is_enabled: row.get::<_, i64>("is_enabled")? != 0,
-        sort_order: row.get("sort_order")?,
-        created_at: row.get("created_at")?,
-    })
 }
 
 #[allow(dead_code)]

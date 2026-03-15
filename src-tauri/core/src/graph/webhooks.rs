@@ -491,13 +491,13 @@ pub async fn load_graph_subscriptions(
         let rows = stmt
             .query_map(rusqlite::params![aid], |row| {
                 Ok(SubscriptionRecord {
-                    id: row.get(0)?,
-                    account_id: row.get(1)?,
-                    resource: row.get(2)?,
-                    notification_url: row.get(3)?,
-                    client_state: row.get(4)?,
-                    expiration_date_time: row.get(5)?,
-                    created_at: row.get(6)?,
+                    id: row.get("id")?,
+                    account_id: row.get("account_id")?,
+                    resource: row.get("resource")?,
+                    notification_url: row.get("notification_url")?,
+                    client_state: row.get("client_state")?,
+                    expiration_date_time: row.get("expiration_date_time")?,
+                    created_at: row.get("created_at")?,
                 })
             })
             .map_err(|e| format!("query load_graph_subscriptions: {e}"))?;

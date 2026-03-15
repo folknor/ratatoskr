@@ -102,8 +102,8 @@ fn get_thread_message_refs(
 
     let rows = stmt
         .query_map(rusqlite::params![account_id, thread_id], |row| {
-            let folder: String = row.get(0)?;
-            let uid: i64 = row.get(1)?;
+            let folder: String = row.get("imap_folder")?;
+            let uid: i64 = row.get("imap_uid")?;
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             Ok(ImapMessageRef {
                 folder,
@@ -214,10 +214,10 @@ fn find_special_folder(
     // Primary: look up by imap_special_use
     let path: Option<String> = conn
         .query_row(
-            "SELECT COALESCE(imap_folder_path, name) FROM labels \
+            "SELECT COALESCE(imap_folder_path, name) AS folder_path FROM labels \
              WHERE account_id = ?1 AND imap_special_use = ?2 LIMIT 1",
             rusqlite::params![account_id, special_use],
-            |row| row.get(0),
+            |row| row.get("folder_path"),
         )
         .ok();
 
@@ -231,10 +231,10 @@ fn find_special_folder(
     if let Some(lid) = label_id {
         let fallback: Option<String> = conn
             .query_row(
-                "SELECT COALESCE(imap_folder_path, name) FROM labels \
+                "SELECT COALESCE(imap_folder_path, name) AS folder_path FROM labels \
                  WHERE account_id = ?1 AND id = ?2 AND imap_folder_path IS NOT NULL LIMIT 1",
                 rusqlite::params![account_id, lid],
-                |row| row.get(0),
+                |row| row.get("folder_path"),
             )
             .ok();
 
@@ -750,7 +750,7 @@ impl ProviderOps for ImapOps {
                 conn.query_row(
                     "SELECT thread_id FROM messages WHERE id = ?1",
                     rusqlite::params![msg_id],
-                    |row| row.get::<_, String>(0),
+                    |row| row.get::<_, String>("thread_id"),
                 )
                 .map_err(|e| format!("thread_id lookup: {e}"))
             })
@@ -881,8 +881,8 @@ impl ProviderOps for ImapOps {
                     rusqlite::params![account_id],
                     |row| {
                         Ok(ProviderProfile {
-                            email: row.get(0)?,
-                            name: row.get(1)?,
+                            email: row.get("email")?,
+                            name: row.get("display_name")?,
                         })
                     },
                 )

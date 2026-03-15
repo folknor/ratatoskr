@@ -7,6 +7,7 @@
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
+use crate::db::from_row::FromRow;
 use crate::db::types::DbScheduledEmail;
 use crate::db::DbState;
 
@@ -177,7 +178,7 @@ pub async fn check_overdue_scheduled_emails(
             .map_err(|e| e.to_string())?;
 
         let rows = stmt
-            .query_map(params![now_unix], crate::db::queries_extra::compose::row_to_scheduled_email)
+            .query_map(params![now_unix], crate::db::types::DbScheduledEmail::from_row)
             .map_err(|e| e.to_string())?;
 
         let mut actions = Vec::new();

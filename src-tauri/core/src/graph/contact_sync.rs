@@ -341,7 +341,7 @@ fn delete_synced_contact(
 
     let emails: Vec<String> = stmt
         .query_map(params![account_id, graph_contact_id], |row| {
-            row.get::<_, String>(0)
+            row.get::<_, String>("email")
         })
         .map_err(|e| format!("query contact map: {e}"))?
         .collect::<Result<Vec<_>, _>>()
@@ -361,9 +361,9 @@ fn delete_synced_contact(
     for email in &emails {
         let remaining: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM graph_contact_map WHERE email = ?1",
+                "SELECT COUNT(*) AS cnt FROM graph_contact_map WHERE email = ?1",
                 params![email],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .map_err(|e| format!("count remaining mappings: {e}"))?;
 
@@ -395,7 +395,7 @@ fn prune_stale_contacts(
         .map_err(|e| format!("prepare stale lookup: {e}"))?;
 
     let all_mapped: Vec<String> = stmt
-        .query_map(params![account_id], |row| row.get::<_, String>(0))
+        .query_map(params![account_id], |row| row.get::<_, String>("graph_contact_id"))
         .map_err(|e| format!("query stale: {e}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("collect stale: {e}"))?;

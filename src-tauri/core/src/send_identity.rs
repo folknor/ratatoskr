@@ -46,13 +46,13 @@ pub fn get_send_identities(
 
     let rows = stmt.query_map(params![account_id], |row| {
         Ok(SendIdentity {
-            id: row.get(0)?,
-            account_id: row.get(1)?,
-            email: row.get(2)?,
-            display_name: row.get(3)?,
-            mailbox_id: row.get(4)?,
-            send_mode: row.get(5)?,
-            is_primary: row.get::<_, i64>(6)? != 0,
+            id: row.get("id")?,
+            account_id: row.get("account_id")?,
+            email: row.get("email")?,
+            display_name: row.get("display_name")?,
+            mailbox_id: row.get("mailbox_id")?,
+            send_mode: row.get("send_mode")?,
+            is_primary: row.get::<_, i64>("is_primary")? != 0,
         })
     })?;
 

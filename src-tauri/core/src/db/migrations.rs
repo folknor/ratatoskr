@@ -1369,7 +1369,7 @@ pub fn run_all(conn: &Connection) -> Result<(), String> {
         .prepare("SELECT version FROM _migrations ORDER BY version")
         .map_err(|e| format!("prepare: {e}"))?;
     let mut applied: std::collections::HashSet<u32> = stmt
-        .query_map([], |row| row.get::<_, u32>(0))
+        .query_map([], |row| row.get::<_, u32>("version"))
         .map_err(|e| format!("query: {e}"))?
         .filter_map(Result::ok)
         .collect();
@@ -1382,7 +1382,7 @@ pub fn run_all(conn: &Connection) -> Result<(), String> {
             .prepare("PRAGMA table_info(labels)")
             .and_then(|mut s| {
                 let cols: Vec<String> = s
-                    .query_map([], |row| row.get::<_, String>(1))?
+                    .query_map([], |row| row.get::<_, String>("name"))?
                     .filter_map(Result::ok)
                     .collect();
                 Ok(cols.iter().any(|c| c == "imap_folder_path"))
@@ -1400,9 +1400,9 @@ pub fn run_all(conn: &Connection) -> Result<(), String> {
     if applied.contains(&18) {
         let has_table: bool = conn
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='tasks'",
+                "SELECT COUNT(*) AS cnt FROM sqlite_master WHERE type='table' AND name='tasks'",
                 [],
-                |row| row.get::<_, i64>(0),
+                |row| row.get::<_, i64>("cnt"),
             )
             .unwrap_or(0)
             > 0;
@@ -1467,18 +1467,18 @@ pub fn run_all(conn: &Connection) -> Result<(), String> {
     // Force IMAP attachment resync with corrected Rust binary (runs once)
     let repair_done: bool = conn
         .query_row(
-            "SELECT COUNT(*) FROM settings WHERE key = 'imap_attachment_repair_v1'",
+            "SELECT COUNT(*) AS cnt FROM settings WHERE key = 'imap_attachment_repair_v1'",
             [],
-            |row| row.get::<_, i64>(0),
+            |row| row.get::<_, i64>("cnt"),
         )
         .unwrap_or(0)
         > 0;
     if !repair_done {
         let imap_count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM accounts WHERE provider = 'imap'",
+                "SELECT COUNT(*) AS cnt FROM accounts WHERE provider = 'imap'",
                 [],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .unwrap_or(0);
         if imap_count > 0 {
@@ -1531,16 +1531,16 @@ mod tests {
         // Verify key tables exist
         let count: u32 = conn
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='threads'",
+                "SELECT COUNT(*) AS cnt FROM sqlite_master WHERE type='table' AND name='threads'",
                 [],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .expect("query");
         assert_eq!(count, 1);
 
         // Verify latest migration recorded
         let max_ver: u32 = conn
-            .query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))
+            .query_row("SELECT MAX(version) AS max_ver FROM _migrations", [], |row| row.get("max_ver"))
             .expect("query");
         assert_eq!(max_ver, 58);
     }

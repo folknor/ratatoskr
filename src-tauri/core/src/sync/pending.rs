@@ -17,11 +17,11 @@ pub async fn blocked_thread_ids(
         for tid in &thread_ids {
             let count: i64 = conn
                 .query_row(
-                    "SELECT COUNT(*) FROM pending_operations \
+                    "SELECT COUNT(*) AS cnt FROM pending_operations \
                      WHERE account_id = ?1 AND resource_id = ?2 \
                      AND status != 'failed'",
                     rusqlite::params![aid, tid],
-                    |row| row.get(0),
+                    |row| row.get("cnt"),
                 )
                 .unwrap_or(0);
             if count > 0 {

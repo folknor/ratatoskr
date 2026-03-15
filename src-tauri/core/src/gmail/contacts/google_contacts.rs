@@ -277,7 +277,7 @@ fn delete_google_contact(
             "SELECT contact_email FROM google_contact_map \
              WHERE resource_name = ?1 AND account_id = ?2",
             params![resource_name, account_id],
-            |row| row.get(0),
+            |row| row.get("contact_email"),
         )
         .ok();
 
@@ -293,18 +293,18 @@ fn delete_google_contact(
     if let Some(ref email) = email {
         let remaining: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM google_contact_map WHERE contact_email = ?1",
+                "SELECT COUNT(*) AS cnt FROM google_contact_map WHERE contact_email = ?1",
                 params![email],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .map_err(|e| format!("count remaining google mappings: {e}"))?;
 
         // Also check graph_contact_map to not delete contacts synced from Exchange
         let graph_remaining: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM graph_contact_map WHERE email = ?1",
+                "SELECT COUNT(*) AS cnt FROM graph_contact_map WHERE email = ?1",
                 params![email],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .unwrap_or(0);
 
@@ -335,7 +335,7 @@ fn prune_stale_google_contacts(
         .map_err(|e| format!("prepare stale google contacts: {e}"))?;
 
     let all_mapped: Vec<String> = stmt
-        .query_map(params![account_id], |row| row.get::<_, String>(0))
+        .query_map(params![account_id], |row| row.get::<_, String>("resource_name"))
         .map_err(|e| format!("query stale google contacts: {e}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("collect stale google contacts: {e}"))?;

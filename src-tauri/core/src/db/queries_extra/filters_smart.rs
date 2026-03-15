@@ -1,6 +1,7 @@
 use super::super::DbState;
 use super::super::types::{DbFilterRule, DbSmartFolder, DbSmartLabelRule, SortOrderItem};
-use super::{dynamic_update, row_to_filter, row_to_smart_folder, row_to_smart_label_rule};
+use super::dynamic_update;
+use crate::db::from_row::FromRow;
 use rusqlite::params;
 
 pub async fn db_get_filters_for_account(
@@ -13,7 +14,7 @@ pub async fn db_get_filters_for_account(
                 "SELECT * FROM filter_rules WHERE account_id = ?1 ORDER BY sort_order, created_at",
             )
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id], row_to_filter)
+        stmt.query_map(params![account_id], DbFilterRule::from_row)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())
@@ -97,7 +98,7 @@ pub async fn db_get_smart_folders(
                          ORDER BY sort_order, created_at",
                 )
                 .map_err(|e| e.to_string())?;
-            stmt.query_map(params![aid], row_to_smart_folder)
+            stmt.query_map(params![aid], DbSmartFolder::from_row)
                 .map_err(|e| e.to_string())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| e.to_string())
@@ -108,7 +109,7 @@ pub async fn db_get_smart_folders(
                          ORDER BY sort_order, created_at",
                 )
                 .map_err(|e| e.to_string())?;
-            stmt.query_map([], row_to_smart_folder)
+            stmt.query_map([], DbSmartFolder::from_row)
                 .map_err(|e| e.to_string())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| e.to_string())
@@ -126,7 +127,7 @@ pub async fn db_get_smart_folder_by_id(
             .prepare("SELECT * FROM smart_folders WHERE id = ?1")
             .map_err(|e| e.to_string())?;
         let mut rows = stmt
-            .query_map(params![id], row_to_smart_folder)
+            .query_map(params![id], DbSmartFolder::from_row)
             .map_err(|e| e.to_string())?;
         match rows.next() {
             Some(Ok(folder)) => Ok(Some(folder)),
@@ -229,7 +230,7 @@ pub async fn db_get_smart_label_rules_for_account(
                      ORDER BY sort_order, created_at",
             )
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id], row_to_smart_label_rule)
+        stmt.query_map(params![account_id], DbSmartLabelRule::from_row)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())

@@ -1,35 +1,22 @@
 use super::super::DbState;
 use super::super::types::{DbLocalDraft, DbScheduledEmail, DbSendAsAlias, DbSignature, DbTemplate};
 use super::dynamic_update;
-use rusqlite::{Row, params};
+use crate::db::from_row::FromRow;
+use crate::db::{query_as, query_one};
+use rusqlite::params;
 
 pub async fn db_get_templates_for_account(
     db: &DbState,
     account_id: String,
 ) -> Result<Vec<DbTemplate>, String> {
     db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, account_id, name, subject, body_html, shortcut, sort_order, created_at
-                     FROM templates WHERE account_id = ?1 OR account_id IS NULL
-                     ORDER BY sort_order, created_at",
-            )
-            .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id], |row| {
-            Ok(DbTemplate {
-                id: row.get("id")?,
-                account_id: row.get("account_id")?,
-                name: row.get("name")?,
-                subject: row.get("subject")?,
-                body_html: row.get("body_html")?,
-                shortcut: row.get("shortcut")?,
-                sort_order: row.get("sort_order")?,
-                created_at: row.get("created_at")?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+        query_as::<DbTemplate>(
+            conn,
+            "SELECT id, account_id, name, subject, body_html, shortcut, sort_order, created_at
+                 FROM templates WHERE account_id = ?1 OR account_id IS NULL
+                 ORDER BY sort_order, created_at",
+            &[&account_id],
+        )
     })
     .await
 }
@@ -99,26 +86,13 @@ pub async fn db_get_signatures_for_account(
     account_id: String,
 ) -> Result<Vec<DbSignature>, String> {
     db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, account_id, name, body_html, is_default, sort_order
-                     FROM signatures WHERE account_id = ?1
-                     ORDER BY sort_order, created_at",
-            )
-            .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id], |row| {
-            Ok(DbSignature {
-                id: row.get("id")?,
-                account_id: row.get("account_id")?,
-                name: row.get("name")?,
-                body_html: row.get("body_html")?,
-                is_default: row.get("is_default")?,
-                sort_order: row.get("sort_order")?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+        query_as::<DbSignature>(
+            conn,
+            "SELECT id, account_id, name, body_html, is_default, sort_order
+                 FROM signatures WHERE account_id = ?1
+                 ORDER BY sort_order, created_at",
+            &[&account_id],
+        )
     })
     .await
 }
@@ -128,27 +102,12 @@ pub async fn db_get_default_signature(
     account_id: String,
 ) -> Result<Option<DbSignature>, String> {
     db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, account_id, name, body_html, is_default, sort_order
-                     FROM signatures WHERE account_id = ?1 AND is_default = 1 LIMIT 1",
-            )
-            .map_err(|e| e.to_string())?;
-        let rows: Vec<DbSignature> = stmt
-            .query_map(params![account_id], |row| {
-                Ok(DbSignature {
-                    id: row.get("id")?,
-                    account_id: row.get("account_id")?,
-                    name: row.get("name")?,
-                    body_html: row.get("body_html")?,
-                    is_default: row.get("is_default")?,
-                    sort_order: row.get("sort_order")?,
-                })
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        Ok(rows.into_iter().next())
+        query_one::<DbSignature>(
+            conn,
+            "SELECT id, account_id, name, body_html, is_default, sort_order
+                 FROM signatures WHERE account_id = ?1 AND is_default = 1 LIMIT 1",
+            &[&account_id],
+        )
     })
     .await
 }
@@ -198,7 +157,7 @@ pub async fn db_update_signature(
                 .query_row(
                     "SELECT account_id FROM signatures WHERE id = ?1",
                     params![id],
-                    |row| row.get(0),
+                    |row| row.get("account_id"),
                 )
                 .ok();
             if let Some(aid) = account_id {
@@ -235,22 +194,6 @@ pub async fn db_delete_signature(db: &DbState, id: String) -> Result<(), String>
     .await
 }
 
-fn row_to_send_as_alias(row: &Row<'_>) -> rusqlite::Result<DbSendAsAlias> {
-    Ok(DbSendAsAlias {
-        id: row.get("id")?,
-        account_id: row.get("account_id")?,
-        email: row.get("email")?,
-        display_name: row.get("display_name")?,
-        reply_to_address: row.get("reply_to_address")?,
-        signature_id: row.get("signature_id")?,
-        is_primary: row.get("is_primary")?,
-        is_default: row.get("is_default")?,
-        treat_as_alias: row.get("treat_as_alias")?,
-        verification_status: row.get("verification_status")?,
-        created_at: row.get("created_at")?,
-    })
-}
-
 pub async fn db_get_aliases_for_account(
     db: &DbState,
     account_id: String,
@@ -259,7 +202,7 @@ pub async fn db_get_aliases_for_account(
         let mut stmt = conn
             .prepare("SELECT * FROM send_as_aliases WHERE account_id = ?1 ORDER BY is_primary DESC, email")
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id], row_to_send_as_alias)
+        stmt.query_map(params![account_id], DbSendAsAlias::from_row)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())
@@ -321,7 +264,7 @@ pub async fn db_get_default_alias(
             .query_row(
                 "SELECT * FROM send_as_aliases WHERE account_id = ?1 AND is_default = 1 LIMIT 1",
                 params![account_id],
-                row_to_send_as_alias,
+                DbSendAsAlias::from_row,
             )
             .ok();
         if result.is_some() {
@@ -331,7 +274,7 @@ pub async fn db_get_default_alias(
             .query_row(
                 "SELECT * FROM send_as_aliases WHERE account_id = ?1 AND is_primary = 1 LIMIT 1",
                 params![account_id],
-                row_to_send_as_alias,
+                DbSendAsAlias::from_row,
             )
             .ok())
     })
@@ -368,27 +311,6 @@ pub async fn db_delete_alias(db: &DbState, id: String) -> Result<(), String> {
         Ok(())
     })
     .await
-}
-
-fn row_to_local_draft(row: &Row<'_>) -> rusqlite::Result<DbLocalDraft> {
-    Ok(DbLocalDraft {
-        id: row.get("id")?,
-        account_id: row.get("account_id")?,
-        to_addresses: row.get("to_addresses")?,
-        cc_addresses: row.get("cc_addresses")?,
-        bcc_addresses: row.get("bcc_addresses")?,
-        subject: row.get("subject")?,
-        body_html: row.get("body_html")?,
-        reply_to_message_id: row.get("reply_to_message_id")?,
-        thread_id: row.get("thread_id")?,
-        from_email: row.get("from_email")?,
-        signature_id: row.get("signature_id")?,
-        remote_draft_id: row.get("remote_draft_id")?,
-        attachments: row.get("attachments")?,
-        created_at: row.get("created_at")?,
-        updated_at: row.get("updated_at")?,
-        sync_status: row.get("sync_status")?,
-    })
 }
 
 pub async fn db_save_local_draft(
@@ -441,13 +363,11 @@ pub async fn db_save_local_draft(
 
 pub async fn db_get_local_draft(db: &DbState, id: String) -> Result<Option<DbLocalDraft>, String> {
     db.with_conn(move |conn| {
-        Ok(conn
-            .query_row(
-                "SELECT * FROM local_drafts WHERE id = ?1",
-                params![id],
-                row_to_local_draft,
-            )
-            .ok())
+        query_one::<DbLocalDraft>(
+            conn,
+            "SELECT * FROM local_drafts WHERE id = ?1",
+            &[&id],
+        )
     })
     .await
 }
@@ -457,15 +377,11 @@ pub async fn db_get_unsynced_drafts(
     account_id: String,
 ) -> Result<Vec<DbLocalDraft>, String> {
     db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT * FROM local_drafts WHERE account_id = ?1 AND sync_status = 'pending' ORDER BY updated_at ASC",
-            )
-            .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id], row_to_local_draft)
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())
+        query_as::<DbLocalDraft>(
+            conn,
+            "SELECT * FROM local_drafts WHERE account_id = ?1 AND sync_status = 'pending' ORDER BY updated_at ASC",
+            &[&account_id],
+        )
     })
     .await
 }
@@ -495,32 +411,6 @@ pub async fn db_delete_local_draft(db: &DbState, id: String) -> Result<(), Strin
     .await
 }
 
-pub(crate) fn row_to_scheduled_email(row: &Row<'_>) -> rusqlite::Result<DbScheduledEmail> {
-    Ok(DbScheduledEmail {
-        id: row.get("id")?,
-        account_id: row.get("account_id")?,
-        to_addresses: row.get("to_addresses")?,
-        cc_addresses: row.get("cc_addresses")?,
-        bcc_addresses: row.get("bcc_addresses")?,
-        subject: row.get("subject")?,
-        body_html: row.get("body_html")?,
-        reply_to_message_id: row.get("reply_to_message_id")?,
-        thread_id: row.get("thread_id")?,
-        scheduled_at: row.get("scheduled_at")?,
-        signature_id: row.get("signature_id")?,
-        attachment_paths: row.get("attachment_paths")?,
-        status: row.get("status")?,
-        created_at: row.get("created_at")?,
-        delegation: row.get("delegation")?,
-        remote_message_id: row.get("remote_message_id")?,
-        remote_status: row.get("remote_status")?,
-        timezone: row.get("timezone")?,
-        from_email: row.get("from_email")?,
-        error_message: row.get("error_message")?,
-        retry_count: row.get("retry_count")?,
-    })
-}
-
 pub async fn db_get_pending_scheduled_emails(
     db: &DbState,
     now: i64,
@@ -531,7 +421,7 @@ pub async fn db_get_pending_scheduled_emails(
                 "SELECT * FROM scheduled_emails WHERE status = 'pending' AND scheduled_at <= ?1 ORDER BY scheduled_at ASC",
             )
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![now], row_to_scheduled_email)
+        stmt.query_map(params![now], DbScheduledEmail::from_row)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())
@@ -549,7 +439,7 @@ pub async fn db_get_scheduled_emails_for_account(
                 "SELECT * FROM scheduled_emails WHERE account_id = ?1 AND status = 'pending' ORDER BY scheduled_at ASC",
             )
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id], row_to_scheduled_email)
+        stmt.query_map(params![account_id], DbScheduledEmail::from_row)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())

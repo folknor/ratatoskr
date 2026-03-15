@@ -1,3 +1,5 @@
+pub mod from_row;
+mod from_row_impls;
 pub mod lookups;
 pub mod migrations;
 pub mod pending_ops;
@@ -5,6 +7,7 @@ pub mod queries;
 pub mod queries_extra;
 pub mod sql_fragments;
 pub mod types;
+pub use from_row::{FromRow, query_as, query_one};
 pub use queries::*;
 
 use std::path::Path;

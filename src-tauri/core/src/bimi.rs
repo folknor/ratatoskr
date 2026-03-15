@@ -63,12 +63,12 @@ pub fn get_bimi_cache(conn: &Connection, domain: &str) -> Result<Option<BimiCach
         rusqlite::params![domain],
         |row| {
             Ok(BimiCacheEntry {
-                domain: row.get(0)?,
-                has_bimi: row.get::<_, i32>(1)? != 0,
-                logo_uri: row.get(2)?,
-                authority_uri: row.get(3)?,
-                fetched_at: row.get(4)?,
-                expires_at: row.get(5)?,
+                domain: row.get("domain")?,
+                has_bimi: row.get::<_, i32>("has_bimi")? != 0,
+                logo_uri: row.get("logo_uri")?,
+                authority_uri: row.get("authority_uri")?,
+                fetched_at: row.get("fetched_at")?,
+                expires_at: row.get("expires_at")?,
             })
         },
     )
@@ -636,7 +636,7 @@ fn domains_to_warm(conn: &Connection) -> Result<Vec<String>, String> {
     let rows = stmt
         .query_map(
             rusqlite::params![cutoff, WARM_MAX_MESSAGES],
-            |row| row.get::<_, String>(0),
+            |row| row.get::<_, String>("domain"),
         )
         .map_err(|e| format!("query sender domains: {e}"))?;
 

@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-use crate::db::queries::row_to_thread;
+use crate::db::FromRow;
 use crate::db::sql_fragments::LATEST_MESSAGE_SUBQUERY;
 use crate::db::types::{AccountScope, DbThread, FolderAccountUnreadCount, FolderUnreadCount};
 
@@ -100,7 +100,7 @@ fn execute_thread_query_with_label(
         all_params.iter().map(AsRef::as_ref).collect();
 
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
-    stmt.query_map(param_refs.as_slice(), row_to_thread)
+    stmt.query_map(param_refs.as_slice(), DbThread::from_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
@@ -121,7 +121,7 @@ fn execute_thread_query_no_label(
         all_params.iter().map(AsRef::as_ref).collect();
 
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
-    stmt.query_map(param_refs.as_slice(), row_to_thread)
+    stmt.query_map(param_refs.as_slice(), DbThread::from_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
@@ -138,13 +138,13 @@ pub fn get_thread_count_scoped(
 
     if let Some(lid) = label_id {
         let sql = format!(
-            "SELECT COUNT(DISTINCT t.account_id || '/' || t.id) FROM threads t
+            "SELECT COUNT(DISTINCT t.account_id || '/' || t.id) AS cnt FROM threads t
              INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
              WHERE {scope_clause} AND tl.label_id = ?{next_idx}"
         );
         execute_count_query(conn, &sql, scope_params, Some(lid))
     } else {
-        let sql = format!("SELECT COUNT(*) FROM threads t WHERE {scope_clause}");
+        let sql = format!("SELECT COUNT(*) AS cnt FROM threads t WHERE {scope_clause}");
         execute_count_query(conn, &sql, scope_params, None)
     }
 }
@@ -157,7 +157,7 @@ pub fn get_unread_count_scoped(
     let (scope_clause, scope_params) = account_scope_clause(scope, 1);
 
     let sql = format!(
-        "SELECT COUNT(*) FROM threads t
+        "SELECT COUNT(*) AS cnt FROM threads t
          INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
          WHERE {scope_clause} AND tl.label_id = 'INBOX' AND t.is_read = 0"
     );
@@ -179,7 +179,7 @@ fn execute_count_query(
     let param_refs: Vec<&dyn rusqlite::types::ToSql> =
         all_params.iter().map(AsRef::as_ref).collect();
 
-    conn.query_row(sql, param_refs.as_slice(), |row| row.get::<_, i64>(0))
+    conn.query_row(sql, param_refs.as_slice(), |row| row.get::<_, i64>("cnt"))
         .map_err(|e| e.to_string())
 }
 
@@ -226,7 +226,7 @@ fn get_label_folder_unread_counts(
         .collect();
 
     let sql = format!(
-        "SELECT tl.label_id, COUNT(*) FROM threads t
+        "SELECT tl.label_id AS folder_id, COUNT(*) AS unread_count FROM threads t
          INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
          WHERE {scope_clause} AND t.is_read = 0
            AND tl.label_id IN ({})
@@ -242,15 +242,10 @@ fn get_label_folder_unread_counts(
         all_params.iter().map(AsRef::as_ref).collect();
 
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    stmt.query_map(param_refs.as_slice(), |row| {
-        Ok(FolderUnreadCount {
-            folder_id: row.get(0)?,
-            unread_count: row.get(1)?,
-        })
-    })
-    .map_err(|e| e.to_string())?
-    .collect::<Result<Vec<_>, _>>()
-    .map_err(|e| e.to_string())
+    stmt.query_map(param_refs.as_slice(), FolderUnreadCount::from_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 /// Unread count for a flag-based virtual folder (STARRED or SNOOZED).
@@ -263,7 +258,7 @@ fn get_flag_folder_unread_count(
     let flag_col = flag_column(folder_id);
 
     let sql = format!(
-        "SELECT COUNT(*) FROM threads t
+        "SELECT COUNT(*) AS cnt FROM threads t
          WHERE {scope_clause} AND t.is_read = 0 AND t.{flag_col} = 1"
     );
 
@@ -271,7 +266,7 @@ fn get_flag_folder_unread_count(
         scope_params.iter().map(AsRef::as_ref).collect();
 
     let count = conn
-        .query_row(&sql, param_refs.as_slice(), |row| row.get::<_, i64>(0))
+        .query_row(&sql, param_refs.as_slice(), |row| row.get::<_, i64>("cnt"))
         .map_err(|e| e.to_string())?;
 
     Ok(FolderUnreadCount {
@@ -293,7 +288,7 @@ fn get_label_folder_unread_counts_by_account(
         .collect();
 
     let sql = format!(
-        "SELECT tl.label_id, t.account_id, COUNT(*) FROM threads t
+        "SELECT tl.label_id AS folder_id, t.account_id, COUNT(*) AS unread_count FROM threads t
          INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
          WHERE {scope_clause} AND t.is_read = 0
            AND tl.label_id IN ({})
@@ -309,16 +304,10 @@ fn get_label_folder_unread_counts_by_account(
         all_params.iter().map(AsRef::as_ref).collect();
 
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    stmt.query_map(param_refs.as_slice(), |row| {
-        Ok(FolderAccountUnreadCount {
-            folder_id: row.get(0)?,
-            account_id: row.get(1)?,
-            unread_count: row.get(2)?,
-        })
-    })
-    .map_err(|e| e.to_string())?
-    .collect::<Result<Vec<_>, _>>()
-    .map_err(|e| e.to_string())
+    stmt.query_map(param_refs.as_slice(), FolderAccountUnreadCount::from_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 /// Flag-based virtual folder unread counts grouped by account.
@@ -331,7 +320,7 @@ fn get_flag_folder_unread_by_account(
     let flag_col = flag_column(folder_id);
 
     let sql = format!(
-        "SELECT t.account_id, COUNT(*) FROM threads t
+        "SELECT t.account_id, COUNT(*) AS unread_count FROM threads t
          WHERE {scope_clause} AND t.is_read = 0 AND t.{flag_col} = 1
          GROUP BY t.account_id"
     );
@@ -343,8 +332,8 @@ fn get_flag_folder_unread_by_account(
     stmt.query_map(param_refs.as_slice(), |row| {
         Ok(FolderAccountUnreadCount {
             folder_id: folder_id.to_owned(),
-            account_id: row.get(0)?,
-            unread_count: row.get(1)?,
+            account_id: row.get("account_id")?,
+            unread_count: row.get("unread_count")?,
         })
     })
     .map_err(|e| e.to_string())?
@@ -469,12 +458,12 @@ fn count_local_drafts(
     let clause = scope_clause.replace("t.account_id", "account_id");
 
     let sql = format!(
-        "SELECT COUNT(*) FROM local_drafts WHERE {clause} AND sync_status != 'synced'"
+        "SELECT COUNT(*) AS cnt FROM local_drafts WHERE {clause} AND sync_status != 'synced'"
     );
 
     let param_refs: Vec<&dyn rusqlite::types::ToSql> =
         scope_params.iter().map(AsRef::as_ref).collect();
 
-    conn.query_row(&sql, param_refs.as_slice(), |row| row.get::<_, i64>(0))
+    conn.query_row(&sql, param_refs.as_slice(), |row| row.get::<_, i64>("cnt"))
         .map_err(|e| e.to_string())
 }

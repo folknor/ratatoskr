@@ -231,7 +231,7 @@ fn delete_carddav_contact(
             "SELECT contact_email FROM carddav_contact_map \
              WHERE uri = ?1 AND account_id = ?2",
             params![uri, account_id],
-            |row| row.get(0),
+            |row| row.get("contact_email"),
         )
         .ok();
 
@@ -247,26 +247,26 @@ fn delete_carddav_contact(
     if let Some(ref email) = email {
         let carddav_remaining: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM carddav_contact_map WHERE contact_email = ?1",
+                "SELECT COUNT(*) AS cnt FROM carddav_contact_map WHERE contact_email = ?1",
                 params![email],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .map_err(|e| format!("count remaining carddav mappings: {e}"))?;
 
         // Also check other providers' mappings
         let google_remaining: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM google_contact_map WHERE contact_email = ?1",
+                "SELECT COUNT(*) AS cnt FROM google_contact_map WHERE contact_email = ?1",
                 params![email],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .unwrap_or(0);
 
         let graph_remaining: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM graph_contact_map WHERE email = ?1",
+                "SELECT COUNT(*) AS cnt FROM graph_contact_map WHERE email = ?1",
                 params![email],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .unwrap_or(0);
 
@@ -293,7 +293,7 @@ async fn load_ctag(db: &DbState, account_id: &str) -> Result<Option<String>, Str
             .query_row(
                 "SELECT value FROM settings WHERE key = ?1",
                 params![key],
-                |row| row.get(0),
+                |row| row.get("value"),
             )
             .ok();
         Ok(result)
@@ -334,8 +334,8 @@ async fn load_stored_etags(
         let rows = stmt
             .query_map(params![aid], |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>("uri")?,
+                    row.get::<_, Option<String>>("etag")?,
                 ))
             })
             .map_err(|e| format!("query etags: {e}"))?;

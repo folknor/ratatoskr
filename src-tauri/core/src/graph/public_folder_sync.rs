@@ -111,7 +111,7 @@ async fn load_sync_state(
 
         let result = stmt
             .query_row(rusqlite::params![account_id, folder_id], |row| {
-                Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?))
+                Ok((row.get::<_, Option<i64>>("last_sync_timestamp")?, row.get::<_, Option<i64>>("last_full_scan_at")?))
             })
             .ok();
 
@@ -186,7 +186,7 @@ async fn upsert_items(
             // Check if this item already exists (and if change_key differs)
             let existing_ck: Option<Option<String>> = exists_stmt
                 .query_row(rusqlite::params![account_id, item.item_id], |row| {
-                    row.get::<_, Option<String>>(0)
+                    row.get::<_, Option<String>>("change_key")
                 })
                 .ok();
 
@@ -289,7 +289,7 @@ async fn load_sync_depth_days(
                 "SELECT sync_depth_days FROM public_folder_pins \
                  WHERE account_id = ?1 AND folder_id = ?2",
                 rusqlite::params![account_id, folder_id],
-                |row| row.get::<_, i32>(0),
+                |row| row.get::<_, i32>("sync_depth_days"),
             )
             .unwrap_or(30);
         Ok(depth)
@@ -312,7 +312,7 @@ async fn load_pinned_folder_ids(
             .map_err(|e| format!("prepare load_pinned_folder_ids: {e}"))?;
 
         let rows = stmt
-            .query_map(rusqlite::params![account_id], |row| row.get::<_, String>(0))
+            .query_map(rusqlite::params![account_id], |row| row.get::<_, String>("folder_id"))
             .map_err(|e| format!("query load_pinned_folder_ids: {e}"))?;
 
         let mut ids = Vec::new();
@@ -708,9 +708,9 @@ mod tests {
 
         let count: i32 = conn
             .query_row(
-                "SELECT COUNT(*) FROM public_folder_items WHERE account_id = 'acc1'",
+                "SELECT COUNT(*) AS cnt FROM public_folder_items WHERE account_id = 'acc1'",
                 [],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .expect("count");
         assert_eq!(count, 1);
@@ -747,7 +747,7 @@ mod tests {
             .query_row(
                 "SELECT change_key, subject, is_read FROM public_folder_items WHERE item_id = 'item1'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get("change_key")?, row.get("subject")?, row.get("is_read")?)),
             )
             .expect("query");
 
@@ -790,9 +790,9 @@ mod tests {
 
         let remaining: i32 = conn
             .query_row(
-                "SELECT COUNT(*) FROM public_folder_items WHERE account_id = 'acc1'",
+                "SELECT COUNT(*) AS cnt FROM public_folder_items WHERE account_id = 'acc1'",
                 [],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .expect("count");
         assert_eq!(remaining, 2);
@@ -817,7 +817,7 @@ mod tests {
             .query_row(
                 "SELECT sync_depth_days FROM public_folder_pins WHERE account_id = 'acc1' AND folder_id = 'f1'",
                 [],
-                |row| row.get(0),
+                |row| row.get("sync_depth_days"),
             )
             .expect("query depth");
         assert_eq!(depth, 60);
@@ -857,27 +857,27 @@ mod tests {
 
         let pin_count: i32 = conn
             .query_row(
-                "SELECT COUNT(*) FROM public_folder_pins WHERE account_id = 'acc1'",
+                "SELECT COUNT(*) AS cnt FROM public_folder_pins WHERE account_id = 'acc1'",
                 [],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .expect("count pins");
         assert_eq!(pin_count, 0);
 
         let item_count: i32 = conn
             .query_row(
-                "SELECT COUNT(*) FROM public_folder_items WHERE account_id = 'acc1'",
+                "SELECT COUNT(*) AS cnt FROM public_folder_items WHERE account_id = 'acc1'",
                 [],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .expect("count items");
         assert_eq!(item_count, 0);
 
         let sync_count: i32 = conn
             .query_row(
-                "SELECT COUNT(*) FROM public_folder_sync_state WHERE account_id = 'acc1'",
+                "SELECT COUNT(*) AS cnt FROM public_folder_sync_state WHERE account_id = 'acc1'",
                 [],
-                |row| row.get(0),
+                |row| row.get("cnt"),
             )
             .expect("count sync state");
         assert_eq!(sync_count, 0);

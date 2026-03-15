@@ -3,6 +3,7 @@ use super::super::types::{
     BackfillRow, CachedAttachmentRow, DbCategory, ImapMessageRow, SnoozedThread, SpecialFolderRow,
     SubscriptionEntry,
 };
+use crate::db::from_row::FromRow;
 use rusqlite::params;
 
 /// Backfill variant of the latest-message subquery that also selects `to_addresses`.
@@ -27,12 +28,7 @@ pub async fn db_get_snoozed_threads_due(
                 "SELECT id, account_id FROM threads WHERE is_snoozed = 1 AND snooze_until <= ?1",
             )
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![now], |row| {
-            Ok(SnoozedThread {
-                id: row.get(0)?,
-                account_id: row.get(1)?,
-            })
-        })
+        stmt.query_map(params![now], SnoozedThread::from_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
@@ -89,17 +85,7 @@ pub async fn db_get_subscriptions(
                      ORDER BY MAX(m.date) DESC",
             )
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id], |row| {
-            Ok(SubscriptionEntry {
-                from_address: row.get("from_address")?,
-                from_name: row.get("from_name")?,
-                latest_unsubscribe_header: row.get("latest_unsubscribe_header")?,
-                latest_unsubscribe_post: row.get("latest_unsubscribe_post")?,
-                message_count: row.get("message_count")?,
-                latest_date: row.get("latest_date")?,
-                status: row.get("status")?,
-            })
-        })
+        stmt.query_map(params![account_id], SubscriptionEntry::from_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
@@ -118,7 +104,7 @@ pub async fn db_get_unsubscribe_status(
             .query_row(
                 "SELECT status FROM unsubscribe_actions WHERE account_id = ?1 AND from_address = ?2",
                 params![account_id, from_address],
-                |row| row.get(0),
+                |row| row.get("status"),
             )
             .ok())
     })
@@ -150,13 +136,7 @@ pub async fn db_get_imap_uids_for_messages(
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             param_values.iter().map(|p| p.as_ref()).collect();
         let rows = stmt
-            .query_map(param_refs.as_slice(), |row| {
-                Ok(ImapMessageRow {
-                    id: row.get(0)?,
-                    imap_uid: row.get(1)?,
-                    imap_folder: row.get(2)?,
-                })
-            })
+            .query_map(param_refs.as_slice(), ImapMessageRow::from_row)
             .map_err(|e| e.to_string())?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())
@@ -175,12 +155,7 @@ pub async fn db_find_special_folder(
             .query_row(
                 "SELECT imap_folder_path, name FROM labels WHERE account_id = ?1 AND imap_special_use = ?2 LIMIT 1",
                 params![account_id, special_use],
-                |row| {
-                    Ok(SpecialFolderRow {
-                        imap_folder_path: row.get(0)?,
-                        name: row.get(1)?,
-                    })
-                },
+                SpecialFolderRow::from_row,
             )
             .ok();
         if let Some(row) = result {
@@ -191,12 +166,7 @@ pub async fn db_find_special_folder(
                 .query_row(
                     "SELECT imap_folder_path, name FROM labels WHERE account_id = ?1 AND id = ?2 AND imap_folder_path IS NOT NULL LIMIT 1",
                     params![account_id, label_id],
-                    |row| {
-                        Ok(SpecialFolderRow {
-                            imap_folder_path: row.get(0)?,
-                            name: row.get(1)?,
-                        })
-                    },
+                    SpecialFolderRow::from_row,
                 )
                 .ok();
             if let Some(row) = fallback {
@@ -261,9 +231,9 @@ pub async fn db_get_attachment_cache_size(db: &DbState) -> Result<i64, String> {
     db.with_conn(move |conn| {
         let total: i64 = conn
             .query_row(
-                "SELECT COALESCE(SUM(cache_size), 0) FROM attachments WHERE cached_at IS NOT NULL",
+                "SELECT COALESCE(SUM(cache_size), 0) AS total FROM attachments WHERE cached_at IS NOT NULL",
                 [],
-                |row| row.get(0),
+                |row| row.get("total"),
             )
             .map_err(|e| e.to_string())?;
         Ok(total)
@@ -281,14 +251,7 @@ pub async fn db_get_oldest_cached_attachments(
                 "SELECT id, local_path, cache_size, content_hash FROM attachments WHERE cached_at IS NOT NULL ORDER BY cached_at ASC LIMIT ?1",
             )
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![limit], |row| {
-            Ok(CachedAttachmentRow {
-                id: row.get(0)?,
-                local_path: row.get(1)?,
-                cache_size: row.get(2)?,
-                content_hash: row.get(3)?,
-            })
-        })
+        stmt.query_map(params![limit], CachedAttachmentRow::from_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
@@ -326,9 +289,9 @@ pub async fn db_clear_all_attachment_cache(db: &DbState) -> Result<(), String> {
 pub async fn db_count_cached_by_hash(db: &DbState, content_hash: String) -> Result<i64, String> {
     db.with_conn(move |conn| {
         conn.query_row(
-            "SELECT COUNT(*) FROM attachments WHERE content_hash = ?1 AND cached_at IS NOT NULL",
+            "SELECT COUNT(*) AS cnt FROM attachments WHERE content_hash = ?1 AND cached_at IS NOT NULL",
             params![content_hash],
-            |row| row.get(0),
+            |row| row.get("cnt"),
         )
         .map_err(|e| e.to_string())
     })
@@ -355,18 +318,7 @@ pub async fn db_get_inbox_threads_for_backfill(
                  LIMIT ?2 OFFSET ?3"
         );
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id, batch_size, offset], |row| {
-            Ok(BackfillRow {
-                thread_id: row.get("thread_id")?,
-                subject: row.get("subject")?,
-                snippet: row.get("snippet")?,
-                from_address: row.get("from_address")?,
-                from_name: row.get("from_name")?,
-                to_addresses: row.get("to_addresses")?,
-                has_attachments: row.get("has_attachments")?,
-                id: row.get("id")?,
-            })
-        })
+        stmt.query_map(params![account_id, batch_size, offset], BackfillRow::from_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
@@ -384,7 +336,7 @@ pub async fn db_update_scheduled_email_attachments(
             .query_row(
                 "SELECT id FROM scheduled_emails WHERE account_id = ?1 ORDER BY created_at DESC LIMIT 1",
                 params![account_id],
-                |row| row.get(0),
+                |row| row.get("id"),
             )
             .ok();
         if let Some(id) = id {
@@ -438,8 +390,8 @@ pub async fn db_query_raw_select(
         let rows = stmt
             .query_map(param_refs.as_slice(), |row| {
                 let mut map = serde_json::Map::new();
-                for (i, name) in col_names.iter().enumerate() {
-                    let val: rusqlite::types::Value = row.get(i)?;
+                for name in &col_names {
+                    let val: rusqlite::types::Value = row.get(name.as_str())?;
                     let json_val = match val {
                         rusqlite::types::Value::Null => serde_json::Value::Null,
                         rusqlite::types::Value::Integer(n) => serde_json::Value::Number(n.into()),
@@ -505,19 +457,7 @@ pub async fn db_get_categories(
                  FROM categories WHERE account_id = ?1 ORDER BY sort_order ASC",
             )
             .map_err(|e| format!("prepare categories query: {e}"))?;
-        stmt.query_map(params![account_id], |row| {
-            Ok(DbCategory {
-                id: row.get(0)?,
-                account_id: row.get(1)?,
-                display_name: row.get(2)?,
-                color_preset: row.get(3)?,
-                color_bg: row.get(4)?,
-                color_fg: row.get(5)?,
-                provider_id: row.get(6)?,
-                sync_state: row.get(7)?,
-                sort_order: row.get(8)?,
-            })
-        })
+        stmt.query_map(params![account_id], DbCategory::from_row)
         .map_err(|e| format!("query categories: {e}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("collect categories: {e}"))
