@@ -15,7 +15,6 @@ use super::types::{
     SameDomainContact, SnoozedThread, SortOrderItem, SubscriptionEntry, ThreadCategoryWithManual,
     ThreadInfoRow, TriggeredFollowUp, UncachedAttachment,
 };
-pub use ratatoskr_core::db::queries_extra::load_recent_rule_categorized_threads;
 
 #[tauri::command]
 pub async fn db_get_all_contacts(

@@ -4,11 +4,12 @@ use tauri::{AppHandle, State};
 
 use crate::body_store::BodyStoreState;
 use ratatoskr_core::calendar::sync::calendar_sync_account_impl;
-use crate::categorization::AiCategorizationCandidate;
 use crate::categorization::commands::categorize_threads_with_ai_impl;
 use crate::db::DbState;
-use crate::db::queries_extra::load_recent_rule_categorized_threads;
 use crate::filters::FilterableMessage;
+use ratatoskr_core::sync::notifications::{
+    evaluate_notifications, get_ai_categorization_candidates,
+};
 use crate::filters::commands::filters_apply_to_messages_impl;
 use crate::filters::commands::load_enabled_filters;
 use crate::filters::commands::load_filterable_messages;
@@ -26,7 +27,7 @@ use crate::state::AppState;
 
 use super::config;
 use super::types::{
-    ImapSyncResult, NotificationCandidate, SyncNotificationsEvent, SyncStatus,
+    ImapSyncResult, SyncNotificationsEvent, SyncStatus,
     SyncStatusDonePayload, SyncStatusEvent,
 };
 use super::{SyncQueueState, SyncState};
@@ -449,202 +450,6 @@ async fn run_sync_account(app_state: &AppState, account_id: &str) {
     }
 }
 
-async fn get_ai_categorization_candidates(
-    db: &DbState,
-    account_id: &str,
-) -> Result<Vec<AiCategorizationCandidate>, String> {
-    let account_id = account_id.to_string();
-    db.with_conn(move |conn| {
-        let auto_categorize = conn
-            .query_row(
-                "SELECT value FROM settings WHERE key = 'ai_auto_categorize'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .ok();
-        if auto_categorize.as_deref() == Some("false") {
-            return Ok(Vec::new());
-        }
-
-        load_recent_rule_categorized_threads(conn, &account_id, 20).map(|threads| {
-            threads
-                .into_iter()
-                .map(|thread| AiCategorizationCandidate {
-                    id: thread.id,
-                    subject: thread.subject,
-                    snippet: thread.snippet,
-                    from_address: thread.from_address,
-                })
-                .collect()
-        })
-    })
-    .await
-}
-
-async fn evaluate_notifications(
-    db: &DbState,
-    account_id: &str,
-    messages: &[FilterableMessage],
-    is_delta: bool,
-) -> Result<Vec<NotificationCandidate>, String> {
-    if !is_delta || messages.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let account_id = account_id.to_string();
-    let messages = messages.to_vec();
-    let thread_ids: Vec<String> = messages.iter().map(|msg| msg.thread_id.clone()).collect();
-    db.with_conn(move |conn| {
-        let notifications_enabled: Option<String> = conn
-            .query_row(
-                "SELECT value FROM settings WHERE key = 'notifications_enabled'",
-                [],
-                |row| row.get(0),
-            )
-            .ok();
-        if notifications_enabled.as_deref() == Some("false") {
-            return Ok(Vec::new());
-        }
-
-        let smart_notifications = conn
-            .query_row(
-                "SELECT value FROM settings WHERE key = 'smart_notifications'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .ok()
-            .unwrap_or_else(|| "true".to_string())
-            == "true";
-        let notify_categories = conn
-            .query_row(
-                "SELECT value FROM settings WHERE key = 'notify_categories'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .ok()
-            .unwrap_or_else(|| "Primary".to_string());
-        let allowed_categories: std::collections::HashSet<String> = notify_categories
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-
-        let vip_senders: std::collections::HashSet<String> = {
-            let mut stmt = conn
-                .prepare("SELECT email_address FROM notification_vips WHERE account_id = ?1")
-                .map_err(|e| e.to_string())?;
-            stmt.query_map(rusqlite::params![account_id], |row| row.get::<_, String>(0))
-                .map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?
-                .into_iter()
-                .map(|email| email.trim().to_lowercase())
-                .collect()
-        };
-
-        // Only check muted status for the relevant thread IDs, not every muted thread in the account.
-        let muted_thread_ids: std::collections::HashSet<String> = if thread_ids.is_empty() {
-            std::collections::HashSet::new()
-        } else {
-            let placeholders: String = thread_ids
-                .iter()
-                .enumerate()
-                .map(|(i, _)| format!("?{}", i + 2))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let sql = format!(
-                "SELECT id FROM threads WHERE account_id = ?1 AND is_muted = 1 AND id IN ({placeholders})"
-            );
-            let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
-                vec![Box::new(account_id.clone())];
-            for id in &thread_ids {
-                param_values.push(Box::new(id.clone()));
-            }
-            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                param_values.iter().map(AsRef::as_ref).collect();
-            stmt.query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))
-                .map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?
-                .into_iter()
-                .collect()
-        };
-
-        let mut category_by_thread: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
-        for chunk in thread_ids.chunks(100) {
-            if chunk.is_empty() {
-                continue;
-            }
-            let placeholders: String = chunk
-                .iter()
-                .enumerate()
-                .map(|(i, _)| format!("?{}", i + 2))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let sql = format!(
-                "SELECT thread_id, category FROM thread_categories WHERE account_id = ?1 AND thread_id IN ({placeholders})"
-            );
-            let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-            param_values.push(Box::new(account_id.clone()));
-            for id in chunk {
-                param_values.push(Box::new(id.clone()));
-            }
-            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                param_values.iter().map(AsRef::as_ref).collect();
-            let rows = stmt
-                .query_map(param_refs.as_slice(), |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })
-                .map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?;
-            category_by_thread.extend(rows);
-        }
-
-        let mut candidates = Vec::new();
-        for msg in messages {
-            if muted_thread_ids.contains(&msg.thread_id) {
-                continue;
-            }
-            let from_address_normalized =
-                msg.from_address.as_ref().map(|email| email.trim().to_lowercase());
-            let should_notify = if !smart_notifications {
-                true
-            } else if let Some(from_address) = from_address_normalized.as_ref() {
-                if vip_senders.contains(from_address) {
-                    true
-                } else {
-                    let category = category_by_thread
-                        .get(&msg.thread_id)
-                        .map(String::as_str)
-                        .unwrap_or("Primary");
-                    allowed_categories.contains(category)
-                }
-            } else {
-                let category = category_by_thread
-                    .get(&msg.thread_id)
-                    .map(String::as_str)
-                    .unwrap_or("Primary");
-                allowed_categories.contains(category)
-            };
-
-            if should_notify {
-                candidates.push(NotificationCandidate {
-                    thread_id: msg.thread_id,
-                    from_name: msg.from_name,
-                    from_address: msg.from_address,
-                    subject: msg.subject,
-                });
-            }
-        }
-
-        Ok(candidates)
-    })
-    .await
-}
 
 async fn load_post_sync_messages(
     db: &DbState,

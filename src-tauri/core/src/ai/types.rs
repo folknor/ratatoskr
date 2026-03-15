@@ -66,7 +66,7 @@ impl fmt::Display for AiProvider {
 #[derive(Debug, Clone)]
 pub struct AiConfig {
     pub provider: AiProvider,
-    pub api_key: String,
+    pub api_key: Option<String>,
     pub model: String,
     /// Server URL (used for Ollama).
     pub server_url: Option<String>,
