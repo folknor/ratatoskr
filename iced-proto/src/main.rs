@@ -219,15 +219,16 @@ impl App {
             .selected_thread
             .and_then(|idx| self.threads.get(idx));
 
-        let sidebar = ui::sidebar::view(
-            &self.accounts,
-            self.selected_account,
-            &self.labels,
-            &self.selected_label,
-            self.scope_dropdown_open,
-            self.labels_expanded,
-            self.smart_folders_expanded,
-        );
+        let sidebar_model = ui::sidebar::SidebarModel {
+            accounts: &self.accounts,
+            selected_account: self.selected_account,
+            labels: &self.labels,
+            selected_label: &self.selected_label,
+            scope_dropdown_open: self.scope_dropdown_open,
+            labels_expanded: self.labels_expanded,
+            smart_folders_expanded: self.smart_folders_expanded,
+        };
+        let sidebar = ui::sidebar::view(sidebar_model);
 
         let thread_list = ui::thread_list::view(
             &self.threads,

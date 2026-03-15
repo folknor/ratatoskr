@@ -1,12 +1,14 @@
 use iced::widget::{button, canvas, column, container, row, rule, text, Canvas, Space};
-use iced::{mouse, Alignment, Element, Length, Rectangle, Renderer, Theme};
+use iced::{mouse, Alignment, Color, Element, Length, Rectangle, Renderer, Theme};
 
+use crate::db::Account;
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::Message;
 
-/// Colored circle with initial letter, used for avatars.
+// ── Avatar ──────────────────────────────────────────────
+
 pub fn avatar_circle<'a>(name: &str, size: f32) -> Element<'a, Message> {
     let color = theme::avatar_color(name);
     let letter = theme::initial(name);
@@ -15,13 +17,12 @@ pub fn avatar_circle<'a>(name: &str, size: f32) -> Element<'a, Message> {
         .width(size)
         .height(size);
 
-    // Overlay the letter on the circle
     iced::widget::stack![
         circle,
         container(
             text(letter)
                 .size(size * 0.45)
-                .color(iced::Color::WHITE),
+                .color(Color::WHITE),
         )
         .center(Length::Fill),
     ]
@@ -30,35 +31,7 @@ pub fn avatar_circle<'a>(name: &str, size: f32) -> Element<'a, Message> {
     .into()
 }
 
-struct CirclePainter {
-    color: iced::Color,
-    size: f32,
-}
-
-impl canvas::Program<Message> for CirclePainter {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &(),
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<canvas::Geometry<Renderer>> {
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let radius = self.size / 2.0;
-        let circle = canvas::path::Path::circle(
-            iced::Point::new(radius, radius),
-            radius,
-        );
-        frame.fill(&circle, self.color);
-        vec![frame.into_geometry()]
-    }
-}
-
-/// Small colored dot for labels in sidebar.
-pub fn color_dot<'a>(color: iced::Color) -> Element<'a, Message> {
+pub fn color_dot<'a>(color: Color) -> Element<'a, Message> {
     let dot = Canvas::new(DotPainter { color })
         .width(8)
         .height(8);
@@ -67,7 +40,7 @@ pub fn color_dot<'a>(color: iced::Color) -> Element<'a, Message> {
         .into()
 }
 
-// ── Unread count badge ──────────────────────────────────
+// ── Badges ──────────────────────────────────────────────
 
 pub fn count_badge<'a>(count: i64) -> Element<'a, Message> {
     if count == 0 {
@@ -78,17 +51,40 @@ pub fn count_badge<'a>(count: i64) -> Element<'a, Message> {
     } else {
         count.to_string()
     };
-    container(
-        text(label)
-            .size(10)
-            .style(text::secondary),
-    )
-    .padding(PAD_BADGE)
-    .style(theme::badge_container)
-    .into()
+    container(text(label).size(10).style(text::secondary))
+        .padding(PAD_BADGE)
+        .style(theme::badge_container)
+        .into()
 }
 
-/// A sidebar nav item with an optional unread count badge on the right.
+// ── Nav items ───────────────────────────────────────────
+
+pub struct NavItem<'a> {
+    pub label: &'a str,
+    pub id: &'a str,
+    pub unread: i64,
+}
+
+pub fn nav_group<'a>(
+    items: &[NavItem<'a>],
+    selected_label: &'a Option<String>,
+) -> Element<'a, Message> {
+    let mut col = column![].spacing(SPACE_XXS);
+    for item in items {
+        let is_active = match selected_label {
+            Some(lid) => lid == item.id,
+            None => item.id == "INBOX",
+        };
+        let on_press = if item.id == "INBOX" {
+            Message::SelectLabel(None)
+        } else {
+            Message::SelectLabel(Some(item.id.to_string()))
+        };
+        col = col.push(nav_item_with_badge(item.label, item.id, is_active, item.unread, on_press));
+    }
+    col.into()
+}
+
 pub fn nav_item_with_badge<'a>(
     label: &'a str,
     _id: &'a str,
@@ -119,10 +115,44 @@ pub fn nav_item_with_badge<'a>(
         .into()
 }
 
-// ── Horizontal divider ──────────────────────────────────
+pub fn label_nav_item<'a>(
+    name: &'a str,
+    id: &'a str,
+    color: Color,
+    active: bool,
+    on_press: Message,
+) -> Element<'a, Message> {
+    let lbl_style: fn(&Theme) -> text::Style = if active {
+        text::primary
+    } else {
+        text::secondary
+    };
+
+    button(
+        row![color_dot(color), text(name).size(12).style(lbl_style)]
+            .spacing(SPACE_XS)
+            .align_y(Alignment::Center),
+    )
+    .on_press(on_press)
+    .padding(PAD_ICON_BTN)
+    .style(theme::nav_button(active))
+    .width(Length::Fill)
+    .into()
+}
+
+// ── Dividers & section breaks ───────────────────────────
 
 pub fn divider<'a>() -> Element<'a, Message> {
     rule::horizontal(1).style(theme::divider_rule).into()
+}
+
+pub fn section_break<'a>() -> Element<'a, Message> {
+    column![
+        Space::new().height(SPACE_XXS),
+        divider(),
+        Space::new().height(SPACE_XXS),
+    ]
+    .into()
 }
 
 // ── Collapsible section ─────────────────────────────────
@@ -207,10 +237,142 @@ pub fn dropdown_item<'a>(
         .into()
 }
 
+// ── Scope dropdown ──────────────────────────────────────
+
+pub fn scope_dropdown<'a>(
+    accounts: &'a [Account],
+    selected_account: Option<usize>,
+    dropdown_open: bool,
+) -> Element<'a, Message> {
+    let trigger_content: Element<'a, Message> = if let Some(idx) = selected_account {
+        if let Some(acc) = accounts.get(idx) {
+            let name = acc.display_name.as_deref().unwrap_or(&acc.email);
+            row![
+                avatar_circle(name, 24.0),
+                text(name).size(12).style(text::base),
+            ]
+            .spacing(SPACE_XS)
+            .align_y(Alignment::Center)
+            .into()
+        } else {
+            text("All Accounts").size(12).style(text::base).into()
+        }
+    } else {
+        text("All Accounts").size(12).style(text::base).into()
+    };
+
+    let trigger = dropdown_trigger(trigger_content, Message::ToggleScopeDropdown);
+
+    if !dropdown_open {
+        return trigger;
+    }
+
+    let mut items: Vec<Element<'a, Message>> = Vec::new();
+
+    items.push(dropdown_item(
+        row![
+            icon::inbox().size(12).style(text::secondary),
+            text("All Accounts").size(12).style(text::base),
+        ]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center)
+        .into(),
+        selected_account.is_none(),
+        Message::ToggleScopeDropdown,
+    ));
+
+    for (idx, acc) in accounts.iter().enumerate() {
+        let name = acc.display_name.as_deref().unwrap_or(&acc.email);
+        let is_selected = selected_account == Some(idx);
+        items.push(dropdown_item(
+            row![
+                avatar_circle(name, 20.0),
+                text(name).size(12).style(text::base),
+            ]
+            .spacing(SPACE_XS)
+            .align_y(Alignment::Center)
+            .into(),
+            is_selected,
+            Message::SelectAccount(idx),
+        ));
+    }
+
+    let menu = dropdown_menu(items);
+
+    column![trigger, menu].spacing(SPACE_XXS).into()
+}
+
+// ── Compose button ──────────────────────────────────────
+
+pub fn compose_button<'a>() -> Element<'a, Message> {
+    button(
+        container(
+            row![
+                icon::pencil().size(13).color(Color::WHITE),
+                text("Compose").size(13).color(Color::WHITE),
+            ]
+            .spacing(SPACE_XXS)
+            .align_y(Alignment::Center),
+        )
+        .center_x(Length::Fill)
+        .center_y(Length::Fill),
+    )
+    .on_press(Message::Compose)
+    .padding(PAD_BUTTON)
+    .style(button::primary)
+    .width(Length::Fill)
+    .into()
+}
+
+// ── Settings button ─────────────────────────────────────
+
+pub fn settings_button<'a>() -> Element<'a, Message> {
+    button(
+        row![
+            icon::settings().size(12).style(text::secondary),
+            text("Settings").size(12).style(text::secondary),
+        ]
+        .spacing(SPACE_XXS)
+        .align_y(Alignment::Center),
+    )
+    .on_press(Message::Noop)
+    .style(theme::bare_button)
+    .padding(PAD_NAV_ITEM)
+    .width(Length::Fill)
+    .into()
+}
+
 // ── Canvas painters ─────────────────────────────────────
 
+struct CirclePainter {
+    color: Color,
+    size: f32,
+}
+
+impl canvas::Program<Message> for CirclePainter {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry<Renderer>> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let radius = self.size / 2.0;
+        let circle = canvas::path::Path::circle(
+            iced::Point::new(radius, radius),
+            radius,
+        );
+        frame.fill(&circle, self.color);
+        vec![frame.into_geometry()]
+    }
+}
+
 struct DotPainter {
-    color: iced::Color,
+    color: Color,
 }
 
 impl canvas::Program<Message> for DotPainter {

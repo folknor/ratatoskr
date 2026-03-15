@@ -1,63 +1,48 @@
-use iced::widget::{button, column, container, row, scrollable, text, Space};
-use iced::{Alignment, Element, Length, Theme};
+use iced::widget::{column, container, scrollable, Space};
+use iced::{Element, Length};
 
 use crate::db::{Account, Label};
-use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
-use crate::ui::widgets;
+use crate::ui::widgets::{self, NavItem};
 use crate::Message;
 
-#[allow(clippy::too_many_arguments)]
-pub fn view<'a>(
-    accounts: &'a [Account],
-    selected_account: Option<usize>,
-    labels: &'a [Label],
-    selected_label: &'a Option<String>,
-    scope_dropdown_open: bool,
-    labels_expanded: bool,
-    smart_folders_expanded: bool,
-) -> Element<'a, Message> {
-    let mut col = column![].spacing(SPACE_XXS).width(SIDEBAR_WIDTH);
+pub struct SidebarModel<'a> {
+    pub accounts: &'a [Account],
+    pub selected_account: Option<usize>,
+    pub labels: &'a [Label],
+    pub selected_label: &'a Option<String>,
+    pub scope_dropdown_open: bool,
+    pub labels_expanded: bool,
+    pub smart_folders_expanded: bool,
+}
 
-    // ── Scope selector (dropdown) ────────────────────────
-    col = col.push(scope_selector(
-        accounts,
-        selected_account,
-        scope_dropdown_open,
-    ));
+impl SidebarModel<'_> {
+    fn is_all_accounts(&self) -> bool {
+        self.selected_account.is_none()
+    }
+}
 
-    col = col.push(Space::new().height(SPACE_XXS));
+pub fn view<'a>(model: SidebarModel<'a>) -> Element<'a, Message> {
+    let mut col = column![
+        widgets::scope_dropdown(model.accounts, model.selected_account, model.scope_dropdown_open),
+        Space::new().height(SPACE_XXS),
+        widgets::compose_button(),
+        Space::new().height(SPACE_XS),
+        nav_items(&model),
+        widgets::section_break(),
+        smart_folders(model.smart_folders_expanded),
+    ]
+    .spacing(0)
+    .width(SIDEBAR_WIDTH);
 
-    // ── Compose button ──────────────────────────────────
-    col = col.push(compose_button());
+    if !model.is_all_accounts() {
+        col = col.push(widgets::section_break());
+        col = col.push(labels(&model));
+    }
 
-    col = col.push(Space::new().height(SPACE_XS));
-
-    // ── Navigation items with unread badges ──────────────
-    col = col.push(nav_section(selected_label));
-
-    col = col.push(Space::new().height(SPACE_XXS));
-    col = col.push(widgets::divider());
-    col = col.push(Space::new().height(SPACE_XXS));
-
-    // ── Smart Folders (collapsible) ─────────────────────
-    col = col.push(smart_folders_section(smart_folders_expanded));
-
-    col = col.push(Space::new().height(SPACE_XXS));
-    col = col.push(widgets::divider());
-    col = col.push(Space::new().height(SPACE_XXS));
-
-    // ── Labels (collapsible) ────────────────────────────
-    col = col.push(labels_section(
-        labels,
-        selected_label,
-        labels_expanded,
-    ));
-
-    // ── Bottom spacer + settings ────────────────────────
     col = col.push(Space::new().height(Length::Fill));
-    col = col.push(settings_button());
+    col = col.push(widgets::settings_button());
 
     container(scrollable(col).height(Length::Fill))
         .padding(PAD_SIDEBAR)
@@ -66,215 +51,61 @@ pub fn view<'a>(
         .into()
 }
 
-// ── Scope selector ──────────────────────────────────────
-
-fn scope_selector<'a>(
-    accounts: &'a [Account],
-    selected_account: Option<usize>,
-    dropdown_open: bool,
-) -> Element<'a, Message> {
-    let trigger_content: Element<'a, Message> = if let Some(idx) = selected_account {
-        if let Some(acc) = accounts.get(idx) {
-            let name = acc.display_name.as_deref().unwrap_or(&acc.email);
-            row![
-                widgets::avatar_circle(name, 24.0),
-                text(name).size(12).style(text::base),
-            ]
-            .spacing(SPACE_XS)
-            .align_y(Alignment::Center)
-            .into()
-        } else {
-            text("All Accounts").size(12).style(text::base).into()
-        }
-    } else {
-        text("All Accounts").size(12).style(text::base).into()
-    };
-
-    let trigger = widgets::dropdown_trigger(trigger_content, Message::ToggleScopeDropdown);
-
-    if !dropdown_open {
-        return trigger;
-    }
-
-    // Build dropdown items
-    let mut items: Vec<Element<'a, Message>> = Vec::new();
-
-    // "All Accounts" option
-    items.push(widgets::dropdown_item(
-        row![
-            icon::inbox().size(12).style(text::secondary),
-            text("All Accounts").size(12).style(text::base),
-        ]
-        .spacing(SPACE_XS)
-        .align_y(Alignment::Center)
-        .into(),
-        selected_account.is_none(),
-        Message::ToggleScopeDropdown,
-    ));
-
-    // Per-account items
-    for (idx, acc) in accounts.iter().enumerate() {
-        let name = acc.display_name.as_deref().unwrap_or(&acc.email);
-        let is_selected = selected_account == Some(idx);
-        items.push(widgets::dropdown_item(
-            row![
-                widgets::avatar_circle(name, 20.0),
-                text(name).size(12).style(text::base),
-            ]
-            .spacing(SPACE_XS)
-            .align_y(Alignment::Center)
-            .into(),
-            is_selected,
-            Message::SelectAccount(idx),
-        ));
-    }
-
-    let menu = widgets::dropdown_menu(items);
-
-    column![trigger, menu].spacing(SPACE_XXS).into()
-}
-
-// ── Compose button ──────────────────────────────────────
-
-fn compose_button<'a>() -> Element<'a, Message> {
-    button(
-        container(
-            row![
-                icon::pencil().size(13).color(iced::Color::WHITE),
-                text("Compose").size(13).color(iced::Color::WHITE),
-            ]
-            .spacing(SPACE_XXS)
-            .align_y(Alignment::Center),
-        )
-        .center_x(Length::Fill)
-        .center_y(Length::Fill),
-    )
-    .on_press(Message::Compose)
-    .padding(PAD_BUTTON)
-    .style(button::primary)
-    .width(Length::Fill)
-    .into()
-}
-
-// ── Navigation items ────────────────────────────────────
-
-fn nav_section<'a>(selected_label: &'a Option<String>) -> Element<'a, Message> {
-    let nav_items: Vec<(&str, &str, i64)> = vec![
-        ("Inbox", "INBOX", 12),
-        ("Starred", "__starred", 0),
-        ("Snoozed", "__snoozed", 2),
-        ("Sent", "__sent", 0),
-        ("Drafts", "__drafts", 3),
-        ("Trash", "__trash", 0),
+fn nav_items<'a>(model: &SidebarModel<'a>) -> Element<'a, Message> {
+    let mut items = vec![
+        NavItem { label: "Inbox",   id: "INBOX",     unread: 12 },
+        NavItem { label: "Starred", id: "__starred",  unread: 0 },
+        NavItem { label: "Snoozed", id: "__snoozed",  unread: 2 },
+        NavItem { label: "Sent",    id: "__sent",     unread: 0 },
+        NavItem { label: "Drafts",  id: "__drafts",   unread: 3 },
+        NavItem { label: "Trash",   id: "__trash",    unread: 0 },
     ];
-
-    let mut col = column![].spacing(SPACE_XXS);
-
-    for (display_name, id, unread) in nav_items {
-        let is_active = match selected_label {
-            Some(lid) => lid == id,
-            None => id == "INBOX",
-        };
-        let on_press = if id == "INBOX" {
-            Message::SelectLabel(None)
-        } else {
-            Message::SelectLabel(Some(id.to_string()))
-        };
-        col = col.push(widgets::nav_item_with_badge(
-            display_name,
-            id,
-            is_active,
-            unread,
-            on_press,
-        ));
+    if !model.is_all_accounts() {
+        items.push(NavItem { label: "Spam",     id: "__spam",     unread: 0 });
+        items.push(NavItem { label: "All Mail", id: "__all_mail", unread: 0 });
     }
-
-    col.into()
+    widgets::nav_group(&items, model.selected_label)
 }
 
-// ── Smart Folders (collapsible) ─────────────────────────
-
-fn smart_folders_section(expanded: bool) -> Element<'static, Message> {
-    let children: Vec<Element<'static, Message>> = vec![
-        widgets::nav_item_with_badge("VIP", "__sf_vip", false, 3, Message::Noop),
-        widgets::nav_item_with_badge("Newsletters", "__sf_news", false, 0, Message::Noop),
-    ];
-
+fn smart_folders(expanded: bool) -> Element<'static, Message> {
     widgets::collapsible_section(
         "SMART FOLDERS",
         expanded,
         Message::ToggleSmartFoldersSection,
-        children,
+        vec![
+            widgets::nav_item_with_badge("VIP", "__sf_vip", false, 3, Message::Noop),
+            widgets::nav_item_with_badge("Newsletters", "__sf_news", false, 0, Message::Noop),
+        ],
     )
 }
 
-// ── Labels (collapsible) ────────────────────────────────
-
-fn labels_section<'a>(
-    labels: &'a [Label],
-    selected_label: &'a Option<String>,
-    expanded: bool,
-) -> Element<'a, Message> {
-    let user_labels: Vec<&Label> = labels
+fn labels<'a>(model: &SidebarModel<'a>) -> Element<'a, Message> {
+    let children = model
+        .labels
         .iter()
-        .filter(|l| {
-            !matches!(
-                l.name.as_str(),
-                "INBOX" | "Sent" | "Drafts" | "Trash" | "Spam" | "Archive"
-                    | "Junk" | "Templates" | "Calendar" | "Contacts"
-                    | "Journal" | "Notes" | "Outbox" | "Deleted Items"
-                    | "Sent Items" | "Conversation History"
-            )
-        })
-        .collect();
-
-    let children: Vec<Element<'a, Message>> = user_labels
-        .iter()
+        .filter(|l| !is_system_label(&l.name))
         .take(12)
-        .map(|label| {
-            let is_active = selected_label.as_deref() == Some(&label.id);
-            let color_dot = widgets::color_dot(theme::avatar_color(&label.name));
-            let lbl_style: fn(&Theme) -> text::Style = if is_active {
-                text::primary
-            } else {
-                text::secondary
-            };
-
-            button(
-                row![color_dot, text(&label.name).size(12).style(lbl_style)]
-                    .spacing(SPACE_XS)
-                    .align_y(Alignment::Center),
+        .map(|l| {
+            let active = model.selected_label.as_deref() == Some(&l.id);
+            widgets::label_nav_item(
+                &l.name,
+                &l.id,
+                theme::avatar_color(&l.name),
+                active,
+                Message::SelectLabel(Some(l.id.clone())),
             )
-            .on_press(Message::SelectLabel(Some(label.id.clone())))
-            .padding(PAD_ICON_BTN)
-            .style(theme::nav_button(is_active))
-            .width(Length::Fill)
-            .into()
         })
         .collect();
 
-    widgets::collapsible_section(
-        "LABELS",
-        expanded,
-        Message::ToggleLabelsSection,
-        children,
-    )
+    widgets::collapsible_section("LABELS", model.labels_expanded, Message::ToggleLabelsSection, children)
 }
 
-// ── Settings ────────────────────────────────────────────
-
-fn settings_button<'a>() -> Element<'a, Message> {
-    button(
-        row![
-            icon::settings().size(12).style(text::secondary),
-            text("Settings").size(12).style(text::secondary),
-        ]
-        .spacing(SPACE_XXS)
-        .align_y(Alignment::Center),
+fn is_system_label(name: &str) -> bool {
+    matches!(
+        name,
+        "INBOX" | "Sent" | "Drafts" | "Trash" | "Spam" | "Archive"
+            | "Junk" | "Templates" | "Calendar" | "Contacts"
+            | "Journal" | "Notes" | "Outbox" | "Deleted Items"
+            | "Sent Items" | "Conversation History"
     )
-    .on_press(Message::Noop)
-    .style(theme::bare_button)
-    .padding(PAD_NAV_ITEM)
-    .width(Length::Fill)
-    .into()
 }
