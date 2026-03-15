@@ -1,7 +1,9 @@
 use iced::widget::{button, column, container, row, scrollable, text, Space};
-use iced::{Alignment, Element, Length, Padding};
+use iced::{Alignment, Element, Length};
 
 use crate::db::Thread;
+use crate::icon;
+use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::widgets;
 use crate::Message;
@@ -15,20 +17,16 @@ pub fn view<'a>(thread: Option<&'a Thread>) -> Element<'a, Message> {
     container(content)
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(|_: &iced::Theme| container::Style {
-            background: Some(theme::BG_BASE.into()),
-            ..Default::default()
-        })
         .into()
 }
 
 fn empty_state<'a>() -> Element<'a, Message> {
     container(
         column![
-            text("No conversation selected").size(16).color(theme::TEXT_TERTIARY),
-            text("Select a thread to read").size(12).color(theme::TEXT_TERTIARY),
+            text("No conversation selected").size(16).style(theme::text_tertiary),
+            text("Select a thread to read").size(12).style(theme::text_tertiary),
         ]
-        .spacing(4)
+        .spacing(SPACE_XXS)
         .align_x(iced::Alignment::Center),
     )
     .center_x(Length::Fill)
@@ -51,52 +49,43 @@ fn thread_view(thread: &Thread) -> Element<'_, Message> {
     // ── Action bar ──────────────────────────────────────
     let actions = container(
         row![
-            action_btn("Reply"),
-            action_btn("Reply All"),
-            action_btn("Forward"),
-            Space::new().width(8),
-            action_btn("Archive"),
-            action_btn("Delete"),
-            action_btn("Star"),
-            action_btn("Snooze"),
-            action_btn("Pin"),
+            icon_btn(icon::reply(), "Reply"),
+            icon_btn(icon::reply_all(), "Reply All"),
+            icon_btn(icon::forward(), "Forward"),
+            Space::new().width(SPACE_XS),
+            icon_btn(icon::archive(), "Archive"),
+            icon_btn(icon::trash(), "Delete"),
+            icon_btn(icon::star(), "Star"),
+            icon_btn(icon::clock(), "Snooze"),
+            icon_btn(icon::pin(), "Pin"),
             Space::new().width(Length::Fill),
-            action_btn("Print"),
-            action_btn("Pop-out"),
+            icon_btn(icon::printer(), "Print"),
+            icon_btn(icon::external_link(), "Pop-out"),
         ]
-        .spacing(2)
+        .spacing(SPACE_XXXS)
         .align_y(Alignment::Center),
     )
-    .padding(Padding::from([6, 16]))
+    .padding(PAD_TOOLBAR)
     .width(Length::Fill)
-    .style(|_: &iced::Theme| container::Style {
-        background: Some(theme::BG_SURFACE.into()),
-        border: iced::Border {
-            color: theme::BORDER,
-            width: 1.0,
-            radius: 0.0.into(),
-        },
-        ..Default::default()
-    });
+    .style(theme::action_bar_container);
     col = col.push(actions);
 
     // ── Thread header ───────────────────────────────────
     let header = container(
         column![
-            text(subject).size(18).color(theme::TEXT_PRIMARY),
+            text(subject).size(18).style(text::base),
             text(format!("{} messages in this thread", thread.message_count))
                 .size(11)
-                .color(theme::TEXT_TERTIARY),
+                .style(theme::text_tertiary),
         ]
-        .spacing(4),
+        .spacing(SPACE_XXS),
     )
-    .padding(Padding::from([16, 20]));
+    .padding(PAD_CONTENT);
     col = col.push(header);
 
     // ── Message items (simulated) ───────────────────────
-    let mut messages = column![].spacing(8).padding(Padding::from([0, 20]));
+    let mut messages = column![].spacing(SPACE_XS).padding(iced::Padding::from([0.0, SPACE_LG]));
 
-    // Show a simulated expanded message from the sender
     let avatar = widgets::avatar_circle(sender, 32.0);
     let date_str = thread
         .last_message_at
@@ -110,9 +99,9 @@ fn thread_view(thread: &Thread) -> Element<'_, Message> {
         avatar,
         column![
             row![
-                text(sender).size(13).color(theme::TEXT_PRIMARY),
+                text(sender).size(13).style(text::base),
                 Space::new().width(Length::Fill),
-                text(date_str).size(11).color(theme::TEXT_TERTIARY),
+                text(date_str).size(11).style(theme::text_tertiary),
             ],
             text(
                 thread
@@ -121,49 +110,41 @@ fn thread_view(thread: &Thread) -> Element<'_, Message> {
                     .unwrap_or(""),
             )
             .size(11)
-            .color(theme::TEXT_TERTIARY),
+            .style(theme::text_tertiary),
         ]
-        .spacing(2)
+        .spacing(SPACE_XXXS)
         .width(Length::Fill),
     ]
-    .spacing(10)
+    .spacing(SPACE_SM)
     .align_y(Alignment::Start);
 
     // Message body placeholder
     let body_text = thread.snippet.as_deref().unwrap_or("(no preview available)");
     let msg_body = container(
-        text(body_text).size(13).color(theme::TEXT_SECONDARY),
+        text(body_text).size(13).style(text::secondary),
     )
-    .padding(Padding::from([12, 0]));
+    .padding(iced::Padding::from([SPACE_SM, 0.0]));
 
     let message_card = container(
-        column![msg_header, msg_body].spacing(8),
+        column![msg_header, msg_body].spacing(SPACE_XS),
     )
-    .padding(Padding::from([12, 16]))
+    .padding(PAD_CARD)
     .width(Length::Fill)
-    .style(|_: &iced::Theme| container::Style {
-        background: Some(theme::BG_SURFACE.into()),
-        border: iced::Border {
-            color: theme::BORDER,
-            width: 1.0,
-            radius: 8.0.into(),
-        },
-        ..Default::default()
-    });
+    .style(theme::message_card_container);
 
     messages = messages.push(message_card);
-    messages = messages.push(Space::new().height(16));
+    messages = messages.push(Space::new().height(SPACE_MD));
 
     // ── Reply buttons ───────────────────────────────────
     let reply_bar = container(
         row![
-            reply_btn("Reply"),
-            reply_btn("Reply All"),
-            reply_btn("Forward"),
+            reply_btn(icon::reply(), "Reply"),
+            reply_btn(icon::reply_all(), "Reply All"),
+            reply_btn(icon::forward(), "Forward"),
         ]
-        .spacing(8),
+        .spacing(SPACE_XS),
     )
-    .padding(Padding::from([0, 20]));
+    .padding(iced::Padding::from([0.0, SPACE_LG]));
 
     col = col.push(scrollable(
         column![messages, reply_bar].spacing(0),
@@ -172,20 +153,32 @@ fn thread_view(thread: &Thread) -> Element<'_, Message> {
     col.into()
 }
 
-fn action_btn(label: &str) -> Element<'_, Message> {
-    button(text(label).size(11).color(theme::TEXT_SECONDARY))
-        .on_press(Message::Noop)
-        .padding(Padding::from([4, 8]))
-        .style(button::text)
-        .into()
-}
-
-fn reply_btn(label: &str) -> Element<'_, Message> {
+fn icon_btn<'a>(ico: iced::widget::Text<'a>, label: &'a str) -> Element<'a, Message> {
     button(
-        text(label).size(12).color(theme::TEXT_SECONDARY),
+        row![
+            ico.size(12).style(text::secondary),
+            text(label).size(11).style(text::secondary),
+        ]
+        .spacing(SPACE_XXS)
+        .align_y(Alignment::Center),
     )
     .on_press(Message::Noop)
-    .padding(Padding::from([8, 16]))
+    .padding(PAD_ICON_BTN)
+    .style(theme::action_button)
+    .into()
+}
+
+fn reply_btn<'a>(ico: iced::widget::Text<'a>, label: &'a str) -> Element<'a, Message> {
+    button(
+        row![
+            ico.size(14).style(text::secondary),
+            text(label).size(12).style(text::secondary),
+        ]
+        .spacing(SPACE_XXS)
+        .align_y(Alignment::Center),
+    )
+    .on_press(Message::Noop)
+    .padding(PAD_BUTTON)
     .style(button::secondary)
     .into()
 }

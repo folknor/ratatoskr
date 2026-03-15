@@ -1,90 +1,220 @@
 use iced::widget::{button, column, container, row, scrollable, text, Space};
-use iced::{Alignment, Element, Length, Padding};
+use iced::{Alignment, Element, Length, Theme};
 
 use crate::db::{Account, Label};
+use crate::icon;
+use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::widgets;
 use crate::Message;
 
+#[allow(clippy::too_many_arguments)]
 pub fn view<'a>(
     accounts: &'a [Account],
     selected_account: Option<usize>,
     labels: &'a [Label],
     selected_label: &'a Option<String>,
+    scope_dropdown_open: bool,
+    labels_expanded: bool,
+    smart_folders_expanded: bool,
 ) -> Element<'a, Message> {
-    let mut col = column![].spacing(2).width(180);
+    let mut col = column![].spacing(SPACE_XXS).width(SIDEBAR_WIDTH);
 
-    // ── Account switcher ────────────────────────────────
-    if let Some(idx) = selected_account {
-        if let Some(acc) = accounts.get(idx) {
-            let name = acc.display_name.as_deref().unwrap_or(&acc.email);
-            let avatar = widgets::avatar_circle(name, 32.0);
-            let account_info = column![
-                text(name).size(13).color(theme::TEXT_PRIMARY),
-                text(&acc.email).size(11).color(theme::TEXT_TERTIARY),
-            ]
-            .spacing(1);
-            let switcher = button(
-                row![avatar, account_info]
-                    .spacing(8)
-                    .align_y(Alignment::Center),
-            )
-            .on_press(Message::CycleAccount)
-            .padding(Padding::new(6.0))
-            .style(button::text)
-            .width(Length::Fill);
-            col = col.push(switcher);
-        }
-    }
+    // ── Scope selector (dropdown) ────────────────────────
+    col = col.push(scope_selector(
+        accounts,
+        selected_account,
+        scope_dropdown_open,
+    ));
 
-    col = col.push(Space::new().height(4));
+    col = col.push(Space::new().height(SPACE_XXS));
 
     // ── Compose button ──────────────────────────────────
-    let compose_btn = button(
-        container(text("Compose").size(13).color(iced::Color::WHITE))
-            .center_x(Length::Fill)
-            .center_y(Length::Fill),
+    col = col.push(compose_button());
+
+    col = col.push(Space::new().height(SPACE_XS));
+
+    // ── Navigation items with unread badges ──────────────
+    col = col.push(nav_section(selected_label));
+
+    col = col.push(Space::new().height(SPACE_XXS));
+    col = col.push(widgets::divider());
+    col = col.push(Space::new().height(SPACE_XXS));
+
+    // ── Smart Folders (collapsible) ─────────────────────
+    col = col.push(smart_folders_section(smart_folders_expanded));
+
+    col = col.push(Space::new().height(SPACE_XXS));
+    col = col.push(widgets::divider());
+    col = col.push(Space::new().height(SPACE_XXS));
+
+    // ── Labels (collapsible) ────────────────────────────
+    col = col.push(labels_section(
+        labels,
+        selected_label,
+        labels_expanded,
+    ));
+
+    // ── Bottom spacer + settings ────────────────────────
+    col = col.push(Space::new().height(Length::Fill));
+    col = col.push(settings_button());
+
+    container(scrollable(col).height(Length::Fill))
+        .padding(PAD_SIDEBAR)
+        .width(SIDEBAR_WIDTH)
+        .style(theme::sidebar_container)
+        .into()
+}
+
+// ── Scope selector ──────────────────────────────────────
+
+fn scope_selector<'a>(
+    accounts: &'a [Account],
+    selected_account: Option<usize>,
+    dropdown_open: bool,
+) -> Element<'a, Message> {
+    let trigger_content: Element<'a, Message> = if let Some(idx) = selected_account {
+        if let Some(acc) = accounts.get(idx) {
+            let name = acc.display_name.as_deref().unwrap_or(&acc.email);
+            row![
+                widgets::avatar_circle(name, 24.0),
+                text(name).size(12).style(text::base),
+            ]
+            .spacing(SPACE_XS)
+            .align_y(Alignment::Center)
+            .into()
+        } else {
+            text("All Accounts").size(12).style(text::base).into()
+        }
+    } else {
+        text("All Accounts").size(12).style(text::base).into()
+    };
+
+    let trigger = widgets::dropdown_trigger(trigger_content, Message::ToggleScopeDropdown);
+
+    if !dropdown_open {
+        return trigger;
+    }
+
+    // Build dropdown items
+    let mut items: Vec<Element<'a, Message>> = Vec::new();
+
+    // "All Accounts" option
+    items.push(widgets::dropdown_item(
+        row![
+            icon::inbox().size(12).style(text::secondary),
+            text("All Accounts").size(12).style(text::base),
+        ]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center)
+        .into(),
+        selected_account.is_none(),
+        Message::ToggleScopeDropdown,
+    ));
+
+    // Per-account items
+    for (idx, acc) in accounts.iter().enumerate() {
+        let name = acc.display_name.as_deref().unwrap_or(&acc.email);
+        let is_selected = selected_account == Some(idx);
+        items.push(widgets::dropdown_item(
+            row![
+                widgets::avatar_circle(name, 20.0),
+                text(name).size(12).style(text::base),
+            ]
+            .spacing(SPACE_XS)
+            .align_y(Alignment::Center)
+            .into(),
+            is_selected,
+            Message::SelectAccount(idx),
+        ));
+    }
+
+    let menu = widgets::dropdown_menu(items);
+
+    column![trigger, menu].spacing(SPACE_XXS).into()
+}
+
+// ── Compose button ──────────────────────────────────────
+
+fn compose_button<'a>() -> Element<'a, Message> {
+    button(
+        container(
+            row![
+                icon::pencil().size(13).color(iced::Color::WHITE),
+                text("Compose").size(13).color(iced::Color::WHITE),
+            ]
+            .spacing(SPACE_XXS)
+            .align_y(Alignment::Center),
+        )
+        .center_x(Length::Fill)
+        .center_y(Length::Fill),
     )
     .on_press(Message::Compose)
-    .padding(Padding::from([8, 16]))
+    .padding(PAD_BUTTON)
     .style(button::primary)
-    .width(Length::Fill);
-    col = col.push(compose_btn);
+    .width(Length::Fill)
+    .into()
+}
 
-    col = col.push(Space::new().height(8));
+// ── Navigation items ────────────────────────────────────
 
-    // ── Navigation items ────────────────────────────────
-    let nav_items = [
-        ("Inbox", "INBOX"),
-        ("Starred", "__starred"),
-        ("Snoozed", "__snoozed"),
-        ("Sent", "__sent"),
-        ("Drafts", "__drafts"),
-        ("Trash", "__trash"),
-        ("Spam", "__spam"),
-        ("All Mail", "__all"),
+fn nav_section<'a>(selected_label: &'a Option<String>) -> Element<'a, Message> {
+    let nav_items: Vec<(&str, &str, i64)> = vec![
+        ("Inbox", "INBOX", 12),
+        ("Starred", "__starred", 0),
+        ("Snoozed", "__snoozed", 2),
+        ("Sent", "__sent", 0),
+        ("Drafts", "__drafts", 3),
+        ("Trash", "__trash", 0),
     ];
 
-    for (display_name, id) in nav_items {
+    let mut col = column![].spacing(SPACE_XXS);
+
+    for (display_name, id, unread) in nav_items {
         let is_active = match selected_label {
             Some(lid) => lid == id,
             None => id == "INBOX",
         };
-        let nav_btn = nav_item(display_name, id, is_active);
-        col = col.push(nav_btn);
+        let on_press = if id == "INBOX" {
+            Message::SelectLabel(None)
+        } else {
+            Message::SelectLabel(Some(id.to_string()))
+        };
+        col = col.push(widgets::nav_item_with_badge(
+            display_name,
+            id,
+            is_active,
+            unread,
+            on_press,
+        ));
     }
 
-    col = col.push(Space::new().height(12));
+    col.into()
+}
 
-    // ── Labels section ──────────────────────────────────
-    col = col.push(
-        row![
-            text("LABELS").size(10).color(theme::TEXT_TERTIARY),
-        ]
-        .padding(Padding::from([0, 8])),
-    );
-    col = col.push(Space::new().height(4));
+// ── Smart Folders (collapsible) ─────────────────────────
 
+fn smart_folders_section(expanded: bool) -> Element<'static, Message> {
+    let children: Vec<Element<'static, Message>> = vec![
+        widgets::nav_item_with_badge("VIP", "__sf_vip", false, 3, Message::Noop),
+        widgets::nav_item_with_badge("Newsletters", "__sf_news", false, 0, Message::Noop),
+    ];
+
+    widgets::collapsible_section(
+        "SMART FOLDERS",
+        expanded,
+        Message::ToggleSmartFoldersSection,
+        children,
+    )
+}
+
+// ── Labels (collapsible) ────────────────────────────────
+
+fn labels_section<'a>(
+    labels: &'a [Label],
+    selected_label: &'a Option<String>,
+    expanded: bool,
+) -> Element<'a, Message> {
     let user_labels: Vec<&Label> = labels
         .iter()
         .filter(|l| {
@@ -98,81 +228,53 @@ pub fn view<'a>(
         })
         .collect();
 
-    for label in user_labels.iter().take(8) {
-        let is_active = selected_label.as_deref() == Some(&label.id);
-        let color_dot = widgets::color_dot(theme::avatar_color(&label.name));
-        let btn = button(
-            row![color_dot, text(&label.name).size(12).color(if is_active {
-                theme::ACCENT
+    let children: Vec<Element<'a, Message>> = user_labels
+        .iter()
+        .take(12)
+        .map(|label| {
+            let is_active = selected_label.as_deref() == Some(&label.id);
+            let color_dot = widgets::color_dot(theme::avatar_color(&label.name));
+            let lbl_style: fn(&Theme) -> text::Style = if is_active {
+                text::primary
             } else {
-                theme::TEXT_SECONDARY
-            })]
-            .spacing(8)
-            .align_y(Alignment::Center),
-        )
-        .on_press(Message::SelectLabel(Some(label.id.clone())))
-        .padding(Padding::from([4, 8]))
-        .style(if is_active {
-            button::secondary
-        } else {
-            button::text
+                text::secondary
+            };
+
+            button(
+                row![color_dot, text(&label.name).size(12).style(lbl_style)]
+                    .spacing(SPACE_XS)
+                    .align_y(Alignment::Center),
+            )
+            .on_press(Message::SelectLabel(Some(label.id.clone())))
+            .padding(PAD_ICON_BTN)
+            .style(theme::nav_button(is_active))
+            .width(Length::Fill)
+            .into()
         })
-        .width(Length::Fill);
-        col = col.push(btn);
-    }
+        .collect();
 
-    if user_labels.len() > 8 {
-        col = col.push(
-            text(format!("{} more", user_labels.len() - 8))
-                .size(11)
-                .color(theme::TEXT_TERTIARY),
-        );
-    }
-
-    // ── Bottom spacer + settings ────────────────────────
-    col = col.push(Space::new().height(Length::Fill));
-    col = col.push(
-        button(text("Settings").size(12).color(theme::TEXT_SECONDARY))
-            .on_press(Message::Noop)
-            .style(button::text)
-            .padding(Padding::from([6, 8]))
-            .width(Length::Fill),
-    );
-
-    container(scrollable(col).height(Length::Fill))
-        .padding(Padding::from([8, 4]))
-        .width(180)
-        .style(|_: &iced::Theme| container::Style {
-            background: Some(theme::BG_SIDEBAR.into()),
-            border: iced::Border {
-                color: theme::BORDER,
-                width: 0.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        })
-        .into()
+    widgets::collapsible_section(
+        "LABELS",
+        expanded,
+        Message::ToggleLabelsSection,
+        children,
+    )
 }
 
-fn nav_item<'a>(label: &'a str, id: &'a str, active: bool) -> Element<'a, Message> {
-    let txt_color = if active {
-        theme::ACCENT
-    } else {
-        theme::TEXT_SECONDARY
-    };
+// ── Settings ────────────────────────────────────────────
 
-    button(text(label).size(12).color(txt_color))
-        .on_press(Message::SelectLabel(if id == "INBOX" {
-            None
-        } else {
-            Some(id.to_string())
-        }))
-        .padding(Padding::from([5, 8]))
-        .style(if active {
-            button::secondary
-        } else {
-            button::text
-        })
-        .width(Length::Fill)
-        .into()
+fn settings_button<'a>() -> Element<'a, Message> {
+    button(
+        row![
+            icon::settings().size(12).style(text::secondary),
+            text("Settings").size(12).style(text::secondary),
+        ]
+        .spacing(SPACE_XXS)
+        .align_y(Alignment::Center),
+    )
+    .on_press(Message::Noop)
+    .style(theme::bare_button)
+    .padding(PAD_NAV_ITEM)
+    .width(Length::Fill)
+    .into()
 }

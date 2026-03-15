@@ -1,0 +1,9 @@
+name = "Dark"
+
+[colors]
+background = "#0F172A"
+text = "#F1F5FA"
+primary = "#6266F1"
+success = "#059669"
+warning = "#D97706"
+danger = "#DC2626"

@@ -1,7 +1,8 @@
 use iced::widget::{column, container, row, text, Space};
-use iced::{Alignment, Element, Length, Padding};
+use iced::{Alignment, Element, Length};
 
 use crate::db::Thread;
+use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::widgets;
 use crate::Message;
@@ -13,17 +14,9 @@ pub fn view<'a>(thread: Option<&'a Thread>) -> Element<'a, Message> {
     };
 
     container(content)
-        .width(if thread.is_some() { 240 } else { 0 })
+        .width(if thread.is_some() { CONTACT_SIDEBAR_WIDTH } else { 0.0 })
         .height(Length::Fill)
-        .style(|_: &iced::Theme| container::Style {
-            background: Some(theme::BG_SIDEBAR.into()),
-            border: iced::Border {
-                color: theme::BORDER,
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        })
+        .style(theme::sidebar_container)
         .into()
 }
 
@@ -38,28 +31,28 @@ fn contact_panel(thread: &Thread) -> Element<'_, Message> {
     let avatar = widgets::avatar_circle(sender, 56.0);
 
     let mut col = column![]
-        .spacing(4)
+        .spacing(SPACE_XXS)
         .align_x(iced::Alignment::Center)
         .width(Length::Fill);
 
     // ── Avatar + name ───────────────────────────────────
-    col = col.push(Space::new().height(16));
+    col = col.push(Space::new().height(SPACE_MD));
     col = col.push(container(avatar).center_x(Length::Fill));
-    col = col.push(Space::new().height(8));
+    col = col.push(Space::new().height(SPACE_XS));
     col = col.push(
         container(
-            text(sender).size(14).color(theme::TEXT_PRIMARY),
+            text(sender).size(14).style(text::base),
         )
         .center_x(Length::Fill),
     );
     col = col.push(
         container(
-            text(email).size(11).color(theme::TEXT_TERTIARY),
+            text(email).size(11).style(theme::text_tertiary),
         )
         .center_x(Length::Fill),
     );
 
-    col = col.push(Space::new().height(16));
+    col = col.push(Space::new().height(SPACE_MD));
 
     // ── Stats section ───────────────────────────────────
     col = col.push(section_header("STATS"));
@@ -67,26 +60,26 @@ fn contact_panel(thread: &Thread) -> Element<'_, Message> {
     col = col.push(stat_row("First email", "—"));
     col = col.push(stat_row("Last email", "—"));
 
-    col = col.push(Space::new().height(12));
+    col = col.push(Space::new().height(SPACE_SM));
 
     // ── Notes ───────────────────────────────────────────
     col = col.push(section_header("NOTES"));
     col = col.push(
         container(
-            text("No notes yet").size(11).color(theme::TEXT_TERTIARY),
+            text("No notes yet").size(11).style(theme::text_tertiary),
         )
-        .padding(Padding::from([4, 12])),
+        .padding(PAD_ICON_BTN),
     );
 
-    col = col.push(Space::new().height(12));
+    col = col.push(Space::new().height(SPACE_SM));
 
     // ── Shared files ────────────────────────────────────
     col = col.push(section_header("SHARED FILES"));
     col = col.push(
         container(
-            text("No shared files").size(11).color(theme::TEXT_TERTIARY),
+            text("No shared files").size(11).style(theme::text_tertiary),
         )
-        .padding(Padding::from([4, 12])),
+        .padding(PAD_ICON_BTN),
     );
 
     iced::widget::scrollable(col)
@@ -96,9 +89,9 @@ fn contact_panel(thread: &Thread) -> Element<'_, Message> {
 
 fn section_header(label: &str) -> Element<'_, Message> {
     container(
-        text(label).size(10).color(theme::TEXT_TERTIARY),
+        text(label).size(10).style(theme::text_tertiary),
     )
-    .padding(Padding::from([8, 12]))
+    .padding(PAD_SECTION_HEADER)
     .width(Length::Fill)
     .into()
 }
@@ -106,13 +99,13 @@ fn section_header(label: &str) -> Element<'_, Message> {
 fn stat_row<'a>(label: &'a str, value: &'a str) -> Element<'a, Message> {
     container(
         row![
-            text(label).size(11).color(theme::TEXT_TERTIARY),
+            text(label).size(11).style(theme::text_tertiary),
             Space::new().width(Length::Fill),
-            text(value).size(11).color(theme::TEXT_SECONDARY),
+            text(value).size(11).style(text::secondary),
         ]
         .align_y(Alignment::Center),
     )
-    .padding(Padding::from([2, 12]))
+    .padding(PAD_STAT_ROW)
     .width(Length::Fill)
     .into()
 }

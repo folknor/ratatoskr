@@ -4,8 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-iced = { version = "0.14", features = ["tokio", "canvas"] }
+iced = { git = "https://github.com/squidowl/iced", rev = "af28bbe8de1dfafa2ebe7a3ac96ebcc87ae05538", default-features = false, features = [
+    "wgpu", "tokio", "lazy", "advanced", "canvas", "web-colors", "wayland", "x11",
+] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 chrono = "0.4"
 dirs = "6"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+mundy = { version = "0.1.9", default-features = false, features = ["color-scheme", "tokio", "log"] }

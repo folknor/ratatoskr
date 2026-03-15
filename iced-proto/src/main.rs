@@ -1,4 +1,7 @@
+mod appearance;
 mod db;
+mod font;
+mod icon;
 mod ui;
 
 use db::{Account, Db, Label, Thread};
@@ -16,10 +19,17 @@ fn main() -> iced::Result {
     let db = Db::open(&app_data_dir).expect("failed to open database");
     let _ = DB.set(Arc::new(db));
 
-    iced::application(App::boot, App::update, App::view)
+    let mut app = iced::application(App::boot, App::update, App::view)
         .title("Ratatoskr (iced prototype)")
         .theme(App::theme)
-        .run()
+        .subscription(App::subscription)
+        .default_font(font::TEXT);
+
+    for f in font::load() {
+        app = app.font(f);
+    }
+
+    app.run()
 }
 
 #[derive(Debug, Clone)]
@@ -33,6 +43,10 @@ pub enum Message {
     SelectThread(usize),
     Compose,
     Noop,
+    AppearanceChanged(appearance::Mode),
+    ToggleScopeDropdown,
+    ToggleLabelsSection,
+    ToggleSmartFoldersSection,
 }
 
 struct App {
@@ -44,6 +58,10 @@ struct App {
     selected_label: Option<String>,
     selected_thread: Option<usize>,
     status: String,
+    mode: appearance::Mode,
+    scope_dropdown_open: bool,
+    labels_expanded: bool,
+    smart_folders_expanded: bool,
 }
 
 impl App {
@@ -59,16 +77,28 @@ impl App {
             selected_label: None,
             selected_thread: None,
             status: "Loading...".to_string(),
+            mode: appearance::Mode::Dark,
+            scope_dropdown_open: false,
+            labels_expanded: true,
+            smart_folders_expanded: true,
         };
         (app, Task::perform(load_accounts(db_ref), Message::AccountsLoaded))
     }
 
     fn theme(&self) -> Theme {
-        Theme::Dark
+        self.mode.theme()
+    }
+
+    fn subscription(&self) -> iced::Subscription<Message> {
+        appearance::subscription().map(Message::AppearanceChanged)
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::AppearanceChanged(mode) => {
+                self.mode = mode;
+                Task::none()
+            }
             Message::AccountsLoaded(Ok(accounts)) => {
                 self.accounts = accounts;
                 if !self.accounts.is_empty() {
@@ -98,6 +128,7 @@ impl App {
                 self.selected_account = Some(idx);
                 self.selected_label = None;
                 self.selected_thread = None;
+                self.scope_dropdown_open = false;
                 if let Some(account) = self.accounts.get(idx) {
                     let db = Arc::clone(&self.db);
                     let id = account.id.clone();
@@ -162,6 +193,18 @@ impl App {
                 self.selected_thread = Some(idx);
                 Task::none()
             }
+            Message::ToggleScopeDropdown => {
+                self.scope_dropdown_open = !self.scope_dropdown_open;
+                Task::none()
+            }
+            Message::ToggleLabelsSection => {
+                self.labels_expanded = !self.labels_expanded;
+                Task::none()
+            }
+            Message::ToggleSmartFoldersSection => {
+                self.smart_folders_expanded = !self.smart_folders_expanded;
+                Task::none()
+            }
             Message::Compose | Message::Noop => Task::none(),
         }
     }
@@ -181,6 +224,9 @@ impl App {
             self.selected_account,
             &self.labels,
             &self.selected_label,
+            self.scope_dropdown_open,
+            self.labels_expanded,
+            self.smart_folders_expanded,
         );
 
         let thread_list = ui::thread_list::view(

@@ -33,7 +33,7 @@ Files already small or without compressible content pass through unchanged.
 
 ## Supported formats
 
-- **Images**: JPEG (mozjpeg-rs, progressive + trellis), PNG (oxipng lossless), WebP, GIF, BMP, TIFF. HEIC behind optional `heic` feature flag.
+- **Images**: JPEG (mozjpeg-rs, progressive + trellis), PNG (oxipng lossless), WebP, GIF, BMP, TIFF. HEIC is scaffolded behind an optional `heic` feature flag but not yet implemented.
 - **PDFs**: DCTDecode (JPEG) and FlateDecode (raw pixel) image recompression, stream deduplication, unused object removal, metadata stripping, PDF 1.5 object streams (`save_modern`).
 - **SVGs**: Strip editor metadata (Inkscape/Sodipodi), optimize embedded base64 PNG/JPEG images.
 - **OOXML**: .docx, .xlsx, .pptx, .docm, .xlsm, .pptm -- compresses images in `word/media/`, `xl/media/`, `ppt/media/`.

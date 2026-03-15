@@ -1,41 +1,270 @@
-use iced::Color;
+use iced::widget::{button, container, rule, text};
+use iced::{border, Color, Theme};
+use serde::Deserialize;
 
-// Dark theme colors matched from the Tauri screenshot
-pub const BG_BASE: Color = Color::from_rgb(0.059, 0.090, 0.165); // #0f172a
-pub const BG_SIDEBAR: Color = Color::from_rgb(0.067, 0.082, 0.145); // #111525
-pub const BG_SURFACE: Color = Color::from_rgb(0.086, 0.110, 0.192); // #161c31
-pub const BG_ELEVATED: Color = Color::from_rgb(0.110, 0.141, 0.235); // #1c243c
-pub const BG_HOVER: Color = Color::from_rgb(0.133, 0.165, 0.263); // #222a43
-pub const BG_SELECTED: Color = Color::from_rgb(0.153, 0.180, 0.290); // #272e4a
+// ── TOML loading ────────────────────────────────────────
 
-pub const TEXT_PRIMARY: Color = Color::from_rgb(0.945, 0.961, 0.980); // #f1f5fa
-pub const TEXT_SECONDARY: Color = Color::from_rgb(0.690, 0.733, 0.804); // #b0bbcd
-pub const TEXT_TERTIARY: Color = Color::from_rgb(0.502, 0.553, 0.647); // #808da5
+#[derive(Debug, Deserialize)]
+struct ThemeFile {
+    name: Option<String>,
+    colors: ThemeColors,
+}
 
-pub const ACCENT: Color = Color::from_rgb(0.384, 0.400, 0.945); // #6266f1
-pub const ACCENT_DIM: Color = Color::from_rgb(0.384, 0.400, 0.945); // same, for subtle uses
-pub const DANGER: Color = Color::from_rgb(0.863, 0.149, 0.149); // #dc2626
-pub const WARNING: Color = Color::from_rgb(0.851, 0.467, 0.024); // #d97706
-pub const SUCCESS: Color = Color::from_rgb(0.020, 0.588, 0.412); // #059669
+#[derive(Debug, Deserialize)]
+struct ThemeColors {
+    background: String,
+    text: String,
+    primary: String,
+    success: String,
+    warning: String,
+    danger: String,
+}
 
-pub const BORDER: Color = Color::from_rgba(1.0, 1.0, 1.0, 0.08);
-pub const BORDER_SUBTLE: Color = Color::from_rgba(1.0, 1.0, 1.0, 0.04);
+pub fn from_toml(content: &str) -> Result<Theme, toml::de::Error> {
+    let file: ThemeFile = toml::from_str(content)?;
+    let palette = iced::theme::Palette {
+        background: hex_to_color(&file.colors.background),
+        text: hex_to_color(&file.colors.text),
+        primary: hex_to_color(&file.colors.primary),
+        success: hex_to_color(&file.colors.success),
+        warning: hex_to_color(&file.colors.warning),
+        danger: hex_to_color(&file.colors.danger),
+    };
+    Ok(Theme::custom(file.name.unwrap_or_else(|| "Custom".into()), palette))
+}
 
-// Avatar colors for initials
-pub const AVATAR_COLORS: &[Color] = &[
-    Color::from_rgb(0.384, 0.400, 0.945), // indigo
-    Color::from_rgb(0.020, 0.588, 0.412), // green
-    Color::from_rgb(0.863, 0.149, 0.149), // red
-    Color::from_rgb(0.851, 0.467, 0.024), // amber
-    Color::from_rgb(0.608, 0.318, 0.878), // purple
-    Color::from_rgb(0.059, 0.522, 0.780), // cyan
-    Color::from_rgb(0.878, 0.318, 0.518), // pink
-    Color::from_rgb(0.180, 0.620, 0.220), // emerald
+// ── Built-in dark/light seeds ───────────────────────────
+
+pub fn dark() -> Theme {
+    Theme::custom("Dark", iced::theme::Palette {
+        background: hex_to_color("#0F172A"),
+        text: hex_to_color("#F1F5FA"),
+        primary: hex_to_color("#6266F1"),
+        success: hex_to_color("#059669"),
+        warning: hex_to_color("#D97706"),
+        danger: hex_to_color("#DC2626"),
+    })
+}
+
+pub fn light() -> Theme {
+    Theme::custom("Light", iced::theme::Palette {
+        background: hex_to_color("#F9FAFC"),
+        text: hex_to_color("#11172A"),
+        primary: hex_to_color("#4F53DE"),
+        success: hex_to_color("#058059"),
+        warning: hex_to_color("#D97706"),
+        danger: hex_to_color("#DC2626"),
+    })
+}
+
+// ── Text styles ─────────────────────────────────────────
+// Built-in: text::base, text::primary, text::secondary,
+//           text::success, text::warning, text::danger
+
+pub fn text_tertiary(theme: &Theme) -> text::Style {
+    text::Style {
+        color: Some(theme.extended_palette().background.strongest.text.scale_alpha(0.5)),
+    }
+}
+
+// ── Button styles ───────────────────────────────────────
+// Built-in: button::primary, button::secondary, button::text,
+//           button::danger, button::subtle
+
+pub fn nav_button(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let p = theme.extended_palette();
+        match status {
+            button::Status::Hovered => button::Style {
+                background: Some(p.background.weak.color.into()),
+                text_color: if active { p.primary.base.color } else { p.background.base.text },
+                border: border::rounded(4),
+                ..Default::default()
+            },
+            _ => button::Style {
+                background: if active { Some(p.background.strong.color.into()) } else { None },
+                text_color: if active { p.primary.base.color } else { p.secondary.base.color },
+                border: border::rounded(4),
+                ..Default::default()
+            },
+        }
+    }
+}
+
+pub fn thread_card_button(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let p = theme.extended_palette();
+        let bg = if selected { p.background.strong.color } else { p.background.weaker.color };
+        match status {
+            button::Status::Hovered => button::Style {
+                background: Some(p.background.neutral.color.into()),
+                text_color: p.background.base.text,
+                ..Default::default()
+            },
+            _ => button::Style {
+                background: Some(bg.into()),
+                text_color: p.background.base.text,
+                ..Default::default()
+            },
+        }
+    }
+}
+
+pub fn bare_button(theme: &Theme, status: button::Status) -> button::Style {
+    let p = theme.extended_palette();
+    match status {
+        button::Status::Hovered => button::Style {
+            background: Some(p.background.weak.color.into()),
+            text_color: p.background.base.text,
+            border: border::rounded(4),
+            ..Default::default()
+        },
+        _ => button::Style {
+            text_color: p.secondary.base.color,
+            ..Default::default()
+        },
+    }
+}
+
+pub fn action_button(theme: &Theme, status: button::Status) -> button::Style {
+    let p = theme.extended_palette();
+    match status {
+        button::Status::Hovered => button::Style {
+            background: Some(p.background.weak.color.into()),
+            text_color: p.background.base.text,
+            border: border::rounded(4),
+            ..Default::default()
+        },
+        _ => button::Style {
+            text_color: p.secondary.base.color,
+            border: border::rounded(4),
+            ..Default::default()
+        },
+    }
+}
+
+// ── Container styles ────────────────────────────────────
+// Built-in: container::transparent, container::bordered_box,
+//           container::dark, container::rounded_box
+
+pub fn sidebar_container(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(theme.extended_palette().background.weakest.color.into()),
+        ..Default::default()
+    }
+}
+
+pub fn surface_container(theme: &Theme) -> container::Style {
+    let p = theme.extended_palette();
+    container::Style {
+        background: Some(p.background.weaker.color.into()),
+        border: iced::Border {
+            color: p.background.strongest.color.scale_alpha(0.15),
+            width: 1.0,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+pub fn elevated_container(theme: &Theme) -> container::Style {
+    let p = theme.extended_palette();
+    container::Style {
+        background: Some(p.background.weak.color.into()),
+        border: iced::Border {
+            color: p.background.strongest.color.scale_alpha(0.15),
+            width: 1.0,
+            radius: 6.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+pub fn badge_container(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(theme.extended_palette().background.weak.color.into()),
+        border: iced::Border {
+            radius: 8.0.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+pub fn message_card_container(theme: &Theme) -> container::Style {
+    let p = theme.extended_palette();
+    container::Style {
+        background: Some(p.background.weaker.color.into()),
+        border: iced::Border {
+            color: p.background.strongest.color.scale_alpha(0.15),
+            width: 1.0,
+            radius: 8.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+pub fn action_bar_container(theme: &Theme) -> container::Style {
+    let p = theme.extended_palette();
+    container::Style {
+        background: Some(p.background.weaker.color.into()),
+        border: iced::Border {
+            color: p.background.strongest.color.scale_alpha(0.15),
+            width: 1.0,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+pub fn floating_container(theme: &Theme) -> container::Style {
+    let p = theme.extended_palette();
+    container::Style {
+        background: Some(p.background.weak.color.into()),
+        border: iced::Border {
+            color: p.background.strongest.color.scale_alpha(0.2),
+            width: 1.0,
+            radius: 8.0.into(),
+        },
+        shadow: iced::Shadow {
+            color: Color::BLACK.scale_alpha(0.25),
+            offset: iced::Vector::new(0.0, 2.0),
+            blur_radius: 8.0,
+        },
+        ..Default::default()
+    }
+}
+
+// ── Rule styles ─────────────────────────────────────────
+
+pub fn divider_rule(theme: &Theme) -> rule::Style {
+    rule::Style {
+        color: theme.extended_palette().background.strongest.color.scale_alpha(0.15),
+        radius: 0.0.into(),
+        fill_mode: rule::FillMode::Full,
+        snap: true,
+    }
+}
+
+// ── Avatar colors ───────────────────────────────────────
+
+const AVATAR_HUES: &[f32] = &[
+    260.0, // indigo
+    160.0, // green
+    25.0,  // red-orange
+    45.0,  // amber
+    290.0, // purple
+    195.0, // cyan
+    340.0, // pink
+    130.0, // emerald
 ];
 
 pub fn avatar_color(name: &str) -> Color {
     let hash: usize = name.bytes().map(|b| b as usize).sum();
-    AVATAR_COLORS[hash % AVATAR_COLORS.len()]
+    let hue = AVATAR_HUES[hash % AVATAR_HUES.len()];
+    // Simple OKLCh-inspired generation: fixed lightness and chroma, vary hue
+    // This gives consistent, readable colors without needing the palette crate
+    hsl_to_color(hue, 0.65, 0.55)
 }
 
 pub fn initial(name: &str) -> String {
@@ -43,4 +272,30 @@ pub fn initial(name: &str) -> String {
         .next()
         .map(|c| c.to_uppercase().to_string())
         .unwrap_or_else(|| "?".to_string())
+}
+
+// ── Color utilities ─────────────────────────────────────
+
+fn hex_to_color(hex: &str) -> Color {
+    let hex = hex.trim_start_matches('#');
+    let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(0);
+    let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0);
+    let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0);
+    Color::from_rgb8(r, g, b)
+}
+
+fn hsl_to_color(h: f32, s: f32, l: f32) -> Color {
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let h_prime = h / 60.0;
+    let x = c * (1.0 - (h_prime % 2.0 - 1.0).abs());
+    let (r1, g1, b1) = match h_prime as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = l - c / 2.0;
+    Color::from_rgb(r1 + m, g1 + m, b1 + m)
 }
