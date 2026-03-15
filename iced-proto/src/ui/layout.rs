@@ -222,8 +222,8 @@ pub const PAD_BADGE: Padding = Padding {
     left: 4.0,
 };
 
-/// Account switcher button.
-pub const PAD_ACCOUNT: Padding = Padding::new(8.0);
+/// Dropdown: trigger button and menu wrapper.
+pub const PAD_DROPDOWN: Padding = Padding::new(8.0);
 
 /// Message body inner padding (horizontal only).
 pub const PAD_BODY: Padding = Padding {

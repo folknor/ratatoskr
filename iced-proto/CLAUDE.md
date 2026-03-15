@@ -54,15 +54,53 @@ All sizing, spacing, padding, and radii are centralized here. Views import `use 
 
 **Avatar sizes:** `AVATAR_DROPDOWN_ITEM` (20), `AVATAR_DROPDOWN_TRIGGER` (24), `AVATAR_THREAD_CARD` (28), `AVATAR_MESSAGE_CARD` (32), `AVATAR_CONTACT_HERO` (56). Every `avatar_circle()` call must use one of these.
 
-**Leading slot widths:** `SLOT_DROPDOWN_ITEM`, `SLOT_DROPDOWN_TRIGGER`. When a list item has an icon or avatar on the left, wrap it in `widgets::leading_slot(content, size)` so all labels align.
+**Leading slot widths:** `SLOT_DROPDOWN`. When a list item has an icon or avatar on the left, wrap it in a fixed-size container so all labels align.
 
 **Border radii:** `RADIUS_SM` (4), `RADIUS_MD` (6), `RADIUS_LG` (8). Every `border::rounded()` or `radius:` value must use one of these.
 
-**Padding presets** are named by role: `PAD_ICON_BTN`, `PAD_NAV_ITEM`, `PAD_BUTTON`, `PAD_SIDEBAR`, `PAD_PANEL_HEADER`, `PAD_TOOLBAR`, `PAD_CONTENT`, `PAD_CARD`, `PAD_THREAD_CARD`, `PAD_INPUT`, `PAD_SECTION_HEADER`, `PAD_COLLAPSIBLE_HEADER`, `PAD_STAT_ROW`, `PAD_BADGE`, `PAD_ACCOUNT`, `PAD_BODY`.
+**Padding presets** are named by role: `PAD_ICON_BTN`, `PAD_NAV_ITEM`, `PAD_BUTTON`, `PAD_SIDEBAR`, `PAD_PANEL_HEADER`, `PAD_TOOLBAR`, `PAD_CONTENT`, `PAD_CARD`, `PAD_THREAD_CARD`, `PAD_INPUT`, `PAD_SECTION_HEADER`, `PAD_COLLAPSIBLE_HEADER`, `PAD_STAT_ROW`, `PAD_BADGE`, `PAD_DROPDOWN`, `PAD_BODY`.
 
 **Panel widths:** `SIDEBAR_WIDTH` (180), `THREAD_LIST_WIDTH` (280), `CONTACT_SIDEBAR_WIDTH` (240).
 
 **Semantic colors** live in `theme.rs`: `theme::ON_AVATAR` (white text/icons on colored backgrounds). No `Color::WHITE` or other raw colors in view code.
+
+## Widget design rules
+
+### A widget owns its entire layout.
+
+The widget function builds every container, row, spacing, and style internally. There is no "partial widget" that the caller finishes assembling. If two instances of a widget should look the same, they will — because there is exactly one code path.
+
+### Widget constructors accept data, not UI elements.
+
+Constructors take primitive values (`&str`, `bool`, `usize`) and domain objects (`&Account`, `&Thread`). They never accept `Element`, `Row`, `Container`, or anything the caller built from iced primitives. The widget reads data from what it's given and builds all the UI internally.
+
+### All widgets belong in widgets.rs.
+
+Domain-specific widgets do not exist unless the user asks for it explicitly. A "scope dropdown" is not a widget — it's a sidebar view function that calls the generic `dropdown` widget with account data. The generic `dropdown` widget lives in `widgets.rs`. The sidebar-specific assembly lives in `sidebar.rs`.
+
+### Every slot in a structured widget gets its own container.
+
+In iced, bare widgets (especially `Text`) behave differently from widgets inside containers. A `text()` in a `row![]` negotiates its own width based on content. A `container(text())` with explicit constraints is predictable.
+
+Name the slots and give each one a container:
+- `icon_slot`: `container(icon).width(FIXED).height(FIXED).align_x(Center).align_y(Center)`
+- `label_slot`: `container(text).width(Fill).align_y(Center)`
+
+### `center()` vs `align_x/y(Center)` — know the difference.
+
+- `center(Length::Fill)` — the content expands to fill the container. For text widgets, this stretches them to the container width.
+- `center(Length::Shrink)` — the content stays at natural size, centered within the container.
+- `align_x(Alignment::Center)` + `align_y(Alignment::Center)` — centers without giving the content a size hint. Safest for mixed content types.
+
+Default to `align_x/y(Center)` for icon slots. Only use `center(Length::Fill)` when you specifically need the content to expand (e.g., centering a letter inside an avatar stack).
+
+### Don't guess at visual issues.
+
+When the user reports a visual bug and the fix isn't obvious from reading the code:
+1. Understand the widget tree structure first (what contains what).
+2. Reason about how each container constrains its children.
+3. If uncertain how an iced API works, check reference projects (halloy, libcosmic) rather than guessing.
+4. Ask for a description or screenshot before attempting a fix. Don't iterate blindly.
 
 ## Theme system (`src/ui/theme/`)
 

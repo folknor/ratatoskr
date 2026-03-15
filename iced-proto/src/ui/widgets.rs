@@ -38,9 +38,10 @@ pub fn avatar_circle<'a>(name: &str, size: f32) -> Element<'a, Message> {
         container(
             text(letter)
                 .size(size * 0.45)
-                .color(theme::ON_AVATAR),
+                .color(theme::ON_AVATAR)
+                .font(iced::Font { weight: iced::font::Weight::Bold, ..font::TEXT }),
         )
-        .center(Length::Shrink),
+        .center(Length::Fill),
     ]
     .width(size)
     .height(size)
@@ -252,7 +253,7 @@ pub fn dropdown<'a>(
         .align_y(Alignment::Center),
     )
     .on_press(on_toggle)
-    .padding(PAD_ACCOUNT)
+    .padding(PAD_DROPDOWN)
     .style(theme::bare_button)
     .width(Length::Fill);
 
@@ -292,7 +293,7 @@ pub fn dropdown<'a>(
     let menu = container(
         column(menu_items).spacing(SPACE_XXS).width(Length::Fill),
     )
-    .padding(PAD_ICON_BTN)
+    .padding(PAD_DROPDOWN)
     .style(theme::floating_container)
     .width(Length::Fill);
 
