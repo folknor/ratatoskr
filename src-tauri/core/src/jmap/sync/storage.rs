@@ -27,7 +27,7 @@ pub(super) async fn persist_messages(
     // Group messages by thread for thread-level aggregation
     let mut threads: HashMap<&str, Vec<&ParsedJmapMessage>> = HashMap::new();
     for msg in messages {
-        threads.entry(&msg.thread_id).or_default().push(msg);
+        threads.entry(&msg.base.thread_id).or_default().push(msg);
     }
 
     // 1. DB writes (metadata + thread aggregation)
@@ -182,7 +182,7 @@ fn upsert_thread_record(
 
     let is_important = messages
         .iter()
-        .flat_map(|message| message.label_ids.iter().map(String::as_str))
+        .flat_map(|message| message.base.label_ids.iter().map(String::as_str))
         .any(|label| label == "IMPORTANT");
 
     let aggregate = sync_persistence::compute_thread_aggregate(tx, account_id, thread_id)?;
@@ -207,7 +207,7 @@ fn set_thread_labels(
         thread_id,
         messages
             .iter()
-            .flat_map(|message| message.label_ids.iter().map(String::as_str)),
+            .flat_map(|message| message.base.label_ids.iter().map(String::as_str)),
     )
 }
 
@@ -217,7 +217,8 @@ fn upsert_messages(
     messages: &[ParsedJmapMessage],
 ) -> Result<(), String> {
     for msg in messages {
-        let has_body = msg.body_html.is_some() || msg.body_text.is_some();
+        let b = &msg.base;
+        let has_body = b.body_html.is_some() || b.body_text.is_some();
 
         tx.execute(
             "INSERT OR REPLACE INTO messages \
@@ -228,31 +229,32 @@ fn upsert_messages(
               message_id_header, references_header, in_reply_to_header, body_cached, \
               mdn_requested) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, \
-                     ?13, ?14, ?15, ?16, ?17, ?18, NULL, ?19, ?20, ?21, ?22, ?23)",
+                     ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
             rusqlite::params![
-                msg.id,
+                b.id,
                 account_id,
-                msg.thread_id,
-                msg.from_address,
-                msg.from_name,
-                msg.to_addresses,
-                msg.cc_addresses,
-                msg.bcc_addresses,
-                msg.reply_to,
-                msg.subject,
-                msg.snippet,
-                msg.date,
-                msg.is_read,
-                msg.is_starred,
-                msg.raw_size,
-                msg.internal_date,
-                msg.list_unsubscribe,
-                msg.list_unsubscribe_post,
-                msg.message_id_header,
-                msg.references_header,
-                msg.in_reply_to_header,
+                b.thread_id,
+                b.from_address,
+                b.from_name,
+                b.to_addresses,
+                b.cc_addresses,
+                b.bcc_addresses,
+                b.reply_to,
+                b.subject,
+                b.snippet,
+                b.date,
+                b.is_read,
+                b.is_starred,
+                b.raw_size,
+                b.internal_date,
+                b.list_unsubscribe,
+                b.list_unsubscribe_post,
+                b.auth_results,
+                b.message_id_header,
+                b.references_header,
+                b.in_reply_to_header,
                 if has_body { 1i64 } else { 0i64 },
-                msg.mdn_requested,
+                b.mdn_requested,
             ],
         )
         .map_err(|e| format!("upsert message: {e}"))?;
@@ -267,7 +269,7 @@ fn upsert_attachments(
 ) -> Result<(), String> {
     for msg in messages {
         for att in &msg.attachments {
-            let att_id = format!("{}_{}", msg.id, att.blob_id);
+            let att_id = format!("{}_{}", msg.base.id, att.blob_id);
             tx.execute(
                 "INSERT INTO attachments \
                  (id, message_id, account_id, filename, mime_type, size, \
@@ -278,7 +280,7 @@ fn upsert_attachments(
                    gmail_attachment_id = ?7, content_id = ?8, is_inline = ?9",
                 rusqlite::params![
                     att_id,
-                    msg.id,
+                    msg.base.id,
                     account_id,
                     att.filename,
                     att.mime_type,
@@ -359,7 +361,7 @@ fn sync_keyword_categories(
         messages.iter().flat_map(|msg| {
             msg.keyword_categories
                 .iter()
-                .map(move |kw| (msg.id.as_str(), kw.as_str()))
+                .map(move |kw| (msg.base.id.as_str(), kw.as_str()))
         }),
     )?;
 
@@ -375,9 +377,9 @@ async fn store_bodies(body_store: &BodyStoreState, messages: &[ParsedJmapMessage
         body_store,
         messages,
         "JMAP",
-        |message| &message.id,
-        |message| message.body_html.as_ref(),
-        |message| message.body_text.as_ref(),
+        |message| &message.base.id,
+        |message| message.base.body_html.as_ref(),
+        |message| message.base.body_text.as_ref(),
     )
     .await;
 }
@@ -403,7 +405,7 @@ async fn store_inline_images(ctx: &SyncCtx<'_>, messages: &[ParsedJmapMessage]) 
                 }
 
                 Some((
-                    format!("{}_{}", msg.id, att.blob_id),
+                    format!("{}_{}", msg.base.id, att.blob_id),
                     att.blob_id.clone(),
                     att.mime_type.clone(),
                 ))
@@ -501,19 +503,19 @@ async fn index_messages(search: &SearchState, account_id: &str, messages: &[Pars
     let docs: Vec<SearchDocument> = messages
         .iter()
         .map(|m| SearchDocument {
-            message_id: m.id.clone(),
+            message_id: m.base.id.clone(),
             account_id: account_id.to_string(),
-            thread_id: m.thread_id.clone(),
-            subject: m.subject.clone(),
-            from_name: m.from_name.clone(),
-            from_address: m.from_address.clone(),
-            to_addresses: m.to_addresses.clone(),
-            body_text: m.body_text.clone(),
-            snippet: Some(m.snippet.clone()),
-            date: m.date / 1000, // tantivy expects seconds
-            is_read: m.is_read,
-            is_starred: m.is_starred,
-            has_attachment: m.has_attachments,
+            thread_id: m.base.thread_id.clone(),
+            subject: m.base.subject.clone(),
+            from_name: m.base.from_name.clone(),
+            from_address: m.base.from_address.clone(),
+            to_addresses: m.base.to_addresses.clone(),
+            body_text: m.base.body_text.clone(),
+            snippet: Some(m.base.snippet.clone()),
+            date: m.base.date / 1000, // tantivy expects seconds
+            is_read: m.base.is_read,
+            is_starred: m.base.is_starred,
+            has_attachment: m.base.has_attachments,
         })
         .collect();
 

@@ -6,9 +6,7 @@ use crate::gmail::client::GmailState;
 
 use super::caldav::{caldav_list_calendars_impl, caldav_sync_events_impl};
 use super::google::{google_calendar_list_calendars_impl, google_calendar_sync_events_impl};
-use super::types::{
-    CalendarEventDto, CalendarEventInput, CalendarInfoDto, CalendarSyncResultDto,
-};
+use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};
 
 pub async fn calendar_sync_account_impl(
     account_id: &str,
@@ -129,7 +127,6 @@ pub async fn apply_calendar_sync_result_impl(
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
 
         for event in sync_result.created.into_iter().chain(sync_result.updated) {
-            let event = calendar_dto_to_input(event);
             upsert_calendar_event(&tx, &account_id, &calendar_id, &event)?;
         }
 
@@ -167,7 +164,7 @@ pub async fn upsert_provider_events_impl(
     db: &DbState,
     account_id: &str,
     calendar_remote_id: &str,
-    events: Vec<CalendarEventInput>,
+    events: Vec<CalendarEventDto>,
 ) -> Result<(), String> {
     let account_id = account_id.to_string();
     let calendar_remote_id = calendar_remote_id.to_string();
@@ -259,44 +256,6 @@ fn row_to_db_calendar(row: &Row<'_>) -> rusqlite::Result<DbCalendar> {
     })
 }
 
-pub fn calendar_input_to_dto(event: CalendarEventInput) -> CalendarEventDto {
-    CalendarEventDto {
-        remote_event_id: event.remote_event_id,
-        uid: event.uid,
-        etag: event.etag,
-        summary: event.summary,
-        description: event.description,
-        location: event.location,
-        start_time: event.start_time,
-        end_time: event.end_time,
-        is_all_day: event.is_all_day,
-        status: event.status,
-        organizer_email: event.organizer_email,
-        attendees_json: event.attendees_json,
-        html_link: event.html_link,
-        ical_data: event.ical_data,
-    }
-}
-
-fn calendar_dto_to_input(event: CalendarEventDto) -> CalendarEventInput {
-    CalendarEventInput {
-        remote_event_id: event.remote_event_id,
-        uid: event.uid,
-        etag: event.etag,
-        summary: event.summary,
-        description: event.description,
-        location: event.location,
-        start_time: event.start_time,
-        end_time: event.end_time,
-        is_all_day: event.is_all_day,
-        status: event.status,
-        organizer_email: event.organizer_email,
-        attendees_json: event.attendees_json,
-        html_link: event.html_link,
-        ical_data: event.ical_data,
-    }
-}
-
 async fn sync_google_calendar_account(
     account_id: &str,
     db: &DbState,
@@ -344,7 +303,7 @@ pub fn upsert_calendar_event(
     tx: &rusqlite::Transaction<'_>,
     account_id: &str,
     calendar_id: &str,
-    event: &CalendarEventInput,
+    event: &CalendarEventDto,
 ) -> Result<(), String> {
     let id = uuid::Uuid::new_v4().to_string();
     tx.execute(

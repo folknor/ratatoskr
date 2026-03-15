@@ -106,10 +106,35 @@ pub struct OAuthAuthorizationBundle {
 
 pub struct PendingOAuthAuthorization {
     pub tokens: TokenExchangeResult,
+    pub created_at: std::time::Instant,
 }
 
 pub type PendingOAuthAuthorizations =
     std::sync::Mutex<std::collections::HashMap<String, PendingOAuthAuthorization>>;
+
+/// Maximum age for pending OAuth entries before they are swept.
+const PENDING_OAUTH_MAX_AGE: Duration = Duration::from_secs(600);
+
+/// Insert a pending OAuth authorization, sweeping stale entries first.
+pub fn insert_pending_oauth(
+    store: &PendingOAuthAuthorizations,
+    key: String,
+    tokens: TokenExchangeResult,
+) -> Result<(), String> {
+    let mut map = store
+        .lock()
+        .map_err(|_| "Pending OAuth store is poisoned".to_string())?;
+    let now = std::time::Instant::now();
+    map.retain(|_, entry| now.duration_since(entry.created_at) < PENDING_OAUTH_MAX_AGE);
+    map.insert(
+        key,
+        PendingOAuthAuthorization {
+            tokens,
+            created_at: now,
+        },
+    );
+    Ok(())
+}
 
 pub trait OAuthIdentityProvider {
     fn authorization_request(&self) -> OAuthAuthorizationRequest;
@@ -150,10 +175,13 @@ pub struct GenericOAuthProvider {
     use_pkce: bool,
     client_id: String,
     client_secret: Option<String>,
+    is_microsoft: bool,
 }
 
 impl GenericOAuthProvider {
     pub fn from_request(request: OAuthProviderAuthorizationRequest) -> Self {
+        let is_microsoft = request.provider_id == "microsoft"
+            || request.provider_id == "microsoft_graph";
         Self {
             provider_id: request.provider_id,
             auth_url: request.auth_url,
@@ -163,6 +191,7 @@ impl GenericOAuthProvider {
             use_pkce: request.use_pkce,
             client_id: request.client_id,
             client_secret: request.client_secret,
+            is_microsoft,
         }
     }
 
@@ -179,15 +208,12 @@ impl GenericOAuthProvider {
             use_pkce: true,
             client_id,
             client_secret: None,
+            is_microsoft: true,
         }
     }
 
     pub fn microsoft_graph_default() -> Self {
         Self::microsoft_graph(MICROSOFT_DEFAULT_CLIENT_ID.to_string())
-    }
-
-    fn is_microsoft(&self) -> bool {
-        self.provider_id == "microsoft" || self.provider_id == "microsoft_graph"
     }
 }
 
@@ -224,7 +250,7 @@ impl OAuthIdentityProvider for GoogleOAuthProvider {
 
 impl OAuthIdentityProvider for GenericOAuthProvider {
     fn authorization_request(&self) -> OAuthAuthorizationRequest {
-        let extra_auth_params = if self.is_microsoft() {
+        let extra_auth_params = if self.is_microsoft {
             vec![
                 ("prompt".to_string(), "consent".to_string()),
                 ("response_mode".to_string(), "query".to_string()),
@@ -247,7 +273,7 @@ impl OAuthIdentityProvider for GenericOAuthProvider {
             token_url: self.token_url.clone(),
             client_id: self.client_id.clone(),
             client_secret: self.client_secret.clone(),
-            scope: self.is_microsoft().then(|| self.scopes.join(" ")),
+            scope: self.is_microsoft.then(|| self.scopes.join(" ")),
         }
     }
 
@@ -403,12 +429,29 @@ pub async fn await_oauth_callback(
         .map_err(|_| "OAuth timed out — please try again".to_string())?
         .map_err(|e| format!("Failed to accept OAuth connection: {e}"))?;
 
-    let mut buf = vec![0u8; 4096];
-    let n = stream
-        .read(&mut buf)
+    const MAX_REQUEST_SIZE: usize = 16384;
+    let mut buf = Vec::with_capacity(4096);
+    let mut tmp = [0u8; 4096];
+    loop {
+        let n = tokio::time::timeout(
+            Duration::from_secs(10),
+            stream.read(&mut tmp),
+        )
         .await
+        .map_err(|_| "Timed out reading OAuth callback request".to_string())?
         .map_err(|e| format!("Failed to read OAuth request: {e}"))?;
-    let request = String::from_utf8_lossy(&buf[..n]);
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&tmp[..n]);
+        if buf.len() > MAX_REQUEST_SIZE {
+            return Err("OAuth callback request too large".to_string());
+        }
+        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+            break;
+        }
+    }
+    let request = String::from_utf8_lossy(&buf);
 
     let (code, returned_state) = parse_auth_code_and_state(&request)?;
 
@@ -636,7 +679,7 @@ async fn fetch_provider_userinfo(
     provider: &GenericOAuthProvider,
     tokens: &TokenExchangeResult,
 ) -> Result<OAuthUserInfo, String> {
-    if provider.is_microsoft() {
+    if provider.is_microsoft {
         return parse_microsoft_userinfo(tokens);
     }
 

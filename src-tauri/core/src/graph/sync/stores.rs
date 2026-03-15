@@ -15,9 +15,9 @@ pub(super) async fn store_bodies(body_store: &BodyStoreState, messages: &[Parsed
         body_store,
         messages,
         "Graph",
-        |message| &message.id,
-        |message| message.body_html.as_ref(),
-        |message| message.body_text.as_ref(),
+        |message| &message.base.id,
+        |message| message.base.body_html.as_ref(),
+        |message| message.base.body_text.as_ref(),
     )
     .await;
 }
@@ -56,19 +56,19 @@ pub(super) async fn index_messages(
     let docs: Vec<SearchDocument> = messages
         .iter()
         .map(|m| SearchDocument {
-            message_id: m.id.clone(),
+            message_id: m.base.id.clone(),
             account_id: account_id.to_string(),
-            thread_id: m.thread_id.clone(),
-            subject: m.subject.clone(),
-            from_name: m.from_name.clone(),
-            from_address: m.from_address.clone(),
-            to_addresses: m.to_addresses.clone(),
-            body_text: m.body_text.clone(),
-            snippet: Some(m.snippet.clone()),
-            date: m.date / 1000, // tantivy expects seconds
-            is_read: m.is_read,
-            is_starred: m.is_starred,
-            has_attachment: m.has_attachments,
+            thread_id: m.base.thread_id.clone(),
+            subject: m.base.subject.clone(),
+            from_name: m.base.from_name.clone(),
+            from_address: m.base.from_address.clone(),
+            to_addresses: m.base.to_addresses.clone(),
+            body_text: m.base.body_text.clone(),
+            snippet: Some(m.base.snippet.clone()),
+            date: m.base.date / 1000, // tantivy expects seconds
+            is_read: m.base.is_read,
+            is_starred: m.base.is_starred,
+            has_attachment: m.base.has_attachments,
         })
         .collect();
 

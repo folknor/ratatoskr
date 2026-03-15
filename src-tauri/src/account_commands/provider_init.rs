@@ -6,7 +6,7 @@ use crate::graph::client::{GraphClient, GraphState};
 use crate::graph::types::GraphProfile;
 use crate::oauth::{
     GenericOAuthProvider, GoogleOAuthProvider, OAuthProviderAuthorizationRequest,
-    PendingOAuthAuthorization, PendingOAuthAuthorizations,
+    PendingOAuthAuthorizations,
 };
 use crate::provider::crypto::{AppCryptoState, encrypt_value};
 
@@ -101,15 +101,11 @@ pub async fn account_authorize_oauth_provider(
     let access_token = oauth.tokens.access_token.clone();
     let expires_in = oauth.tokens.expires_in;
     let authorization_id = uuid::Uuid::new_v4().to_string();
-    pending_oauth
-        .lock()
-        .map_err(|_| "Pending OAuth store is poisoned".to_string())?
-        .insert(
-            authorization_id.clone(),
-            PendingOAuthAuthorization {
-                tokens: oauth.tokens,
-            },
-        );
+    crate::oauth::insert_pending_oauth(
+        &pending_oauth,
+        authorization_id.clone(),
+        oauth.tokens,
+    )?;
 
     Ok(OAuthProviderAuthorizationResult {
         authorization_id,

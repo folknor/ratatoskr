@@ -1,3 +1,4 @@
+pub mod account_resync;
 pub mod attachment_dedup;
 pub mod crypto;
 pub mod email_parsing;
@@ -13,4 +14,5 @@ pub mod token;
 pub mod signature_images;
 pub mod html_sanitizer;
 pub mod tracking_pixels;
+pub mod parsed_message;
 pub mod types;

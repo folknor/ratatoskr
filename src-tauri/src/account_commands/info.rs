@@ -85,6 +85,7 @@ pub async fn account_delete(
     cleanup_cached_files(
         &app_handle,
         &db,
+        &account_id,
         deletion_data.cached_files,
     )
     .await?;
@@ -102,25 +103,26 @@ pub async fn account_delete(
 async fn cleanup_cached_files(
     app_handle: &AppHandle,
     db: &DbState,
+    account_id: &str,
     cached_files: Vec<(String, String)>,
 ) -> Result<(), String> {
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
         .map_err(|e| format!("resolve app data dir: {e}"))?;
-    for (local_path, content_hash) in cached_files {
-        let remaining_refs = count_refs(db, &content_hash).await?;
-        if remaining_refs == 0 {
-            remove_cached(&app_data_dir, &local_path);
+    let files_clone = cached_files.clone();
+    let acct = account_id.to_string();
+    let referenced = db
+        .with_conn(move |conn| {
+            delete::referenced_hashes_excluding_account(conn, &files_clone, &acct)
+        })
+        .await?;
+    for (local_path, content_hash) in &cached_files {
+        if !referenced.contains(content_hash) {
+            remove_cached(&app_data_dir, local_path);
         }
     }
     Ok(())
-}
-
-async fn count_refs(db: &DbState, content_hash: &str) -> Result<i64, String> {
-    let hash = content_hash.to_string();
-    db.with_conn(move |conn| delete::count_cached_refs(conn, &hash))
-        .await
 }
 
 fn remove_cached(app_data_dir: &Path, local_path: &str) {

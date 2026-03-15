@@ -9,25 +9,6 @@ pub struct CalendarInfoInput {
     pub is_primary: bool,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CalendarEventInput {
-    pub remote_event_id: String,
-    pub uid: Option<String>,
-    pub etag: Option<String>,
-    pub summary: Option<String>,
-    pub description: Option<String>,
-    pub location: Option<String>,
-    pub start_time: i64,
-    pub end_time: i64,
-    pub is_all_day: bool,
-    pub status: String,
-    pub organizer_email: Option<String>,
-    pub attendees_json: Option<String>,
-    pub html_link: Option<String>,
-    pub ical_data: Option<String>,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CalendarInfoDto {
@@ -55,6 +36,11 @@ pub struct CalendarEventDto {
     pub html_link: Option<String>,
     pub ical_data: Option<String>,
 }
+
+/// Backward-compatible alias: `CalendarEventInput` was previously a separate
+/// struct with identical fields. Code that receives events from the frontend
+/// can continue to use this name.
+pub type CalendarEventInput = CalendarEventDto;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -3,6 +3,7 @@ use super::types::{GraphMessage, GraphRecipient, REACTIONS_GUID};
 use crate::provider::email_parsing::format_address_list;
 use crate::provider::encoding::decode_base64_standard;
 use crate::provider::headers::find_header_value_case_insensitive;
+use crate::provider::parsed_message::ParsedMessageBase;
 
 /// Parsed attachment metadata ready for DB persistence.
 #[derive(Debug, Clone)]
@@ -23,31 +24,8 @@ pub struct ParsedGraphAttachment {
 /// Analogous to `jmap/parse.rs::ParsedJmapMessage`.
 #[derive(Debug, Clone)]
 pub struct ParsedGraphMessage {
-    pub id: String,
-    pub thread_id: String,
-    pub from_address: Option<String>,
-    pub from_name: Option<String>,
-    pub to_addresses: Option<String>,
-    pub cc_addresses: Option<String>,
-    pub bcc_addresses: Option<String>,
-    pub reply_to: Option<String>,
-    pub subject: Option<String>,
-    pub snippet: String,
-    pub date: i64,
-    pub is_read: bool,
-    pub is_starred: bool,
-    pub body_html: Option<String>,
-    pub body_text: Option<String>,
-    pub internal_date: i64,
-    pub label_ids: Vec<String>,
-    pub has_attachments: bool,
-    pub message_id_header: Option<String>,
-    pub references_header: Option<String>,
-    pub in_reply_to_header: Option<String>,
-    pub auth_results: Option<String>,
-    pub list_unsubscribe: Option<String>,
-    pub list_unsubscribe_post: Option<String>,
-    pub mdn_requested: bool,
+    /// Common fields shared with other providers.
+    pub base: ParsedMessageBase,
     pub attachments: Vec<ParsedGraphAttachment>,
     /// Exchange categories assigned to this message (e.g. "Red Category", "Blue Category").
     pub categories: Vec<String>,
@@ -59,26 +37,7 @@ pub struct ParsedGraphMessage {
     pub is_mentioned: bool,
 }
 
-impl crate::seen_addresses::MessageAddresses for ParsedGraphMessage {
-    fn sender_address(&self) -> Option<&str> {
-        self.from_address.as_deref()
-    }
-    fn sender_name(&self) -> Option<&str> {
-        self.from_name.as_deref()
-    }
-    fn to_addresses(&self) -> Option<&str> {
-        self.to_addresses.as_deref()
-    }
-    fn cc_addresses(&self) -> Option<&str> {
-        self.cc_addresses.as_deref()
-    }
-    fn bcc_addresses(&self) -> Option<&str> {
-        self.bcc_addresses.as_deref()
-    }
-    fn msg_date_ms(&self) -> i64 {
-        self.date
-    }
-}
+crate::provider::parsed_message::impl_message_addresses!(ParsedGraphMessage);
 
 /// Convert a Graph API message to our DB-ready struct.
 ///
@@ -206,31 +165,34 @@ pub fn parse_graph_message(
         .collect();
 
     Ok(ParsedGraphMessage {
-        id,
-        thread_id,
-        from_address,
-        from_name,
-        to_addresses,
-        cc_addresses,
-        bcc_addresses,
-        reply_to,
-        subject,
-        snippet,
-        date,
-        is_read,
-        is_starred,
-        body_html,
-        body_text,
-        internal_date,
-        label_ids,
-        has_attachments,
-        message_id_header,
-        references_header,
-        in_reply_to_header,
-        auth_results,
-        list_unsubscribe,
-        list_unsubscribe_post,
-        mdn_requested,
+        base: ParsedMessageBase {
+            id,
+            thread_id,
+            from_address,
+            from_name,
+            to_addresses,
+            cc_addresses,
+            bcc_addresses,
+            reply_to,
+            subject,
+            snippet,
+            date,
+            is_read,
+            is_starred,
+            body_html,
+            body_text,
+            raw_size: 0, // Graph doesn't expose message size directly
+            internal_date,
+            label_ids,
+            has_attachments,
+            message_id_header,
+            references_header,
+            in_reply_to_header,
+            auth_results,
+            list_unsubscribe,
+            list_unsubscribe_post,
+            mdn_requested,
+        },
         attachments,
         categories: categories.to_vec(),
         owner_reaction_type,

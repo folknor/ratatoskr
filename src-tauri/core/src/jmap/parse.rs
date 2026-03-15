@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use jmap_client::email::{Email, Header, HeaderValue, Property};
 
 use crate::provider::email_parsing::format_address_list;
+use crate::provider::parsed_message::ParsedMessageBase;
 
 use super::mailbox_mapper::{MailboxInfo, get_labels_for_email};
 
@@ -11,62 +12,14 @@ use super::mailbox_mapper::{MailboxInfo, get_labels_for_email};
 /// Matches the shape written to the `messages` table + body store.
 #[derive(Debug, Clone)]
 pub struct ParsedJmapMessage {
-    pub id: String,
-    pub thread_id: String,
-    pub from_address: Option<String>,
-    pub from_name: Option<String>,
-    pub to_addresses: Option<String>,
-    pub cc_addresses: Option<String>,
-    pub bcc_addresses: Option<String>,
-    pub reply_to: Option<String>,
-    pub subject: Option<String>,
-    pub snippet: String,
-    pub date: i64,
-    pub is_read: bool,
-    pub is_starred: bool,
-    pub body_html: Option<String>,
-    pub body_text: Option<String>,
-    pub raw_size: i64,
-    pub internal_date: i64,
-    pub label_ids: Vec<String>,
-    pub has_attachments: bool,
+    /// Common fields shared with other providers.
+    pub base: ParsedMessageBase,
     pub attachments: Vec<ParsedJmapAttachment>,
-    /// JMAP Message-ID header values
-    pub message_id_header: Option<String>,
-    /// JMAP References header values
-    pub references_header: Option<String>,
-    /// JMAP In-Reply-To header values
-    pub in_reply_to_header: Option<String>,
-    /// List-Unsubscribe header (RFC 2369)
-    pub list_unsubscribe: Option<String>,
-    /// List-Unsubscribe-Post header (RFC 8058)
-    pub list_unsubscribe_post: Option<String>,
-    /// Whether the sender requested a read receipt (Disposition-Notification-To)
-    pub mdn_requested: bool,
     /// Non-system JMAP keywords (those not starting with `$`) that map to categories.
     pub keyword_categories: Vec<String>,
 }
 
-impl crate::seen_addresses::MessageAddresses for ParsedJmapMessage {
-    fn sender_address(&self) -> Option<&str> {
-        self.from_address.as_deref()
-    }
-    fn sender_name(&self) -> Option<&str> {
-        self.from_name.as_deref()
-    }
-    fn to_addresses(&self) -> Option<&str> {
-        self.to_addresses.as_deref()
-    }
-    fn cc_addresses(&self) -> Option<&str> {
-        self.cc_addresses.as_deref()
-    }
-    fn bcc_addresses(&self) -> Option<&str> {
-        self.bcc_addresses.as_deref()
-    }
-    fn msg_date_ms(&self) -> i64 {
-        self.date
-    }
-}
+crate::provider::parsed_message::impl_message_addresses!(ParsedJmapMessage);
 
 #[derive(Debug, Clone)]
 pub struct ParsedJmapAttachment {
@@ -210,32 +163,35 @@ pub fn parse_jmap_email(
     let raw_size = i64::try_from(email.size()).unwrap_or(i64::MAX);
 
     Ok(ParsedJmapMessage {
-        id,
-        thread_id,
-        from_address,
-        from_name,
-        to_addresses,
-        cc_addresses,
-        bcc_addresses,
-        reply_to,
-        subject,
-        snippet,
-        date,
-        is_read,
-        is_starred,
-        body_html,
-        body_text,
-        raw_size,
-        internal_date,
-        label_ids,
-        has_attachments,
+        base: ParsedMessageBase {
+            id,
+            thread_id,
+            from_address,
+            from_name,
+            to_addresses,
+            cc_addresses,
+            bcc_addresses,
+            reply_to,
+            subject,
+            snippet,
+            date,
+            is_read,
+            is_starred,
+            body_html,
+            body_text,
+            raw_size,
+            internal_date,
+            label_ids,
+            has_attachments,
+            message_id_header,
+            references_header,
+            in_reply_to_header,
+            list_unsubscribe,
+            list_unsubscribe_post,
+            auth_results: None,
+            mdn_requested,
+        },
         attachments,
-        message_id_header,
-        references_header,
-        in_reply_to_header,
-        list_unsubscribe,
-        list_unsubscribe_post,
-        mdn_requested,
         keyword_categories,
     })
 }

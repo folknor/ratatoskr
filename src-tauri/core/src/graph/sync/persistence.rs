@@ -27,7 +27,7 @@ pub(super) async fn persist_messages(
     // Group messages by thread for thread-level aggregation
     let mut threads: HashMap<&str, Vec<&ParsedGraphMessage>> = HashMap::new();
     for msg in messages {
-        threads.entry(&msg.thread_id).or_default().push(msg);
+        threads.entry(&msg.base.thread_id).or_default().push(msg);
     }
 
     // 1. DB writes (metadata + thread aggregation)
@@ -178,7 +178,7 @@ fn store_thread_to_db(
             .flat_map(|msg| {
                 msg.categories
                     .iter()
-                    .map(move |cat| (msg.id.as_str(), cat.as_str()))
+                    .map(move |cat| (msg.base.id.as_str(), cat.as_str()))
             }),
     )?;
     Ok(())
@@ -200,7 +200,7 @@ fn upsert_thread_record(
 
     let is_important = messages
         .iter()
-        .flat_map(|message| message.label_ids.iter().map(String::as_str))
+        .flat_map(|message| message.base.label_ids.iter().map(String::as_str))
         .any(|label| label == "IMPORTANT");
 
     let aggregate = sync_persistence::compute_thread_aggregate(tx, account_id, thread_id)?;
@@ -225,7 +225,7 @@ fn set_thread_labels(
         thread_id,
         messages
             .iter()
-            .flat_map(|message| message.label_ids.iter().map(String::as_str)),
+            .flat_map(|message| message.base.label_ids.iter().map(String::as_str)),
     )
 }
 
@@ -235,7 +235,8 @@ fn upsert_messages(
     messages: &[ParsedGraphMessage],
 ) -> Result<(), String> {
     for msg in messages {
-        let has_body = msg.body_html.is_some() || msg.body_text.is_some();
+        let b = &msg.base;
+        let has_body = b.body_html.is_some() || b.body_text.is_some();
 
         tx.execute(
             "INSERT OR REPLACE INTO messages \
@@ -248,30 +249,30 @@ fn upsert_messages(
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, \
                      ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
             rusqlite::params![
-                msg.id,
+                b.id,
                 account_id,
-                msg.thread_id,
-                msg.from_address,
-                msg.from_name,
-                msg.to_addresses,
-                msg.cc_addresses,
-                msg.bcc_addresses,
-                msg.reply_to,
-                msg.subject,
-                msg.snippet,
-                msg.date,
-                msg.is_read,
-                msg.is_starred,
-                0i64, // raw_size — Graph doesn't expose message size directly
-                msg.internal_date,
-                msg.list_unsubscribe,
-                msg.list_unsubscribe_post,
-                msg.auth_results,
-                msg.message_id_header,
-                msg.references_header,
-                msg.in_reply_to_header,
+                b.thread_id,
+                b.from_address,
+                b.from_name,
+                b.to_addresses,
+                b.cc_addresses,
+                b.bcc_addresses,
+                b.reply_to,
+                b.subject,
+                b.snippet,
+                b.date,
+                b.is_read,
+                b.is_starred,
+                b.raw_size,
+                b.internal_date,
+                b.list_unsubscribe,
+                b.list_unsubscribe_post,
+                b.auth_results,
+                b.message_id_header,
+                b.references_header,
+                b.in_reply_to_header,
                 if has_body { 1i64 } else { 0i64 },
-                msg.mdn_requested,
+                b.mdn_requested,
                 msg.is_mentioned,
             ],
         )
@@ -287,7 +288,7 @@ fn upsert_attachments(
 ) -> Result<(), String> {
     for msg in messages {
         for att in &msg.attachments {
-            let att_id = format!("{}_{}", msg.id, att.id);
+            let att_id = format!("{}_{}", msg.base.id, att.id);
             tx.execute(
                 "INSERT INTO attachments \
                  (id, message_id, account_id, filename, mime_type, size, \
@@ -298,7 +299,7 @@ fn upsert_attachments(
                    gmail_attachment_id = ?7, content_hash = ?8, content_id = ?9, is_inline = ?10",
                 rusqlite::params![
                     att_id,
-                    msg.id,
+                    msg.base.id,
                     account_id,
                     att.filename,
                     att.mime_type,
@@ -353,7 +354,7 @@ fn insert_exchange_reactions(
                  VALUES (?1, ?2, ?3, NULL, ?4, ?5, 'exchange_native') \
                  ON CONFLICT(message_id, account_id, reactor_email, reaction_type) DO UPDATE SET \
                    reacted_at = ?5",
-                rusqlite::params![msg.id, account_id, owner_email, emoji, msg.date],
+                rusqlite::params![msg.base.id, account_id, owner_email, emoji, msg.base.date],
             )
             .map_err(|e| format!("insert exchange reaction: {e}"))?;
         }
@@ -367,7 +368,7 @@ fn insert_exchange_reactions(
                  VALUES (?1, ?2, '__count__', NULL, ?3, NULL, 'exchange_native') \
                  ON CONFLICT(message_id, account_id, reactor_email, reaction_type) DO UPDATE SET \
                    reaction_type = ?3",
-                rusqlite::params![msg.id, account_id, count.to_string()],
+                rusqlite::params![msg.base.id, account_id, count.to_string()],
             )
             .map_err(|e| format!("insert exchange reaction count: {e}"))?;
         }

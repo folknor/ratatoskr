@@ -244,11 +244,11 @@ pub async fn jmap_delta_sync(
                 let filtered = filter_pending_ops(&ctx, parsed).await?;
 
                 for msg in &filtered {
-                    affected_thread_ids.insert(msg.thread_id.clone());
-                    if msg.label_ids.contains(&"INBOX".to_string())
-                        && created.iter().any(|c| c == &msg.id)
+                    affected_thread_ids.insert(msg.base.thread_id.clone());
+                    if msg.base.label_ids.contains(&"INBOX".to_string())
+                        && created.iter().any(|c| c == &msg.base.id)
                     {
-                        new_inbox_ids.push(msg.id.clone());
+                        new_inbox_ids.push(msg.base.id.clone());
                     }
                 }
 
@@ -342,7 +342,7 @@ async fn filter_pending_ops(
 
     let thread_ids: HashSet<String> = messages
         .iter()
-        .map(|message| message.thread_id.clone())
+        .map(|message| message.base.thread_id.clone())
         .collect();
     let blocked_threads =
         sync_pending::blocked_thread_ids(ctx.db, ctx.account_id, thread_ids.into_iter().collect())
@@ -360,7 +360,7 @@ async fn filter_pending_ops(
     Ok(sync_pending::filter_by_blocked_threads(
         messages,
         &blocked_threads,
-        |message| &message.thread_id,
+        |message| &message.base.thread_id,
     ))
 }
 

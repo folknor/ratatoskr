@@ -4,6 +4,8 @@ use rusqlite::OptionalExtension;
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::db::DbState;
+use crate::inline_image_store::InlineImageStoreState;
+use crate::provider::types::AttachmentData;
 
 const CACHE_DIR: &str = "attachment_cache";
 
@@ -241,4 +243,142 @@ pub async fn enforce_cache_limit(db: &DbState, app_data_dir: &Path) -> Result<()
             remove_cached_relative(app_data_dir, &row.local_path)?;
         }
     }
+}
+
+// ── Cache orchestration for attachment fetches ──────────────
+
+/// Check the inline image SQLite store for small cached images.
+pub async fn try_inline_image_hit(
+    db: &DbState,
+    inline_images: &InlineImageStoreState,
+    account_id: &str,
+    message_id: &str,
+    attachment_id: &str,
+) -> Result<Option<AttachmentData>, String> {
+    let (acct, msg, att) = (
+        account_id.to_string(),
+        message_id.to_string(),
+        attachment_id.to_string(),
+    );
+
+    let hash = db
+        .with_conn(move |conn| {
+            let info = find_cache_info(conn, &acct, &msg, &att)?;
+            Ok(info.and_then(|i| i.content_hash))
+        })
+        .await?;
+
+    let Some(hash) = hash else { return Ok(None) };
+
+    let result = inline_images.get(hash).await?;
+    Ok(result.map(|(bytes, _mime)| {
+        let size = bytes.len();
+        let data = encode_base64(&bytes);
+        AttachmentData { data, size }
+    }))
+}
+
+/// Check the content-addressed file cache for a previously fetched
+/// attachment.
+pub async fn try_cache_hit(
+    db: &DbState,
+    app_data_dir: &Path,
+    account_id: &str,
+    message_id: &str,
+    attachment_id: &str,
+) -> Result<Option<AttachmentData>, String> {
+    let dir = app_data_dir.to_path_buf();
+    let (acct, msg, att) = (
+        account_id.to_string(),
+        message_id.to_string(),
+        attachment_id.to_string(),
+    );
+
+    db.with_conn(move |conn| {
+        let info = find_cache_info(conn, &acct, &msg, &att)?;
+        let Some(info) = info else { return Ok(None) };
+        let Some(ref hash) = info.content_hash else {
+            return Ok(None);
+        };
+
+        if let Some(bytes) = read_cached(&dir, hash) {
+            let size = bytes.len();
+            let data = encode_base64(&bytes);
+            return Ok(Some(AttachmentData { data, size }));
+        }
+
+        Ok(None)
+    })
+    .await
+}
+
+/// After a provider fetch, decode + hash + write to cache + update DB.
+///
+/// Spawns a background task so the caller is not blocked.
+pub fn cache_after_fetch(
+    db: &DbState,
+    inline_images: &InlineImageStoreState,
+    app_data_dir: &Path,
+    account_id: &str,
+    message_id: &str,
+    attachment_id: &str,
+    base64_data: &str,
+) {
+    let db = db.clone();
+    let inline_store = inline_images.clone();
+    let dir = app_data_dir.to_path_buf();
+    let (acct, msg, att, data) = (
+        account_id.to_string(),
+        message_id.to_string(),
+        attachment_id.to_string(),
+        base64_data.to_string(),
+    );
+
+    tokio::task::spawn(async move {
+        let result: Result<(), String> = async {
+            let bytes = decode_base64(&data)?;
+            let content_hash = hash_bytes(&bytes);
+
+            // Small inline images -> SQLite blob store
+            if bytes.len() <= crate::inline_image_store::MAX_INLINE_SIZE {
+                let mime = {
+                    let (a, m, at) = (acct.clone(), msg.clone(), att.clone());
+                    db.with_conn(move |conn| {
+                        let info = find_cache_info(conn, &a, &m, &at)?;
+                        Ok(info.and_then(|i| i.mime_type))
+                    })
+                    .await?
+                };
+                if let Some(ref mime) = mime {
+                    if mime.starts_with("image/") {
+                        inline_store
+                            .put(content_hash.clone(), bytes.clone(), mime.clone())
+                            .await?;
+                    }
+                }
+            }
+
+            // File-based cache for all sizes
+            let local_path = write_cached(&dir, &content_hash, &bytes)?;
+
+            #[allow(clippy::cast_possible_wrap)]
+            let cache_size = bytes.len() as i64;
+
+            db.with_conn(move |conn| {
+                let info = find_cache_info(conn, &acct, &msg, &att)?;
+                if let Some(info) = info {
+                    update_cache_fields(conn, &info.id, &local_path, cache_size, &content_hash)?;
+                }
+                Ok(())
+            })
+            .await?;
+
+            enforce_cache_limit(&db, &dir).await
+        }
+        .await;
+
+        if let Err(e) = result {
+            log::warn!("Failed to cache attachment: {e}");
+        }
+    });
 }

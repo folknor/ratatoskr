@@ -3,7 +3,6 @@ use tauri::{Emitter, Manager};
 mod account_commands;
 mod ai_commands;
 mod app_setup;
-mod attachment_cache;
 mod body_store;
 mod calendar_commands;
 mod categorization;

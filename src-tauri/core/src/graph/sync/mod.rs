@@ -364,9 +364,9 @@ async fn sync_folder_delta(
         let filtered = filter_pending_ops(sctx, created_or_updated).await?;
 
         for msg in &filtered {
-            affected_thread_ids.insert(msg.thread_id.clone());
-            if msg.label_ids.contains(&"INBOX".to_string()) {
-                new_inbox_ids.push(msg.id.clone());
+            affected_thread_ids.insert(msg.base.thread_id.clone());
+            if msg.base.label_ids.contains(&"INBOX".to_string()) {
+                new_inbox_ids.push(msg.base.id.clone());
             }
         }
 
@@ -412,7 +412,7 @@ async fn filter_pending_ops(
 
     let thread_ids: HashSet<String> = messages
         .iter()
-        .map(|message| message.thread_id.clone())
+        .map(|message| message.base.thread_id.clone())
         .collect();
     let blocked_threads = sync_pending::blocked_thread_ids(
         sctx.db,
@@ -433,7 +433,7 @@ async fn filter_pending_ops(
     Ok(sync_pending::filter_by_blocked_threads(
         messages,
         &blocked_threads,
-        |message| &message.thread_id,
+        |message| &message.base.thread_id,
     ))
 }
 

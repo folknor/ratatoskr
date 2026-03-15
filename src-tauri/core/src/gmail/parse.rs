@@ -6,6 +6,7 @@ use crate::provider::attachment_dedup::{
 use crate::provider::email_parsing::parse_single_address_header;
 use crate::provider::encoding::decode_base64url_nopad;
 use crate::provider::headers::find_header_value_case_insensitive;
+use crate::provider::parsed_message::ParsedMessageBase;
 
 use super::auth_parser::parse_authentication_results;
 use super::types::{GmailHeader, GmailMessage, GmailPayload};
@@ -39,59 +40,17 @@ pub struct ParsedAttachment {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParsedGmailMessage {
-    pub id: String,
-    pub thread_id: String,
-    pub from_address: Option<String>,
-    pub from_name: Option<String>,
-    pub to_addresses: Option<String>,
-    pub cc_addresses: Option<String>,
-    pub bcc_addresses: Option<String>,
-    pub reply_to: Option<String>,
-    pub subject: Option<String>,
-    pub snippet: String,
-    pub date: i64,
-    pub is_read: bool,
-    pub is_starred: bool,
-    pub body_html: Option<String>,
-    pub body_text: Option<String>,
-    pub raw_size: i64,
-    pub internal_date: i64,
-    pub label_ids: Vec<String>,
-    pub has_attachments: bool,
+    /// Common fields shared with other providers.
+    #[serde(flatten)]
+    pub base: ParsedMessageBase,
     pub attachments: Vec<ParsedAttachment>,
-    pub list_unsubscribe: Option<String>,
-    pub list_unsubscribe_post: Option<String>,
-    pub auth_results: Option<String>,
-    pub mdn_requested: bool,
-    pub message_id_header: Option<String>,
-    pub references_header: Option<String>,
-    pub in_reply_to_header: Option<String>,
     /// True when this message is a Gmail emoji reaction (not a real message).
     pub is_reaction: bool,
     /// The emoji from a reaction message, if any.
     pub reaction_emoji: Option<String>,
 }
 
-impl crate::seen_addresses::MessageAddresses for ParsedGmailMessage {
-    fn sender_address(&self) -> Option<&str> {
-        self.from_address.as_deref()
-    }
-    fn sender_name(&self) -> Option<&str> {
-        self.from_name.as_deref()
-    }
-    fn to_addresses(&self) -> Option<&str> {
-        self.to_addresses.as_deref()
-    }
-    fn cc_addresses(&self) -> Option<&str> {
-        self.cc_addresses.as_deref()
-    }
-    fn bcc_addresses(&self) -> Option<&str> {
-        self.bcc_addresses.as_deref()
-    }
-    fn msg_date_ms(&self) -> i64 {
-        self.date
-    }
-}
+crate::provider::parsed_message::impl_message_addresses!(ParsedGmailMessage);
 
 /// Parse a Gmail API message into the internal representation.
 pub fn parse_gmail_message(msg: &GmailMessage) -> ParsedGmailMessage {
@@ -124,34 +83,36 @@ pub fn parse_gmail_message(msg: &GmailMessage) -> ParsedGmailMessage {
         .unwrap_or(0);
 
     ParsedGmailMessage {
-        id: msg.id.clone(),
-        thread_id: msg.thread_id.clone(),
-        from_address,
-        from_name,
-        to_addresses: get_header(headers, "To"),
-        cc_addresses: get_header(headers, "Cc"),
-        bcc_addresses: get_header(headers, "Bcc"),
-        reply_to: get_header(headers, "Reply-To"),
-        subject: get_header(headers, "Subject"),
-        snippet: msg.snippet.clone(),
-        date: internal_date,
-        is_read: !msg.label_ids.contains(&"UNREAD".to_string()),
-        is_starred: msg.label_ids.contains(&"STARRED".to_string()),
-        body_html,
-        body_text,
-        raw_size: msg.size_estimate.unwrap_or(0),
-        internal_date,
-        label_ids: msg.label_ids.clone(),
-        has_attachments: !attachments.is_empty(),
+        base: ParsedMessageBase {
+            id: msg.id.clone(),
+            thread_id: msg.thread_id.clone(),
+            from_address,
+            from_name,
+            to_addresses: get_header(headers, "To"),
+            cc_addresses: get_header(headers, "Cc"),
+            bcc_addresses: get_header(headers, "Bcc"),
+            reply_to: get_header(headers, "Reply-To"),
+            subject: get_header(headers, "Subject"),
+            snippet: msg.snippet.clone(),
+            date: internal_date,
+            is_read: !msg.label_ids.contains(&"UNREAD".to_string()),
+            is_starred: msg.label_ids.contains(&"STARRED".to_string()),
+            body_html,
+            body_text,
+            raw_size: msg.size_estimate.unwrap_or(0),
+            internal_date,
+            label_ids: msg.label_ids.clone(),
+            has_attachments: !attachments.is_empty(),
+            list_unsubscribe: get_header(headers, "List-Unsubscribe"),
+            list_unsubscribe_post: get_header(headers, "List-Unsubscribe-Post"),
+            auth_results,
+            mdn_requested: get_header(headers, "Disposition-Notification-To").is_some(),
+            message_id_header: get_header(headers, "Message-ID")
+                .or_else(|| get_header(headers, "Message-Id")),
+            references_header: get_header(headers, "References"),
+            in_reply_to_header: get_header(headers, "In-Reply-To"),
+        },
         attachments,
-        list_unsubscribe: get_header(headers, "List-Unsubscribe"),
-        list_unsubscribe_post: get_header(headers, "List-Unsubscribe-Post"),
-        auth_results,
-        mdn_requested: get_header(headers, "Disposition-Notification-To").is_some(),
-        message_id_header: get_header(headers, "Message-ID")
-            .or_else(|| get_header(headers, "Message-Id")),
-        references_header: get_header(headers, "References"),
-        in_reply_to_header: get_header(headers, "In-Reply-To"),
         is_reaction,
         reaction_emoji,
     }

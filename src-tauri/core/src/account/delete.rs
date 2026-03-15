@@ -75,6 +75,54 @@ pub fn count_cached_refs(conn: &Connection, content_hash: &str) -> Result<i64, S
     .map_err(|e| format!("count remaining cached attachment refs: {e}"))
 }
 
+/// Batch-count remaining cached attachment references for multiple content
+/// hashes, excluding a specific account. Returns the set of hashes that
+/// still have at least one reference from another account.
+pub fn referenced_hashes_excluding_account(
+    conn: &Connection,
+    content_hashes: &[(String, String)],
+    account_id: &str,
+) -> Result<std::collections::HashSet<String>, String> {
+    use std::collections::HashSet;
+
+    if content_hashes.is_empty() {
+        return Ok(HashSet::new());
+    }
+
+    // Collect unique hashes
+    let unique: HashSet<&str> = content_hashes.iter().map(|(_, h)| h.as_str()).collect();
+    let hashes: Vec<&str> = unique.into_iter().collect();
+
+    // Process in batches to stay within SQLite variable limits
+    let mut referenced = HashSet::new();
+    for chunk in hashes.chunks(500) {
+        let placeholders: Vec<String> = (0..chunk.len()).map(|i| format!("?{}", i + 2)).collect();
+        let sql = format!(
+            "SELECT content_hash FROM attachments \
+             WHERE content_hash IN ({}) AND account_id != ?1 AND cached_at IS NOT NULL \
+             GROUP BY content_hash",
+            placeholders.join(", ")
+        );
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| format!("prepare batch ref count: {e}"))?;
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> =
+            vec![Box::new(account_id.to_string())];
+        for hash in chunk {
+            params.push(Box::new((*hash).to_string()));
+        }
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let rows = stmt
+            .query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))
+            .map_err(|e| format!("query batch ref count: {e}"))?;
+        for row in rows {
+            let hash = row.map_err(|e| format!("read batch ref count row: {e}"))?;
+            referenced.insert(hash);
+        }
+    }
+    Ok(referenced)
+}
+
 /// Delete the account row from the database.
 pub fn delete_account_row(conn: &Connection, account_id: &str) -> Result<(), String> {
     conn.execute(

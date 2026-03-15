@@ -10,8 +10,7 @@ use super::caldav;
 use super::google;
 use super::sync;
 use super::types::{
-    CalendarEventDto, CalendarEventInput, CalendarInfoDto, CalendarInfoInput,
-    CalendarSyncResultDto,
+    CalendarEventDto, CalendarInfoDto, CalendarInfoInput, CalendarSyncResultDto,
 };
 
 // ── Google Calendar commands ────────────────────────────────
@@ -260,7 +259,7 @@ pub async fn calendar_upsert_provider_events(
     db: State<'_, DbState>,
     account_id: String,
     calendar_remote_id: String,
-    events: Vec<CalendarEventInput>,
+    events: Vec<CalendarEventDto>,
 ) -> Result<(), String> {
     sync::upsert_provider_events_impl(&db, &account_id, &calendar_remote_id, events).await
 }
@@ -270,8 +269,8 @@ pub async fn calendar_apply_sync_result(
     db: State<'_, DbState>,
     account_id: String,
     calendar_remote_id: String,
-    created: Vec<CalendarEventInput>,
-    updated: Vec<CalendarEventInput>,
+    created: Vec<CalendarEventDto>,
+    updated: Vec<CalendarEventDto>,
     deleted_remote_ids: Vec<String>,
     new_sync_token: Option<String>,
     new_ctag: Option<String>,
@@ -281,14 +280,8 @@ pub async fn calendar_apply_sync_result(
         &account_id,
         &calendar_remote_id,
         CalendarSyncResultDto {
-            created: created
-                .into_iter()
-                .map(sync::calendar_input_to_dto)
-                .collect(),
-            updated: updated
-                .into_iter()
-                .map(sync::calendar_input_to_dto)
-                .collect(),
+            created,
+            updated,
             deleted_remote_ids,
             new_sync_token,
             new_ctag,
