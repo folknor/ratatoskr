@@ -14,7 +14,7 @@ pub fn view<'a>(thread: Option<&'a Thread>) -> Element<'a, Message> {
     };
 
     container(content)
-        .width(if thread.is_some() { CONTACT_SIDEBAR_WIDTH } else { 0.0 })
+        .width(Length::Fill)
         .height(Length::Fill)
         .style(theme::sidebar_container)
         .into()

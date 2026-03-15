@@ -43,7 +43,7 @@ pub fn view<'a>(
             .spacing(0)
             .width(Length::Fill),
     )
-    .width(THREAD_LIST_WIDTH)
+    .width(Length::Fill)
     .height(Length::Fill)
     .style(theme::surface_container)
     .into()

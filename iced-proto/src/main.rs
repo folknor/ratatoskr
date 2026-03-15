@@ -5,7 +5,7 @@ mod icon;
 mod ui;
 
 use db::{Account, Db, Label, Thread};
-use iced::widget::row;
+use iced::widget::pane_grid::{self, Configuration, PaneGrid};
 use iced::{Element, Task, Theme};
 use std::sync::Arc;
 
@@ -32,6 +32,14 @@ fn main() -> iced::Result {
     app.run()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PaneKind {
+    Sidebar,
+    ThreadList,
+    ReadingPane,
+    ContactSidebar,
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     AccountsLoaded(Result<Vec<Account>, String>),
@@ -47,6 +55,7 @@ pub enum Message {
     ToggleScopeDropdown,
     ToggleLabelsSection,
     ToggleSmartFoldersSection,
+    PaneResized(pane_grid::ResizeEvent),
 }
 
 struct App {
@@ -62,6 +71,28 @@ struct App {
     scope_dropdown_open: bool,
     labels_expanded: bool,
     smart_folders_expanded: bool,
+    panes: pane_grid::State<PaneKind>,
+}
+
+fn pane_configuration() -> Configuration<PaneKind> {
+    // Sidebar | ThreadList | ReadingPane | ContactSidebar
+    //  ~15%       ~22%         ~45%           ~18%
+    Configuration::Split {
+        axis: pane_grid::Axis::Vertical,
+        ratio: 0.15,
+        a: Box::new(Configuration::Pane(PaneKind::Sidebar)),
+        b: Box::new(Configuration::Split {
+            axis: pane_grid::Axis::Vertical,
+            ratio: 0.26,
+            a: Box::new(Configuration::Pane(PaneKind::ThreadList)),
+            b: Box::new(Configuration::Split {
+                axis: pane_grid::Axis::Vertical,
+                ratio: 0.73,
+                a: Box::new(Configuration::Pane(PaneKind::ReadingPane)),
+                b: Box::new(Configuration::Pane(PaneKind::ContactSidebar)),
+            }),
+        }),
+    }
 }
 
 impl App {
@@ -81,6 +112,7 @@ impl App {
             scope_dropdown_open: false,
             labels_expanded: true,
             smart_folders_expanded: true,
+            panes: pane_grid::State::with_configuration(pane_configuration()),
         };
         (app, Task::perform(load_accounts(db_ref), Message::AccountsLoaded))
     }
@@ -205,6 +237,10 @@ impl App {
                 self.smart_folders_expanded = !self.smart_folders_expanded;
                 Task::none()
             }
+            Message::PaneResized(pane_grid::ResizeEvent { split, ratio }) => {
+                self.panes.resize(split, ratio);
+                Task::none()
+            }
             Message::Compose | Message::Noop => Task::none(),
         }
     }
@@ -219,29 +255,41 @@ impl App {
             .selected_thread
             .and_then(|idx| self.threads.get(idx));
 
-        let sidebar_model = ui::sidebar::SidebarModel {
-            accounts: &self.accounts,
-            selected_account: self.selected_account,
-            labels: &self.labels,
-            selected_label: &self.selected_label,
-            scope_dropdown_open: self.scope_dropdown_open,
-            labels_expanded: self.labels_expanded,
-            smart_folders_expanded: self.smart_folders_expanded,
-        };
-        let sidebar = ui::sidebar::view(sidebar_model);
-
-        let thread_list = ui::thread_list::view(
-            &self.threads,
-            self.selected_thread,
-            &self.status,
-            label_name,
-        );
-
-        let reading_pane = ui::reading_pane::view(selected_thread);
-
-        let contact_sidebar = ui::contact_sidebar::view(selected_thread);
-
-        row![sidebar, thread_list, reading_pane, contact_sidebar].into()
+        PaneGrid::new(&self.panes, |_pane, kind, _maximized| {
+            let content: Element<'_, Message> = match kind {
+                PaneKind::Sidebar => {
+                    let sidebar_model = ui::sidebar::SidebarModel {
+                        accounts: &self.accounts,
+                        selected_account: self.selected_account,
+                        labels: &self.labels,
+                        selected_label: &self.selected_label,
+                        scope_dropdown_open: self.scope_dropdown_open,
+                        labels_expanded: self.labels_expanded,
+                        smart_folders_expanded: self.smart_folders_expanded,
+                    };
+                    ui::sidebar::view(sidebar_model)
+                }
+                PaneKind::ThreadList => {
+                    ui::thread_list::view(
+                        &self.threads,
+                        self.selected_thread,
+                        &self.status,
+                        label_name,
+                    )
+                }
+                PaneKind::ReadingPane => {
+                    ui::reading_pane::view(selected_thread)
+                }
+                PaneKind::ContactSidebar => {
+                    ui::contact_sidebar::view(selected_thread)
+                }
+            };
+            pane_grid::Content::new(content)
+        })
+        .spacing(1)
+        .min_size(120)
+        .on_resize(4, Message::PaneResized)
+        .into()
     }
 }
 

@@ -34,7 +34,7 @@ pub fn view<'a>(model: SidebarModel<'a>) -> Element<'a, Message> {
         smart_folders(model.smart_folders_expanded),
     ]
     .spacing(0)
-    .width(SIDEBAR_WIDTH);
+    .width(Length::Fill);
 
     if !model.is_all_accounts() {
         col = col.push(widgets::section_break());
@@ -46,7 +46,8 @@ pub fn view<'a>(model: SidebarModel<'a>) -> Element<'a, Message> {
 
     container(scrollable(col).height(Length::Fill))
         .padding(PAD_SIDEBAR)
-        .width(SIDEBAR_WIDTH)
+        .width(Length::Fill)
+        .height(Length::Fill)
         .style(theme::sidebar_container)
         .into()
 }
