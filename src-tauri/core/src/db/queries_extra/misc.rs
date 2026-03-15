@@ -5,6 +5,18 @@ use super::super::types::{
 };
 use rusqlite::params;
 
+/// Backfill variant of the latest-message subquery that also selects `to_addresses`.
+/// The standard `LATEST_MESSAGE_SUBQUERY` does not include this column.
+const LATEST_MESSAGE_BACKFILL_SUBQUERY: &str = "\
+SELECT id, account_id, thread_id, from_address, from_name, to_addresses FROM (
+  SELECT id, account_id, thread_id, from_address, from_name, to_addresses,
+         ROW_NUMBER() OVER (
+           PARTITION BY account_id, thread_id
+           ORDER BY date DESC, id DESC
+         ) AS rn
+  FROM messages
+) WHERE rn = 1";
+
 pub async fn db_get_snoozed_threads_due(
     db: &DbState,
     now: i64,
@@ -330,28 +342,19 @@ pub async fn db_get_inbox_threads_for_backfill(
     offset: i64,
 ) -> Result<Vec<BackfillRow>, String> {
     db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT t.id AS thread_id, t.subject, t.snippet,
-                            m.from_address, m.from_name,
-                            m.to_addresses, t.has_attachments, m.id
-                     FROM threads t
-                     INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-                     LEFT JOIN (
-                       SELECT id, account_id, thread_id, from_address, from_name, to_addresses FROM (
-                         SELECT id, account_id, thread_id, from_address, from_name, to_addresses,
-                                ROW_NUMBER() OVER (
-                                  PARTITION BY account_id, thread_id
-                                  ORDER BY date DESC, id DESC
-                                ) AS rn
-                         FROM messages
-                       ) WHERE rn = 1
-                     ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-                     WHERE t.account_id = ?1 AND tl.label_id = 'INBOX'
-                     ORDER BY t.last_message_at DESC
-                     LIMIT ?2 OFFSET ?3",
-            )
-            .map_err(|e| e.to_string())?;
+        let sql = format!(
+            "SELECT t.id AS thread_id, t.subject, t.snippet,
+                        m.from_address, m.from_name,
+                        m.to_addresses, t.has_attachments, m.id
+                 FROM threads t
+                 INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
+                 LEFT JOIN ({LATEST_MESSAGE_BACKFILL_SUBQUERY}
+                 ) m ON m.account_id = t.account_id AND m.thread_id = t.id
+                 WHERE t.account_id = ?1 AND tl.label_id = 'INBOX'
+                 ORDER BY t.last_message_at DESC
+                 LIMIT ?2 OFFSET ?3"
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
         stmt.query_map(params![account_id, batch_size, offset], |row| {
             Ok(BackfillRow {
                 thread_id: row.get("thread_id")?,

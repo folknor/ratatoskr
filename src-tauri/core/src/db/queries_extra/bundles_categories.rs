@@ -1,4 +1,5 @@
 use super::super::DbState;
+use super::super::sql_fragments::LATEST_MESSAGE_SUBQUERY;
 use super::super::types::{
     BundleSummary, BundleSummarySingle, DbBundleRule, ThreadCategoryWithManual, ThreadInfoRow,
 };
@@ -417,27 +418,18 @@ pub async fn db_get_uncategorized_inbox_thread_ids(
 ) -> Result<Vec<ThreadInfoRow>, String> {
     db.with_conn(move |conn| {
         let lim = limit.unwrap_or(20);
-        let mut stmt = conn
-            .prepare(
-                "SELECT t.id, t.subject, t.snippet, m.from_address
-                     FROM threads t
-                     INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-                     LEFT JOIN (
-                       SELECT account_id, thread_id, from_address FROM (
-                         SELECT account_id, thread_id, from_address,
-                                ROW_NUMBER() OVER (
-                                  PARTITION BY account_id, thread_id
-                                  ORDER BY date DESC, id DESC
-                                ) AS rn
-                         FROM messages
-                       ) WHERE rn = 1
-                     ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-                     LEFT JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
-                     WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND tc.thread_id IS NULL
-                     ORDER BY t.last_message_at DESC
-                     LIMIT ?2",
-            )
-            .map_err(|e| e.to_string())?;
+        let sql = format!(
+            "SELECT t.id, t.subject, t.snippet, m.from_address
+                 FROM threads t
+                 INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
+                 LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
+                 ) m ON m.account_id = t.account_id AND m.thread_id = t.id
+                 LEFT JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
+                 WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND tc.thread_id IS NULL
+                 ORDER BY t.last_message_at DESC
+                 LIMIT ?2"
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
         stmt.query_map(params![account_id, lim], |row| {
             Ok(ThreadInfoRow {
                 id: row.get(0)?,

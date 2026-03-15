@@ -1,6 +1,7 @@
 use rusqlite::Connection;
 
 use crate::db::queries::row_to_thread;
+use crate::db::sql_fragments::LATEST_MESSAGE_SUBQUERY;
 use crate::db::types::{AccountScope, DbThread, FolderAccountUnreadCount, FolderUnreadCount};
 
 /// Build the WHERE clause fragment and collect parameter values for an `AccountScope`.
@@ -57,15 +58,7 @@ pub fn get_threads_scoped(
         let sql = format!(
             "SELECT t.*, m.from_name, m.from_address FROM threads t
              INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-             LEFT JOIN (
-               SELECT id, account_id, thread_id, from_name, from_address FROM (
-                 SELECT id, account_id, thread_id, from_name, from_address,
-                        ROW_NUMBER() OVER (
-                          PARTITION BY account_id, thread_id
-                          ORDER BY date DESC, id DESC
-                        ) AS rn
-                 FROM messages
-               ) WHERE rn = 1
+             LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
              WHERE {scope_clause} AND tl.label_id = ?{next_idx}
              GROUP BY t.account_id, t.id
@@ -78,15 +71,7 @@ pub fn get_threads_scoped(
     } else {
         let sql = format!(
             "SELECT t.*, m.from_name, m.from_address FROM threads t
-             LEFT JOIN (
-               SELECT id, account_id, thread_id, from_name, from_address FROM (
-                 SELECT id, account_id, thread_id, from_name, from_address,
-                        ROW_NUMBER() OVER (
-                          PARTITION BY account_id, thread_id
-                          ORDER BY date DESC, id DESC
-                        ) AS rn
-                 FROM messages
-               ) WHERE rn = 1
+             LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
              WHERE {scope_clause}
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
@@ -408,15 +393,7 @@ pub fn get_draft_threads(
     let sql = format!(
         "SELECT t.*, m.from_name, m.from_address FROM threads t
          INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-         LEFT JOIN (
-           SELECT id, account_id, thread_id, from_name, from_address FROM (
-             SELECT id, account_id, thread_id, from_name, from_address,
-                    ROW_NUMBER() OVER (
-                      PARTITION BY account_id, thread_id
-                      ORDER BY date DESC, id DESC
-                    ) AS rn
-             FROM messages
-           ) WHERE rn = 1
+         LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
          ) m ON m.account_id = t.account_id AND m.thread_id = t.id
          WHERE {scope_clause} AND tl.label_id = ?{next_idx}
          GROUP BY t.account_id, t.id
@@ -444,15 +421,7 @@ fn get_flag_threads(
 
     let sql = format!(
         "SELECT t.*, m.from_name, m.from_address FROM threads t
-         LEFT JOIN (
-           SELECT id, account_id, thread_id, from_name, from_address FROM (
-             SELECT id, account_id, thread_id, from_name, from_address,
-                    ROW_NUMBER() OVER (
-                      PARTITION BY account_id, thread_id
-                      ORDER BY date DESC, id DESC
-                    ) AS rn
-             FROM messages
-           ) WHERE rn = 1
+         LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
          ) m ON m.account_id = t.account_id AND m.thread_id = t.id
          WHERE {scope_clause} AND t.{flag_col} = 1
          ORDER BY t.is_pinned DESC, t.last_message_at DESC

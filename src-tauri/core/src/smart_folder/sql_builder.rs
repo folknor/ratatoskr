@@ -1,6 +1,7 @@
 use rusqlite::Connection;
 
 use crate::db::queries::row_to_thread;
+use crate::db::sql_fragments::LATEST_MESSAGE_SUBQUERY;
 use crate::db::types::{AccountScope, DbThread};
 
 use super::parser::ParsedQuery;
@@ -271,15 +272,7 @@ fn build_thread_select_sql(
            FROM messages m \
            WHERE 1=1{msg_where} \
          ) matched ON matched.account_id = t.account_id AND matched.thread_id = t.id \
-         LEFT JOIN ( \
-           SELECT id, account_id, thread_id, from_name, from_address FROM ( \
-             SELECT id, account_id, thread_id, from_name, from_address, \
-                    ROW_NUMBER() OVER ( \
-                      PARTITION BY account_id, thread_id \
-                      ORDER BY date DESC, id DESC \
-                    ) AS rn \
-             FROM messages \
-           ) WHERE rn = 1 \
+         LEFT JOIN ({LATEST_MESSAGE_SUBQUERY} \
          ) latest_m ON latest_m.account_id = t.account_id AND latest_m.thread_id = t.id \
          WHERE 1=1{thread_flag_where} \
          ORDER BY t.is_pinned DESC, t.last_message_at DESC \

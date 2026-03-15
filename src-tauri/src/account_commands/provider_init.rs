@@ -243,7 +243,8 @@ pub async fn account_create_graph_via_oauth(
     let oauth = crate::oauth::authorize_with_provider(&app, &provider).await?;
 
     let account_id = uuid::Uuid::new_v4().to_string();
-    let expires_at = chrono::Utc::now().timestamp() + oauth.tokens.expires_in as i64;
+    let expires_at = chrono::Utc::now().timestamp()
+        + i64::try_from(oauth.tokens.expires_in).map_err(|_| "Microsoft token expiry overflow")?;
     let access_token = encrypt_value(graph.encryption_key(), &oauth.tokens.access_token)?;
     let refresh_token = encrypt_value(
         graph.encryption_key(),
@@ -530,7 +531,8 @@ pub async fn account_reauthorize_graph(
             .as_deref()
             .ok_or("Microsoft did not return a refresh token")?,
     )?;
-    let expires_at = chrono::Utc::now().timestamp() + oauth.tokens.expires_in as i64;
+    let expires_at = chrono::Utc::now().timestamp()
+        + i64::try_from(oauth.tokens.expires_in).map_err(|_| "Microsoft token expiry overflow")?;
 
     let new_encrypted_cid = if client_id.is_some() {
         Some(encrypt_value(&encryption_key, &resolved_client_id)?)

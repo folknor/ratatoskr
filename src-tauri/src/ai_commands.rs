@@ -14,7 +14,12 @@ const DEFAULT_COPILOT_MODEL: &str = "openai/gpt-4o-mini";
 
 fn shared_ai_http_client() -> &'static reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new)
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .unwrap_or_default()
+    })
 }
 
 #[derive(Debug, Deserialize)]

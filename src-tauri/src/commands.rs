@@ -131,16 +131,20 @@ pub async fn imap_set_flags(
     let flag_op = if add { "+FLAGS" } else { "-FLAGS" };
 
     // Format flags like "(\Seen \Flagged)"
+    // Only the five standard IMAP system flags get a backslash prefix.
+    // Keyword flags like $Forwarded, $MDNSent, $Junk must NOT be prefixed.
+    const STANDARD_FLAGS: &[&str] = &["Seen", "Answered", "Flagged", "Deleted", "Draft"];
     let flags_str = format!(
         "({})",
         flags
             .iter()
             .map(|f| {
-                // Ensure flags have the backslash prefix if they're standard flags
                 if f.starts_with('\\') {
                     f.clone()
-                } else {
+                } else if STANDARD_FLAGS.iter().any(|sf| sf.eq_ignore_ascii_case(f)) {
                     format!("\\{f}")
+                } else {
+                    f.clone()
                 }
             })
             .collect::<Vec<_>>()

@@ -67,7 +67,7 @@ pub(crate) async fn calendar_sync_account_impl(
 
     match provider.as_deref() {
         Some("google_api") => sync_google_calendar_account(account_id, db, gmail).await,
-        Some("caldav") => sync_caldav_calendar_account(account_id, db, gmail).await,
+        Some("caldav") => sync_caldav_calendar_account(account_id, db, gmail.encryption_key()).await,
         _ => Err(format!(
             "No calendar provider configured for account {account_id}"
         )),
@@ -394,15 +394,15 @@ async fn sync_google_calendar_account(
 async fn sync_caldav_calendar_account(
     account_id: &str,
     db: &DbState,
-    gmail: &GmailState,
+    encryption_key: &[u8; 32],
 ) -> Result<(), String> {
-    let calendars = caldav_list_calendars_impl(account_id, db, gmail).await?;
+    let calendars = caldav_list_calendars_impl(account_id, db, encryption_key).await?;
     upsert_discovered_calendars_impl(db, account_id, "caldav", calendars).await?;
     let visible_calendars = load_visible_calendars(db, account_id).await?;
 
     for calendar in visible_calendars {
         let sync_result =
-            caldav_sync_events_impl(account_id, &calendar.remote_id, db, gmail).await?;
+            caldav_sync_events_impl(account_id, &calendar.remote_id, db, encryption_key).await?;
         apply_calendar_sync_result_impl(db, account_id, &calendar.remote_id, sync_result).await?;
     }
 

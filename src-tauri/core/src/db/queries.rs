@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use rusqlite::{Connection, Row, params};
 
 use super::DbState;
+use super::sql_fragments::{LATEST_MESSAGE_SUBQUERY, SEEN_ADDRESS_SCORE_EXPR, validate_thread_bool_column};
 use super::types::{
     CategoryCount, DbAttachment, DbContact, DbLabel, DbMessage, DbThread, ThreadCategoryRow,
 };
@@ -224,50 +225,32 @@ pub fn get_threads(
     let off = offset.unwrap_or(0);
 
     if let Some(ref lid) = label_id {
-        let mut stmt = conn
-            .prepare(
-                "SELECT t.*, m.from_name, m.from_address FROM threads t
-                 INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-                 LEFT JOIN (
-                   SELECT id, account_id, thread_id, from_name, from_address FROM (
-                     SELECT id, account_id, thread_id, from_name, from_address,
-                            ROW_NUMBER() OVER (
-                              PARTITION BY account_id, thread_id
-                              ORDER BY date DESC, id DESC
-                            ) AS rn
-                     FROM messages
-                   ) WHERE rn = 1
-                 ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-                 WHERE t.account_id = ?1 AND tl.label_id = ?2
-                 GROUP BY t.account_id, t.id
-                 ORDER BY t.is_pinned DESC, t.last_message_at DESC
-                 LIMIT ?3 OFFSET ?4",
-            )
-            .map_err(|e| e.to_string())?;
+        let sql = format!(
+            "SELECT t.*, m.from_name, m.from_address FROM threads t
+             INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
+             LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
+             ) m ON m.account_id = t.account_id AND m.thread_id = t.id
+             WHERE t.account_id = ?1 AND tl.label_id = ?2
+             GROUP BY t.account_id, t.id
+             ORDER BY t.is_pinned DESC, t.last_message_at DESC
+             LIMIT ?3 OFFSET ?4"
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
         stmt.query_map(params![account_id, lid, lim, off], row_to_thread)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())
     } else {
-        let mut stmt = conn
-            .prepare(
-                "SELECT t.*, m.from_name, m.from_address FROM threads t
-                 LEFT JOIN (
-                   SELECT id, account_id, thread_id, from_name, from_address FROM (
-                     SELECT id, account_id, thread_id, from_name, from_address,
-                            ROW_NUMBER() OVER (
-                              PARTITION BY account_id, thread_id
-                              ORDER BY date DESC, id DESC
-                            ) AS rn
-                     FROM messages
-                   ) WHERE rn = 1
-                 ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-                 WHERE t.account_id = ?1
-                 ORDER BY t.is_pinned DESC, t.last_message_at DESC
-                 LIMIT ?2 OFFSET ?3",
-            )
-            .map_err(|e| e.to_string())?;
+        let sql = format!(
+            "SELECT t.*, m.from_name, m.from_address FROM threads t
+             LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
+             ) m ON m.account_id = t.account_id AND m.thread_id = t.id
+             WHERE t.account_id = ?1
+             ORDER BY t.is_pinned DESC, t.last_message_at DESC
+             LIMIT ?2 OFFSET ?3"
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
         stmt.query_map(params![account_id, lim, off], row_to_thread)
             .map_err(|e| e.to_string())?
@@ -287,55 +270,37 @@ pub fn get_threads_for_category(
     let off = offset.unwrap_or(0);
 
     if category == "Primary" {
-        let mut stmt = conn
-            .prepare(
-                "SELECT t.*, m.from_name, m.from_address FROM threads t
-                 INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-                 LEFT JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
-                 LEFT JOIN (
-                   SELECT id, account_id, thread_id, from_name, from_address FROM (
-                     SELECT id, account_id, thread_id, from_name, from_address,
-                            ROW_NUMBER() OVER (
-                              PARTITION BY account_id, thread_id
-                              ORDER BY date DESC, id DESC
-                            ) AS rn
-                     FROM messages
-                   ) WHERE rn = 1
-                 ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-                 WHERE t.account_id = ?1 AND tl.label_id = 'INBOX'
-                   AND (tc.category IS NULL OR tc.category = 'Primary')
-                 GROUP BY t.account_id, t.id
-                 ORDER BY t.is_pinned DESC, t.last_message_at DESC
-                 LIMIT ?2 OFFSET ?3",
-            )
-            .map_err(|e| e.to_string())?;
+        let sql = format!(
+            "SELECT t.*, m.from_name, m.from_address FROM threads t
+             INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
+             LEFT JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
+             LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
+             ) m ON m.account_id = t.account_id AND m.thread_id = t.id
+             WHERE t.account_id = ?1 AND tl.label_id = 'INBOX'
+               AND (tc.category IS NULL OR tc.category = 'Primary')
+             GROUP BY t.account_id, t.id
+             ORDER BY t.is_pinned DESC, t.last_message_at DESC
+             LIMIT ?2 OFFSET ?3"
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
         stmt.query_map(params![account_id, lim, off], row_to_thread)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())
     } else {
-        let mut stmt = conn
-            .prepare(
-                "SELECT t.*, m.from_name, m.from_address FROM threads t
-                 INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-                 INNER JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
-                 LEFT JOIN (
-                   SELECT id, account_id, thread_id, from_name, from_address FROM (
-                     SELECT id, account_id, thread_id, from_name, from_address,
-                            ROW_NUMBER() OVER (
-                              PARTITION BY account_id, thread_id
-                              ORDER BY date DESC, id DESC
-                            ) AS rn
-                     FROM messages
-                   ) WHERE rn = 1
-                 ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-                 WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND tc.category = ?2
-                 GROUP BY t.account_id, t.id
-                 ORDER BY t.is_pinned DESC, t.last_message_at DESC
-                 LIMIT ?3 OFFSET ?4",
-            )
-            .map_err(|e| e.to_string())?;
+        let sql = format!(
+            "SELECT t.*, m.from_name, m.from_address FROM threads t
+             INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
+             INNER JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
+             LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
+             ) m ON m.account_id = t.account_id AND m.thread_id = t.id
+             WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND tc.category = ?2
+             GROUP BY t.account_id, t.id
+             ORDER BY t.is_pinned DESC, t.last_message_at DESC
+             LIMIT ?3 OFFSET ?4"
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
         stmt.query_map(params![account_id, category, lim, off], row_to_thread)
             .map_err(|e| e.to_string())?
@@ -349,23 +314,14 @@ pub fn get_thread_by_id(
     account_id: String,
     thread_id: String,
 ) -> Result<Option<DbThread>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT t.*, m.from_name, m.from_address FROM threads t
-             LEFT JOIN (
-               SELECT id, account_id, thread_id, from_name, from_address FROM (
-                 SELECT id, account_id, thread_id, from_name, from_address,
-                        ROW_NUMBER() OVER (
-                          PARTITION BY account_id, thread_id
-                          ORDER BY date DESC, id DESC
-                        ) AS rn
-                 FROM messages
-               ) WHERE rn = 1
-             ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-             WHERE t.account_id = ?1 AND t.id = ?2
-             LIMIT 1",
-        )
-        .map_err(|e| e.to_string())?;
+    let sql = format!(
+        "SELECT t.*, m.from_name, m.from_address FROM threads t
+         LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
+         ) m ON m.account_id = t.account_id AND m.thread_id = t.id
+         WHERE t.account_id = ?1 AND t.id = ?2
+         LIMIT 1"
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
     let mut rows = stmt
         .query_map(params![account_id, thread_id], row_to_thread)
@@ -631,18 +587,29 @@ pub fn set_setting(conn: &Connection, key: String, value: String) -> Result<(), 
     Ok(())
 }
 
+/// Update a boolean column on a thread row. The column name is validated against
+/// an allowlist to prevent SQL injection.
+fn set_thread_bool_field(
+    conn: &Connection,
+    account_id: &str,
+    thread_id: &str,
+    column: &str,
+    value: bool,
+) -> Result<(), String> {
+    let column = validate_thread_bool_column(column)?;
+    let sql = format!("UPDATE threads SET {column} = ?3 WHERE account_id = ?1 AND id = ?2");
+    conn.execute(&sql, params![account_id, thread_id, value])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn set_thread_read(
     conn: &Connection,
     account_id: String,
     thread_id: String,
     is_read: bool,
 ) -> Result<(), String> {
-    conn.execute(
-        "UPDATE threads SET is_read = ?3 WHERE account_id = ?1 AND id = ?2",
-        params![account_id, thread_id, is_read],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    set_thread_bool_field(conn, &account_id, &thread_id, "is_read", is_read)
 }
 
 pub fn set_thread_starred(
@@ -651,12 +618,7 @@ pub fn set_thread_starred(
     thread_id: String,
     is_starred: bool,
 ) -> Result<(), String> {
-    conn.execute(
-        "UPDATE threads SET is_starred = ?3 WHERE account_id = ?1 AND id = ?2",
-        params![account_id, thread_id, is_starred],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    set_thread_bool_field(conn, &account_id, &thread_id, "is_starred", is_starred)
 }
 
 pub fn set_thread_pinned(
@@ -665,12 +627,7 @@ pub fn set_thread_pinned(
     thread_id: String,
     is_pinned: bool,
 ) -> Result<(), String> {
-    conn.execute(
-        "UPDATE threads SET is_pinned = ?3 WHERE account_id = ?1 AND id = ?2",
-        params![account_id, thread_id, is_pinned],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    set_thread_bool_field(conn, &account_id, &thread_id, "is_pinned", is_pinned)
 }
 
 pub fn set_thread_muted(
@@ -679,12 +636,7 @@ pub fn set_thread_muted(
     thread_id: String,
     is_muted: bool,
 ) -> Result<(), String> {
-    conn.execute(
-        "UPDATE threads SET is_muted = ?3 WHERE account_id = ?1 AND id = ?2",
-        params![account_id, thread_id, is_muted],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    set_thread_bool_field(conn, &account_id, &thread_id, "is_muted", is_muted)
 }
 
 pub fn delete_thread(
@@ -873,36 +825,30 @@ fn search_contacts_fts(
     }
     let like_pattern = format!("%{query}%");
 
-    let mut stmt = conn
-        .prepare(
-            "SELECT c.id, c.email, c.display_name, c.avatar_url, c.frequency,
-                    c.last_contacted_at, c.notes, 1 AS source_rank
-             FROM contacts c
-             INNER JOIN contacts_fts ON contacts_fts.rowid = c.rowid
+    let sql = format!(
+        "SELECT c.id, c.email, c.display_name, c.avatar_url, c.frequency,
+                c.last_contacted_at, c.notes, 1 AS source_rank
+         FROM contacts c
+         INNER JOIN contacts_fts ON contacts_fts.rowid = c.rowid
+         WHERE contacts_fts MATCH ?1
+
+         UNION ALL
+
+         SELECT '' AS id, sa.email, sa.display_name, NULL AS avatar_url,
+           {SEEN_ADDRESS_SCORE_EXPR} AS frequency,
+           NULL AS last_contacted_at, NULL AS notes, 2 AS source_rank
+         FROM seen_addresses sa
+         WHERE (sa.email LIKE ?2 OR sa.display_name LIKE ?2)
+           AND sa.email NOT IN (
+             SELECT c2.email FROM contacts c2
+             INNER JOIN contacts_fts fts2 ON fts2.rowid = c2.rowid
              WHERE contacts_fts MATCH ?1
+           )
 
-             UNION ALL
-
-             SELECT '' AS id, sa.email, sa.display_name, NULL AS avatar_url,
-               CAST(
-                 (sa.times_sent_to * 3.0 + sa.times_sent_cc * 1.5
-                  + sa.times_received_from * 1.0 + sa.times_received_cc * 0.5)
-                 / (1.0 + CAST((unixepoch() * 1000 - sa.last_seen_at) AS REAL)
-                    / 86400000.0 / 90.0)
-               AS INTEGER) AS frequency,
-               NULL AS last_contacted_at, NULL AS notes, 2 AS source_rank
-             FROM seen_addresses sa
-             WHERE (sa.email LIKE ?2 OR sa.display_name LIKE ?2)
-               AND sa.email NOT IN (
-                 SELECT c2.email FROM contacts c2
-                 INNER JOIN contacts_fts fts2 ON fts2.rowid = c2.rowid
-                 WHERE contacts_fts MATCH ?1
-               )
-
-             ORDER BY source_rank ASC, frequency DESC, display_name ASC
-             LIMIT ?3",
-        )
-        .map_err(|e| e.to_string())?;
+         ORDER BY source_rank ASC, frequency DESC, display_name ASC
+         LIMIT ?3"
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
     stmt.query_map(params![fts_query, like_pattern, limit], row_to_contact)
         .map_err(|e| e.to_string())?
@@ -918,34 +864,28 @@ fn search_contacts_like(
 ) -> Result<Vec<DbContact>, String> {
     let pattern = format!("%{query}%");
 
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, email, display_name, avatar_url, frequency,
-                    last_contacted_at, notes, 1 AS source_rank
-             FROM contacts
+    let sql = format!(
+        "SELECT id, email, display_name, avatar_url, frequency,
+                last_contacted_at, notes, 1 AS source_rank
+         FROM contacts
+         WHERE email LIKE ?1 OR display_name LIKE ?1
+
+         UNION ALL
+
+         SELECT '' AS id, sa.email, sa.display_name, NULL AS avatar_url,
+           {SEEN_ADDRESS_SCORE_EXPR} AS frequency,
+           NULL AS last_contacted_at, NULL AS notes, 2 AS source_rank
+         FROM seen_addresses sa
+         WHERE (sa.email LIKE ?1 OR sa.display_name LIKE ?1)
+           AND sa.email NOT IN (
+             SELECT email FROM contacts
              WHERE email LIKE ?1 OR display_name LIKE ?1
+           )
 
-             UNION ALL
-
-             SELECT '' AS id, sa.email, sa.display_name, NULL AS avatar_url,
-               CAST(
-                 (sa.times_sent_to * 3.0 + sa.times_sent_cc * 1.5
-                  + sa.times_received_from * 1.0 + sa.times_received_cc * 0.5)
-                 / (1.0 + CAST((unixepoch() * 1000 - sa.last_seen_at) AS REAL)
-                    / 86400000.0 / 90.0)
-               AS INTEGER) AS frequency,
-               NULL AS last_contacted_at, NULL AS notes, 2 AS source_rank
-             FROM seen_addresses sa
-             WHERE (sa.email LIKE ?1 OR sa.display_name LIKE ?1)
-               AND sa.email NOT IN (
-                 SELECT email FROM contacts
-                 WHERE email LIKE ?1 OR display_name LIKE ?1
-               )
-
-             ORDER BY source_rank ASC, frequency DESC, display_name ASC
-             LIMIT ?2",
-        )
-        .map_err(|e| e.to_string())?;
+         ORDER BY source_rank ASC, frequency DESC, display_name ASC
+         LIMIT ?2"
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
     stmt.query_map(params![pattern, limit], row_to_contact)
         .map_err(|e| e.to_string())?

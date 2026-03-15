@@ -3,6 +3,7 @@ pub mod migrations;
 pub mod pending_ops;
 pub mod queries;
 pub mod queries_extra;
+pub mod sql_fragments;
 pub mod types;
 pub use queries::*;
 

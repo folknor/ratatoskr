@@ -51,6 +51,12 @@ impl ImapOps {
     pub fn new(encryption_key: [u8; 32]) -> Self {
         Self { encryption_key }
     }
+
+    /// Shorthand for loading the IMAP config from the database.
+    async fn load_config(&self, ctx: &ProviderCtx<'_>) -> Result<super::types::ImapConfig, String> {
+        crate::imap::account_config::load_imap_config(ctx.db, ctx.account_id, &self.encryption_key)
+            .await
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -251,6 +257,49 @@ macro_rules! with_session {
     }};
 }
 
+/// What to do with messages grouped by folder.
+enum FolderAction {
+    /// Move messages to the given destination folder.
+    Move(String),
+    /// Permanently delete messages (no destination).
+    Delete,
+}
+
+/// Group thread message refs by folder and execute move/delete in parallel sessions.
+async fn execute_folder_action(
+    config: &super::types::ImapConfig,
+    refs: &[ImapMessageRef],
+    action: &FolderAction,
+) -> Result<(), String> {
+    let grouped = group_by_folder(refs);
+    let futs: Vec<_> = grouped
+        .iter()
+        .filter(|(folder, _)| match action {
+            FolderAction::Move(dest) => **folder != dest,
+            FolderAction::Delete => true,
+        })
+        .map(|(folder, uids)| {
+            let config = config.clone();
+            let folder = folder.to_string();
+            let uids = uid_set(uids);
+            let action_dest = match action {
+                FolderAction::Move(dest) => Some(dest.clone()),
+                FolderAction::Delete => None,
+            };
+            async move {
+                with_session!(&config, session => {
+                    match action_dest {
+                        Some(dest) => imap_client::move_messages(&mut session, &folder, &uids, &dest).await,
+                        None => imap_client::delete_messages(&mut session, &folder, &uids).await,
+                    }
+                })
+            }
+        })
+        .collect();
+    futures::future::try_join_all(futs).await?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // ProviderOps implementation
 // ---------------------------------------------------------------------------
@@ -268,12 +317,7 @@ impl ProviderOps for ImapOps {
         // This trait method is not the primary entry point for IMAP sync, but we
         // wire it through for consistency with the provider abstraction.
         let account_id = ctx.account_id.to_string();
-        let imap_config = crate::imap::account_config::load_imap_config(
-            ctx.db,
-            &account_id,
-            &self.encryption_key,
-        )
-        .await?;
+        let imap_config = self.load_config(ctx).await?;
 
         let result = crate::sync::imap_initial::imap_initial_sync(
             ctx.progress,
@@ -299,12 +343,7 @@ impl ProviderOps for ImapOps {
         days_back: Option<i64>,
     ) -> Result<SyncResult, String> {
         let account_id = ctx.account_id.to_string();
-        let imap_config = crate::imap::account_config::load_imap_config(
-            ctx.db,
-            &account_id,
-            &self.encryption_key,
-        )
-        .await?;
+        let imap_config = self.load_config(ctx).await?;
         let days_back = days_back.unwrap_or(365);
 
         let result = crate::sync::imap_delta::imap_delta_sync(
@@ -330,12 +369,7 @@ impl ProviderOps for ImapOps {
     async fn archive(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
-        let config = crate::imap::account_config::load_imap_config(
-            ctx.db,
-            &account_id,
-            &self.encryption_key,
-        )
-        .await?;
+        let config = self.load_config(ctx).await?;
 
         let (refs, archive_folder) = ctx
             .db
@@ -347,36 +381,13 @@ impl ProviderOps for ImapOps {
             })
             .await?;
 
-        let grouped = group_by_folder(&refs);
-        let futs: Vec<_> = grouped
-            .iter()
-            .filter(|(folder, _)| **folder != archive_folder)
-            .map(|(folder, uids)| {
-                let config = config.clone();
-                let folder = folder.to_string();
-                let uids = uid_set(uids);
-                let dest = archive_folder.clone();
-                async move {
-                    with_session!(&config, session => {
-                        imap_client::move_messages(&mut session, &folder, &uids, &dest).await
-                    })
-                }
-            })
-            .collect();
-        futures::future::try_join_all(futs).await?;
-
-        Ok(())
+        execute_folder_action(&config, &refs, &FolderAction::Move(archive_folder)).await
     }
 
     async fn trash(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
-        let config = crate::imap::account_config::load_imap_config(
-            ctx.db,
-            &account_id,
-            &self.encryption_key,
-        )
-        .await?;
+        let config = self.load_config(ctx).await?;
 
         let (refs, trash_folder) = ctx
             .db
@@ -388,59 +399,20 @@ impl ProviderOps for ImapOps {
             })
             .await?;
 
-        let grouped = group_by_folder(&refs);
-        let futs: Vec<_> = grouped
-            .iter()
-            .filter(|(folder, _)| **folder != trash_folder)
-            .map(|(folder, uids)| {
-                let config = config.clone();
-                let folder = folder.to_string();
-                let uids = uid_set(uids);
-                let dest = trash_folder.clone();
-                async move {
-                    with_session!(&config, session => {
-                        imap_client::move_messages(&mut session, &folder, &uids, &dest).await
-                    })
-                }
-            })
-            .collect();
-        futures::future::try_join_all(futs).await?;
-
-        Ok(())
+        execute_folder_action(&config, &refs, &FolderAction::Move(trash_folder)).await
     }
 
     async fn permanent_delete(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
-        let config = crate::imap::account_config::load_imap_config(
-            ctx.db,
-            &account_id,
-            &self.encryption_key,
-        )
-        .await?;
+        let config = self.load_config(ctx).await?;
 
         let refs = ctx
             .db
             .with_conn(move |conn| get_thread_message_refs(conn, &account_id, &tid))
             .await?;
 
-        let grouped = group_by_folder(&refs);
-        let futs: Vec<_> = grouped
-            .iter()
-            .map(|(folder, uids)| {
-                let config = config.clone();
-                let folder = folder.to_string();
-                let uids = uid_set(uids);
-                async move {
-                    with_session!(&config, session => {
-                        imap_client::delete_messages(&mut session, &folder, &uids).await
-                    })
-                }
-            })
-            .collect();
-        futures::future::try_join_all(futs).await?;
-
-        Ok(())
+        execute_folder_action(&config, &refs, &FolderAction::Delete).await
     }
 
     async fn mark_read(
@@ -451,12 +423,7 @@ impl ProviderOps for ImapOps {
     ) -> Result<(), String> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
-        let config = crate::imap::account_config::load_imap_config(
-            ctx.db,
-            &account_id,
-            &self.encryption_key,
-        )
-        .await?;
+        let config = self.load_config(ctx).await?;
 
         let refs = ctx
             .db
@@ -491,12 +458,7 @@ impl ProviderOps for ImapOps {
     ) -> Result<(), String> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
-        let config = crate::imap::account_config::load_imap_config(
-            ctx.db,
-            &account_id,
-            &self.encryption_key,
-        )
-        .await?;
+        let config = self.load_config(ctx).await?;
 
         let refs = ctx
             .db
@@ -531,12 +493,7 @@ impl ProviderOps for ImapOps {
     ) -> Result<(), String> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
-        let config = crate::imap::account_config::load_imap_config(
-            ctx.db,
-            &account_id,
-            &self.encryption_key,
-        )
-        .await?;
+        let config = self.load_config(ctx).await?;
 
         let (refs, junk_folder) = ctx
             .db
@@ -549,29 +506,12 @@ impl ProviderOps for ImapOps {
             .await?;
 
         let destination = if is_spam {
-            junk_folder.clone()
+            junk_folder
         } else {
             "INBOX".to_string()
         };
-        let grouped = group_by_folder(&refs);
-        let futs: Vec<_> = grouped
-            .iter()
-            .filter(|(folder, _)| **folder != destination)
-            .map(|(folder, uids)| {
-                let config = config.clone();
-                let folder = folder.to_string();
-                let uids = uid_set(uids);
-                let dest = destination.clone();
-                async move {
-                    with_session!(&config, session => {
-                        imap_client::move_messages(&mut session, &folder, &uids, &dest).await
-                    })
-                }
-            })
-            .collect();
-        futures::future::try_join_all(futs).await?;
 
-        Ok(())
+        execute_folder_action(&config, &refs, &FolderAction::Move(destination)).await
     }
 
     async fn move_to_folder(
@@ -583,37 +523,14 @@ impl ProviderOps for ImapOps {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
         let dest = folder_id.to_string();
-        let config = crate::imap::account_config::load_imap_config(
-            ctx.db,
-            &account_id,
-            &self.encryption_key,
-        )
-        .await?;
+        let config = self.load_config(ctx).await?;
 
         let refs = ctx
             .db
             .with_conn(move |conn| get_thread_message_refs(conn, &account_id, &tid))
             .await?;
 
-        let grouped = group_by_folder(&refs);
-        let futs: Vec<_> = grouped
-            .iter()
-            .filter(|(folder, _)| **folder != dest)
-            .map(|(folder, uids)| {
-                let config = config.clone();
-                let folder = folder.to_string();
-                let uids = uid_set(uids);
-                let dest = dest.clone();
-                async move {
-                    with_session!(&config, session => {
-                        imap_client::move_messages(&mut session, &folder, &uids, &dest).await
-                    })
-                }
-            })
-            .collect();
-        futures::future::try_join_all(futs).await?;
-
-        Ok(())
+        execute_folder_action(&config, &refs, &FolderAction::Move(dest)).await
     }
 
     async fn add_tag(
@@ -646,12 +563,7 @@ impl ProviderOps for ImapOps {
         category_name: &str,
     ) -> Result<(), String> {
         let (folder, uid) = parse_imap_message_id(message_id, ctx.account_id)?;
-        let config = crate::imap::account_config::load_imap_config(
-            ctx.db,
-            ctx.account_id,
-            &self.encryption_key,
-        )
-        .await?;
+        let config = self.load_config(ctx).await?;
 
         with_session!(&config, session => {
             imap_client::set_keyword_if_supported(&mut session, &folder, uid, "+FLAGS", category_name).await
@@ -665,12 +577,7 @@ impl ProviderOps for ImapOps {
         category_name: &str,
     ) -> Result<(), String> {
         let (folder, uid) = parse_imap_message_id(message_id, ctx.account_id)?;
-        let config = crate::imap::account_config::load_imap_config(
-            ctx.db,
-            ctx.account_id,
-            &self.encryption_key,
-        )
-        .await?;
+        let config = self.load_config(ctx).await?;
 
         with_session!(&config, session => {
             imap_client::set_keyword_if_supported(&mut session, &folder, uid, "-FLAGS", category_name).await
@@ -739,12 +646,7 @@ impl ProviderOps for ImapOps {
         _mentions: &[(String, String)],
     ) -> Result<String, String> {
         let account_id = ctx.account_id.to_string();
-        let config = crate::imap::account_config::load_imap_config(
-            ctx.db,
-            &account_id,
-            &self.encryption_key,
-        )
-        .await?;
+        let config = self.load_config(ctx).await?;
 
         let drafts_folder = ctx
             .db
@@ -781,35 +683,18 @@ impl ProviderOps for ImapOps {
     }
 
     async fn delete_draft(&self, ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), String> {
-        // Parse draft ID: IMAP message IDs are "imap-{accountId}-{folder}-{uid}"
+        // Generated draft IDs (imap-draft-...) can't be mapped to a server UID
         let prefix = format!("imap-{}-", ctx.account_id);
         if !draft_id.starts_with(&prefix) {
-            // Generated draft IDs (imap-draft-...) can't be mapped to a server UID
             log::debug!("Draft {draft_id} has a generated ID, cannot delete from server");
             return Ok(());
         }
 
-        let remainder = &draft_id[prefix.len()..];
-        let last_dash = remainder
-            .rfind('-')
-            .ok_or_else(|| format!("Invalid draft ID format: {draft_id}"))?;
-        let folder = &remainder[..last_dash];
-        let uid: u32 = remainder[last_dash + 1..]
-            .parse()
-            .map_err(|_| format!("Invalid UID in draft ID: {draft_id}"))?;
-
-        let account_id = ctx.account_id.to_string();
-        let folder_owned = folder.to_string();
-
-        let config = crate::imap::account_config::load_imap_config(
-            ctx.db,
-            &account_id,
-            &self.encryption_key,
-        )
-        .await?;
+        let (folder, uid) = parse_imap_message_id(draft_id, ctx.account_id)?;
+        let config = self.load_config(ctx).await?;
 
         with_session!(&config, session => {
-            imap_client::delete_messages(&mut session, &folder_owned, &uid.to_string()).await
+            imap_client::delete_messages(&mut session, &folder, &uid.to_string()).await
         })
     }
 
@@ -821,33 +706,12 @@ impl ProviderOps for ImapOps {
         message_id: &str,
         attachment_id: &str,
     ) -> Result<AttachmentData, String> {
-        let prefix = format!("imap-{}-", ctx.account_id);
-        if !message_id.starts_with(&prefix) {
-            return Err(format!("Invalid IMAP message ID: {message_id}"));
-        }
-
-        let remainder = &message_id[prefix.len()..];
-        let last_dash = remainder
-            .rfind('-')
-            .ok_or_else(|| format!("Invalid message ID format: {message_id}"))?;
-        let folder = &remainder[..last_dash];
-        let uid: u32 = remainder[last_dash + 1..]
-            .parse()
-            .map_err(|_| format!("Invalid UID in message ID: {message_id}"))?;
-
-        let account_id = ctx.account_id.to_string();
-        let folder_owned = folder.to_string();
+        let (folder, uid) = parse_imap_message_id(message_id, ctx.account_id)?;
         let part_id = attachment_id.to_string();
-
-        let config = crate::imap::account_config::load_imap_config(
-            ctx.db,
-            &account_id,
-            &self.encryption_key,
-        )
-        .await?;
+        let config = self.load_config(ctx).await?;
 
         let data = with_session!(&config, session => {
-            imap_client::fetch_attachment(&mut session, &folder_owned, uid, &part_id).await
+            imap_client::fetch_attachment(&mut session, &folder, uid, &part_id).await
         })?;
 
         // data is base64-encoded; compute actual byte size
@@ -868,34 +732,15 @@ impl ProviderOps for ImapOps {
         ctx: &ProviderCtx<'_>,
         message_id: &str,
     ) -> Result<ProviderParsedMessage, String> {
-        let prefix = format!("imap-{}-", ctx.account_id);
-        if !message_id.starts_with(&prefix) {
-            return Err(format!("Invalid IMAP message ID: {message_id}"));
-        }
-
-        let remainder = &message_id[prefix.len()..];
-        let last_dash = remainder
-            .rfind('-')
-            .ok_or_else(|| format!("Invalid message ID format: {message_id}"))?;
-        let folder = &remainder[..last_dash];
-        let uid: u32 = remainder[last_dash + 1..]
-            .parse()
-            .map_err(|_| format!("Invalid UID in message ID: {message_id}"))?;
-
+        let (folder, uid) = parse_imap_message_id(message_id, ctx.account_id)?;
         let account_id = ctx.account_id.to_string();
-        let folder_owned = folder.to_string();
-        let config = crate::imap::account_config::load_imap_config(
-            ctx.db,
-            &account_id,
-            &self.encryption_key,
-        )
-        .await?;
+        let config = self.load_config(ctx).await?;
 
         let message = with_session!(&config, session => {
-            imap_client::fetch_message_body(&mut session, &folder_owned, uid).await
+            imap_client::fetch_message_body(&mut session, &folder, uid).await
         })?;
 
-        let mut parsed = imap_message_to_provider_message(&account_id, &folder_owned, &message);
+        let mut parsed = imap_message_to_provider_message(&account_id, &folder, &message);
 
         // Look up the thread_id stored during sync; empty string if message isn't indexed yet.
         let msg_id = message_id.to_string();
@@ -922,31 +767,11 @@ impl ProviderOps for ImapOps {
         ctx: &ProviderCtx<'_>,
         message_id: &str,
     ) -> Result<String, String> {
-        let prefix = format!("imap-{}-", ctx.account_id);
-        if !message_id.starts_with(&prefix) {
-            return Err(format!("Invalid IMAP message ID: {message_id}"));
-        }
-
-        let remainder = &message_id[prefix.len()..];
-        let last_dash = remainder
-            .rfind('-')
-            .ok_or_else(|| format!("Invalid message ID format: {message_id}"))?;
-        let folder = &remainder[..last_dash];
-        let uid: u32 = remainder[last_dash + 1..]
-            .parse()
-            .map_err(|_| format!("Invalid UID in message ID: {message_id}"))?;
-
-        let account_id = ctx.account_id.to_string();
-        let folder_owned = folder.to_string();
-        let config = crate::imap::account_config::load_imap_config(
-            ctx.db,
-            &account_id,
-            &self.encryption_key,
-        )
-        .await?;
+        let (folder, uid) = parse_imap_message_id(message_id, ctx.account_id)?;
+        let config = self.load_config(ctx).await?;
 
         with_session!(&config, session => {
-            imap_client::fetch_raw_message(&mut session, &folder_owned, uid).await
+            imap_client::fetch_raw_message(&mut session, &folder, uid).await
         })
     }
 
@@ -956,13 +781,7 @@ impl ProviderOps for ImapOps {
         &self,
         ctx: &ProviderCtx<'_>,
     ) -> Result<Vec<ProviderFolderEntry>, String> {
-        let account_id = ctx.account_id.to_string();
-        let config = crate::imap::account_config::load_imap_config(
-            ctx.db,
-            &account_id,
-            &self.encryption_key,
-        )
-        .await?;
+        let config = self.load_config(ctx).await?;
 
         let folders = with_session!(&config, session => {
             imap_client::list_folders(&mut session).await
@@ -1030,12 +849,7 @@ impl ProviderOps for ImapOps {
 
     async fn test_connection(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, String> {
         let account_id = ctx.account_id.to_string();
-        let imap_config = crate::imap::account_config::load_imap_config(
-            ctx.db,
-            &account_id,
-            &self.encryption_key,
-        )
-        .await?;
+        let imap_config = self.load_config(ctx).await?;
         let smtp_config = crate::imap::account_config::load_smtp_config(
             ctx.db,
             &account_id,

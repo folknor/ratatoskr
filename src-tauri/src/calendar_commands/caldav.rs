@@ -2,7 +2,7 @@ use rusqlite::OptionalExtension;
 use tauri::State;
 
 use crate::db::DbState;
-use crate::gmail::client::GmailState;
+use crate::provider::crypto::AppCryptoState;
 
 use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};
 use super::{CALDAV_NS, shared_http_client};
@@ -19,17 +19,17 @@ pub(super) struct CaldavAccountConfig {
 pub async fn caldav_list_calendars(
     account_id: String,
     db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
+    crypto: State<'_, AppCryptoState>,
 ) -> Result<Vec<CalendarInfoDto>, String> {
-    caldav_list_calendars_impl(&account_id, &db, &gmail).await
+    caldav_list_calendars_impl(&account_id, &db, crypto.encryption_key()).await
 }
 
 pub(super) async fn caldav_list_calendars_impl(
     account_id: &str,
     db: &DbState,
-    gmail: &GmailState,
+    encryption_key: &[u8; 32],
 ) -> Result<Vec<CalendarInfoDto>, String> {
-    let config = load_caldav_account_config(db, gmail.encryption_key(), account_id).await?;
+    let config = load_caldav_account_config(db, encryption_key, account_id).await?;
     let client = shared_http_client();
     let home_url = resolve_caldav_home_url(client, &config).await?;
     list_caldav_calendars(client, &config, &home_url).await
@@ -42,9 +42,9 @@ pub async fn caldav_fetch_events(
     time_min: String,
     time_max: String,
     db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
+    crypto: State<'_, AppCryptoState>,
 ) -> Result<Vec<CalendarEventDto>, String> {
-    let config = load_caldav_account_config(&db, gmail.encryption_key(), &account_id).await?;
+    let config = load_caldav_account_config(&db, crypto.encryption_key(), &account_id).await?;
     let client = shared_http_client();
     fetch_caldav_events(client, &config, &calendar_remote_id, &time_min, &time_max).await
 }
@@ -55,18 +55,18 @@ pub async fn caldav_sync_events(
     calendar_remote_id: String,
     _sync_token: Option<String>,
     db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
+    crypto: State<'_, AppCryptoState>,
 ) -> Result<CalendarSyncResultDto, String> {
-    caldav_sync_events_impl(&account_id, &calendar_remote_id, &db, &gmail).await
+    caldav_sync_events_impl(&account_id, &calendar_remote_id, &db, crypto.encryption_key()).await
 }
 
 pub(super) async fn caldav_sync_events_impl(
     account_id: &str,
     calendar_remote_id: &str,
     db: &DbState,
-    gmail: &GmailState,
+    encryption_key: &[u8; 32],
 ) -> Result<CalendarSyncResultDto, String> {
-    let config = load_caldav_account_config(db, gmail.encryption_key(), account_id).await?;
+    let config = load_caldav_account_config(db, encryption_key, account_id).await?;
     let client = shared_http_client();
     let time_min = (chrono::Utc::now() - chrono::Duration::days(90)).to_rfc3339();
     let time_max = (chrono::Utc::now() + chrono::Duration::days(365)).to_rfc3339();
@@ -85,9 +85,9 @@ pub(super) async fn caldav_sync_events_impl(
 pub async fn caldav_test_connection(
     account_id: String,
     db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
+    crypto: State<'_, AppCryptoState>,
 ) -> Result<serde_json::Value, String> {
-    let config = load_caldav_account_config(&db, gmail.encryption_key(), &account_id).await?;
+    let config = load_caldav_account_config(&db, crypto.encryption_key(), &account_id).await?;
     let client = shared_http_client();
     let result = match resolve_caldav_home_url(client, &config).await {
         Ok(home_url) => list_caldav_calendars(client, &config, &home_url).await,
@@ -116,9 +116,9 @@ pub async fn caldav_create_event(
     calendar_remote_id: String,
     event: serde_json::Value,
     db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
+    crypto: State<'_, AppCryptoState>,
 ) -> Result<CalendarEventDto, String> {
-    let config = load_caldav_account_config(&db, gmail.encryption_key(), &account_id).await?;
+    let config = load_caldav_account_config(&db, crypto.encryption_key(), &account_id).await?;
     let client = shared_http_client();
     let input = parse_caldav_event_input(event)?;
     let uid = uuid::Uuid::new_v4().to_string();
@@ -147,9 +147,9 @@ pub async fn caldav_update_event(
     event: serde_json::Value,
     etag: Option<String>,
     db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
+    crypto: State<'_, AppCryptoState>,
 ) -> Result<CalendarEventDto, String> {
-    let config = load_caldav_account_config(&db, gmail.encryption_key(), &account_id).await?;
+    let config = load_caldav_account_config(&db, crypto.encryption_key(), &account_id).await?;
     let client = shared_http_client();
     let input = parse_caldav_event_input(event)?;
     let existing = fetch_caldav_event_by_href(client, &config, &remote_event_id).await?;
@@ -182,9 +182,9 @@ pub async fn caldav_delete_event(
     remote_event_id: String,
     etag: Option<String>,
     db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
+    crypto: State<'_, AppCryptoState>,
 ) -> Result<(), String> {
-    let config = load_caldav_account_config(&db, gmail.encryption_key(), &account_id).await?;
+    let config = load_caldav_account_config(&db, crypto.encryption_key(), &account_id).await?;
     let client = shared_http_client();
     let mut headers = Vec::new();
     if let Some(etag_value) = etag.as_deref() {
