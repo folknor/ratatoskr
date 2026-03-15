@@ -44,13 +44,25 @@ Elm architecture (iced's `application()` — boot/update/view cycle). Single `Ap
 
 ## Layout module (`src/ui/layout.rs`)
 
-All spacing, padding, and panel widths are centralized here. Views import `use crate::ui::layout::*` and reference named constants — no magic numbers in view code.
+All sizing, spacing, padding, and radii are centralized here. Views import `use crate::ui::layout::*` and reference named constants. **No magic numbers in view or widget code** — every `.size()`, avatar diameter, border radius, and padding must reference a layout constant.
 
-**Spacing scale** (4px base grid): `SPACE_XXS` (2) → `SPACE_XS` (4) → `SPACE_SM` (6) → `SPACE_MD` (8) → `SPACE_LG` (10) → `SPACE_XL` (12) → `SPACE_XXL` (16) → `SPACE_XXXL` (20).
+**Spacing scale** (geometric): `SPACE_XXXS` (2) → `SPACE_XXS` (4) → `SPACE_XS` (8) → `SPACE_SM` (12) → `SPACE_MD` (16) → `SPACE_LG` (24) → `SPACE_XL` (32) → `SPACE_XXL` (48) → `SPACE_XXXL` (64).
 
-**Padding presets** are named by role, not by values: `PAD_ICON_BTN`, `PAD_NAV_ITEM`, `PAD_BUTTON`, `PAD_SIDEBAR`, `PAD_PANEL_HEADER`, `PAD_TOOLBAR`, `PAD_CONTENT`, `PAD_CARD`, `PAD_THREAD_CARD`, `PAD_INPUT`, `PAD_SECTION_HEADER`, `PAD_STAT_ROW`, `PAD_BADGE`, `PAD_ACCOUNT`.
+**Type scale:** `TEXT_XS` (10) → `TEXT_SM` (11) → `TEXT_MD` (12) → `TEXT_LG` (13) → `TEXT_XL` (14) → `TEXT_TITLE` (16) → `TEXT_HEADING` (18). Every `text(...).size()` must use one of these.
+
+**Icon sizes:** `ICON_XS` (10) → `ICON_SM` (11) → `ICON_MD` (12) → `ICON_LG` (13) → `ICON_XL` (14). Every `icon::foo().size()` must use one of these.
+
+**Avatar sizes:** `AVATAR_DROPDOWN_ITEM` (20), `AVATAR_DROPDOWN_TRIGGER` (24), `AVATAR_THREAD_CARD` (28), `AVATAR_MESSAGE_CARD` (32), `AVATAR_CONTACT_HERO` (56). Every `avatar_circle()` call must use one of these.
+
+**Leading slot widths:** `SLOT_DROPDOWN_ITEM`, `SLOT_DROPDOWN_TRIGGER`. When a list item has an icon or avatar on the left, wrap it in `widgets::leading_slot(content, size)` so all labels align.
+
+**Border radii:** `RADIUS_SM` (4), `RADIUS_MD` (6), `RADIUS_LG` (8). Every `border::rounded()` or `radius:` value must use one of these.
+
+**Padding presets** are named by role: `PAD_ICON_BTN`, `PAD_NAV_ITEM`, `PAD_BUTTON`, `PAD_SIDEBAR`, `PAD_PANEL_HEADER`, `PAD_TOOLBAR`, `PAD_CONTENT`, `PAD_CARD`, `PAD_THREAD_CARD`, `PAD_INPUT`, `PAD_SECTION_HEADER`, `PAD_COLLAPSIBLE_HEADER`, `PAD_STAT_ROW`, `PAD_BADGE`, `PAD_ACCOUNT`, `PAD_BODY`.
 
 **Panel widths:** `SIDEBAR_WIDTH` (180), `THREAD_LIST_WIDTH` (280), `CONTACT_SIDEBAR_WIDTH` (240).
+
+**Semantic colors** live in `theme.rs`: `theme::ON_AVATAR` (white text/icons on colored backgrounds). No `Color::WHITE` or other raw colors in view code.
 
 ## Theme system (`src/ui/theme/`)
 

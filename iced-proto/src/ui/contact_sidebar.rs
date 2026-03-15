@@ -14,7 +14,7 @@ pub fn view<'a>(thread: Option<&'a Thread>) -> Element<'a, Message> {
     };
 
     container(content)
-        .width(Length::Fill)
+        .width(CONTACT_SIDEBAR_WIDTH)
         .height(Length::Fill)
         .style(theme::sidebar_container)
         .into()
@@ -28,7 +28,7 @@ fn contact_panel(thread: &Thread) -> Element<'_, Message> {
         .unwrap_or("(unknown)");
     let email = thread.from_address.as_deref().unwrap_or("");
 
-    let avatar = widgets::avatar_circle(sender, 56.0);
+    let avatar = widgets::avatar_circle(sender, AVATAR_CONTACT_HERO);
 
     let mut col = column![]
         .spacing(SPACE_XXS)
@@ -39,8 +39,8 @@ fn contact_panel(thread: &Thread) -> Element<'_, Message> {
     col = col.push(Space::new().height(SPACE_MD));
     col = col.push(container(avatar).center_x(Length::Fill));
     col = col.push(Space::new().height(SPACE_XS));
-    col = col.push(container(text(sender).size(14).style(text::base)).center_x(Length::Fill));
-    col = col.push(container(text(email).size(11).style(theme::text_tertiary)).center_x(Length::Fill));
+    col = col.push(container(text(sender).size(TEXT_XL).style(text::base)).center_x(Length::Fill));
+    col = col.push(container(text(email).size(TEXT_SM).style(theme::text_tertiary)).center_x(Length::Fill));
     col = col.push(Space::new().height(SPACE_MD));
 
     // ── Stats ───────────────────────────────────────────
@@ -53,14 +53,14 @@ fn contact_panel(thread: &Thread) -> Element<'_, Message> {
     // ── Notes ───────────────────────────────────────────
     col = col.push(widgets::section_header("NOTES"));
     col = col.push(
-        container(text("No notes yet").size(11).style(theme::text_tertiary)).padding(PAD_ICON_BTN),
+        container(text("No notes yet").size(TEXT_SM).style(theme::text_tertiary)).padding(PAD_ICON_BTN),
     );
     col = col.push(Space::new().height(SPACE_SM));
 
     // ── Shared files ────────────────────────────────────
     col = col.push(widgets::section_header("SHARED FILES"));
     col = col.push(
-        container(text("No shared files").size(11).style(theme::text_tertiary)).padding(PAD_ICON_BTN),
+        container(text("No shared files").size(TEXT_SM).style(theme::text_tertiary)).padding(PAD_ICON_BTN),
     );
 
     iced::widget::scrollable(col)

@@ -1,5 +1,6 @@
 pub mod contact_sidebar;
 pub mod layout;
+pub mod popover;
 pub mod reading_pane;
 pub mod settings;
 pub mod sidebar;

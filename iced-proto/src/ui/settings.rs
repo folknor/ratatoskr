@@ -157,8 +157,8 @@ fn tab_nav(active: Tab) -> Element<'static, SettingsMessage> {
     col = col.push(
         button(
             row![
-                icon::arrow_left().size(14).style(text::secondary),
-                text("Settings").size(16).style(text::base),
+                icon::arrow_left().size(ICON_XL).style(text::secondary),
+                text("Settings").size(TEXT_TITLE).style(text::base),
             ]
             .spacing(SPACE_XS)
             .align_y(Alignment::Center),
@@ -175,8 +175,8 @@ fn tab_nav(active: Tab) -> Element<'static, SettingsMessage> {
         col = col.push(
             button(
                 row![
-                    tab.icon().size(14).style(if is_active { text::primary } else { text::secondary }),
-                    text(tab.label()).size(13).style(if is_active { text::base } else { text::secondary }),
+                    tab.icon().size(ICON_XL).style(if is_active { text::primary } else { text::secondary }),
+                    text(tab.label()).size(TEXT_LG).style(if is_active { text::base } else { text::secondary }),
                 ]
                 .spacing(SPACE_XS)
                 .align_y(Alignment::Center),
@@ -245,11 +245,11 @@ fn about_tab<'a>() -> Element<'a, SettingsMessage> {
         container(
             row![
                 column![
-                    text("Software Updates").size(13).style(text::base),
-                    text("Check for new versions").size(11).style(theme::text_tertiary),
+                    text("Software Updates").size(TEXT_LG).style(text::base),
+                    text("Check for new versions").size(TEXT_SM).style(theme::text_tertiary),
                 ].spacing(SPACE_XXXS),
                 Space::new().width(Length::Fill),
-                button(text("Check for Updates").size(12))
+                button(text("Check for Updates").size(TEXT_MD))
                     .on_press(SettingsMessage::CheckForUpdates)
                     .padding(PAD_ICON_BTN)
                     .style(button::secondary),
@@ -261,18 +261,18 @@ fn about_tab<'a>() -> Element<'a, SettingsMessage> {
     col = col.push(section("License", vec![
         container(
             column![
-                text("Apache License 2.0").size(13).style(text::base),
+                text("Apache License 2.0").size(TEXT_LG).style(text::base),
                 Space::new().height(SPACE_XS),
                 text("Licensed under the Apache License, Version 2.0. You may obtain a copy of the License at:")
-                    .size(11)
+                    .size(TEXT_SM)
                     .style(theme::text_tertiary),
                 Space::new().height(SPACE_XXS),
                 text("https://www.apache.org/licenses/LICENSE-2.0")
-                    .size(11)
+                    .size(TEXT_SM)
                     .style(text::primary),
                 Space::new().height(SPACE_SM),
                 text("Copyright 2024-2026 Ratatoskr contributors.")
-                    .size(11)
+                    .size(TEXT_SM)
                     .style(theme::text_tertiary),
             ]
         ).padding(iced::Padding::from([SPACE_SM, SPACE_MD])).into(),
@@ -282,13 +282,13 @@ fn about_tab<'a>() -> Element<'a, SettingsMessage> {
     col = col.push(section("Links", vec![
         button(
             row![
-                icon::globe().size(14).style(text::secondary),
+                icon::globe().size(ICON_XL).style(text::secondary),
                 column![
-                    text("GitHub Repository").size(13).style(text::base),
-                    text("folknor/ratatoskr").size(11).style(theme::text_tertiary),
+                    text("GitHub Repository").size(TEXT_LG).style(text::base),
+                    text("folknor/ratatoskr").size(TEXT_SM).style(theme::text_tertiary),
                 ].spacing(SPACE_XXXS),
                 Space::new().width(Length::Fill),
-                icon::external_link().size(12).style(theme::text_tertiary),
+                icon::external_link().size(ICON_MD).style(theme::text_tertiary),
             ]
             .spacing(SPACE_SM)
             .align_y(Alignment::Center),
@@ -308,8 +308,8 @@ fn about_tab<'a>() -> Element<'a, SettingsMessage> {
 fn placeholder_tab(tab: Tab) -> Element<'static, SettingsMessage> {
     container(
         column![
-            text(tab.label()).size(16).style(theme::text_tertiary),
-            text("Not yet implemented").size(12).style(theme::text_tertiary),
+            text(tab.label()).size(TEXT_TITLE).style(theme::text_tertiary),
+            text("Not yet implemented").size(TEXT_MD).style(theme::text_tertiary),
         ]
         .spacing(SPACE_XXS)
         .align_x(Alignment::Center),
@@ -342,7 +342,7 @@ fn section<'a>(
         col = col.push(item);
     }
     column![
-        text(title).size(14).style(text::base),
+        text(title).size(TEXT_XL).style(text::base),
         Space::new().height(SPACE_XS),
         container(col)
             .width(Length::Fill)
@@ -358,7 +358,7 @@ fn setting_row<'a>(
 ) -> Element<'a, SettingsMessage> {
     container(
         row![
-            text(label).size(13).style(text::base),
+            text(label).size(TEXT_LG).style(text::base),
             Space::new().width(Length::Fill),
             control,
         ]
@@ -378,12 +378,12 @@ fn toggle_row<'a>(
     container(
         row![
             column![
-                text(label).size(13).style(text::base),
-                text(description).size(11).style(theme::text_tertiary),
+                text(label).size(TEXT_LG).style(text::base),
+                text(description).size(TEXT_SM).style(theme::text_tertiary),
             ]
             .spacing(SPACE_XXXS),
             Space::new().width(Length::Fill),
-            toggler(value).size(18).on_toggle(on_toggle),
+            toggler(value).size(TEXT_HEADING).on_toggle(on_toggle),
         ]
         .align_y(Alignment::Center),
     )
@@ -395,9 +395,9 @@ fn toggle_row<'a>(
 fn info_row<'a>(label: &'a str, value: &'a str) -> Element<'a, SettingsMessage> {
     container(
         row![
-            text(label).size(13).style(theme::text_tertiary),
+            text(label).size(TEXT_LG).style(theme::text_tertiary),
             Space::new().width(Length::Fill),
-            text(value).size(13).style(text::base),
+            text(value).size(TEXT_LG).style(text::base),
         ]
         .align_y(Alignment::Center),
     )
@@ -415,9 +415,9 @@ fn settings_pick_list(
     let sel = Some(selected.to_string());
     pick_list(sel, opts, |s: &String| s.clone())
         .on_select(move |s| on_select(s))
-        .text_size(12)
+        .text_size(TEXT_MD)
         .padding(iced::Padding::from([SPACE_XXS, SPACE_SM]))
-        .handle(pick_list::Handle::Arrow { size: Some(iced::Pixels(10.0)) })
+        .handle(pick_list::Handle::Arrow { size: Some(iced::Pixels(ICON_XS)) })
         .style(|theme: &iced::Theme, status| {
             let p = theme.extended_palette();
             pick_list::Style {
@@ -429,7 +429,7 @@ fn settings_pick_list(
                     pick_list::Status::Hovered => iced::Border {
                         color: p.background.strongest.color.scale_alpha(0.15),
                         width: 1.0,
-                        radius: 4.0.into(),
+                        radius: RADIUS_SM.into(),
                     },
                     _ => iced::Border::default(),
                 },
@@ -447,6 +447,9 @@ const ACCENT_COLORS: &[iced::Color] = &[
     iced::Color::from_rgb(0.851, 0.467, 0.024), // Orange
 ];
 
+/// Diameter of accent color swatch circles.
+const SWATCH_SIZE: f32 = 24.0;
+
 fn accent_color_row(selected: usize) -> Element<'static, SettingsMessage> {
     let mut swatches = row![].spacing(SPACE_XS).align_y(Alignment::Center);
     for (i, &color) in ACCENT_COLORS.iter().enumerate() {
@@ -454,19 +457,19 @@ fn accent_color_row(selected: usize) -> Element<'static, SettingsMessage> {
         let swatch = button(
             container(
                 if is_selected {
-                    Element::from(icon::check().size(12).color(iced::Color::WHITE))
+                    Element::from(icon::check().size(ICON_MD).color(theme::ON_AVATAR))
                 } else {
                     Element::from(Space::new().width(0).height(0))
                 },
             )
-            .center(24),
+            .center(SWATCH_SIZE),
         )
         .on_press(SettingsMessage::AccentColorSelected(i))
         .padding(0)
         .style(move |_theme: &iced::Theme, _status| button::Style {
             background: Some(color.into()),
             border: iced::Border {
-                radius: 12.0.into(),
+                radius: (SWATCH_SIZE / 2.0).into(),
                 ..Default::default()
             },
             ..Default::default()
@@ -486,12 +489,12 @@ fn settings_section_container(theme: &iced::Theme) -> container::Style {
         border: iced::Border {
             color: p.background.strongest.color.scale_alpha(0.1),
             width: 1.0,
-            radius: 8.0.into(),
+            radius: RADIUS_LG.into(),
         },
         shadow: iced::Shadow {
             color: iced::Color::BLACK.scale_alpha(0.15),
             offset: iced::Vector::ZERO,
-            blur_radius: 8.0,
+            blur_radius: RADIUS_LG,
         },
         ..Default::default()
     }

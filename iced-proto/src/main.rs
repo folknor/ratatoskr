@@ -23,7 +23,8 @@ fn main() -> iced::Result {
         .title("Ratatoskr (iced prototype)")
         .theme(App::theme)
         .subscription(App::subscription)
-        .default_font(font::TEXT);
+        .default_font(font::TEXT)
+        .window_size((1280.0, 800.0));
 
     for f in font::load() {
         app = app.font(f);
@@ -37,13 +38,13 @@ enum PaneKind {
     Sidebar,
     ThreadList,
     ReadingPane,
-    ContactSidebar,
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
     AccountsLoaded(Result<Vec<Account>, String>),
     SelectAccount(usize),
+    SelectAllAccounts,
     CycleAccount,
     LabelsLoaded(Result<Vec<Label>, String>),
     SelectLabel(Option<String>),
@@ -79,8 +80,8 @@ struct App {
 }
 
 fn pane_configuration() -> Configuration<PaneKind> {
-    // Sidebar | ThreadList | ReadingPane | ContactSidebar
-    //  ~15%       ~22%         ~45%           ~18%
+    // Sidebar | ThreadList | ReadingPane
+    //  ~15%       ~22%         ~63%
     Configuration::Split {
         axis: pane_grid::Axis::Vertical,
         ratio: 0.15,
@@ -89,12 +90,7 @@ fn pane_configuration() -> Configuration<PaneKind> {
             axis: pane_grid::Axis::Vertical,
             ratio: 0.26,
             a: Box::new(Configuration::Pane(PaneKind::ThreadList)),
-            b: Box::new(Configuration::Split {
-                axis: pane_grid::Axis::Vertical,
-                ratio: 0.73,
-                a: Box::new(Configuration::Pane(PaneKind::ReadingPane)),
-                b: Box::new(Configuration::Pane(PaneKind::ContactSidebar)),
-            }),
+            b: Box::new(Configuration::Pane(PaneKind::ReadingPane)),
         }),
     }
 }
@@ -160,6 +156,15 @@ impl App {
             }
             Message::AccountsLoaded(Err(e)) => {
                 self.status = format!("Error: {e}");
+                Task::none()
+            }
+            Message::SelectAllAccounts => {
+                self.selected_account = None;
+                self.selected_label = None;
+                self.selected_thread = None;
+                self.scope_dropdown_open = false;
+                self.threads.clear();
+                self.labels.clear();
                 Task::none()
             }
             Message::SelectAccount(idx) => {
@@ -301,9 +306,6 @@ impl App {
                 }
                 PaneKind::ReadingPane => {
                     ui::reading_pane::view(selected_thread)
-                }
-                PaneKind::ContactSidebar => {
-                    ui::contact_sidebar::view(selected_thread)
                 }
             };
             pane_grid::Content::new(content)

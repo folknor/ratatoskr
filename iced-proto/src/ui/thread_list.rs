@@ -15,17 +15,17 @@ pub fn view<'a>(
 ) -> Element<'a, Message> {
     let header = container(
         column![
-            container(text("Search...").size(12).style(theme::text_tertiary))
+            container(text("Search...").size(TEXT_MD).style(theme::text_tertiary))
                 .padding(PAD_INPUT)
                 .width(Length::Fill)
                 .style(theme::elevated_container),
             Space::new().height(SPACE_XS),
             row![
-                text(label_name).size(14).style(text::base),
+                text(label_name).size(TEXT_XL).style(text::base),
                 Space::new().width(SPACE_XXS),
-                text(status).size(11).style(theme::text_tertiary),
+                text(status).size(TEXT_SM).style(theme::text_tertiary),
                 Space::new().width(Length::Fill),
-                text("All").size(11).style(text::secondary),
+                text("All").size(TEXT_SM).style(text::secondary),
             ]
             .align_y(Alignment::Center),
         ]

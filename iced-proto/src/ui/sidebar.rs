@@ -1,10 +1,11 @@
-use iced::widget::{column, container, scrollable, Space};
+use iced::widget::{column, container, scrollable, text, Space};
 use iced::{Element, Length};
 
 use crate::db::{Account, Label};
+use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
-use crate::ui::widgets::{self, NavItem};
+use crate::ui::widgets::{self, DropdownEntry, NavItem};
 use crate::Message;
 
 pub struct SidebarModel<'a> {
@@ -25,7 +26,7 @@ impl SidebarModel<'_> {
 
 pub fn view<'a>(model: SidebarModel<'a>) -> Element<'a, Message> {
     let mut col = column![
-        widgets::scope_dropdown(model.accounts, model.selected_account, model.scope_dropdown_open),
+        scope_dropdown(&model),
         Space::new().height(SPACE_XXS),
         widgets::compose_button(),
         Space::new().height(SPACE_XS),
@@ -51,6 +52,54 @@ pub fn view<'a>(model: SidebarModel<'a>) -> Element<'a, Message> {
         .style(theme::sidebar_container)
         .into()
 }
+
+// ── Scope dropdown ──────────────────────────────────────
+
+fn scope_dropdown<'a>(model: &SidebarModel<'a>) -> Element<'a, Message> {
+    // Determine trigger icon + label from current selection
+    let (trigger_icon, trigger_label): (Element<'a, Message>, &'a str) =
+        match model.selected_account {
+            Some(idx) if model.accounts.get(idx).is_some() => {
+                let acc = &model.accounts[idx];
+                let name = acc.display_name.as_deref().unwrap_or(&acc.email);
+                (widgets::avatar_circle(name, AVATAR_DROPDOWN_TRIGGER), name)
+            }
+            _ => (
+                icon::inbox().size(ICON_XL).style(text::secondary).into(),
+                "All Accounts",
+            ),
+        };
+
+    // Build dropdown entries
+    let mut entries: Vec<DropdownEntry<'a>> = Vec::new();
+
+    entries.push(DropdownEntry {
+        icon: icon::inbox().size(ICON_XL).style(text::secondary).into(),
+        label: "All Accounts",
+        selected: model.selected_account.is_none(),
+        on_press: Message::SelectAllAccounts,
+    });
+
+    for (idx, acc) in model.accounts.iter().enumerate() {
+        let name = acc.display_name.as_deref().unwrap_or(&acc.email);
+        entries.push(DropdownEntry {
+            icon: widgets::avatar_circle(name, AVATAR_DROPDOWN_ITEM),
+            label: name,
+            selected: model.selected_account == Some(idx),
+            on_press: Message::SelectAccount(idx),
+        });
+    }
+
+    widgets::dropdown(
+        trigger_icon,
+        trigger_label,
+        model.scope_dropdown_open,
+        Message::ToggleScopeDropdown,
+        entries,
+    )
+}
+
+// ── Nav items ───────────────────────────────────────────
 
 fn nav_items<'a>(model: &SidebarModel<'a>) -> Element<'a, Message> {
     let mut items = vec![

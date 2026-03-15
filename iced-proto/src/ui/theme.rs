@@ -2,6 +2,14 @@ use iced::widget::{button, container, rule, text};
 use iced::{border, Color, Theme};
 use serde::Deserialize;
 
+use super::layout::*;
+
+// ── Semantic colors ────────────────────────────────────
+// Colors that don't come from the theme palette.
+
+/// Text/icon color on top of avatar circles and primary buttons.
+pub const ON_AVATAR: Color = Color::WHITE;
+
 // ── TOML loading ────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -71,6 +79,32 @@ pub fn text_tertiary(theme: &Theme) -> text::Style {
 // Built-in: button::primary, button::secondary, button::text,
 //           button::danger, button::subtle
 
+pub fn primary_button(theme: &Theme, status: button::Status) -> button::Style {
+    let mut style = button::primary(theme, status);
+    style.border = border::rounded(RADIUS_LG);
+    style
+}
+
+pub fn dropdown_button(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let p = theme.extended_palette();
+        match status {
+            button::Status::Hovered => button::Style {
+                background: Some(p.background.strong.color.into()),
+                text_color: p.background.base.text,
+                border: border::rounded(RADIUS_SM),
+                ..Default::default()
+            },
+            _ => button::Style {
+                background: None,
+                text_color: if selected { p.background.base.text } else { p.secondary.base.color },
+                border: border::rounded(RADIUS_SM),
+                ..Default::default()
+            },
+        }
+    }
+}
+
 pub fn nav_button(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
         let p = theme.extended_palette();
@@ -78,13 +112,13 @@ pub fn nav_button(active: bool) -> impl Fn(&Theme, button::Status) -> button::St
             button::Status::Hovered => button::Style {
                 background: Some(p.background.weak.color.into()),
                 text_color: if active { p.primary.base.color } else { p.background.base.text },
-                border: border::rounded(4),
+                border: border::rounded(RADIUS_SM),
                 ..Default::default()
             },
             _ => button::Style {
                 background: if active { Some(p.background.strong.color.into()) } else { None },
                 text_color: if active { p.primary.base.color } else { p.secondary.base.color },
-                border: border::rounded(4),
+                border: border::rounded(RADIUS_SM),
                 ..Default::default()
             },
         }
@@ -116,7 +150,7 @@ pub fn bare_button(theme: &Theme, status: button::Status) -> button::Style {
         button::Status::Hovered => button::Style {
             background: Some(p.background.weak.color.into()),
             text_color: p.background.base.text,
-            border: border::rounded(4),
+            border: border::rounded(RADIUS_SM),
             ..Default::default()
         },
         _ => button::Style {
@@ -132,12 +166,12 @@ pub fn action_button(theme: &Theme, status: button::Status) -> button::Style {
         button::Status::Hovered => button::Style {
             background: Some(p.background.weak.color.into()),
             text_color: p.background.base.text,
-            border: border::rounded(4),
+            border: border::rounded(RADIUS_SM),
             ..Default::default()
         },
         _ => button::Style {
             text_color: p.secondary.base.color,
-            border: border::rounded(4),
+            border: border::rounded(RADIUS_SM),
             ..Default::default()
         },
     }
@@ -174,7 +208,7 @@ pub fn elevated_container(theme: &Theme) -> container::Style {
         border: iced::Border {
             color: p.background.strongest.color.scale_alpha(0.15),
             width: 1.0,
-            radius: 6.0.into(),
+            radius: RADIUS_MD.into(),
         },
         ..Default::default()
     }
@@ -184,7 +218,7 @@ pub fn badge_container(theme: &Theme) -> container::Style {
     container::Style {
         background: Some(theme.extended_palette().background.weak.color.into()),
         border: iced::Border {
-            radius: 8.0.into(),
+            radius: RADIUS_LG.into(),
             ..Default::default()
         },
         ..Default::default()
@@ -198,7 +232,7 @@ pub fn message_card_container(theme: &Theme) -> container::Style {
         border: iced::Border {
             color: p.background.strongest.color.scale_alpha(0.15),
             width: 1.0,
-            radius: 8.0.into(),
+            radius: RADIUS_LG.into(),
         },
         ..Default::default()
     }
@@ -224,12 +258,12 @@ pub fn floating_container(theme: &Theme) -> container::Style {
         border: iced::Border {
             color: p.background.strongest.color.scale_alpha(0.2),
             width: 1.0,
-            radius: 8.0.into(),
+            radius: RADIUS_LG.into(),
         },
         shadow: iced::Shadow {
             color: Color::BLACK.scale_alpha(0.25),
             offset: iced::Vector::new(0.0, 2.0),
-            blur_radius: 8.0,
+            blur_radius: RADIUS_LG,
         },
         ..Default::default()
     }
@@ -262,8 +296,6 @@ const AVATAR_HUES: &[f32] = &[
 pub fn avatar_color(name: &str) -> Color {
     let hash: usize = name.bytes().map(|b| b as usize).sum();
     let hue = AVATAR_HUES[hash % AVATAR_HUES.len()];
-    // Simple OKLCh-inspired generation: fixed lightness and chroma, vary hue
-    // This gives consistent, readable colors without needing the palette crate
     hsl_to_color(hue, 0.65, 0.55)
 }
 

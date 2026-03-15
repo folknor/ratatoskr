@@ -1,12 +1,27 @@
 use iced::widget::{button, canvas, column, container, row, rule, text, Canvas, Space};
 use iced::{mouse, Alignment, Color, Element, Length, Rectangle, Renderer, Theme};
 
-use crate::db::{Account, Thread};
+use crate::db::Thread;
 use crate::font;
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::Message;
+
+// ── Leading slot ───────────────────────────────────────
+// Wraps any content (icon, avatar, dot) in a fixed-size
+// centered container so all list items align their labels.
+
+pub fn leading_slot<'a>(
+    content: impl Into<Element<'a, Message>>,
+    size: f32,
+) -> Element<'a, Message> {
+    container(content)
+        .width(Length::Fixed(size))
+        .height(Length::Fixed(size))
+        .center(Length::Shrink)
+        .into()
+}
 
 // ── Avatar ──────────────────────────────────────────────
 
@@ -23,9 +38,9 @@ pub fn avatar_circle<'a>(name: &str, size: f32) -> Element<'a, Message> {
         container(
             text(letter)
                 .size(size * 0.45)
-                .color(Color::WHITE),
+                .color(theme::ON_AVATAR),
         )
-        .center(Length::Fill),
+        .center(Length::Shrink),
     ]
     .width(size)
     .height(size)
@@ -34,8 +49,8 @@ pub fn avatar_circle<'a>(name: &str, size: f32) -> Element<'a, Message> {
 
 pub fn color_dot<'a>(color: Color) -> Element<'a, Message> {
     let dot = Canvas::new(DotPainter { color })
-        .width(8)
-        .height(8);
+        .width(DOT_SIZE)
+        .height(DOT_SIZE);
     container(dot)
         .center_y(Length::Shrink)
         .into()
@@ -52,7 +67,7 @@ pub fn count_badge<'a>(count: i64) -> Element<'a, Message> {
     } else {
         count.to_string()
     };
-    container(text(label).size(10).style(text::secondary))
+    container(text(label).size(TEXT_XS).style(text::secondary))
         .padding(PAD_BADGE)
         .style(theme::badge_container)
         .into()
@@ -99,7 +114,7 @@ pub fn nav_item_with_badge<'a>(
         text::secondary
     };
 
-    let mut content = row![text(label).size(12).style(label_style)]
+    let mut content = row![text(label).size(TEXT_MD).style(label_style)]
         .align_y(Alignment::Center);
 
     if unread > 0 {
@@ -130,7 +145,7 @@ pub fn label_nav_item<'a>(
     };
 
     button(
-        row![color_dot(color), text(name).size(12).style(lbl_style)]
+        row![color_dot(color), text(name).size(TEXT_MD).style(lbl_style)]
             .spacing(SPACE_XS)
             .align_y(Alignment::Center),
     )
@@ -172,14 +187,14 @@ pub fn collapsible_section<'a>(
 
     let header = button(
         row![
-            text(title).size(10).style(theme::text_tertiary),
+            text(title).size(TEXT_XS).style(theme::text_tertiary),
             Space::new().width(Length::Fill),
-            chevron.size(10).style(theme::text_tertiary),
+            chevron.size(ICON_XS).style(theme::text_tertiary),
         ]
         .align_y(Alignment::Center),
     )
     .on_press(on_toggle)
-    .padding(iced::Padding::from([0.0, 8.0]))
+    .padding(PAD_COLLAPSIBLE_HEADER)
     .style(theme::bare_button)
     .width(Length::Fill);
 
@@ -194,113 +209,96 @@ pub fn collapsible_section<'a>(
     col.into()
 }
 
-// ── Dropdown / Popover ──────────────────────────────────
+// ── Dropdown ────────────────────────────────────────────
+// Fully opaque dropdown widget. Callers provide data only,
+// never layout elements. The dropdown builds its own
+// two-slot (icon + label) structure for both the trigger
+// and every menu item.
 
-pub fn dropdown_trigger<'a>(
-    content: Element<'a, Message>,
-    on_press: Message,
-) -> Element<'a, Message> {
-    button(
-        row![
-            content,
-            Space::new().width(Length::Fill),
-            icon::chevron_down().size(11).style(theme::text_tertiary),
-        ]
-        .align_y(Alignment::Center),
-    )
-    .on_press(on_press)
-    .padding(PAD_ACCOUNT)
-    .style(theme::bare_button)
-    .width(Length::Fill)
-    .into()
+/// One entry in a dropdown menu.
+pub struct DropdownEntry<'a> {
+    pub icon: Element<'a, Message>,
+    pub label: &'a str,
+    pub selected: bool,
+    pub on_press: Message,
 }
 
-pub fn dropdown_menu<'a>(items: Vec<Element<'a, Message>>) -> Element<'a, Message> {
-    container(
-        column(items).spacing(SPACE_XXS).width(Length::Fill),
+/// A complete dropdown: closed trigger + optional open menu.
+/// Both trigger and items share the same two-slot layout.
+pub fn dropdown<'a>(
+    trigger_icon: Element<'a, Message>,
+    trigger_label: &'a str,
+    open: bool,
+    on_toggle: Message,
+    items: Vec<DropdownEntry<'a>>,
+) -> Element<'a, Message> {
+    // trigger_button
+    let trigger = button(
+        row![
+            // icon_slot: fixed size, content centered
+            container(trigger_icon)
+                .width(SLOT_DROPDOWN)
+                .height(SLOT_DROPDOWN)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
+            // label_slot: fills remaining width, vertically centered
+            container(text(trigger_label).size(TEXT_MD).style(text::base))
+                .width(Length::Fill)
+                .align_y(Alignment::Center),
+            // chevron_slot
+            icon::chevron_down().size(ICON_SM).style(theme::text_tertiary),
+        ]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center),
+    )
+    .on_press(on_toggle)
+    .padding(PAD_ACCOUNT)
+    .style(theme::bare_button)
+    .width(Length::Fill);
+
+    if !open {
+        return trigger.into();
+    }
+
+    let menu_items: Vec<Element<'a, Message>> = items
+        .into_iter()
+        .map(|entry| {
+            // item_button
+            button(
+                row![
+                    // icon_slot: fixed size, content centered
+                    container(entry.icon)
+                        .width(SLOT_DROPDOWN)
+                        .height(SLOT_DROPDOWN)
+                        .align_x(Alignment::Center)
+                        .align_y(Alignment::Center),
+                    // label_slot: fills remaining width, vertically centered
+                    container(text(entry.label).size(TEXT_MD).style(text::base))
+                        .width(Length::Fill)
+                        .align_y(Alignment::Center),
+                ]
+                .spacing(SPACE_XS)
+                .align_y(Alignment::Center),
+            )
+            .on_press(entry.on_press)
+            .padding(PAD_NAV_ITEM)
+            .height(DROPDOWN_ITEM_HEIGHT)
+            .style(theme::dropdown_button(entry.selected))
+            .width(Length::Fill)
+            .into()
+        })
+        .collect();
+
+    let menu = container(
+        column(menu_items).spacing(SPACE_XXS).width(Length::Fill),
     )
     .padding(PAD_ICON_BTN)
     .style(theme::floating_container)
-    .width(Length::Fill)
-    .into()
-}
+    .width(Length::Fill);
 
-pub fn dropdown_item<'a>(
-    content: Element<'a, Message>,
-    selected: bool,
-    on_press: Message,
-) -> Element<'a, Message> {
-    button(content)
-        .on_press(on_press)
-        .padding(PAD_NAV_ITEM)
-        .style(theme::nav_button(selected))
-        .width(Length::Fill)
+    crate::ui::popover::popover(trigger)
+        .popup(menu)
         .into()
-}
-
-// ── Scope dropdown ──────────────────────────────────────
-
-pub fn scope_dropdown<'a>(
-    accounts: &'a [Account],
-    selected_account: Option<usize>,
-    dropdown_open: bool,
-) -> Element<'a, Message> {
-    let trigger_content: Element<'a, Message> = if let Some(idx) = selected_account {
-        if let Some(acc) = accounts.get(idx) {
-            let name = acc.display_name.as_deref().unwrap_or(&acc.email);
-            row![
-                avatar_circle(name, 24.0),
-                text(name).size(12).style(text::base),
-            ]
-            .spacing(SPACE_XS)
-            .align_y(Alignment::Center)
-            .into()
-        } else {
-            text("All Accounts").size(12).style(text::base).into()
-        }
-    } else {
-        text("All Accounts").size(12).style(text::base).into()
-    };
-
-    let trigger = dropdown_trigger(trigger_content, Message::ToggleScopeDropdown);
-
-    if !dropdown_open {
-        return trigger;
-    }
-
-    let mut items: Vec<Element<'a, Message>> = Vec::new();
-
-    items.push(dropdown_item(
-        row![
-            icon::inbox().size(12).style(text::secondary),
-            text("All Accounts").size(12).style(text::base),
-        ]
-        .spacing(SPACE_XS)
-        .align_y(Alignment::Center)
-        .into(),
-        selected_account.is_none(),
-        Message::ToggleScopeDropdown,
-    ));
-
-    for (idx, acc) in accounts.iter().enumerate() {
-        let name = acc.display_name.as_deref().unwrap_or(&acc.email);
-        let is_selected = selected_account == Some(idx);
-        items.push(dropdown_item(
-            row![
-                avatar_circle(name, 20.0),
-                text(name).size(12).style(text::base),
-            ]
-            .spacing(SPACE_XS)
-            .align_y(Alignment::Center)
-            .into(),
-            is_selected,
-            Message::SelectAccount(idx),
-        ));
-    }
-
-    let menu = dropdown_menu(items);
-
-    column![trigger, menu].spacing(SPACE_XXS).into()
 }
 
 // ── Compose button ──────────────────────────────────────
@@ -309,8 +307,8 @@ pub fn compose_button<'a>() -> Element<'a, Message> {
     button(
         container(
             row![
-                icon::pencil().size(13).color(Color::WHITE),
-                text("Compose").size(13).color(Color::WHITE),
+                icon::pencil().size(ICON_LG).color(theme::ON_AVATAR),
+                text("Compose").size(TEXT_LG).color(theme::ON_AVATAR),
             ]
             .spacing(SPACE_XXS)
             .align_y(Alignment::Center),
@@ -320,7 +318,7 @@ pub fn compose_button<'a>() -> Element<'a, Message> {
     )
     .on_press(Message::Compose)
     .padding(PAD_BUTTON)
-    .style(button::primary)
+    .style(theme::primary_button)
     .width(Length::Fill)
     .into()
 }
@@ -330,8 +328,8 @@ pub fn compose_button<'a>() -> Element<'a, Message> {
 pub fn settings_button<'a>() -> Element<'a, Message> {
     button(
         row![
-            icon::settings().size(12).style(text::secondary),
-            text("Settings").size(12).style(text::secondary),
+            icon::settings().size(ICON_MD).style(text::secondary),
+            text("Settings").size(TEXT_MD).style(text::secondary),
         ]
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),
@@ -412,20 +410,20 @@ pub fn thread_card(thread: &Thread, index: usize, selected: bool) -> Element<'_,
         text::base
     };
 
-    let avatar = avatar_circle(sender, 28.0);
+    let avatar = avatar_circle(sender, AVATAR_THREAD_CARD);
 
     let mut indicators = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
     if thread.has_attachments {
-        indicators = indicators.push(icon::paperclip().size(10).style(theme::text_tertiary));
+        indicators = indicators.push(icon::paperclip().size(ICON_XS).style(theme::text_tertiary));
     }
     if thread.is_starred {
-        indicators = indicators.push(icon::star().size(11).style(text::warning));
+        indicators = indicators.push(icon::star().size(ICON_SM).style(text::warning));
     }
     if thread.message_count > 1 {
         indicators = indicators.push(
             container(
                 text(thread.message_count.to_string())
-                    .size(10)
+                    .size(TEXT_XS)
                     .style(theme::text_tertiary),
             )
             .padding(PAD_BADGE)
@@ -435,17 +433,17 @@ pub fn thread_card(thread: &Thread, index: usize, selected: bool) -> Element<'_,
 
     let top_row = row![
         text(sender)
-            .size(12)
+            .size(TEXT_MD)
             .style(name_style)
             .font(iced::Font { weight, ..font::TEXT }),
         Space::new().width(Length::Fill),
-        text(date_str).size(10).style(theme::text_tertiary),
+        text(date_str).size(TEXT_XS).style(theme::text_tertiary),
     ]
     .align_y(Alignment::Center);
 
     let subject_row = row![
         text(subject)
-            .size(12)
+            .size(TEXT_MD)
             .style(name_style)
             .font(iced::Font { weight, ..font::TEXT })
             .wrapping(text::Wrapping::None),
@@ -453,7 +451,7 @@ pub fn thread_card(thread: &Thread, index: usize, selected: bool) -> Element<'_,
 
     let snippet_row = row![
         text(snippet)
-            .size(11)
+            .size(TEXT_SM)
             .style(theme::text_tertiary)
             .wrapping(text::Wrapping::None),
         Space::new().width(Length::Fill),
@@ -485,8 +483,8 @@ pub fn thread_card(thread: &Thread, index: usize, selected: bool) -> Element<'_,
 pub fn action_icon_button<'a>(ico: iced::widget::Text<'a>, label: &'a str) -> Element<'a, Message> {
     button(
         row![
-            ico.size(12).style(text::secondary),
-            text(label).size(11).style(text::secondary),
+            ico.size(ICON_MD).style(text::secondary),
+            text(label).size(TEXT_SM).style(text::secondary),
         ]
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),
@@ -500,8 +498,8 @@ pub fn action_icon_button<'a>(ico: iced::widget::Text<'a>, label: &'a str) -> El
 pub fn reply_button<'a>(ico: iced::widget::Text<'a>, label: &'a str) -> Element<'a, Message> {
     button(
         row![
-            ico.size(14).style(text::secondary),
-            text(label).size(12).style(text::secondary),
+            ico.size(ICON_XL).style(text::secondary),
+            text(label).size(TEXT_MD).style(text::secondary),
         ]
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),
@@ -521,7 +519,7 @@ pub fn message_card(thread: &Thread) -> Element<'_, Message> {
         .or(thread.from_address.as_deref())
         .unwrap_or("(unknown)");
 
-    let avatar = avatar_circle(sender, 32.0);
+    let avatar = avatar_circle(sender, AVATAR_MESSAGE_CARD);
     let date_str = thread
         .last_message_at
         .and_then(|ts| {
@@ -534,12 +532,12 @@ pub fn message_card(thread: &Thread) -> Element<'_, Message> {
         avatar,
         column![
             row![
-                text(sender).size(13).style(text::base),
+                text(sender).size(TEXT_LG).style(text::base),
                 Space::new().width(Length::Fill),
-                text(date_str).size(11).style(theme::text_tertiary),
+                text(date_str).size(TEXT_SM).style(theme::text_tertiary),
             ],
             text(thread.from_address.as_deref().unwrap_or(""))
-                .size(11)
+                .size(TEXT_SM)
                 .style(theme::text_tertiary),
         ]
         .spacing(SPACE_XXXS)
@@ -549,8 +547,8 @@ pub fn message_card(thread: &Thread) -> Element<'_, Message> {
     .align_y(Alignment::Start);
 
     let body_text = thread.snippet.as_deref().unwrap_or("(no preview available)");
-    let body = container(text(body_text).size(13).style(text::secondary))
-        .padding(iced::Padding::from([SPACE_SM, 0.0]));
+    let body = container(text(body_text).size(TEXT_LG).style(text::secondary))
+        .padding(PAD_BODY);
 
     container(column![header, body].spacing(SPACE_XS))
         .padding(PAD_CARD)
@@ -564,8 +562,8 @@ pub fn message_card(thread: &Thread) -> Element<'_, Message> {
 pub fn empty_placeholder<'a>(title: &'a str, subtitle: &'a str) -> Element<'a, Message> {
     container(
         column![
-            text(title).size(16).style(theme::text_tertiary),
-            text(subtitle).size(12).style(theme::text_tertiary),
+            text(title).size(TEXT_TITLE).style(theme::text_tertiary),
+            text(subtitle).size(TEXT_MD).style(theme::text_tertiary),
         ]
         .spacing(SPACE_XXS)
         .align_x(Alignment::Center),
@@ -580,7 +578,7 @@ pub fn empty_placeholder<'a>(title: &'a str, subtitle: &'a str) -> Element<'a, M
 // ── Section header / stat row ───────────────────────────
 
 pub fn section_header<'a>(label: &'a str) -> Element<'a, Message> {
-    container(text(label).size(10).style(theme::text_tertiary))
+    container(text(label).size(TEXT_XS).style(theme::text_tertiary))
         .padding(PAD_SECTION_HEADER)
         .width(Length::Fill)
         .into()
@@ -589,9 +587,9 @@ pub fn section_header<'a>(label: &'a str) -> Element<'a, Message> {
 pub fn stat_row<'a>(label: &'a str, value: &'a str) -> Element<'a, Message> {
     container(
         row![
-            text(label).size(11).style(theme::text_tertiary),
+            text(label).size(TEXT_SM).style(theme::text_tertiary),
             Space::new().width(Length::Fill),
-            text(value).size(11).style(text::secondary),
+            text(value).size(TEXT_SM).style(text::secondary),
         ]
         .align_y(Alignment::Center),
     )
@@ -618,9 +616,10 @@ impl canvas::Program<Message> for DotPainter {
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let radius = DOT_SIZE / 2.0;
         let circle = canvas::path::Path::circle(
-            iced::Point::new(4.0, 4.0),
-            4.0,
+            iced::Point::new(radius, radius),
+            radius,
         );
         frame.fill(&circle, self.color);
         vec![frame.into_geometry()]
