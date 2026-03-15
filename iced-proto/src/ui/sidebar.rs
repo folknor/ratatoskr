@@ -123,8 +123,8 @@ fn smart_folders(expanded: bool) -> Element<'static, Message> {
         expanded,
         Message::ToggleSmartFoldersSection,
         vec![
-            widgets::nav_item_with_badge("VIP", "__sf_vip", false, 3, Message::Noop),
-            widgets::nav_item_with_badge("Newsletters", "__sf_news", false, 0, Message::Noop),
+            widgets::nav_button(None, "VIP", false, widgets::NavSize::Compact, Some(3), Message::Noop),
+            widgets::nav_button(None, "Newsletters", false, widgets::NavSize::Compact, Some(0), Message::Noop),
         ],
     )
 }

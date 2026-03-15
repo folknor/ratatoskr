@@ -59,7 +59,7 @@ pub fn color_dot<'a>(color: Color) -> Element<'a, Message> {
 
 // ── Badges ──────────────────────────────────────────────
 
-pub fn count_badge<'a>(count: i64) -> Element<'a, Message> {
+pub fn count_badge<'a, M: 'a>(count: i64) -> Element<'a, M> {
     if count == 0 {
         return Space::new().width(0).height(0).into();
     }
@@ -75,6 +75,78 @@ pub fn count_badge<'a>(count: i64) -> Element<'a, Message> {
 }
 
 // ── Nav items ───────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NavSize {
+    /// Sidebar folder list — compact padding
+    Compact,
+    /// Settings tabs — more spacious padding
+    Regular,
+}
+
+/// Generic navigation button used in both the sidebar and settings.
+/// Accepts data only — builds its own two-slot (icon + label) structure.
+/// Generic over message type so settings can use it with SettingsMessage.
+pub fn nav_button<'a, M: Clone + 'a>(
+    ico: Option<iced::widget::Text<'a>>,
+    label: &'a str,
+    active: bool,
+    size: NavSize,
+    badge: Option<i64>,
+    on_press: M,
+) -> Element<'a, M> {
+    let label_style: fn(&Theme) -> text::Style = if active {
+        text::primary
+    } else {
+        text::secondary
+    };
+    let icon_style: fn(&Theme) -> text::Style = if active {
+        text::primary
+    } else {
+        text::secondary
+    };
+    let pad = match size {
+        NavSize::Compact => PAD_NAV_ITEM,
+        NavSize::Regular => PAD_SETTINGS_ROW,
+    };
+    let icon_size = match size {
+        NavSize::Compact => ICON_MD,
+        NavSize::Regular => ICON_XL,
+    };
+    let text_size = match size {
+        NavSize::Compact => TEXT_MD,
+        NavSize::Regular => TEXT_LG,
+    };
+
+    let mut content = row![].spacing(SPACE_XS).align_y(Alignment::Center);
+
+    if let Some(ico) = ico {
+        content = content.push(
+            container(ico.size(icon_size).style(icon_style))
+                .align_y(Alignment::Center),
+        );
+    }
+
+    content = content.push(
+        container(text(label).size(text_size).style(label_style))
+            .align_y(Alignment::Center),
+    );
+
+    if let Some(count) = badge {
+        if count > 0 {
+            content = content
+                .push(Space::new().width(Length::Fill))
+                .push(count_badge(count));
+        }
+    }
+
+    button(content)
+        .on_press(on_press)
+        .padding(pad)
+        .style(theme::nav_button(active))
+        .width(Length::Fill)
+        .into()
+}
 
 pub struct NavItem<'a> {
     pub label: &'a str,
@@ -97,42 +169,16 @@ pub fn nav_group<'a>(
         } else {
             Message::SelectLabel(Some(item.id.to_string()))
         };
-        col = col.push(nav_item_with_badge(item.label, item.id, is_active, item.unread, on_press));
+        col = col.push(nav_button(
+            None,
+            item.label,
+            is_active,
+            NavSize::Compact,
+            Some(item.unread),
+            on_press,
+        ));
     }
     col.into()
-}
-
-pub fn nav_item_with_badge<'a>(
-    label: &'a str,
-    _id: &'a str,
-    active: bool,
-    unread: i64,
-    on_press: Message,
-) -> Element<'a, Message> {
-    let label_style: fn(&Theme) -> text::Style = if active {
-        text::primary
-    } else {
-        text::secondary
-    };
-
-    let mut content = row![
-        container(text(label).size(TEXT_MD).style(label_style))
-            .align_y(Alignment::Center)
-    ]
-    .align_y(Alignment::Center);
-
-    if unread > 0 {
-        content = content
-            .push(Space::new().width(Length::Fill))
-            .push(count_badge(unread));
-    }
-
-    button(content)
-        .on_press(on_press)
-        .padding(PAD_NAV_ITEM)
-        .style(theme::nav_button(active))
-        .width(Length::Fill)
-        .into()
 }
 
 pub fn label_nav_item<'a>(

@@ -4,6 +4,7 @@ use iced::{Alignment, Element, Length};
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
+use crate::ui::widgets;
 
 // ── Messages ────────────────────────────────────────────
 
@@ -154,42 +155,26 @@ pub fn view(state: &SettingsState) -> Element<'_, SettingsMessage> {
 fn tab_nav(active: Tab) -> Element<'static, SettingsMessage> {
     let mut col = column![].spacing(SPACE_XXS).width(SETTINGS_NAV_WIDTH);
 
-    col = col.push(
-        button(
-            row![
-                container(icon::arrow_left().size(ICON_XL).style(text::secondary))
-                    .align_y(Alignment::Center),
-                container(text("Settings").size(TEXT_TITLE).style(text::base))
-                    .align_y(Alignment::Center),
-            ]
-            .spacing(SPACE_XS)
-            .align_y(Alignment::Center),
-        )
-        .on_press(SettingsMessage::Close)
-        .padding(PAD_SETTINGS_ROW)
-        .style(theme::bare_button)
-        .width(Length::Fill),
-    );
+    col = col.push(widgets::nav_button(
+        Some(icon::arrow_left()),
+        "Settings",
+        false,
+        widgets::NavSize::Regular,
+        None,
+        SettingsMessage::Close,
+    ));
     col = col.push(Space::new().height(SPACE_XS));
 
     for tab in Tab::ALL {
         let is_active = *tab == active;
-        col = col.push(
-            button(
-                row![
-                    container(tab.icon().size(ICON_XL).style(if is_active { text::primary } else { text::secondary }))
-                        .align_y(Alignment::Center),
-                    container(text(tab.label()).size(TEXT_LG).style(if is_active { text::base } else { text::secondary }))
-                        .align_y(Alignment::Center),
-                ]
-                .spacing(SPACE_XS)
-                .align_y(Alignment::Center),
-            )
-            .on_press(SettingsMessage::SelectTab(*tab))
-            .padding(PAD_SETTINGS_ROW)
-            .style(theme::nav_button(is_active))
-            .width(Length::Fill),
-        );
+        col = col.push(widgets::nav_button(
+            Some(tab.icon()),
+            tab.label(),
+            is_active,
+            widgets::NavSize::Regular,
+            None,
+            SettingsMessage::SelectTab(*tab),
+        ));
     }
 
     container(scrollable(col).height(Length::Fill))
