@@ -85,6 +85,12 @@ pub fn primary_button(theme: &Theme, status: button::Status) -> button::Style {
     style
 }
 
+pub fn secondary_button(theme: &Theme, status: button::Status) -> button::Style {
+    let mut style = button::secondary(theme, status);
+    style.border = border::rounded(RADIUS_LG);
+    style
+}
+
 pub fn dropdown_button(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
         let p = theme.extended_palette();
@@ -141,6 +147,25 @@ pub fn thread_card_button(selected: bool) -> impl Fn(&Theme, button::Status) -> 
                 ..Default::default()
             },
         }
+    }
+}
+
+pub fn ghost_button(theme: &Theme, status: button::Status) -> button::Style {
+    let p = theme.extended_palette();
+    match status {
+        button::Status::Hovered => button::Style {
+            text_color: p.background.base.text,
+            border: iced::Border {
+                color: p.background.strongest.color.scale_alpha(0.15),
+                width: 1.0,
+                radius: RADIUS_SM.into(),
+            },
+            ..Default::default()
+        },
+        _ => button::Style {
+            text_color: p.background.base.text,
+            ..Default::default()
+        },
     }
 }
 

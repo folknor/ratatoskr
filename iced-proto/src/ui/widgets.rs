@@ -308,7 +308,7 @@ pub fn dropdown<'a>(
         .spacing(SPACE_XS)
         .align_y(Alignment::Center),
     )
-    .on_press(on_toggle)
+    .on_press(on_toggle.clone())
     .padding(PAD_DROPDOWN)
     .style(theme::bare_button)
     .width(Length::Fill);
@@ -355,6 +355,74 @@ pub fn dropdown<'a>(
 
     crate::ui::popover::popover(trigger)
         .popup(menu)
+        .on_dismiss(on_toggle)
+        .into()
+}
+
+// ── Select (settings-style dropdown) ────────────────────
+// Ghost trigger (no background) with right-aligned label
+// and chevron. Opens a floating menu of text options.
+
+/// A select widget for choosing from a list of text options.
+/// Trigger is transparent with right-aligned label + chevron.
+/// Generic over message type.
+pub fn select<'a, M: Clone + 'a>(
+    options: &[&'a str],
+    selected: &'a str,
+    open: bool,
+    on_toggle: M,
+    on_select: impl Fn(String) -> M + 'a,
+) -> Element<'a, M> {
+    // trigger: label right-aligned, then chevron
+    let trigger = button(
+        row![
+            // label_slot: right-aligned
+            container(text(selected).size(TEXT_MD).style(text::base))
+                .width(Length::Shrink)
+                .align_y(Alignment::Center),
+            // chevron_slot
+            container(icon::chevron_down().size(ICON_SM).style(theme::text_tertiary))
+                .align_y(Alignment::Center),
+        ]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center),
+    )
+    .on_press(on_toggle.clone())
+    .padding(PAD_SELECT_TRIGGER)
+    .style(theme::ghost_button)
+    .width(Length::Shrink);
+
+    if !open {
+        return trigger.into();
+    }
+
+    let menu_items: Vec<Element<'a, M>> = options
+        .iter()
+        .map(|&option| {
+            let is_selected = option == selected;
+            button(
+                container(text(option).size(TEXT_MD).style(text::base))
+                    .width(Length::Fill)
+                    .align_y(Alignment::Center),
+            )
+            .on_press(on_select(option.to_string()))
+            .padding(PAD_NAV_ITEM)
+            .height(DROPDOWN_ITEM_HEIGHT)
+            .style(theme::dropdown_button(is_selected))
+            .width(Length::Fill)
+            .into()
+        })
+        .collect();
+
+    let menu = container(
+        column(menu_items).spacing(SPACE_XXS).width(Length::Fill),
+    )
+    .padding(PAD_DROPDOWN)
+    .style(theme::floating_container);
+
+    crate::ui::popover::popover(trigger)
+        .popup(menu)
+        .on_dismiss(on_toggle.clone())
         .into()
 }
 

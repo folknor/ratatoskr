@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, pick_list, row, scrollable, text, toggler, Space};
+use iced::widget::{button, column, container, row, scrollable, text, toggler, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::icon;
@@ -22,9 +22,18 @@ pub enum SettingsMessage {
     ToggleBlockRemoteImages(bool),
     TogglePhishingDetection(bool),
     PhishingSensitivityChanged(String),
+    ToggleSelect(SelectField),
     // About
     CheckForUpdates,
     OpenGithub,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectField {
+    Theme,
+    ReadingPane,
+    Density,
+    FontSize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +91,7 @@ impl Tab {
 
 pub struct SettingsState {
     pub active_tab: Tab,
+    pub open_select: Option<SelectField>,
     // General
     pub theme: String,
     pub density: String,
@@ -98,6 +108,7 @@ impl Default for SettingsState {
     fn default() -> Self {
         Self {
             active_tab: Tab::General,
+            open_select: None,
             theme: "System".into(),
             density: "Default".into(),
             font_size: "Default".into(),
@@ -116,10 +127,17 @@ impl SettingsState {
         match message {
             SettingsMessage::Close => {}
             SettingsMessage::SelectTab(tab) => self.active_tab = tab,
-            SettingsMessage::ThemeChanged(v) => self.theme = v,
-            SettingsMessage::DensityChanged(v) => self.density = v,
-            SettingsMessage::FontSizeChanged(v) => self.font_size = v,
-            SettingsMessage::ReadingPaneChanged(v) => self.reading_pane_position = v,
+            SettingsMessage::ToggleSelect(field) => {
+                self.open_select = if self.open_select == Some(field) {
+                    None
+                } else {
+                    Some(field)
+                };
+            }
+            SettingsMessage::ThemeChanged(v) => { self.theme = v; self.open_select = None; }
+            SettingsMessage::DensityChanged(v) => { self.density = v; self.open_select = None; }
+            SettingsMessage::FontSizeChanged(v) => { self.font_size = v; self.open_select = None; }
+            SettingsMessage::ReadingPaneChanged(v) => { self.reading_pane_position = v; self.open_select = None; }
             SettingsMessage::AccentColorSelected(i) => self.accent_color_index = i,
             SettingsMessage::ToggleSyncStatusBar(v) => self.sync_status_bar = v,
             SettingsMessage::ToggleBlockRemoteImages(v) => self.block_remote_images = v,
@@ -190,17 +208,29 @@ fn general_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
     let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(SETTINGS_CONTENT_MAX_WIDTH);
 
     col = col.push(section("Appearance", vec![
-        setting_row("Theme", settings_pick_list(
-            &["System", "Light", "Dark"], &state.theme, SettingsMessage::ThemeChanged,
+        setting_row("Theme", widgets::select(
+            &["System", "Light", "Dark"], &state.theme,
+            state.open_select == Some(SelectField::Theme),
+            SettingsMessage::ToggleSelect(SelectField::Theme),
+            SettingsMessage::ThemeChanged,
         )),
-        setting_row("Reading Pane", settings_pick_list(
-            &["Right", "Bottom", "Hidden"], &state.reading_pane_position, SettingsMessage::ReadingPaneChanged,
+        setting_row("Reading Pane", widgets::select(
+            &["Right", "Bottom", "Hidden"], &state.reading_pane_position,
+            state.open_select == Some(SelectField::ReadingPane),
+            SettingsMessage::ToggleSelect(SelectField::ReadingPane),
+            SettingsMessage::ReadingPaneChanged,
         )),
-        setting_row("Email Density", settings_pick_list(
-            &["Compact", "Default", "Spacious"], &state.density, SettingsMessage::DensityChanged,
+        setting_row("Email Density", widgets::select(
+            &["Compact", "Default", "Spacious"], &state.density,
+            state.open_select == Some(SelectField::Density),
+            SettingsMessage::ToggleSelect(SelectField::Density),
+            SettingsMessage::DensityChanged,
         )),
-        setting_row("Font Size", settings_pick_list(
-            &["Small", "Default", "Large", "XLarge"], &state.font_size, SettingsMessage::FontSizeChanged,
+        setting_row("Font Size", widgets::select(
+            &["Small", "Default", "Large", "XLarge"], &state.font_size,
+            state.open_select == Some(SelectField::FontSize),
+            SettingsMessage::ToggleSelect(SelectField::FontSize),
+            SettingsMessage::FontSizeChanged,
         )),
         accent_color_row(state.accent_color_index),
         toggle_row("Show Sync Status Bar", "Display sync progress in the status bar", state.sync_status_bar, SettingsMessage::ToggleSyncStatusBar),
@@ -237,7 +267,7 @@ fn about_tab<'a>() -> Element<'a, SettingsMessage> {
                 button(text("Check for Updates").size(TEXT_MD))
                     .on_press(SettingsMessage::CheckForUpdates)
                     .padding(PAD_ICON_BTN)
-                    .style(button::secondary),
+                    .style(theme::secondary_button),
             ].align_y(Alignment::Center),
         ).padding(PAD_SETTINGS_ROW).into(),
     ]));
@@ -387,21 +417,6 @@ fn info_row<'a>(label: &'a str, value: &'a str) -> Element<'a, SettingsMessage> 
     .into()
 }
 
-fn settings_pick_list(
-    options: &[&str],
-    selected: &str,
-    on_select: fn(String) -> SettingsMessage,
-) -> Element<'static, SettingsMessage> {
-    let opts: Vec<String> = options.iter().map(|s| (*s).to_string()).collect();
-    let sel = Some(selected.to_string());
-    pick_list(sel, opts, |s: &String| s.clone())
-        .on_select(move |s| on_select(s))
-        .text_size(TEXT_MD)
-        .padding(PAD_PICK_LIST)
-        .handle(pick_list::Handle::Arrow { size: Some(iced::Pixels(ICON_XS)) })
-        .style(theme::ghost_pick_list)
-        .into()
-}
 
 fn accent_color_row(selected: usize) -> Element<'static, SettingsMessage> {
     let mut swatches = row![].spacing(SPACE_XS).align_y(Alignment::Center);

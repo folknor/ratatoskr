@@ -4,10 +4,12 @@ use iced::advanced::{
 use iced::{Event, Length, Point, Rectangle, Renderer, Size, Theme, Vector, mouse};
 
 /// A widget that displays a base element and optionally floats a popup
-/// overlay below it, without affecting layout.
+/// overlay below it, without affecting layout. Clicks outside the
+/// popup dismiss it via `on_dismiss`.
 pub struct Popover<'a, Message> {
     base: iced::Element<'a, Message>,
     popup: Option<iced::Element<'a, Message>>,
+    on_dismiss: Option<Message>,
 }
 
 pub fn popover<'a, Message: 'a>(
@@ -16,17 +18,23 @@ pub fn popover<'a, Message: 'a>(
     Popover {
         base: base.into(),
         popup: None,
+        on_dismiss: None,
     }
 }
 
-impl<'a, Message: 'a> Popover<'a, Message> {
+impl<'a, Message: Clone + 'a> Popover<'a, Message> {
     pub fn popup(mut self, popup: impl Into<iced::Element<'a, Message>>) -> Self {
         self.popup = Some(popup.into());
         self
     }
+
+    pub fn on_dismiss(mut self, message: Message) -> Self {
+        self.on_dismiss = Some(message);
+        self
+    }
 }
 
-impl<Message> Widget<Message, Theme, Renderer> for Popover<'_, Message> {
+impl<Message: Clone> Widget<Message, Theme, Renderer> for Popover<'_, Message> {
     fn size(&self) -> Size<Length> {
         self.base.as_widget().size()
     }
@@ -159,6 +167,7 @@ impl<Message> Widget<Message, Theme, Renderer> for Popover<'_, Message> {
             base_bounds: layout.bounds(),
             position: layout.position(),
             viewport: *viewport,
+            on_dismiss: self.on_dismiss.clone(),
         }));
 
         Some(
@@ -170,7 +179,7 @@ impl<Message> Widget<Message, Theme, Renderer> for Popover<'_, Message> {
     }
 }
 
-impl<'a, Message: 'a> From<Popover<'a, Message>> for iced::Element<'a, Message> {
+impl<'a, Message: Clone + 'a> From<Popover<'a, Message>> for iced::Element<'a, Message> {
     fn from(popover: Popover<'a, Message>) -> Self {
         iced::Element::new(popover)
     }
@@ -182,9 +191,10 @@ struct PopoverOverlay<'a, 'b, Message> {
     base_bounds: Rectangle,
     position: Point,
     viewport: Rectangle,
+    on_dismiss: Option<Message>,
 }
 
-impl<Message> overlay::Overlay<Message, Theme, Renderer>
+impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer>
     for PopoverOverlay<'_, '_, Message>
 {
     fn layout(&mut self, renderer: &Renderer, _bounds: Size) -> layout::Node {
@@ -256,9 +266,17 @@ impl<Message> overlay::Overlay<Message, Theme, Renderer>
             &layout.bounds(),
         );
 
-        // Capture mouse/touch events over the overlay so they don't
-        // propagate to widgets underneath.
-        if matches!(event, Event::Mouse(_) | Event::Touch(_))
+        // Clicks inside the overlay are captured so they don't propagate.
+        // Clicks outside the overlay dismiss it.
+        if let Event::Mouse(mouse::Event::ButtonPressed { button: mouse::Button::Left, .. })
+        | Event::Touch(iced::touch::Event::FingerPressed { .. }) = event
+        {
+            if cursor.is_over(layout.bounds()) {
+                shell.capture_event();
+            } else if let Some(on_dismiss) = &self.on_dismiss {
+                shell.publish(on_dismiss.clone());
+            }
+        } else if matches!(event, Event::Mouse(_) | Event::Touch(_))
             && cursor.is_over(layout.bounds())
         {
             shell.capture_event();

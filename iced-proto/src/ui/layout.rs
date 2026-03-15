@@ -233,12 +233,12 @@ pub const PAD_SETTINGS_ROW: Padding = Padding {
     left: 16.0,
 };
 
-/// Pick list inner padding.
-pub const PAD_PICK_LIST: Padding = Padding {
+/// Select trigger padding (vertical only — sits inside a padded row).
+pub const PAD_SELECT_TRIGGER: Padding = Padding {
     top: 4.0,
-    right: 12.0,
+    right: 0.0,
     bottom: 4.0,
-    left: 12.0,
+    left: 0.0,
 };
 
 /// Message body inner padding (horizontal only).
