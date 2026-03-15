@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, row, scrollable, text, Space};
+use iced::widget::{button, column, container, pick_list, row, scrollable, text, toggler, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::icon;
@@ -9,6 +9,7 @@ use crate::ui::theme;
 
 #[derive(Debug, Clone)]
 pub enum SettingsMessage {
+    Close,
     SelectTab(Tab),
     // General
     ThemeChanged(String),
@@ -112,6 +113,7 @@ impl Default for SettingsState {
 impl SettingsState {
     pub fn update(&mut self, message: SettingsMessage) {
         match message {
+            SettingsMessage::Close => {}
             SettingsMessage::SelectTab(tab) => self.active_tab = tab,
             SettingsMessage::ThemeChanged(v) => self.theme = v,
             SettingsMessage::DensityChanged(v) => self.density = v,
@@ -153,8 +155,18 @@ fn tab_nav(active: Tab) -> Element<'static, SettingsMessage> {
     let mut col = column![].spacing(SPACE_XXS).width(200);
 
     col = col.push(
-        container(text("Settings").size(16).style(text::base))
-            .padding(iced::Padding::from([SPACE_MD, SPACE_SM])),
+        button(
+            row![
+                icon::arrow_left().size(14).style(text::secondary),
+                text("Settings").size(16).style(text::base),
+            ]
+            .spacing(SPACE_XS)
+            .align_y(Alignment::Center),
+        )
+        .on_press(SettingsMessage::Close)
+        .padding(iced::Padding::from([SPACE_MD, SPACE_SM]))
+        .style(theme::bare_button)
+        .width(Length::Fill),
     );
     col = col.push(Space::new().height(SPACE_XS));
 
@@ -170,7 +182,7 @@ fn tab_nav(active: Tab) -> Element<'static, SettingsMessage> {
                 .align_y(Alignment::Center),
             )
             .on_press(SettingsMessage::SelectTab(*tab))
-            .padding(iced::Padding::from([SPACE_XS, SPACE_SM]))
+            .padding(iced::Padding::from([SPACE_SM, SPACE_SM]))
             .style(theme::nav_button(is_active))
             .width(Length::Fill),
         );
@@ -189,20 +201,28 @@ fn general_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
     let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(600);
 
     // Appearance section
-    col = col.push(section("Appearance", column![
-        setting_row("Theme", dropdown_display(&state.theme)),
-        setting_row("Reading Pane", dropdown_display(&state.reading_pane_position)),
-        setting_row("Email Density", dropdown_display(&state.density)),
-        setting_row("Font Size", dropdown_display(&state.font_size)),
+    col = col.push(section("Appearance", vec![
+        setting_row("Theme", settings_pick_list(
+            &["System", "Light", "Dark"], &state.theme, SettingsMessage::ThemeChanged,
+        )),
+        setting_row("Reading Pane", settings_pick_list(
+            &["Right", "Bottom", "Hidden"], &state.reading_pane_position, SettingsMessage::ReadingPaneChanged,
+        )),
+        setting_row("Email Density", settings_pick_list(
+            &["Compact", "Default", "Spacious"], &state.density, SettingsMessage::DensityChanged,
+        )),
+        setting_row("Font Size", settings_pick_list(
+            &["Small", "Default", "Large", "XLarge"], &state.font_size, SettingsMessage::FontSizeChanged,
+        )),
         accent_color_row(state.accent_color_index),
-        toggle_row("Show Sync Status Bar", "Display sync progress in the status bar", state.sync_status_bar),
-    ].spacing(SPACE_0)));
+        toggle_row("Show Sync Status Bar", "Display sync progress in the status bar", state.sync_status_bar, SettingsMessage::ToggleSyncStatusBar),
+    ]));
 
     // Privacy & Security section
-    col = col.push(section("Privacy & Security", column![
-        toggle_row("Block Remote Images", "Don't load remote images in email bodies", state.block_remote_images),
-        toggle_row("Phishing Detection", "Warn about suspicious emails", state.phishing_detection),
-    ].spacing(SPACE_0)));
+    col = col.push(section("Privacy & Security", vec![
+        toggle_row("Block Remote Images", "Don't load remote images in email bodies", state.block_remote_images, SettingsMessage::ToggleBlockRemoteImages),
+        toggle_row("Phishing Detection", "Warn about suspicious emails", state.phishing_detection, SettingsMessage::TogglePhishingDetection),
+    ]));
 
     col.into()
 }
@@ -213,15 +233,15 @@ fn about_tab<'a>() -> Element<'a, SettingsMessage> {
     let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(600);
 
     // App info section
-    col = col.push(section("Application", column![
+    col = col.push(section("Application", vec![
         info_row("Version", "0.1.0-dev"),
         info_row("Iced Version", "0.15.0-dev"),
         info_row("Platform", std::env::consts::OS),
         info_row("Architecture", std::env::consts::ARCH),
-    ].spacing(SPACE_0)));
+    ]));
 
     // Updates section
-    col = col.push(section("Updates", column![
+    col = col.push(section("Updates", vec![
         container(
             row![
                 column![
@@ -234,11 +254,11 @@ fn about_tab<'a>() -> Element<'a, SettingsMessage> {
                     .padding(PAD_ICON_BTN)
                     .style(button::secondary),
             ].align_y(Alignment::Center),
-        ).padding(iced::Padding::from([SPACE_SM, SPACE_MD])),
-    ].spacing(SPACE_0)));
+        ).padding(iced::Padding::from([SPACE_SM, SPACE_MD])).into(),
+    ]));
 
     // License section
-    col = col.push(section("License", column![
+    col = col.push(section("License", vec![
         container(
             column![
                 text("Apache License 2.0").size(13).style(text::base),
@@ -255,31 +275,30 @@ fn about_tab<'a>() -> Element<'a, SettingsMessage> {
                     .size(11)
                     .style(theme::text_tertiary),
             ]
-        ).padding(iced::Padding::from([SPACE_SM, SPACE_MD])),
-    ].spacing(SPACE_0)));
+        ).padding(iced::Padding::from([SPACE_SM, SPACE_MD])).into(),
+    ]));
 
     // Links section
-    col = col.push(section("Links", column![
-        container(
-            button(
-                row![
-                    icon::globe().size(14).style(text::secondary),
-                    column![
-                        text("GitHub Repository").size(13).style(text::base),
-                        text("folknor/ratatoskr").size(11).style(theme::text_tertiary),
-                    ].spacing(SPACE_XXXS),
-                    Space::new().width(Length::Fill),
-                    icon::external_link().size(12).style(theme::text_tertiary),
-                ]
-                .spacing(SPACE_SM)
-                .align_y(Alignment::Center),
-            )
-            .on_press(SettingsMessage::OpenGithub)
-            .padding(iced::Padding::from([SPACE_SM, SPACE_MD]))
-            .style(theme::bare_button)
-            .width(Length::Fill),
-        ),
-    ].spacing(SPACE_0)));
+    col = col.push(section("Links", vec![
+        button(
+            row![
+                icon::globe().size(14).style(text::secondary),
+                column![
+                    text("GitHub Repository").size(13).style(text::base),
+                    text("folknor/ratatoskr").size(11).style(theme::text_tertiary),
+                ].spacing(SPACE_XXXS),
+                Space::new().width(Length::Fill),
+                icon::external_link().size(12).style(theme::text_tertiary),
+            ]
+            .spacing(SPACE_SM)
+            .align_y(Alignment::Center),
+        )
+        .on_press(SettingsMessage::OpenGithub)
+        .padding(iced::Padding::from([SPACE_SM, SPACE_MD]))
+        .style(theme::bare_button)
+        .width(Length::Fill)
+        .into(),
+    ]));
 
     col.into()
 }
@@ -306,13 +325,26 @@ fn placeholder_tab(tab: Tab) -> Element<'static, SettingsMessage> {
 
 fn section<'a>(
     title: &'a str,
-    content: impl Into<Element<'a, SettingsMessage>>,
+    items: Vec<Element<'a, SettingsMessage>>,
 ) -> Element<'a, SettingsMessage> {
-    let content = content.into();
+    let mut col = column![].width(Length::Fill);
+    for (i, item) in items.into_iter().enumerate() {
+        if i > 0 {
+            col = col.push(iced::widget::rule::horizontal(1).style(|theme: &iced::Theme| {
+                iced::widget::rule::Style {
+                    color: theme.extended_palette().background.strongest.color.scale_alpha(0.08),
+                    radius: 0.0.into(),
+                    fill_mode: iced::widget::rule::FillMode::Full,
+                    snap: true,
+                }
+            }));
+        }
+        col = col.push(item);
+    }
     column![
         text(title).size(14).style(text::base),
         Space::new().height(SPACE_XS),
-        container(content)
+        container(col)
             .width(Length::Fill)
             .style(settings_section_container),
     ]
@@ -340,7 +372,8 @@ fn setting_row<'a>(
 fn toggle_row<'a>(
     label: &'a str,
     description: &'a str,
-    _value: bool,
+    value: bool,
+    on_toggle: fn(bool) -> SettingsMessage,
 ) -> Element<'a, SettingsMessage> {
     container(
         row![
@@ -350,11 +383,7 @@ fn toggle_row<'a>(
             ]
             .spacing(SPACE_XXXS),
             Space::new().width(Length::Fill),
-            // Placeholder toggle — iced has checkbox but no toggle switch.
-            // Using a text indicator for now.
-            text(if _value { "ON" } else { "OFF" })
-                .size(11)
-                .style(if _value { text::primary } else { text::secondary }),
+            toggler(value).size(18).on_toggle(on_toggle),
         ]
         .align_y(Alignment::Center),
     )
@@ -377,20 +406,36 @@ fn info_row<'a>(label: &'a str, value: &'a str) -> Element<'a, SettingsMessage> 
     .into()
 }
 
-fn dropdown_display<'a>(current: &'a str) -> Element<'a, SettingsMessage> {
-    // Placeholder — iced has pick_list for real dropdowns.
-    // Scaffolding as a styled button showing the current value.
-    button(
-        row![
-            text(current).size(12).style(text::base),
-            icon::chevron_down().size(10).style(theme::text_tertiary),
-        ]
-        .spacing(SPACE_XXS)
-        .align_y(Alignment::Center),
-    )
-    .padding(PAD_ICON_BTN)
-    .style(button::secondary)
-    .into()
+fn settings_pick_list(
+    options: &[&str],
+    selected: &str,
+    on_select: fn(String) -> SettingsMessage,
+) -> Element<'static, SettingsMessage> {
+    let opts: Vec<String> = options.iter().map(|s| (*s).to_string()).collect();
+    let sel = Some(selected.to_string());
+    pick_list(sel, opts, |s: &String| s.clone())
+        .on_select(move |s| on_select(s))
+        .text_size(12)
+        .padding(iced::Padding::from([SPACE_XXS, SPACE_SM]))
+        .handle(pick_list::Handle::Arrow { size: Some(iced::Pixels(10.0)) })
+        .style(|theme: &iced::Theme, status| {
+            let p = theme.extended_palette();
+            pick_list::Style {
+                text_color: p.background.base.text,
+                placeholder_color: p.secondary.weak.color,
+                handle_color: p.background.base.text,
+                background: iced::Background::Color(iced::Color::TRANSPARENT),
+                border: match status {
+                    pick_list::Status::Hovered => iced::Border {
+                        color: p.background.strongest.color.scale_alpha(0.15),
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    _ => iced::Border::default(),
+                },
+            }
+        })
+        .into()
 }
 
 const ACCENT_COLORS: &[iced::Color] = &[
@@ -442,6 +487,11 @@ fn settings_section_container(theme: &iced::Theme) -> container::Style {
             color: p.background.strongest.color.scale_alpha(0.1),
             width: 1.0,
             radius: 8.0.into(),
+        },
+        shadow: iced::Shadow {
+            color: iced::Color::BLACK.scale_alpha(0.15),
+            offset: iced::Vector::ZERO,
+            blur_radius: 8.0,
         },
         ..Default::default()
     }

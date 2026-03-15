@@ -251,6 +251,10 @@ impl App {
                 self.show_settings = !self.show_settings;
                 Task::none()
             }
+            Message::Settings(ui::settings::SettingsMessage::Close) => {
+                self.show_settings = false;
+                Task::none()
+            }
             Message::Settings(msg) => {
                 self.settings.update(msg);
                 Task::none()
