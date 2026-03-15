@@ -1,7 +1,8 @@
 use iced::widget::{button, canvas, column, container, row, rule, text, Canvas, Space};
 use iced::{mouse, Alignment, Color, Element, Length, Rectangle, Renderer, Theme};
 
-use crate::db::Account;
+use crate::db::{Account, Thread};
+use crate::font;
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
@@ -370,6 +371,236 @@ impl canvas::Program<Message> for CirclePainter {
         vec![frame.into_geometry()]
     }
 }
+
+// ── Thread card ─────────────────────────────────────────
+
+pub fn thread_card(thread: &Thread, index: usize, selected: bool) -> Element<'_, Message> {
+    let sender = thread
+        .from_name
+        .as_deref()
+        .or(thread.from_address.as_deref())
+        .unwrap_or("(unknown)");
+
+    let subject = thread.subject.as_deref().unwrap_or("(no subject)");
+    let snippet = thread.snippet.as_deref().unwrap_or("");
+
+    let date_str = thread
+        .last_message_at
+        .and_then(|ts| {
+            chrono::DateTime::from_timestamp(ts, 0).map(|dt| {
+                let now = chrono::Utc::now();
+                let diff = now.signed_duration_since(dt);
+                if diff.num_hours() < 24 {
+                    dt.format("%l:%M %p").to_string().trim().to_string()
+                } else if diff.num_days() < 7 {
+                    dt.format("%a").to_string()
+                } else {
+                    dt.format("%b %d").to_string()
+                }
+            })
+        })
+        .unwrap_or_default();
+
+    let weight = if thread.is_read {
+        iced::font::Weight::Normal
+    } else {
+        iced::font::Weight::Bold
+    };
+    let name_style: fn(&Theme) -> text::Style = if thread.is_read {
+        text::secondary
+    } else {
+        text::base
+    };
+
+    let avatar = avatar_circle(sender, 28.0);
+
+    let mut indicators = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
+    if thread.has_attachments {
+        indicators = indicators.push(icon::paperclip().size(10).style(theme::text_tertiary));
+    }
+    if thread.is_starred {
+        indicators = indicators.push(icon::star().size(11).style(text::warning));
+    }
+    if thread.message_count > 1 {
+        indicators = indicators.push(
+            container(
+                text(thread.message_count.to_string())
+                    .size(10)
+                    .style(theme::text_tertiary),
+            )
+            .padding(PAD_BADGE)
+            .style(theme::badge_container),
+        );
+    }
+
+    let top_row = row![
+        text(sender)
+            .size(12)
+            .style(name_style)
+            .font(iced::Font { weight, ..font::TEXT }),
+        Space::new().width(Length::Fill),
+        text(date_str).size(10).style(theme::text_tertiary),
+    ]
+    .align_y(Alignment::Center);
+
+    let subject_row = row![
+        text(subject)
+            .size(12)
+            .style(name_style)
+            .font(iced::Font { weight, ..font::TEXT })
+            .wrapping(text::Wrapping::None),
+    ];
+
+    let snippet_row = row![
+        text(snippet)
+            .size(11)
+            .style(theme::text_tertiary)
+            .wrapping(text::Wrapping::None),
+        Space::new().width(Length::Fill),
+        indicators,
+    ]
+    .align_y(Alignment::Center);
+
+    let content = row![
+        avatar,
+        column![top_row, subject_row, snippet_row].spacing(SPACE_XXXS).width(Length::Fill),
+    ]
+    .spacing(SPACE_SM)
+    .align_y(Alignment::Start);
+
+    button(
+        container(content)
+            .padding(PAD_THREAD_CARD)
+            .width(Length::Fill),
+    )
+    .on_press(Message::SelectThread(index))
+    .padding(0)
+    .style(theme::thread_card_button(selected))
+    .width(Length::Fill)
+    .into()
+}
+
+// ── Action / reply buttons ──────────────────────────────
+
+pub fn action_icon_button<'a>(ico: iced::widget::Text<'a>, label: &'a str) -> Element<'a, Message> {
+    button(
+        row![
+            ico.size(12).style(text::secondary),
+            text(label).size(11).style(text::secondary),
+        ]
+        .spacing(SPACE_XXS)
+        .align_y(Alignment::Center),
+    )
+    .on_press(Message::Noop)
+    .padding(PAD_ICON_BTN)
+    .style(theme::action_button)
+    .into()
+}
+
+pub fn reply_button<'a>(ico: iced::widget::Text<'a>, label: &'a str) -> Element<'a, Message> {
+    button(
+        row![
+            ico.size(14).style(text::secondary),
+            text(label).size(12).style(text::secondary),
+        ]
+        .spacing(SPACE_XXS)
+        .align_y(Alignment::Center),
+    )
+    .on_press(Message::Noop)
+    .padding(PAD_BUTTON)
+    .style(button::secondary)
+    .into()
+}
+
+// ── Message card ────────────────────────────────────────
+
+pub fn message_card(thread: &Thread) -> Element<'_, Message> {
+    let sender = thread
+        .from_name
+        .as_deref()
+        .or(thread.from_address.as_deref())
+        .unwrap_or("(unknown)");
+
+    let avatar = avatar_circle(sender, 32.0);
+    let date_str = thread
+        .last_message_at
+        .and_then(|ts| {
+            chrono::DateTime::from_timestamp(ts, 0)
+                .map(|dt| dt.format("%a, %b %d, %Y, %l:%M %p").to_string())
+        })
+        .unwrap_or_default();
+
+    let header = row![
+        avatar,
+        column![
+            row![
+                text(sender).size(13).style(text::base),
+                Space::new().width(Length::Fill),
+                text(date_str).size(11).style(theme::text_tertiary),
+            ],
+            text(thread.from_address.as_deref().unwrap_or(""))
+                .size(11)
+                .style(theme::text_tertiary),
+        ]
+        .spacing(SPACE_XXXS)
+        .width(Length::Fill),
+    ]
+    .spacing(SPACE_SM)
+    .align_y(Alignment::Start);
+
+    let body_text = thread.snippet.as_deref().unwrap_or("(no preview available)");
+    let body = container(text(body_text).size(13).style(text::secondary))
+        .padding(iced::Padding::from([SPACE_SM, 0.0]));
+
+    container(column![header, body].spacing(SPACE_XS))
+        .padding(PAD_CARD)
+        .width(Length::Fill)
+        .style(theme::message_card_container)
+        .into()
+}
+
+// ── Empty state placeholder ─────────────────────────────
+
+pub fn empty_placeholder<'a>(title: &'a str, subtitle: &'a str) -> Element<'a, Message> {
+    container(
+        column![
+            text(title).size(16).style(theme::text_tertiary),
+            text(subtitle).size(12).style(theme::text_tertiary),
+        ]
+        .spacing(SPACE_XXS)
+        .align_x(Alignment::Center),
+    )
+    .center_x(Length::Fill)
+    .center_y(Length::Fill)
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+// ── Section header / stat row ───────────────────────────
+
+pub fn section_header<'a>(label: &'a str) -> Element<'a, Message> {
+    container(text(label).size(10).style(theme::text_tertiary))
+        .padding(PAD_SECTION_HEADER)
+        .width(Length::Fill)
+        .into()
+}
+
+pub fn stat_row<'a>(label: &'a str, value: &'a str) -> Element<'a, Message> {
+    container(
+        row![
+            text(label).size(11).style(theme::text_tertiary),
+            Space::new().width(Length::Fill),
+            text(value).size(11).style(text::secondary),
+        ]
+        .align_y(Alignment::Center),
+    )
+    .padding(PAD_STAT_ROW)
+    .width(Length::Fill)
+    .into()
+}
+
+// ── Canvas painters ─────────────────────────────────────
 
 struct DotPainter {
     color: Color,
