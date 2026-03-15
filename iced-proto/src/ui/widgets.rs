@@ -336,7 +336,7 @@ pub fn settings_button<'a>() -> Element<'a, Message> {
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),
     )
-    .on_press(Message::Noop)
+    .on_press(Message::ToggleSettings)
     .style(theme::bare_button)
     .padding(PAD_NAV_ITEM)
     .width(Length::Fill)

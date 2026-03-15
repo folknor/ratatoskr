@@ -51,6 +51,8 @@ pub enum Message {
     SelectThread(usize),
     Compose,
     Noop,
+    ToggleSettings,
+    Settings(ui::settings::SettingsMessage),
     AppearanceChanged(appearance::Mode),
     ToggleScopeDropdown,
     ToggleLabelsSection,
@@ -72,6 +74,8 @@ struct App {
     labels_expanded: bool,
     smart_folders_expanded: bool,
     panes: pane_grid::State<PaneKind>,
+    show_settings: bool,
+    settings: ui::settings::SettingsState,
 }
 
 fn pane_configuration() -> Configuration<PaneKind> {
@@ -113,6 +117,8 @@ impl App {
             labels_expanded: true,
             smart_folders_expanded: true,
             panes: pane_grid::State::with_configuration(pane_configuration()),
+            show_settings: false,
+            settings: ui::settings::SettingsState::default(),
         };
         (app, Task::perform(load_accounts(db_ref), Message::AccountsLoaded))
     }
@@ -241,11 +247,23 @@ impl App {
                 self.panes.resize(split, ratio);
                 Task::none()
             }
+            Message::ToggleSettings => {
+                self.show_settings = !self.show_settings;
+                Task::none()
+            }
+            Message::Settings(msg) => {
+                self.settings.update(msg);
+                Task::none()
+            }
             Message::Compose | Message::Noop => Task::none(),
         }
     }
 
     fn view(&self) -> Element<'_, Message> {
+        if self.show_settings {
+            return ui::settings::view(&self.settings).map(Message::Settings);
+        }
+
         let label_name = self
             .selected_label
             .as_deref()
