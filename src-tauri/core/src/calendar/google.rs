@@ -1,8 +1,7 @@
 use serde::Deserialize;
-use tauri::State;
 
 use crate::db::DbState;
-use crate::gmail::client::{GmailClient, GmailState};
+use crate::gmail::client::GmailClient;
 use crate::provider::http;
 
 use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};
@@ -78,25 +77,15 @@ struct GoogleEventListResponse {
     next_sync_token: Option<String>,
 }
 
-#[tauri::command]
-pub async fn google_calendar_list_calendars(
-    account_id: String,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-) -> Result<Vec<CalendarInfoDto>, String> {
-    google_calendar_list_calendars_impl(&account_id, &db, &gmail).await
-}
-
-pub(super) async fn google_calendar_list_calendars_impl(
-    account_id: &str,
+pub async fn google_calendar_list_calendars_impl(
+    _account_id: &str,
     db: &DbState,
-    gmail: &GmailState,
+    client: &GmailClient,
 ) -> Result<Vec<CalendarInfoDto>, String> {
-    let client = gmail.get(account_id).await?;
     let http = shared_http_client();
     let url = format!("{GOOGLE_CALENDAR_API_BASE}/users/me/calendarList");
     let response: GoogleCalendarListResponse =
-        google_calendar_request(http, &client, db, &url).await?;
+        google_calendar_request(http, client, db, &url).await?;
 
     Ok(response
         .items
@@ -110,26 +99,14 @@ pub(super) async fn google_calendar_list_calendars_impl(
         .collect())
 }
 
-#[tauri::command]
-pub async fn google_calendar_sync_events(
-    account_id: String,
-    calendar_remote_id: String,
-    sync_token: Option<String>,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
-) -> Result<CalendarSyncResultDto, String> {
-    google_calendar_sync_events_impl(&account_id, &calendar_remote_id, sync_token, &db, &gmail)
-        .await
-}
-
-pub(super) async fn google_calendar_sync_events_impl(
+pub async fn google_calendar_sync_events_impl(
     account_id: &str,
     calendar_remote_id: &str,
     sync_token: Option<String>,
     db: &DbState,
-    gmail: &GmailState,
+    client: &GmailClient,
 ) -> Result<CalendarSyncResultDto, String> {
-    let client = gmail.get(account_id).await?;
+    let _ = account_id;
     let http = shared_http_client();
     let encoded_id = urlencoding::encode(calendar_remote_id);
     let mut created = Vec::new();
@@ -161,7 +138,7 @@ pub(super) async fn google_calendar_sync_events_impl(
         let url = format!("{GOOGLE_CALENDAR_API_BASE}/calendars/{encoded_id}/events?{query}");
 
         let response =
-            match google_calendar_request::<GoogleEventListResponse>(http, &client, db, &url).await
+            match google_calendar_request::<GoogleEventListResponse>(http, client, db, &url).await
             {
                 Ok(value) => value,
                 Err(error) => {
@@ -210,88 +187,76 @@ pub(super) async fn google_calendar_sync_events_impl(
     })
 }
 
-#[tauri::command]
-pub async fn google_calendar_fetch_events(
-    account_id: String,
-    calendar_remote_id: String,
-    time_min: String,
-    time_max: String,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
+pub async fn google_calendar_fetch_events_impl(
+    client: &GmailClient,
+    db: &DbState,
+    calendar_remote_id: &str,
+    time_min: &str,
+    time_max: &str,
 ) -> Result<Vec<CalendarEventDto>, String> {
-    let client = gmail.get(&account_id).await?;
     let http = shared_http_client();
-    let encoded_id = urlencoding::encode(&calendar_remote_id);
+    let encoded_id = urlencoding::encode(calendar_remote_id);
     let query = [
         ("timeMin", time_min),
         ("timeMax", time_max),
-        ("singleEvents", "true".to_string()),
-        ("orderBy", "startTime".to_string()),
-        ("maxResults", "250".to_string()),
+        ("singleEvents", "true"),
+        ("orderBy", "startTime"),
+        ("maxResults", "250"),
     ]
     .into_iter()
-    .map(|(key, value)| format!("{key}={}", urlencoding::encode(&value)))
+    .map(|(key, value)| format!("{key}={}", urlencoding::encode(value)))
     .collect::<Vec<_>>()
     .join("&");
     let url = format!("{GOOGLE_CALENDAR_API_BASE}/calendars/{encoded_id}/events?{query}");
     let response: GoogleEventListResponse =
-        google_calendar_request(http, &client, &db, &url).await?;
+        google_calendar_request(http, client, db, &url).await?;
 
     response.items.into_iter().map(map_google_event).collect()
 }
 
-#[tauri::command]
-pub async fn google_calendar_create_event(
-    account_id: String,
-    calendar_remote_id: String,
+pub async fn google_calendar_create_event_impl(
+    client: &GmailClient,
+    db: &DbState,
+    calendar_remote_id: &str,
     event: serde_json::Value,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
 ) -> Result<CalendarEventDto, String> {
-    let client = gmail.get(&account_id).await?;
     let http = shared_http_client();
-    let encoded_id = urlencoding::encode(&calendar_remote_id);
+    let encoded_id = urlencoding::encode(calendar_remote_id);
     let url = format!("{GOOGLE_CALENDAR_API_BASE}/calendars/{encoded_id}/events");
     let response: GoogleCalendarEvent =
-        google_calendar_request_with_body(http, &client, &db, "POST", &url, Some(event)).await?;
+        google_calendar_request_with_body(http, client, db, "POST", &url, Some(event)).await?;
     map_google_event(response)
 }
 
-#[tauri::command]
-pub async fn google_calendar_update_event(
-    account_id: String,
-    calendar_remote_id: String,
-    remote_event_id: String,
+pub async fn google_calendar_update_event_impl(
+    client: &GmailClient,
+    db: &DbState,
+    calendar_remote_id: &str,
+    remote_event_id: &str,
     event: serde_json::Value,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
 ) -> Result<CalendarEventDto, String> {
-    let client = gmail.get(&account_id).await?;
     let http = shared_http_client();
-    let encoded_cal_id = urlencoding::encode(&calendar_remote_id);
-    let encoded_event_id = urlencoding::encode(&remote_event_id);
+    let encoded_cal_id = urlencoding::encode(calendar_remote_id);
+    let encoded_event_id = urlencoding::encode(remote_event_id);
     let url =
         format!("{GOOGLE_CALENDAR_API_BASE}/calendars/{encoded_cal_id}/events/{encoded_event_id}");
     let response: GoogleCalendarEvent =
-        google_calendar_request_with_body(http, &client, &db, "PATCH", &url, Some(event)).await?;
+        google_calendar_request_with_body(http, client, db, "PATCH", &url, Some(event)).await?;
     map_google_event(response)
 }
 
-#[tauri::command]
-pub async fn google_calendar_delete_event(
-    account_id: String,
-    calendar_remote_id: String,
-    remote_event_id: String,
-    db: State<'_, DbState>,
-    gmail: State<'_, GmailState>,
+pub async fn google_calendar_delete_event_impl(
+    client: &GmailClient,
+    db: &DbState,
+    calendar_remote_id: &str,
+    remote_event_id: &str,
 ) -> Result<(), String> {
-    let client = gmail.get(&account_id).await?;
     let http = shared_http_client();
-    let encoded_cal_id = urlencoding::encode(&calendar_remote_id);
-    let encoded_event_id = urlencoding::encode(&remote_event_id);
+    let encoded_cal_id = urlencoding::encode(calendar_remote_id);
+    let encoded_event_id = urlencoding::encode(remote_event_id);
     let url =
         format!("{GOOGLE_CALENDAR_API_BASE}/calendars/{encoded_cal_id}/events/{encoded_event_id}");
-    google_calendar_request_empty(http, &client, &db, "DELETE", &url).await
+    google_calendar_request_empty(http, client, db, "DELETE", &url).await
 }
 
 async fn google_calendar_request<T: serde::de::DeserializeOwned>(

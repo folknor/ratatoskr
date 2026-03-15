@@ -1,7 +1,9 @@
+pub mod account;
 pub mod ai;
 pub mod attachment_cache;
 pub mod bimi;
 pub mod body_store;
+pub mod calendar;
 pub mod carddav;
 pub mod categorization;
 pub mod contact_photos;
@@ -18,6 +20,7 @@ pub mod imap;
 pub mod inline_image_store;
 pub mod jmap;
 pub mod mdn;
+pub mod oauth;
 pub mod mentions;
 pub mod progress;
 pub mod provider;

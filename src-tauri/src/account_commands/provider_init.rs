@@ -1,4 +1,3 @@
-use rusqlite::OptionalExtension;
 use tauri::{AppHandle, State};
 
 use crate::db::DbState;
@@ -10,6 +9,8 @@ use crate::oauth::{
     PendingOAuthAuthorization, PendingOAuthAuthorizations,
 };
 use crate::provider::crypto::{AppCryptoState, encrypt_value};
+
+use ratatoskr_core::account::provider_init;
 
 use super::types::{
     AccountResult, CreateImapOAuthAccountRequest, OAuthProviderAuthorizationResult,
@@ -32,15 +33,7 @@ pub async fn account_create_gmail_via_oauth(
 
     let email_for_check = oauth.user_info.email.clone();
     let duplicate = db
-        .with_conn(move |conn| {
-            conn.query_row(
-                "SELECT id FROM accounts WHERE email = ?1 AND provider = 'gmail_api' LIMIT 1",
-                rusqlite::params![email_for_check],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()
-            .map_err(|e| format!("Duplicate Gmail check failed: {e}"))
-        })
+        .with_conn(move |conn| provider_init::check_gmail_duplicate(conn, &email_for_check))
         .await?;
     if let Some(existing_id) = duplicate {
         return Err(format!(
@@ -49,56 +42,41 @@ pub async fn account_create_gmail_via_oauth(
         ));
     }
 
+    let encryption_key = *gmail.encryption_key();
     let account_id = uuid::Uuid::new_v4().to_string();
-    let expires_at = chrono::Utc::now().timestamp()
-        + i64::try_from(oauth.tokens.expires_in).map_err(|_| "Google token expiry overflow")?;
-    let access_token = encrypt_value(gmail.encryption_key(), &oauth.tokens.access_token)?;
-    let refresh_token = encrypt_value(
-        gmail.encryption_key(),
+    let (access_token, refresh_token, expires_at) = provider_init::encrypt_oauth_tokens(
+        &encryption_key,
+        &oauth.tokens.access_token,
         oauth
             .tokens
             .refresh_token
             .as_deref()
             .ok_or("Google did not return a refresh token")?,
+        oauth.tokens.expires_in,
     )?;
 
-    let encrypted_client_id = encrypt_value(gmail.encryption_key(), &client_id)?;
+    let encrypted_client_id = encrypt_value(&encryption_key, &client_id)?;
     let encrypted_client_secret = if secret.is_empty() {
         None
     } else {
-        Some(encrypt_value(gmail.encryption_key(), &secret)?)
+        Some(encrypt_value(&encryption_key, &secret)?)
     };
 
-    db.with_conn({
-        let id = account_id.clone();
-        let email = oauth.user_info.email.clone();
-        let display_name = oauth.user_info.name.clone();
-        let avatar_url = oauth.user_info.picture.clone();
-        move |conn| {
-            conn.execute(
-                "INSERT INTO accounts (id, email, display_name, avatar_url, access_token, \
-                 refresh_token, token_expires_at, provider, auth_method, oauth_client_id, \
-                 oauth_client_secret) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'gmail_api', 'oauth2', ?8, ?9)",
-                rusqlite::params![
-                    id,
-                    email,
-                    display_name,
-                    avatar_url,
-                    access_token,
-                    refresh_token,
-                    expires_at,
-                    encrypted_client_id,
-                    encrypted_client_secret,
-                ],
-            )
-            .map_err(|e| format!("Failed to insert Gmail account: {e}"))?;
-            Ok(())
-        }
-    })
-    .await?;
+    let params = provider_init::InsertGmailAccountParams {
+        account_id: account_id.clone(),
+        email: oauth.user_info.email.clone(),
+        display_name: Some(oauth.user_info.name.clone()),
+        avatar_url: oauth.user_info.picture.clone(),
+        access_token,
+        refresh_token,
+        expires_at,
+        encrypted_client_id,
+        encrypted_client_secret,
+    };
+    db.with_conn(move |conn| provider_init::insert_gmail_account(conn, &params))
+        .await?;
 
-    let client = GmailClient::from_account(&db, &account_id, *gmail.encryption_key()).await?;
+    let client = GmailClient::from_account(&db, &account_id, encryption_key).await?;
     gmail.insert(account_id.clone(), client).await;
 
     Ok(AccountResult {
@@ -155,69 +133,49 @@ pub async fn account_create_imap_oauth(
         .map_err(|_| "Pending OAuth store is poisoned".to_string())?
         .remove(&request.authorization_id)
         .ok_or_else(|| "OAuth authorization has expired or is invalid".to_string())?;
-    let account_id = uuid::Uuid::new_v4().to_string();
-    let access_token = encrypt_value(crypto.encryption_key(), &authorization.tokens.access_token)?;
-    let refresh_token = encrypt_value(
-        crypto.encryption_key(),
+
+    let encryption_key = *crypto.encryption_key();
+    let (access_token, refresh_token, expires_at) = provider_init::encrypt_oauth_tokens(
+        &encryption_key,
+        &authorization.tokens.access_token,
         authorization
             .tokens
             .refresh_token
             .as_deref()
             .ok_or_else(|| "OAuth provider did not return a refresh token".to_string())?,
+        authorization.tokens.expires_in,
     )?;
     let oauth_client_secret = request
         .oauth_client_secret
         .as_deref()
         .filter(|secret| !secret.is_empty())
-        .map(|secret| encrypt_value(crypto.encryption_key(), secret))
+        .map(|secret| encrypt_value(&encryption_key, secret))
         .transpose()?;
 
-    db.with_conn({
-        let account_id = account_id.clone();
-        let email = request.email.clone();
-        let display_name = request.display_name.clone();
-        let avatar_url = request.avatar_url.clone();
-        move |conn| {
-            conn.execute(
-                "INSERT INTO accounts (id, email, display_name, avatar_url, access_token, \
-                 refresh_token, token_expires_at, provider, auth_method, imap_host, imap_port, \
-                 imap_security, smtp_host, smtp_port, smtp_security, oauth_provider, \
-                 oauth_client_id, oauth_client_secret, oauth_token_url, imap_username, \
-                 accept_invalid_certs) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'imap', 'oauth2', ?8, ?9, ?10, ?11, ?12, \
-                 ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
-                rusqlite::params![
-                    account_id,
-                    email,
-                    display_name,
-                    avatar_url,
-                    access_token,
-                    refresh_token,
-                    i64::try_from(authorization.tokens.expires_in)
-                        .ok()
-                        .and_then(|expires_in| chrono::Utc::now()
-                            .timestamp()
-                            .checked_add(expires_in))
-                        .unwrap_or_else(|| chrono::Utc::now().timestamp()),
-                    request.imap_host,
-                    request.imap_port,
-                    request.imap_security,
-                    request.smtp_host,
-                    request.smtp_port,
-                    request.smtp_security,
-                    request.oauth_provider,
-                    request.oauth_client_id,
-                    oauth_client_secret,
-                    request.oauth_token_url,
-                    request.imap_username,
-                    if request.accept_invalid_certs { 1 } else { 0 },
-                ],
-            )
-            .map_err(|e| format!("Failed to insert OAuth IMAP account: {e}"))?;
-            Ok(())
-        }
-    })
-    .await?;
+    let account_id = uuid::Uuid::new_v4().to_string();
+    let params = provider_init::InsertImapOAuthAccountParams {
+        account_id: account_id.clone(),
+        email: request.email.clone(),
+        display_name: request.display_name.clone(),
+        avatar_url: request.avatar_url.clone(),
+        access_token,
+        refresh_token,
+        expires_at,
+        imap_host: request.imap_host,
+        imap_port: request.imap_port,
+        imap_security: request.imap_security,
+        smtp_host: request.smtp_host,
+        smtp_port: request.smtp_port,
+        smtp_security: request.smtp_security,
+        oauth_provider: request.oauth_provider,
+        oauth_client_id: request.oauth_client_id,
+        oauth_client_secret,
+        oauth_token_url: request.oauth_token_url,
+        imap_username: request.imap_username,
+        accept_invalid_certs: request.accept_invalid_certs,
+    };
+    db.with_conn(move |conn| provider_init::insert_imap_oauth_account(conn, &params))
+        .await?;
 
     Ok(AccountResult {
         id: account_id,
@@ -242,49 +200,37 @@ pub async fn account_create_graph_via_oauth(
     };
     let oauth = crate::oauth::authorize_with_provider(&app, &provider).await?;
 
+    let encryption_key = *graph.encryption_key();
     let account_id = uuid::Uuid::new_v4().to_string();
-    let expires_at = chrono::Utc::now().timestamp()
-        + i64::try_from(oauth.tokens.expires_in).map_err(|_| "Microsoft token expiry overflow")?;
-    let access_token = encrypt_value(graph.encryption_key(), &oauth.tokens.access_token)?;
-    let refresh_token = encrypt_value(
-        graph.encryption_key(),
+    let (access_token, refresh_token, expires_at) = provider_init::encrypt_oauth_tokens(
+        &encryption_key,
+        &oauth.tokens.access_token,
         oauth
             .tokens
             .refresh_token
             .as_deref()
             .ok_or("Microsoft did not return a refresh token")?,
+        oauth.tokens.expires_in,
     )?;
 
-    let actual_client_id = client_id.unwrap_or_else(|| crate::oauth::default_microsoft_client_id().to_string());
-    let encrypted_client_id = encrypt_value(graph.encryption_key(), &actual_client_id)?;
+    let actual_client_id =
+        client_id.unwrap_or_else(|| crate::oauth::default_microsoft_client_id().to_string());
+    let encrypted_client_id = encrypt_value(&encryption_key, &actual_client_id)?;
 
-    db.with_conn({
-        let id = account_id.clone();
-        let email = oauth.user_info.email.clone();
-        let display_name = oauth.user_info.name.clone();
-        move |conn| {
-            conn.execute(
-                "INSERT INTO accounts (id, email, display_name, avatar_url, access_token, \
-                 refresh_token, token_expires_at, provider, auth_method, oauth_client_id) \
-                 VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, 'graph', 'oauth2', ?7)",
-                rusqlite::params![
-                    id,
-                    email,
-                    display_name,
-                    access_token,
-                    refresh_token,
-                    expires_at,
-                    encrypted_client_id,
-                ],
-            )
-            .map_err(|e| format!("Failed to insert Graph account: {e}"))?;
-            Ok(())
-        }
-    })
-    .await?;
+    let graph_params = provider_init::InsertGraphAccountParams {
+        account_id: account_id.clone(),
+        email: oauth.user_info.email.clone(),
+        display_name: Some(oauth.user_info.name.clone()),
+        access_token,
+        refresh_token,
+        expires_at,
+        encrypted_client_id,
+    };
+    db.with_conn(move |conn| provider_init::insert_graph_account(conn, &graph_params))
+        .await?;
 
     let init_result = async {
-        let client = GraphClient::from_account(&db, &account_id, *graph.encryption_key()).await?;
+        let client = GraphClient::from_account(&db, &account_id, encryption_key).await?;
         let profile: GraphProfile = client
             .get_json("/me?$select=displayName,mail,userPrincipalName", &db)
             .await?;
@@ -298,12 +244,7 @@ pub async fn account_create_graph_via_oauth(
             let cleanup_id = account_id.clone();
             let _ = db
                 .with_conn(move |conn| {
-                    conn.execute(
-                        "DELETE FROM accounts WHERE id = ?1",
-                        rusqlite::params![cleanup_id],
-                    )
-                    .map_err(|de| format!("cleanup delete failed: {de}"))?;
-                    Ok(())
+                    ratatoskr_core::account::delete::delete_account_row(conn, &cleanup_id)
                 })
                 .await;
             return Err(e);
@@ -325,15 +266,7 @@ pub async fn account_create_graph_via_oauth(
         let id = account_id.clone();
         let email = email.clone();
         let display_name = display_name.clone();
-        move |conn| {
-            conn.execute(
-                "UPDATE accounts SET email = ?1, display_name = ?2, updated_at = unixepoch() \
-                 WHERE id = ?3",
-                rusqlite::params![email, display_name, id],
-            )
-            .map_err(|e| format!("Failed to finalize Graph account profile: {e}"))?;
-            Ok(())
-        }
+        move |conn| provider_init::finalize_graph_profile(conn, &id, &email, &display_name)
     })
     .await?;
 
@@ -359,45 +292,12 @@ pub async fn account_reauthorize_gmail(
 ) -> Result<(), String> {
     let encryption_key = *gmail.encryption_key();
 
-    // Use provided credentials, or read existing per-account credentials
     let (resolved_client_id, resolved_client_secret) = if let Some(ref cid) = client_id {
         (cid.clone(), client_secret.clone().unwrap_or_default())
     } else {
         let aid = account_id.clone();
         db.with_conn(move |conn| {
-            conn.query_row(
-                "SELECT oauth_client_id, oauth_client_secret FROM accounts WHERE id = ?1",
-                rusqlite::params![aid],
-                |row| {
-                    Ok((
-                        row.get::<_, Option<String>>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                    ))
-                },
-            )
-            .map_err(|e| format!("Failed to read account credentials: {e}"))
-            .and_then(|(cid, cs)| {
-                let cid = cid.filter(|s| !s.is_empty()).ok_or_else(|| {
-                    "Account has no stored OAuth credentials. Provide client_id to reauthorize."
-                        .to_string()
-                })?;
-                let cid = if crate::provider::crypto::is_encrypted(&cid) {
-                    crate::provider::crypto::decrypt_value(&encryption_key, &cid).unwrap_or(cid)
-                } else {
-                    cid
-                };
-                let cs = cs
-                    .filter(|s| !s.is_empty())
-                    .map(|s| {
-                        if crate::provider::crypto::is_encrypted(&s) {
-                            crate::provider::crypto::decrypt_value(&encryption_key, &s).unwrap_or(s)
-                        } else {
-                            s
-                        }
-                    })
-                    .unwrap_or_default();
-                Ok((cid, cs))
-            })
+            provider_init::resolve_gmail_reauth_credentials(conn, &aid, &encryption_key)
         })
         .await?
     };
@@ -414,16 +314,17 @@ pub async fn account_reauthorize_gmail(
         ));
     }
 
-    let refresh_token = oauth
+    let refresh_raw = oauth
         .tokens
         .refresh_token
         .ok_or("Google did not return a refresh token. Please revoke app access and try again.")?;
-    let access_token = encrypt_value(&encryption_key, &oauth.tokens.access_token)?;
-    let refresh_token = encrypt_value(&encryption_key, &refresh_token)?;
-    let expires_at = chrono::Utc::now().timestamp()
-        + i64::try_from(oauth.tokens.expires_in).map_err(|_| "Google token expiry overflow")?;
+    let (access_token, refresh_token, expires_at) = provider_init::encrypt_oauth_tokens(
+        &encryption_key,
+        &oauth.tokens.access_token,
+        &refresh_raw,
+        oauth.tokens.expires_in,
+    )?;
 
-    // If new credentials were provided, update them on the account
     let new_encrypted_cid = if client_id.is_some() {
         Some(encrypt_value(&encryption_key, &resolved_client_id)?)
     } else {
@@ -438,30 +339,15 @@ pub async fn account_reauthorize_gmail(
     db.with_conn({
         let id = account_id.clone();
         move |conn| {
-            if let Some(enc_cid) = new_encrypted_cid {
-                conn.execute(
-                    "UPDATE accounts SET access_token = ?1, refresh_token = ?2, \
-                     token_expires_at = ?3, oauth_client_id = ?4, oauth_client_secret = ?5, \
-                     updated_at = unixepoch() WHERE id = ?6",
-                    rusqlite::params![
-                        access_token,
-                        refresh_token,
-                        expires_at,
-                        enc_cid,
-                        new_encrypted_cs,
-                        id
-                    ],
-                )
-                .map_err(|e| format!("Failed to update Gmail account tokens: {e}"))?;
-            } else {
-                conn.execute(
-                    "UPDATE accounts SET access_token = ?1, refresh_token = ?2, \
-                     token_expires_at = ?3, updated_at = unixepoch() WHERE id = ?4",
-                    rusqlite::params![access_token, refresh_token, expires_at, id],
-                )
-                .map_err(|e| format!("Failed to update Gmail account tokens: {e}"))?;
-            }
-            Ok(())
+            provider_init::update_gmail_reauth_tokens(
+                conn,
+                &id,
+                &access_token,
+                &refresh_token,
+                expires_at,
+                new_encrypted_cid.as_deref(),
+                new_encrypted_cs.as_deref(),
+            )
         }
     })
     .await?;
@@ -487,25 +373,14 @@ pub async fn account_reauthorize_graph(
         cid
     } else {
         let aid = account_id.clone();
+        let default_cid = crate::oauth::default_microsoft_client_id().to_string();
         db.with_conn(move |conn| {
-            conn.query_row(
-                "SELECT oauth_client_id FROM accounts WHERE id = ?1",
-                rusqlite::params![aid],
-                |row| row.get::<_, Option<String>>(0),
+            provider_init::resolve_graph_reauth_client_id(
+                conn,
+                &aid,
+                &encryption_key,
+                &default_cid,
             )
-            .map_err(|e| format!("Failed to read account credentials: {e}"))
-            .map(|cid| {
-                match cid.filter(|s| !s.is_empty()) {
-                    Some(encrypted) => {
-                        if crate::provider::crypto::is_encrypted(&encrypted) {
-                            crate::provider::crypto::decrypt_value(&encryption_key, &encrypted).unwrap_or(encrypted)
-                        } else {
-                            encrypted
-                        }
-                    }
-                    None => crate::oauth::default_microsoft_client_id().to_string(),
-                }
-            })
         })
         .await?
     };
@@ -522,17 +397,16 @@ pub async fn account_reauthorize_graph(
         ));
     }
 
-    let access_token = encrypt_value(&encryption_key, &oauth.tokens.access_token)?;
-    let refresh_token = encrypt_value(
+    let (access_token, refresh_token, expires_at) = provider_init::encrypt_oauth_tokens(
         &encryption_key,
+        &oauth.tokens.access_token,
         oauth
             .tokens
             .refresh_token
             .as_deref()
             .ok_or("Microsoft did not return a refresh token")?,
+        oauth.tokens.expires_in,
     )?;
-    let expires_at = chrono::Utc::now().timestamp()
-        + i64::try_from(oauth.tokens.expires_in).map_err(|_| "Microsoft token expiry overflow")?;
 
     let new_encrypted_cid = if client_id.is_some() {
         Some(encrypt_value(&encryption_key, &resolved_client_id)?)
@@ -543,23 +417,14 @@ pub async fn account_reauthorize_graph(
     db.with_conn({
         let id = account_id.clone();
         move |conn| {
-            if let Some(enc_cid) = new_encrypted_cid {
-                conn.execute(
-                    "UPDATE accounts SET access_token = ?1, refresh_token = ?2, \
-                     token_expires_at = ?3, oauth_client_id = ?4, \
-                     updated_at = unixepoch() WHERE id = ?5",
-                    rusqlite::params![access_token, refresh_token, expires_at, enc_cid, id],
-                )
-                .map_err(|e| format!("Failed to update Graph account tokens: {e}"))?;
-            } else {
-                conn.execute(
-                    "UPDATE accounts SET access_token = ?1, refresh_token = ?2, \
-                     token_expires_at = ?3, updated_at = unixepoch() WHERE id = ?4",
-                    rusqlite::params![access_token, refresh_token, expires_at, id],
-                )
-                .map_err(|e| format!("Failed to update Graph account tokens: {e}"))?;
-            }
-            Ok(())
+            provider_init::update_graph_reauth_tokens(
+                conn,
+                &id,
+                &access_token,
+                &refresh_token,
+                expires_at,
+                new_encrypted_cid.as_deref(),
+            )
         }
     })
     .await?;

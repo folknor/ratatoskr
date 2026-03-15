@@ -1,13 +1,11 @@
 use rusqlite::OptionalExtension;
-use tauri::State;
 
 use crate::db::DbState;
-use crate::provider::crypto::AppCryptoState;
 
 use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};
 use super::{CALDAV_NS, shared_http_client};
 
-pub(super) struct CaldavAccountConfig {
+pub struct CaldavAccountConfig {
     server_url: String,
     username: String,
     password: String,
@@ -15,16 +13,7 @@ pub(super) struct CaldavAccountConfig {
     home_url: Option<String>,
 }
 
-#[tauri::command]
-pub async fn caldav_list_calendars(
-    account_id: String,
-    db: State<'_, DbState>,
-    crypto: State<'_, AppCryptoState>,
-) -> Result<Vec<CalendarInfoDto>, String> {
-    caldav_list_calendars_impl(&account_id, &db, crypto.encryption_key()).await
-}
-
-pub(super) async fn caldav_list_calendars_impl(
+pub async fn caldav_list_calendars_impl(
     account_id: &str,
     db: &DbState,
     encryption_key: &[u8; 32],
@@ -35,32 +24,20 @@ pub(super) async fn caldav_list_calendars_impl(
     list_caldav_calendars(client, &config, &home_url).await
 }
 
-#[tauri::command]
-pub async fn caldav_fetch_events(
-    account_id: String,
-    calendar_remote_id: String,
-    time_min: String,
-    time_max: String,
-    db: State<'_, DbState>,
-    crypto: State<'_, AppCryptoState>,
+pub async fn caldav_fetch_events_impl(
+    db: &DbState,
+    encryption_key: &[u8; 32],
+    account_id: &str,
+    calendar_remote_id: &str,
+    time_min: &str,
+    time_max: &str,
 ) -> Result<Vec<CalendarEventDto>, String> {
-    let config = load_caldav_account_config(&db, crypto.encryption_key(), &account_id).await?;
+    let config = load_caldav_account_config(db, encryption_key, account_id).await?;
     let client = shared_http_client();
-    fetch_caldav_events(client, &config, &calendar_remote_id, &time_min, &time_max).await
+    fetch_caldav_events(client, &config, calendar_remote_id, time_min, time_max).await
 }
 
-#[tauri::command]
-pub async fn caldav_sync_events(
-    account_id: String,
-    calendar_remote_id: String,
-    _sync_token: Option<String>,
-    db: State<'_, DbState>,
-    crypto: State<'_, AppCryptoState>,
-) -> Result<CalendarSyncResultDto, String> {
-    caldav_sync_events_impl(&account_id, &calendar_remote_id, &db, crypto.encryption_key()).await
-}
-
-pub(super) async fn caldav_sync_events_impl(
+pub async fn caldav_sync_events_impl(
     account_id: &str,
     calendar_remote_id: &str,
     db: &DbState,
@@ -81,13 +58,12 @@ pub(super) async fn caldav_sync_events_impl(
     })
 }
 
-#[tauri::command]
-pub async fn caldav_test_connection(
-    account_id: String,
-    db: State<'_, DbState>,
-    crypto: State<'_, AppCryptoState>,
+pub async fn caldav_test_connection_impl(
+    db: &DbState,
+    encryption_key: &[u8; 32],
+    account_id: &str,
 ) -> Result<serde_json::Value, String> {
-    let config = load_caldav_account_config(&db, crypto.encryption_key(), &account_id).await?;
+    let config = load_caldav_account_config(db, encryption_key, account_id).await?;
     let client = shared_http_client();
     let result = match resolve_caldav_home_url(client, &config).await {
         Ok(home_url) => list_caldav_calendars(client, &config, &home_url).await,
@@ -110,20 +86,19 @@ pub async fn caldav_test_connection(
     }
 }
 
-#[tauri::command]
-pub async fn caldav_create_event(
-    account_id: String,
-    calendar_remote_id: String,
+pub async fn caldav_create_event_impl(
+    db: &DbState,
+    encryption_key: &[u8; 32],
+    account_id: &str,
+    calendar_remote_id: &str,
     event: serde_json::Value,
-    db: State<'_, DbState>,
-    crypto: State<'_, AppCryptoState>,
 ) -> Result<CalendarEventDto, String> {
-    let config = load_caldav_account_config(&db, crypto.encryption_key(), &account_id).await?;
+    let config = load_caldav_account_config(db, encryption_key, account_id).await?;
     let client = shared_http_client();
     let input = parse_caldav_event_input(event)?;
     let uid = uuid::Uuid::new_v4().to_string();
     let ical_data = build_caldav_ical_event(&input, Some(&uid));
-    let remote_event_id = join_url_path(&calendar_remote_id, &format!("{uid}.ics"))?;
+    let remote_event_id = join_url_path(calendar_remote_id, &format!("{uid}.ics"))?;
 
     caldav_request_with_headers(
         client,
@@ -139,20 +114,19 @@ pub async fn caldav_create_event(
     fetch_caldav_event_by_href(client, &config, &remote_event_id).await
 }
 
-#[tauri::command]
-pub async fn caldav_update_event(
-    account_id: String,
-    _calendar_remote_id: String,
-    remote_event_id: String,
+#[allow(clippy::too_many_arguments)]
+pub async fn caldav_update_event_impl(
+    db: &DbState,
+    encryption_key: &[u8; 32],
+    account_id: &str,
+    remote_event_id: &str,
     event: serde_json::Value,
     etag: Option<String>,
-    db: State<'_, DbState>,
-    crypto: State<'_, AppCryptoState>,
 ) -> Result<CalendarEventDto, String> {
-    let config = load_caldav_account_config(&db, crypto.encryption_key(), &account_id).await?;
+    let config = load_caldav_account_config(db, encryption_key, account_id).await?;
     let client = shared_http_client();
     let input = parse_caldav_event_input(event)?;
-    let existing = fetch_caldav_event_by_href(client, &config, &remote_event_id).await?;
+    let existing = fetch_caldav_event_by_href(client, &config, remote_event_id).await?;
     let merged = merge_caldav_event_input(&existing, &input);
     let ical_data = build_caldav_ical_event(&merged, existing.uid.as_deref());
 
@@ -165,26 +139,24 @@ pub async fn caldav_update_event(
         client,
         &config,
         "PUT",
-        &remote_event_id,
+        remote_event_id,
         Some(&ical_data),
         None,
         &headers,
     )
     .await?;
 
-    fetch_caldav_event_by_href(client, &config, &remote_event_id).await
+    fetch_caldav_event_by_href(client, &config, remote_event_id).await
 }
 
-#[tauri::command]
-pub async fn caldav_delete_event(
-    account_id: String,
-    _calendar_remote_id: String,
-    remote_event_id: String,
+pub async fn caldav_delete_event_impl(
+    db: &DbState,
+    encryption_key: &[u8; 32],
+    account_id: &str,
+    remote_event_id: &str,
     etag: Option<String>,
-    db: State<'_, DbState>,
-    crypto: State<'_, AppCryptoState>,
 ) -> Result<(), String> {
-    let config = load_caldav_account_config(&db, crypto.encryption_key(), &account_id).await?;
+    let config = load_caldav_account_config(db, encryption_key, account_id).await?;
     let client = shared_http_client();
     let mut headers = Vec::new();
     if let Some(etag_value) = etag.as_deref() {
@@ -194,7 +166,7 @@ pub async fn caldav_delete_event(
         client,
         &config,
         "DELETE",
-        &remote_event_id,
+        remote_event_id,
         None,
         None,
         &headers,
@@ -203,7 +175,7 @@ pub async fn caldav_delete_event(
     Ok(())
 }
 
-pub(super) async fn load_caldav_account_config(
+pub async fn load_caldav_account_config(
     db: &DbState,
     encryption_key: &[u8; 32],
     account_id: &str,
@@ -761,6 +733,9 @@ fn parse_caldav_ical_event(ical_data: &str, href: &str) -> Result<CalendarEventD
             _ => {}
         }
     }
+
+    let _ = dtstart_tzid;
+    let _ = dtend_tzid;
 
     let start_time = dtstart
         .as_deref()

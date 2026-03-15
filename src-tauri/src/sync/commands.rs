@@ -3,7 +3,7 @@
 use tauri::{AppHandle, State};
 
 use crate::body_store::BodyStoreState;
-use crate::calendar_commands::sync::calendar_sync_account_impl;
+use ratatoskr_core::calendar::sync::calendar_sync_account_impl;
 use crate::categorization::AiCategorizationCandidate;
 use crate::categorization::commands::categorize_threads_with_ai_impl;
 use crate::db::DbState;
