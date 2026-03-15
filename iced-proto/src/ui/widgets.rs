@@ -115,8 +115,11 @@ pub fn nav_item_with_badge<'a>(
         text::secondary
     };
 
-    let mut content = row![text(label).size(TEXT_MD).style(label_style)]
-        .align_y(Alignment::Center);
+    let mut content = row![
+        container(text(label).size(TEXT_MD).style(label_style))
+            .align_y(Alignment::Center)
+    ]
+    .align_y(Alignment::Center);
 
     if unread > 0 {
         content = content
@@ -146,9 +149,13 @@ pub fn label_nav_item<'a>(
     };
 
     button(
-        row![color_dot(color), text(name).size(TEXT_MD).style(lbl_style)]
-            .spacing(SPACE_XS)
-            .align_y(Alignment::Center),
+        row![
+            color_dot(color),
+            container(text(name).size(TEXT_MD).style(lbl_style))
+                .align_y(Alignment::Center),
+        ]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center),
     )
     .on_press(on_press)
     .padding(PAD_ICON_BTN)
@@ -188,9 +195,11 @@ pub fn collapsible_section<'a>(
 
     let header = button(
         row![
-            text(title).size(TEXT_XS).style(theme::text_tertiary),
+            container(text(title).size(TEXT_XS).style(theme::text_tertiary))
+                .align_y(Alignment::Center),
             Space::new().width(Length::Fill),
-            chevron.size(ICON_XS).style(theme::text_tertiary),
+            container(chevron.size(ICON_XS).style(theme::text_tertiary))
+                .align_y(Alignment::Center),
         ]
         .align_y(Alignment::Center),
     )
@@ -247,7 +256,8 @@ pub fn dropdown<'a>(
                 .width(Length::Fill)
                 .align_y(Alignment::Center),
             // chevron_slot
-            icon::chevron_down().size(ICON_SM).style(theme::text_tertiary),
+            container(icon::chevron_down().size(ICON_SM).style(theme::text_tertiary))
+                .align_y(Alignment::Center),
         ]
         .spacing(SPACE_XS)
         .align_y(Alignment::Center),
@@ -308,8 +318,10 @@ pub fn compose_button<'a>() -> Element<'a, Message> {
     button(
         container(
             row![
-                icon::pencil().size(ICON_LG).color(theme::ON_AVATAR),
-                text("Compose").size(TEXT_LG).color(theme::ON_AVATAR),
+                container(icon::pencil().size(ICON_LG).color(theme::ON_AVATAR))
+                    .align_y(Alignment::Center),
+                container(text("Compose").size(TEXT_LG).color(theme::ON_AVATAR))
+                    .align_y(Alignment::Center),
             ]
             .spacing(SPACE_XXS)
             .align_y(Alignment::Center),
@@ -329,8 +341,10 @@ pub fn compose_button<'a>() -> Element<'a, Message> {
 pub fn settings_button<'a>() -> Element<'a, Message> {
     button(
         row![
-            icon::settings().size(ICON_MD).style(text::secondary),
-            text("Settings").size(TEXT_MD).style(text::secondary),
+            container(icon::settings().size(ICON_MD).style(text::secondary))
+                .align_y(Alignment::Center),
+            container(text("Settings").size(TEXT_MD).style(text::secondary))
+                .align_y(Alignment::Center),
         ]
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),
@@ -484,8 +498,10 @@ pub fn thread_card(thread: &Thread, index: usize, selected: bool) -> Element<'_,
 pub fn action_icon_button<'a>(ico: iced::widget::Text<'a>, label: &'a str) -> Element<'a, Message> {
     button(
         row![
-            ico.size(ICON_MD).style(text::secondary),
-            text(label).size(TEXT_SM).style(text::secondary),
+            container(ico.size(ICON_MD).style(text::secondary))
+                .align_y(Alignment::Center),
+            container(text(label).size(TEXT_SM).style(text::secondary))
+                .align_y(Alignment::Center),
         ]
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),
@@ -499,8 +515,10 @@ pub fn action_icon_button<'a>(ico: iced::widget::Text<'a>, label: &'a str) -> El
 pub fn reply_button<'a>(ico: iced::widget::Text<'a>, label: &'a str) -> Element<'a, Message> {
     button(
         row![
-            ico.size(ICON_XL).style(text::secondary),
-            text(label).size(TEXT_MD).style(text::secondary),
+            container(ico.size(ICON_XL).style(text::secondary))
+                .align_y(Alignment::Center),
+            container(text(label).size(TEXT_MD).style(text::secondary))
+                .align_y(Alignment::Center),
         ]
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),

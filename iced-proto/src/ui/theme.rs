@@ -1,4 +1,4 @@
-use iced::widget::{button, container, rule, text};
+use iced::widget::{button, container, pick_list, rule, text};
 use iced::{border, Color, Theme};
 use serde::Deserialize;
 
@@ -269,6 +269,24 @@ pub fn floating_container(theme: &Theme) -> container::Style {
     }
 }
 
+pub fn settings_section_container(theme: &Theme) -> container::Style {
+    let p = theme.extended_palette();
+    container::Style {
+        background: Some(p.background.weakest.color.into()),
+        border: iced::Border {
+            color: p.background.strongest.color.scale_alpha(0.1),
+            width: 1.0,
+            radius: RADIUS_LG.into(),
+        },
+        shadow: iced::Shadow {
+            color: Color::BLACK.scale_alpha(0.15),
+            offset: iced::Vector::ZERO,
+            blur_radius: RADIUS_LG,
+        },
+        ..Default::default()
+    }
+}
+
 // ── Rule styles ─────────────────────────────────────────
 
 pub fn divider_rule(theme: &Theme) -> rule::Style {
@@ -279,6 +297,59 @@ pub fn divider_rule(theme: &Theme) -> rule::Style {
         snap: true,
     }
 }
+
+pub fn subtle_divider_rule(theme: &Theme) -> rule::Style {
+    rule::Style {
+        color: theme.extended_palette().background.strongest.color.scale_alpha(0.08),
+        radius: 0.0.into(),
+        fill_mode: rule::FillMode::Full,
+        snap: true,
+    }
+}
+
+// ── Pick list style ─────────────────────────────────────
+
+pub fn ghost_pick_list(theme: &Theme, status: pick_list::Status) -> pick_list::Style {
+    let p = theme.extended_palette();
+    pick_list::Style {
+        text_color: p.background.base.text,
+        placeholder_color: p.secondary.weak.color,
+        handle_color: p.background.base.text,
+        background: iced::Background::Color(Color::TRANSPARENT),
+        border: match status {
+            pick_list::Status::Hovered => iced::Border {
+                color: p.background.strongest.color.scale_alpha(0.15),
+                width: 1.0,
+                radius: RADIUS_SM.into(),
+            },
+            _ => iced::Border::default(),
+        },
+    }
+}
+
+// ── Swatch button style ─────────────────────────────────
+
+pub fn swatch_button(color: Color) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_theme, _status| button::Style {
+        background: Some(color.into()),
+        border: iced::Border {
+            radius: RADIUS_ROUND.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+// ── Accent colors ───────────────────────────────────────
+
+pub const ACCENT_COLORS: &[Color] = &[
+    Color::from_rgb(0.384, 0.400, 0.945), // Indigo
+    Color::from_rgb(0.059, 0.522, 0.780), // Blue
+    Color::from_rgb(0.020, 0.588, 0.412), // Green
+    Color::from_rgb(0.608, 0.318, 0.878), // Purple
+    Color::from_rgb(0.878, 0.318, 0.518), // Pink
+    Color::from_rgb(0.851, 0.467, 0.024), // Orange
+];
 
 // ── Avatar colors ───────────────────────────────────────
 

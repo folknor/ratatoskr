@@ -225,6 +225,22 @@ pub const PAD_BADGE: Padding = Padding {
 /// Dropdown: trigger button and menu wrapper.
 pub const PAD_DROPDOWN: Padding = Padding::new(8.0);
 
+/// Settings row (label + control).
+pub const PAD_SETTINGS_ROW: Padding = Padding {
+    top: 12.0,
+    right: 16.0,
+    bottom: 12.0,
+    left: 16.0,
+};
+
+/// Pick list inner padding.
+pub const PAD_PICK_LIST: Padding = Padding {
+    top: 4.0,
+    right: 12.0,
+    bottom: 4.0,
+    left: 12.0,
+};
+
 /// Message body inner padding (horizontal only).
 pub const PAD_BODY: Padding = Padding {
     top: 12.0,
@@ -232,3 +248,17 @@ pub const PAD_BODY: Padding = Padding {
     bottom: 12.0,
     left: 0.0,
 };
+
+// ── Settings-specific sizes ────────────────────────────
+
+/// Settings nav sidebar width
+pub const SETTINGS_NAV_WIDTH: f32 = 200.0;
+
+/// Settings content max width
+pub const SETTINGS_CONTENT_MAX_WIDTH: u32 = 600;
+
+/// Accent color swatch diameter
+pub const SWATCH_SIZE: f32 = 24.0;
+
+/// Accent color swatch border radius (circular)
+pub const RADIUS_ROUND: f32 = SWATCH_SIZE / 2.0;
