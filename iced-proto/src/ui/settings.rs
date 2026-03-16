@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, row, scrollable, text, toggler, Space};
+use iced::widget::{button, column, container, row, scrollable, text, text_input, toggler, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::icon;
@@ -26,6 +26,34 @@ pub enum SettingsMessage {
     // About
     CheckForUpdates,
     OpenGithub,
+    // Composing
+    ToggleSendAndArchive(bool),
+    UndoDelayChanged(String),
+    DefaultReplyChanged(String),
+    MarkAsReadChanged(String),
+    // Notifications
+    ToggleNotifications(bool),
+    ToggleSmartNotifications(bool),
+    ToggleNotifyCategory(String),
+    VipEmailChanged(String),
+    AddVipSender,
+    RemoveVipSender(String),
+    // AI
+    AiProviderChanged(String),
+    AiModelChanged(String),
+    ToggleAiEnabled(bool),
+    ToggleAiAutoCategorize(bool),
+    ToggleAiAutoSummarize(bool),
+    ToggleAiAutoDraft(bool),
+    ToggleAiWritingStyle(bool),
+    ToggleAiAutoArchiveUpdates(bool),
+    ToggleAiAutoArchivePromotions(bool),
+    ToggleAiAutoArchiveSocial(bool),
+    ToggleAiAutoArchiveNewsletters(bool),
+    AiApiKeyChanged(String),
+    OllamaUrlChanged(String),
+    OllamaModelChanged(String),
+    SaveAiSettings,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,6 +62,11 @@ pub enum SelectField {
     ReadingPane,
     Density,
     FontSize,
+    UndoDelay,
+    DefaultReply,
+    MarkAsRead,
+    AiProvider,
+    AiModel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,6 +135,33 @@ pub struct SettingsState {
     pub block_remote_images: bool,
     pub phishing_detection: bool,
     pub phishing_sensitivity: String,
+    // Composing
+    pub undo_delay: String,
+    pub send_and_archive: bool,
+    pub default_reply_mode: String,
+    pub mark_as_read: String,
+    // Notifications
+    pub notifications_enabled: bool,
+    pub smart_notifications: bool,
+    pub notify_categories: Vec<String>,
+    pub vip_email_input: String,
+    pub vip_senders: Vec<String>,
+    // AI
+    pub ai_provider: String,
+    pub ai_api_key: String,
+    pub ai_model: String,
+    pub ai_ollama_url: String,
+    pub ai_ollama_model: String,
+    pub ai_enabled: bool,
+    pub ai_auto_categorize: bool,
+    pub ai_auto_summarize: bool,
+    pub ai_auto_draft: bool,
+    pub ai_writing_style: bool,
+    pub ai_auto_archive_updates: bool,
+    pub ai_auto_archive_promotions: bool,
+    pub ai_auto_archive_social: bool,
+    pub ai_auto_archive_newsletters: bool,
+    pub ai_key_saved: bool,
 }
 
 impl Default for SettingsState {
@@ -118,6 +178,30 @@ impl Default for SettingsState {
             block_remote_images: false,
             phishing_detection: true,
             phishing_sensitivity: "Default".into(),
+            undo_delay: "5 seconds".into(),
+            send_and_archive: false,
+            default_reply_mode: "Reply".into(),
+            mark_as_read: "After 2 Seconds".into(),
+            notifications_enabled: true,
+            smart_notifications: true,
+            notify_categories: vec!["Primary".into()],
+            vip_email_input: String::new(),
+            vip_senders: Vec::new(),
+            ai_provider: "Claude".into(),
+            ai_api_key: String::new(),
+            ai_model: "claude-sonnet-4-6".into(),
+            ai_ollama_url: "http://localhost:11434".into(),
+            ai_ollama_model: "llama3.2".into(),
+            ai_enabled: true,
+            ai_auto_categorize: true,
+            ai_auto_summarize: true,
+            ai_auto_draft: true,
+            ai_writing_style: true,
+            ai_auto_archive_updates: false,
+            ai_auto_archive_promotions: false,
+            ai_auto_archive_social: false,
+            ai_auto_archive_newsletters: false,
+            ai_key_saved: false,
         }
     }
 }
@@ -134,6 +218,7 @@ impl SettingsState {
                     Some(field)
                 };
             }
+            // General
             SettingsMessage::ThemeChanged(v) => { self.theme = v; self.open_select = None; }
             SettingsMessage::DensityChanged(v) => { self.density = v; self.open_select = None; }
             SettingsMessage::FontSizeChanged(v) => { self.font_size = v; self.open_select = None; }
@@ -143,7 +228,50 @@ impl SettingsState {
             SettingsMessage::ToggleBlockRemoteImages(v) => self.block_remote_images = v,
             SettingsMessage::TogglePhishingDetection(v) => self.phishing_detection = v,
             SettingsMessage::PhishingSensitivityChanged(v) => self.phishing_sensitivity = v,
+            // About
             SettingsMessage::CheckForUpdates | SettingsMessage::OpenGithub => {}
+            // Composing
+            SettingsMessage::ToggleSendAndArchive(v) => self.send_and_archive = v,
+            SettingsMessage::UndoDelayChanged(v) => { self.undo_delay = v; self.open_select = None; }
+            SettingsMessage::DefaultReplyChanged(v) => { self.default_reply_mode = v; self.open_select = None; }
+            SettingsMessage::MarkAsReadChanged(v) => { self.mark_as_read = v; self.open_select = None; }
+            // Notifications
+            SettingsMessage::ToggleNotifications(v) => self.notifications_enabled = v,
+            SettingsMessage::ToggleSmartNotifications(v) => self.smart_notifications = v,
+            SettingsMessage::ToggleNotifyCategory(cat) => {
+                if let Some(pos) = self.notify_categories.iter().position(|c| c == &cat) {
+                    self.notify_categories.remove(pos);
+                } else {
+                    self.notify_categories.push(cat);
+                }
+            }
+            SettingsMessage::VipEmailChanged(v) => self.vip_email_input = v,
+            SettingsMessage::AddVipSender => {
+                let email = self.vip_email_input.trim().to_string();
+                if !email.is_empty() && !self.vip_senders.contains(&email) {
+                    self.vip_senders.push(email);
+                    self.vip_email_input.clear();
+                }
+            }
+            SettingsMessage::RemoveVipSender(email) => {
+                self.vip_senders.retain(|e| e != &email);
+            }
+            // AI
+            SettingsMessage::AiProviderChanged(v) => { self.ai_provider = v; self.open_select = None; }
+            SettingsMessage::AiModelChanged(v) => { self.ai_model = v; self.open_select = None; }
+            SettingsMessage::ToggleAiEnabled(v) => self.ai_enabled = v,
+            SettingsMessage::ToggleAiAutoCategorize(v) => self.ai_auto_categorize = v,
+            SettingsMessage::ToggleAiAutoSummarize(v) => self.ai_auto_summarize = v,
+            SettingsMessage::ToggleAiAutoDraft(v) => self.ai_auto_draft = v,
+            SettingsMessage::ToggleAiWritingStyle(v) => self.ai_writing_style = v,
+            SettingsMessage::ToggleAiAutoArchiveUpdates(v) => self.ai_auto_archive_updates = v,
+            SettingsMessage::ToggleAiAutoArchivePromotions(v) => self.ai_auto_archive_promotions = v,
+            SettingsMessage::ToggleAiAutoArchiveSocial(v) => self.ai_auto_archive_social = v,
+            SettingsMessage::ToggleAiAutoArchiveNewsletters(v) => self.ai_auto_archive_newsletters = v,
+            SettingsMessage::AiApiKeyChanged(v) => self.ai_api_key = v,
+            SettingsMessage::OllamaUrlChanged(v) => self.ai_ollama_url = v,
+            SettingsMessage::OllamaModelChanged(v) => self.ai_ollama_model = v,
+            SettingsMessage::SaveAiSettings => self.ai_key_saved = true,
         }
     }
 }
@@ -154,8 +282,13 @@ pub fn view(state: &SettingsState) -> Element<'_, SettingsMessage> {
     let nav = tab_nav(state.active_tab);
     let content = match state.active_tab {
         Tab::General => general_tab(state),
+        Tab::Notifications => notifications_tab(state),
+        Tab::Composing => composing_tab(state),
+        Tab::MailRules => mail_rules_tab(),
+        Tab::People => people_tab(),
+        Tab::Shortcuts => shortcuts_tab(),
+        Tab::Ai => ai_tab(state),
         Tab::About => about_tab(),
-        _ => placeholder_tab(state.active_tab),
     };
 
     row![
@@ -246,6 +379,348 @@ fn general_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
     col.into()
 }
 
+// ── Composing tab ────────────────────────────────────────
+
+fn composing_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
+    let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(SETTINGS_CONTENT_MAX_WIDTH);
+
+    col = col.push(section("Sending", vec![
+        setting_row("Undo Send Delay", widgets::select(
+            &["None", "5 seconds", "10 seconds", "30 seconds"], &state.undo_delay,
+            state.open_select == Some(SelectField::UndoDelay),
+            SettingsMessage::ToggleSelect(SelectField::UndoDelay),
+            SettingsMessage::UndoDelayChanged,
+        )),
+        toggle_row("Send & Archive", "Archive a thread immediately after sending a reply",
+            state.send_and_archive, SettingsMessage::ToggleSendAndArchive),
+    ]));
+
+    col = col.push(section("Behavior", vec![
+        setting_row("Default Reply Action", widgets::select(
+            &["Reply", "Reply All"], &state.default_reply_mode,
+            state.open_select == Some(SelectField::DefaultReply),
+            SettingsMessage::ToggleSelect(SelectField::DefaultReply),
+            SettingsMessage::DefaultReplyChanged,
+        )),
+        setting_row("Mark as Read", widgets::select(
+            &["Instantly", "After 2 Seconds", "Manually"], &state.mark_as_read,
+            state.open_select == Some(SelectField::MarkAsRead),
+            SettingsMessage::ToggleSelect(SelectField::MarkAsRead),
+            SettingsMessage::MarkAsReadChanged,
+        )),
+    ]));
+
+    col = col.push(section("Signatures", vec![
+        coming_soon_row("Signature management"),
+    ]));
+
+    col = col.push(section("Templates", vec![
+        coming_soon_row("Template management"),
+    ]));
+
+    col.into()
+}
+
+// ── Notifications tab ────────────────────────────────────
+
+fn notifications_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
+    let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(SETTINGS_CONTENT_MAX_WIDTH);
+
+    col = col.push(section("Notifications", vec![
+        toggle_row("Enable Notifications", "Receive desktop notifications for new email",
+            state.notifications_enabled, SettingsMessage::ToggleNotifications),
+        toggle_row("Smart Notifications", "Only notify about important emails",
+            state.smart_notifications, SettingsMessage::ToggleSmartNotifications),
+    ]));
+
+    if state.smart_notifications {
+        let chips: Vec<Element<'_, SettingsMessage>> =
+            ["Primary", "Updates", "Promotions", "Social", "Newsletters"]
+                .iter()
+                .map(|cat| {
+                    let active = state.notify_categories.contains(&(*cat).to_string());
+                    button(text(*cat).size(TEXT_SM))
+                        .on_press(SettingsMessage::ToggleNotifyCategory((*cat).to_string()))
+                        .padding(PAD_ICON_BTN)
+                        .style(theme::chip_button(active))
+                        .into()
+                })
+                .collect();
+        let chips_row = iced::widget::row(chips).spacing(SPACE_XS).align_y(Alignment::Center);
+        col = col.push(section("Notify for Categories", vec![
+            settings_row_container(SETTINGS_ROW_HEIGHT, chips_row),
+        ]));
+
+        let mut vip_col = column![].spacing(SPACE_XXXS).width(Length::Fill);
+
+        vip_col = vip_col.push(
+            container(
+                text("Always notify when email arrives from a VIP sender.")
+                    .size(TEXT_SM)
+                    .style(theme::text_tertiary),
+            )
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill),
+        );
+
+        for email in &state.vip_senders {
+            vip_col = vip_col.push(
+                container(
+                    row![
+                        container(text(email.clone()).size(TEXT_LG).style(text::base))
+                            .align_y(Alignment::Center)
+                            .width(Length::Fill),
+                        button(text("Remove").size(TEXT_SM).style(text::danger))
+                            .on_press(SettingsMessage::RemoveVipSender(email.clone()))
+                            .padding(PAD_ICON_BTN)
+                            .style(theme::bare_button),
+                    ]
+                    .align_y(Alignment::Center),
+                )
+                .padding(PAD_SETTINGS_ROW)
+                .width(Length::Fill),
+            );
+        }
+
+        vip_col = vip_col.push(
+            container(
+                row![
+                    text_input("email@example.com", &state.vip_email_input)
+                        .on_input(SettingsMessage::VipEmailChanged)
+                        .on_submit(SettingsMessage::AddVipSender)
+                        .size(TEXT_LG)
+                        .padding(PAD_INPUT)
+                        .style(theme::settings_text_input)
+                        .width(Length::Fill),
+                    Space::new().width(SPACE_XS),
+                    button(text("Add").size(TEXT_LG))
+                        .on_press(SettingsMessage::AddVipSender)
+                        .padding(PAD_ICON_BTN)
+                        .style(theme::secondary_button),
+                ]
+                .align_y(Alignment::Center),
+            )
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill),
+        );
+
+        col = col.push(section("VIP Senders", vec![vip_col.into()]));
+    }
+
+    col.into()
+}
+
+// ── Mail Rules tab ───────────────────────────────────────
+
+fn mail_rules_tab<'a>() -> Element<'a, SettingsMessage> {
+    let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(SETTINGS_CONTENT_MAX_WIDTH);
+
+    col = col.push(section("Labels", vec![coming_soon_row("Label management")]));
+    col = col.push(section("Filters", vec![coming_soon_row("Filter management")]));
+    col = col.push(section("Smart Labels", vec![coming_soon_row("Smart label management")]));
+    col = col.push(section("Smart Folders", vec![coming_soon_row("Smart folder management")]));
+    col = col.push(section("Quick Steps", vec![coming_soon_row("Quick step management")]));
+
+    col.into()
+}
+
+// ── People tab ───────────────────────────────────────────
+
+fn people_tab<'a>() -> Element<'a, SettingsMessage> {
+    let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(SETTINGS_CONTENT_MAX_WIDTH);
+
+    col = col.push(section("Contacts", vec![coming_soon_row("Contact management")]));
+    col = col.push(section("Groups", vec![coming_soon_row("Group management")]));
+    col = col.push(section("Subscriptions", vec![coming_soon_row("Subscription management")]));
+
+    col.into()
+}
+
+// ── Shortcuts tab ────────────────────────────────────────
+
+fn shortcuts_tab<'a>() -> Element<'a, SettingsMessage> {
+    let sections: &[(&str, &[(&str, &str)])] = &[
+        ("Navigation", &[
+            ("Next thread", "j"),
+            ("Previous thread", "k"),
+            ("Go to Inbox", "g i"),
+            ("Search", "/"),
+            ("Close / dismiss", "Esc"),
+        ]),
+        ("Thread", &[
+            ("Archive", "e"),
+            ("Delete", "#"),
+            ("Reply", "r"),
+            ("Reply All", "a"),
+            ("Forward", "f"),
+            ("Star / unstar", "s"),
+            ("Mute thread", "m"),
+            ("Mark as unread", "u"),
+        ]),
+        ("Composing", &[
+            ("New message", "c"),
+        ]),
+    ];
+
+    let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(SETTINGS_CONTENT_MAX_WIDTH);
+
+    for (category, items) in sections {
+        let rows: Vec<Element<'_, SettingsMessage>> = items
+            .iter()
+            .map(|(desc, key)| {
+                settings_row_container(
+                    SETTINGS_ROW_HEIGHT,
+                    row![
+                        container(text(*desc).size(TEXT_LG).style(text::secondary))
+                            .align_y(Alignment::Center)
+                            .width(Length::Fill),
+                        container(text(*key).size(TEXT_SM).style(text::secondary))
+                            .padding(PAD_ICON_BTN)
+                            .style(theme::key_badge_container),
+                    ]
+                    .align_y(Alignment::Center),
+                )
+            })
+            .collect();
+
+        col = col.push(section(category, rows));
+    }
+
+    col.into()
+}
+
+// ── AI tab ───────────────────────────────────────────────
+
+fn ai_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
+    let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(SETTINGS_CONTENT_MAX_WIDTH);
+
+    col = col.push(section("Provider", vec![
+        setting_row("AI Provider", widgets::select(
+            &["Claude", "OpenAI", "Gemini", "Ollama", "Copilot"],
+            &state.ai_provider,
+            state.open_select == Some(SelectField::AiProvider),
+            SettingsMessage::ToggleSelect(SelectField::AiProvider),
+            SettingsMessage::AiProviderChanged,
+        )),
+    ]));
+
+    if state.ai_provider == "Ollama" {
+        col = col.push(section("Local Server", vec![
+            container(
+                column![
+                    text("Server URL").size(TEXT_LG).style(text::base),
+                    Space::new().height(SPACE_XXS),
+                    text_input("http://localhost:11434", &state.ai_ollama_url)
+                        .on_input(SettingsMessage::OllamaUrlChanged)
+                        .size(TEXT_LG)
+                        .padding(PAD_INPUT)
+                        .style(theme::settings_text_input)
+                        .width(Length::Fill),
+                ]
+                .spacing(SPACE_XXXS),
+            )
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill)
+            .into(),
+            container(
+                column![
+                    text("Model Name").size(TEXT_LG).style(text::base),
+                    Space::new().height(SPACE_XXS),
+                    text_input("e.g. llama3.2", &state.ai_ollama_model)
+                        .on_input(SettingsMessage::OllamaModelChanged)
+                        .size(TEXT_LG)
+                        .padding(PAD_INPUT)
+                        .style(theme::settings_text_input)
+                        .width(Length::Fill),
+                ]
+                .spacing(SPACE_XXXS),
+            )
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill)
+            .into(),
+        ]));
+    } else {
+        let key_label = match state.ai_provider.as_str() {
+            "OpenAI" => "OpenAI API Key",
+            "Gemini" => "Google AI API Key",
+            "Copilot" => "GitHub Personal Access Token",
+            _ => "Anthropic API Key",
+        };
+
+        let model_options: &[&str] = match state.ai_provider.as_str() {
+            "OpenAI" => &["gpt-4o", "gpt-4o-mini", "o4-mini"],
+            "Gemini" => &["gemini-2.0-flash", "gemini-2.5-flash-preview-05-20", "gemini-2.5-pro"],
+            "Copilot" => &["openai/gpt-4o", "openai/gpt-4o-mini"],
+            _ => &["claude-haiku-4-5-20251001", "claude-sonnet-4-5", "claude-sonnet-4-6", "claude-opus-4-6"],
+        };
+
+        col = col.push(section("API Key", vec![
+            container(
+                column![
+                    text(key_label).size(TEXT_LG).style(text::base),
+                    Space::new().height(SPACE_XXS),
+                    row![
+                        text_input("", &state.ai_api_key)
+                            .on_input(SettingsMessage::AiApiKeyChanged)
+                            .secure(true)
+                            .size(TEXT_LG)
+                            .padding(PAD_INPUT)
+                            .style(theme::settings_text_input)
+                            .width(Length::Fill),
+                        Space::new().width(SPACE_XS),
+                        button(
+                            text(if state.ai_key_saved { "Saved" } else { "Save" }).size(TEXT_LG),
+                        )
+                        .on_press(SettingsMessage::SaveAiSettings)
+                        .padding(PAD_ICON_BTN)
+                        .style(theme::secondary_button),
+                    ]
+                    .align_y(Alignment::Center),
+                ]
+                .spacing(SPACE_XXXS),
+            )
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill)
+            .into(),
+            setting_row("Model", widgets::select(
+                model_options, &state.ai_model,
+                state.open_select == Some(SelectField::AiModel),
+                SettingsMessage::ToggleSelect(SelectField::AiModel),
+                SettingsMessage::AiModelChanged,
+            )),
+        ]));
+    }
+
+    col = col.push(section("Features", vec![
+        toggle_row("Enable AI Features", "Use AI-powered features across the app",
+            state.ai_enabled, SettingsMessage::ToggleAiEnabled),
+        toggle_row("Auto-Categorize", "Automatically categorize incoming emails",
+            state.ai_auto_categorize, SettingsMessage::ToggleAiAutoCategorize),
+        toggle_row("Auto-Summarize", "Generate summaries for long email threads",
+            state.ai_auto_summarize, SettingsMessage::ToggleAiAutoSummarize),
+    ]));
+
+    col = col.push(section("Auto-Draft Replies", vec![
+        toggle_row("Auto-Draft", "Automatically draft replies based on email content",
+            state.ai_auto_draft, SettingsMessage::ToggleAiAutoDraft),
+        toggle_row("Learn Writing Style", "Analyze your sent emails to match your writing style",
+            state.ai_writing_style, SettingsMessage::ToggleAiWritingStyle),
+    ]));
+
+    col = col.push(section("Auto-Archive Categories", vec![
+        toggle_row("Updates", "Automatically archive update emails",
+            state.ai_auto_archive_updates, SettingsMessage::ToggleAiAutoArchiveUpdates),
+        toggle_row("Promotions", "Automatically archive promotional emails",
+            state.ai_auto_archive_promotions, SettingsMessage::ToggleAiAutoArchivePromotions),
+        toggle_row("Social", "Automatically archive social notification emails",
+            state.ai_auto_archive_social, SettingsMessage::ToggleAiAutoArchiveSocial),
+        toggle_row("Newsletters", "Automatically archive newsletters",
+            state.ai_auto_archive_newsletters, SettingsMessage::ToggleAiAutoArchiveNewsletters),
+    ]));
+
+    col.into()
+}
+
 // ── About tab ───────────────────────────────────────────
 
 fn about_tab<'a>() -> Element<'a, SettingsMessage> {
@@ -320,24 +795,6 @@ fn about_tab<'a>() -> Element<'a, SettingsMessage> {
     col.into()
 }
 
-// ── Placeholder tab ─────────────────────────────────────
-
-fn placeholder_tab(tab: Tab) -> Element<'static, SettingsMessage> {
-    container(
-        column![
-            text(tab.label()).size(TEXT_TITLE).style(theme::text_tertiary),
-            text("Not yet implemented").size(TEXT_MD).style(theme::text_tertiary),
-        ]
-        .spacing(SPACE_XXS)
-        .align_x(Alignment::Center),
-    )
-    .center_x(Length::Fill)
-    .center_y(Length::Fill)
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .into()
-}
-
 // ── Shared setting widgets ──────────────────────────────
 
 fn section<'a>(
@@ -395,7 +852,7 @@ fn toggle_row<'a>(
     label: &'a str,
     description: &'a str,
     value: bool,
-    on_toggle: fn(bool) -> SettingsMessage,
+    on_toggle: impl Fn(bool) -> SettingsMessage + 'a,
 ) -> Element<'a, SettingsMessage> {
     settings_row_container(SETTINGS_TOGGLE_ROW_HEIGHT,
         row![
@@ -424,6 +881,14 @@ fn info_row<'a>(label: &'a str, value: &'a str) -> Element<'a, SettingsMessage> 
     )
 }
 
+fn coming_soon_row<'a>(feature: &'a str) -> Element<'a, SettingsMessage> {
+    settings_row_container(
+        SETTINGS_ROW_HEIGHT,
+        text(format!("{feature} coming soon."))
+            .size(TEXT_LG)
+            .style(theme::text_tertiary),
+    )
+}
 
 fn accent_color_row(selected: usize) -> Element<'static, SettingsMessage> {
     let mut swatches = row![].spacing(SPACE_XS).align_y(Alignment::Center);

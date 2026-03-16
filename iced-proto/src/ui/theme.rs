@@ -1,4 +1,4 @@
-use iced::widget::{button, container, pick_list, rule, text};
+use iced::widget::{button, container, pick_list, rule, text, text_input};
 use iced::{border, Color, Theme};
 use serde::Deserialize;
 
@@ -390,6 +390,96 @@ pub fn ghost_pick_list(theme: &Theme, status: pick_list::Status) -> pick_list::S
             },
             _ => iced::Border::default(),
         },
+    }
+}
+
+// ── Text input style ────────────────────────────────────
+
+pub fn settings_text_input(theme: &Theme, status: text_input::Status) -> text_input::Style {
+    let p = theme.extended_palette();
+    let border_color = match status {
+        text_input::Status::Focused { .. } => p.primary.base.color,
+        text_input::Status::Hovered => p.background.strongest.color.scale_alpha(0.3),
+        _ => p.background.strongest.color.scale_alpha(0.15),
+    };
+    text_input::Style {
+        background: p.background.weak.color.into(),
+        border: iced::Border {
+            color: border_color,
+            width: 1.0,
+            radius: RADIUS_SM.into(),
+        },
+        icon: p.background.base.text.scale_alpha(0.5),
+        placeholder: p.background.base.text.scale_alpha(0.4),
+        value: p.background.base.text,
+        selection: p.primary.base.color.scale_alpha(0.3),
+    }
+}
+
+// ── Chip button style ────────────────────────────────────
+// Used for toggleable category/tag selector pills.
+
+pub fn chip_button(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let p = theme.extended_palette();
+        match status {
+            button::Status::Hovered => button::Style {
+                background: Some(if active {
+                    p.primary.base.color.scale_alpha(0.25).into()
+                } else {
+                    p.background.strong.color.into()
+                }),
+                text_color: if active { p.primary.base.color } else { p.background.base.text },
+                border: iced::Border {
+                    color: if active {
+                        p.primary.base.color.scale_alpha(0.4)
+                    } else {
+                        p.background.strongest.color.scale_alpha(0.2)
+                    },
+                    width: 1.0,
+                    radius: RADIUS_LG.into(),
+                },
+                ..Default::default()
+            },
+            _ => button::Style {
+                background: Some(if active {
+                    p.primary.base.color.scale_alpha(0.15).into()
+                } else {
+                    p.background.base.color.into()
+                }),
+                text_color: if active {
+                    p.primary.base.color
+                } else {
+                    p.background.base.text.scale_alpha(0.7)
+                },
+                border: iced::Border {
+                    color: if active {
+                        p.primary.base.color.scale_alpha(0.3)
+                    } else {
+                        p.background.strongest.color.scale_alpha(0.15)
+                    },
+                    width: 1.0,
+                    radius: RADIUS_LG.into(),
+                },
+                ..Default::default()
+            },
+        }
+    }
+}
+
+// ── Key badge container ──────────────────────────────────
+// Used for shortcut key display in the Shortcuts tab.
+
+pub fn key_badge_container(theme: &Theme) -> container::Style {
+    let p = theme.extended_palette();
+    container::Style {
+        background: Some(p.background.weak.color.into()),
+        border: iced::Border {
+            color: p.background.strongest.color.scale_alpha(0.2),
+            width: 1.0,
+            radius: RADIUS_SM.into(),
+        },
+        ..Default::default()
     }
 }
 
