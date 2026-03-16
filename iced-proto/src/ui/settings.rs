@@ -348,25 +348,25 @@ fn general_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
             state.open_select == Some(SelectField::Theme),
             SettingsMessage::ToggleSelect(SelectField::Theme),
             SettingsMessage::ThemeChanged,
-        )),
+        ), SettingsMessage::ToggleSelect(SelectField::Theme)),
         setting_row("Reading Pane", widgets::select(
             &["Right", "Bottom", "Hidden"], &state.reading_pane_position,
             state.open_select == Some(SelectField::ReadingPane),
             SettingsMessage::ToggleSelect(SelectField::ReadingPane),
             SettingsMessage::ReadingPaneChanged,
-        )),
+        ), SettingsMessage::ToggleSelect(SelectField::ReadingPane)),
         setting_row("Email Density", widgets::select(
             &["Compact", "Default", "Spacious"], &state.density,
             state.open_select == Some(SelectField::Density),
             SettingsMessage::ToggleSelect(SelectField::Density),
             SettingsMessage::DensityChanged,
-        )),
+        ), SettingsMessage::ToggleSelect(SelectField::Density)),
         setting_row("Font Size", widgets::select(
             &["Small", "Default", "Large", "XLarge"], &state.font_size,
             state.open_select == Some(SelectField::FontSize),
             SettingsMessage::ToggleSelect(SelectField::FontSize),
             SettingsMessage::FontSizeChanged,
-        )),
+        ), SettingsMessage::ToggleSelect(SelectField::FontSize)),
         accent_color_row(state.accent_color_index),
         toggle_row("Show Sync Status Bar", "Display sync progress in the status bar", state.sync_status_bar, SettingsMessage::ToggleSyncStatusBar),
     ]));
@@ -390,7 +390,7 @@ fn composing_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
             state.open_select == Some(SelectField::UndoDelay),
             SettingsMessage::ToggleSelect(SelectField::UndoDelay),
             SettingsMessage::UndoDelayChanged,
-        )),
+        ), SettingsMessage::ToggleSelect(SelectField::UndoDelay)),
         toggle_row("Send & Archive", "Archive a thread immediately after sending a reply",
             state.send_and_archive, SettingsMessage::ToggleSendAndArchive),
     ]));
@@ -401,13 +401,13 @@ fn composing_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
             state.open_select == Some(SelectField::DefaultReply),
             SettingsMessage::ToggleSelect(SelectField::DefaultReply),
             SettingsMessage::DefaultReplyChanged,
-        )),
+        ), SettingsMessage::ToggleSelect(SelectField::DefaultReply)),
         setting_row("Mark as Read", widgets::select(
             &["Instantly", "After 2 Seconds", "Manually"], &state.mark_as_read,
             state.open_select == Some(SelectField::MarkAsRead),
             SettingsMessage::ToggleSelect(SelectField::MarkAsRead),
             SettingsMessage::MarkAsReadChanged,
-        )),
+        ), SettingsMessage::ToggleSelect(SelectField::MarkAsRead)),
     ]));
 
     col = col.push(section("Signatures", vec![
@@ -601,7 +601,7 @@ fn ai_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
             state.open_select == Some(SelectField::AiProvider),
             SettingsMessage::ToggleSelect(SelectField::AiProvider),
             SettingsMessage::AiProviderChanged,
-        )),
+        ), SettingsMessage::ToggleSelect(SelectField::AiProvider)),
     ]));
 
     if state.ai_provider == "Ollama" {
@@ -687,7 +687,7 @@ fn ai_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
                 state.open_select == Some(SelectField::AiModel),
                 SettingsMessage::ToggleSelect(SelectField::AiModel),
                 SettingsMessage::AiModelChanged,
-            )),
+            ), SettingsMessage::ToggleSelect(SelectField::AiModel)),
         ]));
     }
 
@@ -836,16 +836,28 @@ fn settings_row_container<'a>(
 fn setting_row<'a>(
     label: &'a str,
     control: Element<'a, SettingsMessage>,
+    on_press: SettingsMessage,
 ) -> Element<'a, SettingsMessage> {
-    settings_row_container(SETTINGS_ROW_HEIGHT,
-        row![
-            container(text(label).size(TEXT_LG).style(text::base))
-                .align_y(Alignment::Center),
-            Space::new().width(Length::Fill),
-            control,
-        ]
+    button(
+        container(
+            row![
+                container(text(label).size(TEXT_LG).style(text::base))
+                    .align_y(Alignment::Center),
+                Space::new().width(Length::Fill),
+                control,
+            ]
+            .align_y(Alignment::Center),
+        )
+        .padding(PAD_SETTINGS_ROW)
+        .width(Length::Fill)
+        .height(SETTINGS_ROW_HEIGHT)
         .align_y(Alignment::Center),
     )
+    .on_press(on_press)
+    .padding(0)
+    .style(theme::bare_button)
+    .width(Length::Fill)
+    .into()
 }
 
 fn toggle_row<'a>(
@@ -854,18 +866,33 @@ fn toggle_row<'a>(
     value: bool,
     on_toggle: impl Fn(bool) -> SettingsMessage + 'a,
 ) -> Element<'a, SettingsMessage> {
-    settings_row_container(SETTINGS_TOGGLE_ROW_HEIGHT,
-        row![
-            column![
-                text(label).size(TEXT_LG).style(text::base),
-                text(description).size(TEXT_SM).style(theme::text_tertiary),
+    // Compute the button's press message before on_toggle is moved into the toggler.
+    // The toggler captures its own click events, so the button only fires when the
+    // user clicks outside the knob (e.g. on the label). No double-firing.
+    let on_press_msg = on_toggle(!value);
+    button(
+        container(
+            row![
+                column![
+                    text(label).size(TEXT_LG).style(text::base),
+                    text(description).size(TEXT_SM).style(theme::text_tertiary),
+                ]
+                .spacing(SPACE_XXXS),
+                Space::new().width(Length::Fill),
+                toggler(value).size(TEXT_HEADING).on_toggle(on_toggle),
             ]
-            .spacing(SPACE_XXXS),
-            Space::new().width(Length::Fill),
-            toggler(value).size(TEXT_HEADING).on_toggle(on_toggle),
-        ]
+            .align_y(Alignment::Center),
+        )
+        .padding(PAD_SETTINGS_ROW)
+        .width(Length::Fill)
+        .height(SETTINGS_TOGGLE_ROW_HEIGHT)
         .align_y(Alignment::Center),
     )
+    .on_press(on_press_msg)
+    .padding(0)
+    .style(theme::bare_button)
+    .width(Length::Fill)
+    .into()
 }
 
 fn info_row<'a>(label: &'a str, value: &'a str) -> Element<'a, SettingsMessage> {
@@ -910,5 +937,14 @@ fn accent_color_row(selected: usize) -> Element<'static, SettingsMessage> {
         swatches = swatches.push(swatch);
     }
 
-    setting_row("Accent Color", swatches.into())
+    settings_row_container(
+        SETTINGS_ROW_HEIGHT,
+        row![
+            container(text("Accent Color").size(TEXT_LG).style(text::base))
+                .align_y(Alignment::Center),
+            Space::new().width(Length::Fill),
+            swatches,
+        ]
+        .align_y(Alignment::Center),
+    )
 }

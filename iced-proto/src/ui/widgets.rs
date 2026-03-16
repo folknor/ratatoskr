@@ -406,7 +406,7 @@ pub fn select<'a, M: Clone + 'a>(
             container(text(selected).size(TEXT_MD).style(text::base))
                 .align_y(Alignment::Center),
             // chevron_slot
-            container(icon::chevron_down().size(ICON_SM).style(theme::text_tertiary))
+            container(icon::chevron_down().size(ICON_MD).style(text::secondary))
                 .align_y(Alignment::Center),
         ]
         .spacing(SPACE_XS)
@@ -434,7 +434,7 @@ pub fn select<'a, M: Clone + 'a>(
 
             if is_selected {
                 label_row = label_row.push(
-                    container(icon::check().size(ICON_SM).style(text::primary))
+                    container(icon::check().size(ICON_MD).style(text::base))
                         .align_y(Alignment::Center),
                 );
             }

@@ -133,7 +133,11 @@ impl App {
     }
 
     fn theme(&self) -> Theme {
-        self.mode.theme()
+        match self.settings.theme.as_str() {
+            "Light" => crate::ui::theme::light(),
+            "Dark" => crate::ui::theme::dark(),
+            _ => self.mode.theme(), // "System" tracks OS preference
+        }
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {

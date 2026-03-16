@@ -102,7 +102,7 @@ pub fn dropdown_button(selected: bool) -> impl Fn(&Theme, button::Status) -> but
         let p = theme.extended_palette();
         match status {
             button::Status::Hovered => button::Style {
-                background: Some(p.background.strong.color.into()),
+                background: Some(p.background.weakest.color.into()),
                 text_color: p.background.base.text,
                 border: border::rounded(RADIUS_SM),
                 ..Default::default()
@@ -180,7 +180,7 @@ pub fn bare_button(theme: &Theme, status: button::Status) -> button::Style {
     let p = theme.extended_palette();
     match status {
         button::Status::Hovered => button::Style {
-            background: Some(p.background.weak.color.into()),
+            background: Some(p.background.weakest.color.into()),
             text_color: p.background.base.text,
             border: border::rounded(RADIUS_SM),
             ..Default::default()
@@ -427,7 +427,7 @@ pub fn chip_button(active: bool) -> impl Fn(&Theme, button::Status) -> button::S
                 background: Some(if active {
                     p.primary.base.color.scale_alpha(0.25).into()
                 } else {
-                    p.background.strong.color.into()
+                    p.background.weakest.color.into()
                 }),
                 text_color: if active { p.primary.base.color } else { p.background.base.text },
                 border: iced::Border {
