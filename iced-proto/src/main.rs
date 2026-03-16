@@ -142,7 +142,7 @@ impl App {
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
-        iced::Subscription::batch([
+        let mut subs = vec![
             appearance::subscription().map(Message::AppearanceChanged),
             iced::window::resize_events().map(|(_id, size)| Message::WindowResized(size)),
             iced::window::close_requests().map(Message::WindowCloseRequested),
@@ -153,7 +153,17 @@ impl App {
                     None
                 }
             }),
-        ])
+        ];
+
+        // Drive overlay slide animation
+        if self.settings.overlay_anim.is_animating(iced::time::Instant::now()) {
+            subs.push(
+                iced::window::frames()
+                    .map(|at| Message::Settings(ui::settings::SettingsMessage::OverlayAnimTick(at))),
+            );
+        }
+
+        iced::Subscription::batch(subs)
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {

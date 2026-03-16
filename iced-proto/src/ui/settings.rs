@@ -1,7 +1,9 @@
+use iced::animation::{self, Easing};
+use iced::time::{Duration, Instant};
 use iced::widget::{button, column, container, mouse_area, radio, row, scrollable, slider, text, text_input, Space};
+use iced::{Alignment, Element, Length, Point};
 
 use crate::ui::animated_toggler::animated_toggler;
-use iced::{Alignment, Element, Length, Point};
 
 use crate::icon;
 use crate::ui::layout::*;
@@ -67,6 +69,17 @@ pub enum SettingsMessage {
     ListAdd(String),                      // (list_id)
     ListToggle(String, usize, bool),      // (list_id, item index, new value)
     ListMenu(String, usize),              // (list_id, item index)
+    // Overlay
+    OpenOverlay(SettingsOverlay),
+    CloseOverlay,
+    OverlayAnimTick(Instant),
+}
+
+/// Overlays that slide in from the right, covering the settings content.
+/// One level deep — no stacking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsOverlay {
+    CreateFilter,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,6 +190,9 @@ pub struct SettingsState {
     pub ai_auto_archive_social: bool,
     pub ai_auto_archive_newsletters: bool,
     pub ai_key_saved: bool,
+    // Overlay
+    pub overlay: Option<SettingsOverlay>,
+    pub overlay_anim: animation::Animation<bool>,
     // Editable lists
     pub drag_state: Option<DragState>,
     // Demo data for Mail Rules tab
@@ -245,6 +261,10 @@ impl Default for SettingsState {
             ai_auto_archive_social: false,
             ai_auto_archive_newsletters: false,
             ai_key_saved: false,
+            overlay: None,
+            overlay_anim: animation::Animation::new(false)
+                .easing(Easing::EaseOutCubic)
+                .duration(Duration::from_millis(200)),
             drag_state: None,
             demo_labels: vec![
                 EditableItem { label: "Important".into(), enabled: Some(true) },
@@ -418,6 +438,18 @@ impl SettingsState {
             SettingsMessage::ListMenu(_, _) => {
                 // TODO: open context menu
             }
+            // Overlay
+            SettingsMessage::OpenOverlay(overlay) => {
+                self.overlay = Some(overlay);
+                self.overlay_anim.go_mut(true, Instant::now());
+            }
+            SettingsMessage::CloseOverlay => {
+                self.overlay = None;
+                self.overlay_anim.go_mut(false, Instant::now());
+            }
+            SettingsMessage::OverlayAnimTick(_) => {
+                // Just triggers a redraw — the animation reads Instant::now() in view.
+            }
         }
     }
 
@@ -445,17 +477,87 @@ pub fn view(state: &SettingsState) -> Element<'_, SettingsMessage> {
         Tab::About => about_tab(),
     };
 
+    let now = Instant::now();
+    let overlay_t: f32 = state.overlay_anim.interpolate(0.0, 1.0, now);
+    let show_overlay = state.overlay.is_some() || overlay_t > 0.001;
+
+    let content_area = container(
+        scrollable(
+            container(content).padding(PAD_SETTINGS_CONTENT)
+        ).height(Length::Fill)
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(theme::content_container);
+
+    let main_content: Element<'_, SettingsMessage> = if show_overlay {
+        let overlay_content = match state.overlay {
+            Some(SettingsOverlay::CreateFilter) => create_filter_overlay(),
+            None => column![].into(), // closing animation
+        };
+
+        // Overlay panel: back button header + scrollable content
+        let overlay_panel = container(
+            column![
+                container(
+                    button(
+                        row![
+                            container(icon::arrow_left().size(ICON_XL).style(text::base))
+                                .align_y(Alignment::Center),
+                            text("Back").size(TEXT_LG).style(text::base)
+                                .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::TEXT }),
+                        ]
+                        .spacing(SPACE_XS)
+                        .align_y(Alignment::Center),
+                    )
+                    .on_press(SettingsMessage::CloseOverlay)
+                    .padding(PAD_NAV_ITEM)
+                    .style(theme::bare_button),
+                )
+                .padding(PAD_SETTINGS_ROW)
+                .width(Length::Fill),
+                scrollable(
+                    container(overlay_content).padding(PAD_SETTINGS_CONTENT)
+                ).height(Length::Fill),
+            ]
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(theme::content_container);
+
+        // Slide from right: use a large fixed offset (2000px) scaled by (1-t).
+        // The stack clips to bounds so overshooting doesn't matter.
+        let offset = ((1.0 - overlay_t) * 2000.0).round();
+
+        // Event blocker: opaque mouse_area between content and overlay
+        // prevents clicks/hovers from reaching the content underneath.
+        let blocker = mouse_area(
+            container(Space::new().width(Length::Fill).height(Length::Fill))
+                .width(Length::Fill)
+                .height(Length::Fill),
+        )
+        .on_press(SettingsMessage::CloseOverlay)
+        .interaction(iced::mouse::Interaction::default());
+
+        iced::widget::stack![
+            content_area,
+            blocker,
+            container(overlay_panel)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .padding(iced::Padding { top: 0.0, right: 0.0, bottom: 0.0, left: offset }),
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+    } else {
+        content_area.into()
+    };
+
     row![
         nav,
         iced::widget::rule::vertical(1).style(theme::sidebar_divider_rule),
-        container(
-            scrollable(
-                container(content).padding(PAD_SETTINGS_CONTENT)
-            ).height(Length::Fill)
-        )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(theme::content_container),
+        main_content,
     ]
     .into()
 }
@@ -677,11 +779,39 @@ fn mail_rules_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
         editable_list("labels", &state.demo_labels, "Add Label", &state.drag_state),
     ]));
     col = col.push(section("Filters", vec![
-        editable_list("filters", &state.demo_filters, "Add Filter", &state.drag_state),
+        action_row("Create Filter", Some("Add a new mail filter rule"), Some(icon::filter()), ActionKind::InApp, SettingsMessage::OpenOverlay(SettingsOverlay::CreateFilter)),
     ]));
+    if !state.demo_filters.is_empty() {
+        col = col.push(section_untitled(vec![
+            editable_list("filters", &state.demo_filters, "Add Filter", &state.drag_state),
+        ]));
+    }
     col = col.push(section("Smart Labels", vec![coming_soon_row("Smart label management")]));
     col = col.push(section("Smart Folders", vec![coming_soon_row("Smart folder management")]));
     col = col.push(section("Quick Steps", vec![coming_soon_row("Quick step management")]));
+
+    col.into()
+}
+
+// ── Overlays ─────────────────────────────────────────────
+
+fn create_filter_overlay<'a>() -> Element<'a, SettingsMessage> {
+    let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(SETTINGS_CONTENT_MAX_WIDTH);
+
+    col = col.push(
+        text("Create Filter")
+            .size(TEXT_HEADING)
+            .style(text::base)
+            .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::TEXT }),
+    );
+
+    col = col.push(section("Conditions", vec![
+        coming_soon_row("Match conditions"),
+    ]));
+
+    col = col.push(section("Actions", vec![
+        coming_soon_row("Filter actions"),
+    ]));
 
     col.into()
 }
@@ -932,6 +1062,19 @@ fn section<'a>(
     title: &'a str,
     items: Vec<Element<'a, SettingsMessage>>,
 ) -> Element<'a, SettingsMessage> {
+    section_maybe_titled(Some(title), items)
+}
+
+fn section_untitled<'a>(
+    items: Vec<Element<'a, SettingsMessage>>,
+) -> Element<'a, SettingsMessage> {
+    section_maybe_titled(None, items)
+}
+
+fn section_maybe_titled<'a>(
+    title: Option<&'a str>,
+    items: Vec<Element<'a, SettingsMessage>>,
+) -> Element<'a, SettingsMessage> {
     let mut col = column![].width(Length::Fill).padding(1);
     for (i, item) in items.into_iter().enumerate() {
         if i > 0 {
@@ -939,16 +1082,22 @@ fn section<'a>(
         }
         col = col.push(item);
     }
-    column![
-        text(title)
-            .size(TEXT_XL)
-            .style(text::base)
-            .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::TEXT }),
-        container(col)
-            .width(Length::Fill)
-            .style(theme::settings_section_container),
-    ]
-    .spacing(SPACE_XS)
+    let section_box = container(col)
+        .width(Length::Fill)
+        .style(theme::settings_section_container);
+
+    if let Some(title) = title {
+        column![
+            text(title)
+                .size(TEXT_XL)
+                .style(text::base)
+                .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::TEXT }),
+            section_box,
+        ]
+        .spacing(SPACE_XS)
+    } else {
+        column![section_box]
+    }
     .into()
 }
 

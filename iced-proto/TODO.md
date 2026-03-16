@@ -10,6 +10,12 @@
 
 - [ ] **Keybinding display and edit UI** - Need to redo the Settings/Shortcuts UI. Take a look at https://nyaa.place/blog/libadwaita-1-8/
 
+- [ ] **Menu and X icon in dynamic sections need hover states** - Currently theres no indication that they are clickable. Needs a hover background.
+
+- [ ] **Center settings content** - The content of each settings "tab" should be centered.
+
+- [ ] **Back button in settings overlay hover state** - Currently no indication that it's clickable.
+
 ## Research
 
 - [ ] **Investigate iced ecosystem projects** — Review for patterns, widget implementations, and architecture ideas:
