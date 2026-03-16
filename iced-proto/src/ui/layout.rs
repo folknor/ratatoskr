@@ -279,3 +279,13 @@ pub const SWATCH_SIZE: f32 = 24.0;
 
 /// Accent color swatch border radius (circular)
 pub const RADIUS_ROUND: f32 = SWATCH_SIZE / 2.0;
+
+/// Slider handle radius
+pub const SLIDER_HANDLE_RADIUS: f32 = 7.0;
+/// Slider rail width (height of the track)
+pub const SLIDER_RAIL_WIDTH: f32 = 4.0;
+
+/// Radio button outer circle size
+pub const RADIO_SIZE: f32 = 16.0;
+/// Spacing between radio circle and label
+pub const RADIO_LABEL_SPACING: f32 = SPACE_SM;

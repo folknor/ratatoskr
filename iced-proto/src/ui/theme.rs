@@ -1,4 +1,4 @@
-use iced::widget::{button, container, pick_list, rule, text, text_input};
+use iced::widget::{button, container, pick_list, radio, rule, slider, text, text_input};
 use iced::{border, Color, Theme};
 use serde::Deserialize;
 
@@ -480,6 +480,55 @@ pub fn key_badge_container(theme: &Theme) -> container::Style {
             radius: RADIUS_SM.into(),
         },
         ..Default::default()
+    }
+}
+
+// ── Slider style ─────────────────────────────────────────
+
+pub fn settings_slider(theme: &Theme, status: slider::Status) -> slider::Style {
+    let p = theme.extended_palette();
+    let color = match status {
+        slider::Status::Active => p.primary.base.color,
+        slider::Status::Hovered => p.primary.strong.color,
+        slider::Status::Dragged => p.primary.base.color,
+    };
+    slider::Style {
+        rail: slider::Rail {
+            backgrounds: (color.into(), p.background.strong.color.into()),
+            width: SLIDER_RAIL_WIDTH,
+            border: border::rounded(SLIDER_RAIL_WIDTH / 2.0),
+        },
+        handle: slider::Handle {
+            shape: slider::HandleShape::Circle { radius: SLIDER_HANDLE_RADIUS },
+            background: color.into(),
+            border_width: 0.0,
+            border_color: Color::TRANSPARENT,
+        },
+    }
+}
+
+// ── Radio style ──────────────────────────────────────────
+
+pub fn settings_radio(theme: &Theme, status: radio::Status) -> radio::Style {
+    let p = theme.extended_palette();
+    let is_selected = matches!(
+        status,
+        radio::Status::Active { is_selected: true } | radio::Status::Hovered { is_selected: true }
+    );
+    radio::Style {
+        background: if is_selected {
+            p.primary.base.color.into()
+        } else {
+            p.background.base.color.into()
+        },
+        dot_color: ON_AVATAR,
+        border_width: if is_selected { 0.0 } else { 1.5 },
+        border_color: if is_selected {
+            Color::TRANSPARENT
+        } else {
+            p.background.strongest.color.scale_alpha(0.5)
+        },
+        text_color: None, // We handle text ourselves
     }
 }
 

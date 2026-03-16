@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, row, scrollable, text, text_input, toggler, Space};
+use iced::widget::{button, column, container, radio, row, scrollable, slider, text, text_input, toggler, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::icon;
@@ -13,6 +13,8 @@ pub enum SettingsMessage {
     Close,
     SelectTab(Tab),
     // General
+    ScaleDragged(f32),
+    ScaleReleased,
     ThemeChanged(String),
     DensityChanged(String),
     FontSizeChanged(String),
@@ -126,6 +128,8 @@ pub struct SettingsState {
     pub active_tab: Tab,
     pub open_select: Option<SelectField>,
     // General
+    pub scale: f32,
+    pub scale_preview: Option<f32>,
     pub theme: String,
     pub density: String,
     pub font_size: String,
@@ -169,6 +173,8 @@ impl Default for SettingsState {
         Self {
             active_tab: Tab::General,
             open_select: None,
+            scale: 1.0,
+            scale_preview: None,
             theme: "System".into(),
             density: "Default".into(),
             font_size: "Default".into(),
@@ -219,6 +225,12 @@ impl SettingsState {
                 };
             }
             // General
+            SettingsMessage::ScaleDragged(v) => self.scale_preview = Some(v),
+            SettingsMessage::ScaleReleased => {
+                if let Some(v) = self.scale_preview.take() {
+                    self.scale = v;
+                }
+            }
             SettingsMessage::ThemeChanged(v) => { self.theme = v; self.open_select = None; }
             SettingsMessage::DensityChanged(v) => { self.density = v; self.open_select = None; }
             SettingsMessage::FontSizeChanged(v) => { self.font_size = v; self.open_select = None; }
@@ -294,10 +306,13 @@ pub fn view(state: &SettingsState) -> Element<'_, SettingsMessage> {
     row![
         nav,
         iced::widget::rule::vertical(1).style(theme::sidebar_divider_rule),
-        container(scrollable(content).height(Length::Fill))
+        container(
+            scrollable(
+                container(content).padding(PAD_SETTINGS_CONTENT)
+            ).height(Length::Fill)
+        )
             .width(Length::Fill)
             .height(Length::Fill)
-            .padding(PAD_SETTINGS_CONTENT)
             .style(theme::content_container),
     ]
     .into()
@@ -349,12 +364,6 @@ fn general_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
             SettingsMessage::ToggleSelect(SelectField::Theme),
             SettingsMessage::ThemeChanged,
         ), SettingsMessage::ToggleSelect(SelectField::Theme)),
-        setting_row("Reading Pane", widgets::select(
-            &["Right", "Bottom", "Hidden"], &state.reading_pane_position,
-            state.open_select == Some(SelectField::ReadingPane),
-            SettingsMessage::ToggleSelect(SelectField::ReadingPane),
-            SettingsMessage::ReadingPaneChanged,
-        ), SettingsMessage::ToggleSelect(SelectField::ReadingPane)),
         setting_row("Email Density", widgets::select(
             &["Compact", "Default", "Spacious"], &state.density,
             state.open_select == Some(SelectField::Density),
@@ -367,9 +376,16 @@ fn general_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
             SettingsMessage::ToggleSelect(SelectField::FontSize),
             SettingsMessage::FontSizeChanged,
         ), SettingsMessage::ToggleSelect(SelectField::FontSize)),
+        slider_row("Scale", None, 1.0..=4.0, state.scale_preview.unwrap_or(state.scale), 1.0, 0.125, SettingsMessage::ScaleDragged, Some(SettingsMessage::ScaleReleased)),
         accent_color_row(state.accent_color_index),
         toggle_row("Show Sync Status Bar", "Display sync progress in the status bar", state.sync_status_bar, SettingsMessage::ToggleSyncStatusBar),
     ]));
+
+    col = col.push(section("Reading Pane", radio_group(
+        &[("Right", "Right"), ("Bottom", "Bottom"), ("Hidden", "Hidden")],
+        Some(state.reading_pane_position.as_str()),
+        |v| SettingsMessage::ReadingPaneChanged(v.to_string()),
+    )));
 
     col = col.push(section("Privacy & Security", vec![
         toggle_row("Block Remote Images", "Don't load remote images in email bodies", state.block_remote_images, SettingsMessage::ToggleBlockRemoteImages),
@@ -915,6 +931,96 @@ fn coming_soon_row<'a>(feature: &'a str) -> Element<'a, SettingsMessage> {
             .size(TEXT_LG)
             .style(theme::text_tertiary),
     )
+}
+
+/// A row with a label on the left (50%) and an optional icon + slider on the right (50%).
+/// No hover effect — only direct slider interaction. The slider has a strong snap toward `default`.
+fn slider_row<'a>(
+    label: &'a str,
+    icon: Option<iced::widget::Text<'a>>,
+    range: std::ops::RangeInclusive<f32>,
+    value: f32,
+    default: f32,
+    step: f32,
+    on_change: impl Fn(f32) -> SettingsMessage + 'a,
+    on_release: Option<SettingsMessage>,
+) -> Element<'a, SettingsMessage> {
+    let mut slider_widget = slider(range, value, on_change)
+        .default(default)
+        .step(step)
+        .style(theme::settings_slider)
+        .width(Length::Fill);
+    if let Some(msg) = on_release {
+        slider_widget = slider_widget.on_release(msg);
+    }
+
+    let right_content: Element<'a, SettingsMessage> = if let Some(ic) = icon {
+        row![
+            container(ic.size(ICON_XL).style(text::secondary))
+                .align_y(Alignment::Center),
+            slider_widget,
+        ]
+        .spacing(SPACE_SM)
+        .align_y(Alignment::Center)
+        .width(Length::Fill)
+        .into()
+    } else {
+        slider_widget.into()
+    };
+
+    settings_row_container(
+        SETTINGS_ROW_HEIGHT,
+        row![
+            container(text(label).size(TEXT_LG).style(text::base))
+                .align_y(Alignment::Center)
+                .width(Length::FillPortion(1)),
+            container(right_content)
+                .align_y(Alignment::Center)
+                .width(Length::FillPortion(1)),
+        ]
+        .align_y(Alignment::Center),
+    )
+}
+
+/// A group of mutually exclusive radio options, rendered as rows with hover effects.
+/// Each row has a radio circle on the left, label text a fixed distance away.
+fn radio_group<'a, V>(
+    options: &'a [(&'a str, V)],
+    selected: Option<V>,
+    on_select: impl Fn(V) -> SettingsMessage + 'a + Copy,
+) -> Vec<Element<'a, SettingsMessage>>
+where
+    V: Copy + Eq + 'a,
+{
+    options
+        .iter()
+        .map(|(label, value)| {
+            let msg = on_select(*value);
+            button(
+                container(
+                    row![
+                        radio("", *value, selected, on_select)
+                            .size(RADIO_SIZE)
+                            .spacing(0)
+                            .style(theme::settings_radio),
+                        container(text(*label).size(TEXT_LG).style(text::base))
+                            .align_y(Alignment::Center),
+                    ]
+                    .spacing(RADIO_LABEL_SPACING)
+                    .align_y(Alignment::Center),
+                )
+                .padding(PAD_SETTINGS_ROW)
+                .width(Length::Fill)
+                .height(SETTINGS_ROW_HEIGHT)
+                .align_y(Alignment::Center),
+            )
+            .on_press(msg)
+            .padding(0)
+            .style(theme::bare_button)
+            .width(Length::Fill)
+            .into()
+        })
+        .collect()
 }
 
 fn accent_color_row(selected: usize) -> Element<'static, SettingsMessage> {

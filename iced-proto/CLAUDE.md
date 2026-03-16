@@ -52,7 +52,11 @@ Elm architecture (iced's `application()` — boot/update/view cycle). Single `Ap
 
 **`height()` on containers is fixed, not minimum.** There's no `min_height()` on containers in this iced version. If you need rows to be "at least X tall but grow for bigger content," use a shared `height()` constant and accept that all rows are that exact height. Use different constants for different row types (e.g., `SETTINGS_ROW_HEIGHT` vs `SETTINGS_TOGGLE_ROW_HEIGHT`).
 
+**Scrollable clips shadows.** If a container inside a `scrollable` has a `shadow`, the shadow will be clipped at the scrollable's bounds. Don't put padding on the outer container around the scrollable — put it on an inner container *inside* the scrollable so the padding becomes part of the scrolled content and gives the shadow room to render.
+
 **Extended palette background scale (dark mode).** `base` is the darkest. Each step lightens by a fixed deviation: `base` (0%) → `weakest` (3%) → `weaker` (7%) → `weak` (10%) → `neutral` (12.5%) → `strong` (15%) → `stronger` (17.5%) → `strongest` (20%). In light mode the direction reverses. Use this to create visual depth hierarchy — e.g., fieldsets at `base`, content area at `weakest`, sidebar at `weaker`.
+
+**Hover backgrounds are always one palette step away from the element's resting color.** If a row rests on `base`, its hover is `weakest`. If it rests on `weakest`, its hover is `weaker`. Never skip steps — jumping two or more steps makes hover effects feel heavy. This applies to nav buttons, setting rows, dropdown items, chip buttons, and any other interactive surface.
 
 ## Layout module (`src/ui/layout.rs`)
 

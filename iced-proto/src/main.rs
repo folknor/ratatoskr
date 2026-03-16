@@ -28,6 +28,7 @@ fn main() -> iced::Result {
     let mut app = iced::application(App::boot, App::update, App::view)
         .title("Ratatoskr (iced prototype)")
         .theme(App::theme)
+        .scale_factor(|app| app.settings.scale)
         .subscription(App::subscription)
         .default_font(font::TEXT)
         .window(window.to_window_settings());
