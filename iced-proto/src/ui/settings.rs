@@ -73,6 +73,11 @@ pub enum SettingsMessage {
     FocusInput(String),
     CopyToClipboard(String),
     Noop,
+    // Help tooltips
+    HelpHover(String),
+    HelpUnhover(String),
+    ToggleHelpPin(String),
+    DismissHelp,
     // Overlay
     OpenOverlay(SettingsOverlay),
     CloseOverlay,
@@ -197,6 +202,9 @@ pub struct SettingsState {
     // Overlay
     pub overlay: Option<SettingsOverlay>,
     pub overlay_anim: animation::Animation<bool>,
+    // Help tooltips
+    pub hovered_help: Option<String>,
+    pub pinned_help: Option<String>,
     // Editable lists
     pub drag_state: Option<DragState>,
     // Demo data for Mail Rules tab
@@ -269,6 +277,8 @@ impl Default for SettingsState {
             overlay_anim: animation::Animation::new(false)
                 .easing(Easing::EaseOutCubic)
                 .duration(Duration::from_millis(200)),
+            hovered_help: None,
+            pinned_help: None,
             drag_state: None,
             demo_labels: vec![
                 EditableItem { label: "Important".into(), enabled: Some(true) },
@@ -294,8 +304,30 @@ impl SettingsState {
                 return iced::clipboard::write(contents);
             }
             SettingsMessage::Noop => {}
+            SettingsMessage::HelpHover(id) => {
+                self.hovered_help = Some(id);
+            }
+            SettingsMessage::HelpUnhover(id) => {
+                if self.hovered_help.as_ref() == Some(&id) {
+                    self.hovered_help = None;
+                }
+            }
+            SettingsMessage::ToggleHelpPin(id) => {
+                if self.pinned_help.as_ref() == Some(&id) {
+                    self.pinned_help = None;
+                } else {
+                    self.pinned_help = Some(id);
+                }
+            }
+            SettingsMessage::DismissHelp => {
+                self.pinned_help = None;
+                self.hovered_help = None;
+            }
             SettingsMessage::Close => {}
-            SettingsMessage::SelectTab(tab) => self.active_tab = tab,
+            SettingsMessage::SelectTab(tab) => {
+                self.active_tab = tab;
+                self.pinned_help = None;
+            }
             SettingsMessage::ToggleSelect(field) => {
                 self.open_select = if self.open_select == Some(field) {
                     None
@@ -647,7 +679,24 @@ fn general_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
         |v| SettingsMessage::ReadingPaneChanged(v.to_string()),
     )));
 
-    col = col.push(section("Privacy & Security", vec![
+    let privacy_help_id = "privacy-security";
+    let privacy_help_visible = state.hovered_help.as_deref() == Some(privacy_help_id)
+        || state.pinned_help.as_deref() == Some(privacy_help_id);
+    col = col.push(section_with_help("Privacy & Security", SectionHelp {
+        id: privacy_help_id,
+        content: column![
+            text("Remote images can be used to track when you open an email. Blocking them prevents this but some emails may not display correctly.")
+                .size(TEXT_SM)
+                .style(theme::text_on_primary),
+            Space::new().height(SPACE_XS),
+            text("Phishing detection analyzes incoming emails for suspicious links, sender spoofing, and social engineering patterns.")
+                .size(TEXT_SM)
+                .style(theme::text_on_primary),
+        ]
+        .into(),
+        visible: privacy_help_visible,
+        pinned: state.pinned_help.as_deref() == Some(privacy_help_id),
+    }, vec![
         toggle_row("Block Remote Images", "Don't load remote images in email bodies", state.block_remote_images, SettingsMessage::ToggleBlockRemoteImages),
         toggle_row("Phishing Detection", "Warn about suspicious emails", state.phishing_detection, SettingsMessage::TogglePhishingDetection),
     ]));
@@ -1048,7 +1097,7 @@ fn section<'a>(
     title: &'a str,
     items: Vec<Element<'a, SettingsMessage>>,
 ) -> Element<'a, SettingsMessage> {
-    section_inner(Some(title), None, items)
+    section_inner(Some(title), None, None, items)
 }
 
 fn section_with_subtitle<'a>(
@@ -1056,18 +1105,35 @@ fn section_with_subtitle<'a>(
     subtitle: &'a str,
     items: Vec<Element<'a, SettingsMessage>>,
 ) -> Element<'a, SettingsMessage> {
-    section_inner(Some(title), Some(subtitle), items)
+    section_inner(Some(title), Some(subtitle), None, items)
+}
+
+fn section_with_help<'a>(
+    title: &'a str,
+    help: SectionHelp<'a>,
+    items: Vec<Element<'a, SettingsMessage>>,
+) -> Element<'a, SettingsMessage> {
+    section_inner(Some(title), None, Some(help), items)
 }
 
 fn section_untitled<'a>(
     items: Vec<Element<'a, SettingsMessage>>,
 ) -> Element<'a, SettingsMessage> {
-    section_inner(None, None, items)
+    section_inner(None, None, None, items)
+}
+
+/// Help tooltip configuration for a section header.
+struct SectionHelp<'a> {
+    id: &'a str,
+    content: Element<'a, SettingsMessage>,
+    visible: bool,
+    pinned: bool,
 }
 
 fn section_inner<'a>(
     title: Option<&'a str>,
     subtitle: Option<&'a str>,
+    help: Option<SectionHelp<'a>>,
     items: Vec<Element<'a, SettingsMessage>>,
 ) -> Element<'a, SettingsMessage> {
     let mut col = column![].width(Length::Fill).padding(1);
@@ -1082,13 +1148,62 @@ fn section_inner<'a>(
         .style(theme::settings_section_container);
 
     if let Some(title) = title {
-        let mut header = column![
-            text(title)
-                .size(TEXT_XL)
-                .style(text::base)
-                .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::TEXT }),
-        ]
-        .spacing(SPACE_XXXS);
+        let title_text: Element<'a, SettingsMessage> = text(title)
+            .size(TEXT_XL)
+            .style(text::base)
+            .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::TEXT })
+            .into();
+
+        let header_row: Element<'a, SettingsMessage> = if let Some(help_cfg) = help {
+            let help_id = help_cfg.id.to_string();
+            let help_id_hover = help_id.clone();
+            let help_id_unhover = help_id.clone();
+            let icon_style: fn(&iced::Theme) -> text::Style = if help_cfg.pinned {
+                text::primary
+            } else {
+                theme::text_muted
+            };
+
+            let help_icon = mouse_area(
+                button(
+                    container(icon::help_circle().size(ICON_XL).style(icon_style))
+                        .align_x(Alignment::Center)
+                        .align_y(Alignment::Center),
+                )
+                .on_press(SettingsMessage::ToggleHelpPin(help_id.clone()))
+                .padding(PAD_ICON_BTN)
+                .style(theme::bare_icon_button),
+            )
+            .on_enter(SettingsMessage::HelpHover(help_id_hover))
+            .on_exit(SettingsMessage::HelpUnhover(help_id_unhover));
+
+            let mut pop = crate::ui::popover::popover(help_icon)
+                .position(crate::ui::popover::Position::BelowRight)
+                .popup_width(HELP_TOOLTIP_WIDTH);
+
+            if help_cfg.visible {
+                pop = pop
+                    .popup(
+                        container(help_cfg.content)
+                            .padding(PAD_SETTINGS_ROW)
+                            .width(Length::Fill)
+                            .style(theme::floating_container),
+                    )
+                    .on_dismiss(SettingsMessage::DismissHelp);
+            }
+
+            row![
+                title_text,
+                Space::new().width(Length::Fill),
+                pop,
+            ]
+            .align_y(Alignment::Center)
+            .into()
+        } else {
+            title_text
+        };
+
+        let mut header = column![header_row].spacing(SPACE_XXXS);
 
         if let Some(subtitle) = subtitle {
             header = header.push(

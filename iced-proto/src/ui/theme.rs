@@ -81,6 +81,13 @@ pub fn text_muted(theme: &Theme) -> text::Style {
     }
 }
 
+/// Text on a primary-colored background (e.g. help tooltips).
+pub fn text_on_primary(theme: &Theme) -> text::Style {
+    text::Style {
+        color: Some(theme.extended_palette().primary.base.text),
+    }
+}
+
 // ── Button styles ───────────────────────────────────────
 // Built-in: button::primary, button::secondary, button::text,
 //           button::danger, button::subtle
@@ -312,10 +319,10 @@ pub fn action_bar_container(theme: &Theme) -> container::Style {
 pub fn floating_container(theme: &Theme) -> container::Style {
     let p = theme.extended_palette();
     container::Style {
-        background: Some(p.background.weak.color.into()),
+        background: Some(p.primary.base.color.scale_alpha(0.85).into()),
         border: iced::Border {
-            color: p.background.strongest.color.scale_alpha(0.2),
-            width: 1.0,
+            color: p.primary.strong.color,
+            width: 2.0,
             radius: RADIUS_LG.into(),
         },
         shadow: iced::Shadow {

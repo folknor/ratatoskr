@@ -4,12 +4,24 @@ use iced::advanced::{
 use iced::{Event, Length, Point, Rectangle, Renderer, Size, Theme, Vector, mouse};
 
 /// A widget that displays a base element and optionally floats a popup
-/// overlay below it, without affecting layout. Clicks outside the
+/// overlay relative to it, without affecting layout. Clicks outside the
 /// popup dismiss it via `on_dismiss`.
 pub struct Popover<'a, Message> {
     base: iced::Element<'a, Message>,
     popup: Option<iced::Element<'a, Message>>,
     on_dismiss: Option<Message>,
+    popup_width: Option<f32>,
+    position: Position,
+}
+
+/// Where the popup appears relative to the base widget.
+#[derive(Debug, Clone, Copy, Default)]
+pub enum Position {
+    /// Below the base, left-aligned.
+    #[default]
+    Below,
+    /// Below the base, right edge aligned with the base's right edge.
+    BelowRight,
 }
 
 pub fn popover<'a, Message: 'a>(
@@ -19,6 +31,8 @@ pub fn popover<'a, Message: 'a>(
         base: base.into(),
         popup: None,
         on_dismiss: None,
+        popup_width: None,
+        position: Position::default(),
     }
 }
 
@@ -30,6 +44,17 @@ impl<'a, Message: Clone + 'a> Popover<'a, Message> {
 
     pub fn on_dismiss(mut self, message: Message) -> Self {
         self.on_dismiss = Some(message);
+        self
+    }
+
+    /// Set a fixed width for the popup. If unset, the popup uses the base's width.
+    pub fn popup_width(mut self, width: f32) -> Self {
+        self.popup_width = Some(width);
+        self
+    }
+
+    pub fn position(mut self, position: Position) -> Self {
+        self.position = position;
         self
     }
 }
@@ -161,13 +186,16 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Popover<'_, Message> {
             translation,
         );
 
+        let base_position = layout.position() + translation;
         let overlay = overlay::Element::new(Box::new(PopoverOverlay {
             content: popup,
             tree: &mut second[0],
             base_bounds: layout.bounds(),
-            position: layout.position(),
+            base_position,
             viewport: *viewport,
             on_dismiss: self.on_dismiss.clone(),
+            popup_width: self.popup_width,
+            position: self.position,
         }));
 
         Some(
@@ -189,20 +217,26 @@ struct PopoverOverlay<'a, 'b, Message> {
     content: &'b mut iced::Element<'a, Message>,
     tree: &'b mut widget::Tree,
     base_bounds: Rectangle,
-    position: Point,
+    base_position: Point,
     viewport: Rectangle,
     on_dismiss: Option<Message>,
+    popup_width: Option<f32>,
+    position: Position,
 }
 
 impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer>
     for PopoverOverlay<'_, '_, Message>
 {
-    fn layout(&mut self, renderer: &Renderer, _bounds: Size) -> layout::Node {
+    fn layout(&mut self, renderer: &Renderer, bounds: Size) -> layout::Node {
+        let popup_width = self.popup_width.unwrap_or(self.base_bounds.width);
+        let below_y = self.base_position.y + self.base_bounds.height;
+        let available_height = (bounds.height - below_y).max(0.0);
+
         let limits = layout::Limits::new(
             Size::ZERO,
             Size {
-                width: self.base_bounds.width,
-                height: self.viewport.height - self.position.y - self.base_bounds.height,
+                width: popup_width,
+                height: available_height,
             },
         )
         .width(Length::Fill);
@@ -212,8 +246,19 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer>
             .as_widget_mut()
             .layout(self.tree, renderer, &limits);
 
-        // Position directly below the base widget
-        node.move_to(self.position + Vector::new(0.0, self.base_bounds.height))
+        // Calculate X based on position mode
+        let x = match self.position {
+            Position::Below => self.base_position.x,
+            Position::BelowRight => {
+                let right_edge = self.base_position.x + self.base_bounds.width;
+                (right_edge - node.size().width).max(0.0)
+            }
+        };
+
+        // Clamp so popup stays within viewport
+        let x = x.clamp(0.0, (bounds.width - node.size().width).max(0.0));
+
+        node.move_to(Point::new(x, below_y))
     }
 
     fn draw(

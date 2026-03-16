@@ -274,6 +274,9 @@ pub const SETTINGS_CONTENT_MAX_WIDTH: u32 = 600;
 /// Minimum width for select widget (trigger + menu)
 pub const SELECT_MIN_WIDTH: f32 = 140.0;
 
+/// Help tooltip popup width
+pub const HELP_TOOLTIP_WIDTH: f32 = 300.0;
+
 /// Accent color swatch diameter
 pub const SWATCH_SIZE: f32 = 24.0;
 
