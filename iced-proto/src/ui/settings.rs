@@ -894,19 +894,7 @@ fn about_tab<'a>() -> Element<'a, SettingsMessage> {
     ]));
 
     col = col.push(section("Updates", vec![
-        container(
-            row![
-                column![
-                    text("Software Updates").size(TEXT_LG).style(text::base),
-                    text("Check for new versions").size(TEXT_SM).style(theme::text_tertiary),
-                ].spacing(SPACE_XXXS),
-                Space::new().width(Length::Fill),
-                button(text("Check for Updates").size(TEXT_MD))
-                    .on_press(SettingsMessage::CheckForUpdates)
-                    .padding(PAD_ICON_BTN)
-                    .style(theme::secondary_button),
-            ].align_y(Alignment::Center),
-        ).padding(PAD_SETTINGS_ROW).into(),
+        action_row("Software Updates", Some("Check for new versions"), None, ActionKind::InApp, SettingsMessage::CheckForUpdates),
     ]));
 
     col = col.push(section("License", vec![
@@ -930,26 +918,7 @@ fn about_tab<'a>() -> Element<'a, SettingsMessage> {
     ]));
 
     col = col.push(section("Links", vec![
-        button(
-            row![
-                container(icon::globe().size(ICON_XL).style(text::secondary))
-                    .align_y(Alignment::Center),
-                column![
-                    text("GitHub Repository").size(TEXT_LG).style(text::base),
-                    text("folknor/ratatoskr").size(TEXT_SM).style(theme::text_tertiary),
-                ].spacing(SPACE_XXXS),
-                Space::new().width(Length::Fill),
-                container(icon::external_link().size(ICON_MD).style(theme::text_tertiary))
-                    .align_y(Alignment::Center),
-            ]
-            .spacing(SPACE_SM)
-            .align_y(Alignment::Center),
-        )
-        .on_press(SettingsMessage::OpenGithub)
-        .padding(PAD_SETTINGS_ROW)
-        .style(theme::bare_button)
-        .width(Length::Fill)
-        .into(),
+        action_row("GitHub Repository", Some("folknor/ratatoskr"), Some(icon::globe()), ActionKind::Url, SettingsMessage::OpenGithub),
     ]));
 
     col.into()
@@ -961,7 +930,7 @@ fn section<'a>(
     title: &'a str,
     items: Vec<Element<'a, SettingsMessage>>,
 ) -> Element<'a, SettingsMessage> {
-    let mut col = column![].width(Length::Fill);
+    let mut col = column![].width(Length::Fill).padding(1);
     for (i, item) in items.into_iter().enumerate() {
         if i > 0 {
             col = col.push(iced::widget::rule::horizontal(1).style(theme::subtle_divider_rule));
@@ -1330,6 +1299,65 @@ fn editable_list<'a>(
         .on_move(move |point| SettingsMessage::ListDragMove(lid_move.clone(), point));
 
     list_area.into()
+}
+
+/// The action type determines the trailing icon.
+#[derive(Debug, Clone, Copy)]
+enum ActionKind {
+    /// Opens an external URL — shows external_link icon.
+    Url,
+    /// In-app action or slide-in overlay — shows arrow_right icon.
+    InApp,
+}
+
+/// A full-row button with optional leading icon, label + optional description,
+/// and a trailing icon indicating the action type. The entire row is the click
+/// target — no nested buttons. Follows the rule that section rows never contain buttons.
+fn action_row<'a>(
+    label: &'a str,
+    description: Option<&'a str>,
+    icon: Option<iced::widget::Text<'a>>,
+    kind: ActionKind,
+    on_press: SettingsMessage,
+) -> Element<'a, SettingsMessage> {
+    let mut content = row![].spacing(SPACE_SM).align_y(Alignment::Center);
+
+    if let Some(ico) = icon {
+        content = content.push(
+            container(ico.size(ICON_XL).style(text::secondary))
+                .align_y(Alignment::Center),
+        );
+    }
+
+    let label_col: Element<'a, SettingsMessage> = if let Some(desc) = description {
+        column![
+            text(label).size(TEXT_LG).style(text::base),
+            text(desc).size(TEXT_SM).style(theme::text_tertiary),
+        ]
+        .spacing(SPACE_XXXS)
+        .into()
+    } else {
+        text(label).size(TEXT_LG).style(text::base).into()
+    };
+
+    content = content.push(label_col);
+    content = content.push(Space::new().width(Length::Fill));
+
+    let trailing = match kind {
+        ActionKind::Url => icon::external_link(),
+        ActionKind::InApp => icon::arrow_right(),
+    };
+    content = content.push(
+        container(trailing.size(ICON_XL).style(text::base))
+            .align_y(Alignment::Center),
+    );
+
+    button(content)
+        .on_press(on_press)
+        .padding(PAD_SETTINGS_ROW)
+        .style(theme::bare_button)
+        .width(Length::Fill)
+        .into()
 }
 
 fn accent_color_row(selected: usize) -> Element<'static, SettingsMessage> {
