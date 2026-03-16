@@ -1278,7 +1278,7 @@ fn toggle_row<'a>(
                 ]
                 .spacing(SPACE_XXXS),
                 Space::new().width(Length::Fill),
-                animated_toggler(value).size(TEXT_HEADING).on_toggle(on_toggle),
+                animated_toggler(value).size(TEXT_HEADING).on_toggle(on_toggle).style(theme::settings_toggler),
             ]
             .align_y(Alignment::Center),
         )
@@ -1537,6 +1537,7 @@ fn editable_list<'a>(
                 animated_toggler(enabled)
                     .size(TEXT_HEADING)
                     .on_toggle(move |v| SettingsMessage::ListToggle(lid.clone(), idx, v))
+                    .style(theme::settings_toggler)
                     .into(),
             );
         }

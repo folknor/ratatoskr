@@ -8,15 +8,7 @@
 
 - [ ] **`responsive` for adaptive layout** — Wrap PaneGrid in `iced::widget::responsive` to collapse panels at narrow window sizes (e.g., hide contact sidebar below 900px, stack sidebar over thread list below 600px).
 
-- [x] **Animated toggler widget** — Custom `animated_toggler` widget using iced's `Animation<bool>` with EaseOutCubic easing (150ms). Pill position and background color both animate smoothly. Handles interruption (toggling mid-animation reverses cleanly). Drop-in replacement for stock toggler.
-
 - [ ] **Keybinding display and edit UI** - Need to redo the Settings/Shortcuts UI. Take a look at https://nyaa.place/blog/libadwaita-1-8/
-
-- [x] **Menu and X icon in dynamic sections need hover states** - Currently theres no indication that they are clickable. Needs a hover background.
-
-- [x] **Center settings content** - The content of each settings "tab" should be centered.
-
-- [x] **Back button in settings overlay hover state** - Currently no indication that it's clickable.
 
 ## Bugs
 
@@ -31,8 +23,6 @@
   - https://github.com/pop-os/iced/blob/master/widget/src/markdown.rs — COSMIC fork's markdown widget
 
 ## Settings Row Types
-
-- [ ] **Single-line text input row** — Design a settings row with a label on the left and an inline text field on the right. Needed for things like custom server URLs, display names, etc.
 
 - [ ] **License display/multiline static text display row** - Need to be able to click the link there, and also the text should be selectable/copyable in these widgets. Needs its own base type.
 

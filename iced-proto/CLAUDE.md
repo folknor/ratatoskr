@@ -64,6 +64,16 @@ Elm architecture (iced's `application()` — boot/update/view cycle). Single `Ap
 
 **`responsive` closure is `Fn`, not `FnOnce`.** You can't move `Element`s into a `responsive(|size| ...)` closure because it may be called multiple times. Use fixed offsets or store computed sizes in state instead.
 
+**Buttons without `on_press` don't show hover states.** Iced treats them as disabled — no hover background, no cursor change. If you need a hover effect, the button must have `on_press` even if the action is just focusing a child widget.
+
+**Buttons hardcode the pointer cursor.** You cannot override the cursor to e.g. `Interaction::Text` for an inline edit row. Wrapping the button in a `mouse_area` with a different `interaction` won't help — the button's `mouse_interaction` wins for its bounds.
+
+**`text_input` without `on_input` is fully disabled.** No focus, no selection, no cursor — completely inert. To make a read-only but selectable/copyable input, provide a no-op `on_input` (e.g. `|_| Message::Noop`).
+
+**Programmatic focus uses `widget::operation::focus(id)`.** Not `text_input::focus`. The ID is `widget::Id` (accepts `String` via `From<String>`). Set the ID on the text input with `.id("my-id")` and return `iced::widget::operation::focus("my-id".to_string())` as a `Task` from `update()`.
+
+**Popover overlay positioning must include the `translation` vector.** In `Widget::overlay()`, `layout.position()` returns coordinates relative to the parent widget, not the window. Add the `translation` parameter: `layout.position() + translation`. Without this, popups misposition at non-1.0 scale factors and inside scrollables.
+
 ## Layout module (`src/ui/layout.rs`)
 
 All sizing, spacing, padding, and radii are centralized here. Views import `use crate::ui::layout::*` and reference named constants. **No magic numbers in view or widget code** — every `.size()`, avatar diameter, border radius, and padding must reference a layout constant.

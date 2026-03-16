@@ -23,10 +23,10 @@ impl From<ColorScheme> for Mode {
 }
 
 impl Mode {
-    pub fn theme(self) -> Theme {
+    pub fn theme(self, accent: iced::Color) -> Theme {
         match self {
-            Mode::Dark | Mode::Unspecified => crate::ui::theme::dark(),
-            Mode::Light => crate::ui::theme::light(),
+            Mode::Dark | Mode::Unspecified => crate::ui::theme::dark_with_accent(accent),
+            Mode::Light => crate::ui::theme::light_with_accent(accent),
         }
     }
 }

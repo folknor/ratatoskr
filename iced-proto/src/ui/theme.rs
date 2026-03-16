@@ -1,4 +1,4 @@
-use iced::widget::{button, container, pick_list, radio, rule, slider, text, text_input};
+use iced::widget::{button, container, pick_list, radio, rule, slider, text, text_input, toggler};
 use iced::{border, Color, Theme};
 use serde::Deserialize;
 
@@ -44,10 +44,14 @@ pub fn from_toml(content: &str) -> Result<Theme, toml::de::Error> {
 // ── Built-in dark/light seeds ───────────────────────────
 
 pub fn dark() -> Theme {
+    dark_with_accent(hex_to_color("#6266F1"))
+}
+
+pub fn dark_with_accent(accent: Color) -> Theme {
     Theme::custom("Dark", iced::theme::Palette {
         background: hex_to_color("#0F172A"),
         text: hex_to_color("#F1F5FA"),
-        primary: hex_to_color("#6266F1"),
+        primary: accent,
         success: hex_to_color("#059669"),
         warning: hex_to_color("#D97706"),
         danger: hex_to_color("#DC2626"),
@@ -55,10 +59,14 @@ pub fn dark() -> Theme {
 }
 
 pub fn light() -> Theme {
+    light_with_accent(hex_to_color("#4F53DE"))
+}
+
+pub fn light_with_accent(accent: Color) -> Theme {
     Theme::custom("Light", iced::theme::Palette {
         background: hex_to_color("#F9FAFC"),
         text: hex_to_color("#11172A"),
-        primary: hex_to_color("#4F53DE"),
+        primary: accent,
         success: hex_to_color("#058059"),
         warning: hex_to_color("#D97706"),
         danger: hex_to_color("#DC2626"),
@@ -587,6 +595,36 @@ pub fn settings_radio(theme: &Theme, status: radio::Status) -> radio::Style {
             p.background.strongest.color.scale_alpha(0.5)
         },
         text_color: None, // We handle text ourselves
+    }
+}
+
+// ── Toggler style ───────────────────────────────────────
+
+/// Toggler with a pill that always matches the section row background (`base`),
+/// instead of the default which uses `primary.base.text` when ON — that color
+/// changes with the accent color and clashes with the section background.
+pub fn settings_toggler(theme: &Theme, status: toggler::Status) -> toggler::Style {
+    let p = theme.extended_palette();
+    let background = match status {
+        toggler::Status::Active { is_toggled } | toggler::Status::Hovered { is_toggled } => {
+            if is_toggled {
+                p.primary.base.color
+            } else {
+                p.background.strong.color
+            }
+        }
+        toggler::Status::Disabled { .. } => p.background.weak.color,
+    };
+    toggler::Style {
+        background: background.into(),
+        foreground: p.background.base.color.into(),
+        foreground_border_width: 0.0,
+        foreground_border_color: Color::TRANSPARENT,
+        background_border_width: 0.0,
+        background_border_color: Color::TRANSPARENT,
+        text_color: None,
+        border_radius: None,
+        padding_ratio: 0.1,
     }
 }
 

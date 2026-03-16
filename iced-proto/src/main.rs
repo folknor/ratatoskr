@@ -134,10 +134,14 @@ impl App {
     }
 
     fn theme(&self) -> Theme {
+        let accent = ui::theme::ACCENT_COLORS
+            .get(self.settings.accent_color_index)
+            .copied()
+            .unwrap_or(ui::theme::ACCENT_COLORS[0]);
         match self.settings.theme.as_str() {
-            "Light" => crate::ui::theme::light(),
-            "Dark" => crate::ui::theme::dark(),
-            _ => self.mode.theme(), // "System" tracks OS preference
+            "Light" => ui::theme::light_with_accent(accent),
+            "Dark" => ui::theme::dark_with_accent(accent),
+            _ => self.mode.theme(accent),
         }
     }
 
