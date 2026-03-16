@@ -69,8 +69,10 @@ pub enum SettingsMessage {
     ListAdd(String),                      // (list_id)
     ListToggle(String, usize, bool),      // (list_id, item index, new value)
     ListMenu(String, usize),              // (list_id, item index)
-    // Input rows
+    // Input/info rows
     FocusInput(String),
+    CopyToClipboard(String),
+    Noop,
     // Overlay
     OpenOverlay(SettingsOverlay),
     CloseOverlay,
@@ -288,6 +290,10 @@ impl SettingsState {
             SettingsMessage::FocusInput(id) => {
                 return iced::widget::operation::focus(id);
             }
+            SettingsMessage::CopyToClipboard(contents) => {
+                return iced::clipboard::write(contents);
+            }
+            SettingsMessage::Noop => {}
             SettingsMessage::Close => {}
             SettingsMessage::SelectTab(tab) => self.active_tab = tab,
             SettingsMessage::ToggleSelect(field) => {
@@ -1173,13 +1179,36 @@ fn toggle_row<'a>(
     .into()
 }
 
-fn info_row<'a>(label: &'a str, value: &'a str) -> Element<'a, SettingsMessage> {
+fn info_row(
+    label: &str,
+    value: &str,
+) -> Element<'static, SettingsMessage> {
+    let label_owned = label.to_string();
+    let value_owned = value.to_string();
+    let value_for_clipboard = value_owned.clone();
     container(
-        column![
-            text(label).size(TEXT_SM).style(theme::text_tertiary),
-            text(value).size(TEXT_LG).style(text::base),
+        row![
+            column![
+                text(label_owned).size(TEXT_SM).style(theme::text_tertiary),
+                text_input("", &value_owned)
+                    .on_input(|_| SettingsMessage::Noop)
+                    .size(TEXT_LG)
+                    .padding(0)
+                    .style(theme::inline_text_input),
+            ]
+            .spacing(SPACE_XXXS)
+            .width(Length::Fill),
+            button(
+                container(icon::copy().size(ICON_MD).style(text::base))
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::Center),
+            )
+            .on_press(SettingsMessage::CopyToClipboard(value_for_clipboard))
+            .padding(PAD_ICON_BTN)
+            .style(theme::bare_icon_button),
         ]
-        .spacing(SPACE_XXXS),
+        .spacing(SPACE_SM)
+        .align_y(Alignment::Center),
     )
     .padding(PAD_SETTINGS_ROW)
     .width(Length::Fill)
