@@ -192,6 +192,25 @@ pub fn bare_button(theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
+/// Icon-only button that sits inside a hovered row or on a `weakest` background.
+/// Hover is `weaker` (one step above `weakest`) so it's visible on both
+/// `base` (unhovered row) and `weakest` (hovered row / content area).
+pub fn bare_icon_button(theme: &Theme, status: button::Status) -> button::Style {
+    let p = theme.extended_palette();
+    match status {
+        button::Status::Hovered => button::Style {
+            background: Some(p.background.weaker.color.into()),
+            text_color: p.background.base.text,
+            border: border::rounded(RADIUS_SM),
+            ..Default::default()
+        },
+        _ => button::Style {
+            text_color: p.secondary.base.color,
+            ..Default::default()
+        },
+    }
+}
+
 pub fn action_button(theme: &Theme, status: button::Status) -> button::Style {
     let p = theme.extended_palette();
     match status {
@@ -394,6 +413,23 @@ pub fn ghost_pick_list(theme: &Theme, status: pick_list::Status) -> pick_list::S
 }
 
 // ── Text input style ────────────────────────────────────
+
+/// Text input that looks like plain text. No background or border in any state.
+pub fn inline_text_input(theme: &Theme, _status: text_input::Status) -> text_input::Style {
+    let p = theme.extended_palette();
+    text_input::Style {
+        background: Color::TRANSPARENT.into(),
+        border: iced::Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: 0.0.into(),
+        },
+        icon: p.background.base.text.scale_alpha(0.5),
+        placeholder: p.background.base.text.scale_alpha(0.4),
+        value: p.background.base.text,
+        selection: p.primary.base.color.scale_alpha(0.3),
+    }
+}
 
 pub fn settings_text_input(theme: &Theme, status: text_input::Status) -> text_input::Style {
     let p = theme.extended_palette();

@@ -300,8 +300,7 @@ impl App {
                 Task::none()
             }
             Message::Settings(msg) => {
-                self.settings.update(msg);
-                Task::none()
+                self.settings.update(msg).map(Message::Settings)
             }
             Message::WindowResized(size) => {
                 self.window.set_size(size);

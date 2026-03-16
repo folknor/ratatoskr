@@ -1,7 +1,7 @@
 use iced::animation::{self, Easing};
 use iced::time::{Duration, Instant};
 use iced::widget::{button, column, container, mouse_area, radio, row, scrollable, slider, text, text_input, Space};
-use iced::{Alignment, Element, Length, Point};
+use iced::{Alignment, Element, Length, Point, Task};
 
 use crate::ui::animated_toggler::animated_toggler;
 
@@ -69,6 +69,8 @@ pub enum SettingsMessage {
     ListAdd(String),                      // (list_id)
     ListToggle(String, usize, bool),      // (list_id, item index, new value)
     ListMenu(String, usize),              // (list_id, item index)
+    // Input rows
+    FocusInput(String),
     // Overlay
     OpenOverlay(SettingsOverlay),
     CloseOverlay,
@@ -281,8 +283,11 @@ impl Default for SettingsState {
 }
 
 impl SettingsState {
-    pub fn update(&mut self, message: SettingsMessage) {
+    pub fn update(&mut self, message: SettingsMessage) -> Task<SettingsMessage> {
         match message {
+            SettingsMessage::FocusInput(id) => {
+                return iced::widget::operation::focus(id);
+            }
             SettingsMessage::Close => {}
             SettingsMessage::SelectTab(tab) => self.active_tab = tab,
             SettingsMessage::ToggleSelect(field) => {
@@ -365,13 +370,13 @@ impl SettingsState {
                 // Only act if drag was initiated from the grip.
                 let has_drag = self.drag_state.as_ref()
                     .map_or(false, |d| d.list_id == list_id);
-                if !has_drag { return; }
+                if !has_drag { return Task::none(); }
 
                 // Record start_y on first move event.
                 if let Some(ref mut drag) = self.drag_state {
                     if drag.start_y < 0.0 {
                         drag.start_y = point.y;
-                        return;
+                        return Task::none();
                     }
                 }
 
@@ -383,7 +388,7 @@ impl SettingsState {
                 // Check if we've moved enough to start dragging.
                 if !self.drag_state.as_ref().unwrap().is_dragging {
                     if (point.y - start_y).abs() < DRAG_START_THRESHOLD {
-                        return;
+                        return Task::none();
                     }
                     if let Some(ref mut drag) = self.drag_state {
                         drag.is_dragging = true;
@@ -408,7 +413,7 @@ impl SettingsState {
             }
             SettingsMessage::ListRowClick(list_id, index) => {
                 // Only toggle if no drag is active.
-                if self.drag_state.is_some() { return; }
+                if self.drag_state.is_some() { return Task::none(); }
                 let items = self.list_items_mut(&list_id);
                 if let Some(item) = items.get_mut(index) {
                     if let Some(ref mut enabled) = item.enabled {
@@ -451,6 +456,7 @@ impl SettingsState {
                 // Just triggers a redraw — the animation reads Instant::now() in view.
             }
         }
+        Task::none()
     }
 
     fn list_items_mut(&mut self, list_id: &str) -> &mut Vec<EditableItem> {
@@ -483,7 +489,9 @@ pub fn view(state: &SettingsState) -> Element<'_, SettingsMessage> {
 
     let content_area = container(
         scrollable(
-            container(content).padding(PAD_SETTINGS_CONTENT)
+            container(content)
+                .padding(PAD_SETTINGS_CONTENT)
+                .align_x(Alignment::Center)
         ).height(Length::Fill)
     )
     .width(Length::Fill)
@@ -512,12 +520,14 @@ pub fn view(state: &SettingsState) -> Element<'_, SettingsMessage> {
                     )
                     .on_press(SettingsMessage::CloseOverlay)
                     .padding(PAD_NAV_ITEM)
-                    .style(theme::bare_button),
+                    .style(theme::bare_icon_button),
                 )
                 .padding(PAD_SETTINGS_ROW)
                 .width(Length::Fill),
                 scrollable(
-                    container(overlay_content).padding(PAD_SETTINGS_CONTENT)
+                    container(overlay_content)
+                        .padding(PAD_SETTINGS_CONTENT)
+                        .align_x(Alignment::Center)
                 ).height(Length::Fill),
             ]
         )
@@ -898,38 +908,8 @@ fn ai_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
 
     if state.ai_provider == "Ollama" {
         col = col.push(section("Local Server", vec![
-            container(
-                column![
-                    text("Server URL").size(TEXT_LG).style(text::base),
-                    Space::new().height(SPACE_XXS),
-                    text_input("http://localhost:11434", &state.ai_ollama_url)
-                        .on_input(SettingsMessage::OllamaUrlChanged)
-                        .size(TEXT_LG)
-                        .padding(PAD_INPUT)
-                        .style(theme::settings_text_input)
-                        .width(Length::Fill),
-                ]
-                .spacing(SPACE_XXXS),
-            )
-            .padding(PAD_SETTINGS_ROW)
-            .width(Length::Fill)
-            .into(),
-            container(
-                column![
-                    text("Model Name").size(TEXT_LG).style(text::base),
-                    Space::new().height(SPACE_XXS),
-                    text_input("e.g. llama3.2", &state.ai_ollama_model)
-                        .on_input(SettingsMessage::OllamaModelChanged)
-                        .size(TEXT_LG)
-                        .padding(PAD_INPUT)
-                        .style(theme::settings_text_input)
-                        .width(Length::Fill),
-                ]
-                .spacing(SPACE_XXXS),
-            )
-            .padding(PAD_SETTINGS_ROW)
-            .width(Length::Fill)
-            .into(),
+            input_row("ollama-url", "Server URL", "http://localhost:11434", &state.ai_ollama_url, SettingsMessage::OllamaUrlChanged),
+            input_row("ollama-model", "Model Name", "e.g. llama3.2", &state.ai_ollama_model, SettingsMessage::OllamaModelChanged),
         ]));
     } else {
         let key_label = match state.ai_provider.as_str() {
@@ -983,7 +963,7 @@ fn ai_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
         ]));
     }
 
-    col = col.push(section("Features", vec![
+    col = col.push(section_with_subtitle("Features", "AI-powered tools to help manage your inbox", vec![
         toggle_row("Enable AI Features", "Use AI-powered features across the app",
             state.ai_enabled, SettingsMessage::ToggleAiEnabled),
         toggle_row("Auto-Categorize", "Automatically categorize incoming emails",
@@ -1062,17 +1042,26 @@ fn section<'a>(
     title: &'a str,
     items: Vec<Element<'a, SettingsMessage>>,
 ) -> Element<'a, SettingsMessage> {
-    section_maybe_titled(Some(title), items)
+    section_inner(Some(title), None, items)
+}
+
+fn section_with_subtitle<'a>(
+    title: &'a str,
+    subtitle: &'a str,
+    items: Vec<Element<'a, SettingsMessage>>,
+) -> Element<'a, SettingsMessage> {
+    section_inner(Some(title), Some(subtitle), items)
 }
 
 fn section_untitled<'a>(
     items: Vec<Element<'a, SettingsMessage>>,
 ) -> Element<'a, SettingsMessage> {
-    section_maybe_titled(None, items)
+    section_inner(None, None, items)
 }
 
-fn section_maybe_titled<'a>(
+fn section_inner<'a>(
     title: Option<&'a str>,
+    subtitle: Option<&'a str>,
     items: Vec<Element<'a, SettingsMessage>>,
 ) -> Element<'a, SettingsMessage> {
     let mut col = column![].width(Length::Fill).padding(1);
@@ -1087,14 +1076,23 @@ fn section_maybe_titled<'a>(
         .style(theme::settings_section_container);
 
     if let Some(title) = title {
-        column![
+        let mut header = column![
             text(title)
                 .size(TEXT_XL)
                 .style(text::base)
                 .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::TEXT }),
-            section_box,
         ]
-        .spacing(SPACE_XS)
+        .spacing(SPACE_XXXS);
+
+        if let Some(subtitle) = subtitle {
+            header = header.push(
+                text(subtitle)
+                    .size(TEXT_SM)
+                    .style(theme::text_tertiary),
+            );
+        }
+
+        column![header, section_box].spacing(SPACE_XS)
     } else {
         column![section_box]
     }
@@ -1176,16 +1174,61 @@ fn toggle_row<'a>(
 }
 
 fn info_row<'a>(label: &'a str, value: &'a str) -> Element<'a, SettingsMessage> {
-    settings_row_container(SETTINGS_ROW_HEIGHT,
-        row![
-            container(text(label).size(TEXT_LG).style(theme::text_tertiary))
-                .align_y(Alignment::Center),
-            Space::new().width(Length::Fill),
-            container(text(value).size(TEXT_LG).style(text::base))
-                .align_y(Alignment::Center),
+    container(
+        column![
+            text(label).size(TEXT_SM).style(theme::text_tertiary),
+            text(value).size(TEXT_LG).style(text::base),
         ]
-        .align_y(Alignment::Center),
+        .spacing(SPACE_XXXS),
     )
+    .padding(PAD_SETTINGS_ROW)
+    .width(Length::Fill)
+    .into()
+}
+
+fn input_row(
+    id: &str,
+    label: &str,
+    placeholder: &str,
+    value: &str,
+    on_input: impl Fn(String) -> SettingsMessage + 'static,
+) -> Element<'static, SettingsMessage> {
+    let id_owned = id.to_string();
+    let label_owned = label.to_string();
+    let placeholder_owned = placeholder.to_string();
+    let value_owned = value.to_string();
+    mouse_area(
+        button(
+            container(
+                row![
+                    column![
+                        text(label_owned).size(TEXT_SM).style(theme::text_tertiary),
+                        text_input(&placeholder_owned, &value_owned)
+                            .id(id_owned.clone())
+                            .on_input(on_input)
+                            .size(TEXT_LG)
+                            .padding(0)
+                            .style(theme::inline_text_input),
+                    ]
+                    .spacing(SPACE_XXXS)
+                    .width(Length::Fill),
+                    container(icon::pencil().size(ICON_MD).style(text::base))
+                        .align_x(Alignment::Center)
+                        .align_y(Alignment::Center),
+                ]
+                .spacing(SPACE_SM)
+                .align_y(Alignment::Center),
+            )
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill),
+        )
+        .on_press(SettingsMessage::FocusInput(id_owned.clone()))
+        .padding(0)
+        .style(theme::bare_button)
+        .width(Length::Fill),
+    )
+    .interaction(iced::mouse::Interaction::Text)
+    .into()
 }
 
 fn coming_soon_row<'a>(feature: &'a str) -> Element<'a, SettingsMessage> {
@@ -1363,7 +1406,7 @@ fn editable_list<'a>(
             )
             .on_press(SettingsMessage::ListMenu(id.clone(), i))
             .padding(PAD_ICON_BTN)
-            .style(theme::bare_button)
+            .style(theme::bare_icon_button)
             .into(),
         );
 
@@ -1376,7 +1419,7 @@ fn editable_list<'a>(
             )
             .on_press(SettingsMessage::ListRemove(id.clone(), i))
             .padding(PAD_ICON_BTN)
-            .style(theme::bare_button)
+            .style(theme::bare_icon_button)
             .into(),
         );
 
