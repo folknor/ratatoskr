@@ -11,7 +11,7 @@ Prototype iced UI for the Ratatoskr email client. Renders a four-pane email inte
 
 ## Commits
 
-Don't create standalone commits for documentation-only changes (CLAUDE.md, TODO.md, comments). Fold them into the next real code commit instead. Keep the git history focused on meaningful changes.
+Don't create standalone commits for documentation-only changes (CLAUDE.md, TODO.md, comments). Fold them into the next real code commit instead. Keep the git history focused on meaningful changes. Don't push to remote unless explicitly asked.
 
 ## Architecture
 
@@ -57,6 +57,12 @@ Elm architecture (iced's `application()` — boot/update/view cycle). Single `Ap
 **Extended palette background scale (dark mode).** `base` is the darkest. Each step lightens by a fixed deviation: `base` (0%) → `weakest` (3%) → `weaker` (7%) → `weak` (10%) → `neutral` (12.5%) → `strong` (15%) → `stronger` (17.5%) → `strongest` (20%). In light mode the direction reverses. Use this to create visual depth hierarchy — e.g., fieldsets at `base`, content area at `weakest`, sidebar at `weaker`.
 
 **Hover backgrounds are always one palette step away from the element's resting color.** If a row rests on `base`, its hover is `weakest`. If it rests on `weakest`, its hover is `weaker`. Never skip steps — jumping two or more steps makes hover effects feel heavy. This applies to nav buttons, setting rows, dropdown items, chip buttons, and any other interactive surface.
+
+**`mouse_area.on_move` gives coordinates relative to that mouse_area's bounds.** If you wrap individual list items in mouse_areas and drag past one item's bounds, `on_move` stops firing or reports clamped coordinates. For drag-to-reorder, wrap the *entire list* in a single mouse_area so cursor Y maps directly to item index via `(point.y / row_height)`.
+
+**`iced::widget::stack` doesn't block events on lower layers.** Stacking an overlay on top of content doesn't prevent clicks/hovers from reaching the content underneath. Insert a `mouse_area` between the layers that captures all events (set `on_press` to consume clicks). This acts as an event blocker.
+
+**`responsive` closure is `Fn`, not `FnOnce`.** You can't move `Element`s into a `responsive(|size| ...)` closure because it may be called multiple times. Use fixed offsets or store computed sizes in state instead.
 
 ## Layout module (`src/ui/layout.rs`)
 
