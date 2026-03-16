@@ -1,4 +1,6 @@
-use iced::widget::{button, column, container, mouse_area, radio, row, scrollable, slider, text, text_input, toggler, Space};
+use iced::widget::{button, column, container, mouse_area, radio, row, scrollable, slider, text, text_input, Space};
+
+use crate::ui::animated_toggler::animated_toggler;
 use iced::{Alignment, Element, Length, Point};
 
 use crate::icon;
@@ -1008,7 +1010,7 @@ fn toggle_row<'a>(
                 ]
                 .spacing(SPACE_XXXS),
                 Space::new().width(Length::Fill),
-                toggler(value).size(TEXT_HEADING).on_toggle(on_toggle),
+                animated_toggler(value).size(TEXT_HEADING).on_toggle(on_toggle),
             ]
             .align_y(Alignment::Center),
         )
@@ -1196,7 +1198,7 @@ fn editable_list<'a>(
             let idx = i;
             let lid = id.clone();
             right_items.push(
-                toggler(enabled)
+                animated_toggler(enabled)
                     .size(TEXT_HEADING)
                     .on_toggle(move |v| SettingsMessage::ListToggle(lid.clone(), idx, v))
                     .into(),

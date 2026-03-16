@@ -1,3 +1,4 @@
+pub mod animated_toggler;
 pub mod contact_sidebar;
 pub mod layout;
 pub mod popover;
