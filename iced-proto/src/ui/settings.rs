@@ -1,5 +1,5 @@
-use iced::widget::{button, column, container, radio, row, scrollable, slider, text, text_input, toggler, Space};
-use iced::{Alignment, Element, Length};
+use iced::widget::{button, column, container, mouse_area, radio, row, scrollable, slider, text, text_input, toggler, Space};
+use iced::{Alignment, Element, Length, Point};
 
 use crate::icon;
 use crate::ui::layout::*;
@@ -56,6 +56,15 @@ pub enum SettingsMessage {
     OllamaUrlChanged(String),
     OllamaModelChanged(String),
     SaveAiSettings,
+    // Editable list
+    ListGripPress(String, usize),         // grip pressed — start potential drag
+    ListDragMove(String, Point),          // cursor moved while grip held
+    ListDragEnd(String),                  // grip released — end drag
+    ListRowClick(String, usize),          // row clicked (not grip) — toggle
+    ListRemove(String, usize),            // (list_id, item index)
+    ListAdd(String),                      // (list_id)
+    ListToggle(String, usize, bool),      // (list_id, item index, new value)
+    ListMenu(String, usize),              // (list_id, item index)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -166,6 +175,32 @@ pub struct SettingsState {
     pub ai_auto_archive_social: bool,
     pub ai_auto_archive_newsletters: bool,
     pub ai_key_saved: bool,
+    // Editable lists
+    pub drag_state: Option<DragState>,
+    // Demo data for Mail Rules tab
+    pub demo_labels: Vec<EditableItem>,
+    pub demo_filters: Vec<EditableItem>,
+}
+
+/// State for an active drag operation.
+#[derive(Debug, Clone)]
+pub struct DragState {
+    pub list_id: String,
+    pub dragging_index: usize,
+    /// Y coordinate when the grip was pressed (list-relative, set on first move).
+    pub start_y: f32,
+    /// Whether the mouse has moved far enough to count as a real drag.
+    pub is_dragging: bool,
+}
+
+/// Minimum Y movement before a grip press becomes a drag.
+const DRAG_START_THRESHOLD: f32 = 4.0;
+
+/// An item in an editable list.
+#[derive(Debug, Clone)]
+pub struct EditableItem {
+    pub label: String,
+    pub enabled: Option<bool>,
 }
 
 impl Default for SettingsState {
@@ -173,9 +208,9 @@ impl Default for SettingsState {
         Self {
             active_tab: Tab::General,
             open_select: None,
-            scale: 1.0,
+            scale: 1.5,
             scale_preview: None,
-            theme: "System".into(),
+            theme: "Light".into(),
             density: "Default".into(),
             font_size: "Default".into(),
             reading_pane_position: "Right".into(),
@@ -208,6 +243,17 @@ impl Default for SettingsState {
             ai_auto_archive_social: false,
             ai_auto_archive_newsletters: false,
             ai_key_saved: false,
+            drag_state: None,
+            demo_labels: vec![
+                EditableItem { label: "Important".into(), enabled: Some(true) },
+                EditableItem { label: "Personal".into(), enabled: Some(true) },
+                EditableItem { label: "Receipts".into(), enabled: Some(false) },
+                EditableItem { label: "Travel".into(), enabled: None },
+            ],
+            demo_filters: vec![
+                EditableItem { label: "Auto-archive promotions".into(), enabled: Some(true) },
+                EditableItem { label: "Star from VIPs".into(), enabled: Some(true) },
+            ],
         }
     }
 }
@@ -284,6 +330,100 @@ impl SettingsState {
             SettingsMessage::OllamaUrlChanged(v) => self.ai_ollama_url = v,
             SettingsMessage::OllamaModelChanged(v) => self.ai_ollama_model = v,
             SettingsMessage::SaveAiSettings => self.ai_key_saved = true,
+            // Editable list
+            SettingsMessage::ListGripPress(list_id, index) => {
+                self.drag_state = Some(DragState {
+                    list_id,
+                    dragging_index: index,
+                    start_y: -1.0, // Set on first move
+                    is_dragging: false,
+                });
+            }
+            SettingsMessage::ListDragMove(list_id, point) => {
+                // Only act if drag was initiated from the grip.
+                let has_drag = self.drag_state.as_ref()
+                    .map_or(false, |d| d.list_id == list_id);
+                if !has_drag { return; }
+
+                // Record start_y on first move event.
+                if let Some(ref mut drag) = self.drag_state {
+                    if drag.start_y < 0.0 {
+                        drag.start_y = point.y;
+                        return;
+                    }
+                }
+
+                let (from, start_y) = {
+                    let d = self.drag_state.as_ref().unwrap();
+                    (d.dragging_index, d.start_y)
+                };
+
+                // Check if we've moved enough to start dragging.
+                if !self.drag_state.as_ref().unwrap().is_dragging {
+                    if (point.y - start_y).abs() < DRAG_START_THRESHOLD {
+                        return;
+                    }
+                    if let Some(ref mut drag) = self.drag_state {
+                        drag.is_dragging = true;
+                    }
+                }
+
+                // Compute target index from cursor Y relative to list top.
+                // Each row is SETTINGS_ROW_HEIGHT, plus 1px divider between rows.
+                let row_step = SETTINGS_ROW_HEIGHT + 1.0;
+                let count = self.list_items_mut(&list_id).len();
+                let target = ((point.y / row_step) as usize).min(count.saturating_sub(1));
+
+                if target != from {
+                    self.list_items_mut(&list_id).swap(from, target);
+                    if let Some(ref mut drag) = self.drag_state {
+                        drag.dragging_index = target;
+                    }
+                }
+            }
+            SettingsMessage::ListDragEnd(_) => {
+                self.drag_state = None;
+            }
+            SettingsMessage::ListRowClick(list_id, index) => {
+                // Only toggle if no drag is active.
+                if self.drag_state.is_some() { return; }
+                let items = self.list_items_mut(&list_id);
+                if let Some(item) = items.get_mut(index) {
+                    if let Some(ref mut enabled) = item.enabled {
+                        *enabled = !*enabled;
+                    }
+                }
+            }
+            SettingsMessage::ListRemove(list_id, index) => {
+                let items = self.list_items_mut(&list_id);
+                if index < items.len() {
+                    items.remove(index);
+                }
+            }
+            SettingsMessage::ListAdd(list_id) => {
+                let items = self.list_items_mut(&list_id);
+                items.push(EditableItem {
+                    label: format!("New item {}", items.len() + 1),
+                    enabled: None,
+                });
+            }
+            SettingsMessage::ListToggle(list_id, index, value) => {
+                let items = self.list_items_mut(&list_id);
+                if let Some(item) = items.get_mut(index) {
+                    item.enabled = Some(value);
+                }
+            }
+            SettingsMessage::ListMenu(_, _) => {
+                // TODO: open context menu
+            }
+        }
+    }
+
+    fn list_items_mut(&mut self, list_id: &str) -> &mut Vec<EditableItem> {
+        match list_id {
+            "labels" => &mut self.demo_labels,
+            "filters" => &mut self.demo_filters,
+            _ => &mut self.demo_labels,
         }
     }
 }
@@ -296,7 +436,7 @@ pub fn view(state: &SettingsState) -> Element<'_, SettingsMessage> {
         Tab::General => general_tab(state),
         Tab::Notifications => notifications_tab(state),
         Tab::Composing => composing_tab(state),
-        Tab::MailRules => mail_rules_tab(),
+        Tab::MailRules => mail_rules_tab(state),
         Tab::People => people_tab(),
         Tab::Shortcuts => shortcuts_tab(),
         Tab::Ai => ai_tab(state),
@@ -528,11 +668,15 @@ fn notifications_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
 
 // ── Mail Rules tab ───────────────────────────────────────
 
-fn mail_rules_tab<'a>() -> Element<'a, SettingsMessage> {
+fn mail_rules_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
     let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(SETTINGS_CONTENT_MAX_WIDTH);
 
-    col = col.push(section("Labels", vec![coming_soon_row("Label management")]));
-    col = col.push(section("Filters", vec![coming_soon_row("Filter management")]));
+    col = col.push(section("Labels", vec![
+        editable_list("labels", &state.demo_labels, "Add Label", &state.drag_state),
+    ]));
+    col = col.push(section("Filters", vec![
+        editable_list("filters", &state.demo_filters, "Add Filter", &state.drag_state),
+    ]));
     col = col.push(section("Smart Labels", vec![coming_soon_row("Smart label management")]));
     col = col.push(section("Smart Folders", vec![coming_soon_row("Smart folder management")]));
     col = col.push(section("Quick Steps", vec![coming_soon_row("Quick step management")]));
@@ -984,6 +1128,7 @@ fn slider_row<'a>(
 
 /// A group of mutually exclusive radio options, rendered as rows with hover effects.
 /// Each row has a radio circle on the left, label text a fixed distance away.
+/// Radio groups must always have their own `section()` — don't mix with other row types.
 fn radio_group<'a, V>(
     options: &'a [(&'a str, V)],
     selected: Option<V>,
@@ -1021,6 +1166,170 @@ where
             .into()
         })
         .collect()
+}
+
+/// An editable, reorderable list with drag handles, optional toggles/menus/remove buttons,
+/// and an "Add" button at the bottom. This is the full-featured private implementation;
+/// public wrappers will expose only the slots each use case needs.
+///
+/// Drag reordering uses a single `mouse_area` wrapping the entire list so that
+/// `on_move` continues to fire as the cursor leaves individual row bounds.
+/// The grip `on_press` initiates the drag; the list-level `on_move` computes
+/// the target index from the cursor's Y position relative to the list top.
+fn editable_list<'a>(
+    list_id: &'a str,
+    items: &'a [EditableItem],
+    add_label: &'a str,
+    drag_state: &'a Option<DragState>,
+) -> Element<'a, SettingsMessage> {
+    let id = list_id.to_string();
+
+    let mut col = column![].width(Length::Fill);
+
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 {
+            col = col.push(iced::widget::rule::horizontal(1).style(theme::subtle_divider_rule));
+        }
+
+        let is_drag_item = drag_state
+            .as_ref()
+            .map_or(false, |d| d.list_id == list_id && d.dragging_index == i && d.is_dragging);
+
+        // ── Left half: grip + label ──
+        let lid_grip = id.clone();
+        let grip_slot = mouse_area(
+            container(
+                icon::grip_vertical().size(ICON_MD).style(theme::text_tertiary),
+            )
+            .width(GRIP_SLOT_WIDTH)
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center),
+        )
+        .on_press(SettingsMessage::ListGripPress(lid_grip, i))
+        .interaction(iced::mouse::Interaction::Grab);
+
+        let label_slot = container(
+            text(&item.label).size(TEXT_LG).style(text::base),
+        )
+        .align_y(Alignment::Center)
+        .width(Length::Fill);
+
+        let left_half = row![grip_slot, label_slot]
+            .spacing(SPACE_XS)
+            .align_y(Alignment::Center)
+            .width(Length::FillPortion(1));
+
+        // ── Right half: optional toggle, menu, remove — all float right ──
+        let mut right_items: Vec<Element<'a, SettingsMessage>> = Vec::new();
+        right_items.push(Space::new().width(Length::Fill).into());
+
+        if let Some(enabled) = item.enabled {
+            let idx = i;
+            let lid = id.clone();
+            right_items.push(
+                toggler(enabled)
+                    .size(TEXT_HEADING)
+                    .on_toggle(move |v| SettingsMessage::ListToggle(lid.clone(), idx, v))
+                    .into(),
+            );
+        }
+
+        // Menu button (⋯)
+        right_items.push(
+            button(
+                container(icon::ellipsis().size(ICON_MD).style(text::secondary))
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::Center),
+            )
+            .on_press(SettingsMessage::ListMenu(id.clone(), i))
+            .padding(PAD_ICON_BTN)
+            .style(theme::bare_button)
+            .into(),
+        );
+
+        // Remove button (✕)
+        right_items.push(
+            button(
+                container(icon::x().size(ICON_MD).style(text::secondary))
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::Center),
+            )
+            .on_press(SettingsMessage::ListRemove(id.clone(), i))
+            .padding(PAD_ICON_BTN)
+            .style(theme::bare_button)
+            .into(),
+        );
+
+        let right_half = iced::widget::row(right_items)
+            .spacing(SPACE_XS)
+            .align_y(Alignment::Center)
+            .width(Length::FillPortion(1));
+
+        let item_row = row![left_half, right_half]
+            .align_y(Alignment::Center);
+
+        // Button for hover effect + row click (toggle).
+        let lid_click = id.clone();
+
+        let mut inner_container = container(item_row)
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill)
+            .height(SETTINGS_ROW_HEIGHT)
+            .align_y(Alignment::Center);
+
+        if is_drag_item {
+            inner_container = inner_container.style(theme::dragging_row_container);
+        }
+
+        let item_btn = button(inner_container)
+            .on_press(SettingsMessage::ListRowClick(lid_click, i))
+            .padding(0)
+            .style(theme::bare_button)
+            .width(Length::Fill);
+
+        col = col.push(item_btn);
+    }
+
+    // Divider before Add button (if there are items)
+    if !items.is_empty() {
+        col = col.push(iced::widget::rule::horizontal(1).style(theme::subtle_divider_rule));
+    }
+
+    // Add button — label centered
+    let add_id = id.clone();
+    let add_btn = button(
+        container(
+            row![
+                icon::plus().size(ICON_MD).style(text::base),
+                text(add_label).size(TEXT_LG).style(text::base)
+                    .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::TEXT }),
+            ]
+            .spacing(SPACE_XS)
+            .align_y(Alignment::Center),
+        )
+        .center_x(Length::Fill)
+        .align_y(Alignment::Center),
+    )
+    .on_press(SettingsMessage::ListAdd(add_id))
+    .padding(PAD_SETTINGS_ROW)
+    .style(theme::bare_button)
+    .width(Length::Fill)
+    .height(SETTINGS_ROW_HEIGHT);
+
+    col = col.push(add_btn);
+
+    // Wrap entire list in a single mouse_area for drag tracking.
+    // on_move gives us Y relative to the list top, so we can compute
+    // the target index directly: target = (y / row_height).
+    let lid_move = id.clone();
+    let lid_release = id;
+    let lid_exit = lid_release.clone();
+    let list_area = mouse_area(col)
+        .on_release(SettingsMessage::ListDragEnd(lid_release))
+        .on_exit(SettingsMessage::ListDragEnd(lid_exit))
+        .on_move(move |point| SettingsMessage::ListDragMove(lid_move.clone(), point));
+
+    list_area.into()
 }
 
 fn accent_color_row(selected: usize) -> Element<'static, SettingsMessage> {

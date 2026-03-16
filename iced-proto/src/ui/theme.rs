@@ -366,7 +366,7 @@ pub fn sidebar_divider_rule(theme: &Theme) -> rule::Style {
 
 pub fn subtle_divider_rule(theme: &Theme) -> rule::Style {
     rule::Style {
-        color: theme.extended_palette().background.strongest.color.scale_alpha(0.15),
+        color: theme.extended_palette().background.strongest.color.scale_alpha(0.25),
         radius: 0.0.into(),
         fill_mode: rule::FillMode::Full,
         snap: true,
@@ -476,6 +476,21 @@ pub fn key_badge_container(theme: &Theme) -> container::Style {
         background: Some(p.background.weak.color.into()),
         border: iced::Border {
             color: p.background.strongest.color.scale_alpha(0.2),
+            width: 1.0,
+            radius: RADIUS_SM.into(),
+        },
+        ..Default::default()
+    }
+}
+
+// ── Dragging row style ───────────────────────────────────
+
+pub fn dragging_row_container(theme: &Theme) -> container::Style {
+    let p = theme.extended_palette();
+    container::Style {
+        background: Some(p.primary.base.color.scale_alpha(0.1).into()),
+        border: iced::Border {
+            color: p.primary.base.color.scale_alpha(0.3),
             width: 1.0,
             radius: RADIUS_SM.into(),
         },

@@ -24,6 +24,10 @@ All resolved. `DropdownEntry.icon` and `dropdown()` `trigger_icon` now use `Drop
   - https://github.com/pop-os/cosmic-edit — COSMIC text editor (large real-world iced app)
   - https://github.com/pop-os/iced/blob/master/widget/src/markdown.rs — COSMIC fork's markdown widget
 
+## Dev Defaults
+
+- [ ] **Restore OS-based theme and 1.0 scale** — `SettingsState::default()` currently hardcodes `theme: "Light"` and `scale: 1.5` for development convenience. Revert to `theme: "System"` and `scale: 1.0` once UI prototyping is done, and persist user preferences to disk.
+
 ## Done
 
 - [x] Persist window state across restarts

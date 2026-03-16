@@ -93,6 +93,9 @@ pub fn bell<'a>() -> Text<'a> { to_text('\u{e059}') }
 pub fn calendar<'a>() -> Text<'a> { to_text('\u{e063}') }
 pub fn clock<'a>() -> Text<'a> { to_text('\u{e087}') }
 
+// ── Drag & layout ───────────────────────────────────────
+pub fn grip_vertical<'a>() -> Text<'a> { to_text('\u{e0eb}') }
+
 // ── Actions ──────────────────────────────────────────────
 pub fn undo<'a>() -> Text<'a> { to_text('\u{e19b}') }
 pub fn redo<'a>() -> Text<'a> { to_text('\u{e143}') }

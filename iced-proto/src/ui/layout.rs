@@ -289,3 +289,6 @@ pub const SLIDER_RAIL_WIDTH: f32 = 4.0;
 pub const RADIO_SIZE: f32 = 16.0;
 /// Spacing between radio circle and label
 pub const RADIO_LABEL_SPACING: f32 = SPACE_SM;
+
+/// Width of the grip handle slot in editable lists
+pub const GRIP_SLOT_WIDTH: f32 = 16.0;
