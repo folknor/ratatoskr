@@ -8,6 +8,7 @@ mod window_state;
 use db::{Account, Db, Label, Thread};
 use iced::widget::pane_grid::{self, Configuration, PaneGrid};
 use iced::{Element, Point, Size, Task, Theme};
+use ui::layout::{READING_PANE_MIN_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -292,7 +293,8 @@ impl App {
                 Task::none()
             }
             Message::PaneResized(pane_grid::ResizeEvent { split, ratio }) => {
-                self.panes.resize(split, ratio);
+                let clamped = self.clamp_pane_ratio(split, ratio);
+                self.panes.resize(split, clamped);
                 Task::none()
             }
             Message::ToggleSettings => {
@@ -308,6 +310,7 @@ impl App {
             }
             Message::WindowResized(size) => {
                 self.window.set_size(size);
+                self.reclamp_all_panes();
                 Task::none()
             }
             Message::WindowMoved(point) => {
@@ -320,6 +323,102 @@ impl App {
                 iced::window::close(id)
             }
             Message::Compose | Message::Noop => Task::none(),
+        }
+    }
+
+    /// Clamp a pane split ratio so each pane respects its minimum width.
+    ///
+    /// The layout is a nested split:
+    ///   Outer: Sidebar (ratio) | Rest (1-ratio)
+    ///   Inner: ThreadList (ratio) | ReadingPane (1-ratio)  [within Rest]
+    ///
+    /// We identify which split is being dragged by walking the layout tree:
+    /// the root split is "outer", and any split nested inside it is "inner".
+    fn clamp_pane_ratio(&self, split: pane_grid::Split, ratio: f32) -> f32 {
+        let total_width = self.window.width;
+        if total_width <= 0.0 {
+            return ratio;
+        }
+
+        let layout = self.panes.layout();
+        let (outer_split, outer_ratio) = match layout {
+            pane_grid::Node::Split {
+                id,
+                ratio: current_ratio,
+                b,
+                ..
+            } => {
+                let inner_split = match b.as_ref() {
+                    pane_grid::Node::Split { id, .. } => Some(*id),
+                    _ => None,
+                };
+                if split == *id {
+                    // Dragging the outer split (Sidebar | Rest)
+                    let min_ratio = SIDEBAR_MIN_WIDTH / total_width;
+                    // Rest must fit ThreadList + ReadingPane minimums
+                    let rest_min = THREAD_LIST_MIN_WIDTH + READING_PANE_MIN_WIDTH;
+                    let max_ratio = 1.0 - (rest_min / total_width);
+                    return ratio.clamp(min_ratio, max_ratio.max(min_ratio));
+                }
+                (inner_split, *current_ratio)
+            }
+            _ => return ratio,
+        };
+
+        if let Some(inner_id) = outer_split {
+            if split == inner_id {
+                // Dragging the inner split (ThreadList | ReadingPane)
+                let rest_width = total_width * (1.0 - outer_ratio);
+                if rest_width <= 0.0 {
+                    return ratio;
+                }
+                let min_ratio = THREAD_LIST_MIN_WIDTH / rest_width;
+                let max_ratio = 1.0 - (READING_PANE_MIN_WIDTH / rest_width);
+                return ratio.clamp(min_ratio, max_ratio.max(min_ratio));
+            }
+        }
+
+        ratio
+    }
+
+    /// Re-clamp all split ratios to enforce per-pane minimums at the current
+    /// window size. Called on window resize so panes can't end up below their
+    /// minimum when the window shrinks.
+    fn reclamp_all_panes(&mut self) {
+        if self.window.width <= 0.0 {
+            return;
+        }
+
+        // Extract split IDs and ratios before mutating (avoids borrow conflict).
+        let (outer, inner) = {
+            let layout = self.panes.layout();
+            match layout {
+                pane_grid::Node::Split {
+                    id, ratio, b, ..
+                } => {
+                    let inner = match b.as_ref() {
+                        pane_grid::Node::Split { id, ratio, .. } => Some((*id, *ratio)),
+                        _ => None,
+                    };
+                    Some((*id, *ratio, inner))
+                }
+                _ => None,
+            }
+        }.map_or(
+            (None, None),
+            |(id, ratio, inner)| (Some((id, ratio)), inner),
+        );
+
+        // Clamp outer split (Sidebar | Rest) first — inner depends on it.
+        if let Some((id, ratio)) = outer {
+            let clamped = self.clamp_pane_ratio(id, ratio);
+            self.panes.resize(id, clamped);
+        }
+
+        // Clamp inner split (ThreadList | ReadingPane).
+        if let Some((id, ratio)) = inner {
+            let clamped = self.clamp_pane_ratio(id, ratio);
+            self.panes.resize(id, clamped);
         }
     }
 
@@ -366,7 +465,7 @@ impl App {
             pane_grid::Content::new(content)
         })
         .spacing(1)
-        .min_size(120)
+        .min_size(SIDEBAR_MIN_WIDTH)
         .on_resize(4, Message::PaneResized)
         .into()
     }

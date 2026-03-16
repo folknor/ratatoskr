@@ -106,6 +106,12 @@ pub const SIDEBAR_WIDTH: f32 = 180.0;
 pub const THREAD_LIST_WIDTH: f32 = 280.0;
 pub const CONTACT_SIDEBAR_WIDTH: f32 = 240.0;
 
+// ── Per-pane minimum widths (for resize clamping) ──────
+
+pub const SIDEBAR_MIN_WIDTH: f32 = 200.0;
+pub const THREAD_LIST_MIN_WIDTH: f32 = 250.0;
+pub const READING_PANE_MIN_WIDTH: f32 = 300.0;
+
 // ── Padding presets ─────────────────────────────────────
 // Named by usage, not by raw values. All values land on
 // the spacing scale above.

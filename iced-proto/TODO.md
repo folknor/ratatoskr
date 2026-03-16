@@ -4,7 +4,7 @@
 
 - [ ] **Audit rendered widths vs layout constants** — At scale 1.0 on a 4K display, observed widths (nav ~420px, sections ~1069px) don't match what the constants predict (nav 208px, sections max 600px). System scale confirmed 1.0. Need to understand why before setting min-width on sections/rows. Add a debug overlay or instrument the layout to see actual rendered sizes.
 
-- [ ] **Per-pane minimum resize limits** — PaneGrid uses a uniform `min_size(120)` for all panes. Should have per-pane minimums (e.g., sidebar can't go below 150px, thread list below 200px). Requires clamping ratios in the `PaneResized` handler since PaneGrid only supports a single global minimum.
+- [x] **Per-pane minimum resize limits** — Clamped in `PaneResized` handler via `clamp_pane_ratio()`. Sidebar min 150px, thread list min 200px, reading pane min 300px.
 
 - [ ] **`responsive` for adaptive layout** — Wrap PaneGrid in `iced::widget::responsive` to collapse panels at narrow window sizes (e.g., hide contact sidebar below 900px, stack sidebar over thread list below 600px).
 
