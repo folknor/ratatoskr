@@ -352,11 +352,6 @@ impl App {
             return ui::settings::view(&self.settings).map(Message::Settings);
         }
 
-        let label_name = self
-            .selected_label
-            .as_deref()
-            .unwrap_or("Inbox");
-
         let selected_thread = self
             .selected_thread
             .and_then(|idx| self.threads.get(idx));
@@ -397,8 +392,6 @@ impl App {
         let thread_list = container(ui::thread_list::view(
             &self.threads,
             self.selected_thread,
-            &self.status,
-            label_name,
         ))
         .width(self.thread_list_width)
         .height(Length::Fill);

@@ -4,7 +4,7 @@ use iced::{Alignment, Element, Length, Padding};
 use crate::db::Thread;
 use crate::icon;
 use crate::ui::layout::*;
-use crate::ui::{contact_sidebar, theme};
+use crate::ui::theme;
 use crate::ui::widgets;
 use crate::Message;
 
@@ -14,13 +14,7 @@ pub fn view<'a>(thread: Option<&'a Thread>) -> Element<'a, Message> {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
-        Some(t) => row![
-            container(thread_view(t))
-                .width(Length::Fill)
-                .height(Length::Fill),
-            contact_sidebar::view(Some(t)),
-        ]
-        .into(),
+        Some(t) => thread_view(t),
     }
 }
 

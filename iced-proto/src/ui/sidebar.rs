@@ -42,15 +42,18 @@ pub fn view<'a>(model: SidebarModel<'a>) -> Element<'a, Message> {
         col = col.push(labels(&model));
     }
 
-    col = col.push(Space::new().height(Length::Fill));
-    col = col.push(widgets::settings_button());
-
-    container(scrollable(col).height(Length::Fill))
-        .padding(PAD_SIDEBAR)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(theme::sidebar_container)
-        .into()
+    container(
+        column![
+            scrollable(col).height(Length::Fill),
+            widgets::settings_button(),
+        ]
+        .spacing(SPACE_XS),
+    )
+    .padding(PAD_SIDEBAR)
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(theme::sidebar_container)
+    .into()
 }
 
 // ── Scope dropdown ──────────────────────────────────────

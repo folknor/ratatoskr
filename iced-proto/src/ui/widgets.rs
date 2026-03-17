@@ -493,18 +493,21 @@ pub fn compose_button<'a>() -> Element<'a, Message> {
 
 pub fn settings_button<'a>() -> Element<'a, Message> {
     button(
-        row![
-            container(icon::settings().size(ICON_MD).style(text::secondary))
-                .align_y(Alignment::Center),
-            container(text("Settings").size(TEXT_MD).style(text::secondary))
-                .align_y(Alignment::Center),
-        ]
-        .spacing(SPACE_XXS)
-        .align_y(Alignment::Center),
+        container(
+            row![
+                container(icon::settings().size(ICON_LG))
+                    .align_y(Alignment::Center),
+                container(text("Settings").size(TEXT_LG))
+                    .align_y(Alignment::Center),
+            ]
+            .spacing(SPACE_XXS)
+            .align_y(Alignment::Center),
+        )
+        .center_x(Length::Fill),
     )
     .on_press(Message::ToggleSettings)
-    .style(theme::bare_button)
-    .padding(PAD_NAV_ITEM)
+    .style(theme::secondary_button)
+    .padding(PAD_BUTTON)
     .width(Length::Fill)
     .into()
 }
@@ -567,15 +570,15 @@ pub fn thread_card(thread: &Thread, index: usize, selected: bool) -> Element<'_,
         })
         .unwrap_or_default();
 
-    let weight = if thread.is_read {
+    let subject_weight = if thread.is_read {
         iced::font::Weight::Normal
     } else {
         iced::font::Weight::Bold
     };
-    let name_style: fn(&Theme) -> text::Style = if thread.is_read {
-        text::secondary
-    } else {
+    let subject_style: fn(&Theme) -> text::Style = if thread.is_read {
         text::base
+    } else {
+        theme::text_accent
     };
 
     let avatar = avatar_circle(sender, AVATAR_THREAD_CARD);
@@ -602,8 +605,8 @@ pub fn thread_card(thread: &Thread, index: usize, selected: bool) -> Element<'_,
     let top_row = row![
         text(sender)
             .size(TEXT_MD)
-            .style(name_style)
-            .font(iced::Font { weight, ..font::TEXT }),
+            .style(text::base)
+            .font(iced::Font { weight: iced::font::Weight::Bold, ..font::TEXT }),
         Space::new().width(Length::Fill),
         text(date_str).size(TEXT_XS).style(theme::text_tertiary),
     ]
@@ -612,15 +615,15 @@ pub fn thread_card(thread: &Thread, index: usize, selected: bool) -> Element<'_,
     let subject_row = row![
         text(subject)
             .size(TEXT_MD)
-            .style(name_style)
-            .font(iced::Font { weight, ..font::TEXT })
+            .style(subject_style)
+            .font(iced::Font { weight: subject_weight, ..font::TEXT })
             .wrapping(text::Wrapping::None),
     ];
 
     let snippet_row = row![
         text(snippet)
             .size(TEXT_SM)
-            .style(theme::text_tertiary)
+            .style(text::secondary)
             .wrapping(text::Wrapping::None),
         Space::new().width(Length::Fill),
         indicators,

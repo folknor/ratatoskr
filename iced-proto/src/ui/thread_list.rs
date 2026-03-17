@@ -1,5 +1,6 @@
-use iced::widget::{column, container, scrollable, text, row, Space};
-use iced::{Alignment, Element, Length};
+use iced::widget::{column, container, scrollable, text};
+use iced::Element;
+use iced::Length;
 
 use crate::db::Thread;
 use crate::ui::layout::*;
@@ -10,26 +11,12 @@ use crate::Message;
 pub fn view<'a>(
     threads: &'a [Thread],
     selected_thread: Option<usize>,
-    status: &'a str,
-    label_name: &'a str,
 ) -> Element<'a, Message> {
     let header = container(
-        column![
-            container(text("Search...").size(TEXT_MD).style(theme::text_tertiary))
-                .padding(PAD_INPUT)
-                .width(Length::Fill)
-                .style(theme::elevated_container),
-            Space::new().height(SPACE_XS),
-            row![
-                text(label_name).size(TEXT_XL).style(text::base),
-                Space::new().width(SPACE_XXS),
-                text(status).size(TEXT_SM).style(theme::text_tertiary),
-                Space::new().width(Length::Fill),
-                text("All").size(TEXT_SM).style(text::secondary),
-            ]
-            .align_y(Alignment::Center),
-        ]
-        .spacing(0),
+        container(text("Search...").size(TEXT_MD).style(theme::text_tertiary))
+            .padding(PAD_INPUT)
+            .width(Length::Fill)
+            .style(theme::elevated_container),
     )
     .padding(PAD_PANEL_HEADER);
 
@@ -45,6 +32,6 @@ pub fn view<'a>(
     )
     .width(Length::Fill)
     .height(Length::Fill)
-    .style(theme::surface_container)
+    .style(theme::base_container)
     .into()
 }

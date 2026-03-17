@@ -77,6 +77,12 @@ pub fn light_with_accent(accent: Color) -> Theme {
 // Built-in: text::base, text::primary, text::secondary,
 //           text::success, text::warning, text::danger
 
+pub fn text_accent(theme: &Theme) -> text::Style {
+    text::Style {
+        color: Some(theme.extended_palette().primary.base.color),
+    }
+}
+
 pub fn text_tertiary(theme: &Theme) -> text::Style {
     text::Style {
         color: Some(theme.extended_palette().background.strongest.text.scale_alpha(0.5)),
@@ -156,10 +162,10 @@ pub fn nav_button(active: bool) -> impl Fn(&Theme, button::Status) -> button::St
 pub fn thread_card_button(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
         let p = theme.extended_palette();
-        let bg = if selected { p.background.strong.color } else { p.background.weaker.color };
+        let bg = if selected { p.background.weakest.color } else { p.background.base.color };
         match status {
             button::Status::Hovered => button::Style {
-                background: Some(p.background.neutral.color.into()),
+                background: Some(p.background.weakest.color.into()),
                 text_color: p.background.base.text,
                 ..Default::default()
             },
@@ -246,6 +252,13 @@ pub fn action_button(theme: &Theme, status: button::Status) -> button::Style {
 // ── Container styles ────────────────────────────────────
 // Built-in: container::transparent, container::bordered_box,
 //           container::dark, container::rounded_box
+
+pub fn base_container(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(theme.extended_palette().background.base.color.into()),
+        ..Default::default()
+    }
+}
 
 pub fn divider_container(theme: &Theme) -> container::Style {
     container::Style {
