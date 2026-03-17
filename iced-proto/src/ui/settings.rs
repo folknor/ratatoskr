@@ -766,11 +766,7 @@ fn theme_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
         ("text border", 9),
         ("pri+fill", 10),
         ("muted border", 11),
-        ("pri.weak", 12),
-        ("mix 10%", 16),
         ("mix 15%", 20),
-        ("mix 20%", 17),
-        ("mix 30%", 18),
         ("text 10%", 19),
     ];
 
@@ -875,6 +871,31 @@ fn theme_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
     .style(theme::sidebar_container);
 
     col = col.push(sidebar_bg_box);
+
+    // Semantic color pairs
+    let btn_width = Length::Fixed(120.0);
+    let semantic_grid = column![
+        row![
+            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::primary_button).padding(PAD_BUTTON).width(btn_width),
+            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::primary_button).padding(PAD_BUTTON).width(btn_width),
+        ].spacing(SPACE_XXS),
+        row![
+            button(container(text("Success").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::exp_semantic_btn(0)).padding(PAD_BUTTON).width(btn_width),
+            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::primary_button).padding(PAD_BUTTON).width(btn_width),
+        ].spacing(SPACE_XXS),
+        row![
+            button(container(text("Warning").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::exp_semantic_btn(1)).padding(PAD_BUTTON).width(btn_width),
+            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::primary_button).padding(PAD_BUTTON).width(btn_width),
+        ].spacing(SPACE_XXS),
+        row![
+            button(container(text("Danger").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::exp_semantic_btn(2)).padding(PAD_BUTTON).width(btn_width),
+            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::primary_button).padding(PAD_BUTTON).width(btn_width),
+        ].spacing(SPACE_XXS),
+    ].spacing(SPACE_XS);
+
+    col = col.push(section("Semantic Color Pairs", vec![
+        container(semantic_grid).padding(PAD_SETTINGS_ROW).width(Length::Fill).into(),
+    ]));
 
     col.into()
 }

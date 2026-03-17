@@ -13,6 +13,8 @@ pub struct ThemeEntry {
 }
 
 pub const THEMES: &[ThemeEntry] = &[
+    ThemeEntry { name: "Light", palette: Palette::LIGHT },
+    ThemeEntry { name: "Dark", palette: Palette::DARK },
     ThemeEntry { name: "Dracula", palette: Palette::DRACULA },
     ThemeEntry { name: "Nord", palette: Palette::NORD },
     ThemeEntry { name: "Solarized Light", palette: Palette::SOLARIZED_LIGHT },
@@ -752,6 +754,33 @@ pub fn exp_btn(variant: usize) -> impl Fn(&Theme, button::Status) -> button::Sty
                 },
                 None => border::rounded(RADIUS_LG),
             },
+            ..Default::default()
+        }
+    }
+}
+
+pub fn exp_semantic_btn(variant: usize) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let p = theme.extended_palette();
+        let is_hovered = matches!(status, button::Status::Hovered);
+
+        let (base_color, base_text) = match variant {
+            0 => (p.success.base.color, p.success.base.text),
+            1 => (p.warning.base.color, p.warning.base.text),
+            2 => (p.danger.base.color, p.danger.base.text),
+            _ => (p.primary.base.color, p.primary.base.text),
+        };
+
+        let bg = if is_hovered {
+            mix(base_color, p.background.base.color, 0.15)
+        } else {
+            base_color
+        };
+
+        button::Style {
+            background: Some(bg.into()),
+            text_color: base_text,
+            border: border::rounded(RADIUS_LG),
             ..Default::default()
         }
     }
