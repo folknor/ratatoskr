@@ -1,9 +1,0 @@
-name = "Light"
-
-[colors]
-background = "#F9FAFC"
-text = "#11172A"
-primary = "#4F53DE"
-success = "#058059"
-warning = "#D97706"
-danger = "#DC2626"

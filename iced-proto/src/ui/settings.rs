@@ -23,7 +23,7 @@ pub enum SettingsMessage {
     DensityChanged(String),
     FontSizeChanged(String),
     ReadingPaneChanged(String),
-    AccentColorSelected(usize),
+    ThemeSelected(usize),
     ToggleSyncStatusBar(bool),
     ToggleBlockRemoteImages(bool),
     TogglePhishingDetection(bool),
@@ -107,6 +107,7 @@ pub enum SelectField {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     General,
+    Theme,
     Notifications,
     Composing,
     MailRules,
@@ -119,6 +120,7 @@ pub enum Tab {
 impl Tab {
     const ALL: &[Tab] = &[
         Tab::General,
+        Tab::Theme,
         Tab::Notifications,
         Tab::Composing,
         Tab::MailRules,
@@ -131,6 +133,7 @@ impl Tab {
     fn label(self) -> &'static str {
         match self {
             Tab::General => "General",
+            Tab::Theme => "Theme",
             Tab::Notifications => "Notifications",
             Tab::Composing => "Composing",
             Tab::MailRules => "Mail Rules",
@@ -144,6 +147,7 @@ impl Tab {
     fn icon(self) -> iced::widget::Text<'static> {
         match self {
             Tab::General => icon::settings(),
+            Tab::Theme => icon::palette(),
             Tab::Notifications => icon::bell(),
             Tab::Composing => icon::pencil(),
             Tab::MailRules => icon::filter(),
@@ -167,7 +171,7 @@ pub struct SettingsState {
     pub density: String,
     pub font_size: String,
     pub reading_pane_position: String,
-    pub accent_color_index: usize,
+    pub selected_theme: Option<usize>,
     pub sync_status_bar: bool,
     pub block_remote_images: bool,
     pub phishing_detection: bool,
@@ -244,7 +248,7 @@ impl Default for SettingsState {
             density: "Default".into(),
             font_size: "Default".into(),
             reading_pane_position: "Right".into(),
-            accent_color_index: 0,
+            selected_theme: None,
             sync_status_bar: true,
             block_remote_images: false,
             phishing_detection: true,
@@ -346,7 +350,10 @@ impl SettingsState {
             SettingsMessage::DensityChanged(v) => { self.density = v; self.open_select = None; }
             SettingsMessage::FontSizeChanged(v) => { self.font_size = v; self.open_select = None; }
             SettingsMessage::ReadingPaneChanged(v) => { self.reading_pane_position = v; self.open_select = None; }
-            SettingsMessage::AccentColorSelected(i) => self.accent_color_index = i,
+            SettingsMessage::ThemeSelected(i) => {
+                self.selected_theme = Some(i);
+                self.theme = "Theme".into();
+            }
             SettingsMessage::ToggleSyncStatusBar(v) => self.sync_status_bar = v,
             SettingsMessage::ToggleBlockRemoteImages(v) => self.block_remote_images = v,
             SettingsMessage::TogglePhishingDetection(v) => self.phishing_detection = v,
@@ -512,6 +519,7 @@ pub fn view(state: &SettingsState) -> Element<'_, SettingsMessage> {
     let nav = tab_nav(state.active_tab);
     let content = match state.active_tab {
         Tab::General => general_tab(state),
+        Tab::Theme => theme_tab(state),
         Tab::Notifications => notifications_tab(state),
         Tab::Composing => composing_tab(state),
         Tab::MailRules => mail_rules_tab(state),
@@ -651,7 +659,7 @@ fn general_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
 
     col = col.push(section("Appearance", vec![
         setting_row("Theme", widgets::select(
-            &["System", "Light", "Dark"], &state.theme,
+            &["System", "Light", "Dark", "Theme"], &state.theme,
             state.open_select == Some(SelectField::Theme),
             SettingsMessage::ToggleSelect(SelectField::Theme),
             SettingsMessage::ThemeChanged,
@@ -669,7 +677,6 @@ fn general_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
             SettingsMessage::FontSizeChanged,
         ), SettingsMessage::ToggleSelect(SelectField::FontSize)),
         slider_row("Scale", None, 1.0..=4.0, state.scale_preview.unwrap_or(state.scale), 1.0, 0.125, SettingsMessage::ScaleDragged, Some(SettingsMessage::ScaleReleased)),
-        accent_color_row(state.accent_color_index),
         toggle_row("Show Sync Status Bar", "Display sync progress in the status bar", state.sync_status_bar, SettingsMessage::ToggleSyncStatusBar),
     ]));
 
@@ -700,6 +707,174 @@ fn general_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
         toggle_row("Block Remote Images", "Don't load remote images in email bodies", state.block_remote_images, SettingsMessage::ToggleBlockRemoteImages),
         toggle_row("Phishing Detection", "Warn about suspicious emails", state.phishing_detection, SettingsMessage::TogglePhishingDetection),
     ]));
+
+    col.into()
+}
+
+// ── Theme tab ───────────────────────────────────────────
+
+fn theme_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
+    let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(SETTINGS_CONTENT_MAX_WIDTH);
+
+    // Build a 3-column grid of theme previews
+    let mut grid = column![].spacing(SPACE_XS);
+    let mut current_row = row![].spacing(SPACE_XS);
+    let mut col_count = 0;
+
+    for (i, entry) in theme::THEMES.iter().enumerate() {
+        let selected = state.selected_theme == Some(i)
+            || (state.selected_theme.is_none() && state.theme == entry.name);
+
+        let card = column![
+            widgets::theme_preview(&entry.palette, selected, crate::Message::Noop)
+                .map(move |_| SettingsMessage::ThemeSelected(i)),
+            container(
+                text(entry.name).size(TEXT_SM).style(if selected { text::base } else { text::secondary }),
+            )
+            .width(Length::Fill)
+            .align_x(Alignment::Center),
+        ]
+        .spacing(SPACE_XXS)
+        .align_x(Alignment::Center);
+
+        current_row = current_row.push(container(card).width(Length::FillPortion(1)));
+        col_count += 1;
+
+        if col_count == 3 {
+            grid = grid.push(current_row);
+            current_row = row![].spacing(SPACE_XS);
+            col_count = 0;
+        }
+    }
+
+    // Push remaining items with empty spacers to fill the row
+    if col_count > 0 {
+        while col_count < 3 {
+            current_row = current_row.push(container(Space::new().width(0).height(0)).width(Length::FillPortion(1)));
+            col_count += 1;
+        }
+        grid = grid.push(current_row);
+    }
+
+    col = col.push(section("Themes", vec![
+        container(grid).padding(PAD_SETTINGS_ROW).width(Length::Fill).into(),
+    ]));
+
+    // Button experiment grid: each candidate next to a Primary for comparison
+    let experiments: Vec<(&str, usize)> = vec![
+        ("pri border", 8),
+        ("text border", 9),
+        ("pri+fill", 10),
+        ("muted border", 11),
+        ("pri.weak", 12),
+        ("mix 10%", 16),
+        ("mix 15%", 20),
+        ("mix 20%", 17),
+        ("mix 30%", 18),
+        ("text 10%", 19),
+    ];
+
+    let mut grid = column![].spacing(SPACE_XS);
+    let mut current_row = row![].spacing(SPACE_XS);
+    let mut col_count = 0;
+
+    for (label, idx) in &experiments {
+        let btn_width = Length::Fixed(120.0);
+        let pair = row![
+            button(container(text(*label).size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::exp_btn(*idx)).padding(PAD_BUTTON).width(btn_width),
+            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::primary_button).padding(PAD_BUTTON).width(btn_width),
+        ].spacing(SPACE_XXS);
+
+        current_row = current_row.push(container(pair).width(Length::FillPortion(1)));
+        col_count += 1;
+
+        if col_count == 2 {
+            grid = grid.push(current_row);
+            current_row = row![].spacing(SPACE_XS);
+            col_count = 0;
+        }
+    }
+    if col_count > 0 {
+        while col_count < 2 {
+            current_row = current_row.push(container(Space::new().width(0).height(0)).width(Length::FillPortion(1)));
+            col_count += 1;
+        }
+        grid = grid.push(current_row);
+    }
+
+    col = col.push(section("Button Experiments (section bg)", vec![
+        container(grid).padding(PAD_SETTINGS_ROW).width(Length::Fill).into(),
+    ]));
+
+    // Same grid on content/main area background
+    let mut grid2 = column![].spacing(SPACE_XS);
+    let mut current_row2 = row![].spacing(SPACE_XS);
+    let mut col_count2 = 0;
+    for (label, idx) in &experiments {
+        let btn_width = Length::Fixed(120.0);
+        let pair = row![
+            button(container(text(*label).size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::exp_btn(*idx)).padding(PAD_BUTTON).width(btn_width),
+            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::primary_button).padding(PAD_BUTTON).width(btn_width),
+        ].spacing(SPACE_XXS);
+        current_row2 = current_row2.push(container(pair).width(Length::FillPortion(1)));
+        col_count2 += 1;
+        if col_count2 == 2 {
+            grid2 = grid2.push(current_row2);
+            current_row2 = row![].spacing(SPACE_XS);
+            col_count2 = 0;
+        }
+    }
+    if col_count2 > 0 {
+        while col_count2 < 2 { current_row2 = current_row2.push(container(Space::new().width(0).height(0)).width(Length::FillPortion(1))); col_count2 += 1; }
+        grid2 = grid2.push(current_row2);
+    }
+
+    let content_bg_box = container(
+        column![
+            text("Content / main area background").size(TEXT_SM).style(theme::text_tertiary),
+            grid2,
+        ].spacing(SPACE_SM),
+    )
+    .padding(PAD_SETTINGS_ROW)
+    .width(Length::Fill)
+    .style(theme::content_container);
+
+    col = col.push(content_bg_box);
+
+    // Same grid on sidebar background
+    let mut grid3 = column![].spacing(SPACE_XS);
+    let mut current_row3 = row![].spacing(SPACE_XS);
+    let mut col_count3 = 0;
+    for (label, idx) in &experiments {
+        let btn_width = Length::Fixed(120.0);
+        let pair = row![
+            button(container(text(*label).size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::exp_btn(*idx)).padding(PAD_BUTTON).width(btn_width),
+            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::primary_button).padding(PAD_BUTTON).width(btn_width),
+        ].spacing(SPACE_XXS);
+        current_row3 = current_row3.push(container(pair).width(Length::FillPortion(1)));
+        col_count3 += 1;
+        if col_count3 == 2 {
+            grid3 = grid3.push(current_row3);
+            current_row3 = row![].spacing(SPACE_XS);
+            col_count3 = 0;
+        }
+    }
+    if col_count3 > 0 {
+        while col_count3 < 2 { current_row3 = current_row3.push(container(Space::new().width(0).height(0)).width(Length::FillPortion(1))); col_count3 += 1; }
+        grid3 = grid3.push(current_row3);
+    }
+
+    let sidebar_bg_box = container(
+        column![
+            text("Sidebar background").size(TEXT_SM).style(theme::text_tertiary),
+            grid3,
+        ].spacing(SPACE_SM),
+    )
+    .padding(PAD_SETTINGS_ROW)
+    .width(Length::Fill)
+    .style(theme::sidebar_container);
+
+    col = col.push(sidebar_bg_box);
 
     col.into()
 }
@@ -798,7 +973,7 @@ fn notifications_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
                         button(text("Remove").size(TEXT_SM).style(text::danger))
                             .on_press(SettingsMessage::RemoveVipSender(email.clone()))
                             .padding(PAD_ICON_BTN)
-                            .style(theme::bare_button),
+                            .style(theme::action_button),
                     ]
                     .align_y(Alignment::Center),
                 )
@@ -1254,7 +1429,7 @@ fn setting_row<'a>(
     )
     .on_press(on_press)
     .padding(0)
-    .style(theme::bare_button)
+    .style(theme::action_button)
     .width(Length::Fill)
     .into()
 }
@@ -1289,7 +1464,7 @@ fn toggle_row<'a>(
     )
     .on_press(on_press_msg)
     .padding(0)
-    .style(theme::bare_button)
+    .style(theme::action_button)
     .width(Length::Fill)
     .into()
 }
@@ -1368,7 +1543,7 @@ fn input_row(
         )
         .on_press(SettingsMessage::FocusInput(id_owned.clone()))
         .padding(0)
-        .style(theme::bare_button)
+        .style(theme::action_button)
         .width(Length::Fill),
     )
     .interaction(iced::mouse::Interaction::Text)
@@ -1468,7 +1643,7 @@ where
             )
             .on_press(msg)
             .padding(0)
-            .style(theme::bare_button)
+            .style(theme::action_button)
             .width(Length::Fill)
             .into()
         })
@@ -1592,7 +1767,7 @@ fn editable_list<'a>(
         let item_btn = button(inner_container)
             .on_press(SettingsMessage::ListRowClick(lid_click, i))
             .padding(0)
-            .style(theme::bare_button)
+            .style(theme::action_button)
             .width(Length::Fill);
 
         col = col.push(item_btn);
@@ -1620,7 +1795,7 @@ fn editable_list<'a>(
     )
     .on_press(SettingsMessage::ListAdd(add_id))
     .padding(PAD_SETTINGS_ROW)
-    .style(theme::bare_button)
+    .style(theme::action_button)
     .width(Length::Fill)
     .height(SETTINGS_ROW_HEIGHT);
 
@@ -1694,39 +1869,8 @@ fn action_row<'a>(
     button(content)
         .on_press(on_press)
         .padding(PAD_SETTINGS_ROW)
-        .style(theme::bare_button)
+        .style(theme::action_button)
         .width(Length::Fill)
         .into()
 }
 
-fn accent_color_row(selected: usize) -> Element<'static, SettingsMessage> {
-    let mut swatches = row![].spacing(SPACE_XS).align_y(Alignment::Center);
-    for (i, &color) in theme::ACCENT_COLORS.iter().enumerate() {
-        let is_selected = i == selected;
-        let swatch = button(
-            container(
-                if is_selected {
-                    Element::from(icon::check().size(ICON_MD).color(theme::ON_AVATAR))
-                } else {
-                    Element::from(Space::new().width(0).height(0))
-                },
-            )
-            .center(SWATCH_SIZE),
-        )
-        .on_press(SettingsMessage::AccentColorSelected(i))
-        .padding(0)
-        .style(theme::swatch_button(color));
-        swatches = swatches.push(swatch);
-    }
-
-    settings_row_container(
-        SETTINGS_ROW_HEIGHT,
-        row![
-            container(text("Accent Color").size(TEXT_LG).style(text::base))
-                .align_y(Alignment::Center),
-            Space::new().width(Length::Fill),
-            swatches,
-        ]
-        .align_y(Alignment::Center),
-    )
-}

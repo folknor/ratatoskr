@@ -132,14 +132,18 @@ impl App {
     }
 
     fn theme(&self) -> Theme {
-        let accent = ui::theme::ACCENT_COLORS
-            .get(self.settings.accent_color_index)
-            .copied()
-            .unwrap_or(ui::theme::ACCENT_COLORS[0]);
         match self.settings.theme.as_str() {
-            "Light" => ui::theme::light_with_accent(accent),
-            "Dark" => ui::theme::dark_with_accent(accent),
-            _ => self.mode.theme(accent),
+            "Light" => Theme::custom(String::from("Light"), iced::theme::Palette::LIGHT),
+            "Dark" => Theme::custom(String::from("Dark"), iced::theme::Palette::DARK),
+            "Theme" => {
+                let idx = self.settings.selected_theme.unwrap_or(0);
+                ui::theme::theme_by_index(idx)
+            }
+            // System — follow OS
+            _ => match self.mode {
+                appearance::Mode::Light => Theme::custom(String::from("Light"), iced::theme::Palette::LIGHT),
+                _ => Theme::custom(String::from("Dark"), iced::theme::Palette::DARK),
+            },
         }
     }
 

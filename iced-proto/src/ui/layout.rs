@@ -282,12 +282,6 @@ pub const SELECT_MIN_WIDTH: f32 = 140.0;
 /// Help tooltip popup width
 pub const HELP_TOOLTIP_WIDTH: f32 = 300.0;
 
-/// Accent color swatch diameter
-pub const SWATCH_SIZE: f32 = 24.0;
-
-/// Accent color swatch border radius (circular)
-pub const RADIUS_ROUND: f32 = SWATCH_SIZE / 2.0;
-
 /// Slider handle radius
 pub const SLIDER_HANDLE_RADIUS: f32 = 7.0;
 /// Slider rail width (height of the track)

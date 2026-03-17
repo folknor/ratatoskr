@@ -103,6 +103,9 @@ pub fn refresh<'a>() -> Text<'a> { to_text('\u{e145}') }
 pub fn ellipsis<'a>() -> Text<'a> { to_text('\u{e0b6}') }
 pub fn ellipsis_vertical<'a>() -> Text<'a> { to_text('\u{e0b7}') }
 
+// ── Appearance ──────────────────────────────────────────
+pub fn palette<'a>() -> Text<'a> { to_text('\u{e1dd}') }
+
 // ── System ───────────────────────────────────────────────
 pub fn moon<'a>() -> Text<'a> { to_text('\u{e11e}') }
 pub fn sun<'a>() -> Text<'a> { to_text('\u{e178}') }

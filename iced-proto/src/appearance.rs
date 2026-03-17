@@ -2,7 +2,7 @@ use iced::advanced::graphics::futures::subscription;
 use iced::advanced::subscription::Hasher;
 use iced::futures::stream::BoxStream;
 use iced::futures::StreamExt;
-use iced::{Subscription, Theme};
+use iced::Subscription;
 use mundy::{ColorScheme, Interest, Preferences};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,14 +22,7 @@ impl From<ColorScheme> for Mode {
     }
 }
 
-impl Mode {
-    pub fn theme(self, accent: iced::Color) -> Theme {
-        match self {
-            Mode::Dark | Mode::Unspecified => crate::ui::theme::dark_with_accent(accent),
-            Mode::Light => crate::ui::theme::light_with_accent(accent),
-        }
-    }
-}
+impl Mode {}
 
 struct Appearance;
 

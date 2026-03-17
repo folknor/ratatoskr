@@ -1,8 +1,43 @@
 use iced::widget::{button, container, pick_list, radio, rule, slider, text, text_input, toggler};
 use iced::{border, Color, Theme};
+use iced::theme::Palette;
 use serde::Deserialize;
 
 use super::layout::*;
+
+// ── Built-in theme catalog ─────────────────────────────
+
+pub struct ThemeEntry {
+    pub name: &'static str,
+    pub palette: Palette,
+}
+
+pub const THEMES: &[ThemeEntry] = &[
+    ThemeEntry { name: "Dracula", palette: Palette::DRACULA },
+    ThemeEntry { name: "Nord", palette: Palette::NORD },
+    ThemeEntry { name: "Solarized Light", palette: Palette::SOLARIZED_LIGHT },
+    ThemeEntry { name: "Solarized Dark", palette: Palette::SOLARIZED_DARK },
+    ThemeEntry { name: "Gruvbox Light", palette: Palette::GRUVBOX_LIGHT },
+    ThemeEntry { name: "Gruvbox Dark", palette: Palette::GRUVBOX_DARK },
+    ThemeEntry { name: "Catppuccin Latte", palette: Palette::CATPPUCCIN_LATTE },
+    ThemeEntry { name: "Catppuccin Frappé", palette: Palette::CATPPUCCIN_FRAPPE },
+    ThemeEntry { name: "Catppuccin Macchiato", palette: Palette::CATPPUCCIN_MACCHIATO },
+    ThemeEntry { name: "Catppuccin Mocha", palette: Palette::CATPPUCCIN_MOCHA },
+    ThemeEntry { name: "Tokyo Night", palette: Palette::TOKYO_NIGHT },
+    ThemeEntry { name: "Tokyo Night Storm", palette: Palette::TOKYO_NIGHT_STORM },
+    ThemeEntry { name: "Tokyo Night Light", palette: Palette::TOKYO_NIGHT_LIGHT },
+    ThemeEntry { name: "Kanagawa Wave", palette: Palette::KANAGAWA_WAVE },
+    ThemeEntry { name: "Kanagawa Lotus", palette: Palette::KANAGAWA_LOTUS },
+    ThemeEntry { name: "Moonfly", palette: Palette::MOONFLY },
+    ThemeEntry { name: "Nightfly", palette: Palette::NIGHTFLY },
+    ThemeEntry { name: "Oxocarbon", palette: Palette::OXOCARBON },
+    ThemeEntry { name: "Ferra", palette: Palette::FERRA },
+];
+
+pub fn theme_by_index(index: usize) -> Theme {
+    let entry = &THEMES[index.min(THEMES.len() - 1)];
+    Theme::custom(entry.name.to_string(), entry.palette)
+}
 
 // ── Semantic colors ────────────────────────────────────
 // Colors that don't come from the theme palette.
@@ -43,35 +78,6 @@ pub fn from_toml(content: &str) -> Result<Theme, toml::de::Error> {
 
 // ── Built-in dark/light seeds ───────────────────────────
 
-pub fn dark() -> Theme {
-    dark_with_accent(hex_to_color("#6266F1"))
-}
-
-pub fn dark_with_accent(accent: Color) -> Theme {
-    Theme::custom("Dark", iced::theme::Palette {
-        background: hex_to_color("#0F172A"),
-        text: hex_to_color("#F1F5FA"),
-        primary: accent,
-        success: hex_to_color("#059669"),
-        warning: hex_to_color("#D97706"),
-        danger: hex_to_color("#DC2626"),
-    })
-}
-
-pub fn light() -> Theme {
-    light_with_accent(hex_to_color("#4F53DE"))
-}
-
-pub fn light_with_accent(accent: Color) -> Theme {
-    Theme::custom("Light", iced::theme::Palette {
-        background: hex_to_color("#F9FAFC"),
-        text: hex_to_color("#11172A"),
-        primary: accent,
-        success: hex_to_color("#058059"),
-        warning: hex_to_color("#D97706"),
-        danger: hex_to_color("#DC2626"),
-    })
-}
 
 // ── Text styles ─────────────────────────────────────────
 // Built-in: text::base, text::primary, text::secondary,
@@ -183,31 +189,10 @@ pub fn ghost_button(theme: &Theme, status: button::Status) -> button::Style {
     match status {
         button::Status::Hovered => button::Style {
             text_color: p.background.base.text,
-            border: iced::Border {
-                color: p.background.strongest.color.scale_alpha(0.15),
-                width: 1.0,
-                radius: RADIUS_SM.into(),
-            },
             ..Default::default()
         },
         _ => button::Style {
             text_color: p.background.base.text,
-            ..Default::default()
-        },
-    }
-}
-
-pub fn bare_button(theme: &Theme, status: button::Status) -> button::Style {
-    let p = theme.extended_palette();
-    match status {
-        button::Status::Hovered => button::Style {
-            background: Some(p.background.weakest.color.into()),
-            text_color: p.background.base.text,
-            border: border::rounded(RADIUS_SM),
-            ..Default::default()
-        },
-        _ => button::Style {
-            text_color: p.secondary.base.color,
             ..Default::default()
         },
     }
@@ -229,6 +214,13 @@ pub fn bare_icon_button(theme: &Theme, status: button::Status) -> button::Style 
             text_color: p.secondary.base.color,
             ..Default::default()
         },
+    }
+}
+
+pub fn bare_transparent_button(_theme: &Theme, _status: button::Status) -> button::Style {
+    button::Style {
+        background: None,
+        ..Default::default()
     }
 }
 
@@ -400,6 +392,19 @@ pub fn select_menu_container(theme: &Theme) -> container::Style {
             color: Color::BLACK.scale_alpha(0.25),
             offset: iced::Vector::new(0.0, 2.0),
             blur_radius: RADIUS_LG,
+        },
+        ..Default::default()
+    }
+}
+
+/// Selected theme preview: 2px primary border with 2px gap (via padding on inner container).
+pub fn theme_selected_ring(theme: &Theme) -> container::Style {
+    let p = theme.extended_palette();
+    container::Style {
+        border: iced::Border {
+            color: p.primary.base.color,
+            width: 2.0,
+            radius: (RADIUS_MD + 4.0).into(), // account for gap + border
         },
         ..Default::default()
     }
@@ -655,29 +660,102 @@ pub fn settings_toggler(theme: &Theme, status: toggler::Status) -> toggler::Styl
     }
 }
 
-// ── Swatch button style ─────────────────────────────────
 
-pub fn swatch_button(color: Color) -> impl Fn(&Theme, button::Status) -> button::Style {
-    move |_theme, _status| button::Style {
-        background: Some(color.into()),
-        border: iced::Border {
-            radius: RADIUS_ROUND.into(),
-            ..Default::default()
-        },
-        ..Default::default()
-    }
+// ── Experimental button styles ──────────────────────────
+
+/// Mix two colors by ratio (0.0 = a, 1.0 = b).
+fn mix(a: Color, b: Color, t: f32) -> Color {
+    Color::from_rgba(
+        a.r + (b.r - a.r) * t,
+        a.g + (b.g - a.g) * t,
+        a.b + (b.b - a.b) * t,
+        a.a + (b.a - a.a) * t,
+    )
 }
 
-// ── Accent colors ───────────────────────────────────────
+pub fn exp_btn(variant: usize) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let p = theme.extended_palette();
+        let bg_base = p.background.base.color;
+        let pri = p.primary.base.color;
+        let txt = p.background.base.text;
+        let is_hovered = matches!(status, button::Status::Hovered);
 
-pub const ACCENT_COLORS: &[Color] = &[
-    Color::from_rgb(0.384, 0.400, 0.945), // Indigo
-    Color::from_rgb(0.059, 0.522, 0.780), // Blue
-    Color::from_rgb(0.020, 0.588, 0.412), // Green
-    Color::from_rgb(0.608, 0.318, 0.878), // Purple
-    Color::from_rgb(0.878, 0.318, 0.518), // Pink
-    Color::from_rgb(0.851, 0.467, 0.024), // Orange
-];
+        let (background, text_color, border_color) = match variant {
+            // Outlined variants
+            8 => if is_hovered {
+                (Some(mix(bg_base, pri, 0.12).into()), pri, Some(pri))
+            } else {
+                (None, pri, Some(pri))
+            },
+            9 => if is_hovered {
+                (Some(mix(bg_base, txt, 0.08).into()), txt, Some(txt.scale_alpha(0.4)))
+            } else {
+                (None, txt, Some(txt.scale_alpha(0.3)))
+            },
+            10 => if is_hovered {
+                (Some(mix(bg_base, pri, 0.18).into()), pri, Some(pri.scale_alpha(0.6)))
+            } else {
+                (Some(mix(bg_base, pri, 0.08).into()), pri, Some(pri.scale_alpha(0.4)))
+            },
+            11 => if is_hovered {
+                (Some(mix(bg_base, txt, 0.08).into()), txt.scale_alpha(0.85), Some(txt.scale_alpha(0.25)))
+            } else {
+                (None, txt.scale_alpha(0.7), Some(txt.scale_alpha(0.15)))
+            },
+
+            // Derived palette colors
+            12 => if is_hovered {
+                (Some(p.primary.base.color.into()), p.primary.base.text, None)
+            } else {
+                (Some(p.primary.weak.color.into()), p.primary.weak.text, None)
+            },
+
+            // Mixed: blend primary/text into background
+            16 => if is_hovered {
+                (Some(mix(bg_base, pri, 0.18).into()), txt, None)
+            } else {
+                (Some(mix(bg_base, pri, 0.10).into()), txt, None)
+            },
+            17 => if is_hovered {
+                (Some(mix(bg_base, pri, 0.28).into()), txt, None)
+            } else {
+                (Some(mix(bg_base, pri, 0.20).into()), txt, None)
+            },
+            18 => if is_hovered {
+                (Some(mix(bg_base, pri, 0.38).into()), txt, None)
+            } else {
+                (Some(mix(bg_base, pri, 0.30).into()), txt, None)
+            },
+            19 => if is_hovered {
+                (Some(mix(bg_base, txt, 0.18).into()), txt, None)
+            } else {
+                (Some(mix(bg_base, txt, 0.10).into()), txt, None)
+            },
+            20 => if is_hovered {
+                (Some(mix(bg_base, pri, 0.23).into()), txt, None)
+            } else {
+                (Some(mix(bg_base, pri, 0.15).into()), txt, None)
+            },
+
+            _ => (None, txt, None),
+        };
+
+        button::Style {
+            background,
+            text_color,
+            border: match border_color {
+                Some(c) => iced::Border {
+                    color: c,
+                    width: 1.0,
+                    radius: RADIUS_LG.into(),
+                },
+                None => border::rounded(RADIUS_LG),
+            },
+            ..Default::default()
+        }
+    }
+}
 
 // ── Avatar colors ───────────────────────────────────────
 
