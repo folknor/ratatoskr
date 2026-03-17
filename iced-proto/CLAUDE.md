@@ -74,6 +74,54 @@ Elm architecture (iced's `application()` — boot/update/view cycle). Single `Ap
 
 **Popover overlay positioning must include the `translation` vector.** In `Widget::overlay()`, `layout.position()` returns coordinates relative to the parent widget, not the window. Add the `translation` parameter: `layout.position() + translation`. Without this, popups misposition at non-1.0 scale factors and inside scrollables.
 
+## PaneGrid internals and scale factor
+
+### How iced computes window/layout sizes
+
+iced has three size concepts in the rendering pipeline:
+
+1. **Physical size** — actual pixels on screen (from winit's `WindowEvent::Resized`)
+2. **Viewport scale factor** — `system_dpi * app_scale_factor` (our app returns 1.5 from `scale_factor()`)
+3. **Logical size** — `physical_size / viewport_scale_factor` — this is what the layout engine uses
+
+The `window::resize_events()` subscription reports the **logical size** (already divided by the full scale factor, including the app's). This is the same size the PaneGrid uses for layout. So `resize_event.width == PaneGrid_layout_width`. Do NOT divide by the app scale factor again — it's already factored in.
+
+The chain: `winit::Resized(physical)` → `window::State` creates `Viewport::with_physical_size(physical, system_dpi * app_scale)` → `conversion::window_event` calls `physical.to_logical(viewport.scale_factor())` → that logical size is what `resize_events()` emits AND what `ui.relayout(logical_size, ...)` uses for layout.
+
+### PaneGrid resize events and ratio semantics
+
+When dragging a split divider, iced computes the new ratio as:
+
+```
+ratio = (cursor_position - region_origin) / region_width
+```
+
+Where `region` comes from `Node::split_regions()`. For a nested split like ours (Sidebar | ThreadList | ReadingPane):
+
+- **Outer split ratio**: relative to the full PaneGrid width (region = full bounds)
+- **Inner split ratio**: relative to the right portion's width (region = everything after the sidebar)
+
+The `ResizeEvent` sends this ratio directly — no pre-clamping. iced's `min_size` only affects the visual layout (via `axis.split()` which clamps widths), not the event ratio.
+
+### How `axis.split()` works internally
+
+```rust
+let width_left = (rect.width * ratio - spacing / 2.0)
+    .round()
+    .max(min_size_a)
+    .min(rect.width - min_size_b - spacing);
+```
+
+For nested splits, `min_size_a` and `min_size_b` account for pane count: `min_size * (pane_count) + spacing * (split_count)`. So with `.min_size(200)`, the right portion (containing 2 panes and 1 split) gets `min_size_b = 200 * 2 + spacing * 1 = 401`.
+
+### Per-pane minimum enforcement
+
+iced's PaneGrid only supports a single global `min_size` for all panes. Per-pane minimums require clamping the ratio in `update()` before calling `State::resize()`. Important: this clamping must also run on `WindowResized`, not just `PaneResized` — otherwise shrinking the window can push panes below their minimum, and the constraint only snaps back on the next drag.
+
+### Variable shadowing trap
+
+When destructuring `Node::Split { id, ratio, .. }` inside a function that also takes a `ratio: f32` parameter, the struct field shadows the parameter. Name the struct field `ratio: current_ratio` to avoid silently clamping the stored ratio instead of the new drag ratio.
+
 ## Layout module (`src/ui/layout.rs`)
 
 All sizing, spacing, padding, and radii are centralized here. Views import `use crate::ui::layout::*` and reference named constants. **No magic numbers in view or widget code** — every `.size()`, avatar diameter, border radius, and padding must reference a layout constant.
