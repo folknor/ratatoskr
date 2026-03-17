@@ -110,7 +110,6 @@ pub const CONTACT_SIDEBAR_WIDTH: f32 = 240.0;
 
 pub const SIDEBAR_MIN_WIDTH: f32 = 200.0;
 pub const THREAD_LIST_MIN_WIDTH: f32 = 250.0;
-pub const READING_PANE_MIN_WIDTH: f32 = 300.0;
 
 // ── Padding presets ─────────────────────────────────────
 // Named by usage, not by raw values. All values land on

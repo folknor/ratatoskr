@@ -6,9 +6,9 @@ mod ui;
 mod window_state;
 
 use db::{Account, Db, Label, Thread};
-use iced::widget::pane_grid::{self, Configuration, PaneGrid};
-use iced::{Element, Point, Size, Task, Theme};
-use ui::layout::{READING_PANE_MIN_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH};
+use iced::widget::{container, mouse_area, row};
+use iced::{Element, Length, Point, Size, Task, Theme};
+use ui::layout::{SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH, THREAD_LIST_MIN_WIDTH, THREAD_LIST_WIDTH};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -41,12 +41,15 @@ fn main() -> iced::Result {
     app.run()
 }
 
+/// Which vertical divider is being dragged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PaneKind {
+pub enum Divider {
     Sidebar,
     ThreadList,
-    ReadingPane,
 }
+
+/// Drag handle width in logical pixels.
+const DIVIDER_WIDTH: f32 = 2.0;
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -66,7 +69,11 @@ pub enum Message {
     ToggleScopeDropdown,
     ToggleLabelsSection,
     ToggleSmartFoldersSection,
-    PaneResized(pane_grid::ResizeEvent),
+    DividerDragStart(Divider),
+    DividerDragMove(Point),
+    DividerDragEnd,
+    DividerHover(Divider),
+    DividerUnhover,
     WindowResized(Size),
     WindowMoved(Point),
     WindowCloseRequested(iced::window::Id),
@@ -85,26 +92,13 @@ struct App {
     scope_dropdown_open: bool,
     labels_expanded: bool,
     smart_folders_expanded: bool,
-    panes: pane_grid::State<PaneKind>,
+    sidebar_width: f32,
+    thread_list_width: f32,
+    dragging: Option<Divider>,
+    hovered_divider: Option<Divider>,
     show_settings: bool,
     settings: ui::settings::SettingsState,
     window: window_state::WindowState,
-}
-
-fn pane_configuration() -> Configuration<PaneKind> {
-    // Sidebar | ThreadList | ReadingPane
-    //  ~15%       ~22%         ~63%
-    Configuration::Split {
-        axis: pane_grid::Axis::Vertical,
-        ratio: 0.15,
-        a: Box::new(Configuration::Pane(PaneKind::Sidebar)),
-        b: Box::new(Configuration::Split {
-            axis: pane_grid::Axis::Vertical,
-            ratio: 0.26,
-            a: Box::new(Configuration::Pane(PaneKind::ThreadList)),
-            b: Box::new(Configuration::Pane(PaneKind::ReadingPane)),
-        }),
-    }
 }
 
 impl App {
@@ -126,7 +120,10 @@ impl App {
             scope_dropdown_open: false,
             labels_expanded: true,
             smart_folders_expanded: true,
-            panes: pane_grid::State::with_configuration(pane_configuration()),
+            sidebar_width: SIDEBAR_WIDTH,
+            thread_list_width: THREAD_LIST_WIDTH,
+            dragging: None,
+            hovered_divider: None,
             show_settings: false,
             settings: ui::settings::SettingsState::default(),
             window,
@@ -292,9 +289,34 @@ impl App {
                 self.smart_folders_expanded = !self.smart_folders_expanded;
                 Task::none()
             }
-            Message::PaneResized(pane_grid::ResizeEvent { split, ratio }) => {
-                let clamped = self.clamp_pane_ratio(split, ratio);
-                self.panes.resize(split, clamped);
+            Message::DividerDragStart(divider) => {
+                self.dragging = Some(divider);
+                Task::none()
+            }
+            Message::DividerDragMove(point) => {
+                match self.dragging {
+                    Some(Divider::Sidebar) => {
+                        self.sidebar_width = point.x.max(SIDEBAR_MIN_WIDTH);
+                    }
+                    Some(Divider::ThreadList) => {
+                        let new_width = (point.x - self.sidebar_width - DIVIDER_WIDTH)
+                            .max(THREAD_LIST_MIN_WIDTH);
+                        self.thread_list_width = new_width;
+                    }
+                    None => {}
+                }
+                Task::none()
+            }
+            Message::DividerDragEnd => {
+                self.dragging = None;
+                Task::none()
+            }
+            Message::DividerHover(divider) => {
+                self.hovered_divider = Some(divider);
+                Task::none()
+            }
+            Message::DividerUnhover => {
+                self.hovered_divider = None;
                 Task::none()
             }
             Message::ToggleSettings => {
@@ -310,7 +332,6 @@ impl App {
             }
             Message::WindowResized(size) => {
                 self.window.set_size(size);
-                self.reclamp_all_panes();
                 Task::none()
             }
             Message::WindowMoved(point) => {
@@ -323,102 +344,6 @@ impl App {
                 iced::window::close(id)
             }
             Message::Compose | Message::Noop => Task::none(),
-        }
-    }
-
-    /// Clamp a pane split ratio so each pane respects its minimum width.
-    ///
-    /// The layout is a nested split:
-    ///   Outer: Sidebar (ratio) | Rest (1-ratio)
-    ///   Inner: ThreadList (ratio) | ReadingPane (1-ratio)  [within Rest]
-    ///
-    /// We identify which split is being dragged by walking the layout tree:
-    /// the root split is "outer", and any split nested inside it is "inner".
-    fn clamp_pane_ratio(&self, split: pane_grid::Split, ratio: f32) -> f32 {
-        let total_width = self.window.width;
-        if total_width <= 0.0 {
-            return ratio;
-        }
-
-        let layout = self.panes.layout();
-        let (outer_split, outer_ratio) = match layout {
-            pane_grid::Node::Split {
-                id,
-                ratio: current_ratio,
-                b,
-                ..
-            } => {
-                let inner_split = match b.as_ref() {
-                    pane_grid::Node::Split { id, .. } => Some(*id),
-                    _ => None,
-                };
-                if split == *id {
-                    // Dragging the outer split (Sidebar | Rest)
-                    let min_ratio = SIDEBAR_MIN_WIDTH / total_width;
-                    // Rest must fit ThreadList + ReadingPane minimums
-                    let rest_min = THREAD_LIST_MIN_WIDTH + READING_PANE_MIN_WIDTH;
-                    let max_ratio = 1.0 - (rest_min / total_width);
-                    return ratio.clamp(min_ratio, max_ratio.max(min_ratio));
-                }
-                (inner_split, *current_ratio)
-            }
-            _ => return ratio,
-        };
-
-        if let Some(inner_id) = outer_split {
-            if split == inner_id {
-                // Dragging the inner split (ThreadList | ReadingPane)
-                let rest_width = total_width * (1.0 - outer_ratio);
-                if rest_width <= 0.0 {
-                    return ratio;
-                }
-                let min_ratio = THREAD_LIST_MIN_WIDTH / rest_width;
-                let max_ratio = 1.0 - (READING_PANE_MIN_WIDTH / rest_width);
-                return ratio.clamp(min_ratio, max_ratio.max(min_ratio));
-            }
-        }
-
-        ratio
-    }
-
-    /// Re-clamp all split ratios to enforce per-pane minimums at the current
-    /// window size. Called on window resize so panes can't end up below their
-    /// minimum when the window shrinks.
-    fn reclamp_all_panes(&mut self) {
-        if self.window.width <= 0.0 {
-            return;
-        }
-
-        // Extract split IDs and ratios before mutating (avoids borrow conflict).
-        let (outer, inner) = {
-            let layout = self.panes.layout();
-            match layout {
-                pane_grid::Node::Split {
-                    id, ratio, b, ..
-                } => {
-                    let inner = match b.as_ref() {
-                        pane_grid::Node::Split { id, ratio, .. } => Some((*id, *ratio)),
-                        _ => None,
-                    };
-                    Some((*id, *ratio, inner))
-                }
-                _ => None,
-            }
-        }.map_or(
-            (None, None),
-            |(id, ratio, inner)| (Some((id, ratio)), inner),
-        );
-
-        // Clamp outer split (Sidebar | Rest) first — inner depends on it.
-        if let Some((id, ratio)) = outer {
-            let clamped = self.clamp_pane_ratio(id, ratio);
-            self.panes.resize(id, clamped);
-        }
-
-        // Clamp inner split (ThreadList | ReadingPane).
-        if let Some((id, ratio)) = inner {
-            let clamped = self.clamp_pane_ratio(id, ratio);
-            self.panes.resize(id, clamped);
         }
     }
 
@@ -436,38 +361,84 @@ impl App {
             .selected_thread
             .and_then(|idx| self.threads.get(idx));
 
-        PaneGrid::new(&self.panes, |_pane, kind, _maximized| {
-            let content: Element<'_, Message> = match kind {
-                PaneKind::Sidebar => {
-                    let sidebar_model = ui::sidebar::SidebarModel {
-                        accounts: &self.accounts,
-                        selected_account: self.selected_account,
-                        labels: &self.labels,
-                        selected_label: &self.selected_label,
-                        scope_dropdown_open: self.scope_dropdown_open,
-                        labels_expanded: self.labels_expanded,
-                        smart_folders_expanded: self.smart_folders_expanded,
-                    };
-                    ui::sidebar::view(sidebar_model)
-                }
-                PaneKind::ThreadList => {
-                    ui::thread_list::view(
-                        &self.threads,
-                        self.selected_thread,
-                        &self.status,
-                        label_name,
-                    )
-                }
-                PaneKind::ReadingPane => {
-                    ui::reading_pane::view(selected_thread)
-                }
-            };
-            pane_grid::Content::new(content)
-        })
-        .spacing(1)
-        .min_size(SIDEBAR_MIN_WIDTH)
-        .on_resize(4, Message::PaneResized)
-        .into()
+        let sidebar_model = ui::sidebar::SidebarModel {
+            accounts: &self.accounts,
+            selected_account: self.selected_account,
+            labels: &self.labels,
+            selected_label: &self.selected_label,
+            scope_dropdown_open: self.scope_dropdown_open,
+            labels_expanded: self.labels_expanded,
+            smart_folders_expanded: self.smart_folders_expanded,
+        };
+
+        let sidebar = container(ui::sidebar::view(sidebar_model))
+            .width(self.sidebar_width)
+            .height(Length::Fill);
+
+        let sidebar_divider_style = if self.hovered_divider == Some(Divider::Sidebar)
+            || self.dragging == Some(Divider::Sidebar)
+        {
+            ui::theme::divider_hover_container as fn(&Theme) -> _
+        } else {
+            ui::theme::divider_container
+        };
+        let divider_sidebar = mouse_area(
+            container("")
+                .width(DIVIDER_WIDTH)
+                .height(Length::Fill)
+                .style(sidebar_divider_style),
+        )
+        .on_press(Message::DividerDragStart(Divider::Sidebar))
+        .on_release(Message::DividerDragEnd)
+        .on_enter(Message::DividerHover(Divider::Sidebar))
+        .on_exit(Message::DividerUnhover)
+        .interaction(iced::mouse::Interaction::ResizingHorizontally);
+
+        let thread_list = container(ui::thread_list::view(
+            &self.threads,
+            self.selected_thread,
+            &self.status,
+            label_name,
+        ))
+        .width(self.thread_list_width)
+        .height(Length::Fill);
+
+        let thread_divider_style = if self.hovered_divider == Some(Divider::ThreadList)
+            || self.dragging == Some(Divider::ThreadList)
+        {
+            ui::theme::divider_hover_container as fn(&Theme) -> _
+        } else {
+            ui::theme::divider_container
+        };
+        let divider_thread = mouse_area(
+            container("")
+                .width(DIVIDER_WIDTH)
+                .height(Length::Fill)
+                .style(thread_divider_style),
+        )
+        .on_press(Message::DividerDragStart(Divider::ThreadList))
+        .on_release(Message::DividerDragEnd)
+        .on_enter(Message::DividerHover(Divider::ThreadList))
+        .on_exit(Message::DividerUnhover)
+        .interaction(iced::mouse::Interaction::ResizingHorizontally);
+
+        let reading_pane = container(ui::reading_pane::view(selected_thread))
+            .width(Length::Fill)
+            .height(Length::Fill);
+
+        let layout = row![sidebar, divider_sidebar, thread_list, divider_thread, reading_pane]
+            .height(Length::Fill);
+
+        // Wrap in a mouse_area to track drag movement across the full window
+        if self.dragging.is_some() {
+            mouse_area(layout)
+                .on_move(Message::DividerDragMove)
+                .on_release(Message::DividerDragEnd)
+                .interaction(iced::mouse::Interaction::ResizingHorizontally)
+                .into()
+        } else {
+            layout.into()
+        }
     }
 }
 

@@ -247,6 +247,20 @@ pub fn action_button(theme: &Theme, status: button::Status) -> button::Style {
 // Built-in: container::transparent, container::bordered_box,
 //           container::dark, container::rounded_box
 
+pub fn divider_container(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(theme.extended_palette().background.strong.color.into()),
+        ..Default::default()
+    }
+}
+
+pub fn divider_hover_container(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(theme.extended_palette().background.strongest.color.into()),
+        ..Default::default()
+    }
+}
+
 pub fn content_container(theme: &Theme) -> container::Style {
     container::Style {
         background: Some(theme.extended_palette().background.weakest.color.into()),
