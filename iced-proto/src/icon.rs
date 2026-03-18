@@ -1,6 +1,6 @@
 use iced::widget::text::{LineHeight, Text};
 
-pub const FONT: iced::Font = iced::Font::with_name("lucide");
+pub const FONT: iced::Font = iced::Font::new("lucide");
 pub const SIZE: f32 = 14.0;
 
 /// Build an icon Text from a codepoint. Used by widgets that accept

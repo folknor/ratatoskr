@@ -334,13 +334,24 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer>
         cursor: mouse::Cursor,
         renderer: &Renderer,
     ) -> mouse::Interaction {
-        self.content.as_widget().mouse_interaction(
+        let interaction = self.content.as_widget().mouse_interaction(
             self.tree,
             layout,
             cursor,
             &layout.bounds(),
             renderer,
-        )
+        );
+
+        // If cursor is over the overlay but between child widgets (e.g. in
+        // spacing gaps), the content returns Interaction::None.  iced treats
+        // None as "not interactive" and passes the cursor through to base
+        // widgets underneath, causing hover states to bleed through.  Return
+        // Idle instead so iced blocks the cursor from the base layer.
+        if interaction == mouse::Interaction::None && cursor.is_over(layout.bounds()) {
+            mouse::Interaction::Idle
+        } else {
+            interaction
+        }
     }
 
     fn overlay<'c>(

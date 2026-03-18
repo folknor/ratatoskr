@@ -140,16 +140,16 @@ impl App {
 
     fn theme(&self) -> Theme {
         match self.settings.theme.as_str() {
-            "Light" => Theme::custom(String::from("Light"), iced::theme::Palette::LIGHT),
-            "Dark" => Theme::custom(String::from("Dark"), iced::theme::Palette::DARK),
+            "Light" => Theme::custom(String::from("Light"), iced::theme::palette::Seed::LIGHT),
+            "Dark" => Theme::custom(String::from("Dark"), iced::theme::palette::Seed::DARK),
             "Theme" => {
                 let idx = self.settings.selected_theme.unwrap_or(0);
                 ui::theme::theme_by_index(idx)
             }
             // System — follow OS
             _ => match self.mode {
-                appearance::Mode::Light => Theme::custom(String::from("Light"), iced::theme::Palette::LIGHT),
-                _ => Theme::custom(String::from("Dark"), iced::theme::Palette::DARK),
+                appearance::Mode::Light => Theme::custom(String::from("Light"), iced::theme::palette::Seed::LIGHT),
+                _ => Theme::custom(String::from("Dark"), iced::theme::palette::Seed::DARK),
             },
         }
     }

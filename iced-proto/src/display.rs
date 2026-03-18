@@ -4,7 +4,7 @@ use display_info::DisplayInfo;
 const REFERENCE_DPI: f32 = 96.0;
 
 /// Below this physical DPI, don't apply any extra app scaling.
-const HIDPI_THRESHOLD: f32 = 140.0;
+const HIDPI_THRESHOLD: f32 = 120.0;
 
 /// Detect an appropriate default app scale factor by querying the primary
 /// monitor's physical resolution and dimensions before the windowing toolkit

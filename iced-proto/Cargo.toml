@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-iced = { git = "https://github.com/squidowl/iced", rev = "af28bbe8de1dfafa2ebe7a3ac96ebcc87ae05538", default-features = false, features = [
+iced = { git = "https://github.com/squidowl/iced", rev = "b201e4f", default-features = false, features = [
     "wgpu", "tokio", "lazy", "advanced", "canvas", "web-colors", "wayland", "x11",
 ] }
 rusqlite = { version = "0.32", features = ["bundled"] }

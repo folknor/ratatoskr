@@ -1,6 +1,6 @@
 use iced::widget::{button, container, pick_list, radio, rule, slider, text, text_input, toggler};
 use iced::{border, Color, Theme};
-use iced::theme::Palette;
+use iced::theme::palette::Seed;
 use serde::Deserialize;
 
 use super::layout::*;
@@ -9,31 +9,31 @@ use super::layout::*;
 
 pub struct ThemeEntry {
     pub name: &'static str,
-    pub palette: Palette,
+    pub palette: Seed,
 }
 
 pub const THEMES: &[ThemeEntry] = &[
-    ThemeEntry { name: "Light", palette: Palette::LIGHT },
-    ThemeEntry { name: "Dark", palette: Palette::DARK },
-    ThemeEntry { name: "Dracula", palette: Palette::DRACULA },
-    ThemeEntry { name: "Nord", palette: Palette::NORD },
-    ThemeEntry { name: "Solarized Light", palette: Palette::SOLARIZED_LIGHT },
-    ThemeEntry { name: "Solarized Dark", palette: Palette::SOLARIZED_DARK },
-    ThemeEntry { name: "Gruvbox Light", palette: Palette::GRUVBOX_LIGHT },
-    ThemeEntry { name: "Gruvbox Dark", palette: Palette::GRUVBOX_DARK },
-    ThemeEntry { name: "Catppuccin Latte", palette: Palette::CATPPUCCIN_LATTE },
-    ThemeEntry { name: "Catppuccin Frappé", palette: Palette::CATPPUCCIN_FRAPPE },
-    ThemeEntry { name: "Catppuccin Macchiato", palette: Palette::CATPPUCCIN_MACCHIATO },
-    ThemeEntry { name: "Catppuccin Mocha", palette: Palette::CATPPUCCIN_MOCHA },
-    ThemeEntry { name: "Tokyo Night", palette: Palette::TOKYO_NIGHT },
-    ThemeEntry { name: "Tokyo Night Storm", palette: Palette::TOKYO_NIGHT_STORM },
-    ThemeEntry { name: "Tokyo Night Light", palette: Palette::TOKYO_NIGHT_LIGHT },
-    ThemeEntry { name: "Kanagawa Wave", palette: Palette::KANAGAWA_WAVE },
-    ThemeEntry { name: "Kanagawa Lotus", palette: Palette::KANAGAWA_LOTUS },
-    ThemeEntry { name: "Moonfly", palette: Palette::MOONFLY },
-    ThemeEntry { name: "Nightfly", palette: Palette::NIGHTFLY },
-    ThemeEntry { name: "Oxocarbon", palette: Palette::OXOCARBON },
-    ThemeEntry { name: "Ferra", palette: Palette::FERRA },
+    ThemeEntry { name: "Light", palette: Seed::LIGHT },
+    ThemeEntry { name: "Dark", palette: Seed::DARK },
+    ThemeEntry { name: "Dracula", palette: Seed::DRACULA },
+    ThemeEntry { name: "Nord", palette: Seed::NORD },
+    ThemeEntry { name: "Solarized Light", palette: Seed::SOLARIZED_LIGHT },
+    ThemeEntry { name: "Solarized Dark", palette: Seed::SOLARIZED_DARK },
+    ThemeEntry { name: "Gruvbox Light", palette: Seed::GRUVBOX_LIGHT },
+    ThemeEntry { name: "Gruvbox Dark", palette: Seed::GRUVBOX_DARK },
+    ThemeEntry { name: "Catppuccin Latte", palette: Seed::CATPPUCCIN_LATTE },
+    ThemeEntry { name: "Catppuccin Frappé", palette: Seed::CATPPUCCIN_FRAPPE },
+    ThemeEntry { name: "Catppuccin Macchiato", palette: Seed::CATPPUCCIN_MACCHIATO },
+    ThemeEntry { name: "Catppuccin Mocha", palette: Seed::CATPPUCCIN_MOCHA },
+    ThemeEntry { name: "Tokyo Night", palette: Seed::TOKYO_NIGHT },
+    ThemeEntry { name: "Tokyo Night Storm", palette: Seed::TOKYO_NIGHT_STORM },
+    ThemeEntry { name: "Tokyo Night Light", palette: Seed::TOKYO_NIGHT_LIGHT },
+    ThemeEntry { name: "Kanagawa Wave", palette: Seed::KANAGAWA_WAVE },
+    ThemeEntry { name: "Kanagawa Lotus", palette: Seed::KANAGAWA_LOTUS },
+    ThemeEntry { name: "Moonfly", palette: Seed::MOONFLY },
+    ThemeEntry { name: "Nightfly", palette: Seed::NIGHTFLY },
+    ThemeEntry { name: "Oxocarbon", palette: Seed::OXOCARBON },
+    ThemeEntry { name: "Ferra", palette: Seed::FERRA },
 ];
 
 pub fn theme_by_index(index: usize) -> Theme {
@@ -67,7 +67,7 @@ struct ThemeColors {
 
 pub fn from_toml(content: &str) -> Result<Theme, toml::de::Error> {
     let file: ThemeFile = toml::from_str(content)?;
-    let palette = iced::theme::Palette {
+    let palette = Seed {
         background: hex_to_color(&file.colors.background),
         text: hex_to_color(&file.colors.text),
         primary: hex_to_color(&file.colors.primary),
@@ -87,26 +87,26 @@ pub fn from_toml(content: &str) -> Result<Theme, toml::de::Error> {
 
 pub fn text_accent(theme: &Theme) -> text::Style {
     text::Style {
-        color: Some(theme.extended_palette().primary.base.color),
+        color: Some(theme.palette().primary.base.color),
     }
 }
 
 pub fn text_tertiary(theme: &Theme) -> text::Style {
     text::Style {
-        color: Some(theme.extended_palette().background.strongest.text.scale_alpha(0.5)),
+        color: Some(theme.palette().background.strongest.text.scale_alpha(0.5)),
     }
 }
 
 pub fn text_muted(theme: &Theme) -> text::Style {
     text::Style {
-        color: Some(theme.extended_palette().background.base.text.scale_alpha(0.6)),
+        color: Some(theme.palette().background.base.text.scale_alpha(0.6)),
     }
 }
 
 /// Text on a primary-colored background (e.g. help tooltips).
 pub fn text_on_primary(theme: &Theme) -> text::Style {
     text::Style {
-        color: Some(theme.extended_palette().primary.base.text),
+        color: Some(theme.palette().primary.base.text),
     }
 }
 
@@ -128,7 +128,7 @@ pub fn secondary_button(theme: &Theme, status: button::Status) -> button::Style 
 
 pub fn dropdown_button(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
-        let p = theme.extended_palette();
+        let p = theme.palette();
         match status {
             button::Status::Hovered => button::Style {
                 background: Some(p.background.weakest.color.into()),
@@ -148,7 +148,7 @@ pub fn dropdown_button(selected: bool) -> impl Fn(&Theme, button::Status) -> but
 
 pub fn nav_button(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
-        let p = theme.extended_palette();
+        let p = theme.palette();
         let inactive_text = p.background.base.text.scale_alpha(0.6);
         match status {
             button::Status::Hovered => button::Style {
@@ -169,7 +169,7 @@ pub fn nav_button(active: bool) -> impl Fn(&Theme, button::Status) -> button::St
 
 pub fn thread_card_button(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
-        let p = theme.extended_palette();
+        let p = theme.palette();
         let bg = if selected { p.background.weakest.color } else { p.background.base.color };
         match status {
             button::Status::Hovered => button::Style {
@@ -187,7 +187,7 @@ pub fn thread_card_button(selected: bool) -> impl Fn(&Theme, button::Status) -> 
 }
 
 pub fn ghost_button(theme: &Theme, status: button::Status) -> button::Style {
-    let p = theme.extended_palette();
+    let p = theme.palette();
     match status {
         button::Status::Hovered => button::Style {
             text_color: p.background.base.text,
@@ -204,7 +204,7 @@ pub fn ghost_button(theme: &Theme, status: button::Status) -> button::Style {
 /// Hover is `weaker` (one step above `weakest`) so it's visible on both
 /// `base` (unhovered row) and `weakest` (hovered row / content area).
 pub fn bare_icon_button(theme: &Theme, status: button::Status) -> button::Style {
-    let p = theme.extended_palette();
+    let p = theme.palette();
     match status {
         button::Status::Hovered => button::Style {
             background: Some(p.background.weaker.color.into()),
@@ -227,7 +227,7 @@ pub fn bare_transparent_button(_theme: &Theme, _status: button::Status) -> butto
 }
 
 pub fn action_button(theme: &Theme, status: button::Status) -> button::Style {
-    let p = theme.extended_palette();
+    let p = theme.palette();
     match status {
         button::Status::Hovered => button::Style {
             background: Some(p.background.weak.color.into()),
@@ -249,41 +249,41 @@ pub fn action_button(theme: &Theme, status: button::Status) -> button::Style {
 
 pub fn base_container(theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(theme.extended_palette().background.base.color.into()),
+        background: Some(theme.palette().background.base.color.into()),
         ..Default::default()
     }
 }
 
 pub fn divider_container(theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(theme.extended_palette().background.strong.color.into()),
+        background: Some(theme.palette().background.strong.color.into()),
         ..Default::default()
     }
 }
 
 pub fn divider_hover_container(theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(theme.extended_palette().background.strongest.color.into()),
+        background: Some(theme.palette().background.strongest.color.into()),
         ..Default::default()
     }
 }
 
 pub fn content_container(theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(theme.extended_palette().background.weakest.color.into()),
+        background: Some(theme.palette().background.weakest.color.into()),
         ..Default::default()
     }
 }
 
 pub fn sidebar_container(theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(theme.extended_palette().background.weaker.color.into()),
+        background: Some(theme.palette().background.weaker.color.into()),
         ..Default::default()
     }
 }
 
 pub fn surface_container(theme: &Theme) -> container::Style {
-    let p = theme.extended_palette();
+    let p = theme.palette();
     container::Style {
         background: Some(p.background.weaker.color.into()),
         border: iced::Border {
@@ -296,7 +296,7 @@ pub fn surface_container(theme: &Theme) -> container::Style {
 }
 
 pub fn elevated_container(theme: &Theme) -> container::Style {
-    let p = theme.extended_palette();
+    let p = theme.palette();
     container::Style {
         background: Some(p.background.weak.color.into()),
         border: iced::Border {
@@ -310,7 +310,7 @@ pub fn elevated_container(theme: &Theme) -> container::Style {
 
 pub fn badge_container(theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(theme.extended_palette().background.weak.color.into()),
+        background: Some(theme.palette().background.weak.color.into()),
         border: iced::Border {
             radius: RADIUS_LG.into(),
             ..Default::default()
@@ -320,7 +320,7 @@ pub fn badge_container(theme: &Theme) -> container::Style {
 }
 
 pub fn message_card_container(theme: &Theme) -> container::Style {
-    let p = theme.extended_palette();
+    let p = theme.palette();
     container::Style {
         background: Some(p.background.weaker.color.into()),
         border: iced::Border {
@@ -333,7 +333,7 @@ pub fn message_card_container(theme: &Theme) -> container::Style {
 }
 
 pub fn action_bar_container(theme: &Theme) -> container::Style {
-    let p = theme.extended_palette();
+    let p = theme.palette();
     container::Style {
         background: Some(p.background.weaker.color.into()),
         border: iced::Border {
@@ -346,7 +346,7 @@ pub fn action_bar_container(theme: &Theme) -> container::Style {
 }
 
 pub fn floating_container(theme: &Theme) -> container::Style {
-    let p = theme.extended_palette();
+    let p = theme.palette();
     container::Style {
         background: Some(p.primary.base.color.scale_alpha(0.85).into()),
         border: iced::Border {
@@ -364,7 +364,7 @@ pub fn floating_container(theme: &Theme) -> container::Style {
 }
 
 pub fn settings_section_container(theme: &Theme) -> container::Style {
-    let p = theme.extended_palette();
+    let p = theme.palette();
     container::Style {
         background: Some(p.background.base.color.into()),
         border: iced::Border {
@@ -382,7 +382,7 @@ pub fn settings_section_container(theme: &Theme) -> container::Style {
 }
 
 pub fn select_menu_container(theme: &Theme) -> container::Style {
-    let p = theme.extended_palette();
+    let p = theme.palette();
     container::Style {
         background: Some(p.background.base.color.into()),
         border: iced::Border {
@@ -401,7 +401,7 @@ pub fn select_menu_container(theme: &Theme) -> container::Style {
 
 /// Selected theme preview: 2px primary border with 2px gap (via padding on inner container).
 pub fn theme_selected_ring(theme: &Theme) -> container::Style {
-    let p = theme.extended_palette();
+    let p = theme.palette();
     container::Style {
         border: iced::Border {
             color: p.primary.base.color,
@@ -416,7 +416,7 @@ pub fn theme_selected_ring(theme: &Theme) -> container::Style {
 
 pub fn divider_rule(theme: &Theme) -> rule::Style {
     rule::Style {
-        color: theme.extended_palette().background.strongest.color.scale_alpha(0.15),
+        color: theme.palette().background.strongest.color.scale_alpha(0.15),
         radius: 0.0.into(),
         fill_mode: rule::FillMode::Full,
         snap: true,
@@ -425,7 +425,7 @@ pub fn divider_rule(theme: &Theme) -> rule::Style {
 
 pub fn sidebar_divider_rule(theme: &Theme) -> rule::Style {
     rule::Style {
-        color: theme.extended_palette().background.weak.color,
+        color: theme.palette().background.weak.color,
         radius: 0.0.into(),
         fill_mode: rule::FillMode::Full,
         snap: true,
@@ -434,7 +434,7 @@ pub fn sidebar_divider_rule(theme: &Theme) -> rule::Style {
 
 pub fn subtle_divider_rule(theme: &Theme) -> rule::Style {
     rule::Style {
-        color: theme.extended_palette().background.strongest.color.scale_alpha(0.25),
+        color: theme.palette().background.strongest.color.scale_alpha(0.25),
         radius: 0.0.into(),
         fill_mode: rule::FillMode::Full,
         snap: true,
@@ -444,7 +444,7 @@ pub fn subtle_divider_rule(theme: &Theme) -> rule::Style {
 // ── Pick list style ─────────────────────────────────────
 
 pub fn ghost_pick_list(theme: &Theme, status: pick_list::Status) -> pick_list::Style {
-    let p = theme.extended_palette();
+    let p = theme.palette();
     pick_list::Style {
         text_color: p.background.base.text,
         placeholder_color: p.secondary.weak.color,
@@ -465,7 +465,7 @@ pub fn ghost_pick_list(theme: &Theme, status: pick_list::Status) -> pick_list::S
 
 /// Text input that looks like plain text. No background or border in any state.
 pub fn inline_text_input(theme: &Theme, _status: text_input::Status) -> text_input::Style {
-    let p = theme.extended_palette();
+    let p = theme.palette();
     text_input::Style {
         background: Color::TRANSPARENT.into(),
         border: iced::Border {
@@ -481,7 +481,7 @@ pub fn inline_text_input(theme: &Theme, _status: text_input::Status) -> text_inp
 }
 
 pub fn settings_text_input(theme: &Theme, status: text_input::Status) -> text_input::Style {
-    let p = theme.extended_palette();
+    let p = theme.palette();
     let border_color = match status {
         text_input::Status::Focused { .. } => p.primary.base.color,
         text_input::Status::Hovered => p.background.strongest.color.scale_alpha(0.3),
@@ -506,7 +506,7 @@ pub fn settings_text_input(theme: &Theme, status: text_input::Status) -> text_in
 
 pub fn chip_button(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
-        let p = theme.extended_palette();
+        let p = theme.palette();
         match status {
             button::Status::Hovered => button::Style {
                 background: Some(if active {
@@ -556,7 +556,7 @@ pub fn chip_button(active: bool) -> impl Fn(&Theme, button::Status) -> button::S
 // Used for shortcut key display in the Shortcuts tab.
 
 pub fn key_badge_container(theme: &Theme) -> container::Style {
-    let p = theme.extended_palette();
+    let p = theme.palette();
     container::Style {
         background: Some(p.background.weak.color.into()),
         border: iced::Border {
@@ -571,7 +571,7 @@ pub fn key_badge_container(theme: &Theme) -> container::Style {
 // ── Dragging row style ───────────────────────────────────
 
 pub fn dragging_row_container(theme: &Theme) -> container::Style {
-    let p = theme.extended_palette();
+    let p = theme.palette();
     container::Style {
         background: Some(p.primary.base.color.scale_alpha(0.1).into()),
         border: iced::Border {
@@ -586,7 +586,7 @@ pub fn dragging_row_container(theme: &Theme) -> container::Style {
 // ── Slider style ─────────────────────────────────────────
 
 pub fn settings_slider(theme: &Theme, status: slider::Status) -> slider::Style {
-    let p = theme.extended_palette();
+    let p = theme.palette();
     let color = match status {
         slider::Status::Active => p.primary.base.color,
         slider::Status::Hovered => p.primary.strong.color,
@@ -610,7 +610,7 @@ pub fn settings_slider(theme: &Theme, status: slider::Status) -> slider::Style {
 // ── Radio style ──────────────────────────────────────────
 
 pub fn settings_radio(theme: &Theme, status: radio::Status) -> radio::Style {
-    let p = theme.extended_palette();
+    let p = theme.palette();
     let is_selected = matches!(
         status,
         radio::Status::Active { is_selected: true } | radio::Status::Hovered { is_selected: true }
@@ -638,7 +638,7 @@ pub fn settings_radio(theme: &Theme, status: radio::Status) -> radio::Style {
 /// instead of the default which uses `primary.base.text` when ON — that color
 /// changes with the accent color and clashes with the section background.
 pub fn settings_toggler(theme: &Theme, status: toggler::Status) -> toggler::Style {
-    let p = theme.extended_palette();
+    let p = theme.palette();
     let background = match status {
         toggler::Status::Active { is_toggled } | toggler::Status::Hovered { is_toggled } => {
             if is_toggled {
@@ -677,7 +677,7 @@ fn mix(a: Color, b: Color, t: f32) -> Color {
 
 pub fn exp_btn(variant: usize) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
-        let p = theme.extended_palette();
+        let p = theme.palette();
         let bg_base = p.background.base.color;
         let pri = p.primary.base.color;
         let txt = p.background.base.text;
@@ -761,7 +761,7 @@ pub fn exp_btn(variant: usize) -> impl Fn(&Theme, button::Status) -> button::Sty
 
 pub fn exp_semantic_btn(variant: usize) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
-        let p = theme.extended_palette();
+        let p = theme.palette();
         let is_hovered = matches!(status, button::Status::Hovered);
 
         let (base_color, base_text) = match variant {

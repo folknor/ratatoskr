@@ -608,7 +608,7 @@ fn rounded_rect(builder: &mut canvas::path::Builder, w: f32, h: f32, r: f32) {
 
 /// Theme preview: 6 vertical stripes in a rounded 16:9 rectangle.
 pub fn theme_preview<'a>(
-    palette: &iced::theme::Palette,
+    palette: &iced::theme::palette::Seed,
     selected: bool,
     on_press: Message,
 ) -> Element<'a, Message> {
@@ -619,6 +619,7 @@ pub fn theme_preview<'a>(
         palette.success,
         palette.warning,
         palette.danger,
+
     ];
 
     let preview_width: f32 = 120.0;

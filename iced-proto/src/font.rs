@@ -6,29 +6,29 @@ use iced::Pixels;
 
 // ── Font constants ───────────────────────────────────────
 
-pub const ICON: iced::Font = iced::Font::with_name("lucide");
+pub const ICON: iced::Font = iced::Font::new("lucide");
 
-pub const TEXT: iced::Font = iced::Font::with_name("Inter");
+pub const TEXT: iced::Font = iced::Font::new("Inter");
 pub const TEXT_BOLD: iced::Font = iced::Font {
     weight: Weight::Bold,
-    ..iced::Font::with_name("Inter")
+    ..iced::Font::new("Inter")
 };
 pub const TEXT_ITALIC: iced::Font = iced::Font {
     style: Style::Italic,
-    ..iced::Font::with_name("Inter")
+    ..iced::Font::new("Inter")
 };
 pub const TEXT_BOLD_ITALIC: iced::Font = iced::Font {
     weight: Weight::Bold,
     style: Style::Italic,
-    ..iced::Font::with_name("Inter")
+    ..iced::Font::new("Inter")
 };
 pub const TEXT_SEMIBOLD: iced::Font = iced::Font {
     weight: Weight::Semibold,
-    ..iced::Font::with_name("Inter")
+    ..iced::Font::new("Inter")
 };
 pub const TEXT_LIGHT: iced::Font = iced::Font {
     weight: Weight::Light,
-    ..iced::Font::with_name("Inter")
+    ..iced::Font::new("Inter")
 };
 
 // ── Sizes ────────────────────────────────────────────────
