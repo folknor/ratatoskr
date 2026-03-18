@@ -1,13 +1,15 @@
-# iced-proto
+# Ratatoskr UI Conventions
 
-Prototype iced UI for the Ratatoskr email client. Renders a four-pane email interface using iced 0.15-dev (Halloy's fork) against a seeded test database.
+iced UI for the Ratatoskr email client (`crates/app/`). Uses iced 0.15-dev (Halloy's fork) against a seeded test database.
 
 ## Commands
 
-- `python3 seed-db.py [thunderbird.sqlite] [output-dir]` — seed a test DB from Thunderbird's `global-messages-db.sqlite` (defaults: `./thunderbird.sqlite` → `~/.local/share/com.velo.app/ratatoskr.db`)
-- `cargo run` — run the prototype (requires a seeded `ratatoskr.db` in `~/.local/share/com.velo.app/`)
-- `cargo check` — type-check
-- `cargo clippy` — lint
+- `python3 crates/app/seed-db.py [thunderbird.sqlite] [output-dir]` — seed a test DB from Thunderbird's `global-messages-db.sqlite` (defaults: `./thunderbird.sqlite` → `~/.local/share/com.velo.app/ratatoskr.db`)
+- `cargo run -p ratatoskr-iced-proto` — run the app (requires a seeded `ratatoskr.db` in `~/.local/share/com.velo.app/`)
+- `cargo check -p ratatoskr-iced-proto` — type-check
+- `cargo clippy -p ratatoskr-iced-proto` — lint
+
+**All `src/` paths in this document are relative to `crates/app/`.**
 
 ## Commits
 
@@ -24,7 +26,7 @@ Elm architecture (iced's `application()` — boot/update/view cycle). Single `Ap
 ### Layout
 
 ```
-[ Sidebar 180px | Thread List 280px | Reading Pane (fill) | Contact Sidebar 240px ]
+[ Sidebar 180px | Thread List 400px | Reading Pane (fill) | Right Sidebar 240px (off by default) ]
 ```
 
 ### Message flow
@@ -32,13 +34,13 @@ Elm architecture (iced's `application()` — boot/update/view cycle). Single `Ap
 1. `boot()` → loads accounts from DB
 2. `AccountsLoaded` → auto-selects first account, fires parallel loads for labels + threads
 3. `SelectAccount` / `SelectLabel` → reloads threads for new filter
-4. `SelectThread` → updates reading pane + contact sidebar
+4. `SelectThread` → loads conversation messages + attachments, updates reading pane
 
 ### What's real vs placeholder
 
-**Real:** Account loading, label listing, thread queries with label filtering, date formatting (relative: time/day/date), read/unread styling, avatar colors — all data from the seeded Thunderbird-sourced DB using the real Ratatoskr schema.
+**Real:** Account loading, label listing, thread queries with label filtering, date formatting (relative: time/day/date), read/unread/starred styling, three-line thread cards with label dots, conversation view with message collapsing, attachment group with deduplication, right sidebar scaffold, panel width persistence.
 
-**Placeholder:** Reading pane shows snippet instead of actual message body (no body store access yet), contact sidebar stats are hardcoded dashes, Compose/Settings/action buttons emit `Noop`, search bar is non-functional.
+**Placeholder:** Message bodies show snippets (no body store access yet), Compose/action buttons emit `Noop`, search bar is non-functional, keyboard shortcuts deferred, right sidebar content is placeholder.
 
 ## Gotchas
 
@@ -142,7 +144,7 @@ All sizing, spacing, padding, and radii are centralized here. Views import `use 
 
 **Padding presets** are named by role: `PAD_ICON_BTN`, `PAD_NAV_ITEM`, `PAD_BUTTON`, `PAD_SIDEBAR`, `PAD_PANEL_HEADER`, `PAD_TOOLBAR`, `PAD_CONTENT`, `PAD_CARD`, `PAD_THREAD_CARD`, `PAD_INPUT`, `PAD_SECTION_HEADER`, `PAD_COLLAPSIBLE_HEADER`, `PAD_STAT_ROW`, `PAD_BADGE`, `PAD_DROPDOWN`, `PAD_BODY`.
 
-**Panel widths:** `SIDEBAR_WIDTH` (180), `THREAD_LIST_WIDTH` (280), `CONTACT_SIDEBAR_WIDTH` (240).
+**Panel widths:** `SIDEBAR_WIDTH` (180), `THREAD_LIST_WIDTH` (400), `RIGHT_SIDEBAR_WIDTH` (240). Thread card height: `THREAD_CARD_HEIGHT` (68). Label dots: `LABEL_DOT_SIZE` (6). Right sidebar auto-collapse: `RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH` (1200).
 
 **Semantic colors** live in `theme.rs`: `theme::ON_AVATAR` (white text/icons on colored backgrounds). No `Color::WHITE` or other raw colors in view code.
 
@@ -202,7 +204,7 @@ Uses iced's built-in `Theme::custom(name, Seed)` with 6 seed colors. `Seed` (bac
 
 ## Migration context
 
-This prototype is part of a migration from Tauri (React/TS frontend + Rust backend) to pure Rust with iced. The ~23k LOC Rust backend (providers, DB, body store, encryption) in `../src-tauri/core/` carries over as-is. The ~73k LOC TypeScript frontend gets replaced.
+The ~22k LOC Rust backend (providers, DB, body store, encryption) lives in `crates/core/`. The React/TS frontend and Tauri app shell have been removed.
 
 **Ecosystem:** Multi-window (Halloy, libcosmic, Kraken Desktop), rich text (Halloy), HTML email rendering (iced_webview_v2 + litehtml), platform support (all three ship on Windows + Linux).
 
@@ -210,4 +212,4 @@ This prototype is part of a migration from Tauri (React/TS frontend + Rust backe
 
 **Email body rendering:** iced_webview_v2 with litehtml for table-based/basic emails, CEF fallback for complex HTML. Still needs testing against a real email corpus.
 
-**Reference projects:** Git checkouts in `../research/`. Full analysis in `../docs/iced-migration-research.md`.
+**Reference projects:** Full analysis in `docs/iced-migration-research.md`.

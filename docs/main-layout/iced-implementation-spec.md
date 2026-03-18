@@ -1,6 +1,6 @@
 # Main Layout: iced Implementation Spec
 
-UI-only spec for the iced-proto main layout work defined by `docs/main-layout/problem-statement.md`. All work is in `iced-proto/`. No backend changes.
+UI-only spec for the crates/app main layout work defined by `docs/main-layout/problem-statement.md`. All work is in `crates/app/`. No backend changes.
 
 ## Implementation Status
 
@@ -1216,7 +1216,7 @@ Add `DateDisplay` to the `SelectField` enum in settings. The setting value flows
 
 ## Phase 3: Deferred
 
-**Keyboard shortcuts, auto-advance, and multi-select are deferred.** The main-layout problem statement requires shortcuts routed through the command palette with `focused_region`-aware dispatch (`docs/main-layout/problem-statement.md` § Context-Dependent Shortcuts). Building a direct keyboard dispatch system in iced-proto would create throwaway code that conflicts with the command palette integration.
+**Keyboard shortcuts, auto-advance, and multi-select are deferred.** The main-layout problem statement requires shortcuts routed through the command palette with `focused_region`-aware dispatch (`docs/main-layout/problem-statement.md` § Context-Dependent Shortcuts). Building a direct keyboard dispatch system in crates/app would create throwaway code that conflicts with the command palette integration.
 
 Phase 3 work resumes when:
 1. Backend Slice 4 (`FocusedRegion` on `CommandContext`) is implemented

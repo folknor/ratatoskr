@@ -1,6 +1,6 @@
 # Main Layout: Backend Implementation Spec
 
-Backend prerequisites for the main layout UI per `docs/main-layout/problem-statement.md`. All work is in `src-tauri/core/` (the `ratatoskr-core` crate) with thin Tauri command wrappers in `src-tauri/src/`. No iced/UI work.
+Backend prerequisites for the main layout UI per `docs/main-layout/problem-statement.md`. All work is in `crates/core/` (the `ratatoskr-core` crate). No UI work.
 
 ## Implementation Status
 
@@ -437,7 +437,7 @@ ON CONFLICT(account_id, thread_id) DO UPDATE SET attachments_collapsed = ?3
 
 ### Tauri commands
 
-Two thin wrappers in `src-tauri/src/db/commands.rs` (or wherever thread-related commands live):
+When the iced app needs these as standalone operations (outside `get_thread_detail`):
 
 ```rust
 #[tauri::command]

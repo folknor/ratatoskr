@@ -1,6 +1,6 @@
 # Search: Backend Implementation Spec
 
-Implementation plan for unifying the search backend per `docs/search/problem-statement.md`. All work is in `src-tauri/core/`. The TS search layer is being replaced by the iced UI and is not covered here.
+Implementation plan for unifying the search backend per `docs/search/problem-statement.md`. All work is in `crates/core/`.
 
 ## Current State
 

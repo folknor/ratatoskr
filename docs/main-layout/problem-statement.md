@@ -559,7 +559,7 @@ The conversation view's collapse rules and collapsed-message summaries depend on
 
 ## Persistence Boundary
 
-This document introduces several categories of persisted and non-persisted UI state. Currently, `WindowState` (`iced-proto/src/window_state.rs`) stores only window geometry (width, height, x, y, maximized). The following clarifies what lives where:
+This document introduces several categories of persisted and non-persisted UI state. Currently, `WindowState` (`crates/app/src/window_state.rs`) stores window geometry plus panel widths and right sidebar state. The following clarifies what lives where:
 
 **Window-level state** (persisted in `window.json`, loaded on app start):
 - Window geometry (exists)
