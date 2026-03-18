@@ -218,6 +218,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
+name = "app"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dirs",
+ "display-info",
+ "iced",
+ "mundy",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml",
+]
+
+[[package]]
 name = "ar_archive_writer"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5071,10 +5087,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "973443cf09a9c8656b574a866ab68dfa19f0867d0340648c7d2f6a71b8a8ea68"
 
 [[package]]
+name = "ratatoskr-command-palette"
+version = "0.1.0"
+dependencies = [
+ "nucleo-matcher",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ratatoskr-core"
 version = "0.1.0"
 dependencies = [
- "aes-gcm",
  "ammonia",
  "async-imap",
  "async-trait",
@@ -5091,8 +5115,10 @@ dependencies = [
  "lol_html",
  "mail-parser",
  "native-tls",
- "nucleo-matcher",
  "quick-xml 0.37.5",
+ "ratatoskr-command-palette",
+ "ratatoskr-crypto",
+ "ratatoskr-search",
  "regex",
  "reqwest 0.13.2",
  "resvg",
@@ -5115,19 +5141,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "ratatoskr-iced-proto"
+name = "ratatoskr-crypto"
 version = "0.1.0"
 dependencies = [
- "chrono",
- "dirs",
- "display-info",
- "iced",
- "mundy",
- "rusqlite",
+ "aes-gcm",
+ "base64 0.22.1",
+ "getrandom 0.2.17",
+ "log",
+]
+
+[[package]]
+name = "ratatoskr-search"
+version = "0.1.0"
+dependencies = [
  "serde",
- "serde_json",
+ "tantivy",
  "tokio",
- "toml",
 ]
 
 [[package]]

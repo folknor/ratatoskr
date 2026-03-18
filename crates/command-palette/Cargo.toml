@@ -1,0 +1,17 @@
+[package]
+name = "ratatoskr-command-palette"
+description = "Command palette engine for Ratatoskr"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+nucleo-matcher = "0.3"
+
+[dev-dependencies]
+serde_json.workspace = true

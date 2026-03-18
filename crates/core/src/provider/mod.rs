@@ -1,6 +1,6 @@
 pub mod account_resync;
 pub mod attachment_dedup;
-pub mod crypto;
+pub use ratatoskr_crypto as crypto;
 pub mod email_parsing;
 pub mod encoding;
 pub mod folder_roles;

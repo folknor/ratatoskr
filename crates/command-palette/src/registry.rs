@@ -490,8 +490,8 @@ fn register_app(out: &mut Vec<CommandDescriptor>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command_palette::context::ViewType;
-    use crate::command_palette::input::InputMode;
+    use crate::context::ViewType;
+    use crate::input::InputMode;
 
     fn empty_context() -> CommandContext {
         CommandContext {

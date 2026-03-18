@@ -20,6 +20,11 @@ reqwest.workspace = true
 base64.workspace = true
 quick-xml.workspace = true
 
+# Extracted workspace crates
+ratatoskr-command-palette = { path = "../command-palette" }
+ratatoskr-crypto = { path = "../crypto" }
+ratatoskr-search = { path = "../search" }
+
 # Crate-specific deps
 log = "0.4"
 futures = "0.3"
@@ -32,7 +37,6 @@ utf7-imap = "0.3"
 socket2 = "0.6"
 tantivy = "0.25"
 zstd = "0.13"
-aes-gcm = "0.10"
 getrandom = { version = "0.2", features = ["std"] }
 urlencoding = "2"
 uuid = { version = "1", features = ["v4"] }
@@ -43,7 +47,6 @@ hickory-resolver = { version = "0.25", features = ["tokio"] }
 xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 sha2 = "0.10"
 unicode-segmentation = "1.12"
-nucleo-matcher = "0.3"
 regex = "1"
 url = "2"
 resvg = { version = "0.47", default-features = false }

@@ -4,6 +4,9 @@ members = [
     "crates/core",
     "crates/app",
     "crates/squeeze",
+    "crates/command-palette",
+    "crates/crypto",
+    "crates/search",
 ]
 
 [workspace.package]

@@ -5,15 +5,15 @@
 Pure Rust desktop email client. Cargo workspace with three crates:
 
 - **`ratatoskr-core`** (`crates/core/`, ~22k lines) — Framework-agnostic business logic: providers, sync, threading, filters, search, DB, encryption, AI, categories, smart folders, etc.
-- **`ratatoskr-iced-proto`** (`crates/app/`) — iced UI app. Elm architecture (boot/update/view). All UI conventions are in `UI.md` at the repo root — **read UI.md before any UI work.**
+- **`app`** (`crates/app/`) — iced UI app. Elm architecture (boot/update/view). All UI conventions are in `UI.md` at the repo root — **read UI.md before any UI work.**
 - **`squeeze`** (`crates/squeeze/`) — Attachment compression crate (CLI + library). Compresses images (mozjpeg-rs + oxipng), PDFs (lopdf), and OOXML/ODF documents (ZIP archive image compression).
 
 ## Commands
 
 - `cargo check --workspace` — check all three crates
 - `cargo check -p ratatoskr-core` — check core only
-- `cargo check -p ratatoskr-iced-proto` — check app only
-- `cargo run -p ratatoskr-iced-proto` — run the iced app (requires a seeded DB, see `crates/app/seed-db.py`)
+- `cargo check -p app` — check app only
+- `cargo run -p app` — run the iced app (requires a seeded DB, see `crates/app/seed-db.py`)
 - `cargo check -p squeeze` — check squeeze only
 - `cargo test -p squeeze` — run squeeze tests
 

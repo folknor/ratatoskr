@@ -5,9 +5,9 @@ iced UI for the Ratatoskr email client (`crates/app/`). Uses iced 0.15-dev (Hall
 ## Commands
 
 - `python3 crates/app/seed-db.py [thunderbird.sqlite] [output-dir]` — seed a test DB from Thunderbird's `global-messages-db.sqlite` (defaults: `./thunderbird.sqlite` → `~/.local/share/com.velo.app/ratatoskr.db`)
-- `cargo run -p ratatoskr-iced-proto` — run the app (requires a seeded `ratatoskr.db` in `~/.local/share/com.velo.app/`)
-- `cargo check -p ratatoskr-iced-proto` — type-check
-- `cargo clippy -p ratatoskr-iced-proto` — lint
+- `cargo run -p app` — run the app (requires a seeded `ratatoskr.db` in `~/.local/share/com.velo.app/`)
+- `cargo check -p app` — type-check
+- `cargo clippy -p app` — lint
 
 **All `src/` paths in this document are relative to `crates/app/`.**
 

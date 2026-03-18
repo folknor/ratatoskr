@@ -1,5 +1,5 @@
 [package]
-name = "ratatoskr-iced-proto"
+name = "app"
 version.workspace = true
 edition.workspace = true
 
