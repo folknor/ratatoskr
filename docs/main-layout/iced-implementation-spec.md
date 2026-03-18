@@ -2,6 +2,30 @@
 
 UI-only spec for the iced-proto main layout work defined by `docs/main-layout/problem-statement.md`. All work is in `iced-proto/`. No backend changes.
 
+## Implementation Status
+
+| Phase | Status | Commits |
+|-------|--------|---------|
+| Phase 1: Thread List Polish + Layout | ✅ Complete | `286bc92` |
+| Phase 2: Conversation View (snippet-only) | ✅ Complete | `d1b70d0` |
+| Phase 3: Interaction Flow | ⏳ Deferred | Blocked on command palette iced integration |
+| Phase 4: Polish | ✅ Complete | `75c0dd4`, `2c81b1a` |
+
+### Deviations from spec
+
+- **1.1**: `RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH` placed in `layout.rs` instead of inline in `main.rs` (follows project's no-magic-numbers convention)
+- **1.7**: `sanitize()` clamps sidebar_width to 180.0 (matching default) instead of 200.0 (drag minimum). Prevents width jump on first save/reopen cycle.
+- **2.3**: `date_display` stored on `SettingsState` instead of directly on `App` (lives with other settings)
+- **2.9**: Attachment deduplication by filename added (not in original spec). `attachment_card` gains a `version_count` parameter with "N versions" badge. Attachment group header count shows unique files, not raw rows.
+- **4.2**: Collapse cache key uses `account_id:thread_id` compound key instead of just `thread_id` (matches backend's compound PK, prevents cross-account collision)
+
+### Post-implementation bug fixes (`2c81b1a`)
+
+1. **Stale conversation rendering**: `SelectThread` now clears `thread_messages`/`thread_attachments`/`message_expanded` immediately before firing async loads, preventing stale messages from rendering under a new thread's header.
+2. **Cache key scoping**: Changed from `thread_id` only to `account_id:thread_id`.
+3. **Sidebar width clamp**: Reduced from 200 to 180 to match default.
+4. **Attachment dedup**: Added per the design spec's deduplication/versioning requirement.
+
 ---
 
 ## Phase 1: Thread List Polish + Layout

@@ -2,6 +2,25 @@
 
 Backend prerequisites for the main layout UI per `docs/main-layout/problem-statement.md`. All work is in `src-tauri/core/` (the `ratatoskr-core` crate) with thin Tauri command wrappers in `src-tauri/src/`. No iced/UI work.
 
+## Implementation Status
+
+| Slice | Status | Commits |
+|-------|--------|---------|
+| Slice 1: Label Color Fallback | ✅ Complete | `286bc92` |
+| Slice 2: Thread Detail Data Layer | ✅ Complete | `d1b70d0` |
+| Slice 3: Attachment Collapse Persistence | ✅ Complete | `286bc92` |
+| Slice 4: FocusedRegion on CommandContext | ✅ Complete | `286bc92` |
+| Phase 3: Auto-Advance | ⏳ Not started | Deferred until Phase 3 UI work begins |
+| Tauri command wrappers | ⏳ Not started | Not needed until iced replaces the React frontend |
+
+### Deviations from spec
+
+All deviations are minor improvements:
+
+- **Slice 1**: Uses `all_presets()` accessor instead of referencing `PRESETS` directly (encapsulation)
+- **Slice 2**: Factored into named helper functions instead of one monolithic function (stays under 100-line limit). Adds `&#39;` HTML entity decoding. Uses char-aware truncation instead of byte-aware (multi-byte safety).
+- **Slice 3**: Module registered as `mod thread_ui_state` + `pub use *` instead of `pub mod` (items accessible, module path private — no functional impact)
+
 ## Current State
 
 The main layout needs four backend capabilities that do not exist:
