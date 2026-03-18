@@ -1,18 +1,9 @@
 # Dependencies
-node_modules/
 research
-iced-proto/thunderbird.sqlite
-iced-proto/target
 .plans
 
 # Build outputs
-dist/
 build/
-test-buildroot/
-
-# Tauri
-src-tauri/target/
-src-tauri/gen/schemas
 
 # Environment variables & secrets
 .env
@@ -57,10 +48,7 @@ nul
 # Reference code
 docs/discovery/
 
-# Debug files
-debug-*.mjs
-
-# Tauri signing keys
+# Signing keys
 *.key
 *.pem
 *.p12
@@ -68,18 +56,13 @@ debug-*.mjs
 *.cert
 *.jks
 
-# Coverage
-coverage/
-
 # Temporary files
 *.tmp
 *.temp
 .cache/
 
-# Packaging Artifacts
-build-dir/
-repo/
-velo-*.tar.gz
-*.rpm
-*.src.rpm
+# Cargo build
 target
+
+# Seed database
+crates/app/thunderbird.sqlite

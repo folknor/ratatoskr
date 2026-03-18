@@ -6,15 +6,9 @@
 
 - [x] **Port AI inference execution to Rust** — Done: `core/src/ai/` module with prompts, types, `AiCompleter` trait, 11 orchestration functions (summarize, smart replies, ask inbox, categorize, smart labels, extract task, transform, compose, reply, writing style, auto-draft), defensive response parsers, DB caching integration. App crate provides the `AiCompleter` implementation with HTTP calls.
 
-### Regression Coverage
-
-- [ ] **Expand regression coverage around migrated sync/bootstrap behavior** — Add focused tests for sync status events, background sync start/stop, post-sync hook triggering, and account bootstrap paths that now rely on Rust-backed summary DTOs.
-
-- [ ] **Replace the magic microtask loop in `flushListenerSetup`** — The current 8-iteration `await Promise.resolve()` loop is brittle and hides ordering assumptions in sync listener tests.
-
 ## Inline Image Store Eviction
 
-- [ ] **Wire up user-configurable eviction for `inline_images.db`** — The Rust backend has the building blocks (`prune_to_size()`, `delete_unreferenced()`, `stats()`, `clear()`), but the TS/UI side has no settings or scheduled eviction plumbing.
+- [ ] **Wire up user-configurable eviction for `inline_images.db`** — The Rust backend has the building blocks (`prune_to_size()`, `delete_unreferenced()`, `stats()`, `clear()`), but eviction is not yet exposed in the UI.
 
   **What's missing**:
   1. **Settings UI**: No user-facing control for inline image store size. The 128 MB cap is hardcoded in Rust.
@@ -28,7 +22,7 @@
   - https://github.com/pop-os/cosmic-edit — COSMIC text editor (large real-world iced app)
   - https://github.com/pop-os/iced/blob/master/widget/src/markdown.rs — COSMIC fork's markdown widget
 
-- [x] **Persist window state across restarts** — Done: `iced-proto/src/window_state.rs`, saves/loads `window.json` in app data dir. Size restored on launch; position saved but only effective on X11 (Wayland ignores app-requested positioning).
+- [x] **Persist window state across restarts** — Done: `crates/app/src/window_state.rs`, saves/loads `window.json` in app data dir. Size restored on launch; position saved but only effective on X11 (Wayland ignores app-requested positioning).
 
 - [ ] **Per-pane minimum resize limits** — PaneGrid currently uses a uniform `min_size(120)` for all panes. Should have per-pane minimums (e.g., sidebar can't go below 150px, thread list below 200px, contact sidebar below 180px). Requires clamping ratios in the `PaneResized` handler since PaneGrid only supports a single global minimum. Decide on actual values after visual testing.
 
@@ -36,13 +30,15 @@
 
 - [ ] **`responsive` for adaptive layout** — Wrap PaneGrid in `iced::widget::responsive` to collapse panels at narrow window sizes (e.g., hide contact sidebar below 900px, stack sidebar over thread list below 600px).
 
+- [ ] **Keybinding display and edit UI** — Need to redo the Settings/Shortcuts UI. Take a look at https://nyaa.place/blog/libadwaita-1-8/
+
+- [ ] **UI freezes after ~20 minutes with settings open** — App hangs completely with no stdout/stderr. Prime suspect is the `mundy` subscription (`appearance.rs`) holding a D-Bus connection that may drop or block over time. Bisect by disabling subscriptions one-by-one to isolate.
+
+- [ ] **License display/multiline static text row** — Need to be able to click links and make text selectable/copyable in license display widgets. Needs its own base row type.
+
+- [ ] **Restore OS-based theme and 1.0 scale** — `SettingsState::default()` currently hardcodes `theme: "Light"` for development convenience. Revert to `theme: "System"` once UI prototyping is done, and persist user preferences to disk.
+
 ## Non-Migration Cleanup
-
-### Branding
-
-- [ ] **Replace logo SVG** — `src/assets/logo.svg` still renders the old "VELO" text as path outlines. Needs a new logo for Ratatoskr.
-
-- [ ] **Replace app icons** — `src-tauri/icons/`, `assets/icon.png`, `src/assets/logo.svg`, and the inline SVG in `splashscreen.html` still contain old Velo branding. Need new Ratatoskr icons for all platforms.
 
 ### Code Quality
 
