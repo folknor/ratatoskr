@@ -237,12 +237,21 @@ pub struct EditableItem {
     pub enabled: Option<bool>,
 }
 
+impl SettingsState {
+    pub fn with_scale(scale: f32) -> Self {
+        Self {
+            scale,
+            ..Self::default()
+        }
+    }
+}
+
 impl Default for SettingsState {
     fn default() -> Self {
         Self {
             active_tab: Tab::General,
             open_select: None,
-            scale: 1.5,
+            scale: 1.0,
             scale_preview: None,
             theme: "Light".into(),
             density: "Default".into(),

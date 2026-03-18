@@ -1,5 +1,6 @@
 mod appearance;
 mod db;
+mod display;
 mod font;
 mod icon;
 mod ui;
@@ -14,6 +15,7 @@ use std::sync::Arc;
 
 static DB: std::sync::OnceLock<Arc<Db>> = std::sync::OnceLock::new();
 static APP_DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+static DEFAULT_SCALE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
 
 fn main() -> iced::Result {
     let app_data_dir = dirs::data_dir()
@@ -22,6 +24,9 @@ fn main() -> iced::Result {
 
     let db = Db::open(&app_data_dir).expect("failed to open database");
     let _ = DB.set(Arc::new(db));
+
+    let detected_scale = display::detect_default_scale();
+    let _ = DEFAULT_SCALE.set(detected_scale);
 
     let window = window_state::WindowState::load(&app_data_dir);
     let _ = APP_DATA_DIR.set(app_data_dir);
@@ -125,7 +130,9 @@ impl App {
             dragging: None,
             hovered_divider: None,
             show_settings: false,
-            settings: ui::settings::SettingsState::default(),
+            settings: ui::settings::SettingsState::with_scale(
+                *DEFAULT_SCALE.get().unwrap_or(&1.0),
+            ),
             window,
         };
         (app, Task::perform(load_accounts(db_ref), Message::AccountsLoaded))
