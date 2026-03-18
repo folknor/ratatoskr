@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use rusqlite::OptionalExtension;
 
-use crate::db::DbState;
-use crate::provider::crypto::{AppCryptoState, decrypt_value, is_encrypted};
+use ratatoskr_core::db::DbState;
+use ratatoskr_crypto::{AppCryptoState, decrypt_value, is_encrypted};
 
-use super::types::{AiCompletionRequest, AiConfig, AiError, AiProvider};
+use crate::types::{AiCompletionRequest, AiConfig, AiError, AiProvider};
 
 // ---------------------------------------------------------------------------
 // Shared HTTP client
@@ -478,7 +478,7 @@ impl<'a> DbConfigCompleter<'a> {
 }
 
 #[async_trait::async_trait]
-impl super::AiCompleter for DbConfigCompleter<'_> {
+impl crate::AiCompleter for DbConfigCompleter<'_> {
     async fn complete(
         &self,
         request: &AiCompletionRequest,

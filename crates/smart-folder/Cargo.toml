@@ -1,0 +1,15 @@
+[package]
+name = "ratatoskr-smart-folder"
+description = "Smart folder query engine for Ratatoskr"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ratatoskr-core = { path = "../core" }
+rusqlite.workspace = true
+chrono.workspace = true

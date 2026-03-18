@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde::Deserialize;
 
-use crate::categorization::ThreadCategory;
+use ratatoskr_core::categorization::ThreadCategory;
 
 // ---------------------------------------------------------------------------
 // Compiled regexes

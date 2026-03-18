@@ -1,8 +1,8 @@
 use rusqlite::Connection;
 
-use crate::db::FromRow;
-use crate::db::sql_fragments::LATEST_MESSAGE_SUBQUERY;
-use crate::db::types::{AccountScope, DbThread};
+use ratatoskr_core::db::FromRow;
+use ratatoskr_core::db::sql_fragments::LATEST_MESSAGE_SUBQUERY;
+use ratatoskr_core::db::types::{AccountScope, DbThread};
 
 use super::parser::ParsedQuery;
 

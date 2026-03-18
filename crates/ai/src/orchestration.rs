@@ -1,13 +1,13 @@
 use chrono::{TimeZone, Utc};
 
-use super::parsing;
-use super::prompts;
-use super::types::{
+use crate::parsing;
+use crate::prompts;
+use crate::types::{
     AiCompleter, AiCompletionRequest, AiError, AiMessageInput, AiSearchResult, AutoDraftMode,
     ExtractedTask, TaskPriority, TextTransformType, ThreadCategory, ThreadForCategorization,
     WritingStyleProfile,
 };
-use crate::db::DbState;
+use ratatoskr_core::db::DbState;
 
 // ---------------------------------------------------------------------------
 // Internal formatting helpers
@@ -453,7 +453,7 @@ pub async fn analyze_writing_style(
     let sample_count = sent_messages.len() as i64;
 
     // Store in DB
-    crate::db::queries_extra::db_upsert_writing_style_profile(
+    ratatoskr_core::db::queries_extra::db_upsert_writing_style_profile(
         db,
         account_id.to_string(),
         profile_text.clone(),
@@ -554,7 +554,7 @@ async fn db_get_cache(
     thread_id: &str,
     cache_type: &str,
 ) -> Result<Option<String>, AiError> {
-    crate::db::queries_extra::db_get_ai_cache(
+    ratatoskr_core::db::queries_extra::db_get_ai_cache(
         db,
         account_id.to_string(),
         thread_id.to_string(),
@@ -571,7 +571,7 @@ async fn db_set_cache(
     cache_type: &str,
     content: &str,
 ) -> Result<(), AiError> {
-    crate::db::queries_extra::db_set_ai_cache(
+    ratatoskr_core::db::queries_extra::db_set_ai_cache(
         db,
         account_id.to_string(),
         thread_id.to_string(),

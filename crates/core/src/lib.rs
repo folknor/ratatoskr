@@ -1,5 +1,4 @@
 pub mod account;
-pub mod ai;
 pub mod attachment_cache;
 pub mod bimi;
 pub use ratatoskr_body_store as body_store;
@@ -29,7 +28,6 @@ pub mod scheduled_send;
 pub use ratatoskr_search as search;
 pub mod seen_addresses;
 pub mod send_identity;
-pub mod smart_folder;
 pub mod smart_labels;
 pub mod smtp;
 pub mod sync;

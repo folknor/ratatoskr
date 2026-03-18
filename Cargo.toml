@@ -9,6 +9,8 @@ members = [
     "crates/search",
     "crates/body-store",
     "crates/inline-image-store",
+    "crates/smart-folder",
+    "crates/ai",
 ]
 
 [workspace.package]
