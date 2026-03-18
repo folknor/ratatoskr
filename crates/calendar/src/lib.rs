@@ -1,4 +1,4 @@
-use crate::provider::http::RetryConfig;
+use ratatoskr_core::provider::http::RetryConfig;
 
 pub mod caldav;
 pub mod google;

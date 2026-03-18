@@ -11,6 +11,8 @@ members = [
     "crates/inline-image-store",
     "crates/smart-folder",
     "crates/ai",
+    "crates/calendar",
+    "crates/cloud-attachments",
 ]
 
 [workspace.package]

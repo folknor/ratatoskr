@@ -5,8 +5,8 @@ use regex::{Regex, RegexSet};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::db::DbState;
-use crate::graph::client::GraphClient;
+use ratatoskr_core::db::DbState;
+use ratatoskr_core::graph::client::GraphClient;
 
 /// Cloud storage provider that hosts the linked file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

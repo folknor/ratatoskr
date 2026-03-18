@@ -1,8 +1,8 @@
 use serde::Deserialize;
 
-use crate::db::DbState;
-use crate::gmail::client::GmailClient;
-use crate::provider::http;
+use ratatoskr_core::db::DbState;
+use ratatoskr_core::gmail::client::GmailClient;
+use ratatoskr_core::provider::http;
 
 use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};
 use super::{GOOGLE_CALENDAR_API_BASE, GOOGLE_CALENDAR_RETRY_CONFIG, shared_http_client};

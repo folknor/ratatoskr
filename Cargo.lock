@@ -5115,6 +5115,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "ratatoskr-calendar"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "quick-xml 0.37.5",
+ "ratatoskr-core",
+ "reqwest 0.13.2",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokio",
+ "urlencoding",
+ "uuid",
+]
+
+[[package]]
+name = "ratatoskr-cloud-attachments"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "ratatoskr-core",
+ "regex",
+ "reqwest 0.13.2",
+ "rusqlite",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ratatoskr-command-palette"
 version = "0.1.0"
 dependencies = [
