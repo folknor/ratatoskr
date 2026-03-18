@@ -17,6 +17,7 @@ pub mod filters;
 pub mod gmail;
 pub mod graph;
 pub mod imap;
+pub mod label_colors;
 pub mod inline_image_store;
 pub mod jmap;
 pub mod mdn;

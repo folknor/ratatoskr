@@ -167,18 +167,31 @@ pub fn nav_button(active: bool) -> impl Fn(&Theme, button::Status) -> button::St
     }
 }
 
-pub fn thread_card_button(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+pub fn thread_card_button(selected: bool, starred: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
         let p = theme.palette();
-        let bg = if selected { p.background.weakest.color } else { p.background.base.color };
+        let base_bg = if starred {
+            // Warm golden tint from warning color
+            mix(p.background.base.color, p.warning.base.color, STARRED_BG_ALPHA)
+        } else if selected {
+            p.background.weakest.color
+        } else {
+            p.background.base.color
+        };
+
         match status {
             button::Status::Hovered => button::Style {
-                background: Some(p.background.weakest.color.into()),
+                background: Some(if starred {
+                    // One step lighter than starred base
+                    mix(p.background.weakest.color, p.warning.base.color, STARRED_BG_ALPHA).into()
+                } else {
+                    p.background.weakest.color.into()
+                }),
                 text_color: p.background.base.text,
                 ..Default::default()
             },
             _ => button::Style {
-                background: Some(bg.into()),
+                background: Some(base_bg.into()),
                 text_color: p.background.base.text,
                 ..Default::default()
             },

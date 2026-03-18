@@ -1303,6 +1303,18 @@ static MIGRATIONS: &[Migration] = &[
             );
         "#,
     },
+    Migration {
+        version: 59,
+        description: "Per-thread UI state (attachment collapse)",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS thread_ui_state (
+                thread_id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                attachments_collapsed INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (account_id, thread_id)
+            );
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -1542,6 +1554,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) AS max_ver FROM _migrations", [], |row| row.get("max_ver"))
             .expect("query");
-        assert_eq!(max_ver, 58);
+        assert_eq!(max_ver, 59);
     }
 }

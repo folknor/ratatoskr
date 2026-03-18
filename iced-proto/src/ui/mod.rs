@@ -1,5 +1,5 @@
 pub mod animated_toggler;
-pub mod contact_sidebar;
+pub mod right_sidebar;
 pub mod layout;
 pub mod popover;
 pub mod reading_pane;

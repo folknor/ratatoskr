@@ -103,8 +103,28 @@ pub const DROPDOWN_TRIGGER_HEIGHT: f32 = 40.0;
 // ── Panel widths ────────────────────────────────────────
 
 pub const SIDEBAR_WIDTH: f32 = 180.0;
-pub const THREAD_LIST_WIDTH: f32 = 280.0;
-pub const CONTACT_SIDEBAR_WIDTH: f32 = 240.0;
+pub const THREAD_LIST_WIDTH: f32 = 400.0;
+pub const RIGHT_SIDEBAR_WIDTH: f32 = 240.0;
+
+/// Label dot diameter on thread cards (line 3 indicators)
+pub const LABEL_DOT_SIZE: f32 = 6.0;
+
+/// Thread card fixed height (three lines + padding)
+pub const THREAD_CARD_HEIGHT: f32 = 68.0;
+
+/// Right sidebar section header padding
+pub const PAD_RIGHT_SIDEBAR: Padding = Padding {
+    top: 12.0,
+    right: 12.0,
+    bottom: 12.0,
+    left: 12.0,
+};
+
+/// Starred thread card warm background alpha
+pub const STARRED_BG_ALPHA: f32 = 0.12;
+
+/// Auto-collapse right sidebar when window width drops below this
+pub const RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH: f32 = 1200.0;
 
 // ── Per-pane minimum widths (for resize clamping) ──────
 

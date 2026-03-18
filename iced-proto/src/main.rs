@@ -9,7 +9,7 @@ mod window_state;
 use db::{Account, Db, Label, Thread};
 use iced::widget::{container, mouse_area, row};
 use iced::{Element, Length, Point, Size, Task, Theme};
-use ui::layout::{SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH, THREAD_LIST_MIN_WIDTH, THREAD_LIST_WIDTH};
+use ui::layout::{RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -81,6 +81,7 @@ pub enum Message {
     DividerUnhover,
     WindowResized(Size),
     WindowMoved(Point),
+    ToggleRightSidebar,
     WindowCloseRequested(iced::window::Id),
 }
 
@@ -101,6 +102,7 @@ struct App {
     thread_list_width: f32,
     dragging: Option<Divider>,
     hovered_divider: Option<Divider>,
+    right_sidebar_open: bool,
     show_settings: bool,
     settings: ui::settings::SettingsState,
     window: window_state::WindowState,
@@ -125,10 +127,11 @@ impl App {
             scope_dropdown_open: false,
             labels_expanded: true,
             smart_folders_expanded: true,
-            sidebar_width: SIDEBAR_WIDTH,
-            thread_list_width: THREAD_LIST_WIDTH,
+            sidebar_width: window.sidebar_width,
+            thread_list_width: window.thread_list_width,
             dragging: None,
             hovered_divider: None,
+            right_sidebar_open: window.right_sidebar_open,
             show_settings: false,
             settings: ui::settings::SettingsState::with_scale(
                 *DEFAULT_SCALE.get().unwrap_or(&1.0),
@@ -341,8 +344,16 @@ impl App {
             Message::Settings(msg) => {
                 self.settings.update(msg).map(Message::Settings)
             }
+            Message::ToggleRightSidebar => {
+                self.right_sidebar_open = !self.right_sidebar_open;
+                Task::none()
+            }
             Message::WindowResized(size) => {
                 self.window.set_size(size);
+                // Auto-collapse right sidebar below threshold
+                if size.width < RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH && self.right_sidebar_open {
+                    self.right_sidebar_open = false;
+                }
                 Task::none()
             }
             Message::WindowMoved(point) => {
@@ -351,6 +362,9 @@ impl App {
             }
             Message::WindowCloseRequested(id) => {
                 let data_dir = APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
+                self.window.sidebar_width = self.sidebar_width;
+                self.window.thread_list_width = self.thread_list_width;
+                self.window.right_sidebar_open = self.right_sidebar_open;
                 self.window.save(data_dir);
                 iced::window::close(id)
             }
@@ -400,9 +414,22 @@ impl App {
         .on_exit(Message::DividerUnhover)
         .interaction(iced::mouse::Interaction::ResizingHorizontally);
 
+        let folder_name = self
+            .selected_label
+            .as_ref()
+            .and_then(|lid| self.labels.iter().find(|l| l.id == *lid).map(|l| l.name.as_str()))
+            .unwrap_or("Inbox");
+        let scope_name = self
+            .selected_account
+            .and_then(|idx| self.accounts.get(idx))
+            .and_then(|a| a.display_name.as_deref().or(Some(a.email.as_str())))
+            .unwrap_or("All");
+
         let thread_list = container(ui::thread_list::view(
             &self.threads,
             self.selected_thread,
+            folder_name,
+            scope_name,
         ))
         .width(self.thread_list_width)
         .height(Length::Fill);
@@ -430,7 +457,9 @@ impl App {
             .width(Length::Fill)
             .height(Length::Fill);
 
-        let layout = row![sidebar, divider_sidebar, thread_list, divider_thread, reading_pane]
+        let right_sidebar = ui::right_sidebar::view(self.right_sidebar_open);
+
+        let layout = row![sidebar, divider_sidebar, thread_list, divider_thread, reading_pane, right_sidebar]
             .height(Length::Fill);
 
         // Wrap in a mouse_area to track drag movement across the full window

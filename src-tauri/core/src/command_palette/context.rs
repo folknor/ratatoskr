@@ -11,6 +11,16 @@ pub enum ProviderKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub enum FocusedRegion {
+    ThreadList,
+    ReadingPane,
+    Composer,
+    SearchBar,
+    Sidebar,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum ViewType {
     Inbox,
     Starred,
@@ -51,6 +61,8 @@ pub struct CommandContext {
 
     pub is_online: bool,
     pub composer_is_open: bool,
+
+    pub focused_region: Option<FocusedRegion>,
 }
 
 impl CommandContext {
@@ -64,6 +76,10 @@ impl CommandContext {
 
     pub fn selection_count(&self) -> usize {
         self.selected_thread_ids.len()
+    }
+
+    pub fn is_focused(&self, region: FocusedRegion) -> bool {
+        self.focused_region == Some(region)
     }
 }
 
@@ -88,6 +104,7 @@ mod tests {
             thread_in_spam: None,
             is_online: true,
             composer_is_open: false,
+            focused_region: None,
         }
     }
 

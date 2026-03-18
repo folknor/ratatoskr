@@ -510,6 +510,7 @@ mod tests {
             thread_in_spam: None,
             is_online: true,
             composer_is_open: false,
+            focused_region: None,
         }
     }
 

@@ -677,9 +677,25 @@ impl canvas::Program<Message> for CirclePainter {
     }
 }
 
+// ── Label dot (thread card indicators) ──────────────────
+
+pub fn label_dot<'a>(color: Color) -> Element<'a, Message> {
+    let dot = Canvas::new(DotPainter { color })
+        .width(LABEL_DOT_SIZE)
+        .height(LABEL_DOT_SIZE);
+    container(dot)
+        .center_y(Length::Shrink)
+        .into()
+}
+
 // ── Thread card ─────────────────────────────────────────
 
-pub fn thread_card(thread: &Thread, index: usize, selected: bool) -> Element<'_, Message> {
+pub fn thread_card<'a>(
+    thread: &'a Thread,
+    index: usize,
+    selected: bool,
+    label_colors: &[(Color,)],
+) -> Element<'a, Message> {
     let sender = thread
         .from_name
         .as_deref()
@@ -706,81 +722,80 @@ pub fn thread_card(thread: &Thread, index: usize, selected: bool) -> Element<'_,
         })
         .unwrap_or_default();
 
-    let subject_weight = if thread.is_read {
-        iced::font::Weight::Normal
+    // Sender: semibold if unread, normal if read
+    let sender_font = if thread.is_read {
+        font::TEXT
     } else {
-        iced::font::Weight::Bold
+        font::TEXT_SEMIBOLD
     };
+
+    // Subject: accent if unread, muted if read; always normal weight
     let subject_style: fn(&Theme) -> text::Style = if thread.is_read {
-        text::base
+        theme::text_muted
     } else {
         theme::text_accent
     };
 
-    let avatar = avatar_circle(sender, AVATAR_THREAD_CARD);
-
+    // Line 3 indicators: label dots + attachment icon
     let mut indicators = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
+    for &(color,) in label_colors {
+        indicators = indicators.push(label_dot(color));
+    }
     if thread.has_attachments {
         indicators = indicators.push(icon::paperclip().size(ICON_XS).style(theme::text_tertiary));
     }
-    if thread.is_starred {
-        indicators = indicators.push(icon::star().size(ICON_SM).style(text::warning));
-    }
-    if thread.message_count > 1 {
-        indicators = indicators.push(
-            container(
-                text(thread.message_count.to_string())
-                    .size(TEXT_XS)
-                    .style(theme::text_tertiary),
-            )
-            .padding(PAD_BADGE)
-            .style(theme::badge_container),
-        );
-    }
 
+    // Line 1: sender + date
     let top_row = row![
-        text(sender)
-            .size(TEXT_MD)
-            .style(text::base)
-            .font(iced::Font { weight: iced::font::Weight::Bold, ..font::TEXT }),
-        Space::new().width(Length::Fill),
-        text(date_str).size(TEXT_XS).style(theme::text_tertiary),
+        container(
+            text(sender)
+                .size(TEXT_MD)
+                .style(text::base)
+                .font(sender_font),
+        )
+        .width(Length::Fill),
+        container(text(date_str).size(TEXT_XS).style(theme::text_tertiary)),
     ]
     .align_y(Alignment::Center);
 
+    // Line 2: subject
     let subject_row = row![
-        text(subject)
-            .size(TEXT_MD)
-            .style(subject_style)
-            .font(iced::Font { weight: subject_weight, ..font::TEXT })
-            .wrapping(text::Wrapping::None),
+        container(
+            text(subject)
+                .size(TEXT_MD)
+                .style(subject_style)
+                .font(font::TEXT)
+                .wrapping(text::Wrapping::None),
+        )
+        .width(Length::Fill),
     ];
 
+    // Line 3: snippet + indicators
     let snippet_row = row![
-        text(snippet)
-            .size(TEXT_SM)
-            .style(text::secondary)
-            .wrapping(text::Wrapping::None),
-        Space::new().width(Length::Fill),
+        container(
+            text(snippet)
+                .size(TEXT_SM)
+                .style(text::secondary)
+                .wrapping(text::Wrapping::None),
+        )
+        .width(Length::Fill),
         indicators,
     ]
     .align_y(Alignment::Center);
 
-    let content = row![
-        avatar,
-        column![top_row, subject_row, snippet_row].spacing(SPACE_XXXS).width(Length::Fill),
-    ]
-    .spacing(SPACE_SM)
-    .align_y(Alignment::Start);
+    let content = column![top_row, subject_row, snippet_row]
+        .spacing(SPACE_XXXS)
+        .width(Length::Fill);
 
     button(
         container(content)
             .padding(PAD_THREAD_CARD)
+            .height(THREAD_CARD_HEIGHT)
             .width(Length::Fill),
     )
     .on_press(Message::SelectThread(index))
     .padding(0)
-    .style(theme::thread_card_button(selected))
+    .style(theme::thread_card_button(selected, thread.is_starred))
     .width(Length::Fill)
     .into()
 }

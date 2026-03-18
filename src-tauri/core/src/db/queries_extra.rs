@@ -19,6 +19,7 @@ mod misc;
 pub mod navigation;
 mod scoped_queries;
 mod tasks;
+mod thread_ui_state;
 
 pub use accounts_messages::*;
 pub use ai_state::*;
@@ -35,6 +36,7 @@ pub use misc::*;
 pub use navigation::*;
 pub use scoped_queries::*;
 pub use tasks::*;
+pub use thread_ui_state::*;
 
 pub(super) fn dynamic_update(
     conn: &Connection,

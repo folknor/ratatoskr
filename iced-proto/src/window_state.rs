@@ -16,7 +16,16 @@ pub struct WindowState {
     pub x: Option<f32>,
     pub y: Option<f32>,
     pub maximized: bool,
+    #[serde(default = "default_sidebar_width")]
+    pub sidebar_width: f32,
+    #[serde(default = "default_thread_list_width")]
+    pub thread_list_width: f32,
+    #[serde(default)]
+    pub right_sidebar_open: bool,
 }
+
+fn default_sidebar_width() -> f32 { 180.0 }
+fn default_thread_list_width() -> f32 { 400.0 }
 
 impl Default for WindowState {
     fn default() -> Self {
@@ -26,6 +35,9 @@ impl Default for WindowState {
             x: None,
             y: None,
             maximized: false,
+            sidebar_width: default_sidebar_width(),
+            thread_list_width: default_thread_list_width(),
+            right_sidebar_open: false,
         }
     }
 }
@@ -88,6 +100,8 @@ impl WindowState {
     fn sanitize(&mut self) {
         self.width = self.width.max(MIN_WIDTH);
         self.height = self.height.max(MIN_HEIGHT);
+        self.sidebar_width = self.sidebar_width.max(200.0);
+        self.thread_list_width = self.thread_list_width.max(250.0);
 
         // Reject negative positions (off-screen)
         if let Some(x) = self.x {
