@@ -14,7 +14,7 @@ This document covers the main window's structure, the thread list, the conversat
 
 3. **No empty chrome.** If a UI element has no function in the current context, it shouldn't be visible. No disabled buttons, no greyed-out toolbars, no placeholder panels. The window shows what's relevant now.
 
-4. **Density is a feature.** Enterprise users process volume. The default density should show more threads per screen than consumer email clients, without feeling cramped. Compact/comfortable modes are a setting, not a redesign.
+4. **Density is a feature.** Enterprise users process volume. The layout should show more threads per screen than consumer email clients, without feeling cramped. One density, designed right. *(Remove the "Email Density" select from the settings UI — `settings.rs` still has a `density` field and Compact/Default/Spacious dropdown that isn't wired to anything.)*
 
 ## Current State
 
@@ -50,13 +50,13 @@ A top bar would be empty chrome. The space is better used for content.
 
 ### Panel Proportions
 
-The current fixed widths (sidebar 180px, thread list 280px) are appropriate for the sidebar and thread list. The reading pane fills remaining space. On a 4K display at 1.5x scale, this gives roughly:
+The sidebar stays at 180px fixed. The thread list and reading pane split the remaining space, with the thread list taking roughly 40% — closer to equal partners than the traditional narrow-list/wide-detail split. On a 4K display at 1.5x scale:
 
 ```
-[ 180px | 280px | ~820px reading pane ]
+[ 180px | ~400px thread list | ~700px reading pane ]
 ```
 
-The thread list could be wider for a more Superhuman feel (where thread list and reading pane are closer to equal), but this depends on thread card design — a denser card with less horizontal waste can show the same information in 280px that a spacious card needs 400px for. Thread card design should drive width, not the other way around.
+The thread list default width increases from the current 280px to ~400px. This gives thread cards room for sender, subject, and snippet without aggressive truncation. The dividers remain draggable.
 
 ### Resizable Dividers
 
@@ -70,51 +70,63 @@ The thread list answers: "what do I need to deal with?" It's a triage surface �
 
 ### Thread Card Content
 
-Each card shows, in priority order:
+Each card is a fixed-height three-line layout. All text lines start from the same left offset — no avatar column or leading icons that push text inward.
 
-1. **Sender** — who is this from? Most important signal for triage. Show the most recent sender for multi-message threads. Bold if unread.
-2. **Subject** — what is this about? Truncated with ellipsis. Bold if unread.
-3. **Snippet** — preview of the most recent message body. Secondary text color. Single line, truncated.
-4. **Date/time** — when? Relative format: time today ("2:34 PM"), day this week ("Tue"), date this year ("Mar 12"), year for older ("Dec 2024").
-5. **Message count** — for threads with multiple messages, show a count badge. Indicates conversation depth at a glance.
-6. **Unread indicator** — a dot or bold treatment, not a separate column. Must be visible without reading the text.
-7. **Avatar** — colored circle with sender initial. Provides visual anchoring and scan targets. Color derived from sender name (deterministic hash).
-8. **Star/flag indicator** — if starred, show inline. Small, non-dominant.
+**Line 1: Sender + Date**
+- **Sender name** (left) — most important triage signal. Bold/semibold if unread, normal weight if read. Shows the most recent sender for multi-message threads.
+- **Date/time** (right) — relative format: time today ("3:42 PM"), day this week ("Tue"), date this year ("Mar 12"), year for older ("Dec 2024").
+
+**Line 2: Subject**
+- **Subject line** — truncated with ellipsis. Accent/primary color if unread, muted if read. This is a stronger unread signal than bold alone.
+
+**Line 3: Snippet + Indicators**
+- **Snippet** (left) — preview of the most recent message body. Muted/tertiary text color. Truncated to make room for indicators.
+- **Indicators** (right, inline) — small colored label dots + attachment icon (📎). Indicators are right-aligned; snippet truncates earlier when indicators are present. If no labels and no attachment, the snippet gets the full width.
+
+### Thread Card States
+
+**Unread:** sender in semibold, subject in accent/primary color.
+
+**Read:** sender in normal weight, subject and snippet in muted colors.
+
+**Starred:** the entire card has a warm/golden background color. There is no star icon — the background *is* the indicator. The star action lives in the reading pane and command palette, not the thread card.
+
+### Thread Card Indicators
+
+**Label colors:** small colored dots (6-8px circles) in the lower right of line 3. Each label the thread has produces one dot in that label's color. No label text — the color is the identifier. Users learn the color-to-label mapping from the reading pane; the thread list is for pattern matching. Most threads have 0-2 labels; the dots are compact enough to handle 3-4 without crowding.
+
+Label colors come from the provider where available (Gmail label colors, Exchange category colors) or are assigned by Ratatoskr for providers without color support (IMAP folders get deterministic hash-based colors).
+
+**Attachment icon:** a small paperclip (📎) in the lower right of line 3, after any label dots. Only shown if the thread has attachments.
+
+**No hover effects on indicators.** No tooltips. The thread card is a pure scan surface.
 
 ### What Thread Cards Do NOT Show
 
-- **Labels/tags** — these are filing metadata, not triage signals. The user already filtered by label to get here. Showing them is redundant noise.
-- **Attachment indicators** — low-value for triage decisions. Available in the reading pane.
-- **Account indicator** — the scope selector already tells you which account(s) you're viewing. Per-thread account badges add noise in unified view.
-
-These can be reconsidered if user feedback shows they're needed, but the default should be minimal.
+- **Avatars** — avatars take horizontal space from text and slow scanning. Sender name typography is sufficient for identification. Avatars appear in the reading pane where there's room.
+- **Message count** — thread depth is not a reliable triage signal. Available in the reading pane.
+- **Label text** — label colors are shown as dots; full names are in the reading pane.
+- **Account indicator** — the scope selector and search scoping handle account context.
+- **AI summary** — not ruled out for the future (would replace the snippet on line 3), but not in V1.
 
 ### Thread Card Layout
 
 ```
-┌─────────────────────────────────────────┐
-│ [●] Sender Name              Mar 12  2 │
-│     Subject line truncated with ell...  │
-│     Snippet preview text in second...   │
-└─────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│ Sender Name                            3:42 PM  │
+│ Subject line truncated with ellipsis...          │
+│ Snippet preview text in muted...    🔵 🟢 📎    │
+└──────────────────────────────────────────────────┘
 ```
 
-- `[●]` = avatar circle (colored, with initial)
-- `2` = message count badge (only if > 1)
-- Unread threads: sender and subject in semibold, avatar has a small unread dot
-- Read threads: normal weight, muted text colors
-
-### Density Modes
-
-Three modes, controlled by a setting:
-
-| Mode | Card height | What changes |
-|------|------------|--------------|
-| **Compact** | ~48px | No snippet line. Sender + subject on one line, date on right. |
-| **Default** | ~64px | Sender + date on first line, subject + snippet on second. |
-| **Comfortable** | ~80px | Current three-line layout with more padding. |
-
-Default is the right starting point. Compact is for power users with high volume. Comfortable is for users who want the visual breathing room.
+Starred variant (golden background):
+```
+┌══════════════════════════════════════════════════┐
+║ Sender Name                            3:42 PM  ║
+║ Subject line truncated with ellipsis...          ║
+║ Snippet preview text in muted...    🔵 📎       ║
+└══════════════════════════════════════════════════┘
+```
 
 ### Selection and Navigation
 
@@ -134,52 +146,183 @@ This is the same pattern as Superhuman — search is spatial ("I'm filtering thi
 
 The reading pane answers: "what does this conversation say, and what should I do about it?" It shows the full thread as a stack of messages, with actions available in context.
 
+### Thread Attachments
+
+Attachments are first-class citizens in the reading pane — they're the reason half of enterprise email exists. Attachments are displayed as a consolidated, deduplicated list at the top of the conversation, above all message cards.
+
+#### Attachment Cards
+
+Attachments are individual multi-line cards inside a group container:
+
+```
+┌─ Attachments (3) ──────────────────── [Save All ↓] ┐
+│                                                     │
+│  ┌─────────────────────────────────────────────┐    │
+│  │ 📄 Q2 Report.pdf                            │    │
+│  │ PDF · 2.4 MB · Mar 14 from Alice            │    │
+│  └─────────────────────────────────────────────┘    │
+│                                                     │
+│  ┌─────────────────────────────────────────────┐    │
+│  │ 📊 Budget.xlsx              ▸ 2 versions    │    │
+│  │ Excel · 847 KB · Mar 14 from Alice          │    │
+│  └─────────────────────────────────────────────┘    │
+│                                                     │
+│  ┌─────────────────────────────────────────────┐    │
+│  │ 🖼 Site Photo.jpg                            │    │
+│  │ Image · 1.1 MB · Mar 12 from Bob            │    │
+│  └─────────────────────────────────────────────┘    │
+│                                                     │
+└─────────────────────────────────────────────────────┘
+```
+
+Each card shows:
+- **Line 1:** file type icon + filename (+ "▸ N versions" if deduplicated)
+- **Line 2:** type label + file size + date + sender name
+
+#### Attachment Dates
+
+Each attachment card shows when the attachment arrived or was last modified:
+
+- **Primary:** file modification date from `Content-Disposition` headers (`modification-date` parameter, RFC 2183) or extractable file metadata (EXIF, PDF creation date, Office document properties) — when available
+- **Fallback:** the date of the email message that contained the attachment — always available
+
+The date is shown alongside the sender who sent that attachment ("Mar 14 from Alice"). This is especially important in the versioning view, where dates distinguish versions:
+
+```
+  ┌─────────────────────────────────────────────┐
+  │ 📊 Budget.xlsx              ▾ 2 versions    │
+  │ Excel · 847 KB · Mar 14 from Alice          │
+  │ ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄  │
+  │   847 KB · Mar 14 from Alice (latest)       │
+  │   692 KB · Mar 8 from Bob                   │
+  └─────────────────────────────────────────────┘
+```
+
+#### Collapsible
+
+The attachment group is collapsible. Collapsed state is persisted per thread ID — if you collapse the attachments because you've already saved them, they stay collapsed next time you open that thread. Stored as a lightweight key-value map (thread ID → bool), negligible disk usage even after years.
+
+The group is expanded by default for threads with attachments.
+
+#### Deduplication and Versioning
+
+In a 30-message thread where `Budget.xlsx` is attached in message 3 and a revised `Budget.xlsx` in message 8, the attachment list shows **one entry** — the latest version (from message 8). A small "2 versions" indicator on the card expands to show all versions with their message dates.
+
+Version detection uses strict same-filename matching. `Budget.xlsx` and `Budget.xlsx` = same document, latest wins. `Budget_v2.xlsx` and `Budget.xlsx` = treated as separate documents (fuzzy matching is too error-prone for enterprise documents where naming conventions vary).
+
+The attachment list is collapsed by default to show only the latest version of each unique filename. Expanding "all versions" reveals the full history.
+
+#### Image Hover Preview
+
+Hovering over an image attachment card shows a fixed-size preview in a fixed position — either to the left of the attachment list or below it, overlaying the reading pane. Not a lightbox, not a cursor-following tooltip. Fixed position, fixed size, appears on hover, disappears on mouse-out.
+
+This may extend to PDF previews (rendered first page as image) in the future. Office documents don't get in-app preview — they open externally.
+
+#### Save/Open Behavior
+
+- **Single click** — selects the card (visual highlight), does not open
+- **Double click** — opens the attachment with the system's default handler
+- **Open button** (per-card) — same as double click, opens with default handler
+- **Save button** (per-card) — save to disk with file picker
+- **Save All** (on the group container header) — saves all *currently visible* attachments. If the list is showing deduplicated latest-versions-only, Save All saves those. If the user has expanded "all versions" first, Save All includes everything. The button does what the current view shows — no surprises.
+
 ### Conversation View
 
-A thread is displayed as a vertical stack of message cards, newest at bottom (chronological order). Each message card shows:
+A thread is displayed as a vertical stack of message cards below the attachment list, newest at top. This is a universal rule — newest first everywhere (thread list, conversation view).
+
+**Pop-out window:** Double-clicking an individual message card in the conversation view opens that message in a separate window (Outlook/Thunderbird behavior). The pop-out shows the single message with its full content, headers, and attachments. Essential for multi-monitor workflows — reference one message while composing a reply to another, or keep a message with instructions visible while working.
+
+Each message card shows:
 
 1. **Sender** — name + email, with avatar
 2. **Recipients** — "to me", "to me, 3 others", expandable to full list
-3. **Date/time** — absolute format ("Mar 12, 2026 at 2:34 PM")
+3. **Date/time** — absolute format ("Mar 12, 2026 at 2:34 PM"), possibly with a relative offset from the initial message ("+14d"). Two options under consideration — decide during implementation when we can see it on screen:
+   - **Option A:** Show relative offset by default ("+14d"), absolute date on hover. Denser, shows conversation rhythm at a glance.
+   - **Option B:** Show absolute date by default, relative offset as a secondary indicator. More conventional, no hover needed.
+   - This may warrant a user setting. The right default isn't obvious without seeing it in context.
 4. **Body** — rendered message content
-5. **Attachments** — if any, listed below the body
 
 ### Message Collapsing
 
-In long threads, older messages are collapsed by default. The collapse model:
+Enterprise threads routinely hit 30+ messages. A thread about a contract negotiation might have 40 replies spanning three weeks, with half of them being one-line acknowledgements ("Thanks", "Sounds good", "+1") and the rest being substantive. Showing all 40 fully expanded is unusable — the user scrolls past walls of quoted text and signatures hunting for the two messages that matter. Collapsing everything except what's relevant is not a nice-to-have, it's a core requirement.
 
-- **Most recent message**: always expanded
-- **Unread messages**: always expanded
-- **User's own messages**: collapsed (you know what you wrote)
-- **Everything else**: collapsed, showing a one-line summary (sender + date + first line of body)
+#### Collapse Rules
 
-Clicking a collapsed message expands it. A "expand all" / "collapse all" toggle is available but not prominent.
+When a thread is opened, each message is either expanded (full content visible) or collapsed (one-line summary) based on these rules, evaluated in priority order:
 
-This is critical for enterprise threads that run to 30+ messages. Showing everything is overwhelming; the user needs to see what's new and optionally drill into history.
+1. **Unread messages** — always expanded. These are the reason the user opened the thread. If there are three unread messages in a 20-message thread, those three are expanded and everything else is collapsed. This is the primary signal.
 
-### Action Bar
+2. **Most recent message** — always expanded, even if read. The latest message is the current state of the conversation. If the user has already read it, they still want to see it in context when revisiting the thread.
 
-When a thread is selected, a contextual action bar appears at the top of the reading pane. This is NOT a toolbar — it's contextual chrome that appears because there's something to act on.
+3. **Initial message** — always expanded, unless it's the user's own message (rule 4). The first message is the context for everything that follows — collapsing it forces the user to click just to remember what the thread is about.
+
+4. **User's own messages** — collapsed by default. You wrote it, you know what it says. Expanding your own replies adds noise between the messages from others that you actually need to re-read. If the user wants to verify what they said, one click expands it.
+
+5. **Everything else** — collapsed. Old, read messages from other people. Available on demand but not taking up space.
+
+#### Collapsed Message Appearance
+
+A collapsed message is a single-line row showing enough context to decide whether to expand:
+
+```
+│ ─ Alice Smith · Mar 8 · "Thanks for sending, I'll review by..."  │
+```
+
+Sender name, date, and the first ~60 characters of the body (stripped of quotes and signatures). This gives enough context to decide "do I need to re-read this?" without expanding.
+
+Clicking a collapsed message expands it inline. Clicking an expanded message (other than unread ones) collapses it back.
+
+#### Expand/Collapse All
+
+A subtle toggle in the conversation header area — "Expand all" / "Collapse all". Not prominent, not a button you'd accidentally hit. It's there for the user who wants to read the entire thread history or who wants to collapse everything back down after exploring.
+
+#### Why Not Persist Collapse State?
+
+Unlike the attachment collapse state (which is persisted per thread), message collapse state is **not persisted**. It resets each time the thread is opened, re-evaluating the rules above. The reasoning: unread status changes between visits. A message that was unread (and therefore expanded) last time might be read now. Persisting the old state would show stale expand/collapse decisions. Re-evaluating on each open ensures the user always sees what's currently relevant.
+
+### Actions
+
+Actions are split across three levels based on what they act on and how often they're used.
+
+#### Thread-Level Actions (reading pane, prominent)
+
+**Star** and **label toggles** are the only thread-level actions with dedicated UI in the reading pane. They appear somewhere prominent in the reading pane header area (exact placement — above or below attachments, toolbar row or pill cloud — deferred to prototyping).
+
+- **Star toggle** — one button, toggles starred state. Visually matches the golden card treatment in the thread list.
+- **Label toggles** — one button per defined label, all visible, all toggleable. Click to add/remove that label from the thread. Colors match the label dots in the thread list. If a user has 15 labels, all 15 are shown — if they defined that many, they want them accessible.
+
+All other thread-level actions (archive, trash, move, snooze, mark unread) live exclusively in the command palette and keyboard shortcuts. No buttons — `e` to archive, `#` to trash, `Cmd+K` for everything else.
+
+#### Per-Message Actions (bottom of each expanded message, inline)
+
+Reply, Reply All, and Forward appear at the bottom of each expanded message card. They're styled inline with the message content — same background color, adapted text color, hover effect. They don't look like a toolbar; they look like part of the message.
 
 ```
 ┌─────────────────────────────────────────────┐
-│  ↩ Reply   ↩↩ Reply All   ↪ Forward   ···  │
-├─────────────────────────────────────────────┤
+│ Alice Smith · Mar 14, 2:34 PM          📅   │
+│ to me, Bob                                  │
 │                                             │
-│  [Message cards...]                         │
+│ Hey, can we reschedule to Thursday?         │
 │                                             │
+│  ↩ Reply   ↩↩ Reply All   ↪ Forward        │
 └─────────────────────────────────────────────┘
 ```
 
-The action bar shows:
-- **Reply / Reply All / Forward** — the primary response actions
-- **Overflow (···)** — opens a compact menu with: Archive, Trash, Star, Snooze, Mark Unread, Move to Folder, Add Label, Print, View Source
+These are convenience shortcuts for palette actions, scoped to *this* message. The same actions in the palette act on the currently selected message (see message selection below).
 
-Every action in the bar is also a palette command with a keyboard shortcut. The bar exists for mouse discoverability, not as the primary interaction path.
+#### Calendar Event Creation (per-message header, expanded only)
+
+The "create calendar event" action (📅) appears in the message header area, right-aligned, only on expanded messages. It's elevated to header level because it's a different kind of action — it creates something in another system, not just email manipulation. Not every message warrants it, but when an email says "let's meet Thursday at 2," the action needs to be right there.
+
+#### Message Selection
+
+Clicking a message card in the conversation view gives it a visual selection state (outline or highlight). Palette actions that are message-specific (reply, forward, create event) act on the selected message. If no message is explicitly selected, they act on the most recent message.
+
+This means the palette's Reply command works whether you click the inline button on a specific message or just press `r` to reply to the latest.
 
 ### Reply Interaction
 
-Clicking Reply (or pressing `r`) should open an inline reply composer at the bottom of the conversation, below the last message. This keeps context visible — the user can see the message they're replying to while composing.
+Clicking Reply on a message (or pressing `r`) opens an inline reply composer directly below that message. This keeps context visible — the user can see the message they're replying to while composing. Since newest messages are at the top, replying to the most recent message means the composer appears near the top of the conversation.
 
 For Reply All and Forward, the same inline composer appears with the appropriate recipients/content prefilled.
 
@@ -261,7 +404,7 @@ The command palette's context system (CommandContext) already models this — `f
 Given that the layout structure is settled and the sidebar is functional, the build order for the main window should be:
 
 ### Phase 1: Thread List Polish
-- Refine thread card layout and density
+- Refine thread card layout
 - Implement keyboard navigation (j/k, Enter to select)
 - Wire up real unread/read styling from DB
 - Search bar above thread list (visual only — real search is a later feature)
@@ -278,25 +421,26 @@ Given that the layout structure is settled and the sidebar is functional, the bu
 - Multi-select in thread list
 - Inline reply composer (basic — full composer is a separate feature)
 
-### Phase 4: Density and Polish
-- Compact/default/comfortable density modes
+### Phase 4: Polish
 - Panel width persistence
 - Empty states
 - Transitions and micro-interactions
 
 ## Open Questions
 
-1. **Thread list width**: Should the default be wider than 280px to give thread cards more room? Depends on card design — a well-designed compact card may not need it. Prototype both and compare.
+1. **Thread list width**: Resolved. Default increases to ~400px (~40% of remaining space after sidebar). Thread list and reading pane are closer to equal partners.
 
-2. **Reading pane position**: The settings UI has a "Reading Pane Position" option (Right/Bottom/Off). Should we build Bottom mode? It's common in Outlook/Thunderbird. It gives the thread list full width but halves vertical space for both panels. This is a post-Phase 1 consideration.
+2. **Reading pane position**: Resolved. Always right. No bottom mode, no toggle. Remove the "Reading Pane Position" setting from the settings UI.
 
-3. **Conversation order**: Newest-at-bottom (chronological, like chat) or newest-at-top (reverse chrono, like traditional email)? Superhuman uses newest-at-bottom. Outlook uses newest-at-top. This is a strong user preference — probably needs to be a setting.
+3. **Conversation order**: Resolved. Newest at top — universal rule across the entire app (thread list and conversation view). No setting, no option.
 
-4. **Inline reply vs compose window**: Should `r` always open inline, or should it depend on context (inline for short replies, compose window for long-form)? Superhuman always does inline with a pop-out option. This seems right.
+4. **Inline reply vs compose window**: Resolved. In the main reading pane, reply is always inline (below the message being replied to) with a pop-out button for long-form. In a popped-out message window, reply always opens a full compose window — no inline composer inside a pop-out.
 
-5. **Thread list grouping**: Should threads be grouped by date ("Today", "Yesterday", "This Week", "Earlier")? Superhuman does this. It helps orientation but takes vertical space. Could be a density-dependent feature (shown in comfortable, hidden in compact).
+5. **Thread list grouping**: Resolved. No. No date section headers, no visual breaks in the list. A uniform list of identical-height cards is faster to scan. The date on each card is sufficient. Section headers break the scanning rhythm the same way a horizontal colored strip on a card would.
 
-6. **Avatar in reading pane vs thread list**: Should avatars appear in both places, or only in the thread list (for scan speed) with the reading pane using the extra space for content? Superhuman shows avatars in both. Enterprise users may prefer density over decoration in the reading pane.
+6. **Avatars**: Resolved. No avatars in the thread list (density wins). Avatars appear in the reading pane message cards where there's room.
+
+7. **AI summary**: Not ruled out. If added, it would replace the snippet on line 3 of the thread card. Deferred — not in V1.
 
 ## Dependencies
 
