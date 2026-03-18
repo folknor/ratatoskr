@@ -25,6 +25,10 @@ members = [
     "crates/attachment-cache",
     "crates/smtp",
     "crates/sync",
+    "crates/gmail",
+    "crates/jmap",
+    "crates/graph",
+    "crates/imap",
 ]
 
 exclude = [

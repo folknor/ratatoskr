@@ -1,0 +1,42 @@
+[package]
+name = "ratatoskr-graph"
+description = "Microsoft Graph provider for Ratatoskr"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Workspace deps
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["sync", "macros", "time"] }
+reqwest.workspace = true
+chrono.workspace = true
+base64.workspace = true
+quick-xml.workspace = true
+rusqlite.workspace = true
+
+# Extracted workspace crates
+ratatoskr-db = { path = "../db" }
+ratatoskr-body-store = { path = "../body-store" }
+ratatoskr-inline-image-store = { path = "../inline-image-store" }
+ratatoskr-search = { path = "../search" }
+ratatoskr-seen-addresses = { path = "../seen-addresses" }
+ratatoskr-provider-utils = { path = "../provider-utils" }
+ratatoskr-attachment-cache = { path = "../attachment-cache" }
+ratatoskr-category-colors = { path = "../category-colors" }
+ratatoskr-sync = { path = "../sync" }
+
+# Crate-specific deps
+log = "0.4"
+async-trait = "0.1"
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+mail-parser = "0.11"
+futures = "0.3"
+urlencoding = "2"
+getrandom = { version = "0.2", features = ["std"] }

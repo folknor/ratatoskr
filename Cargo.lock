@@ -5205,7 +5205,11 @@ dependencies = [
  "ratatoskr-crypto",
  "ratatoskr-db",
  "ratatoskr-filters",
+ "ratatoskr-gmail",
+ "ratatoskr-graph",
+ "ratatoskr-imap",
  "ratatoskr-inline-image-store",
+ "ratatoskr-jmap",
  "ratatoskr-label-colors",
  "ratatoskr-provider-utils",
  "ratatoskr-search",
@@ -5264,6 +5268,97 @@ dependencies = [
 ]
 
 [[package]]
+name = "ratatoskr-gmail"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "futures",
+ "log",
+ "ratatoskr-attachment-cache",
+ "ratatoskr-body-store",
+ "ratatoskr-db",
+ "ratatoskr-inline-image-store",
+ "ratatoskr-provider-utils",
+ "ratatoskr-search",
+ "ratatoskr-seen-addresses",
+ "ratatoskr-sync",
+ "reqwest 0.13.2",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "urlencoding",
+]
+
+[[package]]
+name = "ratatoskr-graph"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "futures",
+ "getrandom 0.2.17",
+ "log",
+ "mail-parser",
+ "quick-xml 0.37.5",
+ "ratatoskr-attachment-cache",
+ "ratatoskr-body-store",
+ "ratatoskr-category-colors",
+ "ratatoskr-db",
+ "ratatoskr-inline-image-store",
+ "ratatoskr-provider-utils",
+ "ratatoskr-search",
+ "ratatoskr-seen-addresses",
+ "ratatoskr-sync",
+ "reqwest 0.13.2",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "urlencoding",
+ "uuid",
+]
+
+[[package]]
+name = "ratatoskr-imap"
+version = "0.1.0"
+dependencies = [
+ "async-imap",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "futures",
+ "getrandom 0.2.17",
+ "log",
+ "mail-parser",
+ "native-tls",
+ "ratatoskr-attachment-cache",
+ "ratatoskr-body-store",
+ "ratatoskr-db",
+ "ratatoskr-inline-image-store",
+ "ratatoskr-provider-utils",
+ "ratatoskr-search",
+ "ratatoskr-seen-addresses",
+ "ratatoskr-smtp",
+ "ratatoskr-sync",
+ "ratatoskr-threading",
+ "regex",
+ "reqwest 0.13.2",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "socket2 0.6.3",
+ "tokio",
+ "tokio-native-tls",
+ "utf7-imap",
+ "xxhash-rust",
+]
+
+[[package]]
 name = "ratatoskr-inline-image-store"
 version = "0.1.0"
 dependencies = [
@@ -5271,6 +5366,35 @@ dependencies = [
  "rusqlite",
  "serde",
  "tokio",
+]
+
+[[package]]
+name = "ratatoskr-jmap"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "futures",
+ "jmap-client",
+ "log",
+ "native-tls",
+ "ratatoskr-attachment-cache",
+ "ratatoskr-body-store",
+ "ratatoskr-db",
+ "ratatoskr-inline-image-store",
+ "ratatoskr-provider-utils",
+ "ratatoskr-search",
+ "ratatoskr-seen-addresses",
+ "ratatoskr-sync",
+ "reqwest 0.13.2",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tokio-tungstenite",
+ "uuid",
 ]
 
 [[package]]

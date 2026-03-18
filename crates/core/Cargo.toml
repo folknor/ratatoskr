@@ -38,6 +38,10 @@ ratatoskr-provider-utils = { path = "../provider-utils" }
 ratatoskr-attachment-cache = { path = "../attachment-cache" }
 ratatoskr-smtp = { path = "../smtp" }
 ratatoskr-sync = { path = "../sync" }
+ratatoskr-gmail = { path = "../gmail" }
+ratatoskr-jmap = { path = "../jmap" }
+ratatoskr-graph = { path = "../graph" }
+ratatoskr-imap = { path = "../imap" }
 
 # Crate-specific deps
 log = "0.4"

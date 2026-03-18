@@ -1,0 +1,36 @@
+[package]
+name = "ratatoskr-gmail"
+description = "Gmail API provider for Ratatoskr"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Workspace deps
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["sync", "macros", "time"] }
+reqwest.workspace = true
+chrono.workspace = true
+
+# Extracted workspace crates
+ratatoskr-db = { path = "../db" }
+ratatoskr-body-store = { path = "../body-store" }
+ratatoskr-inline-image-store = { path = "../inline-image-store" }
+ratatoskr-search = { path = "../search" }
+ratatoskr-seen-addresses = { path = "../seen-addresses" }
+ratatoskr-provider-utils = { path = "../provider-utils" }
+ratatoskr-attachment-cache = { path = "../attachment-cache" }
+ratatoskr-sync = { path = "../sync" }
+
+# Crate-specific deps
+log = "0.4"
+async-trait = "0.1"
+rusqlite.workspace = true
+sha2 = "0.10"
+urlencoding = "2"
+futures = "0.3"
