@@ -341,9 +341,9 @@ The search bar lives above the thread list, inline with the thread list panel. I
 
 2. **Results are ranked.** Free-text matches are scored by Tantivy's relevance ranking. Results with more matching terms, better term positions, and higher term frequency rank higher.
 
-3. **Results are scoped to the current account scope.** If the sidebar is scoped to "All Accounts," search spans all accounts. If scoped to a specific account, search is limited to that account. The user doesn't need to specify account — it follows the existing scope model.
+3. **Search is always cross-account.** Regardless of the sidebar's current scope, search spans all accounts by default. Users narrow via `account:` operators. The sidebar scope controls browsing (which folder's threads are shown); search is for finding across everything. The "Search here" right-click on sidebar items prefills scope operators for discoverability.
 
-4. **Operators autocomplete.** When the user types `from:` or `is:`, the search bar could offer completions (contact names for `from:`, flag names for `is:`). This is a polish feature, not V1 — the query works without autocomplete.
+4. **Operators autocomplete.** When the user types `from:` or `is:`, the search bar offers completions (contact names for `from:`, flag names for `is:`, date presets for `before:`/`after:`). See § Operator Typeahead for full spec. This lands in Phase 4 — the query language works without autocomplete, but typeahead is part of the V1 product.
 
 5. **Clearing search returns to the folder view.** Pressing Escape or clearing the search bar restores the previous thread list (inbox, label, whatever was active before searching).
 
@@ -375,8 +375,10 @@ This means the search bar does double duty: it's both the search input and the s
 The UI calls one search function:
 
 ```
-search(query: String, scope: AccountScope) -> Vec<SearchResult>
+search(query: String) -> Vec<SearchResult>
 ```
+
+No scope parameter — search is always cross-account. Users narrow via `account:` operators in the query string.
 
 The backend:
 1. Parses the query string (operators + free text)
@@ -403,16 +405,21 @@ SearchResult {
 }
 ```
 
-This matches the data needed by thread cards. The UI renders search results using the same thread card component as the folder view.
+#### Thread card mapping
+
+Search results reuse the same thread card component as the folder view. The fields above always come from the **latest message in the thread**, not the best-ranked matching message. This means a search result card looks identical to how that thread appears in the inbox — same sender, same snippet, same date. The search ranking determines the *order* of results, not the *content* of each card.
+
+The matching context is visible in the reading pane: when the user selects a search result, the reading pane opens the thread with matching messages highlighted (expanded by default, matching terms highlighted in the body). This separates "why did this thread match?" (reading pane) from "what is this thread?" (thread card).
 
 ## Implementation Sequence
 
 ### Phase 1: Unify the Query Parser
 
-Merge the smart folder parser and the Tantivy search interface behind a single `search()` function. The parser already handles operators and free text — it just needs to route free text to Tantivy for ranking instead of LIKE.
+Redesign the query parser and unify both search engines behind a single `search()` function. The current smart folder parser (`core/src/smart_folder/parser.rs`) only supports single-value `from`, `to`, `subject`, `has:attachment`, basic `is:` flags, absolute `before`/`after`, and `label`. It does not support `account:`, `folder:`, `in:`, `type:`, `has:` shorthands beyond `attachment`, `is:tagged`, repeated operators with OR semantics, relative date offsets, or compact/greedy date formats. This is a parser redesign, not a small extension — see `docs/search/implementation-spec.md` Slice 1 for the full scope.
 
-- Extend `ParsedQuery` to distinguish "free text for ranking" from "structured filter"
-- Build a single `search()` function in core that uses both engines
+- Redesign `ParsedQuery` with `Vec<String>` fields for OR-capable operators, new operator types, and `has:` expansion
+- New date parser supporting relative offsets (`-7`), compact dates (`20260311`), and greedy multi-token consumption
+- Build a single `search()` function in core that routes to the appropriate engine(s)
 - Add cross-account support to the Tantivy path (remove single-account restriction)
 
 ### Phase 2: Search Bar in iced
@@ -429,11 +436,11 @@ Merge the smart folder parser and the Tantivy search interface behind a single `
 - Smart folder CRUD moves entirely to the palette (rename, delete, reorder)
 - Sidebar smart folder click → search bar shows query, thread list shows results
 
-### Phase 4: Polish
+### Phase 4: Typeahead and Polish
 
-- Operator autocomplete in search bar
+- Operator typeahead (§ Operator Typeahead): contact resolution for `from:`/`to:`, account-scoped `label:`/`folder:` lookup, date presets for `before:`/`after:`
 - Search history (recent queries, accessible via ↑ in empty search bar)
-- Highlighted matching terms in thread list snippets
+- Highlighted matching terms in reading pane (matching messages expanded, terms highlighted)
 - Search result count indicator
 
 ## Open Questions
@@ -455,6 +462,6 @@ Merge the smart folder parser and the Tantivy search interface behind a single `
 ## Dependencies
 
 - **Tantivy cross-account**: The current SearchParams takes a single account_id. This needs to accept AccountScope (All, Single, Multiple) to match the smart folder engine's capability.
-- **Unified parser**: The smart folder parser already handles the operator syntax. It needs to be extended to produce output that both Tantivy and SQL can consume.
+- **Parser redesign**: The current smart folder parser handles a subset of the target operator syntax. It needs a redesign to support all new operators, OR semantics, relative dates, and `has:` expansion — see Phase 1 and `docs/search/implementation-spec.md` Slice 1.
 - **Command palette**: "Save as Smart Folder" and smart folder management commands need to be registered. The command palette infrastructure (Slices 1-2) already supports this pattern.
 - **Thread list component**: Search results must render using the same thread card component as folder views. This is a UI concern for the iced prototype, not a backend issue.

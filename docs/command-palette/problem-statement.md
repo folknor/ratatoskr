@@ -35,7 +35,7 @@ The same action (e.g., "go to inbox") is implemented twice in different ways. Th
 
 ### What Needs to Change
 
-The Rust backend must become the single source of truth. Both keyboard dispatch and the palette UI should query the same registry, get the same commands, and invoke the same execution path. The TypeScript side becomes a thin consumer — it asks core "what commands are available given this context?" and "execute this command ID."
+The Rust backend must become the single source of truth. Both keyboard dispatch and the palette UI should query the same registry, get the same commands, and invoke the same execution path. The app layer becomes a thin consumer — it asks core "what commands are available given this context?" and executes them by passing either a `CommandId` alone (for direct commands) or a `CommandId` + `CommandArgs` (for parameterized commands that require stage-2 input resolution). See § Parameterized command execution contract for the full flow.
 
 ## Core Requirements
 
@@ -45,8 +45,8 @@ Every action the user can perform must be a registered command with a unique ide
 
 - Email thread actions (archive, trash, mark read, star, snooze, mute, pin, etc.)
 - Compose actions (new email, reply, reply all, forward)
-- Navigation (go to inbox, go to sent, go to a specific label/folder)
-- UI layout (toggle sidebar, change reading pane position, change density)
+- Navigation (go to inbox, go to sent, go to a specific label/folder, navigate between threads)
+- UI layout (toggle sidebar, toggle right sidebar)
 - Search and filtering
 - Account management
 - Sync operations
@@ -66,7 +66,7 @@ Category > Command
 Examples:
 - `Email > Archive`
 - `Email > Move to Folder`
-- `View > Reading Pane > Bottom` (rare three-level case)
+- `View > Toggle Right Sidebar`
 - `Navigate > Inbox`
 - `Navigate > [Gmail Label]` (dynamic)
 
@@ -138,7 +138,7 @@ Ratatoskr supports multiple accounts across four providers (Gmail API, JMAP, Mic
 | Snoozed (local feature) | Shared mailboxes, distribution lists |
 | "Unread" as a filter concept | Custom mailbox structures per account |
 
-When a thread is selected, the active account is implied. When no thread is selected, the palette must either use the currently viewed account as context or show options from all accounts (disambiguated).
+When a thread is selected, the active account is implied. When no thread is selected (or the sidebar is scoped to "All Accounts"), parameterized commands show options from all accounts, disambiguated via `OptionItem.path` (see § Cross-Account Label/Folder Disambiguation). This is consistent with the search and sidebar docs, which default to cross-account/additive behavior.
 
 #### Cross-Account Label/Folder Disambiguation
 
@@ -405,10 +405,10 @@ The full design of undo tokens, stack depth, expiration, and multi-step undo is 
 
    For non-parameterized commands, execution takes only a `CommandId` — no `CommandArgs` needed.
 
-4. **Disabled command visibility**: Resolved. `query()` returns all commands with an `available: bool` flag. The frontend decides whether to hide unavailable commands or show them greyed out. This keeps the API flexible for palette, context menus, and other surfaces.
+4. **Disabled command visibility**: Resolved. `query()` returns all commands with an `available: bool` flag. The frontend decides whether to hide unavailable commands or show them greyed out. This keeps the API flexible for palette, context menus, and other surfaces. **Every registered command is palette-visible** — there is no `palette_visible` metadata flag. Navigation commands like "Next Thread" (j/k) appear in the palette alongside everything else. This may be revisited after V1, but for now it's a hard rule: if it's a command, it's searchable.
 
-## Open Questions
+## Resolved Questions
 
-1. **Palette visibility vs bindability**: Must every registered command be searchable in the palette, or can some be keyboard-only? Examples: `nav.next` / `nav.prev` (j/k) are essential keybindings but arguably noise in the palette — no one opens the palette to move down one thread. If commands can opt out of palette visibility, the registry needs a `palette_visible: bool` (or a visibility enum) on the command metadata.
+1. **Palette visibility vs bindability**: Resolved. Every registered command is palette-searchable. There is no keyboard-only tier. Navigation commands like `nav.next` / `nav.prev` (j/k) appear in the palette — they're low-frequency palette searches but they need to be discoverable and their keybindings visible. This may be revisited post-V1 if the palette becomes noisy, but for now the rule is: no command exists without showing in the palette.
 
-2. **Scope of "single source of truth"**: The document states that keyboard dispatch and the palette UI consume the registry. But what about context menus, toolbars, right-click menus, and touch/mobile surfaces? If those also consume command metadata (label, icon, enabled state, keybinding hint), the registry is the app's entire action layer, not just the palette's backend. This is probably the right answer, but it expands the contract — the registry must serve any UI surface that can trigger or display a command, not just two.
+2. **Scope of "single source of truth"**: Resolved. The registry is the app's entire action layer, not just the palette's backend. Context menus, toolbars, right-click menus, the "Search here" sidebar action, reading pane action buttons — any UI surface that triggers or displays a command consumes the registry's metadata (label, icon, enabled state, keybinding hint). This is a consequence of the overview's requirement that "every user-initiated action... must be a registered command."

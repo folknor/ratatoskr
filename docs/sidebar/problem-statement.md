@@ -65,7 +65,9 @@ SMART FOLDERS
 ```
 
 - Universal folders aggregate across all accounts. Unread counts are summed. See "Universal Folder Semantics" below for how aggregation works per folder.
-- Smart Folders are cross-account by design — they appear here naturally. Smart Folders are **exempt from scoping**: they always query across all accounts, even when the sidebar is scoped to a specific account. This is intentional — a Smart Folder like "VIP" is a user-defined cross-account concept and filtering it to one account would defeat its purpose. The sidebar content is therefore: scope-filtered universal folders + scope-filtered labels + unscoped Smart Folders.
+- Smart Folders always appear in the sidebar regardless of scope. They are saved searches — their queries run through the unified search pipeline exactly as written. A smart folder with `account:FooCorp in:inbox is:unread` searches only Foo Corp; one with `is:unread after:-7` spans everything. The scope selector has no effect on smart folders — neither their visibility nor their query execution. The sidebar content is therefore: scope-filtered universal folders + scope-filtered labels + all Smart Folders (unscoped).
+
+  **Requires code change:** `query_smart_folders_sync` in `navigation.rs` currently filters smart folders by scope/account_id. This must change to always return all smart folders regardless of the active scope.
 - **No labels section.** Labels are per-account (Gmail labels, Exchange folders, JMAP mailboxes) and mixing them in a unified view creates noise. Users who need a label navigate via the command palette or scope to a specific account. **Prerequisite**: the command palette must support `Navigate > [Label]` with cross-account disambiguation (showing which account each label belongs to) before the sidebar's label browse path can be removed. Until then, removing labels from the unified sidebar creates a discoverability regression.
 - Spam and All Mail are omitted from the unified view — they're high-volume, rarely browsed, and their semantics differ across providers (Gmail's "All Mail" has no equivalent in Exchange). Available when scoped to a specific account.
 
@@ -97,6 +99,9 @@ LABELS
   - **Exchange/Graph**: Folder tree (Exchange folders are hierarchical and a message lives in exactly one).
   - **JMAP**: Mailbox list (JMAP mailboxes can be hierarchical, similar to Exchange).
   - **IMAP**: Folder tree (IMAP LSUB hierarchy).
+
+  **Requires backend work:** The current `NavigationFolder` struct (`navigation.rs`) has no hierarchy support — no parent ID, no path, and no label-vs-folder discriminator. All provider-specific items are flattened to `FolderKind::AccountLabel`. To support provider-adaptive display, the navigation model needs: (1) a `parent_id: Option<String>` or `path: Option<String>` for tree rendering (Exchange/IMAP/JMAP), (2) a discriminator indicating whether the item is a tag (Gmail label — non-exclusive, multiple per message) or a folder (Exchange/IMAP/JMAP — exclusive, one per message). The frontend uses the discriminator for "also in" indicators and future drag-and-drop semantics, not just rendering. The `DbLabel` type already has the raw data (`label_type`, `imap_folder_path`) — the navigation query needs to expose it.
+
 - Smart Folders still appear — they work cross-account and remain useful when scoped (see note on Smart Folder scoping exemption above).
 - Items like "All Mail" only appear if the provider supports the concept.
 
@@ -116,7 +121,7 @@ The unified view treats Inbox, Starred, Snoozed, Sent, Drafts, and Trash as univ
 Key differences that affect aggregation:
 
 - **Starred is not a folder everywhere.** Gmail and JMAP treat it as a label/keyword (a message can be "starred" and in "Inbox" simultaneously). Exchange and IMAP treat it as a flag on a message that lives in a folder. The sidebar's "Starred" destination must be a **virtual query** ("all messages with the starred/flagged attribute across all accounts"), not a folder listing.
-- **Drafts have a local component.** A draft may exist only locally (unsent compose), only on the server (composed on another device), or both (synced draft). The "Drafts" count must include local-only drafts.
+- **Drafts have a local component.** A draft may exist only locally (unsent compose), only on the server (composed on another device), or both (synced draft). The "Drafts" count must include local-only drafts, and **clicking Drafts must show them all** — the list is a mixed view of server-synced draft threads and local-only drafts. **Requires new work:** `get_draft_threads()` currently returns only server-synced drafts (which have `DbThread` representations via the DRAFT label). Local-only drafts in the `local_drafts` table have a different schema and no thread representation. To deliver a mixed drafts list, either: (a) define a union result type (e.g., `DraftItem` enum with `ServerDraft(DbThread)` and `LocalDraft(DbLocalDraft)` variants) that the thread list can render, or (b) promote local drafts to a lightweight `DbThread`-compatible shape at query time. The count path (`get_draft_count_with_local`) already handles both sources — the list path must match.
 - **Trash retention differs.** Gmail auto-purges after 30 days. Exchange follows org retention policy. JMAP/IMAP vary by server. The unified Trash view aggregates, but "empty trash" is per-account because the semantics differ.
 - **Sent is straightforward.** All providers have a clear Sent concept. Aggregation is a simple union.
 
@@ -137,9 +142,9 @@ When a user clicks a sidebar item, the result must be consistent regardless of p
 
 This means:
 
-- **Universal folders** are predicate-based queries: `folder:inbox`, `is:starred`, `is:snoozed`, `folder:sent`, `is:draft`, `folder:trash`. The predicate is evaluated against all accounts in the current scope.
-- **Account-specific labels** (Gmail) filter by label tag: `label:Clients AND account:foo`. A message may appear in multiple label views because Gmail labels are non-exclusive tags.
-- **Account-specific folders** (Exchange, IMAP, JMAP) filter by folder membership: `folder:Clients AND account:foo`. A message appears in exactly one folder view because these are exclusive containers.
+- **Universal folders** are predicate-based queries: `in:inbox`, `is:starred`, `is:snoozed`, `in:sent`, `is:draft`, `in:trash`. The `in:` operator is the universal folder shorthand defined in the search spec (`docs/search/problem-statement.md`); `folder:` is reserved for provider-specific folder paths. The predicate is evaluated against all accounts in the current scope.
+- **Account-specific labels** (Gmail) filter by label tag: `label:Clients account:foo`. A message may appear in multiple label views because Gmail labels are non-exclusive tags.
+- **Account-specific folders** (Exchange, IMAP, JMAP) filter by folder membership: `folder:Clients account:foo`. A message appears in exactly one folder view because these are exclusive containers.
 
 The sidebar does not need to expose this difference to the user — "Clients" looks the same whether it's a Gmail label or an Exchange folder. But the routing layer must know the difference because:
 
@@ -230,7 +235,7 @@ These are explicitly out of scope for the sidebar, handled by the command palett
 
 4. **Pinned labels/folders**: Should users be able to pin specific labels/folders so they appear in the unified view alongside the universal folders? This would let a user promote "Foo Corp > Clients" to top-level visibility without scoping to Foo Corp. It could blur the clean separation between unified and scoped views, but it's a common power-user request.
 
-5. **Smart Folder interaction with scope**: When a user is scoped to "Foo Corp" and clicks a Smart Folder (which is cross-account by definition), what happens to the scope indicator? Options: (a) scope visually switches to "All" for the duration, (b) scope stays on "Foo Corp" but the content pane shows cross-account results with an indicator. This affects whether scope is a global filter or a sidebar-local concern.
+5. **Smart Folder interaction with scope**: Resolved. The scope indicator stays unchanged when a Smart Folder is clicked. Smart Folders are saved searches — their queries run through the unified search pipeline exactly as written, independent of the scope selector. The thread list shows whatever the query produces. Scope controls universal folders and label visibility; Smart Folders are exempt.
 
 6. **Scope in URL/router state**: Should the active scope be part of the URL so that deep links and browser back/forward preserve it? If scope is purely in-memory UI state, refreshing the app loses the user's account context. If it's in the URL, the routing model gets more complex. The current React app uses TanStack Router with hash history — scope could be a search param (`#/inbox?scope=foo-corp`) without affecting the route structure.
 
@@ -282,7 +287,7 @@ Ship the new sidebar model against the existing React frontend. The sidebar gain
 - Unified inbox across accounts (the headline feature).
 - Scope selector to narrow to one account.
 - Account-specific labels visible when scoped.
-- Correct unread counts (aggregated or per-account).
+- Correct unread counts for universal folders (aggregated or per-account). Smart folder and per-label unread counts remain scaffolded as 0 — implementing them is separate work (see backend glue notes above).
 - Sidebar actions (label edit, context menus) still work as before — no regression.
 
 ### Phase 2: Strip actions from sidebar (palette dependency)

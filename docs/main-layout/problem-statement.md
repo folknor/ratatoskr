@@ -29,7 +29,7 @@ The prototype renders three columns with drag-resizable dividers:
 - Reading pane: shows the selected thread's snippet and basic metadata. Placeholder — no real message rendering, no conversation view.
 - No toolbar or top bar. Search is above the thread list.
 
-The layout decisions are sound. The structure doesn't need to change — it needs to be built out.
+The layout decisions are directionally sound, but the width budget is not finalized — see "Width Budget" below.
 
 ## Layout Structure
 
@@ -57,6 +57,31 @@ The sidebar stays at 180px fixed. The thread list and reading pane split the rem
 ```
 
 The thread list default width increases from the current 280px to ~400px. This gives thread cards room for sender, subject, and snippet without aggressive truncation. The dividers remain draggable.
+
+#### Width Budget
+
+**Resolved.** The right sidebar replaces the contact sidebar — same panel slot, same default width (240px). The thread list width does not change when the right sidebar is toggled; the reading pane absorbs the squeeze.
+
+| Panel | Default width | Min width |
+|-------|--------------|-----------|
+| Sidebar | 180px (unchanged) | 200px (existing `SIDEBAR_MIN_WIDTH`) |
+| Thread list | 400px (was 280px) | 250px (existing `THREAD_LIST_MIN_WIDTH`) |
+| Reading pane | Fill | — |
+| Right sidebar | 240px (was `CONTACT_SIDEBAR_WIDTH`) | 240px (fixed, not resizable) |
+
+Common case (right sidebar off):
+
+```
+180 + 400 = 580px → 700px reading pane at 1280px
+```
+
+With right sidebar on:
+
+```
+180 + 400 + 240 = 820px → 460px reading pane at 1280px
+```
+
+`layout.rs` changes: `THREAD_LIST_WIDTH` → 400, rename `CONTACT_SIDEBAR_WIDTH` to `RIGHT_SIDEBAR_WIDTH` (value stays 240). The contact sidebar pane in the PaneGrid is repurposed for the right sidebar.
 
 ### Resizable Dividers
 
@@ -95,7 +120,7 @@ Each card is a fixed-height three-line layout. All text lines start from the sam
 
 **Label colors:** small colored dots (6-8px circles) in the lower right of line 3. Each label the thread has produces one dot in that label's color. No label text — the color is the identifier. Users learn the color-to-label mapping from the reading pane; the thread list is for pattern matching. Most threads have 0-2 labels; the dots are compact enough to handle 3-4 without crowding.
 
-Label colors come from the provider where available (Gmail label colors, Exchange category colors) or are assigned by Ratatoskr for providers without color support (IMAP folders get deterministic hash-based colors).
+**Label color availability:** Gmail syncs real `color_bg`/`color_fg` hex values from the API (see `gmail/sync/labels.rs`). All other providers — IMAP, JMAP, and Graph (Exchange) — store `color_bg: None, color_fg: None`. No deterministic hash-based color assignment exists in the codebase. **Requires new work:** a fallback color assignment strategy for non-Gmail labels (e.g., deterministic hash of label name → color from a fixed palette). Without this, label dots in the thread list will only work for Gmail accounts.
 
 **Attachment icon:** a small paperclip (📎) in the lower right of line 3, after any label dots. Only shown if the thread has attachments.
 
@@ -216,12 +241,13 @@ Each card shows:
 
 #### Attachment Dates
 
-Each attachment card shows when the attachment arrived or was last modified:
+Each attachment card shows when the attachment arrived, alongside the sender ("Mar 14 from Alice").
 
-- **Primary:** file modification date from `Content-Disposition` headers (`modification-date` parameter, RFC 2183) or extractable file metadata (EXIF, PDF creation date, Office document properties) — when available
-- **Fallback:** the date of the email message that contained the attachment — always available
+**V1:** The date is the parent message's `date` field, which is always available. `AttachmentWithContext` already joins this from the messages table.
 
-The date is shown alongside the sender who sent that attachment ("Mar 14 from Alice"). This is especially important in the versioning view, where dates distinguish versions:
+**Future enhancement:** Richer dates from `Content-Disposition` headers (`modification-date` parameter, RFC 2183) or extractable file metadata (EXIF, PDF creation date, Office document properties). This requires: (1) parsing and storing Content-Disposition parameters during sync (currently not extracted), (2) a `modification_date` column on the `attachments` table, (3) optional metadata extraction for images/PDFs/Office documents at index time. None of this exists in the current data model (`DbAttachment` stores filename, MIME type, size, IDs, cache path, and content hash only). Not a V1 blocker — message date is sufficient for versioning.
+
+The date is especially important in the versioning view, where dates distinguish versions:
 
 ```
   ┌─────────────────────────────────────────────┐
@@ -274,7 +300,7 @@ Each message card shows:
 3. **Date/time** — absolute format ("Mar 12, 2026 at 2:34 PM"), possibly with a relative offset from the initial message ("+14d"). Two options under consideration — decide during implementation when we can see it on screen:
    - **Option A:** Show relative offset by default ("+14d"), absolute date on hover. Denser, shows conversation rhythm at a glance.
    - **Option B:** Show absolute date by default, relative offset as a secondary indicator. More conventional, no hover needed.
-   - This may warrant a user setting. The right default isn't obvious without seeing it in context.
+   - This warrants a user setting. Prototype both behind a setting flag, default to Option A (denser). The setting can live in the existing settings infrastructure.
 4. **Body** — rendered message content
 
 ### Message Collapsing
@@ -451,7 +477,7 @@ Some shortcuts change meaning based on context:
 | `Escape` | Deselect thread | Return focus to thread list | Close composer |
 | `e` | Archive selected thread(s) | Archive current thread | — |
 
-The command palette's context system (CommandContext) already models this — `focused_region` is part of the context struct.
+**Requires new work:** The command palette's `CommandContext` (`core/src/command_palette/context.rs`) does not currently model focus region. It tracks selected threads, active message, current view, account/provider info, and composer state — but has no `focused_region` field. Focus-sensitive dispatch requires: (1) adding a `focused_region` enum (ThreadList / ReadingPane / Composer / SearchBar / Sidebar) to `CommandContext`, (2) updating the iced UI to set this field on focus changes, (3) routing shortcuts through the palette's context system based on region. This is a Phase 3 prerequisite.
 
 ## What Superhuman Gets Right (and We Borrow)
 
@@ -474,28 +500,44 @@ The command palette's context system (CommandContext) already models this — `f
 
 ## Implementation Sequence
 
-Given that the layout structure is settled and the sidebar is functional, the build order for the main window should be:
+Given that the sidebar is functional, the build order for the main window should be:
 
-### Phase 1: Thread List Polish
-- Refine thread card layout
-- Implement keyboard navigation (j/k, Enter to select)
+### Phase 1: Thread List Polish + Layout
+- Update `layout.rs` constants: `THREAD_LIST_WIDTH` → 400, rename `CONTACT_SIDEBAR_WIDTH` to `RIGHT_SIDEBAR_WIDTH` (240)
+- Refine thread card layout to three-line spec (no avatars, label dots, starred background)
+- Label color fallback for non-Gmail providers (deterministic hash → color palette) — see `docs/main-layout/implementation-spec.md` Slice 1
 - Wire up real unread/read styling from DB
-- Search bar above thread list (visual only — real search is a later feature)
+- Scaffold right sidebar (replaces contact sidebar pane, off by default, placeholder content — calendar and pinned items are future features)
+- Extend `WindowState` with panel widths and right-sidebar-open state for persistence
+- Search bar deferred. Keyboard shortcuts (j/k) deferred to Phase 3.
 
-### Phase 2: Conversation View
+### Phase 1.5: Thread Detail Data Layer (prerequisite for Phase 2)
+
+The conversation view's collapse rules and collapsed-message summaries depend on data not currently exposed in a single query:
+
+- **Per-message read state** — collapse rules (§ Message Collapsing) need `is_read` per message. Currently available in the DB but not surfaced in a thread-detail query.
+- **Message ownership** — rule 4 (collapse user's own messages) needs matching `from_address` against the account's identity addresses. The `identities` table exists but there's no utility to test "is this message mine?"
+- **Quote/signature stripping** — collapsed message appearance (§ Collapsed Message Appearance) shows "first ~60 characters of the body, stripped of quotes and signatures." This requires a text extraction pass that strips `>` quoted lines and signature blocks (`-- \n` delimiter). Neither utility exists.
+- **Body text access** — even the stripped-summary path needs body text. Bodies live in `bodies.db` (zstd-compressed), accessed via `BodyStore`. The conversation view needs a query that joins thread → messages → bodies, or a denormalized snippet that's pre-stripped.
+
+**Work required:** A `get_thread_detail()` query/function in core — see `docs/main-layout/implementation-spec.md` Slice 2. This is backend work, not UI work.
+
+### Phase 2: Conversation View (snippet-only)
 - Stacked message cards with sender, date, recipients
-- Message collapsing (newest expanded, older collapsed)
-- Placeholder for message body (snippet for now, real body rendering is a separate effort)
-- Contextual action bar (Reply, Reply All, Forward, overflow)
+- Message collapsing rules applied using snippet as body placeholder (real body rendering is a separate effort; full `get_thread_detail()` integration comes when the backend slice is complete)
+- Date display: prototype both Option A (relative offset) and Option B (absolute) behind a user setting, default to Option A
+- Contextual action bar (Reply, Reply All, Forward, overflow) — visual only, not wired to mutations yet
 
 ### Phase 3: Interaction Flow
+- Add `focused_region` enum to `CommandContext` and wire up focus tracking in iced — see `docs/main-layout/implementation-spec.md` Slice 4
+- Keyboard shortcuts (j/k navigation, Enter, Escape, e/r/s/#) wired via direct iced message dispatch (command palette integration is a later migration)
 - Auto-advance after archive/trash/move
-- Keyboard shortcuts wired to command palette
 - Multi-select in thread list
 - Inline reply composer (basic — full composer is a separate feature)
 
 ### Phase 4: Polish
-- Panel width persistence
+- Panel width persistence (see "Persistence Boundary" below)
+- Attachment collapse state persistence
 - Empty states
 - Transitions and micro-interactions
 
@@ -514,6 +556,23 @@ Given that the layout structure is settled and the sidebar is functional, the bu
 6. **Avatars**: Resolved. No avatars in the thread list (density wins). Avatars appear in the reading pane message cards where there's room.
 
 7. **AI summary**: Not ruled out. If added, it would replace the snippet on line 3 of the thread card. Deferred — not in V1.
+
+## Persistence Boundary
+
+This document introduces several categories of persisted and non-persisted UI state. Currently, `WindowState` (`iced-proto/src/window_state.rs`) stores only window geometry (width, height, x, y, maximized). The following clarifies what lives where:
+
+**Window-level state** (persisted in `window.json`, loaded on app start):
+- Window geometry (exists)
+- Panel widths — sidebar, thread list, right sidebar (not yet implemented, same file)
+- Right sidebar open/closed (not yet implemented)
+
+**Per-thread UI state** (persisted in SQLite, survives app restarts):
+- Attachment group collapse state (thread_id → bool) — lightweight KV, described in § Collapsible
+
+**Ephemeral UI state** (not persisted, recomputed on each thread open):
+- Message expand/collapse state — recomputed from read status and collapse rules each time (§ Why Not Persist Collapse State)
+
+**Implementation:** Panel widths can extend `WindowState` (add `sidebar_width`, `thread_list_width`, `right_sidebar_width`, `right_sidebar_open` fields with defaults). Attachment collapse state needs a small SQLite table or a KV store entry. No new persistence infrastructure is needed — just extending what exists.
 
 ## Dependencies
 

@@ -11,7 +11,9 @@ Two separate search engines with no bridge:
 
 ## Target State
 
-One function: `search(query: &str, scope: AccountScope) -> Result<Vec<SearchResult>, Error>`
+One function: `search(query: &str, search_state: &SearchState, db: &Connection) -> Result<Vec<SearchResult>, Error>`
+
+Always cross-account. Users narrow via `account:` operators in the query string.
 
 Three internal paths based on parsed query content:
 
@@ -168,27 +170,27 @@ Extend `core/src/smart_folder/sql_builder.rs` to handle all new operators.
 ### New clause builders
 
 **`account:` operator:**
-- Match by account name (not ID): `JOIN accounts a ON m.account_id = a.id WHERE a.name LIKE ?`
-- OR semantics for multiple: `a.name LIKE ? OR a.name LIKE ?`
-- Replaces the current `AccountScope` parameter for query-driven scoping. When `account:` operators are present, they override the `scope` parameter.
+- Match by account `display_name` or `email` (not a `name` column — that doesn't exist). The `DbAccount` struct has `display_name: Option<String>` and `email: String`. The SQL: `JOIN accounts a ON m.account_id = a.id WHERE (a.display_name LIKE ? OR a.email LIKE ?)`
+- OR semantics for multiple: `(a.display_name LIKE ?1 OR a.email LIKE ?1) OR (a.display_name LIKE ?2 OR a.email LIKE ?2)`
+- Resolve matched account IDs early, then use ID-based filtering downstream (more efficient than repeated joins). When `account:` operators are present, they override any scope parameter.
 
 **`folder:` operator:**
-- Match by folder/mailbox name or path: `EXISTS (SELECT 1 FROM thread_labels tl JOIN labels l ON tl.label_id = l.id WHERE tl.thread_id = t.id AND l.name LIKE ?)`
-- For hierarchical paths (`folder:"Projects/Q2"`): match the full path or the leaf name depending on how folder hierarchy is stored. May need a `path` column on labels or a recursive match.
+- Match by folder/mailbox name or path: `EXISTS (SELECT 1 FROM thread_labels tl JOIN labels l ON tl.label_id = l.id AND tl.account_id = l.account_id WHERE tl.thread_id = t.id AND l.name LIKE ?)`
+- For hierarchical paths (`folder:"Projects/Q2"`): IMAP folders have `imap_folder_path` on `DbLabel` which stores the full path. Gmail labels encode hierarchy as `/`-separated names (e.g., "Projects/Q2" is the literal label name). Exchange/JMAP folders need a normalization strategy — the current `DbLabel` has no generic `path` column. Options: (a) match against `imap_folder_path` for IMAP, label `name` for Gmail (which already contains the path), and add path normalization for Exchange/JMAP during sync; (b) add a normalized `folder_path` column populated by all providers during sync. Option (b) is cleaner but requires a migration and sync-side changes.
 - OR semantics for multiple folder values.
 
 **`in:` operator (universal folder shorthands):**
-- Map shorthands to provider-agnostic predicates:
+- Map shorthands to provider-agnostic predicates. The `labels` table has no generic `role` column — system folders are identified via `SYSTEM_FOLDER_ROLES` in `core/src/provider/folder_roles.rs`, which maps well-known `label_id` values (e.g., `"INBOX"`, `"SENT"`, `"DRAFT"`, `"TRASH"`, `"SPAM"`) across providers. The SQL builder should match against these label IDs, not a role column:
 
 | Shorthand | Predicate |
 |-----------|-----------|
-| `in:inbox` | `label.role = 'inbox'` or label name match |
-| `in:sent` | `label.role = 'sent'` |
-| `in:drafts` | `label.role = 'drafts'` |
-| `in:trash` | `label.role = 'trash'` |
-| `in:spam` | `label.role = 'spam'` |
-| `in:starred` | `t.is_starred = 1` |
-| `in:snoozed` | `t.is_snoozed = 1` |
+| `in:inbox` | `tl.label_id = 'INBOX'` (via thread_labels join) |
+| `in:sent` | `tl.label_id = 'SENT'` |
+| `in:drafts` | `tl.label_id = 'DRAFT'` |
+| `in:trash` | `tl.label_id = 'TRASH'` |
+| `in:spam` | `tl.label_id = 'SPAM'` |
+| `in:starred` | `t.is_starred = 1` (thread flag, not label join) |
+| `in:snoozed` | `t.is_snoozed = 1` (thread flag, not label join) |
 
 - Starred and snoozed are thread flags, not label joins. The builder must handle the mapping.
 
@@ -200,11 +202,11 @@ Extend `core/src/smart_folder/sql_builder.rs` to handle all new operators.
 - Optionally also check recipient addresses — TBD whether `has:contact` means "sender is a contact" or "any participant is a contact"
 
 **`type:` / attachment MIME filtering:**
-- `EXISTS (SELECT 1 FROM attachments WHERE message_id = m.id AND content_type LIKE ?)`
-- For glob patterns (`video/*`): `content_type LIKE 'video/%'`
-- For exact types: `content_type = ?`
-- OR semantics: multiple types from `has:` expansion become `(content_type LIKE ? OR content_type LIKE ? OR ...)`
-- Prerequisite: verify the `attachments` table has a `content_type` column. If not, add via migration.
+- `EXISTS (SELECT 1 FROM attachments WHERE message_id = m.id AND mime_type LIKE ?)`
+- For glob patterns (`video/*`): `mime_type LIKE 'video/%'`
+- For exact types: `mime_type = ?`
+- OR semantics: multiple types from `has:` expansion become `(mime_type LIKE ? OR mime_type LIKE ? OR ...)`
+- Prerequisite: verify the `attachments` table has a `mime_type` column. If not, add via migration.
 
 **Contact expansion for `from:` / `to:`:**
 - Current: `(m.from_address LIKE ? OR m.from_name LIKE ?)`
@@ -230,7 +232,7 @@ Different operators remain AND:
 -- from:alice has:pdf
 (m.from_address LIKE '%alice%' OR m.from_name LIKE '%alice%' OR ...)
 AND
-EXISTS (SELECT 1 FROM attachments WHERE ... AND content_type = 'application/pdf')
+EXISTS (SELECT 1 FROM attachments WHERE ... AND mime_type = 'application/pdf')
 ```
 
 ### Result shape
@@ -283,7 +285,6 @@ New module: `core/src/search/unified.rs` (or extend `core/src/search/mod.rs`).
 ```rust
 pub fn search(
     query: &str,
-    scope: AccountScope,
     search_state: &SearchState,
     db: &Connection,
 ) -> Result<Vec<SearchResult>, Error> {
@@ -294,12 +295,14 @@ pub fn search(
 
     match (has_free_text, has_operators) {
         (false, false) => Ok(vec![]),  // empty query
-        (false, true) => search_sql_only(&parsed, scope, db),
-        (true, false) => search_tantivy_only(&parsed, scope, search_state),
-        (true, true) => search_combined(&parsed, scope, search_state, db),
+        (false, true) => search_sql_only(&parsed, db),
+        (true, false) => search_tantivy_only(&parsed, search_state),
+        (true, true) => search_combined(&parsed, search_state, db),
     }
 }
 ```
+
+No `scope` parameter — search is always cross-account. Account narrowing is done via `account:` operators in the query string, resolved to account IDs during parsing.
 
 ### Path 1: SQL only (operators, no free text)
 
@@ -329,11 +332,11 @@ The intersection is done in application code — collect SQL thread IDs into a `
 
 ### Account scope resolution
 
-The `scope` parameter and `account:` operators interact:
+Search is always cross-account. Account narrowing is controlled entirely by `account:` operators in the query:
 
-- If `account:` operators are present in the query, they override the `scope` parameter
-- If no `account:` operators, use the `scope` parameter (which defaults to `All` for search)
-- Resolve account names to account IDs before passing to either engine
+- If `account:` operators are present, resolve account display names / emails to account IDs and filter both engines to those accounts
+- If no `account:` operators, search all accounts
+- Resolution happens during parsing, before either engine is invoked
 
 ## Slice 5: Tauri Command
 
@@ -343,14 +346,17 @@ New command replacing `search_messages`:
 #[tauri::command]
 pub async fn search(
     query: String,
-    scope: AccountScope,
     db: State<'_, DbState>,
     search: State<'_, SearchState>,
 ) -> Result<Vec<SearchResult>, String> {
-    let db = db.lock()?;
-    unified::search(&query, scope, &search, &db)
+    db.with_conn(move |conn| {
+        unified::search(&query, &search, conn)
+    })
+    .await
 }
 ```
+
+Note: no `scope` parameter — search is always cross-account per the search problem statement. Users narrow via `account:` operators. The `DbState::with_conn()` pattern (not `.lock()`) is the project's standard for Tauri commands — it runs the closure on the blocking thread pool via `spawn_blocking` to avoid blocking tokio workers.
 
 The old `search_messages` command stays for backward compatibility with the React frontend until it's replaced. The iced UI calls the new `search` command directly (or the core function, since iced doesn't need Tauri commands).
 
@@ -360,13 +366,15 @@ Smart folders become thin wrappers around the search pipeline.
 
 ### Execution path change
 
-Current: `execute_smart_folder_query` → parse → build SQL → execute SQL
-New: `execute_smart_folder_query` → call `unified::search(folder.query, scope, ...)`
+Current: `execute_smart_folder_query` → parse → build SQL → execute SQL → `Vec<DbThread>`
+New: `execute_smart_folder_query` → call `unified::search(folder.query, ...)` → convert back to `Vec<DbThread>`
+
+**Important:** The unified search pipeline returns `Vec<SearchResult>`, but the smart folder API must continue returning `Vec<DbThread>` — the sidebar navigation, thread list, and unread count code all depend on this type. The adapter is straightforward: `SearchResult` contains `thread_id` and `account_id`, which can be used to fetch full `DbThread` records, or the SQL-only path (operators without free text, which covers most smart folders) can return `DbThread` directly without going through `SearchResult` at all. Only smart folders with free text in their query string need the `SearchResult` → `DbThread` conversion.
 
 This means smart folders automatically get:
 - Tantivy ranking (if the query has free text)
 - All new operators
-- Cross-account support
+- Cross-account support (smart folders always run cross-account, independent of sidebar scope — see `docs/sidebar/problem-statement.md`)
 - Contact expansion
 
 ### Token migration
@@ -387,19 +395,13 @@ Add as a DB migration. Keep `resolve_query_tokens` as a fallback for one release
 
 ## Prerequisites / Schema Changes
 
-### Attachments table: `content_type` column
+### Attachments table: `mime_type` column
 
-Verify the `attachments` table has a `content_type` (MIME type) column. If not:
+**Already exists.** The `attachments` table has a `mime_type TEXT` column (see `migrations.rs` line 96, `DbAttachment.mime_type` in `types.rs`). No migration needed for MIME-type filtering.
 
-```sql
-ALTER TABLE attachments ADD COLUMN content_type TEXT DEFAULT '';
-```
+### Labels table: system folder identification
 
-And backfill from existing attachment data during sync or via a migration that re-parses stored attachment metadata.
-
-### Labels table: role column
-
-The `in:` operator maps shorthands to label roles (inbox, sent, drafts, trash, spam). Verify the `labels` table has a `role` or `type` column that identifies well-known folders. The provider sync already normalizes these — confirm the column name and values.
+The `labels` table has no generic `role` column. System folders are identified by well-known `label_id` values (`"INBOX"`, `"SENT"`, `"DRAFT"`, `"TRASH"`, `"SPAM"`, etc.) defined in `SYSTEM_FOLDER_ROLES` (`core/src/provider/folder_roles.rs`). The `in:` operator's SQL builder matches against these IDs via `thread_labels.label_id`, not a role column. The `labels` table also has `label_type`, `imap_folder_path`, and `imap_special_use` for provider-specific metadata — these are used by the `folder:` operator for path matching. No migration needed for `in:` support.
 
 ## Dependency Graph
 
