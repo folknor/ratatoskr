@@ -34,6 +34,11 @@ fn decompress(data: &[u8]) -> Result<String, String> {
 }
 
 impl BodyStoreState {
+    /// Access the underlying connection Arc for synchronous use.
+    pub fn conn(&self) -> Arc<Mutex<Connection>> {
+        Arc::clone(&self.conn)
+    }
+
     /// Open (or create) the body store database.
     pub fn init(app_data_dir: &Path) -> Result<Self, String> {
         std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create app dir: {e}"))?;

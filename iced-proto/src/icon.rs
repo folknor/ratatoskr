@@ -66,6 +66,7 @@ pub fn external_link<'a>() -> Text<'a> { to_text('\u{e0b9}') }
 pub fn image<'a>() -> Text<'a> { to_text('\u{e0f6}') }
 pub fn file<'a>() -> Text<'a> { to_text('\u{e0c0}') }
 pub fn file_text<'a>() -> Text<'a> { to_text('\u{e0cc}') }
+pub fn file_spreadsheet<'a>() -> Text<'a> { to_text('\u{e0cb}') }
 pub fn printer<'a>() -> Text<'a> { to_text('\u{e141}') }
 pub fn download<'a>() -> Text<'a> { to_text('\u{e0b2}') }
 pub fn upload<'a>() -> Text<'a> { to_text('\u{e19e}') }

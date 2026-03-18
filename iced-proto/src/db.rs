@@ -3,6 +3,16 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::{Connection, Row, params};
 
+// ── Date display mode ───────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DateDisplay {
+    /// Absolute date + relative offset from first message ("+14d")
+    RelativeOffset,
+    /// "Mar 12, 2026 at 2:34 PM"
+    Absolute,
+}
+
 // ── Types (subset of src-tauri/src/db/types.rs) ─────────────
 
 #[derive(Debug, Clone)]
@@ -32,6 +42,31 @@ pub struct Thread {
 pub struct Label {
     pub id: String,
     pub name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ThreadMessage {
+    pub id: String,
+    pub thread_id: String,
+    pub account_id: String,
+    pub from_name: Option<String>,
+    pub from_address: Option<String>,
+    pub to_addresses: Option<String>,
+    pub date: Option<i64>,
+    pub subject: Option<String>,
+    pub snippet: Option<String>,
+    pub is_read: bool,
+    pub is_starred: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ThreadAttachment {
+    pub id: String,
+    pub filename: Option<String>,
+    pub mime_type: Option<String>,
+    pub size: Option<i64>,
+    pub from_name: Option<String>,
+    pub date: Option<i64>,
 }
 
 // ── DB connection ───────────────────────────────────────────
@@ -187,6 +222,75 @@ impl Db {
             rows.map_err(|e| e.to_string())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| e.to_string())
+        })
+        .await
+    }
+    pub async fn get_thread_messages(
+        &self,
+        account_id: String,
+        thread_id: String,
+    ) -> Result<Vec<ThreadMessage>, String> {
+        self.with_conn(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, thread_id, account_id, from_name, from_address,
+                        to_addresses, date, subject, snippet, is_read, is_starred
+                 FROM messages
+                 WHERE account_id = ?1 AND thread_id = ?2
+                 ORDER BY date DESC"
+            ).map_err(|e| e.to_string())?;
+
+            stmt.query_map(params![account_id, thread_id], |row| {
+                Ok(ThreadMessage {
+                    id: row.get("id")?,
+                    thread_id: row.get("thread_id")?,
+                    account_id: row.get("account_id")?,
+                    from_name: row.get("from_name")?,
+                    from_address: row.get("from_address")?,
+                    to_addresses: row.get("to_addresses")?,
+                    date: row.get("date")?,
+                    subject: row.get("subject")?,
+                    snippet: row.get("snippet")?,
+                    is_read: row.get::<_, i64>("is_read")? != 0,
+                    is_starred: row.get::<_, i64>("is_starred")? != 0,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+        })
+        .await
+    }
+
+    pub async fn get_thread_attachments(
+        &self,
+        account_id: String,
+        thread_id: String,
+    ) -> Result<Vec<ThreadAttachment>, String> {
+        self.with_conn(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT a.id, a.filename, a.mime_type, a.size,
+                        m.from_name, m.date
+                 FROM attachments a
+                 JOIN messages m ON a.message_id = m.id AND a.account_id = m.account_id
+                 WHERE a.account_id = ?1 AND m.thread_id = ?2
+                   AND a.is_inline = 0
+                   AND a.filename IS NOT NULL AND a.filename != ''
+                 ORDER BY m.date DESC"
+            ).map_err(|e| e.to_string())?;
+
+            stmt.query_map(params![account_id, thread_id], |row| {
+                Ok(ThreadAttachment {
+                    id: row.get("id")?,
+                    filename: row.get("filename")?,
+                    mime_type: row.get("mime_type")?,
+                    size: row.get("size")?,
+                    from_name: row.get("from_name")?,
+                    date: row.get("date")?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
         })
         .await
     }

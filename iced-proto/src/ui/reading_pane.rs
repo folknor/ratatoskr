@@ -1,86 +1,193 @@
-use iced::widget::{column, container, row, scrollable, text, Space};
+use iced::widget::{button, column, container, row, scrollable, text, Space};
 use iced::{Alignment, Element, Length, Padding};
 
-use crate::db::Thread;
+use crate::db::{DateDisplay, Thread, ThreadAttachment, ThreadMessage};
+use crate::font;
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::widgets;
 use crate::Message;
 
-pub fn view<'a>(thread: Option<&'a Thread>) -> Element<'a, Message> {
+pub fn view<'a>(
+    thread: Option<&'a Thread>,
+    messages: &'a [ThreadMessage],
+    message_expanded: &'a [bool],
+    attachments: &'a [ThreadAttachment],
+    attachments_collapsed: bool,
+    date_display: DateDisplay,
+) -> Element<'a, Message> {
     match thread {
-        None => container(widgets::empty_placeholder("No conversation selected", "Select a thread to read"))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        Some(t) => thread_view(t),
+        None => container(widgets::empty_placeholder(
+            "No conversation selected",
+            "Select a thread to read",
+        ))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into(),
+        Some(t) => thread_view(
+            t,
+            messages,
+            message_expanded,
+            attachments,
+            attachments_collapsed,
+            date_display,
+        ),
     }
 }
 
-fn thread_view(thread: &Thread) -> Element<'_, Message> {
+fn thread_view<'a>(
+    thread: &'a Thread,
+    messages: &'a [ThreadMessage],
+    message_expanded: &'a [bool],
+    attachments: &'a [ThreadAttachment],
+    attachments_collapsed: bool,
+    date_display: DateDisplay,
+) -> Element<'a, Message> {
     let subject = thread.subject.as_deref().unwrap_or("(no subject)");
     let mut col = column![].spacing(0).width(Length::Fill);
 
-    // ── Action bar ──────────────────────────────────────
-    col = col.push(
-        container(
-            row![
-                widgets::action_icon_button(icon::reply(), "Reply"),
-                widgets::action_icon_button(icon::reply_all(), "Reply All"),
-                widgets::action_icon_button(icon::forward(), "Forward"),
-                Space::new().width(SPACE_XS),
-                widgets::action_icon_button(icon::archive(), "Archive"),
-                widgets::action_icon_button(icon::trash(), "Delete"),
-                widgets::action_icon_button(icon::star(), "Star"),
-                widgets::action_icon_button(icon::clock(), "Snooze"),
-                widgets::action_icon_button(icon::pin(), "Pin"),
-                Space::new().width(Length::Fill),
-                widgets::action_icon_button(icon::printer(), "Print"),
-                widgets::action_icon_button(icon::external_link(), "Pop-out"),
-            ]
-            .spacing(SPACE_XXXS)
-            .align_y(Alignment::Center),
-        )
-        .padding(PAD_TOOLBAR)
-        .width(Length::Fill)
-        .style(theme::action_bar_container),
-    );
-
     // ── Thread header ───────────────────────────────────
+    let star_icon_style: fn(&iced::Theme) -> text::Style = if thread.is_starred {
+        text::warning
+    } else {
+        text::secondary
+    };
+    let star_btn_style: fn(&iced::Theme, button::Status) -> button::Style = if thread.is_starred {
+        theme::star_active_button
+    } else {
+        theme::bare_icon_button
+    };
+
+    let star_btn = button(icon::star().size(ICON_XL).style(star_icon_style))
+        .on_press(Message::Noop)
+        .padding(PAD_ICON_BTN)
+        .style(star_btn_style);
+
+    let toggle_label = if message_expanded.iter().all(|&e| e) {
+        "Collapse all"
+    } else {
+        "Expand all"
+    };
+
+    let expand_collapse_btn = button(
+        text(toggle_label)
+            .size(TEXT_SM)
+            .style(theme::text_tertiary),
+    )
+    .on_press(Message::ToggleAllMessages)
+    .style(theme::ghost_button)
+    .padding(PAD_ICON_BTN);
+
     col = col.push(
         container(
             column![
-                text(subject).size(TEXT_HEADING).style(text::base),
-                text(format!("{} messages in this thread", thread.message_count))
-                    .size(TEXT_SM)
-                    .style(theme::text_tertiary),
+                row![
+                    container(text(subject).size(TEXT_HEADING).style(text::base))
+                        .width(Length::Fill),
+                    star_btn,
+                ]
+                .align_y(Alignment::Center),
+                row![
+                    container(
+                        text(format!("{} messages", messages.len()))
+                            .size(TEXT_SM)
+                            .style(theme::text_tertiary),
+                    )
+                    .align_y(Alignment::Center),
+                    Space::new().width(Length::Fill),
+                    expand_collapse_btn,
+                ]
+                .align_y(Alignment::Center),
             ]
             .spacing(SPACE_XXS),
         )
         .padding(PAD_CONTENT),
     );
 
-    // ── Messages ────────────────────────────────────────
+    // ── Attachment group (if any) ───────────────────────
+    if !attachments.is_empty() {
+        col = col.push(attachment_group(attachments, attachments_collapsed));
+    }
+
+    // ── Scrollable message list ─────────────────────────
     let messages_pad = Padding::from([0.0, SPACE_LG]);
-    let mut messages = column![].spacing(SPACE_XS).padding(messages_pad);
-    messages = messages.push(widgets::message_card(thread));
-    messages = messages.push(Space::new().height(SPACE_MD));
+    let first_message_date = messages.last().and_then(|m| m.date);
+    let mut msg_col = column![].spacing(SPACE_XS).padding(messages_pad);
 
-    // ── Reply bar ───────────────────────────────────────
-    let reply_bar = container(
-        row![
-            widgets::reply_button(icon::reply(), "Reply"),
-            widgets::reply_button(icon::reply_all(), "Reply All"),
-            widgets::reply_button(icon::forward(), "Forward"),
-        ]
-        .spacing(SPACE_XS),
-    )
-    .padding(Padding::from([0.0, SPACE_LG]));
+    for (i, msg) in messages.iter().enumerate() {
+        let is_expanded = message_expanded.get(i).copied().unwrap_or(false);
+        if is_expanded {
+            msg_col = msg_col.push(widgets::expanded_message_card(
+                msg,
+                i,
+                date_display,
+                first_message_date,
+            ));
+        } else {
+            msg_col = msg_col.push(widgets::collapsed_message_row(msg, i));
+        }
+    }
 
-    col = col.push(
-        scrollable(column![messages, reply_bar].spacing(0)).height(Length::Fill),
-    );
+    msg_col = msg_col.push(Space::new().height(SPACE_MD));
+
+    col = col.push(scrollable(msg_col).height(Length::Fill));
 
     col.into()
+}
+
+// ── Attachment group ────────────────────────────────────
+
+fn attachment_group<'a>(
+    attachments: &'a [ThreadAttachment],
+    collapsed: bool,
+) -> Element<'a, Message> {
+    let chevron = if collapsed {
+        icon::chevron_right()
+    } else {
+        icon::chevron_down()
+    };
+
+    let header = button(
+        row![
+            container(chevron.size(ICON_XS).style(theme::text_tertiary))
+                .align_y(Alignment::Center),
+            Space::new().width(SPACE_XXS),
+            container(
+                text(format!("Attachments ({})", attachments.len()))
+                    .size(TEXT_MD)
+                    .font(font::TEXT_SEMIBOLD)
+                    .style(text::base),
+            )
+            .align_y(Alignment::Center),
+            Space::new().width(Length::Fill),
+            container(
+                text("Save All")
+                    .size(TEXT_SM)
+                    .style(theme::text_accent),
+            )
+            .align_y(Alignment::Center),
+        ]
+        .align_y(Alignment::Center),
+    )
+    .on_press(Message::ToggleAttachmentsCollapsed)
+    .style(theme::ghost_button)
+    .width(Length::Fill);
+
+    let mut content_col = column![header].spacing(SPACE_XS);
+
+    if !collapsed {
+        for att in attachments {
+            content_col = content_col.push(widgets::attachment_card(att));
+        }
+    }
+
+    container(
+        container(content_col)
+            .padding(PAD_CARD)
+            .style(theme::elevated_container),
+    )
+    .padding(PAD_CONTENT)
+    .width(Length::Fill)
+    .into()
 }

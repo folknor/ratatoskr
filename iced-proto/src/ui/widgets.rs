@@ -1,7 +1,7 @@
 use iced::widget::{button, canvas, column, container, row, rule, text, Canvas, Space};
 use iced::{mouse, Alignment, Color, Element, Length, Rectangle, Renderer, Theme};
 
-use crate::db::Thread;
+use crate::db::{DateDisplay, Thread, ThreadAttachment, ThreadMessage};
 use crate::font;
 use crate::icon;
 use crate::ui::layout::*;
@@ -881,6 +881,261 @@ pub fn message_card(thread: &Thread) -> Element<'_, Message> {
         .width(Length::Fill)
         .style(theme::message_card_container)
         .into()
+}
+
+// ── Expanded message card ───────────────────────────────
+
+pub fn expanded_message_card<'a>(
+    msg: &'a ThreadMessage,
+    index: usize,
+    date_display: DateDisplay,
+    first_message_date: Option<i64>,
+) -> Element<'a, Message> {
+    let sender = msg
+        .from_name
+        .as_deref()
+        .or(msg.from_address.as_deref())
+        .unwrap_or("(unknown)");
+
+    let avatar = avatar_circle(sender, AVATAR_MESSAGE_CARD);
+    let date_str = format_message_date(msg.date, first_message_date, date_display);
+
+    let recipients = msg.to_addresses.as_deref().unwrap_or("");
+
+    let header = row![
+        avatar,
+        column![
+            row![
+                container(
+                    text(sender)
+                        .size(TEXT_LG)
+                        .font(font::TEXT_SEMIBOLD)
+                        .style(text::base),
+                )
+                .align_y(Alignment::Center),
+                Space::new().width(Length::Fill),
+                container(
+                    text(date_str)
+                        .size(TEXT_SM)
+                        .style(theme::text_tertiary),
+                )
+                .align_y(Alignment::Center),
+            ]
+            .align_y(Alignment::Center),
+            text(recipients)
+                .size(TEXT_SM)
+                .style(theme::text_tertiary),
+        ]
+        .spacing(SPACE_XXXS)
+        .width(Length::Fill),
+    ]
+    .spacing(SPACE_SM)
+    .align_y(Alignment::Start);
+
+    let body_text = msg.snippet.as_deref().unwrap_or("(no preview available)");
+    let body = container(text(body_text).size(TEXT_LG).style(text::secondary))
+        .padding(PAD_BODY);
+
+    let actions = row![
+        reply_button(icon::reply(), "Reply"),
+        reply_button(icon::reply_all(), "Reply All"),
+        reply_button(icon::forward(), "Forward"),
+    ]
+    .spacing(SPACE_XS);
+
+    let card_content = column![header, body, actions].spacing(SPACE_XS);
+
+    button(
+        container(card_content)
+            .padding(PAD_CARD)
+            .width(Length::Fill)
+            .style(theme::message_card_container),
+    )
+    .on_press(Message::ToggleMessageExpanded(index))
+    .padding(0)
+    .style(theme::bare_transparent_button)
+    .width(Length::Fill)
+    .into()
+}
+
+// ── Collapsed message row ───────────────────────────────
+
+pub fn collapsed_message_row<'a>(
+    msg: &'a ThreadMessage,
+    index: usize,
+) -> Element<'a, Message> {
+    let sender = msg
+        .from_name
+        .as_deref()
+        .or(msg.from_address.as_deref())
+        .unwrap_or("(unknown)");
+
+    let short_date = msg
+        .date
+        .and_then(|ts| {
+            chrono::DateTime::from_timestamp(ts, 0).map(|dt| {
+                dt.format("%b %d").to_string()
+            })
+        })
+        .unwrap_or_default();
+
+    let snippet = truncate_snippet(msg.snippet.as_deref(), 60);
+
+    let content = row![
+        container(text("\u{2014}").size(TEXT_SM).style(theme::text_tertiary))
+            .align_y(Alignment::Center),
+        container(
+            text(sender)
+                .size(TEXT_SM)
+                .font(font::TEXT_SEMIBOLD)
+                .style(text::base),
+        )
+        .align_y(Alignment::Center),
+        container(text("\u{00B7}").size(TEXT_SM).style(theme::text_tertiary))
+            .align_y(Alignment::Center),
+        container(text(short_date).size(TEXT_SM).style(theme::text_tertiary))
+            .align_y(Alignment::Center),
+        container(text("\u{00B7}").size(TEXT_SM).style(theme::text_tertiary))
+            .align_y(Alignment::Center),
+        container(
+            text(snippet)
+                .size(TEXT_SM)
+                .style(theme::text_tertiary)
+                .wrapping(text::Wrapping::None),
+        )
+        .width(Length::Fill)
+        .align_y(Alignment::Center),
+    ]
+    .spacing(SPACE_XS)
+    .align_y(Alignment::Center);
+
+    let pad = iced::Padding {
+        top: SPACE_XXS,
+        right: SPACE_SM,
+        bottom: SPACE_XXS,
+        left: SPACE_SM,
+    };
+
+    button(
+        container(content).padding(pad).width(Length::Fill),
+    )
+    .on_press(Message::ToggleMessageExpanded(index))
+    .padding(0)
+    .style(theme::collapsed_message_button)
+    .width(Length::Fill)
+    .into()
+}
+
+// ── Attachment card ─────────────────────────────────────
+
+pub fn attachment_card<'a>(att: &'a ThreadAttachment) -> Element<'a, Message> {
+    let filename = att.filename.as_deref().unwrap_or("(unnamed)");
+    let file_icon = file_type_icon(att.mime_type.as_deref());
+    let meta = format_attachment_meta(att);
+
+    let line1 = row![
+        container(file_icon.size(ICON_MD).style(text::secondary))
+            .align_y(Alignment::Center),
+        container(
+            text(filename)
+                .size(TEXT_MD)
+                .style(text::base)
+                .wrapping(text::Wrapping::None),
+        )
+        .align_y(Alignment::Center),
+    ]
+    .spacing(SPACE_XS)
+    .align_y(Alignment::Center);
+
+    let line2 = text(meta).size(TEXT_SM).style(theme::text_tertiary);
+
+    container(
+        column![line1, line2].spacing(SPACE_XXXS),
+    )
+    .padding(PAD_NAV_ITEM)
+    .style(theme::elevated_container)
+    .width(Length::Fill)
+    .into()
+}
+
+// ── Helpers ─────────────────────────────────────────────
+
+fn file_type_icon<'a>(mime_type: Option<&str>) -> iced::widget::Text<'a> {
+    match mime_type.unwrap_or("") {
+        t if t.starts_with("image/") => icon::image(),
+        t if t.contains("pdf") => icon::file_text(),
+        t if t.contains("spreadsheet") || t.contains("excel") => icon::file_spreadsheet(),
+        _ => icon::file(),
+    }
+}
+
+fn format_message_date(
+    timestamp: Option<i64>,
+    first_message_timestamp: Option<i64>,
+    display: DateDisplay,
+) -> String {
+    let Some(ts) = timestamp else { return String::new() };
+    let Some(dt) = chrono::DateTime::from_timestamp(ts, 0) else { return String::new() };
+
+    match display {
+        DateDisplay::RelativeOffset => {
+            let abs = dt.format("%b %d, %Y, %l:%M %p").to_string();
+            match first_message_timestamp.and_then(|fts| chrono::DateTime::from_timestamp(fts, 0)) {
+                Some(first_dt) => {
+                    let days = (dt - first_dt).num_days();
+                    if days == 0 {
+                        abs.trim().to_string()
+                    } else {
+                        format!("{} (+{}d)", abs.trim(), days)
+                    }
+                }
+                None => abs.trim().to_string(),
+            }
+        }
+        DateDisplay::Absolute => {
+            dt.format("%b %d, %Y, %l:%M %p").to_string().trim().to_string()
+        }
+    }
+}
+
+fn truncate_snippet(snippet: Option<&str>, max_chars: usize) -> String {
+    let s = snippet.unwrap_or("");
+    if s.len() <= max_chars {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..s.floor_char_boundary(max_chars)])
+    }
+}
+
+fn format_attachment_meta(att: &ThreadAttachment) -> String {
+    let type_label = mime_to_type_label(att.mime_type.as_deref());
+    let size = format_file_size(att.size);
+    let date = att.date
+        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+        .map(|dt| dt.format("%b %d").to_string())
+        .unwrap_or_default();
+    let sender = att.from_name.as_deref().unwrap_or("unknown");
+    format!("{type_label} \u{00B7} {size} \u{00B7} {date} from {sender}")
+}
+
+fn mime_to_type_label(mime: Option<&str>) -> &'static str {
+    match mime.unwrap_or("") {
+        t if t.starts_with("image/") => "Image",
+        t if t.contains("pdf") => "PDF",
+        t if t.contains("spreadsheet") || t.contains("excel") => "Excel",
+        t if t.contains("word") || t.contains("document") => "Word",
+        t if t.contains("zip") || t.contains("archive") => "Archive",
+        _ => "File",
+    }
+}
+
+fn format_file_size(size: Option<i64>) -> String {
+    match size {
+        None => "\u{2014}".to_string(),
+        Some(b) if b < 1024 => format!("{b} B"),
+        Some(b) if b < 1024 * 1024 => format!("{:.0} KB", b as f64 / 1024.0),
+        Some(b) => format!("{:.1} MB", b as f64 / (1024.0 * 1024.0)),
+    }
 }
 
 // ── Empty state placeholder ─────────────────────────────

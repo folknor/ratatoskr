@@ -6,7 +6,7 @@ mod icon;
 mod ui;
 mod window_state;
 
-use db::{Account, Db, Label, Thread};
+use db::{Account, DateDisplay, Db, Label, Thread, ThreadAttachment, ThreadMessage};
 use iced::widget::{container, mouse_area, row};
 use iced::{Element, Length, Point, Size, Task, Theme};
 use ui::layout::{RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH};
@@ -82,6 +82,13 @@ pub enum Message {
     WindowResized(Size),
     WindowMoved(Point),
     ToggleRightSidebar,
+    /// thread_id is included so stale responses can be discarded.
+    ThreadMessagesLoaded(String, Result<Vec<ThreadMessage>, String>),
+    ThreadAttachmentsLoaded(String, Result<Vec<ThreadAttachment>, String>),
+    ToggleMessageExpanded(usize),
+    ToggleAllMessages,
+    ToggleAttachmentsCollapsed,
+    SetDateDisplay(DateDisplay),
     WindowCloseRequested(iced::window::Id),
 }
 
@@ -103,6 +110,10 @@ struct App {
     dragging: Option<Divider>,
     hovered_divider: Option<Divider>,
     right_sidebar_open: bool,
+    thread_messages: Vec<ThreadMessage>,
+    thread_attachments: Vec<ThreadAttachment>,
+    message_expanded: Vec<bool>,
+    attachments_collapsed: bool,
     show_settings: bool,
     settings: ui::settings::SettingsState,
     window: window_state::WindowState,
@@ -132,6 +143,10 @@ impl App {
             dragging: None,
             hovered_divider: None,
             right_sidebar_open: window.right_sidebar_open,
+            thread_messages: Vec::new(),
+            thread_attachments: Vec::new(),
+            message_expanded: Vec::new(),
+            attachments_collapsed: false,
             show_settings: false,
             settings: ui::settings::SettingsState::with_scale(
                 *DEFAULT_SCALE.get().unwrap_or(&1.0),
@@ -289,6 +304,26 @@ impl App {
             }
             Message::SelectThread(idx) => {
                 self.selected_thread = Some(idx);
+                if let Some(thread) = self.threads.get(idx) {
+                    let db = Arc::clone(&self.db);
+                    let account_id = thread.account_id.clone();
+                    let thread_id = thread.id.clone();
+                    let db2 = Arc::clone(&self.db);
+                    let account_id2 = account_id.clone();
+                    let thread_id2 = thread_id.clone();
+                    let tid = thread_id.clone();
+                    let tid2 = thread_id.clone();
+                    return Task::batch([
+                        Task::perform(
+                            async move { db.get_thread_messages(account_id, thread_id).await },
+                            move |result| Message::ThreadMessagesLoaded(tid.clone(), result),
+                        ),
+                        Task::perform(
+                            async move { db2.get_thread_attachments(account_id2, thread_id2).await },
+                            move |result| Message::ThreadAttachmentsLoaded(tid2.clone(), result),
+                        ),
+                    ]);
+                }
                 Task::none()
             }
             Message::ToggleScopeDropdown => {
@@ -367,6 +402,80 @@ impl App {
                 self.window.right_sidebar_open = self.right_sidebar_open;
                 self.window.save(data_dir);
                 iced::window::close(id)
+            }
+            Message::ThreadMessagesLoaded(thread_id, Ok(messages)) => {
+                // Discard stale response
+                let current_thread_id = self.selected_thread
+                    .and_then(|i| self.threads.get(i))
+                    .map(|t| t.id.as_str());
+                if current_thread_id != Some(thread_id.as_str()) {
+                    return Task::none();
+                }
+
+                let len = messages.len();
+                let mut expanded = vec![false; len];
+
+                for (i, msg) in messages.iter().enumerate() {
+                    let is_most_recent = i == 0;
+                    let is_initial = i == len - 1;
+                    let is_unread = !msg.is_read;
+
+                    if is_unread {
+                        expanded[i] = true;
+                        continue;
+                    }
+                    if is_most_recent {
+                        expanded[i] = true;
+                        continue;
+                    }
+                    if is_initial {
+                        expanded[i] = true;
+                        continue;
+                    }
+                }
+
+                self.message_expanded = expanded;
+                self.thread_messages = messages;
+                Task::none()
+            }
+            Message::ThreadMessagesLoaded(_, Err(e)) => {
+                self.status = format!("Messages error: {e}");
+                Task::none()
+            }
+            Message::ThreadAttachmentsLoaded(thread_id, Ok(attachments)) => {
+                let current_thread_id = self.selected_thread
+                    .and_then(|i| self.threads.get(i))
+                    .map(|t| t.id.as_str());
+                if current_thread_id != Some(thread_id.as_str()) {
+                    return Task::none();
+                }
+                self.thread_attachments = attachments;
+                Task::none()
+            }
+            Message::ThreadAttachmentsLoaded(_, Err(e)) => {
+                self.status = format!("Attachments error: {e}");
+                Task::none()
+            }
+            Message::ToggleMessageExpanded(index) => {
+                if let Some(e) = self.message_expanded.get_mut(index) {
+                    *e = !*e;
+                }
+                Task::none()
+            }
+            Message::ToggleAllMessages => {
+                let all_expanded = self.message_expanded.iter().all(|&e| e);
+                for e in &mut self.message_expanded {
+                    *e = !all_expanded;
+                }
+                Task::none()
+            }
+            Message::ToggleAttachmentsCollapsed => {
+                self.attachments_collapsed = !self.attachments_collapsed;
+                Task::none()
+            }
+            Message::SetDateDisplay(display) => {
+                self.settings.date_display = display;
+                Task::none()
             }
             Message::Compose | Message::Noop => Task::none(),
         }
@@ -453,7 +562,14 @@ impl App {
         .on_exit(Message::DividerUnhover)
         .interaction(iced::mouse::Interaction::ResizingHorizontally);
 
-        let reading_pane = container(ui::reading_pane::view(selected_thread))
+        let reading_pane = container(ui::reading_pane::view(
+            selected_thread,
+            &self.thread_messages,
+            &self.message_expanded,
+            &self.thread_attachments,
+            self.attachments_collapsed,
+            self.settings.date_display,
+        ))
             .width(Length::Fill)
             .height(Length::Fill);
 

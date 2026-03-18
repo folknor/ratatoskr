@@ -256,6 +256,42 @@ pub fn action_button(theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
+pub fn collapsed_message_button(theme: &Theme, status: button::Status) -> button::Style {
+    let p = theme.palette();
+    match status {
+        button::Status::Hovered => button::Style {
+            background: Some(p.background.weakest.color.into()),
+            text_color: p.background.base.text,
+            border: border::rounded(RADIUS_SM),
+            ..Default::default()
+        },
+        _ => button::Style {
+            background: None,
+            text_color: p.background.base.text,
+            border: border::rounded(RADIUS_SM),
+            ..Default::default()
+        },
+    }
+}
+
+pub fn star_active_button(theme: &Theme, status: button::Status) -> button::Style {
+    let p = theme.palette();
+    match status {
+        button::Status::Hovered => button::Style {
+            background: Some(p.warning.base.color.scale_alpha(0.2).into()),
+            text_color: p.warning.base.color,
+            border: border::rounded(RADIUS_SM),
+            ..Default::default()
+        },
+        _ => button::Style {
+            background: Some(p.warning.base.color.scale_alpha(0.1).into()),
+            text_color: p.warning.base.color,
+            border: border::rounded(RADIUS_SM),
+            ..Default::default()
+        },
+    }
+}
+
 // ── Container styles ────────────────────────────────────
 // Built-in: container::transparent, container::bordered_box,
 //           container::dark, container::rounded_box

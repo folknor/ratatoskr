@@ -3,6 +3,7 @@ use iced::time::{Duration, Instant};
 use iced::widget::{button, column, container, mouse_area, radio, row, scrollable, slider, text, text_input, Space};
 use iced::{Alignment, Element, Length, Point, Task};
 
+use crate::db::DateDisplay;
 use crate::ui::animated_toggler::animated_toggler;
 
 use crate::icon;
@@ -28,6 +29,7 @@ pub enum SettingsMessage {
     ToggleBlockRemoteImages(bool),
     TogglePhishingDetection(bool),
     PhishingSensitivityChanged(String),
+    DateDisplayChanged(String),
     ToggleSelect(SelectField),
     // About
     CheckForUpdates,
@@ -102,6 +104,7 @@ pub enum SelectField {
     MarkAsRead,
     AiProvider,
     AiModel,
+    DateDisplay,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,6 +179,7 @@ pub struct SettingsState {
     pub block_remote_images: bool,
     pub phishing_detection: bool,
     pub phishing_sensitivity: String,
+    pub date_display: DateDisplay,
     // Composing
     pub undo_delay: String,
     pub send_and_archive: bool,
@@ -262,6 +266,7 @@ impl Default for SettingsState {
             block_remote_images: false,
             phishing_detection: true,
             phishing_sensitivity: "Default".into(),
+            date_display: DateDisplay::RelativeOffset,
             undo_delay: "5 seconds".into(),
             send_and_archive: false,
             default_reply_mode: "Reply".into(),
@@ -367,6 +372,13 @@ impl SettingsState {
             SettingsMessage::ToggleBlockRemoteImages(v) => self.block_remote_images = v,
             SettingsMessage::TogglePhishingDetection(v) => self.phishing_detection = v,
             SettingsMessage::PhishingSensitivityChanged(v) => self.phishing_sensitivity = v,
+            SettingsMessage::DateDisplayChanged(v) => {
+                self.date_display = match v.as_str() {
+                    "Absolute" => DateDisplay::Absolute,
+                    _ => DateDisplay::RelativeOffset,
+                };
+                self.open_select = None;
+            }
             // About
             SettingsMessage::CheckForUpdates | SettingsMessage::OpenGithub => {}
             // Composing
@@ -686,6 +698,16 @@ fn general_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
             SettingsMessage::FontSizeChanged,
         ), SettingsMessage::ToggleSelect(SelectField::FontSize)),
         slider_row("Scale", None, 1.0..=4.0, state.scale_preview.unwrap_or(state.scale), 1.0, 0.125, SettingsMessage::ScaleDragged, Some(SettingsMessage::ScaleReleased)),
+        setting_row("Message Dates", widgets::select(
+            &["Relative Offset", "Absolute"],
+            match state.date_display {
+                DateDisplay::RelativeOffset => "Relative Offset",
+                DateDisplay::Absolute => "Absolute",
+            },
+            state.open_select == Some(SelectField::DateDisplay),
+            SettingsMessage::ToggleSelect(SelectField::DateDisplay),
+            SettingsMessage::DateDisplayChanged,
+        ), SettingsMessage::ToggleSelect(SelectField::DateDisplay)),
         toggle_row("Show Sync Status Bar", "Display sync progress in the status bar", state.sync_status_bar, SettingsMessage::ToggleSyncStatusBar),
     ]));
 

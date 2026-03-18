@@ -26,6 +26,11 @@ pub struct DbState {
 }
 
 impl DbState {
+    /// Access the underlying connection Arc for synchronous use.
+    pub fn conn(&self) -> Arc<Mutex<Connection>> {
+        Arc::clone(&self.conn)
+    }
+
     /// Open (or create) the SQLite database and apply all pending migrations.
     pub fn init(app_data_dir: &Path) -> Result<Self, String> {
         std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create app dir: {e}"))?;
