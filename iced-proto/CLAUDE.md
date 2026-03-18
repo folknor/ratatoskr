@@ -44,7 +44,7 @@ Elm architecture (iced's `application()` — boot/update/view cycle). Single `Ap
 
 **`Padding::from` with mixed types:** `Padding::from([0, CONSTANT])` won't compile if `CONSTANT` is `f32` — Rust infers the array as `[i32; 2]`. Always use `[0.0, CONSTANT]` to keep both elements `f32`.
 
-**`iced::Font::DEFAULT` is not Inter:** We set `default_font(font::TEXT)` which is `Font::with_name("Inter")`. If you construct a font with `iced::Font { weight, ..iced::Font::DEFAULT }` it will NOT use Inter. Always spread from `font::TEXT` instead: `iced::Font { weight, ..font::TEXT }`.
+**`iced::Font::DEFAULT` is not Inter:** We set `default_font(font::TEXT)` which is `Font::new("Inter")`. If you construct a font with `iced::Font { weight, ..iced::Font::DEFAULT }` it will NOT use Inter. Always spread from `font::TEXT` instead: `iced::Font { weight, ..font::TEXT }`.
 
 **Button `text_color` doesn't reach children with explicit `.style()`.** If you set `text_color` on a button style but the `text()` or icon inside has its own `.style(some_fn)`, the explicit style wins. The button's `text_color` only affects children that don't override it. This means changing a button style's color has no visible effect when all children set their own style — you have to change the text/icon styles too.
 
@@ -54,7 +54,7 @@ Elm architecture (iced's `application()` — boot/update/view cycle). Single `Ap
 
 **Scrollable clips shadows.** If a container inside a `scrollable` has a `shadow`, the shadow will be clipped at the scrollable's bounds. Don't put padding on the outer container around the scrollable — put it on an inner container *inside* the scrollable so the padding becomes part of the scrolled content and gives the shadow room to render.
 
-**Extended palette background scale (dark mode).** `base` is the darkest. Each step lightens by a fixed deviation: `base` (0%) → `weakest` (3%) → `weaker` (7%) → `weak` (10%) → `neutral` (12.5%) → `strong` (15%) → `stronger` (17.5%) → `strongest` (20%). In light mode the direction reverses. Use this to create visual depth hierarchy — e.g., fieldsets at `base`, content area at `weakest`, sidebar at `weaker`.
+**Palette background scale (dark mode).** `base` is the darkest. Each step lightens by a fixed deviation: `base` (0%) → `weakest` (3%) → `weaker` (7%) → `weak` (10%) → `neutral` (12.5%) → `strong` (15%) → `stronger` (17.5%) → `strongest` (20%). In light mode the direction reverses. Use this to create visual depth hierarchy — e.g., fieldsets at `base`, content area at `weakest`, sidebar at `weaker`.
 
 **Hover backgrounds are always one palette step away from the element's resting color.** If a row rests on `base`, its hover is `weakest`. If it rests on `weakest`, its hover is `weaker`. Never skip steps — jumping two or more steps makes hover effects feel heavy. This applies to nav buttons, setting rows, dropdown items, chip buttons, and any other interactive surface.
 
@@ -72,6 +72,8 @@ Elm architecture (iced's `application()` — boot/update/view cycle). Single `Ap
 
 **Programmatic focus uses `widget::operation::focus(id)`.** Not `text_input::focus`. The ID is `widget::Id` (accepts `String` via `From<String>`). Set the ID on the text input with `.id("my-id")` and return `iced::widget::operation::focus("my-id".to_string())` as a `Task` from `update()`.
 
+**Overlay `mouse_interaction` must never return `None` over its bounds.** iced uses the overlay's `mouse_interaction()` return value to decide whether to pass the cursor to base widgets. If it returns `Interaction::None` (e.g. cursor is in spacing gaps between menu items), iced passes the real cursor to base widgets, causing their hover states to bleed through. Return `Interaction::Idle` instead when the cursor is over the overlay bounds but between child widgets.
+
 **Popover overlay positioning must include the `translation` vector.** In `Widget::overlay()`, `layout.position()` returns coordinates relative to the parent widget, not the window. Add the `translation` parameter: `layout.position() + translation`. Without this, popups misposition at non-1.0 scale factors and inside scrollables.
 
 ## PaneGrid internals and scale factor
@@ -81,7 +83,7 @@ Elm architecture (iced's `application()` — boot/update/view cycle). Single `Ap
 iced has three size concepts in the rendering pipeline:
 
 1. **Physical size** — actual pixels on screen (from winit's `WindowEvent::Resized`)
-2. **Viewport scale factor** — `system_dpi * app_scale_factor` (our app returns 1.5 from `scale_factor()`)
+2. **Viewport scale factor** — `system_dpi * app_scale_factor` (our app auto-detects scale from monitor DPI via `display-info` crate; see `src/display.rs`)
 3. **Logical size** — `physical_size / viewport_scale_factor` — this is what the layout engine uses
 
 The `window::resize_events()` subscription reports the **logical size** (already divided by the full scale factor, including the app's). This is the same size the PaneGrid uses for layout. So `resize_event.width == PaneGrid_layout_width`. Do NOT divide by the app scale factor again — it's already factored in.
@@ -186,13 +188,13 @@ When the user reports a visual bug and the fix isn't obvious from reading the co
 3. If uncertain how an iced API works, check reference projects (halloy, libcosmic) rather than guessing.
 4. Ask for a description or screenshot before attempting a fix. Don't iterate blindly.
 
-## Theme system (`src/ui/theme/`)
+## Theme system (`src/ui/theme.rs`)
 
-Custom `Theme` enum replacing iced's built-in, with `iced::theme::Base` impl. Per-widget `Catalog` implementations: button, checkbox, container, menu, pane_grid, progress_bar, rule, scrollable, text, text_editor, text_input. Each has named public style functions (e.g. `theme::button::primary`, `theme::container::floating`).
+Uses iced's built-in `Theme::custom(name, Seed)` with 6 seed colors. `Seed` (background, text, primary, success, warning, danger) auto-generates a full `Palette` via OKLCh derivation: 8 background levels, primary/secondary/success/warning/danger with base/weak/strong variants. Access via `theme.palette()`.
 
-**Styles struct hierarchy:** `General` (backgrounds, borders), `Text` (primary/secondary/tertiary as `TextStyle`), `Buttons` (primary/secondary as `ButtonColors`), `Indicators` (accent/danger/warning/success). `TextStyle` has `color: Color` and optional `font_style: FontStyle`.
+**Built-in themes:** 21 palettes in `THEMES` array (Light, Dark, Dracula, Nord, Solarized, Gruvbox, Catppuccin, Tokyo Night, Kanagawa, etc.). Theme files are 8-line TOMLs with 6 hex colors.
 
-**TOML themes:** `themes/dark.toml` and `themes/light.toml`. `Theme::from_toml()` loads custom themes. `TextStyle` deserializes from either `"#hex"` or `{ color = "#hex", font_style = "bold" }`.
+**Custom styles:** ~30 style functions for email-specific widgets (thread cards, nav buttons, badges, popovers, etc.). All use `theme.palette()` to derive colors from the current theme.
 
 **Fonts:** Inter variable (regular + italic) for text, Lucide for icons. Constants in `src/font.rs`: `TEXT`, `TEXT_BOLD`, `TEXT_ITALIC`, `TEXT_SEMIBOLD`, `ICON`. Inter is set as `default_font`.
 
@@ -204,7 +206,7 @@ This prototype is part of a migration from Tauri (React/TS frontend + Rust backe
 
 **Ecosystem:** Multi-window (Halloy, libcosmic, Kraken Desktop), rich text (Halloy), HTML email rendering (iced_webview_v2 + litehtml), platform support (all three ship on Windows + Linux).
 
-**Forking iced:** Halloy and libcosmic both maintain iced forks. Halloy's fork adds X11 primary clipboard, shift-click text selection, and font styling helpers — all text selection/clipboard specifics, not architectural issues. We stay on upstream iced initially and fork only when we hit a concrete need.
+**Forking iced:** We use Halloy's fork (`squidowl/iced`, `arboard-less-patch` branch) which adds primary clipboard, shift-click text selection, and drag selection expansion on top of upstream. libcosmic maintains a separate fork (`pop-os/iced`) which conflicts with ours. We fork from Halloy's only if we need patches they don't carry.
 
 **Email body rendering:** iced_webview_v2 with litehtml for table-based/basic emails, CEF fallback for complex HTML. Still needs testing against a real email corpus.
 
