@@ -100,7 +100,7 @@ impl WindowState {
     fn sanitize(&mut self) {
         self.width = self.width.max(MIN_WIDTH);
         self.height = self.height.max(MIN_HEIGHT);
-        self.sidebar_width = self.sidebar_width.max(200.0);
+        self.sidebar_width = self.sidebar_width.max(180.0);  // SIDEBAR_WIDTH default, not SIDEBAR_MIN_WIDTH
         self.thread_list_width = self.thread_list_width.max(250.0);
 
         // Reject negative positions (off-screen)

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use iced::widget::{button, column, container, row, scrollable, text, Space};
 use iced::{Alignment, Element, Length, Padding};
 
@@ -138,10 +140,39 @@ fn thread_view<'a>(
 
 // ── Attachment group ────────────────────────────────────
 
+/// Deduplicate attachments by filename, keeping the latest version (first
+/// occurrence, since query orders by date DESC). Returns (deduped list,
+/// version counts per filename).
+fn dedup_attachments(attachments: &[ThreadAttachment]) -> Vec<(&ThreadAttachment, usize)> {
+    let mut seen: HashMap<&str, usize> = HashMap::new();
+    let mut result: Vec<(&ThreadAttachment, usize)> = Vec::new();
+
+    // First pass: count versions per filename
+    for att in attachments {
+        let name = att.filename.as_deref().unwrap_or("");
+        *seen.entry(name).or_insert(0) += 1;
+    }
+
+    // Second pass: keep first occurrence (latest) with version count
+    let mut emitted: HashMap<&str, bool> = HashMap::new();
+    for att in attachments {
+        let name = att.filename.as_deref().unwrap_or("");
+        if !emitted.contains_key(name) {
+            let count = seen.get(name).copied().unwrap_or(1);
+            result.push((att, count));
+            emitted.insert(name, true);
+        }
+    }
+
+    result
+}
+
 fn attachment_group<'a>(
     attachments: &'a [ThreadAttachment],
     collapsed: bool,
 ) -> Element<'a, Message> {
+    let deduped = dedup_attachments(attachments);
+
     let chevron = if collapsed {
         icon::chevron_right()
     } else {
@@ -154,7 +185,7 @@ fn attachment_group<'a>(
                 .align_y(Alignment::Center),
             Space::new().width(SPACE_XXS),
             container(
-                text(format!("Attachments ({})", attachments.len()))
+                text(format!("Attachments ({})", deduped.len()))
                     .size(TEXT_MD)
                     .font(font::TEXT_SEMIBOLD)
                     .style(text::base),
@@ -177,8 +208,8 @@ fn attachment_group<'a>(
     let mut content_col = column![header].spacing(SPACE_XS);
 
     if !collapsed {
-        for att in attachments {
-            content_col = content_col.push(widgets::attachment_card(att));
+        for (att, version_count) in &deduped {
+            content_col = content_col.push(widgets::attachment_card(att, *version_count));
         }
     }
 

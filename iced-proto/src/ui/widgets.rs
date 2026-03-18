@@ -1028,12 +1028,12 @@ pub fn collapsed_message_row<'a>(
 
 // ── Attachment card ─────────────────────────────────────
 
-pub fn attachment_card<'a>(att: &'a ThreadAttachment) -> Element<'a, Message> {
+pub fn attachment_card<'a>(att: &'a ThreadAttachment, version_count: usize) -> Element<'a, Message> {
     let filename = att.filename.as_deref().unwrap_or("(unnamed)");
     let file_icon = file_type_icon(att.mime_type.as_deref());
     let meta = format_attachment_meta(att);
 
-    let line1 = row![
+    let mut line1 = row![
         container(file_icon.size(ICON_MD).style(text::secondary))
             .align_y(Alignment::Center),
         container(
@@ -1046,6 +1046,19 @@ pub fn attachment_card<'a>(att: &'a ThreadAttachment) -> Element<'a, Message> {
     ]
     .spacing(SPACE_XS)
     .align_y(Alignment::Center);
+
+    // Show version count badge for deduplicated attachments
+    if version_count > 1 {
+        line1 = line1.push(Space::new().width(SPACE_XS));
+        line1 = line1.push(
+            container(
+                text(format!("{version_count} versions"))
+                    .size(TEXT_XS)
+                    .style(theme::text_tertiary),
+            )
+            .align_y(Alignment::Center),
+        );
+    }
 
     let line2 = text(meta).size(TEXT_SM).style(theme::text_tertiary);
 

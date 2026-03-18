@@ -306,10 +306,17 @@ impl App {
             }
             Message::SelectThread(idx) => {
                 self.selected_thread = Some(idx);
-                // Restore attachment collapse state from cache
+                // Clear previous thread's data immediately to avoid
+                // rendering stale messages under the new thread's header
+                self.thread_messages.clear();
+                self.thread_attachments.clear();
+                self.message_expanded.clear();
+                // Restore attachment collapse state from cache (scoped by account+thread)
                 self.attachments_collapsed = self.threads.get(idx)
-                    .and_then(|t| self.attachment_collapse_cache.get(&t.id))
-                    .copied()
+                    .map(|t| {
+                        let key = format!("{}:{}", t.account_id, t.id);
+                        self.attachment_collapse_cache.get(&key).copied().unwrap_or(false)
+                    })
                     .unwrap_or(false);
                 if let Some(thread) = self.threads.get(idx) {
                     let db = Arc::clone(&self.db);
@@ -479,8 +486,9 @@ impl App {
             Message::ToggleAttachmentsCollapsed => {
                 self.attachments_collapsed = !self.attachments_collapsed;
                 if let Some(thread) = self.selected_thread.and_then(|i| self.threads.get(i)) {
+                    let key = format!("{}:{}", thread.account_id, thread.id);
                     self.attachment_collapse_cache
-                        .insert(thread.id.clone(), self.attachments_collapsed);
+                        .insert(key, self.attachments_collapsed);
                 }
                 Task::none()
             }
