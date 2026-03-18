@@ -5193,6 +5193,7 @@ dependencies = [
  "ratatoskr-filters",
  "ratatoskr-inline-image-store",
  "ratatoskr-label-colors",
+ "ratatoskr-provider-utils",
  "ratatoskr-search",
  "ratatoskr-seen-addresses",
  "ratatoskr-smart-labels",
@@ -5262,6 +5263,31 @@ version = "0.1.0"
 dependencies = [
  "ratatoskr-category-colors",
  "ratatoskr-db",
+]
+
+[[package]]
+name = "ratatoskr-provider-utils"
+version = "0.1.0"
+dependencies = [
+ "ammonia",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "css-inline",
+ "log",
+ "lol_html",
+ "ratatoskr-body-store",
+ "ratatoskr-crypto",
+ "ratatoskr-db",
+ "ratatoskr-inline-image-store",
+ "ratatoskr-search",
+ "ratatoskr-seen-addresses",
+ "regex",
+ "reqwest 0.13.2",
+ "rusqlite",
+ "serde",
+ "unicode-segmentation",
+ "xxhash-rust",
 ]
 
 [[package]]

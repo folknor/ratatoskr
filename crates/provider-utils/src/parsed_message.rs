@@ -35,7 +35,7 @@ pub struct ParsedMessageBase {
     pub mdn_requested: bool,
 }
 
-impl crate::seen_addresses::MessageAddresses for ParsedMessageBase {
+impl ratatoskr_seen_addresses::MessageAddresses for ParsedMessageBase {
     fn sender_address(&self) -> Option<&str> {
         self.from_address.as_deref()
     }
@@ -57,9 +57,10 @@ impl crate::seen_addresses::MessageAddresses for ParsedMessageBase {
 }
 
 /// Implement `MessageAddresses` for a type that has a `base: ParsedMessageBase` field.
+#[macro_export]
 macro_rules! impl_message_addresses {
     ($ty:ty) => {
-        impl crate::seen_addresses::MessageAddresses for $ty {
+        impl ratatoskr_seen_addresses::MessageAddresses for $ty {
             fn sender_address(&self) -> Option<&str> {
                 self.base.sender_address()
             }
@@ -67,13 +68,13 @@ macro_rules! impl_message_addresses {
                 self.base.sender_name()
             }
             fn to_addresses(&self) -> Option<&str> {
-                crate::seen_addresses::MessageAddresses::to_addresses(&self.base)
+                ratatoskr_seen_addresses::MessageAddresses::to_addresses(&self.base)
             }
             fn cc_addresses(&self) -> Option<&str> {
-                crate::seen_addresses::MessageAddresses::cc_addresses(&self.base)
+                ratatoskr_seen_addresses::MessageAddresses::cc_addresses(&self.base)
             }
             fn bcc_addresses(&self) -> Option<&str> {
-                crate::seen_addresses::MessageAddresses::bcc_addresses(&self.base)
+                ratatoskr_seen_addresses::MessageAddresses::bcc_addresses(&self.base)
             }
             fn msg_date_ms(&self) -> i64 {
                 self.base.msg_date_ms()
@@ -82,4 +83,5 @@ macro_rules! impl_message_addresses {
     };
 }
 
-pub(crate) use impl_message_addresses;
+// Re-export the #[macro_export]ed macro into this module for path-based access.
+pub use crate::impl_message_addresses;

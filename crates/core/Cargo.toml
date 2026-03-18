@@ -34,6 +34,7 @@ ratatoskr-threading = { path = "../threading" }
 ratatoskr-filters = { path = "../filters" }
 ratatoskr-smart-labels = { path = "../smart-labels" }
 ratatoskr-seen-addresses = { path = "../seen-addresses" }
+ratatoskr-provider-utils = { path = "../provider-utils" }
 
 # Crate-specific deps
 log = "0.4"

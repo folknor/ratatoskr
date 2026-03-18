@@ -21,6 +21,7 @@ members = [
     "crates/filters",
     "crates/smart-labels",
     "crates/seen-addresses",
+    "crates/provider-utils",
 ]
 
 exclude = [

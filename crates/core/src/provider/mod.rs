@@ -1,18 +1,21 @@
 pub mod account_resync;
-pub mod attachment_dedup;
-pub use ratatoskr_crypto as crypto;
-pub mod email_parsing;
-pub mod encoding;
-pub mod folder_roles;
-pub mod headers;
-pub mod http;
-pub mod label_flags;
-pub mod ops;
-pub mod router;
-pub mod text;
-pub mod token;
-pub mod signature_images;
-pub mod html_sanitizer;
-pub mod tracking_pixels;
-pub mod parsed_message;
-pub mod types;
+
+// Re-export everything from the extracted provider-utils crate so that
+// existing `crate::provider::*` paths throughout core continue to work.
+pub use ratatoskr_provider_utils::attachment_dedup;
+pub use ratatoskr_provider_utils::crypto;
+pub use ratatoskr_provider_utils::email_parsing;
+pub use ratatoskr_provider_utils::encoding;
+pub use ratatoskr_provider_utils::folder_roles;
+pub use ratatoskr_provider_utils::headers;
+pub use ratatoskr_provider_utils::html_sanitizer;
+pub use ratatoskr_provider_utils::http;
+pub use ratatoskr_provider_utils::label_flags;
+pub use ratatoskr_provider_utils::ops;
+pub use ratatoskr_provider_utils::parsed_message;
+pub use ratatoskr_provider_utils::router;
+pub use ratatoskr_provider_utils::signature_images;
+pub use ratatoskr_provider_utils::text;
+pub use ratatoskr_provider_utils::token;
+pub use ratatoskr_provider_utils::tracking_pixels;
+pub use ratatoskr_provider_utils::types;

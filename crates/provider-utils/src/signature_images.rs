@@ -5,7 +5,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use xxhash_rust::xxh3::xxh3_64;
 
-use crate::inline_image_store::{InlineImage, InlineImageStoreState};
+use ratatoskr_inline_image_store::{InlineImage, InlineImageStoreState};
 
 // ---------------------------------------------------------------------------
 // Regex patterns – compiled once via LazyLock

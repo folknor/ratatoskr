@@ -1,4 +1,4 @@
-use crate::db::DbState;
+use ratatoskr_db::db::DbState;
 /// Look up the provider type for an account from the database.
 pub async fn get_provider_type(db: &DbState, account_id: &str) -> Result<String, String> {
     let aid = account_id.to_string();

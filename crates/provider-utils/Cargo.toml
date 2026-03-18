@@ -1,0 +1,36 @@
+[package]
+name = "ratatoskr-provider-utils"
+description = "Shared provider utilities for Ratatoskr email providers"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Workspace deps
+serde.workspace = true
+reqwest.workspace = true
+base64.workspace = true
+chrono.workspace = true
+rusqlite.workspace = true
+
+# Extracted workspace crates
+ratatoskr-db = { path = "../db" }
+ratatoskr-body-store = { path = "../body-store" }
+ratatoskr-crypto = { path = "../crypto" }
+ratatoskr-inline-image-store = { path = "../inline-image-store" }
+ratatoskr-search = { path = "../search" }
+ratatoskr-seen-addresses = { path = "../seen-addresses" }
+
+# Crate-specific deps
+log = "0.4"
+async-trait = "0.1"
+unicode-segmentation = "1.12"
+regex = "1"
+xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
+css-inline = "0.14"
+lol_html = "2"
+ammonia = "4"

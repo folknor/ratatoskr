@@ -1,10 +1,10 @@
 use serde::Serialize;
 
-use crate::body_store::BodyStoreState;
-use crate::db::DbState;
-use crate::inline_image_store::InlineImageStoreState;
-use crate::progress::ProgressReporter;
-use crate::search::SearchState;
+use ratatoskr_body_store::BodyStoreState;
+use ratatoskr_db::db::DbState;
+use ratatoskr_inline_image_store::InlineImageStoreState;
+use ratatoskr_db::progress::ProgressReporter;
+use ratatoskr_search::SearchState;
 
 /// Standardized sync result across all providers.
 #[derive(Debug, Clone, Default, Serialize)]
