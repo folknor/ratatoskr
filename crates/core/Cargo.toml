@@ -35,6 +35,8 @@ ratatoskr-filters = { path = "../filters" }
 ratatoskr-smart-labels = { path = "../smart-labels" }
 ratatoskr-seen-addresses = { path = "../seen-addresses" }
 ratatoskr-provider-utils = { path = "../provider-utils" }
+ratatoskr-attachment-cache = { path = "../attachment-cache" }
+ratatoskr-smtp = { path = "../smtp" }
 
 # Crate-specific deps
 log = "0.4"

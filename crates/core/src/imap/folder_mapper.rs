@@ -1,4 +1,4 @@
-use crate::imap::types::ImapFolder;
+use super::types::ImapFolder;
 use crate::provider::folder_roles::{imap_name_to_special_use, system_folder_by_imap_special_use};
 
 /// Mapping from an IMAP folder to a Gmail-style label.

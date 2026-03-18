@@ -1,8 +1,13 @@
 pub mod account_config;
 pub mod client;
 pub mod connection;
+pub mod convert;
+pub mod folder_mapper;
+pub mod imap_delta;
+pub mod imap_initial;
 pub mod ops;
 pub mod parse;
 pub mod public_folders;
 pub mod raw;
+pub mod sync_pipeline;
 pub mod types;

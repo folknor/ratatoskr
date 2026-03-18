@@ -6,18 +6,19 @@ use crate::progress::ProgressReporter;
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
-use crate::imap::client;
-use crate::imap::connection::connect;
-use crate::imap::types::{DeltaCheckRequest, DeltaCheckResult, ImapConfig};
 use crate::inline_image_store::InlineImageStoreState;
 use crate::search::SearchState;
+use crate::sync::pipeline;
+use crate::sync::types::{ImapSyncResult, MessageMeta};
 use crate::threading;
 
+use super::client;
+use super::connection::connect;
 use super::convert::{ConvertedMessage, convert_imap_message};
 use super::folder_mapper::{get_syncable_folders, map_folder_to_label};
-use super::pipeline;
-use super::pipeline::{CHUNK_SIZE, store_chunk};
-use super::types::{ImapSyncResult, MessageMeta};
+use super::sync_pipeline;
+use super::sync_pipeline::{CHUNK_SIZE, store_chunk};
+use super::types::{DeltaCheckRequest, DeltaCheckResult, ImapConfig};
 
 const CIRCUIT_BREAKER_THRESHOLD: u32 = 3;
 const CIRCUIT_BREAKER_DELAY_MS: u64 = 15_000;
@@ -71,7 +72,7 @@ pub async fn imap_delta_sync(
         let fowned: Vec<_> = syncable_folders.iter().map(|f| (*f).clone()).collect();
         db.with_conn(move |conn| {
             let refs: Vec<_> = fowned.iter().collect();
-            pipeline::sync_folders_to_labels(conn, &aid, &refs)
+            sync_pipeline::sync_folders_to_labels(conn, &aid, &refs)
         })
         .await?;
     }
@@ -79,10 +80,10 @@ pub async fn imap_delta_sync(
     // Get saved folder sync states
     let sync_states = {
         let aid = account_id.to_string();
-        db.with_conn(move |conn| pipeline::get_all_folder_sync_states(conn, &aid))
+        db.with_conn(move |conn| sync_pipeline::get_all_folder_sync_states(conn, &aid))
             .await?
     };
-    let state_map: HashMap<String, pipeline::FolderSyncState> = sync_states
+    let state_map: HashMap<String, sync_pipeline::FolderSyncState> = sync_states
         .into_iter()
         .map(|s| (s.folder_path.clone(), s))
         .collect();
@@ -272,8 +273,8 @@ pub async fn imap_delta_sync(
 async fn batch_delta_check(
     config: &ImapConfig,
     requests: &[DeltaCheckRequest],
-    existing_folders: &[&&crate::imap::types::ImapFolder],
-    state_map: &HashMap<String, pipeline::FolderSyncState>,
+    existing_folders: &[&&super::types::ImapFolder],
+    state_map: &HashMap<String, sync_pipeline::FolderSyncState>,
 ) -> HashMap<String, DeltaCheckResult> {
     let result = async {
         let mut session = connect(config).await?;
@@ -315,7 +316,7 @@ async fn batch_delta_check(
 async fn per_folder_check(
     config: &ImapConfig,
     folder_path: &str,
-    saved: &pipeline::FolderSyncState,
+    saved: &sync_pipeline::FolderSyncState,
 ) -> Result<DeltaCheckResult, String> {
     let mut session = connect(config).await?;
     let status = client::get_folder_status(&mut session, folder_path).await?;
@@ -365,7 +366,7 @@ async fn per_folder_check(
 async fn fetch_folder_uids(
     config: &ImapConfig,
     account_id: &str,
-    folder: &crate::imap::types::ImapFolder,
+    folder: &super::types::ImapFolder,
     folder_label_id: &str,
     since_date: &str,
     db: &DbState,
@@ -389,7 +390,7 @@ async fn fetch_folder_uids(
         let ms = sr.folder_status.highest_modseq;
         let sat = chrono::Utc::now().timestamp();
         db.with_conn(move |conn| {
-            pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, 0, sat, ms)
+            sync_pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, 0, sat, ms)
         })
         .await?;
         return Ok(());
@@ -417,7 +418,7 @@ async fn fetch_folder_uids(
     let ms = sr.folder_status.highest_modseq;
     let sat = chrono::Utc::now().timestamp();
     db.with_conn(move |conn| {
-        pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, last_uid, sat, ms)
+        sync_pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, last_uid, sat, ms)
     })
     .await?;
 
@@ -428,9 +429,9 @@ async fn fetch_folder_uids(
 /// Fetch UIDs on an existing session, store messages. Returns (last_uid, uidvalidity).
 #[allow(clippy::too_many_arguments)]
 async fn fetch_uids_on_session(
-    session: &mut crate::imap::connection::ImapSession,
+    session: &mut super::connection::ImapSession,
     account_id: &str,
-    folder: &crate::imap::types::ImapFolder,
+    folder: &super::types::ImapFolder,
     folder_label_id: &str,
     uids: &[u32],
     db: &DbState,
@@ -494,9 +495,9 @@ async fn fetch_uids_on_session(
 async fn process_folder_delta(
     config: &ImapConfig,
     account_id: &str,
-    folder: &crate::imap::types::ImapFolder,
+    folder: &super::types::ImapFolder,
     folder_label_id: &str,
-    saved: &pipeline::FolderSyncState,
+    saved: &sync_pipeline::FolderSyncState,
     delta: &DeltaCheckResult,
     days_back: i64,
     db: &DbState,
@@ -519,7 +520,7 @@ async fn process_folder_delta(
             let lu = saved.last_uid;
             let sat = chrono::Utc::now().timestamp();
             db.with_conn(move |conn| {
-                pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, lu, sat, Some(modseq))
+                sync_pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, lu, sat, Some(modseq))
             })
             .await?;
         }
@@ -550,7 +551,7 @@ async fn process_folder_delta(
                 let aid = account_id.to_string();
                 let fp = folder.raw_path.clone();
                 let ch = changes;
-                db.with_conn(move |conn| pipeline::apply_flag_changes(conn, &aid, &fp, &ch))
+                db.with_conn(move |conn| sync_pipeline::apply_flag_changes(conn, &aid, &fp, &ch))
                     .await?;
             }
             Ok(_) => {
@@ -577,7 +578,7 @@ async fn process_folder_delta(
         let ms = delta.highest_modseq;
         let sat = chrono::Utc::now().timestamp();
         db.with_conn(move |conn| {
-            pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, lu, sat, ms)
+            sync_pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, lu, sat, ms)
         })
         .await?;
 
@@ -610,7 +611,7 @@ async fn process_folder_delta(
             let ms = sr.folder_status.highest_modseq;
             let sat = chrono::Utc::now().timestamp();
             db.with_conn(move |conn| {
-                pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, 0, sat, ms)
+                sync_pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, 0, sat, ms)
             })
             .await?;
             return Ok(());
@@ -638,7 +639,7 @@ async fn process_folder_delta(
         let ms = sr.folder_status.highest_modseq;
         let sat = chrono::Utc::now().timestamp();
         db.with_conn(move |conn| {
-            pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, lu, sat, ms)
+            sync_pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, lu, sat, ms)
         })
         .await?;
 
@@ -664,7 +665,7 @@ async fn process_folder_delta(
                         let fp = folder.raw_path.clone();
                         let ch = changes;
                         db.with_conn(move |conn| {
-                            pipeline::apply_flag_changes(conn, &aid, &fp, &ch)
+                            sync_pipeline::apply_flag_changes(conn, &aid, &fp, &ch)
                         })
                         .await?;
                     }
@@ -711,7 +712,7 @@ async fn process_folder_delta(
             let ms = delta.highest_modseq;
             let sat = chrono::Utc::now().timestamp();
             db.with_conn(move |conn| {
-                pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, lu, sat, ms)
+                sync_pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, lu, sat, ms)
             })
             .await?;
         }
@@ -761,7 +762,7 @@ async fn process_folder_delta(
     let ms = delta.highest_modseq;
     let sat = chrono::Utc::now().timestamp();
     db.with_conn(move |conn| {
-        pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, last_uid, sat, ms)
+        sync_pipeline::upsert_folder_sync_state(conn, &aid, &fp, uv, last_uid, sat, ms)
     })
     .await?;
 
@@ -793,7 +794,7 @@ pub async fn sync_flags_without_condstore(
     let fp = folder_path.to_string();
     let last_sync = db
         .with_conn(move |conn| {
-            pipeline::get_last_deletion_check_at(conn, &aid, &fp)
+            sync_pipeline::get_last_deletion_check_at(conn, &aid, &fp)
         })
         .await;
 
@@ -809,7 +810,7 @@ pub async fn sync_flags_without_condstore(
     let aid = account_id.to_string();
     let fp = folder_path.to_string();
     let local_flags = db
-        .with_conn(move |conn| pipeline::get_local_flags_for_folder(conn, &aid, &fp))
+        .with_conn(move |conn| sync_pipeline::get_local_flags_for_folder(conn, &aid, &fp))
         .await?;
 
     if local_flags.is_empty() {
@@ -827,7 +828,7 @@ pub async fn sync_flags_without_condstore(
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
 
     // Diff: only include UIDs where flags actually changed
-    let changes: Vec<crate::imap::types::FlagChange> = server_flags
+    let changes: Vec<super::types::FlagChange> = server_flags
         .into_iter()
         .filter(|sf| {
             match local_map.get(&sf.uid) {
@@ -854,7 +855,7 @@ pub async fn sync_flags_without_condstore(
     let aid = account_id.to_string();
     let fp = folder_path.to_string();
     let updated = db
-        .with_conn(move |conn| pipeline::apply_flag_changes(conn, &aid, &fp, &changes))
+        .with_conn(move |conn| sync_pipeline::apply_flag_changes(conn, &aid, &fp, &changes))
         .await?;
 
     Ok(updated)
@@ -881,7 +882,7 @@ pub async fn detect_deleted_messages(
     let fp = folder_path.to_string();
     let should_run = db
         .with_conn(move |conn| {
-            match pipeline::get_last_deletion_check_at(conn, &aid, &fp) {
+            match sync_pipeline::get_last_deletion_check_at(conn, &aid, &fp) {
                 Ok(Some(last)) if now - last < DELETION_CHECK_INTERVAL_SECS => Ok(false),
                 Ok(_) => Ok(true),
                 Err(e) => {
@@ -908,7 +909,7 @@ pub async fn detect_deleted_messages(
     let aid = account_id.to_string();
     let fp = folder_path.to_string();
     let local_entries = db
-        .with_conn(move |conn| pipeline::get_local_uids_for_folder(conn, &aid, &fp))
+        .with_conn(move |conn| sync_pipeline::get_local_uids_for_folder(conn, &aid, &fp))
         .await?;
 
     // Diff: local UIDs not on server = deleted
@@ -921,7 +922,7 @@ pub async fn detect_deleted_messages(
     // Update the last check timestamp
     let aid = account_id.to_string();
     let fp = folder_path.to_string();
-    db.with_conn(move |conn| pipeline::set_last_deletion_check_at(conn, &aid, &fp, now))
+    db.with_conn(move |conn| sync_pipeline::set_last_deletion_check_at(conn, &aid, &fp, now))
         .await?;
 
     if !deleted_ids.is_empty() {
@@ -947,8 +948,8 @@ pub async fn run_deletion_detection(
     db: &DbState,
     body_store: &BodyStoreState,
     search: &SearchState,
-    syncable_folders: &[&crate::imap::types::ImapFolder],
-    state_map: &HashMap<String, pipeline::FolderSyncState>,
+    syncable_folders: &[&super::types::ImapFolder],
+    state_map: &HashMap<String, sync_pipeline::FolderSyncState>,
 ) -> Vec<String> {
     let mut all_affected = Vec::new();
 
@@ -975,7 +976,7 @@ pub async fn run_deletion_detection(
                 let aid = account_id.to_string();
                 let ids = deleted_ids;
                 match db
-                    .with_conn(move |conn| pipeline::remove_deleted_messages(conn, &aid, &ids))
+                    .with_conn(move |conn| sync_pipeline::remove_deleted_messages(conn, &aid, &ids))
                     .await
                 {
                     Ok(affected) => all_affected.extend(affected),

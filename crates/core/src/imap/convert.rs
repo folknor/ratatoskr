@@ -1,9 +1,9 @@
-use crate::imap::types::ImapMessage;
 use crate::provider::text::truncate_graphemes;
+use crate::sync::types::MessageMeta;
 use crate::threading::ThreadableMessage;
 
 use super::folder_mapper::get_labels_for_message;
-use super::types::MessageMeta;
+use super::types::ImapMessage;
 
 /// Converted message data ready for DB insertion.
 pub struct ConvertedMessage {

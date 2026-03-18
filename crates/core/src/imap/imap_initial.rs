@@ -6,18 +6,19 @@ use crate::progress::{self, ProgressReporter};
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
-use crate::imap::client;
-use crate::imap::connection::connect;
-use crate::imap::types::ImapConfig;
 use crate::inline_image_store::InlineImageStoreState;
 use crate::search::SearchState;
+use crate::sync::pipeline;
+use crate::sync::types::{ImapSyncResult, MessageMeta, SyncProgressEvent};
 use crate::threading;
 
+use super::client;
+use super::connection::connect;
 use super::convert::convert_imap_message;
 use super::folder_mapper::{get_syncable_folders, map_folder_to_label};
-use super::pipeline;
-use super::pipeline::{CHUNK_SIZE, store_chunk};
-use super::types::{ImapSyncResult, MessageMeta, SyncProgressEvent};
+use super::sync_pipeline;
+use super::sync_pipeline::{CHUNK_SIZE, store_chunk};
+use super::types::ImapConfig;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -97,8 +98,8 @@ pub async fn imap_initial_sync(
         let account_id = account_id.to_string();
         let folders_owned: Vec<_> = syncable_folders.iter().map(|f| (*f).clone()).collect();
         db.with_conn(move |conn| {
-            let refs: Vec<&crate::imap::types::ImapFolder> = folders_owned.iter().collect();
-            pipeline::sync_folders_to_labels(conn, &account_id, &refs)
+            let refs: Vec<&super::types::ImapFolder> = folders_owned.iter().collect();
+            sync_pipeline::sync_folders_to_labels(conn, &account_id, &refs)
         })
         .await?;
     }
@@ -332,7 +333,7 @@ async fn sync_single_folder(
     search: &SearchState,
     config: &ImapConfig,
     account_id: &str,
-    folder: &crate::imap::types::ImapFolder,
+    folder: &super::types::ImapFolder,
     folder_label_id: &str,
     since_date: &str,
     cutoff_seconds: i64,
@@ -476,7 +477,7 @@ async fn sync_single_folder(
         let fp = folder.raw_path.clone();
         let sync_at = chrono::Utc::now().timestamp();
         db.with_conn(move |conn| {
-            pipeline::upsert_folder_sync_state(
+            sync_pipeline::upsert_folder_sync_state(
                 conn, &aid, &fp, uidvalidity, last_uid, sync_at, highest_modseq,
             )
         })

@@ -1,5 +1,5 @@
 pub mod account;
-pub mod attachment_cache;
+pub use ratatoskr_attachment_cache as attachment_cache;
 pub mod bimi;
 pub use ratatoskr_body_store as body_store;
 pub mod carddav;
@@ -27,7 +27,7 @@ pub use ratatoskr_search as search;
 pub use ratatoskr_seen_addresses as seen_addresses;
 pub mod send_identity;
 pub use ratatoskr_smart_labels as smart_labels;
-pub mod smtp;
+pub use ratatoskr_smtp as smtp;
 pub mod sync;
 pub use ratatoskr_threading as threading;
 pub mod url_cleaning;

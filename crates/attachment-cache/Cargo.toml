@@ -1,0 +1,20 @@
+[package]
+name = "ratatoskr-attachment-cache"
+description = "Attachment cache for Ratatoskr"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ratatoskr-db = { path = "../db" }
+ratatoskr-inline-image-store = { path = "../inline-image-store" }
+ratatoskr-provider-utils = { path = "../provider-utils" }
+
+rusqlite.workspace = true
+tokio = { workspace = true, features = ["sync", "rt"] }
+log = "0.4"
+xxhash-rust = { version = "0.8.15", features = ["xxh3"] }

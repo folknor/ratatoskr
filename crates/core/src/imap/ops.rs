@@ -319,7 +319,7 @@ impl ProviderOps for ImapOps {
         let account_id = ctx.account_id.to_string();
         let imap_config = self.load_config(ctx).await?;
 
-        let result = crate::sync::imap_initial::imap_initial_sync(
+        let result = super::imap_initial::imap_initial_sync(
             ctx.progress,
             ctx.db,
             ctx.body_store,
@@ -346,7 +346,7 @@ impl ProviderOps for ImapOps {
         let imap_config = self.load_config(ctx).await?;
         let days_back = days_back.unwrap_or(365);
 
-        let result = crate::sync::imap_delta::imap_delta_sync(
+        let result = super::imap_delta::imap_delta_sync(
             ctx.progress,
             ctx.db,
             ctx.body_store,

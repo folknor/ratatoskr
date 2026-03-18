@@ -10,7 +10,7 @@ use super::types::{SmtpConfig, SmtpSendResult};
 
 /// Decode a base64url-encoded string (Gmail format) to raw bytes.
 fn decode_base64url(input: &str) -> Result<Vec<u8>, String> {
-    crate::provider::encoding::decode_base64url_nopad(input)
+    ratatoskr_provider_utils::encoding::decode_base64url_nopad(input)
         .map_err(|e| format!("Base64 decode error: {e}"))
 }
 

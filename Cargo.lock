@@ -5104,6 +5104,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ratatoskr-attachment-cache"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "ratatoskr-db",
+ "ratatoskr-inline-image-store",
+ "ratatoskr-provider-utils",
+ "rusqlite",
+ "tokio",
+ "xxhash-rust",
+]
+
+[[package]]
 name = "ratatoskr-body-store"
 version = "0.1.0"
 dependencies = [
@@ -5184,6 +5197,7 @@ dependencies = [
  "mail-parser",
  "native-tls",
  "quick-xml 0.37.5",
+ "ratatoskr-attachment-cache",
  "ratatoskr-body-store",
  "ratatoskr-categorization",
  "ratatoskr-category-colors",
@@ -5197,6 +5211,7 @@ dependencies = [
  "ratatoskr-search",
  "ratatoskr-seen-addresses",
  "ratatoskr-smart-labels",
+ "ratatoskr-smtp",
  "ratatoskr-threading",
  "regex",
  "reqwest 0.13.2",
@@ -5323,6 +5338,16 @@ dependencies = [
 name = "ratatoskr-smart-labels"
 version = "0.1.0"
 dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "ratatoskr-smtp"
+version = "0.1.0"
+dependencies = [
+ "lettre",
+ "mail-parser",
+ "ratatoskr-provider-utils",
  "serde",
 ]
 

@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 use rusqlite::OptionalExtension;
 use xxhash_rust::xxh3::xxh3_64;
 
-use crate::db::DbState;
-use crate::inline_image_store::InlineImageStoreState;
-use crate::provider::types::AttachmentData;
+use ratatoskr_db::db::DbState;
+use ratatoskr_inline_image_store::InlineImageStoreState;
+use ratatoskr_provider_utils::encoding::{decode_base64_standard, encode_base64_standard};
+use ratatoskr_provider_utils::types::AttachmentData;
 
 const CACHE_DIR: &str = "attachment_cache";
 
@@ -60,12 +61,12 @@ pub fn remove_cached_relative(app_data_dir: &Path, relative_path: &str) -> Resul
 /// Decode base64 (standard or URL-safe) to raw bytes.
 pub fn decode_base64(data: &str) -> Result<Vec<u8>, String> {
     let normalized = data.replace('-', "+").replace('_', "/");
-    crate::provider::encoding::decode_base64_standard(&normalized)
+    decode_base64_standard(&normalized)
 }
 
 /// Encode raw bytes to standard base64.
 pub fn encode_base64(data: &[u8]) -> String {
-    crate::provider::encoding::encode_base64_standard(data)
+    encode_base64_standard(data)
 }
 
 // ── DB helpers (run inside with_conn closures) ──────────────
@@ -340,7 +341,7 @@ pub fn cache_after_fetch(
             let content_hash = hash_bytes(&bytes);
 
             // Small inline images -> SQLite blob store
-            if bytes.len() <= crate::inline_image_store::MAX_INLINE_SIZE {
+            if bytes.len() <= ratatoskr_inline_image_store::MAX_INLINE_SIZE {
                 let mime = {
                     let (a, m, at) = (acct.clone(), msg.clone(), att.clone());
                     db.with_conn(move |conn| {
