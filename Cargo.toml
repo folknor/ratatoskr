@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/db",
     "crates/core",
     "crates/app",
     "crates/squeeze",
@@ -13,6 +14,10 @@ members = [
     "crates/ai",
     "crates/calendar",
     "crates/cloud-attachments",
+]
+
+exclude = [
+    "docs/research/slug-glyph-proto",
 ]
 
 [workspace.package]

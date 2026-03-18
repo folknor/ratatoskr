@@ -21,6 +21,7 @@ base64.workspace = true
 quick-xml.workspace = true
 
 # Extracted workspace crates
+ratatoskr-db = { path = "../db" }
 ratatoskr-body-store = { path = "../body-store" }
 ratatoskr-command-palette = { path = "../command-palette" }
 ratatoskr-crypto = { path = "../crypto" }

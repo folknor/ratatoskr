@@ -5176,6 +5176,7 @@ dependencies = [
  "ratatoskr-body-store",
  "ratatoskr-command-palette",
  "ratatoskr-crypto",
+ "ratatoskr-db",
  "ratatoskr-inline-image-store",
  "ratatoskr-search",
  "regex",
@@ -5207,6 +5208,17 @@ dependencies = [
  "base64 0.22.1",
  "getrandom 0.2.17",
  "log",
+]
+
+[[package]]
+name = "ratatoskr-db"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

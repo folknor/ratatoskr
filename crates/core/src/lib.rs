@@ -20,7 +20,7 @@ pub mod jmap;
 pub mod mdn;
 pub mod oauth;
 pub mod mentions;
-pub mod progress;
+pub use ratatoskr_db::progress;
 pub mod provider;
 pub mod scheduled_send;
 pub use ratatoskr_search as search;

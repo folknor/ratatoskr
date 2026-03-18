@@ -1,0 +1,17 @@
+[package]
+name = "ratatoskr-db"
+description = "Shared database types, state, and migrations for Ratatoskr"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+rusqlite.workspace = true
+tokio = { workspace = true, features = ["rt"] }
+log = "0.4"
