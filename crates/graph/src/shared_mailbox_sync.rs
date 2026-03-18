@@ -6,9 +6,9 @@
 //! all API paths use `client.api_path_prefix()` and delta token routing is
 //! handled by the wrapper functions in `sync.rs`.
 
-use ratatoskr_body_store::BodyStoreState;
+use ratatoskr_stores::body_store::BodyStoreState;
 use ratatoskr_db::db::DbState;
-use ratatoskr_inline_image_store::InlineImageStoreState;
+use ratatoskr_stores::inline_image_store::InlineImageStoreState;
 use ratatoskr_db::progress::ProgressReporter;
 use ratatoskr_provider_utils::types::{ProviderCtx, SyncResult};
 use ratatoskr_search::SearchState;

@@ -4,13 +4,13 @@ use std::collections::{HashMap, HashSet};
 
 use ratatoskr_db::progress::ProgressReporter;
 
-use ratatoskr_body_store::BodyStoreState;
+use ratatoskr_stores::body_store::BodyStoreState;
 use ratatoskr_db::db::DbState;
-use ratatoskr_inline_image_store::InlineImageStoreState;
+use ratatoskr_stores::inline_image_store::InlineImageStoreState;
 use ratatoskr_search::SearchState;
 use ratatoskr_sync::pipeline;
 use ratatoskr_sync::types::{ImapSyncResult, MessageMeta};
-use ratatoskr_threading as threading;
+use ratatoskr_sync::threading;
 
 use super::client;
 use super::connection::connect;
@@ -373,7 +373,7 @@ async fn fetch_folder_uids(
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
-    all_threadable: &mut Vec<ratatoskr_threading::ThreadableMessage>,
+    all_threadable: &mut Vec<threading::ThreadableMessage>,
     all_meta: &mut HashMap<String, MessageMeta>,
     labels_by_rfc_id: &mut HashMap<String, HashSet<String>>,
 ) -> Result<(), String> {
@@ -438,7 +438,7 @@ async fn fetch_uids_on_session(
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
-    all_threadable: &mut Vec<ratatoskr_threading::ThreadableMessage>,
+    all_threadable: &mut Vec<threading::ThreadableMessage>,
     all_meta: &mut HashMap<String, MessageMeta>,
     labels_by_rfc_id: &mut HashMap<String, HashSet<String>>,
 ) -> Result<(u32, u32), String> {
@@ -504,7 +504,7 @@ async fn process_folder_delta(
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
-    all_threadable: &mut Vec<ratatoskr_threading::ThreadableMessage>,
+    all_threadable: &mut Vec<threading::ThreadableMessage>,
     all_meta: &mut HashMap<String, MessageMeta>,
     labels_by_rfc_id: &mut HashMap<String, HashSet<String>>,
 ) -> Result<(), String> {

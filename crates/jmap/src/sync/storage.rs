@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use ratatoskr_attachment_cache::hash_bytes;
-use ratatoskr_body_store::BodyStoreState;
+use ratatoskr_stores::attachment_cache::hash_bytes;
+use ratatoskr_stores::body_store::BodyStoreState;
 use ratatoskr_db::db::lookups;
-use ratatoskr_inline_image_store::{InlineImage, MAX_INLINE_SIZE};
+use ratatoskr_stores::inline_image_store::{InlineImage, MAX_INLINE_SIZE};
 use ratatoskr_search::{SearchDocument, SearchState};
 
 use super::super::parse::ParsedJmapMessage;

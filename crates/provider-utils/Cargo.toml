@@ -19,9 +19,7 @@ rusqlite.workspace = true
 
 # Extracted workspace crates
 ratatoskr-db = { path = "../db" }
-ratatoskr-body-store = { path = "../body-store" }
-ratatoskr-crypto = { path = "../crypto" }
-ratatoskr-inline-image-store = { path = "../inline-image-store" }
+ratatoskr-stores = { path = "../stores" }
 ratatoskr-search = { path = "../search" }
 ratatoskr-seen-addresses = { path = "../seen-addresses" }
 
@@ -34,3 +32,5 @@ xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 css-inline = "0.14"
 lol_html = "2"
 ammonia = "4"
+aes-gcm = "0.10"
+getrandom = { version = "0.2", features = ["std"] }

@@ -22,20 +22,12 @@ quick-xml.workspace = true
 
 # Extracted workspace crates
 ratatoskr-db = { path = "../db" }
-ratatoskr-body-store = { path = "../body-store" }
+ratatoskr-stores = { path = "../stores" }
 ratatoskr-command-palette = { path = "../command-palette" }
-ratatoskr-crypto = { path = "../crypto" }
-ratatoskr-inline-image-store = { path = "../inline-image-store" }
 ratatoskr-search = { path = "../search" }
-ratatoskr-category-colors = { path = "../category-colors" }
 ratatoskr-label-colors = { path = "../label-colors" }
-ratatoskr-categorization = { path = "../categorization" }
-ratatoskr-threading = { path = "../threading" }
-ratatoskr-filters = { path = "../filters" }
-ratatoskr-smart-labels = { path = "../smart-labels" }
 ratatoskr-seen-addresses = { path = "../seen-addresses" }
 ratatoskr-provider-utils = { path = "../provider-utils" }
-ratatoskr-attachment-cache = { path = "../attachment-cache" }
 ratatoskr-smtp = { path = "../smtp" }
 ratatoskr-sync = { path = "../sync" }
 ratatoskr-gmail = { path = "../gmail" }

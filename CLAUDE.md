@@ -2,15 +2,20 @@
 
 **Subagents must always be launched in the foreground** (never use `run_in_background: true`) so the user can approve tool requests.
 
-Pure Rust desktop email client. Cargo workspace with three crates:
+Pure Rust desktop email client. Cargo workspace (19 crates). Key crates:
 
-- **`ratatoskr-core`** (`crates/core/`, ~22k lines) — Framework-agnostic business logic: providers, sync, threading, filters, search, DB, encryption, AI, categories, smart folders, etc.
+- **`ratatoskr-core`** (`crates/core/`) — Top-level facade: re-exports all subsystem crates, plus owns accounts, oauth, discovery, email actions, DB queries, cloud attachments.
 - **`app`** (`crates/app/`) — iced UI app. Elm architecture (boot/update/view). All UI conventions are in `UI.md` at the repo root — **read UI.md before any UI work.**
-- **`squeeze`** (`crates/squeeze/`) — Attachment compression crate (CLI + library). Compresses images (mozjpeg-rs + oxipng), PDFs (lopdf), and OOXML/ODF documents (ZIP archive image compression).
+- **`squeeze`** (`crates/squeeze/`) — Attachment compression (CLI + library). Images (mozjpeg-rs + oxipng), PDFs (lopdf), OOXML/ODF.
+- **`ratatoskr-stores`** (`crates/stores/`) — Content stores: email body store (zstd-compressed), inline image store, attachment file cache.
+- **`ratatoskr-sync`** (`crates/sync/`) — Sync pipeline, threading (JWZ), categorization, filters, smart labels.
+- **`ratatoskr-provider-utils`** (`crates/provider-utils/`) — Shared provider helpers, encryption (AES-256-GCM), email parsing, HTML sanitization.
+- **`ratatoskr-label-colors`** (`crates/label-colors/`) — Label color resolution + Exchange category color presets.
+- **Providers**: `gmail`, `jmap`, `graph`, `imap` — each in `crates/{name}/`.
 
 ## Commands
 
-- `cargo check --workspace` — check all three crates
+- `cargo check --workspace` — check all crates
 - `cargo check -p ratatoskr-core` — check core only
 - `cargo check -p app` — check app only
 - `cargo run -p app` — run the iced app (requires a seeded DB, see `crates/app/seed-db.py`)
@@ -37,7 +42,7 @@ Pure Rust desktop email client. Cargo workspace with three crates:
 
 ## Gotchas that will break your code
 
-**Multiple content stores**: Message bodies live outside the main `messages` table in `bodies.db` (zstd-compressed), and inline multipart images have their own attachment database. Use `BodyStoreState` / `InlineImageStoreState` rather than assuming message content is in the main SQLite database.
+**Multiple content stores** (`crates/stores/`): Message bodies live outside the main `messages` table in `bodies.db` (zstd-compressed), and inline multipart images have their own attachment database. Use `BodyStoreState` / `InlineImageStoreState` rather than assuming message content is in the main SQLite database. The attachment file cache is also in this crate.
 
 **Four email providers**: `gmail_api`, `jmap`, `graph` (Microsoft), `imap`. All unified behind the `ProviderOps` trait (`core/src/provider/ops.rs`).
 

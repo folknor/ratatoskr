@@ -152,7 +152,7 @@ pub fn parse_graph_message(
             ParsedGraphAttachment {
                 content_hash: inline_data
                     .as_deref()
-                    .map(ratatoskr_attachment_cache::hash_bytes),
+                    .map(ratatoskr_stores::attachment_cache::hash_bytes),
                 inline_data,
                 id: a.id.clone(),
                 filename: a.name.clone(),
@@ -277,7 +277,7 @@ fn format_recipients(recipients: Option<&[GraphRecipient]>) -> Option<String> {
 
 fn decode_inline_bytes(data: &str) -> Option<Vec<u8>> {
     let decoded = decode_base64_standard(data).ok()?;
-    if decoded.len() > ratatoskr_inline_image_store::MAX_INLINE_SIZE {
+    if decoded.len() > ratatoskr_stores::inline_image_store::MAX_INLINE_SIZE {
         return None;
     }
     Some(decoded)

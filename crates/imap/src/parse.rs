@@ -189,7 +189,7 @@ pub fn parse_message(
                 // Carry raw bytes for small inline images so we can store them
                 // in the inline image SQLite cache during sync.
                 let inline_data = if is_inline
-                    && (size as usize) <= ratatoskr_inline_image_store::MAX_INLINE_SIZE
+                    && (size as usize) <= ratatoskr_stores::inline_image_store::MAX_INLINE_SIZE
                     && mime_type.starts_with("image/")
                 {
                     Some(contents.to_vec())

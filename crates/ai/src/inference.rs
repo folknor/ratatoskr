@@ -4,7 +4,7 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use rusqlite::OptionalExtension;
 
 use ratatoskr_core::db::DbState;
-use ratatoskr_crypto::{AppCryptoState, decrypt_value, is_encrypted};
+use ratatoskr_core::provider::crypto::{AppCryptoState, decrypt_value, is_encrypted};
 
 use crate::types::{AiCompletionRequest, AiConfig, AiError, AiProvider};
 

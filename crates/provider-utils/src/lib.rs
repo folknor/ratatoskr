@@ -1,5 +1,5 @@
 pub mod attachment_dedup;
-pub use ratatoskr_crypto as crypto;
+pub mod crypto;
 pub mod email_parsing;
 pub mod encoding;
 pub mod folder_roles;

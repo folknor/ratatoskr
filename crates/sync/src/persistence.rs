@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use rusqlite::Transaction;
 
-use ratatoskr_body_store::{BodyStoreState, MessageBody};
-use ratatoskr_inline_image_store::{InlineImage, InlineImageStoreState};
+use ratatoskr_stores::body_store::{BodyStoreState, MessageBody};
+use ratatoskr_stores::inline_image_store::{InlineImage, InlineImageStoreState};
 use ratatoskr_search::{SearchDocument, SearchState};
 
 pub struct ThreadAggregate {

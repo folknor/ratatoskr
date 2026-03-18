@@ -7,9 +7,9 @@ use jmap_client::core::query::QueryResponse;
 use jmap_client::email;
 use serde::Serialize;
 
-use ratatoskr_body_store::BodyStoreState;
+use ratatoskr_stores::body_store::BodyStoreState;
 use ratatoskr_db::db::DbState;
-use ratatoskr_inline_image_store::InlineImageStoreState;
+use ratatoskr_stores::inline_image_store::InlineImageStoreState;
 use ratatoskr_db::progress::ProgressReporter;
 use ratatoskr_search::SearchState;
 

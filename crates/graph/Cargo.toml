@@ -22,13 +22,11 @@ rusqlite.workspace = true
 
 # Extracted workspace crates
 ratatoskr-db = { path = "../db" }
-ratatoskr-body-store = { path = "../body-store" }
-ratatoskr-inline-image-store = { path = "../inline-image-store" }
+ratatoskr-stores = { path = "../stores" }
 ratatoskr-search = { path = "../search" }
 ratatoskr-seen-addresses = { path = "../seen-addresses" }
 ratatoskr-provider-utils = { path = "../provider-utils" }
-ratatoskr-attachment-cache = { path = "../attachment-cache" }
-ratatoskr-category-colors = { path = "../category-colors" }
+ratatoskr-label-colors = { path = "../label-colors" }
 ratatoskr-sync = { path = "../sync" }
 
 # Crate-specific deps

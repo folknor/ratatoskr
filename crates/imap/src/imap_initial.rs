@@ -4,13 +4,13 @@ use std::collections::{HashMap, HashSet};
 
 use ratatoskr_db::progress::{self, ProgressReporter};
 
-use ratatoskr_body_store::BodyStoreState;
+use ratatoskr_stores::body_store::BodyStoreState;
 use ratatoskr_db::db::DbState;
-use ratatoskr_inline_image_store::InlineImageStoreState;
+use ratatoskr_stores::inline_image_store::InlineImageStoreState;
 use ratatoskr_search::SearchState;
 use ratatoskr_sync::pipeline;
 use ratatoskr_sync::types::{ImapSyncResult, MessageMeta, SyncProgressEvent};
-use ratatoskr_threading as threading;
+use ratatoskr_sync::threading;
 
 use super::client;
 use super::connection::connect;
@@ -340,7 +340,7 @@ async fn sync_single_folder(
     now_seconds: i64,
     fetched_total: u64,
     total_estimate: u64,
-    all_threadable: &mut Vec<ratatoskr_threading::ThreadableMessage>,
+    all_threadable: &mut Vec<threading::ThreadableMessage>,
     all_meta: &mut HashMap<String, MessageMeta>,
     labels_by_rfc_id: &mut HashMap<String, HashSet<String>>,
 ) -> Result<(u64, u64, u64), String> {

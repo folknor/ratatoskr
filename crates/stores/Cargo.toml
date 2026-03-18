@@ -1,6 +1,6 @@
 [package]
-name = "ratatoskr-attachment-cache"
-description = "Attachment cache for Ratatoskr"
+name = "ratatoskr-stores"
+description = "Content stores for Ratatoskr: email bodies, inline images, attachment cache"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -11,10 +11,11 @@ workspace = true
 
 [dependencies]
 ratatoskr-db = { path = "../db" }
-ratatoskr-inline-image-store = { path = "../inline-image-store" }
-ratatoskr-provider-utils = { path = "../provider-utils" }
 
 rusqlite.workspace = true
 tokio = { workspace = true, features = ["sync", "rt"] }
+base64.workspace = true
+serde.workspace = true
 log = "0.4"
+zstd = "0.13"
 xxhash-rust = { version = "0.8.15", features = ["xxh3"] }

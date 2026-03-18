@@ -11,7 +11,6 @@ workspace = true
 
 [dependencies]
 ratatoskr-core = { path = "../core" }
-ratatoskr-crypto = { path = "../crypto" }
 serde.workspace = true
 serde_json.workspace = true
 reqwest.workspace = true

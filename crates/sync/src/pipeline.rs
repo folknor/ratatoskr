@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use rusqlite::Connection;
 
-use ratatoskr_threading::ThreadGroup;
+use crate::threading::ThreadGroup;
 
 use crate::types::MessageMeta;
 

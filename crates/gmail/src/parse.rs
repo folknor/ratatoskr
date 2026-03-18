@@ -210,13 +210,13 @@ fn collect_attachments(part: &GmailPayload, results: &mut Vec<ParsedAttachment>)
                 body.data
                     .as_deref()
                     .and_then(decode_base64url_bytes)
-                    .filter(|data| data.len() <= ratatoskr_inline_image_store::MAX_INLINE_SIZE)
+                    .filter(|data| data.len() <= ratatoskr_stores::inline_image_store::MAX_INLINE_SIZE)
             } else {
                 None
             };
             let content_hash = inline_data
                 .as_deref()
-                .map(ratatoskr_attachment_cache::hash_bytes);
+                .map(ratatoskr_stores::attachment_cache::hash_bytes);
 
             let filename = if has_filename {
                 part.filename.clone()

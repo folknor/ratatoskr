@@ -10,5 +10,4 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-ratatoskr-category-colors = { path = "../category-colors" }
 ratatoskr-db = { path = "../db" }

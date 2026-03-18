@@ -5094,37 +5094,12 @@ dependencies = [
  "chrono",
  "log",
  "ratatoskr-core",
- "ratatoskr-crypto",
  "regex",
  "reqwest 0.13.2",
  "rusqlite",
  "serde",
  "serde_json",
  "urlencoding",
-]
-
-[[package]]
-name = "ratatoskr-attachment-cache"
-version = "0.1.0"
-dependencies = [
- "log",
- "ratatoskr-db",
- "ratatoskr-inline-image-store",
- "ratatoskr-provider-utils",
- "rusqlite",
- "tokio",
- "xxhash-rust",
-]
-
-[[package]]
-name = "ratatoskr-body-store"
-version = "0.1.0"
-dependencies = [
- "log",
- "rusqlite",
- "serde",
- "tokio",
- "zstd",
 ]
 
 [[package]]
@@ -5141,30 +5116,6 @@ dependencies = [
  "tokio",
  "urlencoding",
  "uuid",
-]
-
-[[package]]
-name = "ratatoskr-categorization"
-version = "0.1.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "ratatoskr-category-colors"
-version = "0.1.0"
-
-[[package]]
-name = "ratatoskr-cloud-attachments"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "ratatoskr-core",
- "regex",
- "reqwest 0.13.2",
- "rusqlite",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -5197,27 +5148,19 @@ dependencies = [
  "mail-parser",
  "native-tls",
  "quick-xml 0.37.5",
- "ratatoskr-attachment-cache",
- "ratatoskr-body-store",
- "ratatoskr-categorization",
- "ratatoskr-category-colors",
  "ratatoskr-command-palette",
- "ratatoskr-crypto",
  "ratatoskr-db",
- "ratatoskr-filters",
  "ratatoskr-gmail",
  "ratatoskr-graph",
  "ratatoskr-imap",
- "ratatoskr-inline-image-store",
  "ratatoskr-jmap",
  "ratatoskr-label-colors",
  "ratatoskr-provider-utils",
  "ratatoskr-search",
  "ratatoskr-seen-addresses",
- "ratatoskr-smart-labels",
  "ratatoskr-smtp",
+ "ratatoskr-stores",
  "ratatoskr-sync",
- "ratatoskr-threading",
  "regex",
  "reqwest 0.13.2",
  "resvg",
@@ -5240,16 +5183,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ratatoskr-crypto"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "base64 0.22.1",
- "getrandom 0.2.17",
- "log",
-]
-
-[[package]]
 name = "ratatoskr-db"
 version = "0.1.0"
 dependencies = [
@@ -5261,13 +5194,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ratatoskr-filters"
-version = "0.1.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "ratatoskr-gmail"
 version = "0.1.0"
 dependencies = [
@@ -5275,13 +5201,11 @@ dependencies = [
  "chrono",
  "futures",
  "log",
- "ratatoskr-attachment-cache",
- "ratatoskr-body-store",
  "ratatoskr-db",
- "ratatoskr-inline-image-store",
  "ratatoskr-provider-utils",
  "ratatoskr-search",
  "ratatoskr-seen-addresses",
+ "ratatoskr-stores",
  "ratatoskr-sync",
  "reqwest 0.13.2",
  "rusqlite",
@@ -5304,14 +5228,12 @@ dependencies = [
  "log",
  "mail-parser",
  "quick-xml 0.37.5",
- "ratatoskr-attachment-cache",
- "ratatoskr-body-store",
- "ratatoskr-category-colors",
  "ratatoskr-db",
- "ratatoskr-inline-image-store",
+ "ratatoskr-label-colors",
  "ratatoskr-provider-utils",
  "ratatoskr-search",
  "ratatoskr-seen-addresses",
+ "ratatoskr-stores",
  "ratatoskr-sync",
  "reqwest 0.13.2",
  "rusqlite",
@@ -5336,16 +5258,13 @@ dependencies = [
  "log",
  "mail-parser",
  "native-tls",
- "ratatoskr-attachment-cache",
- "ratatoskr-body-store",
  "ratatoskr-db",
- "ratatoskr-inline-image-store",
  "ratatoskr-provider-utils",
  "ratatoskr-search",
  "ratatoskr-seen-addresses",
  "ratatoskr-smtp",
+ "ratatoskr-stores",
  "ratatoskr-sync",
- "ratatoskr-threading",
  "regex",
  "reqwest 0.13.2",
  "rusqlite",
@@ -5359,16 +5278,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ratatoskr-inline-image-store"
-version = "0.1.0"
-dependencies = [
- "log",
- "rusqlite",
- "serde",
- "tokio",
-]
-
-[[package]]
 name = "ratatoskr-jmap"
 version = "0.1.0"
 dependencies = [
@@ -5379,13 +5288,11 @@ dependencies = [
  "jmap-client",
  "log",
  "native-tls",
- "ratatoskr-attachment-cache",
- "ratatoskr-body-store",
  "ratatoskr-db",
- "ratatoskr-inline-image-store",
  "ratatoskr-provider-utils",
  "ratatoskr-search",
  "ratatoskr-seen-addresses",
+ "ratatoskr-stores",
  "ratatoskr-sync",
  "reqwest 0.13.2",
  "rusqlite",
@@ -5401,7 +5308,6 @@ dependencies = [
 name = "ratatoskr-label-colors"
 version = "0.1.0"
 dependencies = [
- "ratatoskr-category-colors",
  "ratatoskr-db",
 ]
 
@@ -5409,19 +5315,19 @@ dependencies = [
 name = "ratatoskr-provider-utils"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "ammonia",
  "async-trait",
  "base64 0.22.1",
  "chrono",
  "css-inline",
+ "getrandom 0.2.17",
  "log",
  "lol_html",
- "ratatoskr-body-store",
- "ratatoskr-crypto",
  "ratatoskr-db",
- "ratatoskr-inline-image-store",
  "ratatoskr-search",
  "ratatoskr-seen-addresses",
+ "ratatoskr-stores",
  "regex",
  "reqwest 0.13.2",
  "rusqlite",
@@ -5460,13 +5366,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ratatoskr-smart-labels"
-version = "0.1.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "ratatoskr-smtp"
 version = "0.1.0"
 dependencies = [
@@ -5477,29 +5376,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "ratatoskr-stores"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "log",
+ "ratatoskr-db",
+ "rusqlite",
+ "serde",
+ "tokio",
+ "xxhash-rust",
+ "zstd",
+]
+
+[[package]]
 name = "ratatoskr-sync"
 version = "0.1.0"
 dependencies = [
  "log",
- "ratatoskr-body-store",
- "ratatoskr-categorization",
  "ratatoskr-db",
- "ratatoskr-filters",
- "ratatoskr-inline-image-store",
  "ratatoskr-search",
- "ratatoskr-smart-labels",
- "ratatoskr-threading",
+ "ratatoskr-stores",
  "rusqlite",
  "serde",
  "serde_json",
  "tokio",
-]
-
-[[package]]
-name = "ratatoskr-threading"
-version = "0.1.0"
-dependencies = [
- "serde",
 ]
 
 [[package]]
