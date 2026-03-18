@@ -140,6 +140,41 @@ Search lives directly above the thread list, not in a toolbar or dialog. It's a 
 
 This is the same pattern as Superhuman — search is spatial ("I'm filtering this list") not modal ("I opened a search dialog"). The command palette's search is for commands; the thread list's search is for email.
 
+#### Search Bar Area
+
+The search bar area is two lines: the input field and a context line below it. **Both lines are always visible** — the area has fixed height whether idle or searching. No layout jump when entering/leaving search.
+
+```
+Idle:
+┌─────────────────────────────────────┐
+│ 🔍 Search...                       │
+│ Inbox                     Foo Corp │
+├─────────────────────────────────────┤
+│ [thread cards...]                   │
+
+Searching:
+┌─────────────────────────────────────┐
+│ 🔍 from:alice meeting              │
+│ 47 results                    All ↗│
+├─────────────────────────────────────┤
+│ [search results...]                 │
+
+Idle, all accounts scope:
+┌─────────────────────────────────────┐
+│ 🔍 Search...                       │
+│ Inbox                          All │
+├─────────────────────────────────────┤
+│ [thread cards...]                   │
+```
+
+**Context line (idle):** current folder/view name on the left, account scope on the right. This is the persistent "what am I looking at" indicator — the sidebar selection tells you too, but the context line keeps it visible without eye travel.
+
+**Context line (searching):** result count on the left, scope on the right with a clickable "All ↗" to widen to all accounts if currently scoped to one.
+
+**Typeahead popups** (for `from:`, `to:`, `account:`, `label:`, `folder:`, `before:`/`after:` — see `docs/search/problem-statement.md`) overlay the thread list below. They don't push the list down.
+
+**Smart folder display:** when a smart folder is selected in the sidebar, the search bar shows the smart folder's query string (editable). The context line shows the smart folder name on the left. Modifying the query updates results live; saving is explicit via palette.
+
 ## Conversation / Reading Pane
 
 ### Purpose
@@ -327,6 +362,44 @@ Clicking Reply on a message (or pressing `r`) opens an inline reply composer dir
 For Reply All and Forward, the same inline composer appears with the appropriate recipients/content prefilled.
 
 A "pop out" button on the inline composer opens it in a separate window for long-form composition. The command palette's Compose command (`c`) opens a standalone compose window directly.
+
+### Right Sidebar (Calendar + Pinned Items)
+
+A collapsible right sidebar that shows cross-cutting state alongside the main email view. Off by default. Toggled via keyboard shortcut or command palette ("Toggle Right Sidebar"). When open, the reading pane narrows to make room. When closed, the reading pane reclaims the space.
+
+**Fixed width, not resizable.** Unlike the sidebar and thread list dividers, the right sidebar has a set width (~240-280px). No drag handle. This is a reference panel, not a primary work surface.
+
+**Auto-collapse:** When the window width drops below ~1200px, the right sidebar automatically collapses if it's open. The reading pane needs the space more than a glance panel does at that size.
+
+**Layout (stacked, both visible):**
+
+```
+┌──────────────────────────┐
+│  ◀ March 2026            │
+│  Mo Tu We Th Fr Sa Su    │
+│         1  2  3  4  5    │
+│   6  7  8  9 10 11 12    │
+│  13 14 15 16 17 18 19    │
+│  20 21 22 23 24 25 26    │
+│  27 28 29 30 31          │
+│──────────────────────────│
+│  Today                   │
+│  10:00  Standup          │
+│  14:00  Client call      │
+│  16:30  1:1 with Alice   │
+│──────────────────────────│
+│  ★ Pinned Items          │
+│  Contract review (Inbox) │
+│  Q2 budget sign-off      │
+│  Reply to legal re: NDA  │
+└──────────────────────────┘
+```
+
+**Top section: Mini calendar** — month grid + today's agenda (upcoming events). Shows enough to answer "what's my day look like" without leaving email. Clicking an event could open it in detail (TBD — depends on calendar UI).
+
+**Bottom section: Pinned/starred items** — threads the user has starred or pinned. A persistent list of "things I need to deal with" that stays visible while triaging the inbox. Clicking an item navigates to that thread.
+
+This replicates Outlook's To Do bar behavior — the two most common reasons enterprise users glance away from email are "when's my next meeting" and "what have I flagged for follow-up."
 
 ### Empty State
 
