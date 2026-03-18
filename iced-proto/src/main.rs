@@ -114,6 +114,7 @@ struct App {
     thread_attachments: Vec<ThreadAttachment>,
     message_expanded: Vec<bool>,
     attachments_collapsed: bool,
+    attachment_collapse_cache: std::collections::HashMap<String, bool>,
     show_settings: bool,
     settings: ui::settings::SettingsState,
     window: window_state::WindowState,
@@ -147,6 +148,7 @@ impl App {
             thread_attachments: Vec::new(),
             message_expanded: Vec::new(),
             attachments_collapsed: false,
+            attachment_collapse_cache: std::collections::HashMap::new(),
             show_settings: false,
             settings: ui::settings::SettingsState::with_scale(
                 *DEFAULT_SCALE.get().unwrap_or(&1.0),
@@ -304,6 +306,11 @@ impl App {
             }
             Message::SelectThread(idx) => {
                 self.selected_thread = Some(idx);
+                // Restore attachment collapse state from cache
+                self.attachments_collapsed = self.threads.get(idx)
+                    .and_then(|t| self.attachment_collapse_cache.get(&t.id))
+                    .copied()
+                    .unwrap_or(false);
                 if let Some(thread) = self.threads.get(idx) {
                     let db = Arc::clone(&self.db);
                     let account_id = thread.account_id.clone();
@@ -471,6 +478,10 @@ impl App {
             }
             Message::ToggleAttachmentsCollapsed => {
                 self.attachments_collapsed = !self.attachments_collapsed;
+                if let Some(thread) = self.selected_thread.and_then(|i| self.threads.get(i)) {
+                    self.attachment_collapse_cache
+                        .insert(thread.id.clone(), self.attachments_collapsed);
+                }
                 Task::none()
             }
             Message::SetDateDisplay(display) => {

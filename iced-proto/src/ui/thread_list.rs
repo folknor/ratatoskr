@@ -32,15 +32,20 @@ pub fn view<'a>(
     )
     .padding(PAD_PANEL_HEADER);
 
-    let mut list = column![].spacing(0);
-    for (i, thread) in threads.iter().enumerate() {
-        // Empty label colors for now — backend integration later
-        let label_colors: &[(Color,)] = &[];
-        list = list.push(widgets::thread_card(thread, i, selected_thread == Some(i), label_colors));
-    }
+    let body: Element<'a, Message> = if threads.is_empty() {
+        widgets::empty_placeholder("No conversations", "This folder is empty")
+    } else {
+        let mut list = column![].spacing(0);
+        for (i, thread) in threads.iter().enumerate() {
+            // Empty label colors for now — backend integration later
+            let label_colors: &[(Color,)] = &[];
+            list = list.push(widgets::thread_card(thread, i, selected_thread == Some(i), label_colors));
+        }
+        scrollable(list).height(Length::Fill).into()
+    };
 
     container(
-        column![header, scrollable(list).height(Length::Fill)]
+        column![header, body]
             .spacing(0)
             .width(Length::Fill),
     )
