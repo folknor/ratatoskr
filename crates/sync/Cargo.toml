@@ -1,0 +1,26 @@
+[package]
+name = "ratatoskr-sync"
+description = "Sync pipeline, persistence, notifications, and state for Ratatoskr"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+rusqlite.workspace = true
+tokio = { workspace = true, features = ["rt"] }
+log = "0.4"
+
+ratatoskr-db = { path = "../db" }
+ratatoskr-body-store = { path = "../body-store" }
+ratatoskr-inline-image-store = { path = "../inline-image-store" }
+ratatoskr-search = { path = "../search" }
+ratatoskr-categorization = { path = "../categorization" }
+ratatoskr-filters = { path = "../filters" }
+ratatoskr-smart-labels = { path = "../smart-labels" }
+ratatoskr-threading = { path = "../threading" }

@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::db::DbState;
+use ratatoskr_db::db::DbState;
 
 pub async fn blocked_thread_ids(
     db: &DbState,

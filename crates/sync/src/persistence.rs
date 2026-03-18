@@ -2,9 +2,9 @@ use std::collections::HashSet;
 
 use rusqlite::Transaction;
 
-use crate::body_store::{BodyStoreState, MessageBody};
-use crate::inline_image_store::{InlineImage, InlineImageStoreState};
-use crate::search::{SearchDocument, SearchState};
+use ratatoskr_body_store::{BodyStoreState, MessageBody};
+use ratatoskr_inline_image_store::{InlineImage, InlineImageStoreState};
+use ratatoskr_search::{SearchDocument, SearchState};
 
 pub struct ThreadAggregate {
     pub subject: Option<String>,

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::smart_labels::AppliedSmartLabelMatch;
+use ratatoskr_smart_labels::AppliedSmartLabelMatch;
 
 /// Progress event emitted during sync.
 #[derive(Debug, Clone, Serialize)]

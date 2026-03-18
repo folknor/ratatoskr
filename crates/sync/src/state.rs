@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::db::DbState;
+use ratatoskr_db::db::DbState;
 use rusqlite::OptionalExtension;
 
 pub async fn save_account_history_id(

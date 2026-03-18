@@ -5212,6 +5212,7 @@ dependencies = [
  "ratatoskr-seen-addresses",
  "ratatoskr-smart-labels",
  "ratatoskr-smtp",
+ "ratatoskr-sync",
  "ratatoskr-threading",
  "regex",
  "reqwest 0.13.2",
@@ -5349,6 +5350,25 @@ dependencies = [
  "mail-parser",
  "ratatoskr-provider-utils",
  "serde",
+]
+
+[[package]]
+name = "ratatoskr-sync"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "ratatoskr-body-store",
+ "ratatoskr-categorization",
+ "ratatoskr-db",
+ "ratatoskr-filters",
+ "ratatoskr-inline-image-store",
+ "ratatoskr-search",
+ "ratatoskr-smart-labels",
+ "ratatoskr-threading",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

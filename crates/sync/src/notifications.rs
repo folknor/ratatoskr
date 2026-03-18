@@ -2,11 +2,11 @@ use std::collections::{HashMap, HashSet};
 
 use rusqlite::Connection;
 
-use crate::categorization::AiCategorizationCandidate;
-use crate::db::queries_extra::load_recent_rule_categorized_threads;
-use crate::db::DbState;
-use crate::filters::FilterableMessage;
-use crate::sync::types::NotificationCandidate;
+use ratatoskr_categorization::AiCategorizationCandidate;
+use ratatoskr_db::db::queries::load_recent_rule_categorized_threads;
+use ratatoskr_db::db::DbState;
+use ratatoskr_filters::FilterableMessage;
+use crate::types::NotificationCandidate;
 
 /// Check settings and return threads that need AI categorization.
 pub async fn get_ai_categorization_candidates(
