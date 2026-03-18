@@ -1,7 +1,87 @@
 [workspace]
+resolver = "2"
 members = [
     "crates/core",
     "crates/app",
     "crates/squeeze",
 ]
-resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["folknor"]
+license = "Apache-2.0"
+
+[workspace.lints.clippy]
+# Style: modern idiomatic Rust
+uninlined_format_args = "deny"
+cloned_instead_of_copied = "deny"
+redundant_closure_for_method_calls = "deny"
+semicolon_if_nothing_returned = "deny"
+manual_string_new = "deny"
+explicit_iter_loop = "deny"
+implicit_clone = "deny"
+needless_pass_by_value = "deny"
+unnecessary_sort_by = "deny"
+collapsible_match = "deny"
+if_same_then_else = "deny"
+needless_borrow = "deny"
+ptr_arg = "deny"
+redundant_locals = "deny"
+regex_creation_in_loops = "deny"
+unnecessary_unwrap = "deny"
+wrong_self_convention = "deny"
+
+# Safety: strict error handling
+unwrap_in_result = "deny"
+ok_expect = "deny"
+unwrap_used = "deny"
+
+# Async safety
+await_holding_lock = "deny"
+await_holding_refcell_ref = "deny"
+
+# Type safety
+large_enum_variant = "deny"
+clone_on_ref_ptr = "deny"
+float_cmp = "deny"
+cast_sign_loss = "deny"
+cast_possible_truncation = "deny"
+cast_possible_wrap = "deny"
+
+# Safety: no debug/placeholder code in production
+dbg_macro = "deny"
+todo = "deny"
+
+[workspace.dependencies]
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async runtime
+tokio = { version = "1" }
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# HTTP client
+reqwest = { version = "0.13", default-features = false, features = ["native-tls", "json", "form"] }
+
+# Encoding
+base64 = "0.22"
+
+# XML
+quick-xml = "0.37"
+
+# Optimized release profile
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+panic = "abort"
+
+[profile.release.package."*"]
+opt-level = 3

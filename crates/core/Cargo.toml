@@ -1,59 +1,36 @@
 [package]
 name = "ratatoskr-core"
-version = "0.1.0"
 description = "Framework-agnostic core logic for Ratatoskr"
-authors = ["folknor"]
-license = "Apache-2.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
-[lints.clippy]
-uninlined_format_args = "deny"
-cloned_instead_of_copied = "deny"
-redundant_closure_for_method_calls = "deny"
-semicolon_if_nothing_returned = "deny"
-manual_string_new = "deny"
-explicit_iter_loop = "deny"
-implicit_clone = "deny"
-needless_pass_by_value = "deny"
-unnecessary_sort_by = "deny"
-collapsible_match = "deny"
-if_same_then_else = "deny"
-needless_borrow = "deny"
-ptr_arg = "deny"
-redundant_locals = "deny"
-regex_creation_in_loops = "deny"
-unnecessary_unwrap = "deny"
-wrong_self_convention = "deny"
-unwrap_in_result = "deny"
-ok_expect = "deny"
-await_holding_lock = "deny"
-await_holding_refcell_ref = "deny"
-large_enum_variant = "deny"
-clone_on_ref_ptr = "deny"
-float_cmp = "deny"
-cast_sign_loss = "deny"
-cast_possible_truncation = "deny"
-cast_possible_wrap = "deny"
-unwrap_used = "deny"
+[lints]
+workspace = true
 
 [dependencies]
-serde_json = "1.0"
-serde = { version = "1.0", features = ["derive"] }
+# Workspace deps
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["net", "io-util", "sync", "macros", "rt", "time"] }
+rusqlite.workspace = true
+chrono.workspace = true
+reqwest.workspace = true
+base64.workspace = true
+quick-xml.workspace = true
+
+# Crate-specific deps
 log = "0.4"
-tokio = { version = "1", features = ["net", "io-util", "sync", "macros", "rt", "time"] }
 futures = "0.3"
 async-imap = { version = "0.11", default-features = false, features = ["runtime-tokio"] }
 tokio-native-tls = "0.3"
 native-tls = "0.2"
 mail-parser = "0.11"
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-native-tls", "builder"] }
-base64 = "0.22"
 utf7-imap = "0.3"
 socket2 = "0.6"
-reqwest = { version = "0.13", default-features = false, features = ["native-tls", "json", "form"] }
-rusqlite = { version = "0.32", features = ["bundled"] }
 tantivy = "0.25"
-chrono = { version = "0.4", features = ["serde"] }
 zstd = "0.13"
 aes-gcm = "0.10"
 getrandom = { version = "0.2", features = ["std"] }
@@ -63,7 +40,6 @@ jmap-client = { version = "0.4", default-features = false, features = ["async"] 
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 async-trait = "0.1"
 hickory-resolver = { version = "0.25", features = ["tokio"] }
-quick-xml = "0.37"
 xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 sha2 = "0.10"
 unicode-segmentation = "1.12"
