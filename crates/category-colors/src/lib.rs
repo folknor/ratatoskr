@@ -59,7 +59,7 @@ fn color_distance_sq(a: (u8, u8, u8), b: (u8, u8, u8)) -> u32 {
 /// The preset name is matched case-insensitively.
 ///
 /// ```
-/// # use ratatoskr_core::category_colors::preset_to_hex;
+/// # use ratatoskr_category_colors::preset_to_hex;
 /// assert_eq!(preset_to_hex("preset0"), Some(("#e74c3c", "#ffffff")));
 /// assert_eq!(preset_to_hex("Preset7"), Some(("#3498db", "#ffffff")));
 /// assert_eq!(preset_to_hex("unknown"), None);
@@ -78,7 +78,7 @@ pub fn preset_to_hex(preset: &str) -> Option<(&'static str, &'static str)> {
 /// Euclidean distance in RGB space, or `None` if `bg_hex` is malformed.
 ///
 /// ```
-/// # use ratatoskr_core::category_colors::nearest_exchange_preset;
+/// # use ratatoskr_category_colors::nearest_exchange_preset;
 /// // Exact match
 /// assert_eq!(nearest_exchange_preset("#e74c3c"), Some("preset0"));
 /// // Close to blue

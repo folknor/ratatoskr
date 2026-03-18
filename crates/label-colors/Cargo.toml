@@ -1,0 +1,14 @@
+[package]
+name = "ratatoskr-label-colors"
+description = "Deterministic label color resolution for Ratatoskr"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ratatoskr-category-colors = { path = "../category-colors" }
+ratatoskr-db = { path = "../db" }

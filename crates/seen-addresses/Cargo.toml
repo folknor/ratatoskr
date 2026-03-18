@@ -1,0 +1,17 @@
+[package]
+name = "ratatoskr-seen-addresses"
+description = "Address observation tracking and autocomplete for Ratatoskr"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ratatoskr-db = { path = "../db" }
+serde.workspace = true
+rusqlite.workspace = true
+mail-parser = "0.11"
+log = "0.4"

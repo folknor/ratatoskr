@@ -27,6 +27,13 @@ ratatoskr-command-palette = { path = "../command-palette" }
 ratatoskr-crypto = { path = "../crypto" }
 ratatoskr-inline-image-store = { path = "../inline-image-store" }
 ratatoskr-search = { path = "../search" }
+ratatoskr-category-colors = { path = "../category-colors" }
+ratatoskr-label-colors = { path = "../label-colors" }
+ratatoskr-categorization = { path = "../categorization" }
+ratatoskr-threading = { path = "../threading" }
+ratatoskr-filters = { path = "../filters" }
+ratatoskr-smart-labels = { path = "../smart-labels" }
+ratatoskr-seen-addresses = { path = "../seen-addresses" }
 
 # Crate-specific deps
 log = "0.4"

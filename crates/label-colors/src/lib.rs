@@ -4,8 +4,8 @@
 //! providers store `None`. This module provides a hash-based fallback that
 //! assigns a stable color from the 25-preset palette to any label.
 
-use crate::category_colors::all_presets;
-use crate::db::types::DbLabel;
+use ratatoskr_category_colors::all_presets;
+use ratatoskr_db::db::types::DbLabel;
 
 /// Deterministic color assignment for a label that has no synced color.
 ///

@@ -5131,6 +5131,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ratatoskr-categorization"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "ratatoskr-category-colors"
+version = "0.1.0"
+
+[[package]]
 name = "ratatoskr-cloud-attachments"
 version = "0.1.0"
 dependencies = [
@@ -5174,11 +5185,18 @@ dependencies = [
  "native-tls",
  "quick-xml 0.37.5",
  "ratatoskr-body-store",
+ "ratatoskr-categorization",
+ "ratatoskr-category-colors",
  "ratatoskr-command-palette",
  "ratatoskr-crypto",
  "ratatoskr-db",
+ "ratatoskr-filters",
  "ratatoskr-inline-image-store",
+ "ratatoskr-label-colors",
  "ratatoskr-search",
+ "ratatoskr-seen-addresses",
+ "ratatoskr-smart-labels",
+ "ratatoskr-threading",
  "regex",
  "reqwest 0.13.2",
  "resvg",
@@ -5222,6 +5240,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ratatoskr-filters"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "ratatoskr-inline-image-store"
 version = "0.1.0"
 dependencies = [
@@ -5229,6 +5254,14 @@ dependencies = [
  "rusqlite",
  "serde",
  "tokio",
+]
+
+[[package]]
+name = "ratatoskr-label-colors"
+version = "0.1.0"
+dependencies = [
+ "ratatoskr-category-colors",
+ "ratatoskr-db",
 ]
 
 [[package]]
@@ -5241,12 +5274,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "ratatoskr-seen-addresses"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "mail-parser",
+ "ratatoskr-db",
+ "rusqlite",
+ "serde",
+]
+
+[[package]]
 name = "ratatoskr-smart-folder"
 version = "0.1.0"
 dependencies = [
  "chrono",
  "ratatoskr-core",
  "rusqlite",
+]
+
+[[package]]
+name = "ratatoskr-smart-labels"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "ratatoskr-threading"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

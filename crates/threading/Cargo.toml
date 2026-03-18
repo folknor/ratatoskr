@@ -1,0 +1,13 @@
+[package]
+name = "ratatoskr-threading"
+description = "JWZ email threading algorithm for Ratatoskr"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true

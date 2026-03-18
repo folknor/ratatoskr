@@ -14,6 +14,13 @@ members = [
     "crates/ai",
     "crates/calendar",
     "crates/cloud-attachments",
+    "crates/category-colors",
+    "crates/label-colors",
+    "crates/categorization",
+    "crates/threading",
+    "crates/filters",
+    "crates/smart-labels",
+    "crates/seen-addresses",
 ]
 
 exclude = [
