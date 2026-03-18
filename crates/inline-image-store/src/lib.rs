@@ -287,36 +287,39 @@ impl InlineImageStoreState {
     }
 
     /// Delete inline image blobs that are no longer referenced by any attachment row.
+    ///
+    /// First call [`find_unreferenced_hashes`] with the main DB connection
+    /// (inside a `with_conn` block) to get the orphaned hashes, then pass
+    /// them here.
     pub async fn delete_unreferenced(
         &self,
-        db: &crate::db::DbState,
-        content_hashes: Vec<String>,
+        orphaned_hashes: Vec<String>,
     ) -> Result<u64, String> {
-        if content_hashes.is_empty() {
-            return Ok(0);
-        }
-
-        let mut orphaned = Vec::new();
-        for content_hash in content_hashes {
-            let hash_for_query = content_hash.clone();
-            let remaining_refs: i64 = db
-                .with_conn(move |conn| {
-                    conn.query_row(
-                        "SELECT COUNT(*) AS cnt FROM attachments
-                         WHERE is_inline = 1 AND content_hash = ?1",
-                        params![hash_for_query],
-                        |row| row.get("cnt"),
-                    )
-                    .map_err(|e| format!("count inline image refs: {e}"))
-                })
-                .await?;
-            if remaining_refs == 0 {
-                orphaned.push(content_hash);
-            }
-        }
-
-        self.delete_hashes(orphaned).await
+        self.delete_hashes(orphaned_hashes).await
     }
+}
+
+/// Given a set of content hashes, return only those that have zero remaining
+/// references in the main database's `attachments` table.
+pub fn find_unreferenced_hashes(
+    main_db: &Connection,
+    content_hashes: &[String],
+) -> Result<Vec<String>, String> {
+    let mut orphaned = Vec::new();
+    for content_hash in content_hashes {
+        let remaining_refs: i64 = main_db
+            .query_row(
+                "SELECT COUNT(*) AS cnt FROM attachments
+                 WHERE is_inline = 1 AND content_hash = ?1",
+                params![content_hash],
+                |row| row.get("cnt"),
+            )
+            .map_err(|e| format!("count inline image refs: {e}"))?;
+        if remaining_refs == 0 {
+            orphaned.push(content_hash.clone());
+        }
+    }
+    Ok(orphaned)
 }
 
 /// Collect all distinct inline content hashes for an account's messages.

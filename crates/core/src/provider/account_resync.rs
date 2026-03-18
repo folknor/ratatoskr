@@ -59,7 +59,15 @@ pub async fn prepare_account_resync(
 
     // Clean up orphaned inline images after messages are gone
     if !inline_hashes.is_empty() {
-        let _ = inline_images.delete_unreferenced(db, inline_hashes).await;
+        let orphaned = db
+            .with_conn({
+                let hashes = inline_hashes;
+                move |conn| {
+                    crate::inline_image_store::find_unreferenced_hashes(conn, &hashes)
+                }
+            })
+            .await?;
+        let _ = inline_images.delete_unreferenced(orphaned).await;
     }
 
     // Evict file-based attachment cache entries that are now over the limit

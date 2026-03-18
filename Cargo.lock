@@ -5087,6 +5087,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "973443cf09a9c8656b574a866ab68dfa19f0867d0340648c7d2f6a71b8a8ea68"
 
 [[package]]
+name = "ratatoskr-body-store"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "rusqlite",
+ "serde",
+ "tokio",
+ "zstd",
+]
+
+[[package]]
 name = "ratatoskr-command-palette"
 version = "0.1.0"
 dependencies = [
@@ -5116,8 +5127,10 @@ dependencies = [
  "mail-parser",
  "native-tls",
  "quick-xml 0.37.5",
+ "ratatoskr-body-store",
  "ratatoskr-command-palette",
  "ratatoskr-crypto",
+ "ratatoskr-inline-image-store",
  "ratatoskr-search",
  "regex",
  "reqwest 0.13.2",
@@ -5148,6 +5161,16 @@ dependencies = [
  "base64 0.22.1",
  "getrandom 0.2.17",
  "log",
+]
+
+[[package]]
+name = "ratatoskr-inline-image-store"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "rusqlite",
+ "serde",
+ "tokio",
 ]
 
 [[package]]

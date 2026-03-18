@@ -7,6 +7,8 @@ members = [
     "crates/command-palette",
     "crates/crypto",
     "crates/search",
+    "crates/body-store",
+    "crates/inline-image-store",
 ]
 
 [workspace.package]

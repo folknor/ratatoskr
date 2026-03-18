@@ -1,0 +1,17 @@
+[package]
+name = "ratatoskr-body-store"
+description = "Zstd-compressed email body store for Ratatoskr"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rusqlite.workspace = true
+tokio = { workspace = true, features = ["sync", "rt"] }
+zstd = "0.13"
+log = "0.4"
+serde.workspace = true
