@@ -1641,9 +1641,9 @@ dependencies = [
 
 [[package]]
 name = "euclid"
-version = "0.22.13"
+version = "0.22.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df61bf483e837f88d5c2291dcf55c67be7e676b3a51acc48db3a7b163b91ed63"
+checksum = "f1a05365e3b1c6d1650318537c7460c6923f1abdd272ad6842baa2b509957a06"
 dependencies = [
  "num-traits",
 ]
@@ -2527,7 +2527,7 @@ dependencies = [
 [[package]]
 name = "iced"
 version = "0.15.0-dev"
-source = "git+https://github.com/squidowl/iced?rev=b201e4f#b201e4fc8f39de1989305694a3ba2e9c2fa6fb07"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#1f69ab310fe947c5bac81312753083319b9e4386"
 dependencies = [
  "iced_core",
  "iced_debug",
@@ -2542,7 +2542,7 @@ dependencies = [
 [[package]]
 name = "iced_core"
 version = "0.15.0-dev"
-source = "git+https://github.com/squidowl/iced?rev=b201e4f#b201e4fc8f39de1989305694a3ba2e9c2fa6fb07"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#1f69ab310fe947c5bac81312753083319b9e4386"
 dependencies = [
  "bitflags 2.11.0",
  "bytes",
@@ -2559,7 +2559,7 @@ dependencies = [
 [[package]]
 name = "iced_debug"
 version = "0.15.0-dev"
-source = "git+https://github.com/squidowl/iced?rev=b201e4f#b201e4fc8f39de1989305694a3ba2e9c2fa6fb07"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#1f69ab310fe947c5bac81312753083319b9e4386"
 dependencies = [
  "iced_core",
  "iced_futures",
@@ -2569,7 +2569,7 @@ dependencies = [
 [[package]]
 name = "iced_futures"
 version = "0.15.0-dev"
-source = "git+https://github.com/squidowl/iced?rev=b201e4f#b201e4fc8f39de1989305694a3ba2e9c2fa6fb07"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#1f69ab310fe947c5bac81312753083319b9e4386"
 dependencies = [
  "futures",
  "iced_core",
@@ -2583,7 +2583,7 @@ dependencies = [
 [[package]]
 name = "iced_graphics"
 version = "0.15.0-dev"
-source = "git+https://github.com/squidowl/iced?rev=b201e4f#b201e4fc8f39de1989305694a3ba2e9c2fa6fb07"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#1f69ab310fe947c5bac81312753083319b9e4386"
 dependencies = [
  "bitflags 2.11.0",
  "bytemuck",
@@ -2602,7 +2602,7 @@ dependencies = [
 [[package]]
 name = "iced_program"
 version = "0.15.0-dev"
-source = "git+https://github.com/squidowl/iced?rev=b201e4f#b201e4fc8f39de1989305694a3ba2e9c2fa6fb07"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#1f69ab310fe947c5bac81312753083319b9e4386"
 dependencies = [
  "iced_graphics",
  "iced_runtime",
@@ -2611,7 +2611,7 @@ dependencies = [
 [[package]]
 name = "iced_renderer"
 version = "0.15.0-dev"
-source = "git+https://github.com/squidowl/iced?rev=b201e4f#b201e4fc8f39de1989305694a3ba2e9c2fa6fb07"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#1f69ab310fe947c5bac81312753083319b9e4386"
 dependencies = [
  "iced_graphics",
  "iced_tiny_skia",
@@ -2623,7 +2623,7 @@ dependencies = [
 [[package]]
 name = "iced_runtime"
 version = "0.15.0-dev"
-source = "git+https://github.com/squidowl/iced?rev=b201e4f#b201e4fc8f39de1989305694a3ba2e9c2fa6fb07"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#1f69ab310fe947c5bac81312753083319b9e4386"
 dependencies = [
  "bytes",
  "iced_core",
@@ -2635,7 +2635,7 @@ dependencies = [
 [[package]]
 name = "iced_tiny_skia"
 version = "0.15.0-dev"
-source = "git+https://github.com/squidowl/iced?rev=b201e4f#b201e4fc8f39de1989305694a3ba2e9c2fa6fb07"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#1f69ab310fe947c5bac81312753083319b9e4386"
 dependencies = [
  "bytemuck",
  "cosmic-text",
@@ -2651,7 +2651,7 @@ dependencies = [
 [[package]]
 name = "iced_wgpu"
 version = "0.15.0-dev"
-source = "git+https://github.com/squidowl/iced?rev=b201e4f#b201e4fc8f39de1989305694a3ba2e9c2fa6fb07"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#1f69ab310fe947c5bac81312753083319b9e4386"
 dependencies = [
  "bitflags 2.11.0",
  "bytemuck",
@@ -2664,6 +2664,7 @@ dependencies = [
  "log",
  "lyon",
  "rustc-hash 2.1.1",
+ "sluggrs",
  "thiserror 2.0.18",
  "wgpu",
 ]
@@ -2671,7 +2672,7 @@ dependencies = [
 [[package]]
 name = "iced_widget"
 version = "0.15.0-dev"
-source = "git+https://github.com/squidowl/iced?rev=b201e4f#b201e4fc8f39de1989305694a3ba2e9c2fa6fb07"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#1f69ab310fe947c5bac81312753083319b9e4386"
 dependencies = [
  "iced_renderer",
  "log",
@@ -2685,7 +2686,7 @@ dependencies = [
 [[package]]
 name = "iced_winit"
 version = "0.15.0-dev"
-source = "git+https://github.com/squidowl/iced?rev=b201e4f#b201e4fc8f39de1989305694a3ba2e9c2fa6fb07"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#1f69ab310fe947c5bac81312753083319b9e4386"
 dependencies = [
  "iced_debug",
  "iced_program",
@@ -5158,6 +5159,7 @@ dependencies = [
  "ratatoskr-provider-utils",
  "ratatoskr-search",
  "ratatoskr-seen-addresses",
+ "ratatoskr-smart-folder",
  "ratatoskr-smtp",
  "ratatoskr-stores",
  "ratatoskr-sync",
@@ -5343,6 +5345,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "tantivy",
+ "tempfile",
  "tokio",
 ]
 
@@ -6184,6 +6187,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bdd58c3c93c3d278ca835519292445cb4b0d4dc59ccfdf7ceadaab3f8aeb4038"
 dependencies = [
  "version_check",
+]
+
+[[package]]
+name = "sluggrs"
+version = "0.1.0"
+source = "git+https://github.com/folknor/sluggrs.git?rev=aea7d08#aea7d08e4c07ad35a5e4a093768801bcda563558"
+dependencies = [
+ "bytemuck",
+ "cosmic-text",
+ "log",
+ "skrifa 0.40.0",
+ "wgpu",
 ]
 
 [[package]]

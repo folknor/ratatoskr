@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -98,7 +99,7 @@ pub struct SearchDocument {
     pub has_attachment: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchResult {
     pub message_id: String,
@@ -115,7 +116,9 @@ pub struct SearchResult {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchParams {
-    pub account_id: String,
+    /// Account filter. `None` = search all accounts.
+    /// `Some(ids)` = search only those accounts.
+    pub account_ids: Option<Vec<String>>,
     pub free_text: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
@@ -339,12 +342,15 @@ impl SearchState {
         Ok(())
     }
 
-    /// Simple free-text search filtered by account_id.
+    /// Simple free-text search, optionally filtered by account IDs.
+    ///
+    /// - `account_ids = None` — search all accounts
+    /// - `account_ids = Some(ids)` — search only the given accounts
     #[allow(dead_code)]
     pub fn search(
         &self,
         query_str: &str,
-        account_id: &str,
+        account_ids: Option<&[String]>,
         limit: usize,
     ) -> Result<Vec<SearchResult>, String> {
         let searcher = self.reader.searcher();
@@ -362,15 +368,13 @@ impl SearchState {
             .parse_query(query_str)
             .map_err(|e| format!("parse query: {e}"))?;
 
-        let account_filter: Box<dyn Query> = Box::new(TermQuery::new(
-            Term::from_field_text(self.fields.account_id, account_id),
-            tantivy::schema::IndexRecordOption::Basic,
-        ));
+        let mut clauses: Vec<(Occur, Box<dyn Query>)> = vec![(Occur::Must, text_query)];
 
-        let combined = BooleanQuery::new(vec![
-            (Occur::Must, text_query),
-            (Occur::Must, account_filter),
-        ]);
+        if let Some(filter) = self.build_account_filter(account_ids) {
+            clauses.push((Occur::Must, filter));
+        }
+
+        let combined = BooleanQuery::new(clauses);
 
         let top_docs = searcher
             .search(&combined, &TopDocs::with_limit(limit))
@@ -385,14 +389,12 @@ impl SearchState {
         let searcher = self.reader.searcher();
         let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
 
-        // Always filter by account_id
-        clauses.push((
-            Occur::Must,
-            Box::new(TermQuery::new(
-                Term::from_field_text(self.fields.account_id, &params.account_id),
-                tantivy::schema::IndexRecordOption::Basic,
-            )),
-        ));
+        // Filter by account IDs (None = all accounts)
+        if let Some(filter) =
+            self.build_account_filter(params.account_ids.as_deref())
+        {
+            clauses.push((Occur::Must, filter));
+        }
 
         // Free text → QueryParser on subject+from_name+body_text+snippet
         if let Some(ref text) = params.free_text
@@ -530,6 +532,38 @@ impl SearchState {
         self.collect_results(&searcher, &top_docs)
     }
 
+    /// Build an account filter query from optional account IDs.
+    ///
+    /// - `None` → no filter (search all accounts)
+    /// - `Some(&[])` → no filter (empty slice treated as all)
+    /// - `Some(&[id])` → single `TermQuery`
+    /// - `Some(&[id1, id2, ...])` → `BooleanQuery` with `Should` clauses
+    fn build_account_filter(&self, account_ids: Option<&[String]>) -> Option<Box<dyn Query>> {
+        let ids = account_ids?;
+        match ids.len() {
+            0 => None,
+            1 => Some(Box::new(TermQuery::new(
+                Term::from_field_text(self.fields.account_id, &ids[0]),
+                tantivy::schema::IndexRecordOption::Basic,
+            ))),
+            _ => {
+                let sub: Vec<(Occur, Box<dyn Query>)> = ids
+                    .iter()
+                    .map(|id| -> (Occur, Box<dyn Query>) {
+                        (
+                            Occur::Should,
+                            Box::new(TermQuery::new(
+                                Term::from_field_text(self.fields.account_id, id),
+                                tantivy::schema::IndexRecordOption::Basic,
+                            )),
+                        )
+                    })
+                    .collect();
+                Some(Box::new(BooleanQuery::new(sub)))
+            }
+        }
+    }
+
     /// Clear all documents from the index.
     pub async fn clear_index(&self) -> Result<(), String> {
         let mut writer = self.writer.lock().await;
@@ -586,5 +620,241 @@ impl SearchState {
         }
 
         Ok(results)
+    }
+}
+
+/// Group message-level search results by `thread_id`, keeping the
+/// highest-scoring result per thread. Returns one `SearchResult` per
+/// unique `thread_id`, sorted by rank descending.
+pub fn group_by_thread(results: Vec<SearchResult>) -> Vec<SearchResult> {
+    let mut best: HashMap<String, SearchResult> = HashMap::new();
+
+    for result in results {
+        best.entry(result.thread_id.clone())
+            .and_modify(|existing| {
+                if result.rank > existing.rank {
+                    *existing = result.clone();
+                }
+            })
+            .or_insert(result);
+    }
+
+    let mut grouped: Vec<SearchResult> = best.into_values().collect();
+    grouped.sort_by(|a, b| b.rank.partial_cmp(&a.rank).unwrap_or(std::cmp::Ordering::Equal));
+    grouped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Helpers ──────────────────────────────────────────────────────
+
+    fn make_doc(msg_id: &str, acct: &str, thread: &str, subject: &str) -> SearchDocument {
+        SearchDocument {
+            message_id: msg_id.into(),
+            account_id: acct.into(),
+            thread_id: thread.into(),
+            subject: Some(subject.into()),
+            from_name: Some("Sender".into()),
+            from_address: Some("sender@test.com".into()),
+            to_addresses: Some("recv@test.com".into()),
+            body_text: Some(format!("Body of {subject}")),
+            snippet: Some(format!("Snippet of {subject}")),
+            date: 1_700_000_000,
+            is_read: false,
+            is_starred: false,
+            has_attachment: false,
+        }
+    }
+
+    fn init_temp_search() -> (SearchState, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state = SearchState::init(dir.path()).expect("init search");
+        (state, dir)
+    }
+
+    fn make_result(thread_id: &str, rank: f32) -> SearchResult {
+        SearchResult {
+            message_id: format!("msg-{thread_id}-{rank}"),
+            account_id: "acct1".into(),
+            thread_id: thread_id.into(),
+            subject: None,
+            from_name: None,
+            from_address: None,
+            snippet: None,
+            date: 0,
+            rank,
+        }
+    }
+
+    // ── group_by_thread tests ────────────────────────────────────────
+
+    #[test]
+    fn group_by_thread_empty() {
+        let grouped = group_by_thread(vec![]);
+        assert!(grouped.is_empty());
+    }
+
+    #[test]
+    fn group_by_thread_keeps_highest_score() {
+        let results = vec![
+            make_result("t1", 1.0),
+            make_result("t1", 5.0),
+            make_result("t1", 3.0),
+            make_result("t2", 2.0),
+            make_result("t2", 4.0),
+        ];
+
+        let grouped = group_by_thread(results);
+        assert_eq!(grouped.len(), 2);
+        // Sorted by rank DESC: t1(5.0), t2(4.0)
+        assert_eq!(grouped[0].thread_id, "t1");
+        assert!((grouped[0].rank - 5.0).abs() < f32::EPSILON);
+        assert_eq!(grouped[1].thread_id, "t2");
+        assert!((grouped[1].rank - 4.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn group_by_thread_single_message_per_thread() {
+        let results = vec![
+            make_result("t1", 3.0),
+            make_result("t2", 1.0),
+            make_result("t3", 2.0),
+        ];
+
+        let grouped = group_by_thread(results);
+        assert_eq!(grouped.len(), 3);
+        assert_eq!(grouped[0].thread_id, "t1");
+        assert_eq!(grouped[1].thread_id, "t3");
+        assert_eq!(grouped[2].thread_id, "t2");
+    }
+
+    // ── Multi-account search tests ───────────────────────────────────
+
+    #[tokio::test]
+    async fn search_no_account_filter_returns_all() {
+        let (state, _dir) = init_temp_search();
+        let docs = vec![
+            make_doc("m1", "acct-a", "t1", "Quarterly report"),
+            make_doc("m2", "acct-b", "t2", "Quarterly summary"),
+        ];
+        state.index_messages_batch(&docs).await.expect("index");
+        state.reader.reload().expect("reload");
+
+        let results = state.search("quarterly", None, 10).expect("search");
+        assert_eq!(results.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn search_single_account_filter() {
+        let (state, _dir) = init_temp_search();
+        let docs = vec![
+            make_doc("m1", "acct-a", "t1", "Quarterly report"),
+            make_doc("m2", "acct-b", "t2", "Quarterly summary"),
+        ];
+        state.index_messages_batch(&docs).await.expect("index");
+        state.reader.reload().expect("reload");
+
+        let ids = vec!["acct-a".to_string()];
+        let results = state.search("quarterly", Some(&ids), 10).expect("search");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].account_id, "acct-a");
+    }
+
+    #[tokio::test]
+    async fn search_multi_account_filter() {
+        let (state, _dir) = init_temp_search();
+        let docs = vec![
+            make_doc("m1", "acct-a", "t1", "Quarterly report"),
+            make_doc("m2", "acct-b", "t2", "Quarterly summary"),
+            make_doc("m3", "acct-c", "t3", "Quarterly budget"),
+        ];
+        state.index_messages_batch(&docs).await.expect("index");
+        state.reader.reload().expect("reload");
+
+        let ids = vec!["acct-a".to_string(), "acct-c".to_string()];
+        let results = state.search("quarterly", Some(&ids), 10).expect("search");
+        assert_eq!(results.len(), 2);
+        let accts: Vec<&str> = results.iter().map(|r| r.account_id.as_str()).collect();
+        assert!(accts.contains(&"acct-a"));
+        assert!(accts.contains(&"acct-c"));
+        assert!(!accts.contains(&"acct-b"));
+    }
+
+    #[tokio::test]
+    async fn search_empty_account_slice_returns_all() {
+        let (state, _dir) = init_temp_search();
+        let docs = vec![
+            make_doc("m1", "acct-a", "t1", "Quarterly report"),
+            make_doc("m2", "acct-b", "t2", "Quarterly summary"),
+        ];
+        state.index_messages_batch(&docs).await.expect("index");
+        state.reader.reload().expect("reload");
+
+        let ids: Vec<String> = vec![];
+        let results = state.search("quarterly", Some(&ids), 10).expect("search");
+        assert_eq!(results.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn search_with_filters_no_account_ids() {
+        let (state, _dir) = init_temp_search();
+        let docs = vec![
+            make_doc("m1", "acct-a", "t1", "Budget proposal"),
+            make_doc("m2", "acct-b", "t2", "Budget review"),
+        ];
+        state.index_messages_batch(&docs).await.expect("index");
+        state.reader.reload().expect("reload");
+
+        let params = SearchParams {
+            account_ids: None,
+            free_text: Some("budget".into()),
+            from: None,
+            to: None,
+            subject: None,
+            has_attachment: None,
+            is_unread: None,
+            is_starred: None,
+            before: None,
+            after: None,
+            label: None,
+            limit: Some(10),
+        };
+        let results = state.search_with_filters(&params).expect("search");
+        assert_eq!(results.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn search_with_filters_multi_account() {
+        let (state, _dir) = init_temp_search();
+        let docs = vec![
+            make_doc("m1", "acct-a", "t1", "Budget proposal"),
+            make_doc("m2", "acct-b", "t2", "Budget review"),
+            make_doc("m3", "acct-c", "t3", "Budget forecast"),
+        ];
+        state.index_messages_batch(&docs).await.expect("index");
+        state.reader.reload().expect("reload");
+
+        let params = SearchParams {
+            account_ids: Some(vec!["acct-b".into(), "acct-c".into()]),
+            free_text: Some("budget".into()),
+            from: None,
+            to: None,
+            subject: None,
+            has_attachment: None,
+            is_unread: None,
+            is_starred: None,
+            before: None,
+            after: None,
+            label: None,
+            limit: Some(10),
+        };
+        let results = state.search_with_filters(&params).expect("search");
+        assert_eq!(results.len(), 2);
+        let accts: Vec<&str> = results.iter().map(|r| r.account_id.as_str()).collect();
+        assert!(accts.contains(&"acct-b"));
+        assert!(accts.contains(&"acct-c"));
+        assert!(!accts.contains(&"acct-a"));
     }
 }

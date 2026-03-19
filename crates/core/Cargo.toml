@@ -26,6 +26,7 @@ ratatoskr-db = { path = "../db" }
 ratatoskr-stores = { path = "../stores" }
 ratatoskr-command-palette = { path = "../command-palette" }
 ratatoskr-search = { path = "../search" }
+ratatoskr-smart-folder = { path = "../smart-folder" }
 ratatoskr-label-colors = { path = "../label-colors" }
 ratatoskr-seen-addresses = { path = "../seen-addresses" }
 ratatoskr-provider-utils = { path = "../provider-utils" }

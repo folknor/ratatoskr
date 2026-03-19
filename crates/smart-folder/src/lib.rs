@@ -3,6 +3,7 @@ mod sql_builder;
 mod tokens;
 
 pub use parser::{ParsedQuery, parse_query};
+pub use sql_builder::query_threads;
 pub use tokens::resolve_query_tokens;
 
 use rusqlite::Connection;

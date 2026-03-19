@@ -16,7 +16,7 @@ rusqlite.workspace = true
 chrono.workspace = true
 
 # Crate-specific deps
-iced = { git = "https://github.com/squidowl/iced", rev = "b201e4f", default-features = false, features = [
+iced = { git = "https://github.com/folknor/iced", branch = "sluggrs", default-features = false, features = [
     "wgpu", "tokio", "lazy", "advanced", "canvas", "web-colors", "wayland", "x11",
 ] }
 dirs = "6"
