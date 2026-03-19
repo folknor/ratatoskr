@@ -4,10 +4,11 @@ Implementation plan for unifying the search backend per `docs/search/problem-sta
 
 ## Current State
 
-Two separate search engines with no bridge:
+The unified search pipeline is implemented (Slices 1-4 complete). Entry point: `crates/core/src/search_pipeline.rs`.
 
-- **Tantivy** (`crates/search/src/lib.rs`) — full-text ranked search. Single-account only. Accepts pre-parsed `SearchParams`. Returns message-level results.
-- **Smart folder SQL** (`crates/smart-folder/src/`) — operator-based SQL queries. Cross-account via `AccountScope`. No ranking. Returns thread-level results.
+- **Tantivy** (`crates/search/src/lib.rs`) — full-text ranked search. Cross-account (multi-account filter via `BooleanQuery`). Returns message-level results with `group_by_thread()` helper.
+- **Smart folder SQL** (`crates/smart-folder/src/`) — operator-based SQL queries. Cross-account via `AccountScope`. Returns thread-level results. Supports all operators below.
+- **Unified pipeline** (`crates/core/src/search_pipeline.rs`) — routes queries through SQL, Tantivy, or both based on parsed content.
 
 ## Target State
 
@@ -21,9 +22,9 @@ Three internal paths based on parsed query content:
 2. **Free text only** → Tantivy, relevance-ranked
 3. **Both** → SQL narrows candidates, Tantivy scores them
 
-## Slice 1: Parser Overhaul
+## Slice 1: Parser Overhaul ✅
 
-Rewrite `crates/smart-folder/src/parser.rs`. The parser is the foundation — everything else builds on its output.
+**Status: Complete.** `crates/smart-folder/src/parser.rs` rewritten. 40 parser tests.
 
 ### ParsedQuery changes
 
@@ -163,9 +164,9 @@ The `__LAST_7_DAYS__` / `__LAST_30_DAYS__` / `__TODAY__` token system in `crates
 3. Keep `resolve_query_tokens` as a backward-compatibility shim until migration is confirmed complete
 4. Remove `tokens.rs` once no queries use the old format
 
-## Slice 2: SQL Builder Expansion
+## Slice 2: SQL Builder Expansion ✅
 
-Extend `crates/smart-folder/src/sql_builder.rs` to handle all new operators.
+**Status: Complete.** All new clause builders implemented. 13 integration tests with in-memory SQLite.
 
 ### New clause builders
 
@@ -239,9 +240,9 @@ EXISTS (SELECT 1 FROM attachments WHERE ... AND mime_type = 'application/pdf')
 
 The SQL builder already returns `Vec<DbThread>` (thread-level). This is correct for the operators-only path and for generating candidate IDs for the Tantivy path.
 
-## Slice 3: Tantivy Cross-Account Support
+## Slice 3: Tantivy Cross-Account Support ✅
 
-Modify `crates/search/src/lib.rs` to support multi-account search.
+**Status: Complete.** `SearchParams.account_ids: Option<Vec<String>>`, `group_by_thread()` helper. 9 tests.
 
 ### SearchParams changes
 
@@ -276,9 +277,9 @@ For the Tantivy-only path: query returns message-level hits, group by `thread_id
 
 For the SQL→Tantivy path: SQL provides the thread metadata, Tantivy provides the score.
 
-## Slice 4: Unified Pipeline
+## Slice 4: Unified Pipeline ✅
 
-New module: `crates/search/src/unified.rs` (or extend `crates/search/src/lib.rs`). Alternatively, this could live in `crates/core/src/` since it bridges the search and smart-folder crates.
+**Status: Complete.** `crates/core/src/search_pipeline.rs` with 3-path router and `UnifiedSearchResult` type. 14 tests.
 
 ### The router
 
@@ -392,14 +393,14 @@ The `labels` table has no generic `role` column. System folders are identified b
 ## Dependency Graph
 
 ```
-Slice 1 (parser — crates/smart-folder/)
-  └── Slice 2 (SQL builder — crates/smart-folder/)
-        └── Slice 4 (unified pipeline — crates/search/ or crates/core/)
-              ├── Slice 5 (app integration — trivial wiring in crates/app/)
+Slice 1 (parser) ✅
+  └── Slice 2 (SQL builder) ✅
+        └── Slice 4 (unified pipeline) ✅
+              ├── Slice 5 (app integration — trivial wiring)
               └── Slice 6 (smart folder migration)
 
-Slice 3 (Tantivy cross-account — crates/search/)
-  └── Slice 4 (unified pipeline)
+Slice 3 (Tantivy cross-account) ✅
+  └── Slice 4 (unified pipeline) ✅
 ```
 
-Slices 1 and 3 can be done in parallel. Slice 2 depends on 1. Slice 4 depends on 2 and 3. Slice 5 is trivial wiring. Slice 6 depends on 4.
+Slices 1-4 are complete. Slice 5 is trivial wiring. Slice 6 depends on 4.

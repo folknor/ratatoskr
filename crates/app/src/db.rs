@@ -171,6 +171,7 @@ impl Db {
         account_id: String,
         label_id: Option<String>,
         limit: i64,
+        offset: i64,
     ) -> Result<Vec<Thread>, String> {
         self.with_conn(move |conn| {
             let (sql, do_label) = if label_id.is_some() {
@@ -186,7 +187,7 @@ impl Db {
                      WHERE t.account_id = ?1 AND tl.label_id = ?2
                      GROUP BY t.account_id, t.id
                      ORDER BY t.is_pinned DESC, t.last_message_at DESC
-                     LIMIT ?3",
+                     LIMIT ?3 OFFSET ?4",
                     true,
                 )
             } else {
@@ -199,7 +200,7 @@ impl Db {
                                        AND m2.thread_id = t.id)
                      WHERE t.account_id = ?1
                      ORDER BY t.is_pinned DESC, t.last_message_at DESC
-                     LIMIT ?2",
+                     LIMIT ?2 OFFSET ?3",
                     false,
                 )
             };
@@ -209,12 +210,12 @@ impl Db {
 
             let rows = if do_label {
                 stmt.query_map(
-                    params![account_id, label_id.unwrap_or_default(), limit],
+                    params![account_id, label_id.unwrap_or_default(), limit, offset],
                     row_to_thread,
                 )
             } else {
                 stmt.query_map(
-                    params![account_id, limit],
+                    params![account_id, limit, offset],
                     row_to_thread,
                 )
             };
