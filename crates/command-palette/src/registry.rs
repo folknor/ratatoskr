@@ -1,14 +1,47 @@
+use std::collections::HashMap;
+
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 
-use super::context::CommandContext;
+use super::context::{CommandContext, FocusedRegion, ViewType};
 use super::descriptor::{CommandDescriptor, CommandMatch};
 use super::id::CommandId;
 use super::input::{InputMode, InputSchema};
 use super::keybinding::{current_platform, KeyBinding, NamedKey};
 
+/// Tracks command usage counts for recency/frequency ranking.
+///
+/// Persistence is deferred to Slice 6 — the app layer will be responsible
+/// for saving and restoring this data.
+pub struct UsageTracker {
+    counts: HashMap<CommandId, u32>,
+}
+
+impl UsageTracker {
+    pub fn new() -> Self {
+        Self {
+            counts: HashMap::new(),
+        }
+    }
+
+    pub fn record_usage(&mut self, id: CommandId) {
+        *self.counts.entry(id).or_insert(0) += 1;
+    }
+
+    pub fn usage_count(&self, id: CommandId) -> u32 {
+        self.counts.get(&id).copied().unwrap_or(0)
+    }
+}
+
+impl Default for UsageTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct CommandRegistry {
     descriptors: Vec<CommandDescriptor>,
+    pub usage: UsageTracker,
 }
 
 impl Default for CommandRegistry {
@@ -35,7 +68,10 @@ impl CommandRegistry {
             }
         }
 
-        Self { descriptors }
+        Self {
+            descriptors,
+            usage: UsageTracker::new(),
+        }
     }
 
     pub fn get(&self, id: CommandId) -> Option<&CommandDescriptor> {
@@ -93,18 +129,32 @@ impl CommandRegistry {
         let mut results: Vec<CommandMatch> = self
             .descriptors
             .iter()
-            .map(|d| CommandMatch {
-                id: d.id,
-                label: d.resolved_label(ctx),
-                category: d.category,
-                keybinding: d.keybinding.map(|kb| kb.display(platform)),
-                available: (d.is_available)(ctx),
-                input_mode: input_mode_for(d),
-                score: 0,
-                match_positions: vec![],
+            .map(|d| {
+                let recency = self.usage.usage_count(d.id);
+                CommandMatch {
+                    id: d.id,
+                    label: d.resolved_label(ctx),
+                    category: d.category,
+                    keybinding: d.keybinding.map(|kb| kb.display(platform)),
+                    available: (d.is_available)(ctx),
+                    input_mode: input_mode_for(d),
+                    score: 0,
+                    match_positions: vec![],
+                    recency_score: recency,
+                }
             })
             .collect();
-        results.sort_by(|a, b| a.category.cmp(b.category).then(a.label.cmp(b.label)));
+        results.sort_by(|a, b| {
+            b.available
+                .cmp(&a.available)
+                .then_with(|| {
+                    let a_rel = category_relevance(a.category, ctx);
+                    let b_rel = category_relevance(b.category, ctx);
+                    b_rel.cmp(&a_rel)
+                })
+                .then_with(|| a.category.cmp(b.category))
+                .then_with(|| a.label.cmp(b.label))
+        });
         results
     }
 
@@ -118,25 +168,32 @@ impl CommandRegistry {
 
         for d in &self.descriptors {
             let label = d.resolved_label(ctx);
-            let haystack_str = format!("{} > {}", d.category, label);
+            let haystack_str = build_command_haystack(d.category, label, d.keywords);
             let haystack = Utf32Str::new(&haystack_str, &mut buf);
 
-            if let Some(score) = pattern.score(haystack, &mut matcher) {
+            if let Some(raw_score) = pattern.score(haystack, &mut matcher) {
                 indices.clear();
                 indices.resize(pattern.atoms.len() * 2, 0);
                 pattern.indices(haystack, &mut matcher, &mut indices);
                 indices.sort_unstable();
                 indices.dedup();
 
+                let available = (d.is_available)(ctx);
+                let boost = context_boost(d, ctx);
+                let availability_bonus = if available { 1000 } else { 0 };
+                let score = raw_score.saturating_add(boost).saturating_add(availability_bonus);
+                let recency = self.usage.usage_count(d.id);
+
                 results.push(CommandMatch {
                     id: d.id,
                     label,
                     category: d.category,
                     keybinding: d.keybinding.map(|kb| kb.display(platform)),
-                    available: (d.is_available)(ctx),
+                    available,
                     input_mode: input_mode_for(d),
                     score,
                     match_positions: indices.clone(),
+                    recency_score: recency,
                 });
             }
         }
@@ -150,6 +207,77 @@ fn input_mode_for(d: &CommandDescriptor) -> InputMode {
     match d.input_schema {
         Some(schema) => InputMode::Parameterized { schema },
         None => InputMode::Direct,
+    }
+}
+
+fn build_command_haystack(category: &str, label: &str, keywords: &[&str]) -> String {
+    let mut haystack = format!("{category} > {label}");
+    for kw in keywords {
+        haystack.push(' ');
+        haystack.push_str(kw);
+    }
+    haystack
+}
+
+/// Returns a modest score boost when the command's category aligns with
+/// the current view context or focused region.
+fn context_boost(descriptor: &CommandDescriptor, ctx: &CommandContext) -> u32 {
+    let mut boost: u32 = 0;
+    boost += category_relevance(descriptor.category, ctx) * 5;
+    boost += focused_region_boost(descriptor.category, ctx);
+    boost
+}
+
+/// Returns 0-4 relevance points for how well a category matches the view.
+fn category_relevance(category: &str, ctx: &CommandContext) -> u32 {
+    match category {
+        "Email" => email_view_relevance(ctx),
+        "Compose" => compose_view_relevance(ctx),
+        "Navigation" => 2, // always somewhat relevant
+        "Tasks" if ctx.current_view == ViewType::Tasks => 4,
+        "Tasks" => 1,
+        "View" => 1,
+        "App" => 1,
+        _ => 0,
+    }
+}
+
+fn email_view_relevance(ctx: &CommandContext) -> u32 {
+    match ctx.current_view {
+        ViewType::Inbox
+        | ViewType::Starred
+        | ViewType::Sent
+        | ViewType::Drafts
+        | ViewType::Snoozed
+        | ViewType::Trash
+        | ViewType::Spam
+        | ViewType::AllMail
+        | ViewType::Label
+        | ViewType::SmartFolder
+        | ViewType::Category
+        | ViewType::Attachments => 4,
+        _ => 1,
+    }
+}
+
+fn compose_view_relevance(ctx: &CommandContext) -> u32 {
+    if ctx.composer_is_open {
+        4
+    } else {
+        match ctx.current_view {
+            ViewType::Drafts => 3,
+            ViewType::Inbox | ViewType::Sent => 2,
+            _ => 1,
+        }
+    }
+}
+
+fn focused_region_boost(category: &str, ctx: &CommandContext) -> u32 {
+    match (category, ctx.focused_region) {
+        ("Compose", Some(FocusedRegion::Composer)) => 10,
+        ("Email", Some(FocusedRegion::ThreadList | FocusedRegion::ReadingPane)) => 10,
+        ("Navigation", Some(FocusedRegion::Sidebar)) => 5,
+        _ => 0,
     }
 }
 
@@ -181,6 +309,28 @@ fn desc(
         is_available,
         is_active: None,
         input_schema: None,
+        keywords: &[],
+    }
+}
+
+fn desc_kw(
+    id: CommandId,
+    label: &'static str,
+    category: &'static str,
+    keybinding: Option<KeyBinding>,
+    is_available: fn(&CommandContext) -> bool,
+    keywords: &'static [&'static str],
+) -> CommandDescriptor {
+    CommandDescriptor {
+        id,
+        label,
+        category,
+        keybinding,
+        active_label: None,
+        is_available,
+        is_active: None,
+        input_schema: None,
+        keywords,
     }
 }
 
@@ -202,7 +352,13 @@ fn toggle(
         is_available,
         is_active: Some(is_active),
         input_schema: None,
+        keywords: &[],
     }
+}
+
+fn with_keywords(mut d: CommandDescriptor, keywords: &'static [&'static str]) -> CommandDescriptor {
+    d.keywords = keywords;
+    d
 }
 
 fn parameterized(
@@ -222,6 +378,7 @@ fn parameterized(
         is_available,
         is_active: None,
         input_schema: Some(input_schema),
+        keywords: &[],
     }
 }
 
@@ -289,13 +446,18 @@ fn register_navigation_categories(out: &mut Vec<CommandDescriptor>) {
 }
 
 fn register_email(out: &mut Vec<CommandDescriptor>) {
-    out.push(desc(CommandId::EmailArchive, "Archive", "Email", Some(KeyBinding::key('e')), needs_selection));
-    out.push(desc(
+    out.push(desc_kw(
+        CommandId::EmailArchive, "Archive", "Email",
+        Some(KeyBinding::key('e')), needs_selection,
+        &["done", "file"],
+    ));
+    out.push(desc_kw(
         CommandId::EmailTrash,
         "Move to Trash",
         "Email",
         Some(KeyBinding::key('#')),
         |ctx| ctx.has_selection() && ctx.thread_in_trash != Some(true),
+        &["delete", "remove"],
     ));
     out.push(desc(
         CommandId::EmailPermanentDelete,
@@ -318,14 +480,17 @@ fn register_email(out: &mut Vec<CommandDescriptor>) {
 }
 
 fn register_email_toggles(out: &mut Vec<CommandDescriptor>) {
-    out.push(toggle(
-        CommandId::EmailMarkRead,
-        "Mark as Read",
-        "Mark as Unread",
-        "Email",
-        None,
-        needs_selection,
-        |ctx| ctx.thread_is_read == Some(true),
+    out.push(with_keywords(
+        toggle(
+            CommandId::EmailMarkRead,
+            "Mark as Read",
+            "Mark as Unread",
+            "Email",
+            None,
+            needs_selection,
+            |ctx| ctx.thread_is_read == Some(true),
+        ),
+        &["seen"],
     ));
     out.push(toggle(
         CommandId::EmailStar,
@@ -364,15 +529,18 @@ fn register_email_other(out: &mut Vec<CommandDescriptor>) {
         Some(KeyBinding::key('u')),
         needs_single_selection,
     ));
-    out.push(parameterized(
-        CommandId::EmailMoveToFolder,
-        "Move to Folder",
-        "Email",
-        Some(KeyBinding::key('v')),
-        needs_selection,
-        InputSchema::Single {
-            param: super::input::ParamDef::ListPicker { label: "Folder" },
-        },
+    out.push(with_keywords(
+        parameterized(
+            CommandId::EmailMoveToFolder,
+            "Move to Folder",
+            "Email",
+            Some(KeyBinding::key('v')),
+            needs_selection,
+            InputSchema::Single {
+                param: super::input::ParamDef::ListPicker { label: "Folder" },
+            },
+        ),
+        &["file", "organize"],
     ));
     out.push(parameterized(
         CommandId::EmailAddLabel,
@@ -415,10 +583,22 @@ fn register_email_other(out: &mut Vec<CommandDescriptor>) {
 }
 
 fn register_compose(out: &mut Vec<CommandDescriptor>) {
-    out.push(desc(CommandId::ComposeNew, "Compose New Email", "Compose", Some(KeyBinding::key('c')), always));
-    out.push(desc(CommandId::ComposeReply, "Reply", "Compose", Some(KeyBinding::key('r')), needs_selection));
+    out.push(desc_kw(
+        CommandId::ComposeNew, "Compose New Email", "Compose",
+        Some(KeyBinding::key('c')), always,
+        &["write", "new", "create"],
+    ));
+    out.push(desc_kw(
+        CommandId::ComposeReply, "Reply", "Compose",
+        Some(KeyBinding::key('r')), needs_selection,
+        &["respond"],
+    ));
     out.push(desc(CommandId::ComposeReplyAll, "Reply All", "Compose", Some(KeyBinding::key('a')), needs_selection));
-    out.push(desc(CommandId::ComposeForward, "Forward", "Compose", Some(KeyBinding::key('f')), needs_selection));
+    out.push(desc_kw(
+        CommandId::ComposeForward, "Forward", "Compose",
+        Some(KeyBinding::key('f')), needs_selection,
+        &["send", "share"],
+    ));
 }
 
 fn register_tasks(out: &mut Vec<CommandDescriptor>) {
@@ -475,7 +655,7 @@ fn register_view_reading_pane(out: &mut Vec<CommandDescriptor>) {
 }
 
 fn register_app(out: &mut Vec<CommandDescriptor>) {
-    out.push(desc(CommandId::AppSearch, "Search", "App", Some(KeyBinding::key('/')), always));
+    out.push(desc_kw(CommandId::AppSearch, "Search", "App", Some(KeyBinding::key('/')), always, &["find", "ctrl+f"]));
     out.push(desc(CommandId::AppAskAi, "Ask AI", "App", Some(KeyBinding::key('i')), always));
     out.push(desc(CommandId::AppHelp, "Keyboard Shortcuts", "App", Some(KeyBinding::key('?')), always));
     out.push(desc(
@@ -541,20 +721,34 @@ mod tests {
     }
 
     #[test]
-    fn empty_query_sorted_by_category_then_label() {
+    fn empty_query_available_first_then_alphabetical() {
         let registry = CommandRegistry::new();
         let ctx = empty_context();
         let results = registry.query(&ctx, "");
-        for window in results.windows(2) {
-            let a = &window[0];
-            let b = &window[1];
+
+        // Available commands come before unavailable ones
+        let first_unavailable = results.iter().position(|r| !r.available);
+        let last_available = results.iter().rposition(|r| r.available);
+        if let (Some(first_un), Some(last_av)) = (first_unavailable, last_available) {
             assert!(
-                (a.category, a.label) <= (b.category, b.label),
-                "unsorted: {} > {} before {} > {}",
-                a.category,
-                a.label,
-                b.category,
-                b.label
+                last_av < first_un,
+                "available commands should precede unavailable ones"
+            );
+        }
+
+        // Within the available group, alphabetical by (category, label)
+        let available: Vec<_> = results.iter().filter(|r| r.available).collect();
+        for window in available.windows(2) {
+            let a = window[0];
+            let b = window[1];
+            // Context-relevant categories may come before less relevant ones,
+            // but within same relevance tier, alphabetical order holds.
+            assert!(
+                (a.category, a.label) <= (b.category, b.label)
+                    || category_relevance(a.category, &ctx)
+                        >= category_relevance(b.category, &ctx),
+                "available group misordered: {} > {} before {} > {}",
+                a.category, a.label, b.category, b.label
             );
         }
     }
@@ -749,5 +943,272 @@ mod tests {
         let results2 = registry.query(&ctx2, "");
         let sync2 = results2.iter().find(|r| r.id == CommandId::AppSyncFolder);
         assert!(sync2.map_or(false, |s| s.available));
+    }
+
+    // --- Slice 4: Ranking signals ---
+
+    #[test]
+    fn keyword_search_finds_trash_via_delete() {
+        let registry = CommandRegistry::new();
+        let ctx = empty_context();
+        let results = registry.query(&ctx, "delete");
+        let trash = results.iter().find(|r| r.id == CommandId::EmailTrash);
+        assert!(
+            trash.is_some(),
+            "\"delete\" should match Move to Trash via keyword"
+        );
+    }
+
+    #[test]
+    fn keyword_search_finds_archive_via_done() {
+        let registry = CommandRegistry::new();
+        let ctx = empty_context();
+        let results = registry.query(&ctx, "done");
+        let archive = results.iter().find(|r| r.id == CommandId::EmailArchive);
+        assert!(
+            archive.is_some(),
+            "\"done\" should match Archive via keyword"
+        );
+    }
+
+    #[test]
+    fn keyword_search_finds_compose_via_write() {
+        let registry = CommandRegistry::new();
+        let ctx = empty_context();
+        let results = registry.query(&ctx, "write");
+        let compose = results.iter().find(|r| r.id == CommandId::ComposeNew);
+        assert!(
+            compose.is_some(),
+            "\"write\" should match Compose New Email via keyword"
+        );
+    }
+
+    #[test]
+    fn keyword_search_finds_mark_read_via_seen() {
+        let registry = CommandRegistry::new();
+        let ctx = empty_context();
+        let results = registry.query(&ctx, "seen");
+        let mark_read = results.iter().find(|r| r.id == CommandId::EmailMarkRead);
+        assert!(
+            mark_read.is_some(),
+            "\"seen\" should match Mark as Read via keyword"
+        );
+    }
+
+    #[test]
+    fn keyword_search_finds_move_to_folder_via_organize() {
+        let registry = CommandRegistry::new();
+        let ctx = empty_context();
+        let results = registry.query(&ctx, "organize");
+        let m = results
+            .iter()
+            .find(|r| r.id == CommandId::EmailMoveToFolder);
+        assert!(
+            m.is_some(),
+            "\"organize\" should match Move to Folder via keyword"
+        );
+    }
+
+    #[test]
+    fn keyword_search_finds_reply_via_respond() {
+        let registry = CommandRegistry::new();
+        let ctx = empty_context();
+        let results = registry.query(&ctx, "respond");
+        let reply = results.iter().find(|r| r.id == CommandId::ComposeReply);
+        assert!(
+            reply.is_some(),
+            "\"respond\" should match Reply via keyword"
+        );
+    }
+
+    #[test]
+    fn keyword_search_finds_forward_via_share() {
+        let registry = CommandRegistry::new();
+        let ctx = empty_context();
+        let results = registry.query(&ctx, "share");
+        let fwd = results.iter().find(|r| r.id == CommandId::ComposeForward);
+        assert!(
+            fwd.is_some(),
+            "\"share\" should match Forward via keyword"
+        );
+    }
+
+    #[test]
+    fn available_commands_rank_above_unavailable_in_fuzzy() {
+        let registry = CommandRegistry::new();
+        // With selection: Archive is available
+        let ctx = context_with_selection();
+        let results = registry.query(&ctx, "arch");
+        let archive = results.iter().find(|r| r.id == CommandId::EmailArchive);
+        assert!(archive.map_or(false, |a| a.available));
+        assert!(archive.map_or(false, |a| a.score >= 1000));
+
+        // Without selection: Archive is unavailable
+        let ctx2 = empty_context();
+        let results2 = registry.query(&ctx2, "arch");
+        let archive2 = results2.iter().find(|r| r.id == CommandId::EmailArchive);
+        assert!(!archive2.map_or(true, |a| a.available));
+        assert!(archive2.map_or(true, |a| a.score < 1000));
+    }
+
+    #[test]
+    fn context_boost_favors_email_in_inbox() {
+        let registry = CommandRegistry::new();
+        let ctx = context_with_selection();
+        let results = registry.query(&ctx, "arch");
+        let archive = results.iter().find(|r| r.id == CommandId::EmailArchive);
+        // Email category gets a context boost when viewing Inbox
+        let score = archive.map_or(0, |a| a.score);
+        // Score should include availability bonus (1000) + context boost
+        assert!(
+            score > 1000,
+            "archive score {score} should exceed 1000 (availability bonus + context boost)"
+        );
+    }
+
+    #[test]
+    fn composer_focus_boosts_compose_commands() {
+        let registry = CommandRegistry::new();
+        let mut ctx = context_with_selection();
+        ctx.focused_region = Some(FocusedRegion::Composer);
+        ctx.composer_is_open = true;
+        let results = registry.query(&ctx, "reply");
+        let reply = results.iter().find(|r| r.id == CommandId::ComposeReply);
+        let reply_score = reply.map_or(0, |r| r.score);
+
+        // Same query without composer focus
+        let ctx2 = context_with_selection();
+        let results2 = registry.query(&ctx2, "reply");
+        let reply2 = results2.iter().find(|r| r.id == CommandId::ComposeReply);
+        let reply_score2 = reply2.map_or(0, |r| r.score);
+
+        assert!(
+            reply_score > reply_score2,
+            "compose commands should score higher with composer focused: {reply_score} vs {reply_score2}"
+        );
+    }
+
+    #[test]
+    fn empty_query_groups_available_before_unavailable() {
+        let registry = CommandRegistry::new();
+        // No selection: email actions are unavailable, nav/app/view are available
+        let ctx = empty_context();
+        let results = registry.query(&ctx, "");
+
+        let mut seen_unavailable = false;
+        for r in &results {
+            if !r.available {
+                seen_unavailable = true;
+            } else if seen_unavailable {
+                panic!(
+                    "available command {} > {} after unavailable ones",
+                    r.category, r.label
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tasks_view_boosts_tasks_category() {
+        let mut ctx = empty_context();
+        ctx.current_view = ViewType::Tasks;
+        let relevance = category_relevance("Tasks", &ctx);
+        assert_eq!(relevance, 4, "Tasks category should have max relevance on Tasks view");
+
+        let ctx2 = empty_context(); // Inbox
+        let relevance2 = category_relevance("Tasks", &ctx2);
+        assert!(
+            relevance > relevance2,
+            "Tasks relevance should be higher on Tasks view ({relevance}) than Inbox ({relevance2})"
+        );
+    }
+
+    #[test]
+    fn recency_score_populated_from_usage_tracker() {
+        let mut registry = CommandRegistry::new();
+        registry.usage.record_usage(CommandId::EmailArchive);
+        registry.usage.record_usage(CommandId::EmailArchive);
+        registry.usage.record_usage(CommandId::ComposeNew);
+
+        let ctx = empty_context();
+        let results = registry.query(&ctx, "");
+
+        let archive = results.iter().find(|r| r.id == CommandId::EmailArchive);
+        assert_eq!(archive.map_or(0, |a| a.recency_score), 2);
+
+        let compose = results.iter().find(|r| r.id == CommandId::ComposeNew);
+        assert_eq!(compose.map_or(0, |c| c.recency_score), 1);
+
+        let star = results.iter().find(|r| r.id == CommandId::EmailStar);
+        assert_eq!(star.map_or(99, |s| s.recency_score), 0);
+    }
+
+    #[test]
+    fn usage_tracker_basics() {
+        let mut tracker = UsageTracker::new();
+        assert_eq!(tracker.usage_count(CommandId::NavNext), 0);
+
+        tracker.record_usage(CommandId::NavNext);
+        assert_eq!(tracker.usage_count(CommandId::NavNext), 1);
+
+        tracker.record_usage(CommandId::NavNext);
+        tracker.record_usage(CommandId::NavNext);
+        assert_eq!(tracker.usage_count(CommandId::NavNext), 3);
+
+        // Other commands unaffected
+        assert_eq!(tracker.usage_count(CommandId::NavPrev), 0);
+    }
+
+    #[test]
+    fn recency_score_in_fuzzy_results() {
+        let mut registry = CommandRegistry::new();
+        registry.usage.record_usage(CommandId::EmailArchive);
+        registry.usage.record_usage(CommandId::EmailArchive);
+        registry.usage.record_usage(CommandId::EmailArchive);
+
+        let ctx = empty_context();
+        let results = registry.query(&ctx, "arch");
+        let archive = results.iter().find(|r| r.id == CommandId::EmailArchive);
+        assert_eq!(
+            archive.map_or(0, |a| a.recency_score),
+            3,
+            "fuzzy results should carry recency_score"
+        );
+    }
+
+    #[test]
+    fn descriptor_keywords_field() {
+        let registry = CommandRegistry::new();
+        let archive = registry.get(CommandId::EmailArchive);
+        assert!(
+            archive.map_or(false, |d| d.keywords.contains(&"done")),
+            "Archive should have 'done' keyword"
+        );
+        let trash = registry.get(CommandId::EmailTrash);
+        assert!(
+            trash.map_or(false, |d| d.keywords.contains(&"delete")),
+            "Trash should have 'delete' keyword"
+        );
+        // Commands with no keywords should have empty slice
+        let nav_next = registry.get(CommandId::NavNext);
+        assert!(
+            nav_next.map_or(false, |d| d.keywords.is_empty()),
+            "NavNext should have no keywords"
+        );
+    }
+
+    #[test]
+    fn settings_view_reduces_email_relevance() {
+        let mut ctx = empty_context();
+        ctx.current_view = ViewType::Settings;
+        let email_rel = category_relevance("Email", &ctx);
+        assert!(
+            email_rel < 4,
+            "Email relevance should be low on Settings view"
+        );
+
+        ctx.current_view = ViewType::Inbox;
+        let email_rel_inbox = category_relevance("Email", &ctx);
+        assert_eq!(email_rel_inbox, 4);
     }
 }
