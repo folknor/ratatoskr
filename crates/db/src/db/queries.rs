@@ -4,6 +4,19 @@ use super::from_row::FromRow;
 use super::sql_fragments::LATEST_MESSAGE_SUBQUERY;
 use super::types::ThreadInfoRow;
 
+/// Read a single value from the `settings` table, returning `Ok(None)` when
+/// the key does not exist.
+pub fn get_setting(conn: &Connection, key: String) -> Result<Option<String>, String> {
+    let result = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![key],
+            |row| row.get::<_, String>("value"),
+        )
+        .ok();
+    Ok(result)
+}
+
 pub fn load_recent_rule_categorized_threads(
     conn: &Connection,
     account_id: &str,

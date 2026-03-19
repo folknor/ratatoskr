@@ -310,16 +310,7 @@ pub fn get_labels(conn: &Connection, account_id: String) -> Result<Vec<DbLabel>,
     )
 }
 
-pub fn get_setting(conn: &Connection, key: String) -> Result<Option<String>, String> {
-    let result = conn
-        .query_row(
-            "SELECT value FROM settings WHERE key = ?1",
-            params![key],
-            |row| row.get::<_, String>("value"),
-        )
-        .ok();
-    Ok(result)
-}
+pub use ratatoskr_db::db::queries::get_setting;
 
 pub fn get_secure_setting(
     conn: &Connection,
@@ -820,6 +811,19 @@ pub fn get_thread_count(
         )
         .map_err(|e| e.to_string())
     }
+}
+
+/// Look up the provider type for an account from the database.
+pub async fn get_provider_type(db: &DbState, account_id: &str) -> Result<String, String> {
+    let aid = account_id.to_string();
+    db.with_conn(move |conn| {
+        let mut stmt = conn
+            .prepare("SELECT provider FROM accounts WHERE id = ?1")
+            .map_err(|e| format!("prepare: {e}"))?;
+        stmt.query_row([&aid], |row| row.get::<_, String>(0))
+            .map_err(|e| format!("No account found for {aid}: {e}"))
+    })
+    .await
 }
 
 pub fn get_unread_count(conn: &Connection, account_id: String) -> Result<i64, String> {

@@ -228,8 +228,10 @@ pub async fn imap_delta_sync(
     let skipped = {
         let aid = account_id.to_string();
         let t = tids.clone();
-        db.with_conn(move |conn| pipeline::get_skipped_thread_ids(conn, &aid, &t))
-            .await?
+        db.with_conn(move |conn| {
+            ratatoskr_sync::pending::get_blocked_thread_ids(conn, &aid, &t)
+        })
+        .await?
     };
 
     let mut affected = {
@@ -257,8 +259,10 @@ pub async fn imap_delta_sync(
     {
         let aid = account_id.to_string();
         let marker = format!("imap-synced-{}", chrono::Utc::now().timestamp_millis());
-        db.with_conn(move |conn| pipeline::update_account_sync_state(conn, &aid, &marker))
-            .await?;
+        db.with_conn(move |conn| {
+            ratatoskr_sync::state::update_account_sync_state(conn, &aid, &marker)
+        })
+        .await?;
     }
 
     Ok(ImapSyncResult {

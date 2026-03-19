@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+// Re-export ThreadCategory from its canonical location in core/sync.
+pub use ratatoskr_core::categorization::ThreadCategory;
+
 /// Request sent to an AI completion provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -165,39 +168,6 @@ pub struct ThreadForCategorization {
     pub from_address: String,
 }
 
-/// Thread category assigned by AI.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ThreadCategory {
-    Primary,
-    Updates,
-    Promotions,
-    Social,
-    Newsletters,
-}
-
-impl ThreadCategory {
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "Primary" => Some(Self::Primary),
-            "Updates" => Some(Self::Updates),
-            "Promotions" => Some(Self::Promotions),
-            "Social" => Some(Self::Social),
-            "Newsletters" => Some(Self::Newsletters),
-            _ => None,
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Primary => "Primary",
-            Self::Updates => "Updates",
-            Self::Promotions => "Promotions",
-            Self::Social => "Social",
-            Self::Newsletters => "Newsletters",
-        }
-    }
-}
-
 /// Task extracted from an email thread.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtractedTask {
@@ -290,30 +260,6 @@ mod tests {
     fn ai_provider_display() {
         assert_eq!(AiProvider::Claude.to_string(), "claude");
         assert_eq!(AiProvider::OpenAi.to_string(), "openai");
-    }
-
-    // -- ThreadCategory --
-
-    #[test]
-    fn thread_category_roundtrip() {
-        let categories = [
-            ThreadCategory::Primary,
-            ThreadCategory::Updates,
-            ThreadCategory::Promotions,
-            ThreadCategory::Social,
-            ThreadCategory::Newsletters,
-        ];
-        for cat in categories {
-            let name = cat.as_str();
-            let parsed = ThreadCategory::from_str(name);
-            assert_eq!(parsed, Some(cat), "roundtrip failed for {name}");
-        }
-    }
-
-    #[test]
-    fn thread_category_unknown_returns_none() {
-        assert_eq!(ThreadCategory::from_str("Spam"), None);
-        assert_eq!(ThreadCategory::from_str(""), None);
     }
 
     // -- TaskPriority --

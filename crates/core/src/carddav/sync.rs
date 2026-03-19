@@ -288,17 +288,8 @@ fn delete_carddav_contact(
 
 async fn load_ctag(db: &DbState, account_id: &str) -> Result<Option<String>, String> {
     let key = format!("carddav_ctag:{account_id}");
-    db.with_conn(move |conn| {
-        let result: Option<String> = conn
-            .query_row(
-                "SELECT value FROM settings WHERE key = ?1",
-                params![key],
-                |row| row.get("value"),
-            )
-            .ok();
-        Ok(result)
-    })
-    .await
+    db.with_conn(move |conn| crate::db::get_setting(conn, key))
+        .await
 }
 
 async fn save_ctag(db: &DbState, account_id: &str, ctag: &str) -> Result<(), String> {

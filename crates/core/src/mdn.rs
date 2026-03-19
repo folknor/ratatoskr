@@ -60,17 +60,7 @@ pub fn resolve_read_receipt_policy(
     }
 
     // 4. Global default from settings table
-    if let Ok(Some(value)) = conn.query_row(
-        "SELECT value FROM settings WHERE key = 'default_read_receipt_policy'",
-        [],
-        |row| row.get::<_, String>(0),
-    ).map(Some).or_else(|e| {
-        if e == rusqlite::Error::QueryReturnedNoRows {
-            Ok(None)
-        } else {
-            Err(e)
-        }
-    }) {
+    if let Ok(Some(value)) = crate::db::get_setting(conn, "default_read_receipt_policy".to_string()) {
         return ReadReceiptPolicy::from_str(&value);
     }
 

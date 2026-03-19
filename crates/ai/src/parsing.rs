@@ -3,6 +3,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde::Deserialize;
 
+use crate::types::{ExtractedTask, TaskPriority};
 use ratatoskr_core::categorization::ThreadCategory;
 
 // ---------------------------------------------------------------------------
@@ -103,18 +104,6 @@ fn sanitize_reply(reply: &str) -> String {
 // Task extraction parsing
 // ---------------------------------------------------------------------------
 
-/// Valid task priorities.
-const VALID_PRIORITIES: &[&str] = &["none", "low", "medium", "high", "urgent"];
-
-/// A task extracted from an email thread by AI.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExtractedTask {
-    pub title: String,
-    pub description: Option<String>,
-    pub due_date: Option<i64>,
-    pub priority: String,
-}
-
 /// Intermediate deserialization target for the AI JSON output.
 #[derive(Deserialize)]
 struct RawExtractedTask {
@@ -125,6 +114,17 @@ struct RawExtractedTask {
     priority: Option<String>,
 }
 
+fn parse_priority(s: &str) -> TaskPriority {
+    match s {
+        "none" => TaskPriority::None,
+        "low" => TaskPriority::Low,
+        "medium" => TaskPriority::Medium,
+        "high" => TaskPriority::High,
+        "urgent" => TaskPriority::Urgent,
+        _ => TaskPriority::Medium,
+    }
+}
+
 /// Parse an AI response into an `ExtractedTask`.
 ///
 /// Attempts to extract JSON from the response (possibly wrapped in markdown
@@ -132,9 +132,9 @@ struct RawExtractedTask {
 pub fn parse_extracted_task(response: &str, fallback_subject: &str) -> ExtractedTask {
     let fallback = || ExtractedTask {
         title: format!("Follow up on: {fallback_subject}"),
-        description: None,
+        description: String::new(),
         due_date: None,
-        priority: "medium".to_string(),
+        priority: TaskPriority::Medium,
     };
 
     let json_str = match RE_JSON_OBJECT.find(response) {
@@ -155,12 +155,13 @@ pub fn parse_extracted_task(response: &str, fallback_subject: &str) -> Extracted
 
     let priority = raw
         .priority
-        .filter(|p| VALID_PRIORITIES.contains(&p.as_str()))
-        .unwrap_or_else(|| "medium".to_string());
+        .as_deref()
+        .map(parse_priority)
+        .unwrap_or(TaskPriority::Medium);
 
     ExtractedTask {
         title,
-        description: raw.description,
+        description: raw.description.unwrap_or_default(),
         due_date: raw.due_date,
         priority,
     }
@@ -323,9 +324,9 @@ mod tests {
         let input = r#"{"title": "Send report", "description": "Monthly figures", "dueDate": 1700000000, "priority": "high"}"#;
         let task = parse_extracted_task(input, "Test subject");
         assert_eq!(task.title, "Send report");
-        assert_eq!(task.description.as_deref(), Some("Monthly figures"));
+        assert_eq!(task.description, "Monthly figures");
         assert_eq!(task.due_date, Some(1700000000));
-        assert_eq!(task.priority, "high");
+        assert_eq!(task.priority, TaskPriority::High);
     }
 
     #[test]
@@ -333,7 +334,7 @@ mod tests {
         let input = "Here is the task:\n```json\n{\"title\": \"Do thing\", \"priority\": \"low\"}\n```";
         let task = parse_extracted_task(input, "Fallback");
         assert_eq!(task.title, "Do thing");
-        assert_eq!(task.priority, "low");
+        assert_eq!(task.priority, TaskPriority::Low);
     }
 
     #[test]
@@ -341,8 +342,8 @@ mod tests {
         let input = "This is not JSON at all";
         let task = parse_extracted_task(input, "Important email");
         assert_eq!(task.title, "Follow up on: Important email");
-        assert_eq!(task.priority, "medium");
-        assert!(task.description.is_none());
+        assert_eq!(task.priority, TaskPriority::Medium);
+        assert!(task.description.is_empty());
         assert!(task.due_date.is_none());
     }
 
@@ -350,7 +351,7 @@ mod tests {
     fn parse_extracted_task_invalid_priority_defaults() {
         let input = r#"{"title": "Task", "priority": "super_urgent"}"#;
         let task = parse_extracted_task(input, "Sub");
-        assert_eq!(task.priority, "medium");
+        assert_eq!(task.priority, TaskPriority::Medium);
     }
 
     #[test]

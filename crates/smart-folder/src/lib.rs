@@ -7,7 +7,7 @@ pub use tokens::resolve_query_tokens;
 
 use rusqlite::Connection;
 
-use ratatoskr_core::db::types::{AccountScope, DbThread};
+use ratatoskr_db::db::types::{AccountScope, DbThread};
 
 /// Parameters for a smart folder query, packed to stay under the 7-arg limit.
 pub struct SmartFolderParams<'a> {

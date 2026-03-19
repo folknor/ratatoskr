@@ -169,44 +169,6 @@ pub fn cleanup_orphan_threads(
     Ok(count)
 }
 
-/// Check which thread IDs have pending local operations (should be skipped during sync).
-pub fn get_skipped_thread_ids(
-    conn: &Connection,
-    account_id: &str,
-    thread_ids: &[String],
-) -> Result<HashSet<String>, String> {
-    let mut skipped = HashSet::new();
-    for tid in thread_ids {
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) AS cnt FROM pending_operations \
-                 WHERE account_id = ?1 AND resource_id = ?2 AND status != 'failed'",
-                rusqlite::params![account_id, tid],
-                |row| row.get("cnt"),
-            )
-            .map_err(|e| format!("check pending ops: {e}"))?;
-        if count > 0 {
-            log::info!("Skipping thread {tid}: has {count} pending local ops");
-            skipped.insert(tid.clone());
-        }
-    }
-    Ok(skipped)
-}
-
-/// Update account sync state (history_id column).
-pub fn update_account_sync_state(
-    conn: &Connection,
-    account_id: &str,
-    history_id: &str,
-) -> Result<(), String> {
-    conn.execute(
-        "UPDATE accounts SET history_id = ?1, initial_sync_completed = 1 WHERE id = ?2",
-        rusqlite::params![history_id, account_id],
-    )
-    .map_err(|e| format!("update account sync state: {e}"))?;
-    Ok(())
-}
-
 /// Mark initial sync as completed for providers whose delta state is stored elsewhere.
 pub fn mark_initial_sync_completed(conn: &Connection, account_id: &str) -> Result<(), String> {
     conn.execute(
@@ -215,16 +177,6 @@ pub fn mark_initial_sync_completed(conn: &Connection, account_id: &str) -> Resul
     )
     .map_err(|e| format!("mark initial sync completed: {e}"))?;
     Ok(())
-}
-
-/// Get thread count for an account (used for recovery detection).
-pub fn get_thread_count(conn: &Connection, account_id: &str) -> Result<i64, String> {
-    conn.query_row(
-        "SELECT COUNT(*) AS cnt FROM threads WHERE account_id = ?1",
-        rusqlite::params![account_id],
-        |row| row.get("cnt"),
-    )
-    .map_err(|e| format!("get thread count: {e}"))
 }
 
 /// Clear account history_id (forces next sync to be initial).

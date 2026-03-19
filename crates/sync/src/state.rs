@@ -1,8 +1,23 @@
 use std::collections::HashMap;
 
 use ratatoskr_db::db::DbState;
-use rusqlite::OptionalExtension;
+use rusqlite::{Connection, OptionalExtension};
 
+/// Synchronous version: update account sync state (history_id column).
+pub fn update_account_sync_state(
+    conn: &Connection,
+    account_id: &str,
+    history_id: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE accounts SET history_id = ?1, initial_sync_completed = 1 WHERE id = ?2",
+        rusqlite::params![history_id, account_id],
+    )
+    .map_err(|e| format!("update account sync state: {e}"))?;
+    Ok(())
+}
+
+/// Async version: update account sync state (history_id column).
 pub async fn save_account_history_id(
     db: &DbState,
     account_id: &str,
@@ -10,15 +25,8 @@ pub async fn save_account_history_id(
 ) -> Result<(), String> {
     let aid = account_id.to_string();
     let hid = history_id.to_string();
-    db.with_conn(move |conn| {
-        conn.execute(
-            "UPDATE accounts SET history_id = ?1, initial_sync_completed = 1 WHERE id = ?2",
-            rusqlite::params![hid, aid],
-        )
-        .map_err(|e| format!("update history_id: {e}"))?;
-        Ok(())
-    })
-    .await
+    db.with_conn(move |conn| update_account_sync_state(conn, &aid, &hid))
+        .await
 }
 
 pub async fn load_account_history_id(
@@ -241,16 +249,8 @@ pub async fn load_google_contacts_sync_token(
 ) -> Result<Option<String>, String> {
     let key = format!("google_contacts_sync_token:{account_id}");
 
-    db.with_conn(move |conn| {
-        conn.query_row(
-            "SELECT value FROM settings WHERE key = ?1",
-            rusqlite::params![key],
-            |row| row.get::<_, String>("value"),
-        )
-        .optional()
-        .map_err(|e| format!("load google contacts sync token: {e}"))
-    })
-    .await
+    db.with_conn(move |conn| ratatoskr_db::db::queries::get_setting(conn, key))
+        .await
 }
 
 pub async fn delete_google_contacts_sync_token(
@@ -297,16 +297,8 @@ pub async fn load_google_other_contacts_sync_token(
 ) -> Result<Option<String>, String> {
     let key = format!("google_other_contacts_sync_token:{account_id}");
 
-    db.with_conn(move |conn| {
-        conn.query_row(
-            "SELECT value FROM settings WHERE key = ?1",
-            rusqlite::params![key],
-            |row| row.get::<_, String>("value"),
-        )
-        .optional()
-        .map_err(|e| format!("load google other contacts sync token: {e}"))
-    })
-    .await
+    db.with_conn(move |conn| ratatoskr_db::db::queries::get_setting(conn, key))
+        .await
 }
 
 pub async fn delete_google_other_contacts_sync_token(

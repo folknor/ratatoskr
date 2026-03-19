@@ -149,7 +149,7 @@ pub async fn determine_send_delegation_for_account(
     db: &DbState,
     account_id: &str,
 ) -> Result<SendDelegation, String> {
-    let provider = crate::provider::router::get_provider_type(db, account_id).await?;
+    let provider = crate::db::queries::get_provider_type(db, account_id).await?;
     Ok(determine_send_delegation(&provider))
 }
 

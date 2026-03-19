@@ -299,7 +299,12 @@ pub async fn check_and_renew_subscriptions(
                 "[Graph webhooks] Subscription {} expired, removing local record",
                 sub.id
             );
-            let _ = delete_graph_subscription_record(db, &sub.id).await;
+            if let Err(e) = delete_graph_subscription_record(db, &sub.id).await {
+                log::warn!(
+                    "[Graph webhooks] failed to delete expired subscription record {}: {e}",
+                    sub.id
+                );
+            }
         } else if minutes_remaining < RENEWAL_THRESHOLD_MINUTES {
             log::info!(
                 "[Graph webhooks] Subscription {} expires in {minutes_remaining}min, renewing",
@@ -319,7 +324,12 @@ pub async fn check_and_renew_subscriptions(
                     );
                     // If renewal fails (e.g. 404), clean up
                     if e.contains("404") {
-                        let _ = delete_graph_subscription_record(db, &sub.id).await;
+                        if let Err(e) = delete_graph_subscription_record(db, &sub.id).await {
+                            log::warn!(
+                                "[Graph webhooks] failed to delete stale subscription record {}: {e}",
+                                sub.id
+                            );
+                        }
                     }
                 }
             }

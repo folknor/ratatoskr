@@ -56,15 +56,11 @@ pub fn calendar_provider_kind(account: &SyncAccount) -> Option<&'static str> {
 
 /// Read the `sync_period_days` setting from DB, defaulting to 365.
 pub fn get_sync_period_days(conn: &Connection) -> i64 {
-    conn.query_row(
-        "SELECT value FROM settings WHERE key = 'sync_period_days'",
-        [],
-        |row| {
-            let val: String = row.get("value")?;
-            Ok(val.parse::<i64>().unwrap_or(365))
-        },
-    )
-    .unwrap_or(365)
+    ratatoskr_db::db::queries::get_setting(conn, "sync_period_days".to_string())
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(365)
 }
 
 pub fn get_auto_sync_config(conn: &Connection, account_id: &str) -> Result<AutoSyncConfig, String> {

@@ -11,6 +11,6 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-ratatoskr-core = { path = "../core" }
+ratatoskr-db = { path = "../db" }
 rusqlite.workspace = true
 chrono.workspace = true

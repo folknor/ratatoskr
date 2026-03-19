@@ -242,8 +242,10 @@ pub async fn imap_initial_sync(
     let skipped = {
         let aid = account_id.to_string();
         let tids = thread_ids.clone();
-        db.with_conn(move |conn| pipeline::get_skipped_thread_ids(conn, &aid, &tids))
-            .await?
+        db.with_conn(move |conn| {
+            ratatoskr_sync::pending::get_blocked_thread_ids(conn, &aid, &tids)
+        })
+        .await?
     };
 
     let affected_thread_ids = {
@@ -283,8 +285,10 @@ pub async fn imap_initial_sync(
     if stored_count > 0 || total_messages_found == 0 {
         let aid = account_id.to_string();
         let marker = format!("imap-synced-{}", chrono::Utc::now().timestamp_millis());
-        db.with_conn(move |conn| pipeline::update_account_sync_state(conn, &aid, &marker))
-            .await?;
+        db.with_conn(move |conn| {
+            ratatoskr_sync::state::update_account_sync_state(conn, &aid, &marker)
+        })
+        .await?;
     }
 
     let new_inbox_message_ids: Vec<String> = all_meta

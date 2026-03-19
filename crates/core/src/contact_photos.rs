@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 use log::{info, warn};
 use rusqlite::params;
 use rusqlite::OptionalExtension;
-use xxhash_rust::xxh3::xxh3_64;
 
 use crate::db::DbState;
+use ratatoskr_stores::attachment_cache::hash_bytes;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,11 +27,6 @@ const PHOTO_CACHE_DIR: &str = "contact_photos";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/// Compute an xxh3 content hash from raw bytes, formatted as 16-char hex.
-fn hash_bytes(data: &[u8]) -> String {
-    format!("{:016x}", xxh3_64(data))
-}
 
 /// Build the on-disk path for a cached photo.
 fn photo_file_path(cache_dir: &Path, content_hash: &str) -> PathBuf {

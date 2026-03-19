@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
-use rusqlite::OptionalExtension;
-
 use ratatoskr_core::db::DbState;
 use ratatoskr_core::provider::crypto::{AppCryptoState, decrypt_value, is_encrypted};
 
@@ -143,17 +141,9 @@ pub async fn read_plain_setting(
     key: &str,
 ) -> Result<Option<String>, AiError> {
     let key_name = key.to_string();
-    db.with_conn(move |conn| {
-        conn.query_row(
-            "SELECT value FROM settings WHERE key = ?1",
-            rusqlite::params![key_name],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
-        .map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| AiError::DbError(format!("read setting {key}: {e}")))
+    db.with_conn(move |conn| ratatoskr_core::db::get_setting(conn, key_name))
+        .await
+        .map_err(|e| AiError::DbError(format!("read setting {key}: {e}")))
 }
 
 /// Check whether AI is available (enabled + configured).

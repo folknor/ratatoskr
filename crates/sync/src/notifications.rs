@@ -15,13 +15,8 @@ pub async fn get_ai_categorization_candidates(
 ) -> Result<Vec<AiCategorizationCandidate>, String> {
     let account_id = account_id.to_string();
     db.with_conn(move |conn| {
-        let auto_categorize = conn
-            .query_row(
-                "SELECT value FROM settings WHERE key = 'ai_auto_categorize'",
-                [],
-                |row| row.get::<_, String>("value"),
-            )
-            .ok();
+        let auto_categorize = ratatoskr_db::db::queries::get_setting(conn, "ai_auto_categorize".to_string())
+            .unwrap_or(None);
         if auto_categorize.as_deref() == Some("false") {
             return Ok(Vec::new());
         }
@@ -68,33 +63,19 @@ fn evaluate_notifications_sync(
     messages: &[FilterableMessage],
     thread_ids: &[String],
 ) -> Result<Vec<NotificationCandidate>, String> {
-    let notifications_enabled: Option<String> = conn
-        .query_row(
-            "SELECT value FROM settings WHERE key = 'notifications_enabled'",
-            [],
-            |row| row.get("value"),
-        )
-        .ok();
+    use ratatoskr_db::db::queries::get_setting;
+    let notifications_enabled = get_setting(conn, "notifications_enabled".to_string())
+        .unwrap_or(None);
     if notifications_enabled.as_deref() == Some("false") {
         return Ok(Vec::new());
     }
 
-    let smart_notifications = conn
-        .query_row(
-            "SELECT value FROM settings WHERE key = 'smart_notifications'",
-            [],
-            |row| row.get::<_, String>("value"),
-        )
-        .ok()
+    let smart_notifications = get_setting(conn, "smart_notifications".to_string())
+        .unwrap_or(None)
         .unwrap_or_else(|| "true".to_string())
         == "true";
-    let notify_categories = conn
-        .query_row(
-            "SELECT value FROM settings WHERE key = 'notify_categories'",
-            [],
-            |row| row.get::<_, String>("value"),
-        )
-        .ok()
+    let notify_categories = get_setting(conn, "notify_categories".to_string())
+        .unwrap_or(None)
         .unwrap_or_else(|| "Primary".to_string());
     let allowed_categories: HashSet<String> = notify_categories
         .split(',')

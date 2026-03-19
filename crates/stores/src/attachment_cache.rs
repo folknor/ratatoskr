@@ -156,14 +156,8 @@ struct CachedAttachmentRow {
 
 async fn attachment_cache_max_bytes(db: &DbState) -> Result<i64, String> {
     db.with_conn(|conn| {
-        let raw: Option<String> = conn
-            .query_row(
-                "SELECT value FROM settings WHERE key = 'attachment_cache_max_mb'",
-                [],
-                |row| row.get("value"),
-            )
-            .optional()
-            .map_err(|e| format!("query attachment cache limit: {e}"))?;
+        let raw = ratatoskr_db::db::queries::get_setting(conn, "attachment_cache_max_mb".to_string())
+            .unwrap_or(None);
         let max_mb = raw
             .as_deref()
             .unwrap_or("500")

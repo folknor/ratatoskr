@@ -417,8 +417,11 @@ pub async fn lookup_bimi(
                 } else {
                     let now = chrono::Utc::now().timestamp();
                     let expires = now + POSITIVE_TTL_SECS;
-                    let _ =
-                        upsert_bimi_cache(conn, &domain, true, Some(&logo_key), None, expires);
+                    if let Err(e) =
+                        upsert_bimi_cache(conn, &domain, true, Some(&logo_key), None, expires)
+                    {
+                        warn!("failed to cache BIMI indicator for {domain}: {e}");
+                    }
                     return Some(path);
                 }
             } else {
@@ -455,14 +458,16 @@ pub async fn lookup_bimi(
     if path.exists() {
         let now = chrono::Utc::now().timestamp();
         let expires = now + POSITIVE_TTL_SECS;
-        let _ = upsert_bimi_cache(
+        if let Err(e) = upsert_bimi_cache(
             conn,
             &domain,
             true,
             Some(logo_uri),
             record.authority_uri.as_deref(),
             expires,
-        );
+        ) {
+            warn!("failed to update BIMI cache for {domain}: {e}");
+        }
         return Some(path);
     }
 
@@ -486,14 +491,16 @@ pub async fn lookup_bimi(
     // 7. Cache positive result
     let now = chrono::Utc::now().timestamp();
     let expires = now + POSITIVE_TTL_SECS;
-    let _ = upsert_bimi_cache(
+    if let Err(e) = upsert_bimi_cache(
         conn,
         &domain,
         true,
         Some(logo_uri),
         record.authority_uri.as_deref(),
         expires,
-    );
+    ) {
+        warn!("failed to cache positive BIMI result for {domain}: {e}");
+    }
 
     // 8. Return path
     Some(path)
@@ -503,7 +510,9 @@ pub async fn lookup_bimi(
 fn cache_negative(domain: &str, conn: &Connection) {
     let now = chrono::Utc::now().timestamp();
     let expires = now + NEGATIVE_TTL_SECS;
-    let _ = upsert_bimi_cache(conn, domain, false, None, None, expires);
+    if let Err(e) = upsert_bimi_cache(conn, domain, false, None, None, expires) {
+        warn!("failed to cache negative BIMI result for {domain}: {e}");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -700,14 +709,16 @@ pub async fn warm_bimi_cache(
         match result {
             Some((_path, logo_uri, authority_uri)) => {
                 let expires = now + POSITIVE_TTL_SECS;
-                let _ = upsert_bimi_cache(
+                if let Err(e) = upsert_bimi_cache(
                     conn,
                     domain,
                     true,
                     Some(logo_uri.as_str()),
                     authority_uri.as_deref(),
                     expires,
-                );
+                ) {
+                    warn!("failed to cache BIMI warm result for {domain}: {e}");
+                }
             }
             None => {
                 cache_negative(domain, conn);

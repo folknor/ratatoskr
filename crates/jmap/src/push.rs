@@ -516,7 +516,7 @@ async fn load_push_state(db: &DbState, account_id: &str) -> Result<Option<String
 async fn save_push_enabled(db: &DbState, account_id: &str, ws_url: &str) {
     let aid = account_id.to_string();
     let url = ws_url.to_string();
-    let _ = db
+    if let Err(e) = db
         .with_conn(move |conn| {
             conn.execute(
                 "INSERT INTO jmap_push_state (account_id, ws_url, is_push_enabled) \
@@ -527,12 +527,15 @@ async fn save_push_enabled(db: &DbState, account_id: &str, ws_url: &str) {
             )
             .map_err(|e| format!("save_push_enabled: {e}"))
         })
-        .await;
+        .await
+    {
+        log::warn!("[JMAP push] failed to save push enabled state: {e}");
+    }
 }
 
 async fn save_push_disabled(db: &DbState, account_id: &str, failures: u32) {
     let aid = account_id.to_string();
-    let _ = db
+    if let Err(e) = db
         .with_conn(move |conn| {
             conn.execute(
                 "UPDATE jmap_push_state SET is_push_enabled = 0, \
@@ -541,12 +544,15 @@ async fn save_push_disabled(db: &DbState, account_id: &str, failures: u32) {
             )
             .map_err(|e| format!("save_push_disabled: {e}"))
         })
-        .await;
+        .await
+    {
+        log::warn!("[JMAP push] failed to save push disabled state: {e}");
+    }
 }
 
 async fn save_connected_at(db: &DbState, account_id: &str) {
     let aid = account_id.to_string();
-    let _ = db
+    if let Err(e) = db
         .with_conn(move |conn| {
             conn.execute(
                 "UPDATE jmap_push_state SET last_connected_at = unixepoch(), \
@@ -555,12 +561,15 @@ async fn save_connected_at(db: &DbState, account_id: &str) {
             )
             .map_err(|e| format!("save_connected_at: {e}"))
         })
-        .await;
+        .await
+    {
+        log::warn!("[JMAP push] failed to save connected_at: {e}");
+    }
 }
 
 async fn save_consecutive_failures(db: &DbState, account_id: &str, failures: u32) {
     let aid = account_id.to_string();
-    let _ = db
+    if let Err(e) = db
         .with_conn(move |conn| {
             conn.execute(
                 "UPDATE jmap_push_state SET consecutive_failures = ?2 \
@@ -569,13 +578,16 @@ async fn save_consecutive_failures(db: &DbState, account_id: &str, failures: u32
             )
             .map_err(|e| format!("save_consecutive_failures: {e}"))
         })
-        .await;
+        .await
+    {
+        log::warn!("[JMAP push] failed to save consecutive failures: {e}");
+    }
 }
 
 async fn save_last_push_state(db: &DbState, account_id: &str, push_state: &str) {
     let aid = account_id.to_string();
     let ps = push_state.to_string();
-    let _ = db
+    if let Err(e) = db
         .with_conn(move |conn| {
             conn.execute(
                 "UPDATE jmap_push_state SET push_state = ?2 WHERE account_id = ?1",
@@ -583,7 +595,10 @@ async fn save_last_push_state(db: &DbState, account_id: &str, push_state: &str) 
             )
             .map_err(|e| format!("save_last_push_state: {e}"))
         })
-        .await;
+        .await
+    {
+        log::warn!("[JMAP push] failed to save last push state: {e}");
+    }
 }
 
 // ---------------------------------------------------------------------------

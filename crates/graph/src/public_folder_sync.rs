@@ -5,6 +5,7 @@
 
 use ratatoskr_db::db::DbState;
 use crate::ews::{EwsClient, EwsFolder, EwsHeaders, EwsItem};
+use crate::parse::parse_iso_datetime;
 
 /// Result of syncing a single pinned public folder.
 #[derive(Debug, Default)]
@@ -25,23 +26,7 @@ const PAGE_SIZE: u32 = 50;
 
 /// Parse an ISO 8601 date-time string to a Unix timestamp (seconds).
 fn parse_iso8601_to_unix(s: &str) -> Option<i64> {
-    chrono::DateTime::parse_from_rfc3339(s)
-        .ok()
-        .or_else(|| {
-            // EWS sometimes returns "2024-01-15T10:30:00Z" without fractional seconds
-            chrono::DateTime::parse_from_rfc3339(&format!("{s}+00:00")).ok()
-        })
-        .or_else(|| {
-            // Try NaiveDateTime (no timezone) and assume UTC
-            chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
-                .ok()
-                .and_then(|ndt| {
-                    ndt.and_local_timezone(chrono::Utc)
-                        .single()
-                        .map(|dt| dt.fixed_offset())
-                })
-        })
-        .map(|dt| dt.timestamp())
+    parse_iso_datetime(s).map(|dt| dt.timestamp())
 }
 
 /// Fetch all items from a folder via EWS, paginating until `includes_last`.

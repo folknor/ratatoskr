@@ -283,23 +283,31 @@ fn decode_inline_bytes(data: &str) -> Option<Vec<u8>> {
     Some(decoded)
 }
 
-/// Parse an ISO 8601 date string to epoch milliseconds.
+/// Parse an ISO 8601 date string to a `DateTime<Utc>`.
 ///
 /// Tries RFC 3339 first (has timezone), then falls back to naive datetime
-/// formats without timezone (assumed UTC). Graph API sometimes returns dates
-/// without a timezone suffix.
-fn parse_iso_date(s: &str) -> Option<i64> {
+/// formats without timezone (assumed UTC). Graph API and EWS sometimes
+/// return dates without a timezone suffix.
+///
+/// Callers choose their own resolution: `.timestamp_millis()` for message
+/// dates, `.timestamp()` for sync timestamps, etc.
+pub(crate) fn parse_iso_datetime(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     // Try RFC 3339 first (has timezone)
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
-        return Some(dt.timestamp_millis());
+        return Some(dt.to_utc());
     }
     // Fallback: naive datetime without timezone (assume UTC), with fractional seconds
     if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f") {
-        return Some(dt.and_utc().timestamp_millis());
+        return Some(dt.and_utc());
     }
     // Fallback: naive datetime without timezone (assume UTC), no fractional seconds
     if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S") {
-        return Some(dt.and_utc().timestamp_millis());
+        return Some(dt.and_utc());
     }
     None
+}
+
+/// Parse an ISO 8601 date string to epoch milliseconds.
+fn parse_iso_date(s: &str) -> Option<i64> {
+    parse_iso_datetime(s).map(|dt| dt.timestamp_millis())
 }

@@ -64,39 +64,39 @@
 
 - [ ] **Extract category upsert helper** — Similar `INSERT INTO categories` across 4 providers with slightly different ON CONFLICT clauses.
 
-- [ ] **Consolidate `blocked_thread_ids` / `get_skipped_thread_ids`** — Same query, two implementations in `sync/src/pending.rs` (async) and `sync/src/pipeline.rs` (sync).
+- [x] **Consolidate `blocked_thread_ids` / `get_skipped_thread_ids`** — Same query, two implementations in `sync/src/pending.rs` (async) and `sync/src/pipeline.rs` (sync).
 
-- [ ] **Deduplicate `hash_bytes`** — Identical function in `stores/src/attachment_cache.rs` and `core/src/contact_photos.rs`.
+- [x] **Deduplicate `hash_bytes`** — Core now imports from stores instead of defining its own copy.
 
-- [ ] **Consolidate ISO 8601 date parsing in graph** — `parse_iso_date` and `parse_iso8601_to_unix` implement the same fallback chain. Files: `graph/src/parse.rs:291-305`, `graph/src/public_folder_sync.rs:27-45`.
+- [x] **Consolidate ISO 8601 date parsing in graph** — Extracted `parse_iso_datetime` returning `DateTime<Utc>`, both callers now use it.
 
 #### MEDIUM — Error handling
 
 - [ ] **Introduce `ProviderError` enum** — `Result<T, String>` used in ~100+ signatures via `ProviderOps`. Callers cannot distinguish auth vs network vs rate limit. Add classified variants in `provider-utils`.
 
-- [ ] **Log silently swallowed DB errors** — ~15 call sites use `let _ = ...` for DB writes that should at minimum log warnings. Files: `core/src/bimi.rs`, `jmap/src/push.rs`, `graph/src/webhooks.rs`.
+- [x] **Log silently swallowed DB errors** — 12 `let _ = ...` patterns replaced with `if let Err(e)` + `log::warn!` in bimi.rs, push.rs, webhooks.rs.
 
 #### MEDIUM — Dead code
 
-- [ ] **Delete 15 dead query wrappers in `accounts_messages.rs`** — Tauri-era async functions with zero callers. Reintroduce when wired to iced app.
+- [x] **Delete 15 dead query wrappers in `accounts_messages.rs`** — Removed. Kept `row_to_account`, `db_get_all_accounts`, `db_get_account`, `db_get_account_by_email`, `db_delete_account`.
 
-- [ ] **Consolidate duplicate types in `ai` crate** — `AiMessageInput`, `AiSearchResult`, `ExtractedTask` each defined twice with different fields in `types.rs` vs `formatting.rs`/`parsing.rs`.
+- [x] **Consolidate duplicate types in `ai` crate** — Single definitions in `types.rs`, `formatting.rs` and `parsing.rs` now import from there.
 
-- [ ] **Remove duplicate `ThreadCategory` enum from `ai`** — Identical copy in `sync/src/categorization.rs` and `ai/src/types.rs`. `CATEGORIZE_PROMPT` also duplicated.
+- [x] **Remove duplicate `ThreadCategory` enum from `ai`** — ai now re-exports from `ratatoskr_core::categorization`. `CATEGORIZE_PROMPT` also deduplicated.
 
 #### MEDIUM — Crate boundaries
 
-- [ ] **Change `smart-folder` dep from `core` to `db`** — Only uses DB types, pulls entire core + all providers transitively.
+- [x] **Change `smart-folder` dep from `core` to `db`** — Only uses DB types, pulls entire core + all providers transitively.
 
-- [ ] **Move `router.rs` from `provider-utils` to `core`** — `get_provider_type()` is a DB query, not a provider utility.
+- [x] **Move `router.rs` from `provider-utils` to `core`** — `get_provider_type()` is a DB query, not a provider utility.
 
 #### LOW — Cleanup
 
-- [ ] **Unify `save_account_history_id` / `update_account_sync_state`** — Same SQL in `sync/src/state.rs` and `sync/src/pipeline.rs`.
+- [x] **Unify `save_account_history_id` / `update_account_sync_state`** — Same SQL in `sync/src/state.rs` and `sync/src/pipeline.rs`.
 
-- [ ] **Deduplicate `get_thread_count`** — Core version (with label filter) and sync version (without). Sync should call core's.
+- [x] **Deduplicate `get_thread_count`** — Core version (with label filter) and sync version (without). Sync version removed (had zero callers).
 
-- [ ] **Use `get_setting` helper consistently** — ~14 locations inline `SELECT value FROM settings WHERE key` instead of calling the canonical helper in `core/src/db/queries.rs`.
+- [x] **Use `get_setting` helper consistently** — Moved canonical `get_setting` to `ratatoskr-db` (re-exported by core). Remaining inline SQL: `db/src/db/migrations.rs` (embedded in migration SQL, cannot call Rust).
 
 ### Microsoft Graph
 

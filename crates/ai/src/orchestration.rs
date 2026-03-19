@@ -4,7 +4,7 @@ use crate::parsing;
 use crate::prompts;
 use crate::types::{
     AiCompleter, AiCompletionRequest, AiError, AiMessageInput, AiSearchResult, AutoDraftMode,
-    ExtractedTask, TaskPriority, TextTransformType, ThreadCategory, ThreadForCategorization,
+    ExtractedTask, TextTransformType, ThreadCategory, ThreadForCategorization,
     WritingStyleProfile,
 };
 use ratatoskr_core::db::DbState;
@@ -222,7 +222,7 @@ pub async fn categorize_threads(
             if thread_id.is_empty() || !valid_ids.contains(thread_id) {
                 return None;
             }
-            ThreadCategory::from_str(category_str).map(|cat| (thread_id.to_string(), cat))
+            ThreadCategory::parse(category_str).map(|cat| (thread_id.to_string(), cat))
         })
         .collect();
 
@@ -322,23 +322,7 @@ pub async fn extract_task(
         })
         .await?;
 
-    let parsed = parsing::parse_extracted_task(&response, thread_subject);
-
-    // Convert from parsing::ExtractedTask to types::ExtractedTask
-    let priority = match parsed.priority.as_str() {
-        "none" => TaskPriority::None,
-        "low" => TaskPriority::Low,
-        "high" => TaskPriority::High,
-        "urgent" => TaskPriority::Urgent,
-        _ => TaskPriority::Medium,
-    };
-
-    Ok(ExtractedTask {
-        title: parsed.title,
-        description: parsed.description.unwrap_or_default(),
-        due_date: parsed.due_date,
-        priority,
-    })
+    Ok(parsing::parse_extracted_task(&response, thread_subject))
 }
 
 // ---------------------------------------------------------------------------
@@ -727,9 +711,9 @@ mod tests {
             ("Social", ThreadCategory::Social),
             ("Newsletters", ThreadCategory::Newsletters),
         ] {
-            assert_eq!(ThreadCategory::from_str(s), Some(expected.clone()));
+            assert_eq!(ThreadCategory::parse(s), Some(expected.clone()));
             assert_eq!(expected.as_str(), s);
         }
-        assert_eq!(ThreadCategory::from_str("Invalid"), None);
+        assert_eq!(ThreadCategory::parse("Invalid"), None);
     }
 }

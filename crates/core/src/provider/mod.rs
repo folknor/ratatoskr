@@ -13,7 +13,6 @@ pub use ratatoskr_provider_utils::http;
 pub use ratatoskr_provider_utils::label_flags;
 pub use ratatoskr_provider_utils::ops;
 pub use ratatoskr_provider_utils::parsed_message;
-pub use ratatoskr_provider_utils::router;
 pub use ratatoskr_provider_utils::signature_images;
 pub use ratatoskr_provider_utils::text;
 pub use ratatoskr_provider_utils::token;
