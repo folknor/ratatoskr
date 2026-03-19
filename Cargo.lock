@@ -5404,6 +5404,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ratatoskr-system-fonts"
+version = "0.1.0"
+dependencies = [
+ "tokio",
+ "tracing",
+ "windows-sys 0.61.2",
+ "zbus",
+]
+
+[[package]]
 name = "rav1e"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -20,6 +20,7 @@ members = [
     "crates/jmap",
     "crates/graph",
     "crates/imap",
+    "crates/system-fonts",
 ]
 
 exclude = [
