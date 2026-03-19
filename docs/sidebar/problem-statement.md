@@ -6,6 +6,8 @@ Ratatoskr's sidebar must serve multi-account users (typically 3+ accounts across
 
 This document covers the sidebar's content model and the scope selector that controls it. It does not cover visual styling, dimensions, or animation.
 
+The sidebar also contains the **calendar mode toggle button** (see `docs/calendar/problem-statement.md` § Mode Switcher) and the **pinned searches section** (see `docs/search/pinned-searches.md`).
+
 ## Current State
 
 The sidebar is implemented as an iced view function (`crates/app/src/ui/sidebar.rs`) following iced's Elm architecture. `SidebarModel` holds a reference to the current accounts, labels, selected scope, and section-expand state; the `view()` function renders the sidebar from that model; user interactions produce `Message` variants that the top-level `update()` handles.
@@ -20,7 +22,7 @@ The sidebar already implements much of the design in this document:
 
 4. **Labels** — Collapsible section, shown only when scoped to a specific account. System labels are filtered out.
 
-Tasks, Calendar, and Attachments are already absent from the sidebar — they are palette-first destinations as specified below.
+Tasks and Attachments are already absent from the sidebar — they are palette-first destinations as specified below. Calendar has its own full-view mode accessed via a toggle button in the sidebar header (see `docs/calendar/problem-statement.md`).
 
 ### What's Still Missing
 
@@ -45,17 +47,27 @@ Scope is **app model state**, not a command-palette action. Changing scope does 
 
 The command palette can *set* scope (e.g., `Navigate > Switch Account > Foo Corp`), just as it can toggle the sidebar or switch themes — these are model state mutations exposed as commands for keyboard accessibility, not proof that they belong in the command system's dispatch model. The scope value lives in a single place in the iced app model (`selected_account: Option<usize>` in `crates/app/`) and the sidebar reads it via `SidebarModel`. There is no second implementation path.
 
-### Tasks, Calendar, and Attachments
+### Tasks and Attachments
 
-These are intentionally absent from the proposed sidebar. They are separate product areas, not mailbox filters, and showing them unconditionally in the folder list conflates navigation contexts.
+These are intentionally absent from the sidebar. They are separate product areas, not mailbox filters, and showing them unconditionally in the folder list conflates navigation contexts.
 
-They become **palette-first destinations**: `Navigate > Tasks`, `Navigate > Calendar`, `Navigate > Attachments`. If usage data later shows users reaching for them frequently enough to justify persistent sidebar presence, they can be added back — but as an explicit decision, not a default.
+They become **palette-first destinations**: `Navigate > Tasks`, `Navigate > Attachments`. If usage data later shows users reaching for them frequently enough to justify persistent sidebar presence, they can be added back — but as an explicit decision, not a default.
+
+**Calendar** is not a palette destination — it has its own full-view mode toggled via a button in the sidebar header area. See `docs/calendar/problem-statement.md` for the complete calendar spec.
 
 ### Sidebar Content by Scope
 
 #### All Accounts (unified)
 
 ```
+[📅] [Scope Dropdown    ]
+[  ] [   Compose        ]
+
+ from:alice ha..  ✕       ← Pinned searches
+ 2 hours ago               (see docs/search/pinned-searches.md)
+ is:unread aft..  ✕
+ 3 days ago
+
 Inbox              12
 Starred
 Snoozed
@@ -68,6 +80,8 @@ SMART FOLDERS
 └ Newsletters
 ```
 
+The calendar toggle button sits in the top-left of the header area, to the left of the scope dropdown and compose button (see `docs/calendar/problem-statement.md` § Mode Switcher for dimensions). Pinned searches appear below the header, above the universal folders.
+
 - Universal folders aggregate across all accounts. Unread counts are summed. See "Universal Folder Semantics" below for how aggregation works per folder.
 - Smart Folders always appear in the sidebar regardless of scope. They are saved searches — their queries run through the unified search pipeline exactly as written. A smart folder with `account:FooCorp in:inbox is:unread` searches only Foo Corp; one with `is:unread after:-7` spans everything. The scope selector has no effect on smart folders — neither their visibility nor their query execution. The sidebar content is therefore: scope-filtered universal folders + scope-filtered labels + all Smart Folders (unscoped).
 
@@ -78,6 +92,9 @@ SMART FOLDERS
 #### Specific Account
 
 ```
+[📅] [Account Name  ▾]
+[  ] [   Compose     ]
+
 Inbox               7
 Starred
 Snoozed

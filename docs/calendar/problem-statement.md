@@ -75,7 +75,7 @@ Implementation: both the mail UI tree and the calendar UI tree exist in the app 
 
 When in calendar mode, the window has two panels:
 
-1. **Calendar sidebar** (left, ~220px, fixed width)
+1. **Calendar sidebar** (left, same width as the mail sidebar — currently 180px, fixed width)
 2. **Calendar main view** (fill remaining width)
 
 No right sidebar in calendar mode. No thread list. No reading pane. The calendar owns the full content area.
@@ -232,30 +232,229 @@ Multi-day events span across cells as a horizontal bar (same as Google Calendar 
 
 ## Event Interaction
 
-### Event Detail Panel
+### Event Detail Popover
 
-Clicking an event opens a **persistent popover** anchored near the clicked event. Not a hover tooltip — it stays open until explicitly dismissed (click outside, Escape, or click another event). The popover shows minimal details:
+Clicking an event block opens a popover. Clicking outside or pressing Escape dismisses it. Clicking another event block dismisses the current popover and opens a new one for the clicked event.
 
-- Title
-- Date and time
-- Location (if set)
-- Calendar name + color
-- RSVP buttons (if the user is an attendee)
-- Edit / Delete actions
+#### Popover Anchoring
 
-A **↗ button** in the popover expands it into a **full modal dialog** that dims and blocks interaction with the rest of the calendar window. The modal uses as much space as it needs and shows the complete event detail:
+- **Horizontal**: anchors to the right of the event block if space allows, left if not.
+- **Vertical**: the popover's vertical center aligns with the event block's vertical center.
 
+#### Popover Size
+
+- **Fixed width**: approximately the sidebar width (~180px).
+- **Dynamic height**: grows to fit content. Elements with no data are hidden entirely, so a minimal event (title + time only) produces a compact popover.
+
+#### Popover Contents (top to bottom, all full-width)
+
+```
+┌─────────────────────────┐
+│ Sprint Planning       ↗ │  ← title + expand-to-modal button (top-right)
+│ 10:00–11:30  🔁         │  ← abbreviated time/span + recurrence icon (right-pinned)
+│ Room 4B                 │  ← location (hidden if empty)
+│ Invited by Alice Smith  │  ← organizer (hidden if own event)
+│ Bob, Charlie, +3 others │  ← other attendees (hidden if none)
+│ Discuss Q2 roadmap...   │  ← description (truncated ~200 words, hidden if empty)
+│                         │
+│ ☐ Email organizer       │  ← checkbox (only shown when RSVP actions are present)
+│ [Accept] [Decline] [?]  │  ← action buttons (context-dependent, see below)
+└─────────────────────────┘
+```
+
+Every content row is hidden if its data is empty — no blank rows, no placeholders.
+
+#### Popover Action Buttons (context-dependent)
+
+The action buttons at the bottom of the popover change based on the user's relationship to the event:
+
+**(a) Event from someone else's calendar (shared/public calendar):**
+- "Add to my calendar", "Edit" (if permissions allow), "Cancel" (if permissions allow)
+
+**(b) User's own event (no invitation involved):**
+- No action buttons. The popover is read-only; editing happens in the modal via ↗.
+
+**(c) User's own event where they have already responded to an invitation:**
+- Shows current RSVP status (e.g., "Accepted" / "Tentative" / "Declined") and a "Change" button that reveals the full RSVP options.
+
+**(d) User's own event where they have NOT responded to an invitation:**
+- "Accept", "Decline", "Tentative", "Dismiss"
+
+When RSVP action buttons are present (cases a, c, d), an **"Email organizer" checkbox** appears directly above the action buttons. When checked, the RSVP response is also sent as an email to the organizer.
+
+#### Expand to Modal
+
+The **↗ button** in the popover's top-right corner opens the full event detail modal (see below). The popover closes when the modal opens.
+
+### Event Detail Modal
+
+The modal dims and blocks interaction with the rest of the calendar window. It shows the complete event detail with all fields, and is also the surface for event editing and event creation.
+
+#### Modal Size and Layout
+
+- **Fixed width**: 1200px
+- **Height**: full window height minus ~30px margin on each side
+- **Two-panel layout**: ~850px left panel (event details), ~350px right panel (day view)
+
+```
+┌────────────────────────────────────────────────────┬──────────────────┐
+│ Event Details (left panel, ~850px)                  │ Day View (~350px)│
+│                                                    │                  │
+│ Calendar: [Work Calendar ▾]                        │  8:00            │
+│                                                    │  9:00 ┌────────┐│
+│ Title                                              │       │Standup ││
+│ ─────────────────────────────────────────          │  9:30 └────────┘│
+│ Date: Wed, Mar 19, 2026                            │ 10:00 ┌────────┐│
+│ Time: 10:00 – 11:30           🔁 Weekly            │       │THIS    ││
+│ Location: Room 4B                                  │       │EVENT   ││
+│                                                    │ 11:30 └────────┘│
+│ Organizer: Alice Smith                             │ 12:00            │
+│ Attendees:                                         │ 13:00            │
+│   ✓ Alice Smith (organizer)                        │ 14:00 ┌────────┐│
+│   ✓ Bob Jones                                      │       │Client  ││
+│   ? Charlie (no response)                          │       │call    ││
+│   ✗ Diana (declined)                               │ 15:00 └────────┘│
+│                                                    │ 16:00            │
+│ Description:                                       │                  │
+│ Discuss Q2 roadmap priorities and resource          │                  │
+│ allocation for the new platform migration...       │                  │
+│                                                    │                  │
+│ Reminders: 15 min before                           │                  │
+│                                                    │                  │
+│ ☐ Email organizer                                  │                  │
+│ [Accept] [Decline] [Tentative] [Dismiss]           │                  │
+└────────────────────────────────────────────────────┴──────────────────┘
+```
+
+**Left panel**: scrolls vertically if content overflows. Contains all event fields and action buttons at the bottom.
+
+**Right panel**: a mini day view showing the event's date, with the current event highlighted. Shows other events on the same day so the user can see scheduling conflicts. Uses the same event block rendering as the main day view, just narrower.
+
+#### Left Panel Contents (read mode, top to bottom)
+
+- Calendar selector (name + color, dropdown in edit mode)
 - Title
 - Date and time (with timezone if different from local)
-- Location (with link if it's a URL / meeting link)
-- Calendar (which calendar it belongs to)
-- Organizer and attendees (with RSVP status)
-- Description/notes
 - Recurrence rule (if recurring)
+- Location (with clickable link if URL / meeting link)
+- Organizer
+- Attendees with per-person RSVP status (✓ accepted, ? no response, ~ tentative, ✗ declined)
+- Description (full, not truncated)
 - Reminders
-- Actions: Edit, Delete, RSVP (Accept/Tentative/Decline)
+- "Email organizer" checkbox (when RSVP actions are present)
+- Context-dependent action buttons (same a/b/c/d rules as the popover), plus "Edit" and "Delete"
 
-This two-tier approach keeps quick checks fast (popover) while giving complex events the space they need (modal). The modal is also where event editing happens — clicking "Edit" in either the popover or the modal switches the modal to edit mode with all fields editable.
+Empty fields are hidden in read mode.
+
+#### Edit Mode
+
+Clicking "Edit" switches the left panel to edit mode — fields become editable in place. The right panel day view stays visible (useful for checking conflicts while adjusting times). Save and Cancel buttons replace the action buttons at the bottom. The event creation dialog (see § Event Creation) uses this same modal in edit mode.
+
+#### Close
+
+A close button (✕) in the top-right corner of the modal. Escape also closes. In edit mode, closing without saving prompts for confirmation if changes have been made.
+
+This two-tier approach keeps quick checks fast (popover) while giving complex events the space they need (modal).
+
+### Time Picker Popover
+
+The date/time field in the modal (both read and edit mode) is **not a standard text input**. It displays the formatted time range as a clickable label. Clicking it opens a time picker popover. This popover is used in both the event detail modal (edit mode) and the event creation dialog.
+
+#### Base Layout (simple, no timezone, non-recurring)
+
+```
+┌───────────────────────────────────────┐
+│ Start date     Start time             │
+│ [Mar 19, 2026] [10:00]               │
+│                                       │
+│ End time (default: +30min from start) │
+│ [10:30]                               │
+│                                       │
+│ [🌐 Timezone]                         │
+│                                       │
+│ ☐ All day                             │
+│ ○ Recurring                           │
+└───────────────────────────────────────┘
+```
+
+- **Start date**: date picker
+- **Start time**: time picker
+- **End time**: time picker, defaults to 30 minutes after start time
+- **Timezone button**: expands the fields (see below)
+- **All day checkbox**: when checked, hides time fields (start time, end time), keeps date fields
+- **Recurring toggle**: when enabled, expands recurrence options (see below)
+
+The end date is not shown by default — it is the same as the start date. The timezone expansion reveals it.
+
+#### Timezone Expansion
+
+Clicking the timezone button expands the 3 fields (start date, start time, end time) to 6 fields across two rows:
+
+```
+┌───────────────────────────────────────┐
+│ [Mar 19, 2026] [10:00] [Europe/Oslo] │
+│ [Mar 19, 2026] [10:30] [US/Eastern]  │
+│                                       │
+│ [🌐 Timezone]  (collapse)             │
+│                                       │
+│ ☐ All day                             │
+│ ○ Recurring                           │
+└───────────────────────────────────────┘
+```
+
+Row 1: start date + start time + start timezone. Row 2: end date + end time + end timezone. This enables events that span timezones (e.g., a flight departing Oslo at 10:00 CET arriving New York at 10:30 EST) and multi-day events (end date differs from start date).
+
+#### Recurrence Options
+
+Toggling "Recurring" on expands the popover with recurrence configuration:
+
+```
+┌───────────────────────────────────────┐
+│ [Start date] [Start time]            │
+│ [End time]                            │
+│                                       │
+│ ☐ All day                             │
+│ ● Recurring                           │
+│ ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄ │
+│ Repeat every [1] [Week       ▾]      │
+│                                       │
+│ [Mo][Tu][We][Th][Fr][Sa][Su]          │  ← day-of-week toggles (day/week only)
+│                                       │
+│ ☐ Never on weekends or holidays       │
+│   (shifts to closest work day)        │
+│                                       │
+│ Ends: [Never ▾]                       │
+│       [On date: ___________]          │
+│       [After N occurrences: ___]      │
+└───────────────────────────────────────┘
+```
+
+**Repeat interval**: a number input + dropdown (Day / Week / Month / Year).
+
+**Day-of-week toggles**: 7 buttons (Mon–Sun), shown when the dropdown is Day or Week. Multiple can be active (e.g., every week on Mon, Wed, Fri). Not shown for Month or Year.
+
+**Month recurrence**: when the dropdown is Month, two radio options appear instead of day-of-week toggles:
+
+```
+│ ○ On day 19                           │  ← the date number from the start date
+│ ○ On the third Wednesday              │  ← computed from start date's position in the month
+```
+
+The second option is computed: if the start date is the third Wednesday of the month, it says "On the third Wednesday." If it's the first Monday, "On the first Monday," etc.
+
+**Year recurrence**: same two radio options as Month, but each includes the month name:
+
+```
+│ ○ On March 19                         │
+│ ○ On the third Wednesday of March     │
+```
+
+**Weekend/holiday avoidance**: a checkbox "Never on weekends or holidays." When checked, if a recurring instance would land on a weekend or holiday, it is automatically moved to the closest work day (pulled earlier or pushed later, whichever is closer). This applies to all recurrence types.
+
+**End condition**: dropdown with three options:
+- **Never** — recurs indefinitely
+- **On date** — recurs until a specific end date (date picker)
+- **After N occurrences** — recurs N times then stops (number input)
 
 ### Event Creation
 
@@ -266,16 +465,14 @@ This two-tier approach keeps quick checks fast (popover) while giving complex ev
 1. **Double-click an empty slot**: opens the event creation dialog with that slot's time pre-filled. This only works for single-slot creation — double-clicking after a drag-selection does not preserve the drag range (the first click of the double-click resets the selection to a single slot).
 2. **Keyboard shortcut or command palette** ("New Event"): opens the event creation dialog with the current selection pre-filled. This is the only way to create an event from a drag-selected time range. If no selection exists, defaults to the next available slot (or the current time).
 
-**The event creation dialog** is the same full modal as the event detail expanded view (dimmed background, blocks interaction). It contains all event fields:
+**The event creation dialog** is the same full modal as the event detail expanded view (dimmed background, blocks interaction), opened in edit mode. It contains all event fields:
 
 - Calendar selector (which calendar to create in) — **top of the form**, first field
 - Title
-- Date/time range (with date picker and time picker)
-- All day toggle
+- Date/time (clickable label that opens the Time Picker Popover — see § Time Picker Popover. Handles date, time, timezone, all-day, and recurrence)
 - Location
 - Description (rich text or plain text — start with plain)
 - Attendees (email address input with autocomplete from contacts)
-- Recurrence (none / daily / weekly / monthly / yearly / custom)
 - Reminders (notification timing)
 - Availability (free / busy / tentative / out of office)
 - Visibility (public / private)
