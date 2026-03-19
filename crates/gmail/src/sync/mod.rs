@@ -14,8 +14,7 @@ use ratatoskr_search::SearchState;
 use super::client::GmailClient;
 use ratatoskr_sync::{progress as sync_progress, state as sync_state};
 
-// Re-export submodule items that were previously public
-pub use delta::GmailSyncResult;
+pub(crate) use delta::GmailSyncResult;
 
 // ---------------------------------------------------------------------------
 // Shared context (crate-visible for submodules)

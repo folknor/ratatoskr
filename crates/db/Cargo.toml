@@ -3,6 +3,7 @@ name = "ratatoskr-db"
 description = "Shared database types, state, and migrations for Ratatoskr"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 

@@ -200,35 +200,6 @@ pub async fn db_update_account_all_tokens(
     .await
 }
 
-pub async fn db_update_account_sync_state(
-    db: &DbState,
-    id: String,
-    history_id: String,
-) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        conn.execute(
-            "UPDATE accounts SET history_id = ?1, initial_sync_completed = 1, last_sync_at = unixepoch(), \
-                 updated_at = unixepoch() WHERE id = ?2",
-            params![history_id, id],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
-}
-
-pub async fn db_clear_account_history_id(db: &DbState, id: String) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        conn.execute(
-            "UPDATE accounts SET history_id = NULL, initial_sync_completed = 0, updated_at = unixepoch() WHERE id = ?1",
-            params![id],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
-}
-
 pub async fn db_delete_account(db: &DbState, id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute("DELETE FROM accounts WHERE id = ?1", params![id])

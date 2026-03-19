@@ -3,8 +3,6 @@ use std::fmt;
 /// Errors that can occur during attachment compression.
 #[derive(Debug)]
 pub enum SqueezeError {
-    /// The input format could not be determined or is not supported.
-    UnsupportedFormat(String),
     /// Failed to decode an image.
     ImageDecode(String),
     /// Failed to encode an image.
@@ -24,7 +22,6 @@ pub enum SqueezeError {
 impl fmt::Display for SqueezeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnsupportedFormat(msg) => write!(f, "unsupported format: {msg}"),
             Self::ImageDecode(msg) => write!(f, "image decode error: {msg}"),
             Self::ImageEncode(msg) => write!(f, "image encode error: {msg}"),
             Self::PdfParse(msg) => write!(f, "PDF parse error: {msg}"),

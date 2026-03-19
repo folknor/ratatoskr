@@ -3,6 +3,7 @@ name = "ratatoskr-stores"
 description = "Content stores for Ratatoskr: email bodies, inline images, attachment cache"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 

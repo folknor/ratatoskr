@@ -17,7 +17,7 @@ pub const IMAP_SEARCH_TIMEOUT: Duration = Duration::from_secs(60);
 pub const OVERALL_CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Configure TCP keepalive and nodelay on a connected socket.
-pub fn configure_tcp_socket(stream: &TcpStream) {
+pub(crate) fn configure_tcp_socket(stream: &TcpStream) {
     // Set TCP nodelay via tokio's built-in API
     if let Err(e) = stream.set_nodelay(true) {
         log::warn!("Failed to set TCP_NODELAY: {e}");
@@ -126,7 +126,7 @@ impl std::fmt::Debug for ImapStream {
 
 /// Build a TLS connector, optionally accepting invalid certificates
 /// (for local mail bridges like ProtonMail Bridge with self-signed certs).
-pub fn build_tls_connector(accept_invalid_certs: bool) -> Result<native_tls::TlsConnector, String> {
+pub(crate) fn build_tls_connector(accept_invalid_certs: bool) -> Result<native_tls::TlsConnector, String> {
     let mut builder = native_tls::TlsConnector::builder();
     if accept_invalid_certs {
         builder.danger_accept_invalid_certs(true);
@@ -172,7 +172,7 @@ async fn connect_inner(config: &ImapConfig) -> Result<ImapSession, String> {
 }
 
 /// Establish TCP + TLS or plain stream for "tls" and "none" security modes.
-pub async fn connect_stream(config: &ImapConfig) -> Result<ImapStream, String> {
+pub(crate) async fn connect_stream(config: &ImapConfig) -> Result<ImapStream, String> {
     let addr = (&*config.host, config.port);
 
     match config.security.as_str() {
@@ -304,7 +304,7 @@ async fn authenticate(
 
 /// Negotiated CONDSTORE/QRESYNC capability state for a session.
 #[derive(Debug, Clone)]
-pub struct ImapCapabilities {
+pub(crate) struct ImapCapabilities {
     /// Server supports CONDSTORE (RFC 4551) — HIGHESTMODSEQ in SELECT and
     /// CHANGEDSINCE modifier for UID FETCH.
     pub condstore: bool,
@@ -422,7 +422,7 @@ pub async fn negotiate_condstore_qresync(
 /// ```text
 /// (("" "/")) (("Other Users/" "/")) (("Shared/" "/"))
 /// ```
-pub fn parse_namespace_response(line: &str) -> Result<NamespaceInfo, String> {
+pub(crate) fn parse_namespace_response(line: &str) -> Result<NamespaceInfo, String> {
     let line = line.trim();
     let mut info = NamespaceInfo::default();
     let mut pos = 0;
@@ -784,7 +784,7 @@ mod tests {
 }
 
 /// Classify which namespace a folder path belongs to based on prefix matching.
-pub fn classify_folder_namespace(info: &NamespaceInfo, folder_path: &str) -> Option<NamespaceType> {
+pub(crate) fn classify_folder_namespace(info: &NamespaceInfo, folder_path: &str) -> Option<NamespaceType> {
     // Check other_users and shared first (they have non-empty prefixes),
     // then fall back to personal.
     for entry in &info.other_users {

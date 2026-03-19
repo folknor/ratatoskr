@@ -1,5 +1,3 @@
-use super::DbState;
-use super::types::{DbFollowUpReminder, DbQuickStep};
 use rusqlite::Connection;
 
 // Re-export from the db crate so existing callers (`sync/notifications.rs`,
@@ -70,6 +68,3 @@ pub(super) fn dynamic_update(
         .map_err(|e| e.to_string())?;
     Ok(())
 }
-
-#[allow(dead_code)]
-fn _keep_types_alive(_: (&DbState, &DbFollowUpReminder, &DbQuickStep)) {}

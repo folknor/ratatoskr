@@ -3,6 +3,7 @@ name = "ratatoskr-search"
 description = "Tantivy-based full-text search for Ratatoskr"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 

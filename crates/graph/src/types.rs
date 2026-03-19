@@ -225,7 +225,7 @@ pub struct GraphAttachmentInput {
 }
 
 /// The `$select` fields we request for sync messages.
-pub const MESSAGE_SELECT: &str = "\
+pub(crate) const MESSAGE_SELECT: &str = "\
 id,conversationId,subject,bodyPreview,body,uniqueBody,from,\
 toRecipients,ccRecipients,bccRecipients,replyTo,\
 receivedDateTime,sentDateTime,isRead,isDraft,hasAttachments,\
@@ -233,13 +233,13 @@ importance,parentFolderId,categories,flag,\
 inferenceClassification,isReadReceiptRequested,internetMessageHeaders,internetMessageId,mentionsPreview";
 
 /// GUID for Exchange reaction extended properties.
-pub const REACTIONS_GUID: &str = "{41F28F13-83F4-4114-A584-EEDB5A6B0BFF}";
+pub(crate) const REACTIONS_GUID: &str = "{41F28F13-83F4-4114-A584-EEDB5A6B0BFF}";
 
 /// `$expand` clause to fetch Exchange reaction extended properties alongside messages.
 ///
 /// - `OwnerReactionType` — the authenticated user's reaction emoji (string)
 /// - `ReactionsCount` — total number of reactions on the message (integer)
-pub const REACTIONS_EXPAND: &str = "\
+pub(crate) const REACTIONS_EXPAND: &str = "\
 singleValueExtendedProperties(\
 $filter=id eq 'String {41F28F13-83F4-4114-A584-EEDB5A6B0BFF} Name OwnerReactionType' \
 or id eq 'Integer {41F28F13-83F4-4114-A584-EEDB5A6B0BFF} Name ReactionsCount'\

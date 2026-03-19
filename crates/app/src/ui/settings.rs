@@ -446,13 +446,13 @@ impl SettingsState {
                     }
                 }
 
-                let (from, start_y) = {
-                    let d = self.drag_state.as_ref().unwrap();
-                    (d.dragging_index, d.start_y)
+                let Some(drag_ref) = self.drag_state.as_ref() else {
+                    return Task::none();
                 };
+                let (from, start_y) = (drag_ref.dragging_index, drag_ref.start_y);
 
                 // Check if we've moved enough to start dragging.
-                if !self.drag_state.as_ref().unwrap().is_dragging {
+                if !drag_ref.is_dragging {
                     if (point.y - start_y).abs() < DRAG_START_THRESHOLD {
                         return Task::none();
                     }

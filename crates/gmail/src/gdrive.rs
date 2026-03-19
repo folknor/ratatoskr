@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Default chunk size: 5 MiB (must be a multiple of 256 KiB per Google's spec).
-pub const GDRIVE_CHUNK_SIZE: usize = 5 * 1024 * 1024;
+const GDRIVE_CHUNK_SIZE: usize = 5 * 1024 * 1024;
 
 /// Minimum alignment for upload chunks (256 KiB per Google Drive API spec).
 const GDRIVE_CHUNK_ALIGN: usize = 256 * 1024;

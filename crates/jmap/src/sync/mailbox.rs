@@ -204,7 +204,7 @@ pub async fn fetch_all_mailboxes(
         .unwrap_or_default())
 }
 
-pub fn role_to_str(role: &jmap_client::mailbox::Role) -> &'static str {
+pub(crate) fn role_to_str(role: &jmap_client::mailbox::Role) -> &'static str {
     use jmap_client::mailbox::Role;
     match role {
         Role::Inbox => "inbox",

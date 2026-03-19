@@ -24,7 +24,7 @@ use ratatoskr_sync::{
 const BATCH_SIZE: usize = 50;
 
 // Re-export public items
-pub use mailbox::{fetch_all_mailboxes, role_to_str};
+pub(crate) use mailbox::{fetch_all_mailboxes, role_to_str};
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -33,7 +33,7 @@ pub use mailbox::{fetch_all_mailboxes, role_to_str};
 /// Result of a JMAP delta sync, returned to TS for post-sync hooks.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct JmapSyncResult {
+pub(crate) struct JmapSyncResult {
     pub new_inbox_email_ids: Vec<String>,
     pub affected_thread_ids: Vec<String>,
 }

@@ -3,6 +3,7 @@ name = "ratatoskr-calendar"
 description = "Calendar sync (Google Calendar + CalDAV) for Ratatoskr"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 

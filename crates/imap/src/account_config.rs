@@ -50,7 +50,7 @@ struct AccountConfigRecord {
     oauth_token_url: Option<String>,
 }
 
-pub struct ImapAndSmtpConfig {
+pub(crate) struct ImapAndSmtpConfig {
     pub imap: ImapConfig,
     pub smtp: SmtpConfig,
 }

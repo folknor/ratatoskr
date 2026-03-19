@@ -14,7 +14,7 @@ use super::labels;
 /// Result of a Gmail delta sync, returned to TS for post-sync hooks.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GmailSyncResult {
+pub(crate) struct GmailSyncResult {
     pub new_inbox_message_ids: Vec<String>,
     pub affected_thread_ids: Vec<String>,
 }

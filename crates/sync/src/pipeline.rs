@@ -11,7 +11,7 @@ use crate::types::MessageMeta;
 // ---------------------------------------------------------------------------
 
 /// Number of thread groups to process per transaction.
-pub const THREAD_BATCH_SIZE: usize = 100;
+const THREAD_BATCH_SIZE: usize = 100;
 
 // ---------------------------------------------------------------------------
 // Store threads after JWZ threading pass

@@ -14,28 +14,6 @@ pub struct SyncProgressEvent {
     pub folder: Option<String>,
 }
 
-/// Completion event with summary of what changed.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
-pub struct SyncCompleteEvent {
-    pub account_id: String,
-    pub new_message_count: u64,
-    /// IDs of new inbox messages — TS uses for notification + filter hooks.
-    pub new_inbox_message_ids: Vec<String>,
-    /// Thread IDs of affected threads — TS uses for UI refresh.
-    pub affected_thread_ids: Vec<String>,
-}
-
-/// Error event emitted when sync fails.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
-pub struct SyncErrorEvent {
-    pub account_id: String,
-    pub error: String,
-}
-
 /// Generic sync lifecycle event emitted for queued/manual sync runs.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "lowercase")]

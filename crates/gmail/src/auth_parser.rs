@@ -4,14 +4,14 @@ use super::types::GmailHeader;
 
 /// Individual authentication mechanism result.
 #[derive(Debug, Clone, Serialize)]
-pub struct AuthVerdict {
+pub(crate) struct AuthVerdict {
     pub result: String,
     pub detail: Option<String>,
 }
 
 /// Aggregate authentication result (SPF + DKIM + DMARC).
 #[derive(Debug, Clone, Serialize)]
-pub struct AuthResult {
+pub(crate) struct AuthResult {
     pub spf: AuthVerdict,
     pub dkim: AuthVerdict,
     pub dmarc: AuthVerdict,
@@ -26,7 +26,7 @@ pub struct AuthResult {
 /// 3. `Received-SPF` (SPF-only fallback)
 ///
 /// Returns `None` if no authentication headers are found.
-pub fn parse_authentication_results(headers: &[GmailHeader]) -> Option<AuthResult> {
+pub(crate) fn parse_authentication_results(headers: &[GmailHeader]) -> Option<AuthResult> {
     let auth_header = find_header(headers, "authentication-results");
     let arc_header = auth_header.or_else(|| find_header(headers, "arc-authentication-results"));
     let received_spf = find_header(headers, "received-spf");

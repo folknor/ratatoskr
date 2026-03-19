@@ -44,9 +44,59 @@
 
 ## Non-Migration Cleanup
 
-### Code Quality
+### Code Quality (Post-Refactor Review, March 2026)
 
 - [ ] **Decide whether Graph `raw_size = 0` should stay accepted** — Graph still lacks a clean size field for the current query path. Either keep this as an accepted cosmetic limitation or document a better fallback if one exists.
+
+#### LARGE — Provider infrastructure consolidation
+
+- [ ] **Consolidate OAuth token refresh infrastructure** — Same decrypt/persist/refresh-lock/http-client/endpoint-resolution code duplicated across all 4 provider clients (~300 lines). `provider-utils` already has `token.rs` — extend it to own the full refresh lifecycle. Files: `gmail/src/client.rs`, `graph/src/client.rs`, `jmap/src/client.rs`, `imap/src/account_config.rs`.
+
+- [ ] **Extract shared HTTP response handling** — `check_response_status` and `parse_json_response` are character-identical in gmail + graph (differ only by error prefix). `execute_with_retry` is also structurally identical. Move to `provider-utils/src/http.rs`. Files: `gmail/src/client.rs:454-484`, `graph/src/client.rs:671-700`.
+
+- [ ] **Generic `ProviderState<C>` client registry** — `GmailState`, `GraphState`, `JmapState` are structurally identical (`Arc<RwLock<HashMap<String, Client>>>` + encryption key + same methods). Extract to `provider-utils`. Files: `gmail/src/client.rs:42-78`, `graph/src/client.rs:57-90`, `jmap/src/client.rs:414-450`.
+
+#### MEDIUM — Duplicated logic
+
+- [ ] **Extract message deletion + thread cleanup** — Same delete-messages/count-remaining/delete-orphans/reaggregate logic in 3 providers. Move to `sync/src/persistence.rs`. Files: `jmap/src/sync/storage.rs:77-125`, `graph/src/sync/persistence.rs:80-132`, `imap/src/sync_pipeline.rs:680-730`.
+
+- [ ] **Deduplicate token refresh SQL** — Same `UPDATE accounts SET access_token, token_expires_at, updated_at WHERE id` in all 4 providers.
+
+- [ ] **Extract category upsert helper** — Similar `INSERT INTO categories` across 4 providers with slightly different ON CONFLICT clauses.
+
+- [ ] **Consolidate `blocked_thread_ids` / `get_skipped_thread_ids`** — Same query, two implementations in `sync/src/pending.rs` (async) and `sync/src/pipeline.rs` (sync).
+
+- [ ] **Deduplicate `hash_bytes`** — Identical function in `stores/src/attachment_cache.rs` and `core/src/contact_photos.rs`.
+
+- [ ] **Consolidate ISO 8601 date parsing in graph** — `parse_iso_date` and `parse_iso8601_to_unix` implement the same fallback chain. Files: `graph/src/parse.rs:291-305`, `graph/src/public_folder_sync.rs:27-45`.
+
+#### MEDIUM — Error handling
+
+- [ ] **Introduce `ProviderError` enum** — `Result<T, String>` used in ~100+ signatures via `ProviderOps`. Callers cannot distinguish auth vs network vs rate limit. Add classified variants in `provider-utils`.
+
+- [ ] **Log silently swallowed DB errors** — ~15 call sites use `let _ = ...` for DB writes that should at minimum log warnings. Files: `core/src/bimi.rs`, `jmap/src/push.rs`, `graph/src/webhooks.rs`.
+
+#### MEDIUM — Dead code
+
+- [ ] **Delete 15 dead query wrappers in `accounts_messages.rs`** — Tauri-era async functions with zero callers. Reintroduce when wired to iced app.
+
+- [ ] **Consolidate duplicate types in `ai` crate** — `AiMessageInput`, `AiSearchResult`, `ExtractedTask` each defined twice with different fields in `types.rs` vs `formatting.rs`/`parsing.rs`.
+
+- [ ] **Remove duplicate `ThreadCategory` enum from `ai`** — Identical copy in `sync/src/categorization.rs` and `ai/src/types.rs`. `CATEGORIZE_PROMPT` also duplicated.
+
+#### MEDIUM — Crate boundaries
+
+- [ ] **Change `smart-folder` dep from `core` to `db`** — Only uses DB types, pulls entire core + all providers transitively.
+
+- [ ] **Move `router.rs` from `provider-utils` to `core`** — `get_provider_type()` is a DB query, not a provider utility.
+
+#### LOW — Cleanup
+
+- [ ] **Unify `save_account_history_id` / `update_account_sync_state`** — Same SQL in `sync/src/state.rs` and `sync/src/pipeline.rs`.
+
+- [ ] **Deduplicate `get_thread_count`** — Core version (with label filter) and sync version (without). Sync should call core's.
+
+- [ ] **Use `get_setting` helper consistently** — ~14 locations inline `SELECT value FROM settings WHERE key` instead of calling the canonical helper in `core/src/db/queries.rs`.
 
 ### Microsoft Graph
 

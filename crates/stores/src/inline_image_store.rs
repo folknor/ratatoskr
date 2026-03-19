@@ -7,7 +7,7 @@ use rusqlite::{Connection, params};
 /// Anything larger falls through to the file-based cache.
 pub const MAX_INLINE_SIZE: usize = 256 * 1024;
 /// Cap the inline image store so signature/logo blobs do not grow forever.
-pub const MAX_INLINE_STORE_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_INLINE_STORE_BYTES: u64 = 128 * 1024 * 1024;
 
 /// Separate SQLite database for small inline images (signatures, logos).
 ///
