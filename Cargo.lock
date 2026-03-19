@@ -2527,7 +2527,7 @@ dependencies = [
 [[package]]
 name = "iced"
 version = "0.15.0-dev"
-source = "git+https://github.com/folknor/iced?branch=sluggrs#87cf9124ccc8d9a11fd4c5ced1d28ec103ad6ca1"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#51da8416c12fd9ebb6453d0b053e0673eb8b526a"
 dependencies = [
  "iced_core",
  "iced_debug",
@@ -2542,7 +2542,7 @@ dependencies = [
 [[package]]
 name = "iced_core"
 version = "0.15.0-dev"
-source = "git+https://github.com/folknor/iced?branch=sluggrs#87cf9124ccc8d9a11fd4c5ced1d28ec103ad6ca1"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#51da8416c12fd9ebb6453d0b053e0673eb8b526a"
 dependencies = [
  "bitflags 2.11.0",
  "bytes",
@@ -2559,7 +2559,7 @@ dependencies = [
 [[package]]
 name = "iced_debug"
 version = "0.15.0-dev"
-source = "git+https://github.com/folknor/iced?branch=sluggrs#87cf9124ccc8d9a11fd4c5ced1d28ec103ad6ca1"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#51da8416c12fd9ebb6453d0b053e0673eb8b526a"
 dependencies = [
  "iced_core",
  "iced_futures",
@@ -2569,7 +2569,7 @@ dependencies = [
 [[package]]
 name = "iced_futures"
 version = "0.15.0-dev"
-source = "git+https://github.com/folknor/iced?branch=sluggrs#87cf9124ccc8d9a11fd4c5ced1d28ec103ad6ca1"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#51da8416c12fd9ebb6453d0b053e0673eb8b526a"
 dependencies = [
  "futures",
  "iced_core",
@@ -2583,7 +2583,7 @@ dependencies = [
 [[package]]
 name = "iced_graphics"
 version = "0.15.0-dev"
-source = "git+https://github.com/folknor/iced?branch=sluggrs#87cf9124ccc8d9a11fd4c5ced1d28ec103ad6ca1"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#51da8416c12fd9ebb6453d0b053e0673eb8b526a"
 dependencies = [
  "bitflags 2.11.0",
  "bytemuck",
@@ -2602,7 +2602,7 @@ dependencies = [
 [[package]]
 name = "iced_program"
 version = "0.15.0-dev"
-source = "git+https://github.com/folknor/iced?branch=sluggrs#87cf9124ccc8d9a11fd4c5ced1d28ec103ad6ca1"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#51da8416c12fd9ebb6453d0b053e0673eb8b526a"
 dependencies = [
  "iced_graphics",
  "iced_runtime",
@@ -2611,7 +2611,7 @@ dependencies = [
 [[package]]
 name = "iced_renderer"
 version = "0.15.0-dev"
-source = "git+https://github.com/folknor/iced?branch=sluggrs#87cf9124ccc8d9a11fd4c5ced1d28ec103ad6ca1"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#51da8416c12fd9ebb6453d0b053e0673eb8b526a"
 dependencies = [
  "iced_graphics",
  "iced_tiny_skia",
@@ -2623,7 +2623,7 @@ dependencies = [
 [[package]]
 name = "iced_runtime"
 version = "0.15.0-dev"
-source = "git+https://github.com/folknor/iced?branch=sluggrs#87cf9124ccc8d9a11fd4c5ced1d28ec103ad6ca1"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#51da8416c12fd9ebb6453d0b053e0673eb8b526a"
 dependencies = [
  "bytes",
  "iced_core",
@@ -2635,7 +2635,7 @@ dependencies = [
 [[package]]
 name = "iced_tiny_skia"
 version = "0.15.0-dev"
-source = "git+https://github.com/folknor/iced?branch=sluggrs#87cf9124ccc8d9a11fd4c5ced1d28ec103ad6ca1"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#51da8416c12fd9ebb6453d0b053e0673eb8b526a"
 dependencies = [
  "bytemuck",
  "cosmic-text",
@@ -2651,7 +2651,7 @@ dependencies = [
 [[package]]
 name = "iced_wgpu"
 version = "0.15.0-dev"
-source = "git+https://github.com/folknor/iced?branch=sluggrs#87cf9124ccc8d9a11fd4c5ced1d28ec103ad6ca1"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#51da8416c12fd9ebb6453d0b053e0673eb8b526a"
 dependencies = [
  "bitflags 2.11.0",
  "bytemuck",
@@ -2672,7 +2672,7 @@ dependencies = [
 [[package]]
 name = "iced_widget"
 version = "0.15.0-dev"
-source = "git+https://github.com/folknor/iced?branch=sluggrs#87cf9124ccc8d9a11fd4c5ced1d28ec103ad6ca1"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#51da8416c12fd9ebb6453d0b053e0673eb8b526a"
 dependencies = [
  "iced_renderer",
  "log",
@@ -2686,7 +2686,7 @@ dependencies = [
 [[package]]
 name = "iced_winit"
 version = "0.15.0-dev"
-source = "git+https://github.com/folknor/iced?branch=sluggrs#87cf9124ccc8d9a11fd4c5ced1d28ec103ad6ca1"
+source = "git+https://github.com/folknor/iced?branch=sluggrs#51da8416c12fd9ebb6453d0b053e0673eb8b526a"
 dependencies = [
  "iced_debug",
  "iced_program",
@@ -6192,7 +6192,7 @@ dependencies = [
 [[package]]
 name = "sluggrs"
 version = "0.1.0"
-source = "git+https://github.com/folknor/sluggrs.git?rev=45467b5#45467b57f65a7c6ad851eb451bf9ac8c71432527"
+source = "git+https://github.com/folknor/sluggrs.git?rev=1255c80#1255c8079f846b664c9200c16822f6bc735ee902"
 dependencies = [
  "bytemuck",
  "cosmic-text",

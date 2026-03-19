@@ -8,34 +8,27 @@ This document describes the backend: the command registry, search, and dispatch 
 
 ## Current State
 
-The app already has a command palette, but it's split across multiple systems that overlap and diverge:
+The command palette backend is implemented in the `ratatoskr-command-palette` crate (`crates/command-palette/`). The old TypeScript frontend (which had duplicate registries, duplicate execution paths, substring-only search, no parameterized commands, and no context filtering) has been removed entirely. The Rust crate is the single source of truth.
 
-### Two Separate Registries
+### What Exists (Slices 1-4 Complete)
 
-1. **`src/constants/shortcuts.ts`** — 37 commands defined as `ShortcutItem[]` with `id`, `keys`, and `desc`. Three categories: Navigation (17), Actions (15), App (6).
+1. **`CommandId` enum** (`crates/command-palette/src/id.rs`) — 55 commands across 6 categories (Navigation, Email, Compose, Tasks, View, App). Each variant has a stable `as_str()` / `parse()` round-trip for persistence.
 
-2. **`src/components/search/CommandPalette.tsx`** — ~20 commands defined inline as `Command[]` with `id`, `label`, `category`, and `action` closures. Five categories: Navigation, Actions, Tasks, AI, Settings.
+2. **`CommandRegistry`** (`crates/command-palette/src/registry.rs`) — All 55 commands registered with labels, categories, default keybindings, context predicates (`is_available`), toggle labels (`is_active`), input schemas for parameterized commands, and keyword aliases. Fuzzy search via `nucleo-matcher` with context boost and availability bonus scoring.
 
-These overlap but don't match. The shortcuts file has commands the palette doesn't (pin, mute, select all, move to folder, arrow navigation). The palette has commands the shortcuts don't (theme switching, task panel toggle, AI chat, templates).
+3. **`CommandContext`** (`crates/command-palette/src/context.rs`) — Context snapshot struct with selection state, view type, account/provider info, entity state (read/starred/muted/pinned/draft/trash/spam), app state (online, composer open), and focused UI region.
 
-### Two Separate Execution Paths
+4. **`BindingTable`** (`crates/command-palette/src/keybinding.rs`) — Keybinding resolution with single chords, two-key sequences (`g then i`), user override support, conflict detection, platform-aware display (`Cmd` vs `Ctrl`).
 
-1. **`src/hooks/useKeyboardShortcuts.ts`** — A 270-line `executeAction()` switch statement that maps shortcut IDs to imperative logic (store calls, navigation, custom events).
+5. **`InputSchema` / `ParamDef`** (`crates/command-palette/src/input.rs`) — Parameterized command schemas (ListPicker, DateTime, Enum, Text), option items with hierarchical path display, and fuzzy search over options.
 
-2. **`CommandPalette.tsx`** — Each command carries an inline `action: () => void` closure that does the same work independently.
+6. **`CommandInputResolver` trait** (`crates/command-palette/src/resolver.rs`) — Core-defined trait for resolving dynamic options and validating selections. The iced app layer provides the concrete implementation.
 
-The same action (e.g., "go to inbox") is implemented twice in different ways. These will inevitably drift.
+7. **`UsageTracker`** — Per-command usage counts for recency-based ranking. Persistence deferred to Slice 6.
 
-### Other Limitations
+### What Still Needs to Happen
 
-- **Search**: `string.includes()` substring matching — no fuzzy scoring, no word-boundary weighting.
-- **No second stage**: "Move to Folder" fires a `CustomEvent('ratatoskr-move-to-folder')` to punt the problem to another component. There's no general mechanism for parameterized commands.
-- **No account awareness**: Everything is hardcoded. Templates (fetched per-account) are the only dynamic entries.
-- **No context filtering**: Commands that require a selected thread (archive, star, reply) are always shown, even when nothing is selected.
-
-### What Needs to Change
-
-The Rust backend must become the single source of truth. Both keyboard dispatch and the palette UI should query the same registry, get the same commands, and invoke the same execution path. The app layer becomes a thin consumer — it asks core "what commands are available given this context?" and executes them by passing either a `CommandId` alone (for direct commands) or a `CommandId` + `CommandArgs` (for parameterized commands that require stage-2 input resolution). See § Parameterized command execution contract for the full flow.
+The Rust backend is the single source of truth. The iced app layer (`crates/app/`) is the consumer — it assembles a `CommandContext` from its model state, queries the registry, and dispatches commands through its `Message` / `update()` cycle. Both keyboard dispatch (via iced's subscription/event system and `BindingTable`) and the palette UI query the same registry, get the same commands, and invoke the same execution path. The app passes either a `CommandId` alone (for direct commands) or a `CommandId` + `CommandArgs` (for parameterized commands that require stage-2 input resolution). See the Parameterized command execution contract for the full flow.
 
 ## Core Requirements
 
@@ -53,7 +46,7 @@ Every action the user can perform must be a registered command with a unique ide
 - Contact, task, and calendar operations
 - Settings and preferences
 
-The current codebase has ~500+ operations at the Tauri command layer, but the palette surface is the ~80-100 user-facing actions that a human would invoke.
+The current registry has 55 commands. As the app grows (compound variants, view-local operations, future features), the palette surface will expand to ~80-100 user-facing actions.
 
 ### 2. Hierarchical Command Organization
 
@@ -182,7 +175,7 @@ This design means the sidebar can safely omit labels from the unified view: the 
 
 #### CommandContext
 
-For the registry to determine command availability without leaking logic back into the app layer, it needs a concrete context snapshot. The app layer is responsible for assembling this struct from its own state (Zustand stores, Tauri state, iced model — whatever the framework uses) and passing it to the registry on each query. Core defines the shape; the app fills it in.
+For the registry to determine command availability without leaking logic back into the app layer, it needs a concrete context snapshot. The iced app layer is responsible for assembling this struct from its model state and passing it to the registry on each query. Core defines the shape; the app fills it in.
 
 The context must include at minimum:
 
@@ -196,12 +189,11 @@ The context must include at minimum:
 
 Each command declares its context requirements as a predicate over this struct. The registry evaluates predicates to determine availability and filters the command list accordingly. This keeps all enablement logic in core, co-located with the command definitions, rather than scattered across app-layer UI code.
 
-### 6. Framework Agnosticism
+### 6. Separation of Registry and Execution
 
-The command registry, search, and metadata live in `ratatoskr-core` (the framework-agnostic crate). The actual command *execution* is framework-specific:
+The command registry, search, and metadata live in the `ratatoskr-command-palette` crate (framework-agnostic, no UI dependencies). The actual command *execution* is app-specific:
 
-- The current Tauri app dispatches commands through `#[tauri::command]` handlers
-- The future iced app will dispatch through its own `Message` / `update` cycle
+- The iced app (`crates/app/`) dispatches commands through its `Message` enum / `update()` cycle
 
 Core owns: command identity, metadata, hierarchy, search, context requirements.
 The app layer owns: binding command IDs to concrete handler implementations.
@@ -209,7 +201,7 @@ The app layer owns: binding command IDs to concrete handler implementations.
 ## Constraints
 
 - **Rust edition 2024, strict clippy** — no `unwrap`, max 7 args, max 100 lines per function, no cognitive complexity
-- **Core crate has no UI dependencies** — no Tauri, no iced, no GTK
+- **Command palette crate has no UI dependencies** — no iced, no GTK
 - Commands must be cheaply cloneable and searchable (the palette is invoked frequently and must feel instant)
 - The fuzzy search must handle ~100-200 entries (static commands + dynamic options for one account) with sub-millisecond response times
 
@@ -292,7 +284,7 @@ The full design of undo tokens, stack depth, expiration, and multi-step undo is 
    ParamDef::Text { label, placeholder }           — free text input (rename folder, search query)
    ```
 
-   `EnumOption` separates machine identifier (`value`) from display text (`label`). The frontend sends `value` back, not `label` — no localization hazard.
+   `EnumOption` separates machine identifier (`value`) from display text (`label`). The app layer sends `value` back, not `label` — no localization hazard.
 
    Examples:
    - **Move to Folder**: `Single { param: ListPicker { label: "Folder" } }`
@@ -311,7 +303,7 @@ The full design of undo tokens, stack depth, expiration, and multi-step undo is 
    trait CommandInputResolver: Send + Sync {
        /// Return available options for a ListPicker parameter step.
        /// Only called for ListPicker steps — DateTime, Text, and Enum are
-       /// frontend-only input steps (the schema carries all needed info).
+       /// app-layer-only input steps (the schema carries all needed info).
        /// prior_selections contains values chosen in steps 0..param_index
        /// for Sequence schemas (empty for Single).
        fn get_options(
@@ -341,10 +333,9 @@ The full design of undo tokens, stack depth, expiration, and multi-step undo is 
 
    The name `CommandInputResolver` rather than `OptionProvider` reflects that this trait handles more than just listing options — it also validates selections and may grow to handle step transitions and preview data as input shapes expand. The `prior_selections` parameter on both methods enables sequence-aware resolution and cross-field validation from day one.
 
-   The `CommandInputResolver` is a **separate object from the registry**. The registry is immutable static data. The resolver needs DB access and live account state — things core cannot depend on. This follows the same pattern as `ProgressReporter`: core defines the trait, the app layer provides a concrete implementation.
+   The `CommandInputResolver` is a **separate object from the registry**. The registry is immutable static data. The resolver needs DB access and live account state — things the command palette crate cannot depend on. This follows the same pattern as `ProgressReporter`: core defines the trait, the app layer provides a concrete implementation.
 
-   - Tauri's implementation (`TauriInputResolver`) is wrapped in an `InputResolverState` newtype for Tauri managed state (Tauri's `State<'_>` lookup is concrete-type based; `Arc<dyn Trait>` directly is brittle).
-   - The future iced implementation queries its own model.
+   - The iced app (`crates/app/`) provides its own resolver implementation that queries its model state.
    - The resolver is registered in the app layer at startup, alongside but separate from the `CommandRegistry`.
 
    ### Ownership Summary
@@ -405,7 +396,7 @@ The full design of undo tokens, stack depth, expiration, and multi-step undo is 
 
    For non-parameterized commands, execution takes only a `CommandId` — no `CommandArgs` needed.
 
-4. **Disabled command visibility**: Resolved. `query()` returns all commands with an `available: bool` flag. The frontend decides whether to hide unavailable commands or show them greyed out. This keeps the API flexible for palette, context menus, and other surfaces. **Every registered command is palette-visible** — there is no `palette_visible` metadata flag. Navigation commands like "Next Thread" (j/k) appear in the palette alongside everything else. This may be revisited after V1, but for now it's a hard rule: if it's a command, it's searchable.
+4. **Disabled command visibility**: Resolved. `query()` returns all commands with an `available: bool` flag. The app layer decides whether to hide unavailable commands or show them greyed out. This keeps the API flexible for palette, context menus, and other surfaces. **Every registered command is palette-visible** — there is no `palette_visible` metadata flag. Navigation commands like "Next Thread" (j/k) appear in the palette alongside everything else. This may be revisited after V1, but for now it's a hard rule: if it's a command, it's searchable.
 
 ## Resolved Questions
 

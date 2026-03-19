@@ -8,23 +8,27 @@ This document covers the sidebar's content model and the scope selector that con
 
 ## Current State
 
-The React sidebar (`src/components/layout/Sidebar.tsx`, 838 lines) renders three sections unconditionally:
+The sidebar is implemented as an iced view function (`crates/app/src/ui/sidebar.rs`) following iced's Elm architecture. `SidebarModel` holds a reference to the current accounts, labels, selected scope, and section-expand state; the `view()` function renders the sidebar from that model; user interactions produce `Message` variants that the top-level `update()` handles.
 
-1. **Standard folders** — Inbox, Starred, Snoozed, Sent, Drafts, Trash, Spam, All Mail, Tasks, Calendar, Attachments. Hardcoded, always visible regardless of account state.
+The sidebar already implements much of the design in this document:
 
-2. **Smart Folders** — Dynamic, loaded from DB. Custom icon, unread count badge. Inline creation via modal.
+1. **Scope dropdown** — A dropdown at the top of the sidebar (Option A from below) lets the user choose "All Accounts" or a specific account. Scope state lives in the app's main model (`selected_account: Option<usize>`).
 
-3. **Labels** — Dynamic, loaded per-account. Color dots, inline editing, accordion overflow. Filters out system labels.
+2. **Universal folders** — Inbox, Starred, Snoozed, Sent, Drafts, Trash are always shown. Spam and All Mail appear only when scoped to a specific account.
 
-An account switcher at the top cycles through accounts, but the folder list below doesn't change shape — it always shows the same items. Labels load for the active account but there's no unified view. There is no concept of scoping the sidebar to "all accounts" vs a specific account.
+3. **Smart Folders** — Collapsible section, always visible regardless of scope.
 
-### What's Wrong
+4. **Labels** — Collapsible section, shown only when scoped to a specific account. System labels are filtered out.
 
-- **No unified view**: Users with 3 accounts can't see a combined inbox count or combined starred view. They cycle through accounts one at a time.
-- **Folder list is static**: The same 11 items show whether the user has zero accounts or five. Items like "Tasks" and "Calendar" are shown even if those features aren't relevant to the active account.
-- **Labels are single-account**: Only the currently selected account's labels are visible. Switching accounts to browse another account's labels requires cycling the account switcher.
-- **Actions leak into the sidebar**: Label creation/editing, context menus for sync and delete — these are actions, not navigation. They belong in the command palette.
-- **No account awareness in navigation**: "Inbox" means "inbox for whichever account is selected." There's no way to express "show me all inboxes" vs "show me just Foo Corp's inbox."
+Tasks, Calendar, and Attachments are already absent from the sidebar — they are palette-first destinations as specified below.
+
+### What's Still Missing
+
+- **Live unread counts**: Nav items currently use placeholder counts (hardcoded in the view function). They need to be driven by `get_navigation_state()` from `crates/core/src/db/queries_extra/navigation.rs`.
+- **Smart folder unread counts**: Scaffolded as 0 in the backend — not yet wired.
+- **Per-label unread counts**: Also scaffolded as 0.
+- **Hierarchy support for labels**: The `NavigationFolder` struct has no parent ID or path — Exchange/IMAP/JMAP folder trees are flattened (see details in the "Specific Account" section below).
+- **Actions still present in sidebar**: Label creation/editing, context menus — these should move to the command palette (Phase 2).
 
 ## Design: Scope Selector + Lean Navigation
 
@@ -37,9 +41,9 @@ The sidebar has two layers:
 
 ### Scope as State
 
-Scope is **app UI state**, not router state and not a command-palette action. Changing scope does not navigate — it re-filters the sidebar and the thread list behind it. If the user is viewing "Inbox" and switches scope from "All" to "Foo Corp," they stay on Inbox; the content narrows.
+Scope is **app model state**, not a command-palette action. Changing scope does not navigate — it re-filters the sidebar and the thread list behind it. If the user is viewing "Inbox" and switches scope from "All" to "Foo Corp," they stay on Inbox; the content narrows.
 
-The command palette can *set* scope (e.g., `Navigate > Switch Account > Foo Corp`), just as it can toggle the sidebar or switch themes — these are UI state mutations exposed as commands for keyboard accessibility, not proof that they belong in the command system's dispatch model. The scope value lives in a single place in app state and the sidebar reads it. There is no second implementation path.
+The command palette can *set* scope (e.g., `Navigate > Switch Account > Foo Corp`), just as it can toggle the sidebar or switch themes — these are model state mutations exposed as commands for keyboard accessibility, not proof that they belong in the command system's dispatch model. The scope value lives in a single place in the iced app model (`selected_account: Option<usize>` in `crates/app/`) and the sidebar reads it via `SidebarModel`. There is no second implementation path.
 
 ### Tasks, Calendar, and Attachments
 
@@ -67,7 +71,7 @@ SMART FOLDERS
 - Universal folders aggregate across all accounts. Unread counts are summed. See "Universal Folder Semantics" below for how aggregation works per folder.
 - Smart Folders always appear in the sidebar regardless of scope. They are saved searches — their queries run through the unified search pipeline exactly as written. A smart folder with `account:FooCorp in:inbox is:unread` searches only Foo Corp; one with `is:unread after:-7` spans everything. The scope selector has no effect on smart folders — neither their visibility nor their query execution. The sidebar content is therefore: scope-filtered universal folders + scope-filtered labels + all Smart Folders (unscoped).
 
-  **Requires code change:** `query_smart_folders_sync` in `navigation.rs` currently filters smart folders by scope/account_id. This must change to always return all smart folders regardless of the active scope.
+  **Requires code change:** `query_smart_folders_sync` in `crates/core/src/db/queries_extra/navigation.rs` currently filters smart folders by scope/account_id. This must change to always return all smart folders regardless of the active scope.
 - **No labels section.** Labels are per-account (Gmail labels, Exchange folders, JMAP mailboxes) and mixing them in a unified view creates noise. Users who need a label navigate via the command palette or scope to a specific account. **Prerequisite**: the command palette must support `Navigate > [Label]` with cross-account disambiguation (showing which account each label belongs to) before the sidebar's label browse path can be removed. Until then, removing labels from the unified sidebar creates a discoverability regression.
 - Spam and All Mail are omitted from the unified view — they're high-volume, rarely browsed, and their semantics differ across providers (Gmail's "All Mail" has no equivalent in Exchange). Available when scoped to a specific account.
 
@@ -100,7 +104,7 @@ LABELS
   - **JMAP**: Mailbox list (JMAP mailboxes can be hierarchical, similar to Exchange).
   - **IMAP**: Folder tree (IMAP LSUB hierarchy).
 
-  **Requires backend work:** The current `NavigationFolder` struct (`navigation.rs`) has no hierarchy support — no parent ID, no path, and no label-vs-folder discriminator. All provider-specific items are flattened to `FolderKind::AccountLabel`. To support provider-adaptive display, the navigation model needs: (1) a `parent_id: Option<String>` or `path: Option<String>` for tree rendering (Exchange/IMAP/JMAP), (2) a discriminator indicating whether the item is a tag (Gmail label — non-exclusive, multiple per message) or a folder (Exchange/IMAP/JMAP — exclusive, one per message). The frontend uses the discriminator for "also in" indicators and future drag-and-drop semantics, not just rendering. The `DbLabel` type already has the raw data (`label_type`, `imap_folder_path`) — the navigation query needs to expose it.
+  **Requires backend work:** The current `NavigationFolder` struct (`crates/core/src/db/queries_extra/navigation.rs`) has no hierarchy support — no parent ID, no path, and no label-vs-folder discriminator. All provider-specific items are flattened to `FolderKind::AccountLabel`. To support provider-adaptive display, the navigation model needs: (1) a `parent_id: Option<String>` or `path: Option<String>` for tree rendering (Exchange/IMAP/JMAP), (2) a discriminator indicating whether the item is a tag (Gmail label — non-exclusive, multiple per message) or a folder (Exchange/IMAP/JMAP — exclusive, one per message). The view function uses the discriminator for "also in" indicators and future drag-and-drop semantics, not just rendering. The `DbLabel` type already has the raw data (`label_type`, `imap_folder_path`) — the navigation query needs to expose it.
 
 - Smart Folders still appear — they work cross-account and remain useful when scoped (see note on Smart Folder scoping exemption above).
 - Items like "All Mail" only appear if the provider supports the concept.
@@ -125,13 +129,13 @@ Key differences that affect aggregation:
 - **Trash retention differs.** Gmail auto-purges after 30 days. Exchange follows org retention policy. JMAP/IMAP vary by server. The unified Trash view aggregates, but "empty trash" is per-account because the semantics differ.
 - **Sent is straightforward.** All providers have a clear Sent concept. Aggregation is a simple union.
 
-The backend normalizes these into a **unified query model** where each sidebar destination maps to a provider-agnostic query predicate (e.g., `is_starred = 1` across accounts), not a provider-specific folder/label ID. This is implemented in `core/src/db/queries_extra/scoped_queries.rs`:
+The backend normalizes these into a **unified query model** where each sidebar destination maps to a provider-agnostic query predicate (e.g., `is_starred = 1` across accounts), not a provider-specific folder/label ID. This is implemented in `crates/core/src/db/queries_extra/scoped_queries.rs`:
 
 - **`AccountScope`** enum (`Single`/`Multiple`/`All`) controls which accounts a query spans.
 - **Starred and Snoozed** use predicate-based queries against boolean flags on the `threads` table (`get_starred_threads`, `get_snoozed_threads`), not label joins.
 - **Inbox, Sent, Drafts, Trash, Spam** use the existing `thread_labels` join with well-known label IDs.
 - **Drafts count** includes local-only drafts from the `local_drafts` table via `get_draft_count_with_local()`.
-- **`get_navigation_state()`** (`core/src/db/queries_extra/navigation.rs`) returns the full sidebar state in one call: universal folders with unread counts, smart folders, and (when scoped to a single account) that account's non-system labels.
+- **`get_navigation_state()`** (`crates/core/src/db/queries_extra/navigation.rs`) returns the full sidebar state in one call: universal folders with unread counts, smart folders, and (when scoped to a single account) that account's non-system labels.
 - **Smart folder unread counts and per-label unread counts** are scaffolded as 0 — not yet implemented.
 
 ### Navigation Contract
@@ -237,7 +241,7 @@ These are explicitly out of scope for the sidebar, handled by the command palett
 
 5. **Smart Folder interaction with scope**: Resolved. The scope indicator stays unchanged when a Smart Folder is clicked. Smart Folders are saved searches — their queries run through the unified search pipeline exactly as written, independent of the scope selector. The thread list shows whatever the query produces. Scope controls universal folders and label visibility; Smart Folders are exempt.
 
-6. **Scope in URL/router state**: Should the active scope be part of the URL so that deep links and browser back/forward preserve it? If scope is purely in-memory UI state, refreshing the app loses the user's account context. If it's in the URL, the routing model gets more complex. The current React app uses TanStack Router with hash history — scope could be a search param (`#/inbox?scope=foo-corp`) without affecting the route structure.
+6. **Scope persistence**: Should the active scope be persisted so that relaunching the app restores the user's account context? Currently scope lives in the iced app model as in-memory state and resets on restart. Options: persist to the SQLite settings table, or treat "All Accounts" as a reasonable default on launch.
 
 7. **Default sender account for compose**: When the user opens a new compose window, which account's address should be the default "From"? This matters most in "All Accounts" scope where there's no single obvious answer. The resolution order:
 
@@ -254,7 +258,7 @@ These are explicitly out of scope for the sidebar, handled by the command palett
 ## Dependencies
 
 - **Command palette Slice 2** (`docs/command-palette/roadmap.md`): The `NavigateToLabel` parameterized command with cross-account disambiguation must be implemented before labels can be removed from the unified sidebar (Phase 2). The resolver, `OptionItem` structure, and fuzzy search infrastructure are already scaffolded — what remains is the real `CommandInputResolver` implementation that queries account labels/folders from `DbState`. See "Cross-Account Label/Folder Disambiguation" in `docs/command-palette/problem-statement.md`.
-- **Command palette Slice 6** (`docs/command-palette/roadmap.md`): Phase 2 (stripping actions from sidebar) is gated on the palette frontend migration being far enough along to absorb label creation/editing/deletion and context menu actions.
+- **Command palette Slice 6** (`docs/command-palette/roadmap.md`): Phase 2 (stripping actions from sidebar) is gated on the palette implementation being far enough along to absorb label creation/editing/deletion and context menu actions.
 
 Phase 1 has no palette dependency and can proceed independently.
 
@@ -262,46 +266,41 @@ Phase 1 has no palette dependency and can proceed independently.
 
 ### Phase 1: Scoped sidebar (no palette dependency)
 
-Ship the new sidebar model against the existing React frontend. The sidebar gains scope awareness and consumes the new backend APIs. No action removal yet — label editing, context menus, etc. stay in place until the palette can absorb them.
+Ship the scoped sidebar in the iced app. The sidebar already has scope awareness and the basic structure (scope dropdown, universal folders, smart folders, labels). This phase wires it to live data from the core crate. No action removal yet — label editing, context menus, etc. stay in place until the palette can absorb them.
 
-**Backend glue:**
-- Add `#[tauri::command]` wrappers for `get_navigation_state`, `get_threads_scoped`, `get_starred_threads`, `get_snoozed_threads`, `get_draft_threads`. These are thin pass-throughs (~5-10 lines each) that acquire `DbState`, lock the connection, and call the core function.
-- Wire up smart folder unread counts in `get_navigation_state` (currently scaffolded as 0). This requires calling `count_smart_folder_unread` from the smart folder engine for each folder — evaluate whether the cost is acceptable per sidebar refresh or whether it needs caching.
+**Backend wiring:**
+- The app calls core functions directly (no IPC bridge — the Tauri shell has been removed). The sidebar view function (`crates/app/src/ui/sidebar.rs`) receives its data via `SidebarModel`, which the top-level `update()` populates by calling `get_navigation_state()` from `crates/core/src/db/queries_extra/navigation.rs`.
+- Wire up smart folder unread counts in `get_navigation_state` (currently scaffolded as 0). This requires calling `count_smart_folder_unread` from the smart folder engine (`crates/smart-folder/`) for each folder — evaluate whether the cost is acceptable per sidebar refresh or whether it needs caching.
 
-**Frontend — scope state:**
-- Add a `sidebarScopeStore` (Zustand) with `scope: AccountScope` and `setScope()`. Default to `All`. Persist to `localStorage` so it survives refresh (resolves open question #6 for now without touching the router).
+**Scope state:**
+- Already implemented: `selected_account: Option<usize>` in the iced app model, toggled via `Message::SelectAccount` / `Message::SelectAllAccounts`. The scope dropdown (Option A) is built. Persistence to survive app restart is deferred (see open question #6).
 
-**Frontend — scope selector:**
-- Start with Option A (dropdown/popover) at the top of the sidebar. It's the simplest to build, doesn't require layout changes, and can be swapped later. Shows current scope (account avatar + name, or "All Accounts"), opens a list on click.
+**Sidebar data flow:**
+- Replace the hardcoded placeholder counts in `nav_items()` with live data from `get_navigation_state(scope)`. The `NavigationState` response drives the entire sidebar: universal folders with real unread counts, smart folders, and (when scoped) account labels.
+- Tasks, Calendar, Attachments are already absent from the sidebar.
 
-**Frontend — sidebar rewire:**
-- Replace the hardcoded `ALL_NAV_ITEMS` + separate label/smart-folder queries with a single call to `get_navigation_state(scope)`. The response drives the entire sidebar: universal folders, smart folders, and (when scoped) account labels.
-- Unread counts come from the response instead of separate queries.
-- Remove Tasks, Calendar, Attachments from the sidebar navigation.
-
-**Frontend — thread list rewire:**
-- When viewing a universal folder, call the appropriate scoped query (`get_threads_scoped` for label-based folders, `get_starred_threads` for Starred, etc.) with the current `AccountScope` from the store.
-- The thread list component doesn't need to know about scoping — it receives threads the same way it does today. The change is in what the parent passes down.
+**Thread list wiring:**
+- When viewing a universal folder, call the appropriate scoped query (`get_threads_scoped` for label-based folders, `get_starred_threads` for Starred, etc.) with the current `AccountScope` derived from `selected_account`.
+- The thread list view function doesn't need to know about scoping — it receives threads the same way it does today. The change is in what the parent `update()` passes down.
 
 **What ships:**
 - Unified inbox across accounts (the headline feature).
 - Scope selector to narrow to one account.
 - Account-specific labels visible when scoped.
-- Correct unread counts for universal folders (aggregated or per-account). Smart folder and per-label unread counts remain scaffolded as 0 — implementing them is separate work (see backend glue notes above).
+- Correct unread counts for universal folders (aggregated or per-account). Smart folder and per-label unread counts remain scaffolded as 0 — implementing them is separate work (see backend wiring notes above).
 - Sidebar actions (label edit, context menus) still work as before — no regression.
 
 ### Phase 2: Strip actions from sidebar (palette dependency)
 
 Remove action-related code from the sidebar once the command palette handles those responsibilities. This phase is gated on the command palette being functional enough to replace:
 
-- Label creation/editing/deletion → palette commands
-- Context menus (sync folder, delete label) → palette commands
-- Any inline modals triggered from the sidebar → palette second-stage UI
+- Label creation/editing/deletion -> palette commands
+- Context menus (sync folder, delete label) -> palette commands
+- Any inline modals triggered from the sidebar -> palette second-stage UI
 
 **What changes:**
-- Remove `DroppableLabelItem`'s inline edit button and `LabelForm` component from the sidebar.
-- Remove `SidebarNavContextMenu` and `SidebarLabelContextMenu`.
-- Remove the "Create label" button from the Labels section header.
+- Remove any inline edit affordances and label management widgets from the sidebar view function (`crates/app/src/ui/sidebar.rs`).
+- Remove any sidebar context menu handling from the `update()` function.
 - The sidebar becomes a pure read-only navigation list — click to navigate, nothing else.
 
 **Prerequisite:** The command palette must support `Navigate > [Label]` with cross-account disambiguation (see unified view prerequisite note above). Without this, removing labels from the unified sidebar creates a discoverability regression.
