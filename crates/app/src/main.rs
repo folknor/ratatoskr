@@ -7,7 +7,7 @@ mod ui;
 mod window_state;
 
 use db::{Account, DateDisplay, Db, Label, Thread, ThreadAttachment, ThreadMessage};
-use iced::widget::{container, mouse_area, row, scrollable};
+use iced::widget::{container, mouse_area, row};
 use iced::{Element, Length, Point, Size, Task, Theme};
 use ui::layout::{RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH};
 use std::path::PathBuf;
@@ -56,9 +56,6 @@ pub enum Divider {
 /// Drag handle width in logical pixels.
 const DIVIDER_WIDTH: f32 = 2.0;
 
-/// Number of threads loaded per batch.
-const THREAD_PAGE_SIZE: usize = 200;
-
 #[derive(Debug, Clone)]
 pub enum Message {
     AccountsLoaded(Result<Vec<Account>, String>),
@@ -85,8 +82,6 @@ pub enum Message {
     WindowResized(Size),
     WindowMoved(Point),
     ToggleRightSidebar,
-    ThreadListScrolled(scrollable::Viewport),
-    MoreThreadsLoaded(Result<Vec<Thread>, String>),
     /// thread_id is included so stale responses can be discarded.
     ThreadMessagesLoaded(String, Result<Vec<ThreadMessage>, String>),
     ThreadAttachmentsLoaded(String, Result<Vec<ThreadAttachment>, String>),
@@ -102,8 +97,6 @@ struct App {
     accounts: Vec<Account>,
     labels: Vec<Label>,
     threads: Vec<Thread>,
-    threads_has_more: bool,
-    threads_loading_more: bool,
     selected_account: Option<usize>,
     selected_label: Option<String>,
     selected_thread: Option<usize>,
@@ -138,8 +131,6 @@ impl App {
             accounts: Vec::new(),
             labels: Vec::new(),
             threads: Vec::new(),
-            threads_has_more: false,
-            threads_loading_more: false,
             selected_account: None,
             selected_label: None,
             selected_thread: None,
@@ -227,7 +218,7 @@ impl App {
                             Message::LabelsLoaded,
                         ),
                         Task::perform(
-                            load_threads(db, id, None, 0),
+                            load_threads(db, id, None),
                             Message::ThreadsLoaded,
                         ),
                     ]);
@@ -262,7 +253,7 @@ impl App {
                             Message::LabelsLoaded,
                         ),
                         Task::perform(
-                            load_threads(db, id, None, 0),
+                            load_threads(db, id, None),
                             Message::ThreadsLoaded,
                         ),
                     ])
@@ -292,15 +283,12 @@ impl App {
             Message::SelectLabel(label_id) => {
                 self.selected_label = label_id.clone();
                 self.selected_thread = None;
-                self.threads.clear();
-                self.threads_has_more = false;
-                self.threads_loading_more = false;
                 if let Some(idx) = self.selected_account {
                     if let Some(account) = self.accounts.get(idx) {
                         let db = Arc::clone(&self.db);
                         let id = account.id.clone();
                         return Task::perform(
-                            load_threads(db, id, label_id, 0),
+                            load_threads(db, id, label_id),
                             Message::ThreadsLoaded,
                         );
                     }
@@ -308,53 +296,12 @@ impl App {
                 Task::none()
             }
             Message::ThreadsLoaded(Ok(threads)) => {
-                self.threads_has_more = threads.len() == THREAD_PAGE_SIZE;
                 self.status = format!("{} threads", threads.len());
                 self.threads = threads;
                 Task::none()
             }
             Message::ThreadsLoaded(Err(e)) => {
                 self.status = format!("Threads error: {e}");
-                Task::none()
-            }
-            Message::ThreadListScrolled(viewport) => {
-                if !self.threads_has_more || self.threads_loading_more {
-                    return Task::none();
-                }
-                let content_h = viewport.content_bounds().height;
-                let visible_h = viewport.bounds().height;
-                let offset_y = viewport.absolute_offset().y;
-                let remaining = content_h - offset_y - visible_h;
-                // Load more when within 200px of the bottom
-                if remaining < 200.0 {
-                    self.threads_loading_more = true;
-                    if let Some(idx) = self.selected_account {
-                        if let Some(account) = self.accounts.get(idx) {
-                            let db = Arc::clone(&self.db);
-                            let id = account.id.clone();
-                            let label_id = self.selected_label.clone();
-                            #[allow(clippy::cast_possible_wrap)]
-                            let offset = self.threads.len() as i64;
-                            return Task::perform(
-                                load_threads(db, id, label_id, offset),
-                                Message::MoreThreadsLoaded,
-                            );
-                        }
-                    }
-                }
-                Task::none()
-            }
-            Message::MoreThreadsLoaded(Ok(more)) => {
-                self.threads_loading_more = false;
-                self.threads_has_more = more.len() == THREAD_PAGE_SIZE;
-                let total = self.threads.len() + more.len();
-                self.threads.extend(more);
-                self.status = format!("{total} threads");
-                Task::none()
-            }
-            Message::MoreThreadsLoaded(Err(e)) => {
-                self.threads_loading_more = false;
-                self.status = format!("Load more error: {e}");
                 Task::none()
             }
             Message::SelectThread(idx) => {
@@ -678,9 +625,6 @@ async fn load_threads(
     db: Arc<Db>,
     account_id: String,
     label_id: Option<String>,
-    offset: i64,
 ) -> Result<Vec<Thread>, String> {
-    #[allow(clippy::cast_possible_truncation)]
-    let limit = THREAD_PAGE_SIZE as i64;
-    db.get_threads(account_id, label_id, limit, offset).await
+    db.get_threads(account_id, label_id, 1000).await
 }
