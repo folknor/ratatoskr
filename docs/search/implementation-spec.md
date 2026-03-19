@@ -1,13 +1,13 @@
 # Search: Backend Implementation Spec
 
-Implementation plan for unifying the search backend per `docs/search/problem-statement.md`. All work is in `crates/core/`.
+Implementation plan for unifying the search backend per `docs/search/problem-statement.md`. Work spans three crates: `crates/search/` (Tantivy full-text), `crates/smart-folder/` (operator-based SQL queries), and `crates/core/` (unified pipeline, DB queries, types).
 
 ## Current State
 
 Two separate search engines with no bridge:
 
-- **Tantivy** (`core/src/search/mod.rs`) — full-text ranked search. Single-account only. Accepts pre-parsed `SearchParams`. Returns message-level results.
-- **Smart folder SQL** (`core/src/smart_folder/`) — operator-based SQL queries. Cross-account via `AccountScope`. No ranking. Returns thread-level results.
+- **Tantivy** (`crates/search/src/lib.rs`) — full-text ranked search. Single-account only. Accepts pre-parsed `SearchParams`. Returns message-level results.
+- **Smart folder SQL** (`crates/smart-folder/src/`) — operator-based SQL queries. Cross-account via `AccountScope`. No ranking. Returns thread-level results.
 
 ## Target State
 
@@ -23,7 +23,7 @@ Three internal paths based on parsed query content:
 
 ## Slice 1: Parser Overhaul
 
-Rewrite `core/src/smart_folder/parser.rs`. The parser is the foundation — everything else builds on its output.
+Rewrite `crates/smart-folder/src/parser.rs`. The parser is the foundation — everything else builds on its output.
 
 ### ParsedQuery changes
 
@@ -156,7 +156,7 @@ The greedy space consumption requires the parser to look ahead past whitespace, 
 
 ### Token system deprecation
 
-The `__LAST_7_DAYS__` / `__LAST_30_DAYS__` / `__TODAY__` token system in `tokens.rs` becomes unnecessary once the parser handles relative offsets natively. Steps:
+The `__LAST_7_DAYS__` / `__LAST_30_DAYS__` / `__TODAY__` token system in `crates/smart-folder/src/tokens.rs` becomes unnecessary once the parser handles relative offsets natively. Steps:
 
 1. Add relative offset support to the parser (this slice)
 2. Migrate any persisted smart folder queries that use tokens to offset syntax (DB migration or on-read translation)
@@ -165,7 +165,7 @@ The `__LAST_7_DAYS__` / `__LAST_30_DAYS__` / `__TODAY__` token system in `tokens
 
 ## Slice 2: SQL Builder Expansion
 
-Extend `core/src/smart_folder/sql_builder.rs` to handle all new operators.
+Extend `crates/smart-folder/src/sql_builder.rs` to handle all new operators.
 
 ### New clause builders
 
@@ -180,7 +180,7 @@ Extend `core/src/smart_folder/sql_builder.rs` to handle all new operators.
 - OR semantics for multiple folder values.
 
 **`in:` operator (universal folder shorthands):**
-- Map shorthands to provider-agnostic predicates. The `labels` table has no generic `role` column — system folders are identified via `SYSTEM_FOLDER_ROLES` in `core/src/provider/folder_roles.rs`, which maps well-known `label_id` values (e.g., `"INBOX"`, `"SENT"`, `"DRAFT"`, `"TRASH"`, `"SPAM"`) across providers. The SQL builder should match against these label IDs, not a role column:
+- Map shorthands to provider-agnostic predicates. The `labels` table has no generic `role` column — system folders are identified via `SYSTEM_FOLDER_ROLES` in `crates/provider-utils/src/folder_roles.rs`, which maps well-known `label_id` values (e.g., `"INBOX"`, `"SENT"`, `"DRAFT"`, `"TRASH"`, `"SPAM"`) across providers. The SQL builder should match against these label IDs, not a role column:
 
 | Shorthand | Predicate |
 |-----------|-----------|
@@ -241,7 +241,7 @@ The SQL builder already returns `Vec<DbThread>` (thread-level). This is correct 
 
 ## Slice 3: Tantivy Cross-Account Support
 
-Modify `core/src/search/mod.rs` to support multi-account search.
+Modify `crates/search/src/lib.rs` to support multi-account search.
 
 ### SearchParams changes
 
@@ -278,7 +278,7 @@ For the SQL→Tantivy path: SQL provides the thread metadata, Tantivy provides t
 
 ## Slice 4: Unified Pipeline
 
-New module: `core/src/search/unified.rs` (or extend `core/src/search/mod.rs`).
+New module: `crates/search/src/unified.rs` (or extend `crates/search/src/lib.rs`). Alternatively, this could live in `crates/core/src/` since it bridges the search and smart-folder crates.
 
 ### The router
 
@@ -338,27 +338,13 @@ Search is always cross-account. Account narrowing is controlled entirely by `acc
 - If no `account:` operators, search all accounts
 - Resolution happens during parsing, before either engine is invoked
 
-## Slice 5: Tauri Command
+## Slice 5: App Integration
 
-New command replacing `search_messages`:
+The app is a pure iced GUI (`crates/app/`) — there is no Tauri layer and no command wrappers. The iced app calls the unified search function from `crates/core/` (or `crates/search/`) directly, just like any other core function.
 
-```rust
-#[tauri::command]
-pub async fn search(
-    query: String,
-    db: State<'_, DbState>,
-    search: State<'_, SearchState>,
-) -> Result<Vec<SearchResult>, String> {
-    db.with_conn(move |conn| {
-        unified::search(&query, &search, conn)
-    })
-    .await
-}
-```
+No `scope` parameter — search is always cross-account per the search problem statement. Users narrow via `account:` operators. The `DbState` and `SearchState` types are `Clone` (they wrap `Arc<Mutex<...>>`), so the app passes them into the search call. For blocking work, `DbState::conn()` provides synchronous access to the connection.
 
-Note: no `scope` parameter — search is always cross-account per the search problem statement. Users narrow via `account:` operators. The `DbState::with_conn()` pattern (not `.lock()`) is the project's standard for Tauri commands — it runs the closure on the blocking thread pool via `spawn_blocking` to avoid blocking tokio workers.
-
-The old `search_messages` command stays for backward compatibility with the React frontend until it's replaced. The iced UI calls the new `search` command directly (or the core function, since iced doesn't need Tauri commands).
+This slice is trivial — it amounts to wiring up the unified search function in the app's update/message handler.
 
 ## Slice 6: Smart Folder Migration
 
@@ -397,23 +383,23 @@ Add as a DB migration. Keep `resolve_query_tokens` as a fallback for one release
 
 ### Attachments table: `mime_type` column
 
-**Already exists.** The `attachments` table has a `mime_type TEXT` column (see `migrations.rs` line 96, `DbAttachment.mime_type` in `types.rs`). No migration needed for MIME-type filtering.
+**Already exists.** The `attachments` table has a `mime_type TEXT` column (see `crates/db/src/db/migrations.rs`, `DbAttachment.mime_type` in `crates/db/src/db/types.rs`). No migration needed for MIME-type filtering.
 
 ### Labels table: system folder identification
 
-The `labels` table has no generic `role` column. System folders are identified by well-known `label_id` values (`"INBOX"`, `"SENT"`, `"DRAFT"`, `"TRASH"`, `"SPAM"`, etc.) defined in `SYSTEM_FOLDER_ROLES` (`core/src/provider/folder_roles.rs`). The `in:` operator's SQL builder matches against these IDs via `thread_labels.label_id`, not a role column. The `labels` table also has `label_type`, `imap_folder_path`, and `imap_special_use` for provider-specific metadata — these are used by the `folder:` operator for path matching. No migration needed for `in:` support.
+The `labels` table has no generic `role` column. System folders are identified by well-known `label_id` values (`"INBOX"`, `"SENT"`, `"DRAFT"`, `"TRASH"`, `"SPAM"`, etc.) defined in `SYSTEM_FOLDER_ROLES` (`crates/provider-utils/src/folder_roles.rs`). The `in:` operator's SQL builder matches against these IDs via `thread_labels.label_id`, not a role column. The `labels` table also has `label_type`, `imap_folder_path`, and `imap_special_use` for provider-specific metadata — these are used by the `folder:` operator for path matching. No migration needed for `in:` support.
 
 ## Dependency Graph
 
 ```
-Slice 1 (parser)
-  └── Slice 2 (SQL builder)
-        └── Slice 4 (unified pipeline)
-              ├── Slice 5 (Tauri command)
+Slice 1 (parser — crates/smart-folder/)
+  └── Slice 2 (SQL builder — crates/smart-folder/)
+        └── Slice 4 (unified pipeline — crates/search/ or crates/core/)
+              ├── Slice 5 (app integration — trivial wiring in crates/app/)
               └── Slice 6 (smart folder migration)
 
-Slice 3 (Tantivy cross-account)
+Slice 3 (Tantivy cross-account — crates/search/)
   └── Slice 4 (unified pipeline)
 ```
 
-Slices 1 and 3 can be done in parallel. Slice 2 depends on 1. Slice 4 depends on 2 and 3. Slices 5 and 6 depend on 4.
+Slices 1 and 3 can be done in parallel. Slice 2 depends on 1. Slice 4 depends on 2 and 3. Slice 5 is trivial wiring. Slice 6 depends on 4.

@@ -110,15 +110,19 @@ impl QueryContext {
 
 // ── Clause builders ─────────────────────────────────────────
 
-/// Add WHERE clauses for message-level filters (free text, from, to, subject, dates, read state).
+/// Add WHERE clauses for message-level filters (free text, from, to, dates, read state).
 fn build_message_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     build_free_text_clause(ctx, parsed);
     build_from_clause(ctx, parsed);
     build_to_clause(ctx, parsed);
-    build_subject_clause(ctx, parsed);
     build_attachment_clause(ctx, parsed);
     build_read_clauses(ctx, parsed);
     build_date_clauses(ctx, parsed);
+    // TODO: build account clause (account: operator)
+    // TODO: build folder clause (folder: operator)
+    // TODO: build in_folder clause (in: operator)
+    // TODO: build attachment_types clause (has:<type> / type: operators)
+    // TODO: build has_contact clause (has:contact operator)
 }
 
 fn build_free_text_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
@@ -135,35 +139,40 @@ fn build_free_text_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
 }
 
 fn build_from_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
-    if let Some(ref from) = parsed.from {
-        let idx = ctx.push_param(Box::new(from.clone()));
-        ctx.msg_clauses.push(format!(
-            "(m.from_address LIKE '%' || ?{idx} || '%' \
-             OR m.from_name LIKE '%' || ?{idx} || '%')"
-        ));
+    if parsed.from.is_empty() {
+        return;
     }
+    let parts: Vec<String> = parsed
+        .from
+        .iter()
+        .map(|from| {
+            let idx = ctx.push_param(Box::new(from.clone()));
+            format!(
+                "(m.from_address LIKE '%' || ?{idx} || '%' \
+                 OR m.from_name LIKE '%' || ?{idx} || '%')"
+            )
+        })
+        .collect();
+    ctx.msg_clauses.push(format!("({})", parts.join(" OR ")));
 }
 
 fn build_to_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
-    if let Some(ref to) = parsed.to {
-        let idx = ctx.push_param(Box::new(to.clone()));
-        ctx.msg_clauses.push(format!(
-            "m.to_addresses LIKE '%' || ?{idx} || '%'"
-        ));
+    if parsed.to.is_empty() {
+        return;
     }
-}
-
-fn build_subject_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
-    if let Some(ref subject) = parsed.subject {
-        let idx = ctx.push_param(Box::new(subject.clone()));
-        ctx.msg_clauses.push(format!(
-            "m.subject LIKE '%' || ?{idx} || '%'"
-        ));
-    }
+    let parts: Vec<String> = parsed
+        .to
+        .iter()
+        .map(|to| {
+            let idx = ctx.push_param(Box::new(to.clone()));
+            format!("m.to_addresses LIKE '%' || ?{idx} || '%'")
+        })
+        .collect();
+    ctx.msg_clauses.push(format!("({})", parts.join(" OR ")));
 }
 
 fn build_attachment_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
-    if parsed.has_attachment == Some(true) {
+    if parsed.has_attachment {
         ctx.msg_clauses.push(
             "EXISTS (SELECT 1 FROM attachments a \
              WHERE a.account_id = m.account_id AND a.message_id = m.id)"
@@ -221,7 +230,7 @@ fn build_scope_clause(ctx: &mut QueryContext, scope: &AccountScope) {
     }
 }
 
-/// Add thread-level flag clauses (snoozed, pinned, muted, important).
+/// Add thread-level flag clauses (snoozed, pinned, muted).
 /// These filter on the `threads` table rather than `messages`.
 fn build_thread_flag_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     if parsed.is_snoozed == Some(true) {
@@ -233,23 +242,28 @@ fn build_thread_flag_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     if parsed.is_muted == Some(true) {
         ctx.thread_flag_clauses.push("t.is_muted = 1".to_owned());
     }
-    if parsed.is_important == Some(true) {
-        ctx.thread_flag_clauses
-            .push("t.is_important = 1".to_owned());
-    }
+    // TODO: build is_tagged clause (is:tagged operator)
 }
 
 /// Add label clause via EXISTS subquery on thread_labels.
 fn build_label_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
-    if let Some(ref label) = parsed.label {
-        let idx = ctx.push_param(Box::new(label.clone()));
-        ctx.msg_clauses.push(format!(
-            "EXISTS (SELECT 1 FROM thread_labels tl \
-             JOIN labels l ON l.account_id = tl.account_id AND l.id = tl.label_id \
-             WHERE tl.account_id = m.account_id AND tl.thread_id = m.thread_id \
-             AND LOWER(l.name) = LOWER(?{idx}))"
-        ));
+    if parsed.label.is_empty() {
+        return;
     }
+    let parts: Vec<String> = parsed
+        .label
+        .iter()
+        .map(|label| {
+            let idx = ctx.push_param(Box::new(label.clone()));
+            format!(
+                "EXISTS (SELECT 1 FROM thread_labels tl \
+                 JOIN labels l ON l.account_id = tl.account_id AND l.id = tl.label_id \
+                 WHERE tl.account_id = m.account_id AND tl.thread_id = m.thread_id \
+                 AND LOWER(l.name) = LOWER(?{idx}))"
+            )
+        })
+        .collect();
+    ctx.msg_clauses.push(format!("({})", parts.join(" OR ")));
 }
 
 // ── SQL templates ───────────────────────────────────────────
