@@ -690,7 +690,8 @@ pub async fn warm_bimi_cache(
 
     // We need to collect results synchronously back to update the DB, so we
     // run the async lookups and collect (domain, result) pairs.
-    let results: Vec<(String, Option<(PathBuf, String, Option<String>)>)> =
+    type BimiResult = (String, Option<(PathBuf, String, Option<String>)>);
+    let results: Vec<BimiResult> =
         stream::iter(domains)
             .map(|domain| {
                 let cache_dir = cache_dir.to_path_buf();

@@ -92,13 +92,13 @@ pub fn detect_cloud_links(html_body: &str) -> Vec<CloudLink> {
         }
 
         let matches: Vec<usize> = CLOUD_URL_PATTERNS.matches(url).into_iter().collect();
-        if let Some(&first_match) = matches.first() {
-            if let Some(provider) = provider_for_match_index(first_match) {
-                results.push(CloudLink {
-                    url: url.to_owned(),
-                    provider,
-                });
-            }
+        if let Some(&first_match) = matches.first()
+            && let Some(provider) = provider_for_match_index(first_match)
+        {
+            results.push(CloudLink {
+                url: url.to_owned(),
+                provider,
+            });
         }
     }
 

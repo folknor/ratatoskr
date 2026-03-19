@@ -315,7 +315,7 @@ pub use ratatoskr_db::db::queries::get_setting;
 pub fn get_secure_setting(
     conn: &Connection,
     encryption_key: &[u8; 32],
-    key: String,
+    key: &str,
 ) -> Result<Option<String>, String> {
     let result = get_setting(conn, key)?;
     Ok(result.map(|raw| decode_secure_setting_value(raw, encryption_key)))

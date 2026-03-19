@@ -6,7 +6,7 @@ use super::types::ThreadInfoRow;
 
 /// Read a single value from the `settings` table, returning `Ok(None)` when
 /// the key does not exist.
-pub fn get_setting(conn: &Connection, key: String) -> Result<Option<String>, String> {
+pub fn get_setting(conn: &Connection, key: &str) -> Result<Option<String>, String> {
     let result = conn
         .query_row(
             "SELECT value FROM settings WHERE key = ?1",
@@ -44,6 +44,7 @@ pub struct CategoryColors<'a> {
 }
 
 /// Whether to update `sort_order` on conflict.
+#[derive(Clone, Copy)]
 pub enum CategorySortOnConflict {
     /// Keep the existing sort_order on conflict.
     Keep,

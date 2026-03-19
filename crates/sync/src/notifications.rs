@@ -15,7 +15,7 @@ pub async fn get_ai_categorization_candidates(
 ) -> Result<Vec<AiCategorizationCandidate>, String> {
     let account_id = account_id.to_string();
     db.with_conn(move |conn| {
-        let auto_categorize = ratatoskr_db::db::queries::get_setting(conn, "ai_auto_categorize".to_string())
+        let auto_categorize = ratatoskr_db::db::queries::get_setting(conn, "ai_auto_categorize")
             .unwrap_or(None);
         if auto_categorize.as_deref() == Some("false") {
             return Ok(Vec::new());
@@ -64,17 +64,17 @@ fn evaluate_notifications_sync(
     thread_ids: &[String],
 ) -> Result<Vec<NotificationCandidate>, String> {
     use ratatoskr_db::db::queries::get_setting;
-    let notifications_enabled = get_setting(conn, "notifications_enabled".to_string())
+    let notifications_enabled = get_setting(conn, "notifications_enabled")
         .unwrap_or(None);
     if notifications_enabled.as_deref() == Some("false") {
         return Ok(Vec::new());
     }
 
-    let smart_notifications = get_setting(conn, "smart_notifications".to_string())
+    let smart_notifications = get_setting(conn, "smart_notifications")
         .unwrap_or(None)
         .unwrap_or_else(|| "true".to_string())
         == "true";
-    let notify_categories = get_setting(conn, "notify_categories".to_string())
+    let notify_categories = get_setting(conn, "notify_categories")
         .unwrap_or(None)
         .unwrap_or_else(|| "Primary".to_string());
     let allowed_categories: HashSet<String> = notify_categories

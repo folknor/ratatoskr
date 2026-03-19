@@ -129,7 +129,7 @@ pub async fn read_plain_setting(
     key: &str,
 ) -> Result<Option<String>, AiError> {
     let key_name = key.to_string();
-    db.with_conn(move |conn| ratatoskr_core::db::get_setting(conn, key_name))
+    db.with_conn(move |conn| ratatoskr_core::db::get_setting(conn, &key_name))
         .await
         .map_err(|e| AiError::DbError(format!("read setting {key}: {e}")))
 }

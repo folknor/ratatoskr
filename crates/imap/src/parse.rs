@@ -98,18 +98,15 @@ pub fn parse_message(
     let body_text = message.body_text(0).map(|s| s.to_string());
     let body_html = message.body_html(0).and_then(|html| {
         // Verify the selected HTML part isn't AMP by checking its content type
-        if let Some(&part_idx) = message.html_body.first() {
-            if let Some(part) = message.parts.get(part_idx as usize) {
-                if let Some(ct) = part.content_type() {
-                    if let Some(subtype) = ct.subtype() {
-                        if ratatoskr_provider_utils::email_parsing::is_amp_content_type(
-                            &format!("{}/{subtype}", ct.ctype()),
-                        ) {
-                            return None;
-                        }
-                    }
-                }
-            }
+        if let Some(&part_idx) = message.html_body.first()
+            && let Some(part) = message.parts.get(part_idx as usize)
+            && let Some(ct) = part.content_type()
+            && let Some(subtype) = ct.subtype()
+            && ratatoskr_provider_utils::email_parsing::is_amp_content_type(
+                &format!("{}/{subtype}", ct.ctype()),
+            )
+        {
+            return None;
         }
         Some(html.to_string())
     });

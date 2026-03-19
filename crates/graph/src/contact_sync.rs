@@ -428,7 +428,7 @@ fn extract_emails(contact: &GraphContact) -> Vec<String> {
             e.address
                 .as_deref()
                 .filter(|a| !a.is_empty())
-                .map(|a| a.to_lowercase())
+                .map(str::to_lowercase)
         })
         .collect()
 }

@@ -304,7 +304,7 @@ async fn authenticate(
 
 /// Negotiated CONDSTORE/QRESYNC capability state for a session.
 #[derive(Debug, Clone)]
-pub(crate) struct ImapCapabilities {
+pub struct ImapCapabilities {
     /// Server supports CONDSTORE (RFC 4551) — HIGHESTMODSEQ in SELECT and
     /// CHANGEDSINCE modifier for UID FETCH.
     pub condstore: bool,
@@ -372,10 +372,10 @@ pub async fn negotiate_condstore_qresync(
             match resp.parsed() {
                 async_imap::imap_proto::Response::Capabilities(caps) => {
                     for cap in caps {
-                        if let async_imap::imap_proto::types::Capability::Atom(name) = cap {
-                            if name.eq_ignore_ascii_case("QRESYNC") {
-                                saw_enabled = true;
-                            }
+                        if let async_imap::imap_proto::types::Capability::Atom(name) = cap
+                            && name.eq_ignore_ascii_case("QRESYNC")
+                        {
+                            saw_enabled = true;
                         }
                     }
                 }

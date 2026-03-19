@@ -43,12 +43,11 @@ pub fn compress_image(
     // Pre-flight dimension check: read header only, reject decompression bombs
     // before committing to a full decode (which allocates width × height × channels).
     if let Ok((w, h)) = ImageReader::with_format(Cursor::new(input), img_format).into_dimensions()
+        && u64::from(w) * u64::from(h) > MAX_IMAGE_PIXELS
     {
-        if u64::from(w) * u64::from(h) > MAX_IMAGE_PIXELS {
-            return Err(SqueezeError::ImageDecode(format!(
-                "image too large: {w}x{h} exceeds {MAX_IMAGE_PIXELS} pixel limit"
-            )));
-        }
+        return Err(SqueezeError::ImageDecode(format!(
+            "image too large: {w}x{h} exceeds {MAX_IMAGE_PIXELS} pixel limit"
+        )));
     }
 
     let img = ImageReader::with_format(Cursor::new(input), img_format)

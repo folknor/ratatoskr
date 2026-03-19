@@ -228,12 +228,11 @@ fn extract_body_value(email: &Email, html: bool) -> Option<String> {
 
     for part in parts {
         // Skip AMP body parts — prefer regular text/html
-        if html {
-            if let Some(ct) = part.content_type() {
-                if ratatoskr_provider_utils::email_parsing::is_amp_content_type(ct) {
-                    continue;
-                }
-            }
+        if html
+            && let Some(ct) = part.content_type()
+            && ratatoskr_provider_utils::email_parsing::is_amp_content_type(ct)
+        {
+            continue;
         }
 
         let part_id = part.part_id()?;

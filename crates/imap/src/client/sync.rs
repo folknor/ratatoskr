@@ -58,10 +58,7 @@ pub async fn delta_check_folders(
 
         // CONDSTORE: detect modseq reset (server < cached with same UIDVALIDITY).
         // This can happen during server migration or mailbox repair.
-        let modseq_reset = match (req.last_modseq, server_modseq) {
-            (Some(cached), Some(server)) if server < cached => true,
-            _ => false,
-        };
+        let modseq_reset = matches!((req.last_modseq, server_modseq), (Some(cached), Some(server)) if server < cached);
 
         if modseq_reset {
             log::warn!(
@@ -77,10 +74,7 @@ pub async fn delta_check_folders(
 
         // CONDSTORE fast path: if server's HIGHESTMODSEQ matches our cached
         // value, nothing changed (no new messages, no flag changes, no deletions).
-        let modseq_unchanged = !modseq_reset && match (req.last_modseq, server_modseq) {
-            (Some(cached), Some(server)) if cached == server => true,
-            _ => false,
-        };
+        let modseq_unchanged = !modseq_reset && matches!((req.last_modseq, server_modseq), (Some(cached), Some(server)) if cached == server);
 
         if modseq_unchanged {
             log::debug!(

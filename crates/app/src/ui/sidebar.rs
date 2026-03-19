@@ -24,13 +24,13 @@ impl SidebarModel<'_> {
     }
 }
 
-pub fn view<'a>(model: SidebarModel<'a>) -> Element<'a, Message> {
+pub fn view<'a>(model: &SidebarModel<'a>) -> Element<'a, Message> {
     let mut col = column![
-        scope_dropdown(&model),
+        scope_dropdown(model),
         Space::new().height(SPACE_XXS),
         widgets::compose_button(),
         Space::new().height(SPACE_XS),
-        nav_items(&model),
+        nav_items(model),
         widgets::section_break(),
         smart_folders(model.smart_folders_expanded),
     ]
@@ -39,7 +39,7 @@ pub fn view<'a>(model: SidebarModel<'a>) -> Element<'a, Message> {
 
     if !model.is_all_accounts() {
         col = col.push(widgets::section_break());
-        col = col.push(labels(&model));
+        col = col.push(labels(model));
     }
 
     container(

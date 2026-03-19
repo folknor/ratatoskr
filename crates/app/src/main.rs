@@ -22,7 +22,8 @@ fn main() -> iced::Result {
         .expect("no data dir")
         .join("com.velo.app");
 
-    let db = Db::open(&app_data_dir).expect("failed to open database");
+    let db = Db::open(&app_data_dir)
+        .map_err(|e| iced::Error::WindowCreationFailed(e.into()))?;
     let _ = DB.set(Arc::new(db));
 
     let detected_scale = display::detect_default_scale();
@@ -214,7 +215,7 @@ impl App {
                     self.status = format!("Loaded {} accounts", self.accounts.len());
                     return Task::batch([
                         Task::perform(
-                            load_labels(db.clone(), id.clone()),
+                            load_labels(Arc::clone(&db), id.clone()),
                             Message::LabelsLoaded,
                         ),
                         Task::perform(
@@ -249,7 +250,7 @@ impl App {
                     let id = account.id.clone();
                     Task::batch([
                         Task::perform(
-                            load_labels(db.clone(), id.clone()),
+                            load_labels(Arc::clone(&db), id.clone()),
                             Message::LabelsLoaded,
                         ),
                         Task::perform(
@@ -283,15 +284,15 @@ impl App {
             Message::SelectLabel(label_id) => {
                 self.selected_label = label_id.clone();
                 self.selected_thread = None;
-                if let Some(idx) = self.selected_account {
-                    if let Some(account) = self.accounts.get(idx) {
-                        let db = Arc::clone(&self.db);
-                        let id = account.id.clone();
-                        return Task::perform(
-                            load_threads(db, id, label_id),
-                            Message::ThreadsLoaded,
-                        );
-                    }
+                if let Some(idx) = self.selected_account
+                    && let Some(account) = self.accounts.get(idx)
+                {
+                    let db = Arc::clone(&self.db);
+                    let id = account.id.clone();
+                    return Task::perform(
+                        load_threads(db, id, label_id),
+                        Message::ThreadsLoaded,
+                    );
                 }
                 Task::none()
             }
@@ -519,7 +520,7 @@ impl App {
             smart_folders_expanded: self.smart_folders_expanded,
         };
 
-        let sidebar = container(ui::sidebar::view(sidebar_model))
+        let sidebar = container(ui::sidebar::view(&sidebar_model))
             .width(self.sidebar_width)
             .height(Length::Fill);
 

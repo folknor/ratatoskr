@@ -23,6 +23,9 @@ pub fn color_for_label(label_name: &str, namespace: &str) -> (&'static str, &'st
     namespace.hash(&mut hasher);
     label_name.hash(&mut hasher);
     let presets = all_presets();
+    // Truncation from u64 to usize on 32-bit targets is fine here — we only
+    // need an arbitrary hash value to index into a 25-element table.
+    #[allow(clippy::cast_possible_truncation)]
     let index = (hasher.finish() as usize) % presets.len();
     let (_, bg, fg) = presets[index];
     (bg, fg)

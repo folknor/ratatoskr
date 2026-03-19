@@ -28,7 +28,7 @@ struct AccountConfigRecord {
     oauth_token_url: Option<String>,
 }
 
-pub(crate) struct ImapAndSmtpConfig {
+pub struct ImapAndSmtpConfig {
     pub imap: ImapConfig,
     pub smtp: SmtpConfig,
 }

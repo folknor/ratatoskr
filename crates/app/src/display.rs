@@ -33,7 +33,10 @@ pub fn detect_default_scale() -> f32 {
     let min_dpi = displays
         .iter()
         .filter_map(|d| {
-            let (px, mm) = (d.width.max(0) as u32, d.width_mm.max(0) as u32);
+            let (px, mm) = (
+                d.width,
+                u32::try_from(d.width_mm).unwrap_or(0),
+            );
             compute_dpi(px, mm)
         })
         .reduce(f32::min);

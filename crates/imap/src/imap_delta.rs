@@ -343,8 +343,7 @@ async fn per_folder_check(
     let modseq_reset = match (saved.modseq, status.highest_modseq) {
         (Some(cached), Some(server)) if server < cached => {
             log::warn!(
-                "[sync] per_folder_check: {} HIGHESTMODSEQ reset (cached {cached} > server {server})",
-                folder_path
+                "[sync] per_folder_check: {folder_path} HIGHESTMODSEQ reset (cached {cached} > server {server})",
             );
             true
         }
@@ -804,10 +803,10 @@ pub async fn sync_flags_without_condstore(
 
     // Reuse the deletion check timestamp table for throttling. If we can't
     // read it, proceed anyway (first run).
-    if let Ok(Some(last)) = &last_sync {
-        if now - last < FLAG_SYNC_INTERVAL_SECS {
-            return Ok(0);
-        }
+    if let Ok(Some(last)) = &last_sync
+        && now - last < FLAG_SYNC_INTERVAL_SECS
+    {
+        return Ok(0);
     }
 
     // Get local flags

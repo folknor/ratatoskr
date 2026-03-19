@@ -3,7 +3,6 @@
 /// Exchange's 25 preset colors serve as the canonical palette. Other providers
 /// (Gmail labels, JMAP keywords) can map arbitrary hex colors to the nearest
 /// Exchange preset using Euclidean distance in RGB space.
-
 /// (preset_name, background_hex, foreground_hex)
 const PRESETS: &[(&str, &str, &str)] = &[
     ("preset0", "#e74c3c", "#ffffff"),  // Red
@@ -51,7 +50,10 @@ fn color_distance_sq(a: (u8, u8, u8), b: (u8, u8, u8)) -> u32 {
     let dr = i32::from(a.0) - i32::from(b.0);
     let dg = i32::from(a.1) - i32::from(b.1);
     let db = i32::from(a.2) - i32::from(b.2);
-    (dr * dr + dg * dg + db * db) as u32
+    // Sum of squares of i8-range differences is always non-negative and fits in u32.
+    #[allow(clippy::cast_sign_loss)]
+    let result = (dr * dr + dg * dg + db * db) as u32;
+    result
 }
 
 /// Look up a preset by name, returning `(bg_hex, fg_hex)`.
@@ -92,7 +94,7 @@ pub fn nearest_exchange_preset(bg_hex: &str) -> Option<&'static str> {
 
     for &(name, bg, _) in PRESETS {
         // PRESETS hex values are known-good, unwrap is safe here.
-        let preset_rgb = parse_hex(bg).expect("invalid preset hex in PRESETS table");
+        let preset_rgb = parse_hex(bg)?;
         let dist = color_distance_sq(target, preset_rgb);
         if dist < best_dist {
             best_dist = dist;

@@ -2,9 +2,6 @@
 research
 .plans
 
-# Build outputs
-build/
-
 # Environment variables & secrets
 .env
 .env.*
@@ -42,11 +39,7 @@ nul
 .settings/
 
 # Claude Code — ignore local settings but track shared skills
-.claude/*
-!.claude/skills/
-
-# Reference code
-docs/discovery/
+.claude
 
 # Signing keys
 *.key

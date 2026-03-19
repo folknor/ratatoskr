@@ -62,7 +62,7 @@ pub async fn graph_categories_sync(
                     fg: color_fg,
                 },
                 &cat.id,
-                i as i64,
+                i64::try_from(i).unwrap_or(0),
                 true,
                 ratatoskr_db::db::queries::CategorySortOnConflict::Update,
             )?;

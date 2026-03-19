@@ -1,5 +1,4 @@
 /// Reusable SQL fragments to avoid duplication across query modules.
-
 /// Subquery that picks the latest message per (account_id, thread_id),
 /// returning `id`, `account_id`, `thread_id`, `from_name`, `from_address`.
 ///

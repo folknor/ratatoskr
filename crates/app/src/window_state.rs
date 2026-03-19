@@ -104,15 +104,15 @@ impl WindowState {
         self.thread_list_width = self.thread_list_width.max(250.0);
 
         // Reject negative positions (off-screen)
-        if let Some(x) = self.x {
-            if x < 0.0 {
-                self.x = None;
-            }
+        if let Some(x) = self.x
+            && x < 0.0
+        {
+            self.x = None;
         }
-        if let Some(y) = self.y {
-            if y < 0.0 {
-                self.y = None;
-            }
+        if let Some(y) = self.y
+            && y < 0.0
+        {
+            self.y = None;
         }
     }
 

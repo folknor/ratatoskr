@@ -151,8 +151,7 @@ pub fn imap_name_to_special_use(name: &str) -> Option<&'static str> {
     SYSTEM_FOLDER_ROLES.iter().find_map(|entry| {
         entry
             .imap_name_aliases
-            .iter()
-            .any(|candidate| *candidate == name)
+            .contains(&name)
             .then_some(entry.imap_special_use)
             .flatten()
     })

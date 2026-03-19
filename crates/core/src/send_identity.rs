@@ -110,5 +110,5 @@ pub fn select_from_address(
     }
 
     // 3. Primary identity (first in the list since we ORDER BY is_primary DESC)
-    Ok(identities.into_iter().find(|i| i.is_primary).or_else(|| None))
+    Ok(identities.into_iter().find(|i| i.is_primary))
 }

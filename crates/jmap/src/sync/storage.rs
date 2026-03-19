@@ -270,7 +270,7 @@ fn sync_keyword_categories(
     // Upsert each keyword into the categories table
     for keyword in &unique_keywords {
         ratatoskr_db::db::queries::upsert_category(
-            &tx,
+            tx,
             &format!("kw_{keyword}"),
             account_id,
             keyword,

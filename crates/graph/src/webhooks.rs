@@ -323,13 +323,13 @@ pub async fn check_and_renew_subscriptions(
                         sub.id
                     );
                     // If renewal fails (e.g. 404), clean up
-                    if e.contains("404") {
-                        if let Err(e) = delete_graph_subscription_record(db, &sub.id).await {
-                            log::warn!(
-                                "[Graph webhooks] failed to delete stale subscription record {}: {e}",
-                                sub.id
-                            );
-                        }
+                    if e.contains("404")
+                        && let Err(e) = delete_graph_subscription_record(db, &sub.id).await
+                    {
+                        log::warn!(
+                            "[Graph webhooks] failed to delete stale subscription record {}: {e}",
+                            sub.id
+                        );
                     }
                 }
             }

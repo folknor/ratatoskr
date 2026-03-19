@@ -875,6 +875,9 @@ fn hsl_to_color(h: f32, s: f32, l: f32) -> Color {
     let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
     let h_prime = h / 60.0;
     let x = c * (1.0 - (h_prime % 2.0 - 1.0).abs());
+    // h_prime = h / 60.0 where h is in [0, 360), so h_prime is in [0, 6).
+    // Truncation to u32 yields 0..=5, which is the intended bucket index.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let (r1, g1, b1) = match h_prime as u32 {
         0 => (c, x, 0.0),
         1 => (x, c, 0.0),

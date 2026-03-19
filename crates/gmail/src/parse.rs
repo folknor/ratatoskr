@@ -249,10 +249,9 @@ fn extract_reaction_emoji(part: &GmailPayload) -> Option<String> {
         if let Some(body) = &part.body
             && let Some(data) = &body.data
             && let Some(decoded) = decode_base64url(data)
+            && let Ok(payload) = serde_json::from_str::<GmailReactionPayload>(&decoded)
         {
-            if let Ok(payload) = serde_json::from_str::<GmailReactionPayload>(&decoded) {
-                return Some(payload.emoji);
-            }
+            return Some(payload.emoji);
         }
         return None;
     }

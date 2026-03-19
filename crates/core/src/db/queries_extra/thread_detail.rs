@@ -2,6 +2,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+/// Map from message ID to (text_body, html_body).
+type BodyMap = BodyMap;
+
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
@@ -190,8 +193,8 @@ fn decompress_body(data: &[u8]) -> Result<String, String> {
 fn fetch_bodies(
     body_store_conn: &Connection,
     message_ids: &[String],
-) -> Result<HashMap<String, (Option<String>, Option<String>)>, String> {
-    let mut body_map: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
+) -> Result<BodyMap, String> {
+    let mut body_map: BodyMap = HashMap::new();
     if message_ids.is_empty() {
         return Ok(body_map);
     }
@@ -206,7 +209,7 @@ fn fetch_bodies(
 fn fetch_bodies_chunk(
     conn: &Connection,
     chunk: &[String],
-    body_map: &mut HashMap<String, (Option<String>, Option<String>)>,
+    body_map: &mut BodyMap,
 ) -> Result<(), String> {
     let placeholders: String = chunk
         .iter()

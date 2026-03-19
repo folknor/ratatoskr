@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use rusqlite::Connection;
 
 use ratatoskr_stores::body_store::BodyStoreState;
@@ -428,7 +426,7 @@ pub fn sync_folders_to_labels(
                 fg: None,
             },
             &folder.raw_path,
-            i as i64,
+            i64::try_from(i).unwrap_or(0),
             false,
             ratatoskr_db::db::queries::CategorySortOnConflict::Keep,
         )?;
@@ -613,10 +611,9 @@ pub fn get_local_uids_for_folder(
         )
         .map_err(|e| format!("prepare get_local_uids: {e}"))?;
 
-    #[allow(clippy::cast_sign_loss)]
     let rows = stmt
         .query_map(rusqlite::params![account_id, folder_path], |row| {
-            Ok((row.get::<_, String>("id")?, row.get::<_, i64>("imap_uid")? as u32))
+            Ok((row.get::<_, String>("id")?, u32::try_from(row.get::<_, i64>("imap_uid")?).unwrap_or(0)))
         })
         .map_err(|e| format!("query local uids: {e}"))?;
 
@@ -643,11 +640,10 @@ pub fn get_local_flags_for_folder(
         )
         .map_err(|e| format!("prepare get_local_flags: {e}"))?;
 
-    #[allow(clippy::cast_sign_loss)]
     let rows = stmt
         .query_map(rusqlite::params![account_id, folder_path], |row| {
             Ok((
-                row.get::<_, i64>("imap_uid")? as u32,
+                u32::try_from(row.get::<_, i64>("imap_uid")?).unwrap_or(0),
                 row.get::<_, bool>("is_read")?,
                 row.get::<_, bool>("is_starred")?,
             ))

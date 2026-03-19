@@ -20,6 +20,9 @@ use iced::{
 
 const ANIMATION_DURATION: Duration = Duration::from_millis(150);
 
+/// Style function type for the animated toggler.
+type TogglerStyleFn<'a> = Box<dyn Fn(&Theme, Status) -> Style + 'a>;
+
 /// Internal widget state stored in the tree.
 struct State {
     anim: animation::Animation<bool>,
@@ -31,7 +34,7 @@ pub struct AnimatedToggler<'a, Message> {
     is_toggled: bool,
     on_toggle: Option<Box<dyn Fn(bool) -> Message + 'a>>,
     size: f32,
-    style_fn: Box<dyn Fn(&Theme, Status) -> Style + 'a>,
+    style_fn: TogglerStyleFn<'a>,
 }
 
 impl<'a, Message> AnimatedToggler<'a, Message> {
@@ -114,21 +117,21 @@ impl<Message> Widget<Message, Theme, iced::Renderer> for AnimatedToggler<'_, Mes
                     button: mouse::Button::Left,
                     ..
                 })
-                | Event::Touch(touch::Event::FingerPressed { .. }) => {
-                    if cursor.is_over(layout.bounds()) {
-                        shell.publish(on_toggle(!self.is_toggled));
-                        shell.capture_event();
-                    }
+                | Event::Touch(touch::Event::FingerPressed { .. })
+                    if cursor.is_over(layout.bounds()) =>
+                {
+                    shell.publish(on_toggle(!self.is_toggled));
+                    shell.capture_event();
                 }
                 _ => {}
             }
         }
 
         // Drive animation: when is_toggled changes, start transition
-        if state.anim.value() != self.is_toggled {
-            if let Event::Window(window::Event::RedrawRequested(now)) = event {
-                state.anim.go_mut(self.is_toggled, *now);
-            }
+        if state.anim.value() != self.is_toggled
+            && let Event::Window(window::Event::RedrawRequested(now)) = event
+        {
+            state.anim.go_mut(self.is_toggled, *now);
         }
 
         // Request redraws while animating

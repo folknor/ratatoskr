@@ -183,10 +183,10 @@ fn try_compress_archive_image(
     let dims_reader = ImageReader::new(Cursor::new(data))
         .with_guessed_format()
         .map_err(|e| SqueezeError::ImageDecode(e.to_string()))?;
-    if let Ok((w, h)) = dims_reader.into_dimensions() {
-        if u64::from(w) * u64::from(h) > crate::image::MAX_IMAGE_PIXELS {
-            return Ok(None);
-        }
+    if let Ok((w, h)) = dims_reader.into_dimensions()
+        && u64::from(w) * u64::from(h) > crate::image::MAX_IMAGE_PIXELS
+    {
+        return Ok(None);
     }
 
     let img = ImageReader::new(Cursor::new(data))

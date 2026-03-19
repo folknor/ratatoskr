@@ -60,7 +60,7 @@ pub fn resolve_read_receipt_policy(
     }
 
     // 4. Global default from settings table
-    if let Ok(Some(value)) = crate::db::get_setting(conn, "default_read_receipt_policy".to_string()) {
+    if let Ok(Some(value)) = crate::db::get_setting(conn, "default_read_receipt_policy") {
         return ReadReceiptPolicy::from_str(&value);
     }
 

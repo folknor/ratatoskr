@@ -221,10 +221,10 @@ fn extract_value(input: &str, pos: usize) -> (String, usize) {
     let skip = rest.len() - trimmed.len();
     let start = pos + skip;
 
-    if trimmed.starts_with('"') {
+    if let Some(after_quote) = trimmed.strip_prefix('"') {
         // Quoted value -- find closing quote.
-        if let Some(close) = trimmed[1..].find('"') {
-            let value = trimmed[1..close + 1].to_owned();
+        if let Some(close) = after_quote.find('"') {
+            let value = after_quote[..close].to_owned();
             return (value, start + close + 2);
         }
     }
@@ -247,11 +247,11 @@ fn extract_date_value(input: &str, pos: usize) -> (String, usize) {
     let skip = rest.len() - trimmed.len();
     let start = pos + skip;
 
-    if trimmed.starts_with('"') {
-        if let Some(close) = trimmed[1..].find('"') {
-            let value = trimmed[1..close + 1].to_owned();
-            return (value, start + close + 2);
-        }
+    if let Some(after_quote) = trimmed.strip_prefix('"')
+        && let Some(close) = after_quote.find('"')
+    {
+        let value = after_quote[..close].to_owned();
+        return (value, start + close + 2);
     }
 
     // Take the first non-whitespace token.

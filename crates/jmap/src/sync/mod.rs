@@ -33,7 +33,7 @@ pub(crate) use mailbox::{fetch_all_mailboxes, role_to_str};
 /// Result of a JMAP delta sync, returned to TS for post-sync hooks.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct JmapSyncResult {
+pub struct JmapSyncResult {
     pub new_inbox_email_ids: Vec<String>,
     pub affected_thread_ids: Vec<String>,
 }
@@ -151,10 +151,7 @@ async fn query_email_page(
     let query_request = request.query_email();
     query_request.filter(email::query::Filter::after(since_ts));
     query_request.sort([email::query::Comparator::received_at()]);
-    #[allow(clippy::cast_possible_wrap)]
-    {
-        query_request.position(position as i32);
-    }
+    query_request.position(i32::try_from(position).unwrap_or(i32::MAX));
     query_request.limit(BATCH_SIZE);
     query_request.calculate_total(calculate_total);
     request

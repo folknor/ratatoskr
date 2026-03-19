@@ -435,15 +435,15 @@ impl SettingsState {
             SettingsMessage::ListDragMove(list_id, point) => {
                 // Only act if drag was initiated from the grip.
                 let has_drag = self.drag_state.as_ref()
-                    .map_or(false, |d| d.list_id == list_id);
+                    .is_some_and(|d| d.list_id == list_id);
                 if !has_drag { return Task::none(); }
 
                 // Record start_y on first move event.
-                if let Some(ref mut drag) = self.drag_state {
-                    if drag.start_y < 0.0 {
-                        drag.start_y = point.y;
-                        return Task::none();
-                    }
+                if let Some(ref mut drag) = self.drag_state
+                    && drag.start_y < 0.0
+                {
+                    drag.start_y = point.y;
+                    return Task::none();
                 }
 
                 let Some(drag_ref) = self.drag_state.as_ref() else {
@@ -465,7 +465,8 @@ impl SettingsState {
                 // Each row is SETTINGS_ROW_HEIGHT, plus 1px divider between rows.
                 let row_step = SETTINGS_ROW_HEIGHT + 1.0;
                 let count = self.list_items_mut(&list_id).len();
-                let target = ((point.y / row_step) as usize).min(count.saturating_sub(1));
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let target = ((point.y / row_step).max(0.0) as usize).min(count.saturating_sub(1));
 
                 if target != from {
                     self.list_items_mut(&list_id).swap(from, target);
@@ -481,10 +482,10 @@ impl SettingsState {
                 // Only toggle if no drag is active.
                 if self.drag_state.is_some() { return Task::none(); }
                 let items = self.list_items_mut(&list_id);
-                if let Some(item) = items.get_mut(index) {
-                    if let Some(ref mut enabled) = item.enabled {
-                        *enabled = !*enabled;
-                    }
+                if let Some(item) = items.get_mut(index)
+                    && let Some(ref mut enabled) = item.enabled
+                {
+                    *enabled = !*enabled;
                 }
             }
             SettingsMessage::ListRemove(list_id, index) => {
@@ -1727,7 +1728,7 @@ fn editable_list<'a>(
 
         let is_drag_item = drag_state
             .as_ref()
-            .map_or(false, |d| d.list_id == list_id && d.dragging_index == i && d.is_dragging);
+            .is_some_and(|d| d.list_id == list_id && d.dragging_index == i && d.is_dragging);
 
         // ── Left half: grip + label ──
         let lid_grip = id.clone();

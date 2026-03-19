@@ -132,12 +132,12 @@ pub fn nav_button<'a, M: Clone + 'a>(
             .align_y(Alignment::Center),
     );
 
-    if let Some(count) = badge {
-        if count > 0 {
-            content = content
-                .push(Space::new().width(Length::Fill))
-                .push(count_badge(count));
-        }
+    if let Some(count) = badge
+        && count > 0
+    {
+        content = content
+            .push(Space::new().width(Length::Fill))
+            .push(count_badge(count));
     }
 
     button(content)
@@ -183,7 +183,7 @@ pub fn nav_group<'a>(
 
 pub fn label_nav_item<'a>(
     name: &'a str,
-    id: &'a str,
+    _id: &'a str,
     color: Color,
     active: bool,
     on_press: Message,

@@ -98,7 +98,7 @@ pub(super) async fn sync_mailboxes(
                         fg: None,
                     },
                     provider_id,
-                    i as i64,
+                    i64::try_from(i).unwrap_or(0),
                     false,
                     ratatoskr_db::db::queries::CategorySortOnConflict::Keep,
                 )?;

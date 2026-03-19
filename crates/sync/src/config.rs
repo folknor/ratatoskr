@@ -56,7 +56,7 @@ pub fn calendar_provider_kind(account: &SyncAccount) -> Option<&'static str> {
 
 /// Read the `sync_period_days` setting from DB, defaulting to 365.
 pub fn get_sync_period_days(conn: &Connection) -> i64 {
-    ratatoskr_db::db::queries::get_setting(conn, "sync_period_days".to_string())
+    ratatoskr_db::db::queries::get_setting(conn, "sync_period_days")
         .ok()
         .flatten()
         .and_then(|v| v.parse::<i64>().ok())

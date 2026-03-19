@@ -106,7 +106,7 @@ pub async fn upload_file_chunked(
     data: &[u8],
     chunk_size: usize,
 ) -> Result<String, String> {
-    if chunk_size == 0 || chunk_size % CHUNK_ALIGNMENT != 0 {
+    if chunk_size == 0 || !chunk_size.is_multiple_of(CHUNK_ALIGNMENT) {
         return Err(format!(
             "chunk_size must be a positive multiple of {CHUNK_ALIGNMENT}, got {chunk_size}"
         ));

@@ -99,7 +99,7 @@ pub fn parse_ai_categorization_output(
             let colon_idx = trimmed.find(':')?;
             let thread_id = trimmed[..colon_idx].trim();
             let category = trimmed[colon_idx + 1..].trim();
-            if !(valid_thread_ids.contains(thread_id) && !thread_id.is_empty()) {
+            if !valid_thread_ids.contains(thread_id) || thread_id.is_empty() {
                 return None;
             }
             ThreadCategory::parse(category).map(|parsed| (thread_id.to_string(), parsed))

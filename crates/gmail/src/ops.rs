@@ -297,8 +297,8 @@ impl ProviderOps for GmailOps {
                     },
                     special_use: special.map(String::from),
                     delimiter: Some("/".to_string()),
-                    message_count: l.messages_total.map(|v| v as u32),
-                    unread_count: l.messages_unread.map(|v| v as u32),
+                    message_count: l.messages_total.map(|v| u32::try_from(v).unwrap_or(0)),
+                    unread_count: l.messages_unread.map(|v| u32::try_from(v).unwrap_or(0)),
                     color_bg: l.color.as_ref().map(|c| c.background_color.clone()),
                     color_fg: l.color.as_ref().map(|c| c.text_color.clone()),
                 }
@@ -426,7 +426,7 @@ fn build_reaction_mime(
         use std::time::{SystemTime, UNIX_EPOCH};
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos() as u64)
+            .map_or(0, |d| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX))
     });
 
     let mut msg = String::with_capacity(512);

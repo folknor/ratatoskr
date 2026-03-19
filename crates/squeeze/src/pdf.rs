@@ -452,15 +452,15 @@ fn collect_referenced_ids(doc: &Document) -> HashSet<ObjectId> {
     let mut stack: Vec<ObjectId> = Vec::new();
 
     // Seed from trailer references.
-    if let Ok(root) = doc.trailer.get(b"Root") {
-        if let Ok(id) = root.as_reference() {
-            stack.push(id);
-        }
+    if let Ok(root) = doc.trailer.get(b"Root")
+        && let Ok(id) = root.as_reference()
+    {
+        stack.push(id);
     }
-    if let Ok(info) = doc.trailer.get(b"Info") {
-        if let Ok(id) = info.as_reference() {
-            stack.push(id);
-        }
+    if let Ok(info) = doc.trailer.get(b"Info")
+        && let Ok(id) = info.as_reference()
+    {
+        stack.push(id);
     }
 
     // Iterative traversal — avoids stack overflow on deep object chains.
