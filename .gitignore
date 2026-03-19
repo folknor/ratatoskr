@@ -66,3 +66,6 @@ target
 
 # Seed database
 crates/app/thunderbird.sqlite
+
+# Test fixtures (large binary files)
+crates/squeeze/fixtures/
