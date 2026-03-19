@@ -6,6 +6,7 @@ use jmap_client::email_submission::{Address as SubmissionAddress, UndoStatus};
 use jmap_client::mailbox::Role;
 use jmap_client::Set;
 
+use ratatoskr_provider_utils::error::ProviderError;
 use ratatoskr_provider_utils::ops::ProviderOps;
 use ratatoskr_provider_utils::types::{
     AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation, ProviderProfile,
@@ -35,7 +36,7 @@ impl ProviderOps for JmapOps {
         &self,
         ctx: &ProviderCtx<'_>,
         days_back: i64,
-    ) -> Result<SyncResult, String> {
+    ) -> Result<SyncResult, ProviderError> {
         self.client.ensure_valid_token().await?;
         super::sync::jmap_initial_sync(
             &self.client,
@@ -55,7 +56,7 @@ impl ProviderOps for JmapOps {
         &self,
         ctx: &ProviderCtx<'_>,
         _days_back: Option<i64>,
-    ) -> Result<SyncResult, String> {
+    ) -> Result<SyncResult, ProviderError> {
         self.client.ensure_valid_token().await?;
         let result = super::sync::jmap_delta_sync(
             &self.client,
@@ -73,11 +74,12 @@ impl ProviderOps for JmapOps {
         })
     }
 
-    async fn archive(&self, _ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
+    async fn archive(&self, _ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let mailboxes = get_mailbox_list(&self.client).await?;
         let inbox_id =
-            find_mailbox_id_by_role(&mailboxes, "inbox").ok_or("No inbox mailbox found")?;
+            find_mailbox_id_by_role(&mailboxes, "inbox")
+                .ok_or_else(|| ProviderError::NotFound("No inbox mailbox found".to_string()))?;
         let archive_id = find_mailbox_id_by_role(&mailboxes, "archive");
 
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
@@ -94,15 +96,16 @@ impl ProviderOps for JmapOps {
         request
             .send_single::<EmailSetResponse>()
             .await
-            .map_err(|e| format!("archive: {e}"))?;
+            .map_err(|e| ProviderError::Server(format!("archive: {e}")))?;
         Ok(())
     }
 
-    async fn trash(&self, _ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
+    async fn trash(&self, _ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let mailboxes = get_mailbox_list(&self.client).await?;
         let trash_id =
-            find_mailbox_id_by_role(&mailboxes, "trash").ok_or("No trash mailbox found")?;
+            find_mailbox_id_by_role(&mailboxes, "trash")
+                .ok_or_else(|| ProviderError::NotFound("No trash mailbox found".to_string()))?;
         let inbox_id = find_mailbox_id_by_role(&mailboxes, "inbox");
 
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
@@ -119,7 +122,7 @@ impl ProviderOps for JmapOps {
         request
             .send_single::<EmailSetResponse>()
             .await
-            .map_err(|e| format!("trash: {e}"))?;
+            .map_err(|e| ProviderError::Server(format!("trash: {e}")))?;
         Ok(())
     }
 
@@ -127,7 +130,7 @@ impl ProviderOps for JmapOps {
         &self,
         _ctx: &ProviderCtx<'_>,
         thread_id: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
         let client = self.client.inner();
@@ -138,7 +141,7 @@ impl ProviderOps for JmapOps {
         request
             .send_single::<EmailSetResponse>()
             .await
-            .map_err(|e| format!("permanent delete: {e}"))?;
+            .map_err(|e| ProviderError::Server(format!("permanent delete: {e}")))?;
         Ok(())
     }
 
@@ -147,7 +150,7 @@ impl ProviderOps for JmapOps {
         _ctx: &ProviderCtx<'_>,
         thread_id: &str,
         read: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
         let client = self.client.inner();
@@ -159,7 +162,7 @@ impl ProviderOps for JmapOps {
         request
             .send_single::<EmailSetResponse>()
             .await
-            .map_err(|e| format!("mark read: {e}"))?;
+            .map_err(|e| ProviderError::Server(format!("mark read: {e}")))?;
         Ok(())
     }
 
@@ -168,7 +171,7 @@ impl ProviderOps for JmapOps {
         _ctx: &ProviderCtx<'_>,
         thread_id: &str,
         starred: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
         let client = self.client.inner();
@@ -180,7 +183,7 @@ impl ProviderOps for JmapOps {
         request
             .send_single::<EmailSetResponse>()
             .await
-            .map_err(|e| format!("star: {e}"))?;
+            .map_err(|e| ProviderError::Server(format!("star: {e}")))?;
         Ok(())
     }
 
@@ -189,13 +192,15 @@ impl ProviderOps for JmapOps {
         _ctx: &ProviderCtx<'_>,
         thread_id: &str,
         is_spam: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let mailboxes = get_mailbox_list(&self.client).await?;
         let junk_id =
-            find_mailbox_id_by_role(&mailboxes, "junk").ok_or("No junk/spam mailbox found")?;
+            find_mailbox_id_by_role(&mailboxes, "junk")
+                .ok_or_else(|| ProviderError::NotFound("No junk/spam mailbox found".to_string()))?;
         let inbox_id =
-            find_mailbox_id_by_role(&mailboxes, "inbox").ok_or("No inbox mailbox found")?;
+            find_mailbox_id_by_role(&mailboxes, "inbox")
+                .ok_or_else(|| ProviderError::NotFound("No inbox mailbox found".to_string()))?;
 
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
         let client = self.client.inner();
@@ -217,7 +222,7 @@ impl ProviderOps for JmapOps {
         request
             .send_single::<EmailSetResponse>()
             .await
-            .map_err(|e| format!("spam: {e}"))?;
+            .map_err(|e| ProviderError::Server(format!("spam: {e}")))?;
         Ok(())
     }
 
@@ -226,7 +231,7 @@ impl ProviderOps for JmapOps {
         _ctx: &ProviderCtx<'_>,
         thread_id: &str,
         folder_id: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let target_id = resolve_mailbox_id(&self.client, folder_id).await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
@@ -239,7 +244,7 @@ impl ProviderOps for JmapOps {
         request
             .send_single::<EmailSetResponse>()
             .await
-            .map_err(|e| format!("move to folder: {e}"))?;
+            .map_err(|e| ProviderError::Server(format!("move to folder: {e}")))?;
         Ok(())
     }
 
@@ -248,7 +253,7 @@ impl ProviderOps for JmapOps {
         _ctx: &ProviderCtx<'_>,
         thread_id: &str,
         tag_id: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let mailbox_id = resolve_mailbox_id(&self.client, tag_id).await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
@@ -261,7 +266,7 @@ impl ProviderOps for JmapOps {
         request
             .send_single::<EmailSetResponse>()
             .await
-            .map_err(|e| format!("add tag: {e}"))?;
+            .map_err(|e| ProviderError::Server(format!("add tag: {e}")))?;
         Ok(())
     }
 
@@ -270,7 +275,7 @@ impl ProviderOps for JmapOps {
         _ctx: &ProviderCtx<'_>,
         thread_id: &str,
         tag_id: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let mailbox_id = resolve_mailbox_id(&self.client, tag_id).await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
@@ -283,7 +288,7 @@ impl ProviderOps for JmapOps {
         request
             .send_single::<EmailSetResponse>()
             .await
-            .map_err(|e| format!("remove tag: {e}"))?;
+            .map_err(|e| ProviderError::Server(format!("remove tag: {e}")))?;
         Ok(())
     }
 
@@ -292,7 +297,7 @@ impl ProviderOps for JmapOps {
         _ctx: &ProviderCtx<'_>,
         message_id: &str,
         category_name: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let client = self.client.inner();
         let mut request = client.build();
@@ -301,7 +306,7 @@ impl ProviderOps for JmapOps {
         request
             .send_single::<EmailSetResponse>()
             .await
-            .map_err(|e| format!("apply category: {e}"))?;
+            .map_err(|e| ProviderError::Server(format!("apply category: {e}")))?;
         Ok(())
     }
 
@@ -310,7 +315,7 @@ impl ProviderOps for JmapOps {
         _ctx: &ProviderCtx<'_>,
         message_id: &str,
         category_name: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let client = self.client.inner();
         let mut request = client.build();
@@ -319,7 +324,7 @@ impl ProviderOps for JmapOps {
         request
             .send_single::<EmailSetResponse>()
             .await
-            .map_err(|e| format!("remove category: {e}"))?;
+            .map_err(|e| ProviderError::Server(format!("remove category: {e}")))?;
         Ok(())
     }
 
@@ -329,7 +334,7 @@ impl ProviderOps for JmapOps {
         raw_base64url: &str,
         _thread_id: Option<&str>,
         _mentions: &[(String, String)],
-    ) -> Result<String, String> {
+    ) -> Result<String, ProviderError> {
         self.client.ensure_valid_token().await?;
         let raw_bytes = ratatoskr_provider_utils::encoding::decode_base64url_nopad(raw_base64url)?;
         let client = self.client.inner();
@@ -364,7 +369,7 @@ impl ProviderOps for JmapOps {
             .email_id(format!("#{import_create_id}"))
             .identity_id(&identity_id)
             .create_id()
-            .expect("submission create_id");
+            .ok_or_else(|| ProviderError::Client("submission create_id".to_string()))?;
         sub_request
             .arguments()
             .on_success_update_email(&sub_create_id)
@@ -373,17 +378,17 @@ impl ProviderOps for JmapOps {
         let mut import_response = request
             .send()
             .await
-            .map_err(|e| format!("JMAP batch send: {e}"))?
+            .map_err(|e| ProviderError::Server(format!("JMAP batch send: {e}")))?
             .unwrap_method_responses()
             .into_iter()
             .next()
-            .ok_or("No response from JMAP batch")?
+            .ok_or_else(|| ProviderError::Server("No response from JMAP batch".to_string()))?
             .unwrap_import_email()
-            .map_err(|e| format!("Email/import response: {e}"))?;
+            .map_err(|e| ProviderError::Server(format!("Email/import response: {e}")))?;
 
         let email_id = import_response
             .created(&import_create_id)
-            .map_err(|e| format!("Email/import: {e}"))?
+            .map_err(|e| ProviderError::Server(format!("Email/import: {e}")))?
             .take_id();
 
         Ok(email_id)
@@ -395,13 +400,14 @@ impl ProviderOps for JmapOps {
         raw_base64url: &str,
         _thread_id: Option<&str>,
         _mentions: &[(String, String)],
-    ) -> Result<String, String> {
+    ) -> Result<String, ProviderError> {
         self.client.ensure_valid_token().await?;
         let raw_bytes = ratatoskr_provider_utils::encoding::decode_base64url_nopad(raw_base64url)?;
 
         let mailboxes = get_mailbox_list(&self.client).await?;
         let drafts_id =
-            find_mailbox_id_by_role(&mailboxes, "drafts").ok_or("No drafts mailbox found")?;
+            find_mailbox_id_by_role(&mailboxes, "drafts")
+                .ok_or_else(|| ProviderError::NotFound("No drafts mailbox found".to_string()))?;
 
         let client = self.client.inner();
         let mut email = client
@@ -412,7 +418,7 @@ impl ProviderOps for JmapOps {
                 None,
             )
             .await
-            .map_err(|e| format!("Email/import draft: {e}"))?;
+            .map_err(|e| ProviderError::Server(format!("Email/import draft: {e}")))?;
 
         Ok(email.take_id())
     }
@@ -423,24 +429,24 @@ impl ProviderOps for JmapOps {
         draft_id: &str,
         raw_base64url: &str,
         _thread_id: Option<&str>,
-    ) -> Result<String, String> {
+    ) -> Result<String, ProviderError> {
         self.client.ensure_valid_token().await?;
         // JMAP has no draft mutation — delete old, create new
         let client = self.client.inner();
         client
             .email_destroy(draft_id)
             .await
-            .map_err(|e| format!("delete old draft: {e}"))?;
+            .map_err(|e| ProviderError::Server(format!("delete old draft: {e}")))?;
         self.create_draft(_ctx, raw_base64url, _thread_id, &[]).await
     }
 
-    async fn delete_draft(&self, _ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), String> {
+    async fn delete_draft(&self, _ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let client = self.client.inner();
         client
             .email_destroy(draft_id)
             .await
-            .map_err(|e| format!("delete draft: {e}"))?;
+            .map_err(|e| ProviderError::Server(format!("delete draft: {e}")))?;
         Ok(())
     }
 
@@ -449,13 +455,13 @@ impl ProviderOps for JmapOps {
         _ctx: &ProviderCtx<'_>,
         _message_id: &str,
         attachment_id: &str,
-    ) -> Result<AttachmentData, String> {
+    ) -> Result<AttachmentData, ProviderError> {
         self.client.ensure_valid_token().await?;
         let client = self.client.inner();
         let data = client
             .download(attachment_id)
             .await
-            .map_err(|e| format!("Blob download: {e}"))?;
+            .map_err(|e| ProviderError::Server(format!("Blob download: {e}")))?;
 
         Ok(AttachmentData {
             data: ratatoskr_provider_utils::encoding::encode_base64_standard(&data),
@@ -466,7 +472,7 @@ impl ProviderOps for JmapOps {
     async fn list_folders(
         &self,
         _ctx: &ProviderCtx<'_>,
-    ) -> Result<Vec<ProviderFolderEntry>, String> {
+    ) -> Result<Vec<ProviderFolderEntry>, ProviderError> {
         self.client.ensure_valid_token().await?;
         let mailboxes = super::sync::fetch_all_mailboxes(&self.client).await?;
 
@@ -505,13 +511,13 @@ impl ProviderOps for JmapOps {
         parent_id: Option<&str>,
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
-    ) -> Result<ProviderFolderMutation, String> {
+    ) -> Result<ProviderFolderMutation, ProviderError> {
         self.client.ensure_valid_token().await?;
         let client = self.client.inner();
         let mut mb = client
             .mailbox_create(name, parent_id.map(ToOwned::to_owned), Role::None)
             .await
-            .map_err(|e| format!("Mailbox/set create: {e}"))?;
+            .map_err(|e| ProviderError::Server(format!("Mailbox/set create: {e}")))?;
 
         self.client.invalidate_mailbox_cache().await;
         let id = mb.take_id();
@@ -534,14 +540,14 @@ impl ProviderOps for JmapOps {
         new_name: &str,
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
-    ) -> Result<ProviderFolderMutation, String> {
+    ) -> Result<ProviderFolderMutation, ProviderError> {
         self.client.ensure_valid_token().await?;
         let mailbox_id = resolve_mailbox_id(&self.client, folder_id).await?;
         let client = self.client.inner();
         client
             .mailbox_rename(&mailbox_id, new_name)
             .await
-            .map_err(|e| format!("Mailbox/set rename: {e}"))?;
+            .map_err(|e| ProviderError::Server(format!("Mailbox/set rename: {e}")))?;
         self.client.invalidate_mailbox_cache().await;
 
         Ok(ProviderFolderMutation {
@@ -556,19 +562,19 @@ impl ProviderOps for JmapOps {
         })
     }
 
-    async fn delete_folder(&self, _ctx: &ProviderCtx<'_>, folder_id: &str) -> Result<(), String> {
+    async fn delete_folder(&self, _ctx: &ProviderCtx<'_>, folder_id: &str) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let mailbox_id = resolve_mailbox_id(&self.client, folder_id).await?;
         let client = self.client.inner();
         client
             .mailbox_destroy(&mailbox_id, true)
             .await
-            .map_err(|e| format!("Mailbox/set destroy: {e}"))?;
+            .map_err(|e| ProviderError::Server(format!("Mailbox/set destroy: {e}")))?;
         self.client.invalidate_mailbox_cache().await;
         Ok(())
     }
 
-    async fn test_connection(&self, _ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, String> {
+    async fn test_connection(&self, _ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, ProviderError> {
         self.client.ensure_valid_token().await?;
         let session = self.client.inner().session();
         Ok(ProviderTestResult {
@@ -577,7 +583,7 @@ impl ProviderOps for JmapOps {
         })
     }
 
-    async fn get_profile(&self, _ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, String> {
+    async fn get_profile(&self, _ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, ProviderError> {
         self.client.ensure_valid_token().await?;
         let session = self.client.inner().session();
         Ok(ProviderProfile {

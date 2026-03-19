@@ -4,6 +4,7 @@ mod send;
 use async_trait::async_trait;
 
 use ratatoskr_db::db::DbState;
+use ratatoskr_provider_utils::error::ProviderError;
 use ratatoskr_provider_utils::ops::ProviderOps;
 use ratatoskr_provider_utils::types::{
     AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation, ProviderProfile,
@@ -53,7 +54,7 @@ impl ProviderOps for GraphOps {
         &self,
         ctx: &ProviderCtx<'_>,
         days_back: i64,
-    ) -> Result<SyncResult, String> {
+    ) -> Result<SyncResult, ProviderError> {
         super::sync::graph_initial_sync(&self.client, ctx, days_back).await?;
         Ok(SyncResult::default())
     }
@@ -62,33 +63,33 @@ impl ProviderOps for GraphOps {
         &self,
         ctx: &ProviderCtx<'_>,
         _days_back: Option<i64>,
-    ) -> Result<SyncResult, String> {
-        super::sync::graph_delta_sync(&self.client, ctx).await
+    ) -> Result<SyncResult, ProviderError> {
+        Ok(super::sync::graph_delta_sync(&self.client, ctx).await?)
     }
 
-    async fn archive(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
+    async fn archive(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         let folder_map = require_folder_map(&self.client).await?;
         let archive_id = folder_map
             .resolve_folder_id("archive")
-            .ok_or("No archive folder found")?
+            .ok_or_else(|| ProviderError::NotFound("No archive folder found".to_string()))?
             .to_string();
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
-        move_messages(&self.client, ctx, &msg_ids, &archive_id).await
+        Ok(move_messages(&self.client, ctx, &msg_ids, &archive_id).await?)
     }
 
-    async fn trash(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
+    async fn trash(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         let folder_map = require_folder_map(&self.client).await?;
         let trash_id = folder_map
             .resolve_folder_id("TRASH")
-            .ok_or("No trash folder found")?
+            .ok_or_else(|| ProviderError::NotFound("No trash folder found".to_string()))?
             .to_string();
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
-        move_messages(&self.client, ctx, &msg_ids, &trash_id).await
+        Ok(move_messages(&self.client, ctx, &msg_ids, &trash_id).await?)
     }
 
-    async fn permanent_delete(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
+    async fn permanent_delete(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
-        helpers::delete_messages(&self.client, ctx, &msg_ids).await
+        Ok(helpers::delete_messages(&self.client, ctx, &msg_ids).await?)
     }
 
     async fn mark_read(
@@ -96,13 +97,13 @@ impl ProviderOps for GraphOps {
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         read: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
         let patch = GraphMessagePatch {
             is_read: Some(read),
             ..Default::default()
         };
-        patch_messages(&self.client, ctx, &msg_ids, &patch).await
+        Ok(patch_messages(&self.client, ctx, &msg_ids, &patch).await?)
     }
 
     async fn star(
@@ -110,7 +111,7 @@ impl ProviderOps for GraphOps {
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         starred: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
         let status = if starred { "flagged" } else { "notFlagged" };
         let patch = GraphMessagePatch {
@@ -119,7 +120,7 @@ impl ProviderOps for GraphOps {
             }),
             ..Default::default()
         };
-        patch_messages(&self.client, ctx, &msg_ids, &patch).await
+        Ok(patch_messages(&self.client, ctx, &msg_ids, &patch).await?)
     }
 
     async fn spam(
@@ -127,15 +128,15 @@ impl ProviderOps for GraphOps {
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         is_spam: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         let folder_map = require_folder_map(&self.client).await?;
         let target = if is_spam { "SPAM" } else { "INBOX" };
         let folder_id = folder_map
             .resolve_folder_id(target)
-            .ok_or_else(|| format!("No {target} folder found"))?
+            .ok_or_else(|| ProviderError::NotFound(format!("No {target} folder found")))?
             .to_string();
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
-        move_messages(&self.client, ctx, &msg_ids, &folder_id).await
+        Ok(move_messages(&self.client, ctx, &msg_ids, &folder_id).await?)
     }
 
     async fn move_to_folder(
@@ -143,7 +144,7 @@ impl ProviderOps for GraphOps {
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         folder_id: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         // folder_id could be a label_id — resolve to opaque Graph folder ID
         let folder_map = require_folder_map(&self.client).await?;
         let target = folder_map
@@ -151,7 +152,7 @@ impl ProviderOps for GraphOps {
             .unwrap_or(folder_id)
             .to_string();
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
-        move_messages(&self.client, ctx, &msg_ids, &target).await
+        Ok(move_messages(&self.client, ctx, &msg_ids, &target).await?)
     }
 
     async fn add_tag(
@@ -159,7 +160,7 @@ impl ProviderOps for GraphOps {
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         tag_id: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         let category = tag_id.strip_prefix("cat:").unwrap_or(tag_id);
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
         // Hold category lock for the entire read-modify-write to prevent clobber
@@ -172,7 +173,7 @@ impl ProviderOps for GraphOps {
                 patches.push((msg_id, cats));
             }
         }
-        batch_set_categories(&self.client, ctx, &patches).await
+        Ok(batch_set_categories(&self.client, ctx, &patches).await?)
     }
 
     async fn remove_tag(
@@ -180,7 +181,7 @@ impl ProviderOps for GraphOps {
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         tag_id: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         let category = tag_id.strip_prefix("cat:").unwrap_or(tag_id);
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
         let _guard = self.client.lock_categories().await;
@@ -193,7 +194,7 @@ impl ProviderOps for GraphOps {
                 patches.push((msg_id, cats));
             }
         }
-        batch_set_categories(&self.client, ctx, &patches).await
+        Ok(batch_set_categories(&self.client, ctx, &patches).await?)
     }
 
     async fn apply_category(
@@ -201,10 +202,11 @@ impl ProviderOps for GraphOps {
         ctx: &ProviderCtx<'_>,
         message_id: &str,
         category_name: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         let _guard = self.client.lock_categories().await;
         let current = batch_get_categories(&self.client, ctx, &[message_id.to_string()]).await?;
-        let (_, mut cats) = current.into_iter().next().ok_or("No category data returned")?;
+        let (_, mut cats) = current.into_iter().next()
+            .ok_or_else(|| ProviderError::NotFound("No category data returned".to_string()))?;
         if !cats.iter().any(|c| c == category_name) {
             cats.push(category_name.to_string());
             batch_set_categories(&self.client, ctx, &[(message_id.to_string(), cats)]).await?;
@@ -217,10 +219,11 @@ impl ProviderOps for GraphOps {
         ctx: &ProviderCtx<'_>,
         message_id: &str,
         category_name: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         let _guard = self.client.lock_categories().await;
         let current = batch_get_categories(&self.client, ctx, &[message_id.to_string()]).await?;
-        let (_, mut cats) = current.into_iter().next().ok_or("No category data returned")?;
+        let (_, mut cats) = current.into_iter().next()
+            .ok_or_else(|| ProviderError::NotFound("No category data returned".to_string()))?;
         let before_len = cats.len();
         cats.retain(|c| c != category_name);
         if cats.len() != before_len {
@@ -235,8 +238,8 @@ impl ProviderOps for GraphOps {
         raw_base64url: &str,
         thread_id: Option<&str>,
         mentions: &[(String, String)],
-    ) -> Result<String, String> {
-        send_via_draft(&self.client, ctx, raw_base64url, thread_id, mentions).await
+    ) -> Result<String, ProviderError> {
+        Ok(send_via_draft(&self.client, ctx, raw_base64url, thread_id, mentions).await?)
     }
 
     async fn create_draft(
@@ -245,8 +248,8 @@ impl ProviderOps for GraphOps {
         raw_base64url: &str,
         thread_id: Option<&str>,
         mentions: &[(String, String)],
-    ) -> Result<String, String> {
-        create_draft_impl(&self.client, ctx, raw_base64url, thread_id, mentions).await
+    ) -> Result<String, ProviderError> {
+        Ok(create_draft_impl(&self.client, ctx, raw_base64url, thread_id, mentions).await?)
     }
 
     async fn update_draft(
@@ -255,22 +258,23 @@ impl ProviderOps for GraphOps {
         draft_id: &str,
         raw_base64url: &str,
         thread_id: Option<&str>,
-    ) -> Result<String, String> {
+    ) -> Result<String, ProviderError> {
         // Graph has no draft mutation — delete and recreate
         let enc_id = urlencoding::encode(draft_id);
         let me = self.me();
         self.client
             .delete(&format!("{me}/messages/{enc_id}"), ctx.db)
             .await?;
-        create_draft_impl(&self.client, ctx, raw_base64url, thread_id, &[]).await
+        Ok(create_draft_impl(&self.client, ctx, raw_base64url, thread_id, &[]).await?)
     }
 
-    async fn delete_draft(&self, ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), String> {
+    async fn delete_draft(&self, ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), ProviderError> {
         let enc_id = urlencoding::encode(draft_id);
         let me = self.me();
         self.client
             .delete(&format!("{me}/messages/{enc_id}"), ctx.db)
-            .await
+            .await?;
+        Ok(())
     }
 
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
@@ -279,7 +283,7 @@ impl ProviderOps for GraphOps {
         ctx: &ProviderCtx<'_>,
         message_id: &str,
         attachment_id: &str,
-    ) -> Result<AttachmentData, String> {
+    ) -> Result<AttachmentData, ProviderError> {
         let enc_msg_id = urlencoding::encode(message_id);
         let enc_att_id = urlencoding::encode(attachment_id);
         let me = self.me();
@@ -293,7 +297,7 @@ impl ProviderOps for GraphOps {
 
         let data = if let Some(ref content_bytes) = attachment.content_bytes {
             ratatoskr_provider_utils::encoding::decode_base64_standard(content_bytes)
-                .map_err(|e| format!("Failed to decode attachment: {e}"))?
+                .map_err(|e| ProviderError::Client(format!("Failed to decode attachment: {e}")))?
         } else {
             let raw = self
                 .client
@@ -303,7 +307,7 @@ impl ProviderOps for GraphOps {
                 )
                 .await?;
             if raw.is_empty() {
-                return Err(format!("Attachment {attachment_id} has no content"));
+                return Err(ProviderError::NotFound(format!("Attachment {attachment_id} has no content")));
             }
             raw
         };
@@ -318,7 +322,7 @@ impl ProviderOps for GraphOps {
     async fn list_folders(
         &self,
         ctx: &ProviderCtx<'_>,
-    ) -> Result<Vec<ProviderFolderEntry>, String> {
+    ) -> Result<Vec<ProviderFolderEntry>, ProviderError> {
         // Use cached folder map if it was synced less than 60 seconds ago
         let use_cache = if let Some(age) = self.client.folder_map_age().await {
             age < std::time::Duration::from_secs(60) && self.client.folder_map().await.is_some()
@@ -327,11 +331,10 @@ impl ProviderOps for GraphOps {
         };
 
         let folder_map = if use_cache {
-            // Safe to unwrap: we just checked is_some() above
             self.client
                 .folder_map()
                 .await
-                .ok_or("Folder map vanished")?
+                .ok_or_else(|| ProviderError::Client("Folder map vanished".to_string()))?
         } else {
             let map = super::sync::sync_folders_public(&self.client, ctx).await?;
             self.client.set_folder_map(map.clone()).await;
@@ -368,7 +371,7 @@ impl ProviderOps for GraphOps {
         parent_id: Option<&str>,
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
-    ) -> Result<ProviderFolderMutation, String> {
+    ) -> Result<ProviderFolderMutation, ProviderError> {
         let parent_graph_id = match parent_id {
             Some(parent_id) => {
                 Some(resolve_graph_folder_id(&self.client, ctx, parent_id, false).await?)
@@ -405,7 +408,7 @@ impl ProviderOps for GraphOps {
         new_name: &str,
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
-    ) -> Result<ProviderFolderMutation, String> {
+    ) -> Result<ProviderFolderMutation, ProviderError> {
         let graph_folder_id = resolve_graph_folder_id(&self.client, ctx, folder_id, true).await?;
         let enc_folder_id = urlencoding::encode(&graph_folder_id);
         let body = GraphRenameFolderRequest {
@@ -429,7 +432,7 @@ impl ProviderOps for GraphOps {
         })
     }
 
-    async fn delete_folder(&self, ctx: &ProviderCtx<'_>, folder_id: &str) -> Result<(), String> {
+    async fn delete_folder(&self, ctx: &ProviderCtx<'_>, folder_id: &str) -> Result<(), ProviderError> {
         let graph_folder_id = resolve_graph_folder_id(&self.client, ctx, folder_id, true).await?;
         let enc_folder_id = urlencoding::encode(&graph_folder_id);
         let me = self.me();
@@ -441,7 +444,7 @@ impl ProviderOps for GraphOps {
         Ok(())
     }
 
-    async fn test_connection(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, String> {
+    async fn test_connection(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, ProviderError> {
         let me = self.me();
         let profile: super::types::GraphProfile = self
             .client
@@ -462,7 +465,7 @@ impl ProviderOps for GraphOps {
         })
     }
 
-    async fn get_profile(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, String> {
+    async fn get_profile(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, ProviderError> {
         let me = self.me();
         let profile: super::types::GraphProfile = self
             .client

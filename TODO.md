@@ -72,7 +72,7 @@
 
 #### MEDIUM — Error handling
 
-- [ ] **Introduce `ProviderError` enum** — `Result<T, String>` used in ~100+ signatures via `ProviderOps`. Callers cannot distinguish auth vs network vs rate limit. Add classified variants in `provider-utils`.
+- [x] **Introduce `ProviderError` enum** — Added `ProviderError` in `provider-utils/error.rs` with Auth/Network/RateLimit/NotFound/Server/Client/Db variants. `ProviderOps` trait and all 4 impls migrated. `From<String>` fallback keeps callers compiling.
 
 - [x] **Log silently swallowed DB errors** — 12 `let _ = ...` patterns replaced with `if let Err(e)` + `log::warn!` in bimi.rs, push.rs, webhooks.rs.
 

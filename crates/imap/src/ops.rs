@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use rusqlite::Connection;
 
+use ratatoskr_provider_utils::error::ProviderError;
 use ratatoskr_provider_utils::folder_roles::{imap_name_to_special_use, imap_special_use_to_label_id};
 use ratatoskr_provider_utils::ops::ProviderOps;
 use ratatoskr_provider_utils::types::{
@@ -312,7 +313,7 @@ impl ProviderOps for ImapOps {
         &self,
         ctx: &ProviderCtx<'_>,
         days_back: i64,
-    ) -> Result<SyncResult, String> {
+    ) -> Result<SyncResult, ProviderError> {
         // IMAP sync is handled by the dedicated sync module (sync_imap_initial).
         // This trait method is not the primary entry point for IMAP sync, but we
         // wire it through for consistency with the provider abstraction.
@@ -341,7 +342,7 @@ impl ProviderOps for ImapOps {
         &self,
         ctx: &ProviderCtx<'_>,
         days_back: Option<i64>,
-    ) -> Result<SyncResult, String> {
+    ) -> Result<SyncResult, ProviderError> {
         let account_id = ctx.account_id.to_string();
         let imap_config = self.load_config(ctx).await?;
         let days_back = days_back.unwrap_or(365);
@@ -366,7 +367,7 @@ impl ProviderOps for ImapOps {
 
     // ── Actions ─────────────────────────────────────────────────────────
 
-    async fn archive(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
+    async fn archive(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
         let config = self.load_config(ctx).await?;
@@ -381,10 +382,11 @@ impl ProviderOps for ImapOps {
             })
             .await?;
 
-        execute_folder_action(&config, &refs, &FolderAction::Move(archive_folder)).await
+        execute_folder_action(&config, &refs, &FolderAction::Move(archive_folder)).await?;
+        Ok(())
     }
 
-    async fn trash(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
+    async fn trash(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
         let config = self.load_config(ctx).await?;
@@ -399,10 +401,11 @@ impl ProviderOps for ImapOps {
             })
             .await?;
 
-        execute_folder_action(&config, &refs, &FolderAction::Move(trash_folder)).await
+        execute_folder_action(&config, &refs, &FolderAction::Move(trash_folder)).await?;
+        Ok(())
     }
 
-    async fn permanent_delete(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
+    async fn permanent_delete(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
         let config = self.load_config(ctx).await?;
@@ -412,7 +415,8 @@ impl ProviderOps for ImapOps {
             .with_conn(move |conn| get_thread_message_refs(conn, &account_id, &tid))
             .await?;
 
-        execute_folder_action(&config, &refs, &FolderAction::Delete).await
+        execute_folder_action(&config, &refs, &FolderAction::Delete).await?;
+        Ok(())
     }
 
     async fn mark_read(
@@ -420,7 +424,7 @@ impl ProviderOps for ImapOps {
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         read: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
         let config = self.load_config(ctx).await?;
@@ -455,7 +459,7 @@ impl ProviderOps for ImapOps {
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         starred: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
         let config = self.load_config(ctx).await?;
@@ -490,7 +494,7 @@ impl ProviderOps for ImapOps {
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         is_spam: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
         let config = self.load_config(ctx).await?;
@@ -511,7 +515,8 @@ impl ProviderOps for ImapOps {
             "INBOX".to_string()
         };
 
-        execute_folder_action(&config, &refs, &FolderAction::Move(destination)).await
+        execute_folder_action(&config, &refs, &FolderAction::Move(destination)).await?;
+        Ok(())
     }
 
     async fn move_to_folder(
@@ -519,7 +524,7 @@ impl ProviderOps for ImapOps {
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         folder_id: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
         let dest = folder_id.to_string();
@@ -530,7 +535,8 @@ impl ProviderOps for ImapOps {
             .with_conn(move |conn| get_thread_message_refs(conn, &account_id, &tid))
             .await?;
 
-        execute_folder_action(&config, &refs, &FolderAction::Move(dest)).await
+        execute_folder_action(&config, &refs, &FolderAction::Move(dest)).await?;
+        Ok(())
     }
 
     async fn add_tag(
@@ -538,7 +544,7 @@ impl ProviderOps for ImapOps {
         _ctx: &ProviderCtx<'_>,
         _thread_id: &str,
         _tag_id: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         // IMAP doesn't have native labels/tags.
         // This is a no-op, matching the existing TS ImapSmtpProvider behavior.
         log::debug!("IMAP: add_tag is a no-op (IMAP has no native labels)");
@@ -550,7 +556,7 @@ impl ProviderOps for ImapOps {
         _ctx: &ProviderCtx<'_>,
         _thread_id: &str,
         _tag_id: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         // IMAP doesn't have native labels/tags.
         log::debug!("IMAP: remove_tag is a no-op (IMAP has no native labels)");
         Ok(())
@@ -561,13 +567,14 @@ impl ProviderOps for ImapOps {
         ctx: &ProviderCtx<'_>,
         message_id: &str,
         category_name: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         let (folder, uid) = parse_imap_message_id(message_id, ctx.account_id)?;
         let config = self.load_config(ctx).await?;
 
         with_session!(&config, session => {
             imap_client::set_keyword_if_supported(&mut session, &folder, uid, "+FLAGS", category_name).await
-        })
+        })?;
+        Ok(())
     }
 
     async fn remove_category(
@@ -575,13 +582,14 @@ impl ProviderOps for ImapOps {
         ctx: &ProviderCtx<'_>,
         message_id: &str,
         category_name: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         let (folder, uid) = parse_imap_message_id(message_id, ctx.account_id)?;
         let config = self.load_config(ctx).await?;
 
         with_session!(&config, session => {
             imap_client::set_keyword_if_supported(&mut session, &folder, uid, "-FLAGS", category_name).await
-        })
+        })?;
+        Ok(())
     }
 
     // ── Send + Drafts ───────────────────────────────────────────────────
@@ -592,7 +600,7 @@ impl ProviderOps for ImapOps {
         raw_base64url: &str,
         _thread_id: Option<&str>,
         _mentions: &[(String, String)],
-    ) -> Result<String, String> {
+    ) -> Result<String, ProviderError> {
         let account_id = ctx.account_id.to_string();
         let configs = crate::account_config::load_both_configs(
             ctx.db,
@@ -612,7 +620,7 @@ impl ProviderOps for ImapOps {
         // Send via SMTP
         let result = smtp::client::send_raw_email(&smtp_config, raw_base64url).await?;
         if !result.success {
-            return Err(format!("SMTP send failed: {}", result.message));
+            return Err(ProviderError::Server(format!("SMTP send failed: {}", result.message)));
         }
 
         let message_id = format!(
@@ -644,7 +652,7 @@ impl ProviderOps for ImapOps {
         raw_base64url: &str,
         _thread_id: Option<&str>,
         _mentions: &[(String, String)],
-    ) -> Result<String, String> {
+    ) -> Result<String, ProviderError> {
         let account_id = ctx.account_id.to_string();
         let config = self.load_config(ctx).await?;
 
@@ -674,7 +682,7 @@ impl ProviderOps for ImapOps {
         draft_id: &str,
         raw_base64url: &str,
         thread_id: Option<&str>,
-    ) -> Result<String, String> {
+    ) -> Result<String, ProviderError> {
         // Delete old draft, then create a new one
         if let Err(e) = self.delete_draft(ctx, draft_id).await {
             log::warn!("Failed to delete old draft {draft_id} during update: {e}");
@@ -682,7 +690,7 @@ impl ProviderOps for ImapOps {
         self.create_draft(ctx, raw_base64url, thread_id, &[]).await
     }
 
-    async fn delete_draft(&self, ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), String> {
+    async fn delete_draft(&self, ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), ProviderError> {
         // Generated draft IDs (imap-draft-...) can't be mapped to a server UID
         let prefix = format!("imap-{}-", ctx.account_id);
         if !draft_id.starts_with(&prefix) {
@@ -695,7 +703,8 @@ impl ProviderOps for ImapOps {
 
         with_session!(&config, session => {
             imap_client::delete_messages(&mut session, &folder, &uid.to_string()).await
-        })
+        })?;
+        Ok(())
     }
 
     // ── Attachments ─────────────────────────────────────────────────────
@@ -705,7 +714,7 @@ impl ProviderOps for ImapOps {
         ctx: &ProviderCtx<'_>,
         message_id: &str,
         attachment_id: &str,
-    ) -> Result<AttachmentData, String> {
+    ) -> Result<AttachmentData, ProviderError> {
         let (folder, uid) = parse_imap_message_id(message_id, ctx.account_id)?;
         let part_id = attachment_id.to_string();
         let config = self.load_config(ctx).await?;
@@ -731,7 +740,7 @@ impl ProviderOps for ImapOps {
         &self,
         ctx: &ProviderCtx<'_>,
         message_id: &str,
-    ) -> Result<ProviderParsedMessage, String> {
+    ) -> Result<ProviderParsedMessage, ProviderError> {
         let (folder, uid) = parse_imap_message_id(message_id, ctx.account_id)?;
         let account_id = ctx.account_id.to_string();
         let config = self.load_config(ctx).await?;
@@ -766,13 +775,13 @@ impl ProviderOps for ImapOps {
         &self,
         ctx: &ProviderCtx<'_>,
         message_id: &str,
-    ) -> Result<String, String> {
+    ) -> Result<String, ProviderError> {
         let (folder, uid) = parse_imap_message_id(message_id, ctx.account_id)?;
         let config = self.load_config(ctx).await?;
 
-        with_session!(&config, session => {
+        Ok(with_session!(&config, session => {
             imap_client::fetch_raw_message(&mut session, &folder, uid).await
-        })
+        })?)
     }
 
     // ── Folders ─────────────────────────────────────────────────────────
@@ -780,7 +789,7 @@ impl ProviderOps for ImapOps {
     async fn list_folders(
         &self,
         ctx: &ProviderCtx<'_>,
-    ) -> Result<Vec<ProviderFolderEntry>, String> {
+    ) -> Result<Vec<ProviderFolderEntry>, ProviderError> {
         let config = self.load_config(ctx).await?;
 
         let folders = with_session!(&config, session => {
@@ -819,11 +828,11 @@ impl ProviderOps for ImapOps {
         _parent_id: Option<&str>,
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
-    ) -> Result<ProviderFolderMutation, String> {
-        Err(
+    ) -> Result<ProviderFolderMutation, ProviderError> {
+        Err(ProviderError::Client(
             "Creating folders is not supported for IMAP accounts via the current provider API."
                 .to_string(),
-        )
+        ))
     }
 
     async fn rename_folder(
@@ -833,21 +842,21 @@ impl ProviderOps for ImapOps {
         _new_name: &str,
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
-    ) -> Result<ProviderFolderMutation, String> {
-        Err(
+    ) -> Result<ProviderFolderMutation, ProviderError> {
+        Err(ProviderError::Client(
             "Renaming folders is not supported for IMAP accounts via the current provider API."
                 .to_string(),
-        )
+        ))
     }
 
-    async fn delete_folder(&self, _ctx: &ProviderCtx<'_>, _folder_id: &str) -> Result<(), String> {
-        Err(
+    async fn delete_folder(&self, _ctx: &ProviderCtx<'_>, _folder_id: &str) -> Result<(), ProviderError> {
+        Err(ProviderError::Client(
             "Deleting folders is not supported for IMAP accounts via the current provider API."
                 .to_string(),
-        )
+        ))
     }
 
-    async fn test_connection(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, String> {
+    async fn test_connection(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, ProviderError> {
         let account_id = ctx.account_id.to_string();
         let imap_config = self.load_config(ctx).await?;
         let smtp_config = crate::account_config::load_smtp_config(
@@ -872,7 +881,7 @@ impl ProviderOps for ImapOps {
         })
     }
 
-    async fn get_profile(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, String> {
+    async fn get_profile(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, ProviderError> {
         let account_id = ctx.account_id.to_string();
         ctx.db
             .with_conn(move |conn| {
@@ -889,5 +898,6 @@ impl ProviderOps for ImapOps {
                 .map_err(|e| format!("Failed to read account profile: {e}"))
             })
             .await
+            .map_err(ProviderError::from)
     }
 }

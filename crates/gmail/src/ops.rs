@@ -1,5 +1,6 @@
 use ratatoskr_db::db::DbState;
 use ratatoskr_provider_utils::encoding::encode_base64url_nopad;
+use ratatoskr_provider_utils::error::ProviderError;
 use ratatoskr_provider_utils::ops::ProviderOps;
 use ratatoskr_provider_utils::types::{
     AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation, ProviderProfile,
@@ -26,7 +27,7 @@ impl ProviderOps for GmailOps {
         &self,
         ctx: &ProviderCtx<'_>,
         days_back: i64,
-    ) -> Result<SyncResult, String> {
+    ) -> Result<SyncResult, ProviderError> {
         super::sync::gmail_initial_sync(
             &self.client,
             ctx.account_id,
@@ -45,7 +46,7 @@ impl ProviderOps for GmailOps {
         &self,
         ctx: &ProviderCtx<'_>,
         _days_back: Option<i64>,
-    ) -> Result<SyncResult, String> {
+    ) -> Result<SyncResult, ProviderError> {
         let result = super::sync::gmail_delta_sync(
             &self.client,
             ctx.account_id,
@@ -62,7 +63,7 @@ impl ProviderOps for GmailOps {
         })
     }
 
-    async fn archive(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
+    async fn archive(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         let remove = vec!["INBOX".to_string()];
         self.client
             .modify_thread(thread_id, &[], &remove, ctx.db)
@@ -70,7 +71,7 @@ impl ProviderOps for GmailOps {
         Ok(())
     }
 
-    async fn trash(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
+    async fn trash(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         let add = vec!["TRASH".to_string()];
         let remove = vec!["INBOX".to_string()];
         self.client
@@ -79,8 +80,9 @@ impl ProviderOps for GmailOps {
         Ok(())
     }
 
-    async fn permanent_delete(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String> {
-        self.client.delete_thread(thread_id, ctx.db).await
+    async fn permanent_delete(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
+        self.client.delete_thread(thread_id, ctx.db).await?;
+        Ok(())
     }
 
     async fn mark_read(
@@ -88,7 +90,7 @@ impl ProviderOps for GmailOps {
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         read: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         let (add, remove) = if read {
             (vec![], vec!["UNREAD".to_string()])
         } else {
@@ -105,7 +107,7 @@ impl ProviderOps for GmailOps {
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         starred: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         let (add, remove) = if starred {
             (vec!["STARRED".to_string()], vec![])
         } else {
@@ -122,7 +124,7 @@ impl ProviderOps for GmailOps {
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         is_spam: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         let (add, remove) = if is_spam {
             (vec!["SPAM".to_string()], vec!["INBOX".to_string()])
         } else {
@@ -139,7 +141,7 @@ impl ProviderOps for GmailOps {
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         folder_id: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         let add = vec![folder_id.to_string()];
         self.client
             .modify_thread(thread_id, &add, &[], ctx.db)
@@ -152,7 +154,7 @@ impl ProviderOps for GmailOps {
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         tag_id: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         let add = vec![tag_id.to_string()];
         self.client
             .modify_thread(thread_id, &add, &[], ctx.db)
@@ -165,7 +167,7 @@ impl ProviderOps for GmailOps {
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         tag_id: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         let remove = vec![tag_id.to_string()];
         self.client
             .modify_thread(thread_id, &[], &remove, ctx.db)
@@ -178,7 +180,7 @@ impl ProviderOps for GmailOps {
         ctx: &ProviderCtx<'_>,
         message_id: &str,
         category_name: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         let label_id = find_label_id_by_name(&self.client, ctx, category_name).await?;
         let add = vec![label_id];
         self.client
@@ -192,7 +194,7 @@ impl ProviderOps for GmailOps {
         ctx: &ProviderCtx<'_>,
         message_id: &str,
         category_name: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         let label_id = find_label_id_by_name(&self.client, ctx, category_name).await?;
         let remove = vec![label_id];
         self.client
@@ -207,7 +209,7 @@ impl ProviderOps for GmailOps {
         raw_base64url: &str,
         thread_id: Option<&str>,
         _mentions: &[(String, String)],
-    ) -> Result<String, String> {
+    ) -> Result<String, ProviderError> {
         let msg = self
             .client
             .send_message(raw_base64url, thread_id, ctx.db)
@@ -221,7 +223,7 @@ impl ProviderOps for GmailOps {
         raw_base64url: &str,
         thread_id: Option<&str>,
         _mentions: &[(String, String)],
-    ) -> Result<String, String> {
+    ) -> Result<String, ProviderError> {
         let draft = self
             .client
             .create_draft(raw_base64url, thread_id, ctx.db)
@@ -235,7 +237,7 @@ impl ProviderOps for GmailOps {
         draft_id: &str,
         raw_base64url: &str,
         thread_id: Option<&str>,
-    ) -> Result<String, String> {
+    ) -> Result<String, ProviderError> {
         let draft = self
             .client
             .update_draft(draft_id, raw_base64url, thread_id, ctx.db)
@@ -243,8 +245,9 @@ impl ProviderOps for GmailOps {
         Ok(draft.id)
     }
 
-    async fn delete_draft(&self, ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), String> {
-        self.client.delete_draft(draft_id, ctx.db).await
+    async fn delete_draft(&self, ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), ProviderError> {
+        self.client.delete_draft(draft_id, ctx.db).await?;
+        Ok(())
     }
 
     async fn fetch_attachment(
@@ -252,7 +255,7 @@ impl ProviderOps for GmailOps {
         ctx: &ProviderCtx<'_>,
         message_id: &str,
         attachment_id: &str,
-    ) -> Result<AttachmentData, String> {
+    ) -> Result<AttachmentData, ProviderError> {
         let att = self
             .client
             .get_attachment(message_id, attachment_id, ctx.db)
@@ -270,7 +273,7 @@ impl ProviderOps for GmailOps {
     async fn list_folders(
         &self,
         ctx: &ProviderCtx<'_>,
-    ) -> Result<Vec<ProviderFolderEntry>, String> {
+    ) -> Result<Vec<ProviderFolderEntry>, ProviderError> {
         let labels = self.client.list_labels(ctx.db).await?;
         Ok(labels
             .into_iter()
@@ -310,7 +313,7 @@ impl ProviderOps for GmailOps {
         parent_id: Option<&str>,
         text_color: Option<&str>,
         bg_color: Option<&str>,
-    ) -> Result<ProviderFolderMutation, String> {
+    ) -> Result<ProviderFolderMutation, ProviderError> {
         let full_name = parent_id.map_or_else(|| name.to_string(), |p| format!("{p}/{name}"));
         let color = match (text_color, bg_color) {
             (Some(tc), Some(bc)) => Some((tc, bc)),
@@ -336,7 +339,7 @@ impl ProviderOps for GmailOps {
         new_name: &str,
         text_color: Option<&str>,
         bg_color: Option<&str>,
-    ) -> Result<ProviderFolderMutation, String> {
+    ) -> Result<ProviderFolderMutation, ProviderError> {
         let color = match (text_color, bg_color) {
             (Some(tc), Some(bc)) => Some(Some((tc, bc))),
             _ => None,
@@ -361,11 +364,12 @@ impl ProviderOps for GmailOps {
         })
     }
 
-    async fn delete_folder(&self, ctx: &ProviderCtx<'_>, folder_id: &str) -> Result<(), String> {
-        self.client.delete_label(folder_id, ctx.db).await
+    async fn delete_folder(&self, ctx: &ProviderCtx<'_>, folder_id: &str) -> Result<(), ProviderError> {
+        self.client.delete_label(folder_id, ctx.db).await?;
+        Ok(())
     }
 
-    async fn test_connection(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, String> {
+    async fn test_connection(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, ProviderError> {
         let profile = self.client.get_profile(ctx.db).await?;
         Ok(ProviderTestResult {
             success: true,
@@ -373,7 +377,7 @@ impl ProviderOps for GmailOps {
         })
     }
 
-    async fn get_profile(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, String> {
+    async fn get_profile(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, ProviderError> {
         let profile = self.client.get_profile(ctx.db).await?;
         Ok(ProviderProfile {
             email: profile.email_address,
@@ -389,14 +393,14 @@ async fn find_label_id_by_name(
     client: &GmailClient,
     ctx: &ProviderCtx<'_>,
     name: &str,
-) -> Result<String, String> {
+) -> Result<String, ProviderError> {
     let labels = client.list_labels(ctx.db).await?;
     let lower = name.to_lowercase();
     labels
         .into_iter()
         .find(|l| l.name.to_lowercase() == lower)
         .map(|l| l.id)
-        .ok_or_else(|| format!("No Gmail label found matching category name '{name}'"))
+        .ok_or_else(|| ProviderError::NotFound(format!("No Gmail label found matching category name '{name}'")))
 }
 
 // ── Gmail-specific operations (not part of ProviderOps) ─────

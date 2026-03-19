@@ -4,6 +4,7 @@ pub mod account_resync;
 // existing `crate::provider::*` paths throughout core continue to work.
 pub use ratatoskr_provider_utils::attachment_dedup;
 pub use ratatoskr_provider_utils::crypto;
+pub use ratatoskr_provider_utils::error;
 pub use ratatoskr_provider_utils::email_parsing;
 pub use ratatoskr_provider_utils::encoding;
 pub use ratatoskr_provider_utils::folder_roles;

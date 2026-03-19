@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 
+use super::error::ProviderError;
 use super::types::{
     AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
     ProviderParsedMessage, ProviderProfile, ProviderTestResult, SyncResult,
@@ -18,54 +19,54 @@ pub trait ProviderOps: Send + Sync {
         &self,
         ctx: &ProviderCtx<'_>,
         days_back: i64,
-    ) -> Result<SyncResult, String>;
+    ) -> Result<SyncResult, ProviderError>;
     async fn sync_delta(
         &self,
         ctx: &ProviderCtx<'_>,
         days_back: Option<i64>,
-    ) -> Result<SyncResult, String>;
+    ) -> Result<SyncResult, ProviderError>;
 
     // ── Actions (thread-level) ──────────────────────────────────
 
-    async fn archive(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String>;
-    async fn trash(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String>;
-    async fn permanent_delete(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), String>;
+    async fn archive(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError>;
+    async fn trash(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError>;
+    async fn permanent_delete(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError>;
     async fn mark_read(
         &self,
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         read: bool,
-    ) -> Result<(), String>;
+    ) -> Result<(), ProviderError>;
     async fn star(
         &self,
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         starred: bool,
-    ) -> Result<(), String>;
+    ) -> Result<(), ProviderError>;
     async fn spam(
         &self,
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         is_spam: bool,
-    ) -> Result<(), String>;
+    ) -> Result<(), ProviderError>;
     async fn move_to_folder(
         &self,
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         folder_id: &str,
-    ) -> Result<(), String>;
+    ) -> Result<(), ProviderError>;
     async fn add_tag(
         &self,
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         tag_id: &str,
-    ) -> Result<(), String>;
+    ) -> Result<(), ProviderError>;
     async fn remove_tag(
         &self,
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
         tag_id: &str,
-    ) -> Result<(), String>;
+    ) -> Result<(), ProviderError>;
 
     // ── Send + Drafts ───────────────────────────────────────────
 
@@ -79,7 +80,7 @@ pub trait ProviderOps: Send + Sync {
         raw_base64url: &str,
         thread_id: Option<&str>,
         mentions: &[(String, String)],
-    ) -> Result<String, String>;
+    ) -> Result<String, ProviderError>;
 
     /// Returns the draft ID.
     ///
@@ -91,7 +92,7 @@ pub trait ProviderOps: Send + Sync {
         raw_base64url: &str,
         thread_id: Option<&str>,
         mentions: &[(String, String)],
-    ) -> Result<String, String>;
+    ) -> Result<String, ProviderError>;
 
     /// Returns the (possibly new) draft ID.
     async fn update_draft(
@@ -100,9 +101,9 @@ pub trait ProviderOps: Send + Sync {
         draft_id: &str,
         raw_base64url: &str,
         thread_id: Option<&str>,
-    ) -> Result<String, String>;
+    ) -> Result<String, ProviderError>;
 
-    async fn delete_draft(&self, ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), String>;
+    async fn delete_draft(&self, ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), ProviderError>;
 
     // ── Attachments ─────────────────────────────────────────────
 
@@ -111,28 +112,28 @@ pub trait ProviderOps: Send + Sync {
         ctx: &ProviderCtx<'_>,
         message_id: &str,
         attachment_id: &str,
-    ) -> Result<AttachmentData, String>;
+    ) -> Result<AttachmentData, ProviderError>;
 
     async fn fetch_message(
         &self,
         _ctx: &ProviderCtx<'_>,
         _message_id: &str,
-    ) -> Result<ProviderParsedMessage, String> {
-        Err("Fetching parsed messages is not supported for this provider.".to_string())
+    ) -> Result<ProviderParsedMessage, ProviderError> {
+        Err(ProviderError::Client("Fetching parsed messages is not supported for this provider.".to_string()))
     }
 
     async fn fetch_raw_message(
         &self,
         _ctx: &ProviderCtx<'_>,
         _message_id: &str,
-    ) -> Result<String, String> {
-        Err("Fetching raw messages is not supported for this provider.".to_string())
+    ) -> Result<String, ProviderError> {
+        Err(ProviderError::Client("Fetching raw messages is not supported for this provider.".to_string()))
     }
 
     // ── Folders ─────────────────────────────────────────────────
 
     async fn list_folders(&self, ctx: &ProviderCtx<'_>)
-    -> Result<Vec<ProviderFolderEntry>, String>;
+    -> Result<Vec<ProviderFolderEntry>, ProviderError>;
     async fn create_folder(
         &self,
         ctx: &ProviderCtx<'_>,
@@ -140,7 +141,7 @@ pub trait ProviderOps: Send + Sync {
         parent_id: Option<&str>,
         text_color: Option<&str>,
         bg_color: Option<&str>,
-    ) -> Result<ProviderFolderMutation, String>;
+    ) -> Result<ProviderFolderMutation, ProviderError>;
     async fn rename_folder(
         &self,
         ctx: &ProviderCtx<'_>,
@@ -148,8 +149,8 @@ pub trait ProviderOps: Send + Sync {
         new_name: &str,
         text_color: Option<&str>,
         bg_color: Option<&str>,
-    ) -> Result<ProviderFolderMutation, String>;
-    async fn delete_folder(&self, ctx: &ProviderCtx<'_>, folder_id: &str) -> Result<(), String>;
+    ) -> Result<ProviderFolderMutation, ProviderError>;
+    async fn delete_folder(&self, ctx: &ProviderCtx<'_>, folder_id: &str) -> Result<(), ProviderError>;
 
     // ── Categories ────────────────────────────────────────────────
 
@@ -161,7 +162,7 @@ pub trait ProviderOps: Send + Sync {
         _ctx: &ProviderCtx<'_>,
         _message_id: &str,
         _category_name: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         Ok(())
     }
 
@@ -173,12 +174,12 @@ pub trait ProviderOps: Send + Sync {
         _ctx: &ProviderCtx<'_>,
         _message_id: &str,
         _category_name: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), ProviderError> {
         Ok(())
     }
 
     // ── Connection / Profile ────────────────────────────────────
 
-    async fn test_connection(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, String>;
-    async fn get_profile(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, String>;
+    async fn test_connection(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, ProviderError>;
+    async fn get_profile(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, ProviderError>;
 }
