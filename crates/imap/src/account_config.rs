@@ -5,6 +5,7 @@ use rusqlite::OptionalExtension;
 
 use ratatoskr_db::db::DbState;
 use ratatoskr_provider_utils::crypto::{decrypt_value, encrypt_value, is_encrypted};
+use ratatoskr_provider_utils::http::shared_http_client;
 use ratatoskr_provider_utils::token::refresh_oauth_token;
 use ratatoskr_smtp::types::SmtpConfig;
 
@@ -12,11 +13,6 @@ use super::types::ImapConfig;
 
 static IMAP_REFRESH_LOCKS: OnceLock<StdMutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
     OnceLock::new();
-
-fn shared_http_client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new)
-}
 
 fn get_refresh_lock(account_id: &str) -> Arc<tokio::sync::Mutex<()>> {
     let map = IMAP_REFRESH_LOCKS.get_or_init(|| StdMutex::new(HashMap::new()));
@@ -212,14 +208,14 @@ async fn ensure_oauth_access_token(
     .await?;
     let encrypted_access_token = encrypt_value(encryption_key, &refreshed.access_token)?;
     let aid = account_id.to_string();
+    let new_expires = refreshed.expires_at;
     db.with_conn(move |conn| {
-        conn.execute(
-            "UPDATE accounts SET access_token = ?1, token_expires_at = ?2, \
-             updated_at = unixepoch() WHERE id = ?3",
-            rusqlite::params![encrypted_access_token, refreshed.expires_at, aid],
+        ratatoskr_db::db::queries::persist_refreshed_token(
+            conn,
+            &aid,
+            &encrypted_access_token,
+            new_expires,
         )
-        .map_err(|e| format!("Failed to persist refreshed IMAP OAuth token: {e}"))?;
-        Ok(())
     })
     .await?;
 

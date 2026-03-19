@@ -87,16 +87,21 @@ pub(super) async fn sync_mailboxes(
             }
             // Sync user mailboxes into categories table (no colors in JMAP)
             for (i, (provider_id, name)) in category_rows.iter().enumerate() {
-                tx.execute(
-                    "INSERT INTO categories \
-                     (id, account_id, display_name, color_preset, color_bg, color_fg, \
-                      provider_id, sync_state, sort_order) \
-                     VALUES (?1, ?2, ?3, NULL, NULL, NULL, ?4, 'synced', ?5) \
-                     ON CONFLICT(account_id, display_name) DO UPDATE SET \
-                       provider_id = ?4, sync_state = 'synced'",
-                    rusqlite::params![provider_id, aid, name, provider_id, i as i64],
-                )
-                .map_err(|e| format!("upsert jmap category: {e}"))?;
+                ratatoskr_db::db::queries::upsert_category(
+                    &tx,
+                    provider_id,
+                    &aid,
+                    name,
+                    &ratatoskr_db::db::queries::CategoryColors {
+                        preset: None,
+                        bg: None,
+                        fg: None,
+                    },
+                    provider_id,
+                    i as i64,
+                    false,
+                    ratatoskr_db::db::queries::CategorySortOnConflict::Keep,
+                )?;
             }
             tx.commit().map_err(|e| format!("commit labels: {e}"))?;
             Ok(())

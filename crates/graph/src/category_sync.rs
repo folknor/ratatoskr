@@ -51,26 +51,21 @@ pub async fn graph_categories_sync(
                 }
             };
 
-            tx.execute(
-                "INSERT INTO categories \
-                 (id, account_id, display_name, color_preset, color_bg, color_fg, \
-                  provider_id, sync_state, sort_order) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'synced', ?8) \
-                 ON CONFLICT(account_id, display_name) DO UPDATE SET \
-                   color_preset = ?4, color_bg = ?5, color_fg = ?6, \
-                   provider_id = ?7, sync_state = 'synced', sort_order = ?8",
-                rusqlite::params![
-                    cat.id,
-                    aid,
-                    cat.display_name,
-                    color_preset,
-                    color_bg,
-                    color_fg,
-                    cat.id,
-                    i as i64,
-                ],
-            )
-            .map_err(|e| format!("upsert category: {e}"))?;
+            ratatoskr_db::db::queries::upsert_category(
+                &tx,
+                &cat.id,
+                &aid,
+                &cat.display_name,
+                &ratatoskr_db::db::queries::CategoryColors {
+                    preset: Some(color_preset),
+                    bg: color_bg,
+                    fg: color_fg,
+                },
+                &cat.id,
+                i as i64,
+                true,
+                ratatoskr_db::db::queries::CategorySortOnConflict::Update,
+            )?;
         }
 
         tx.commit()

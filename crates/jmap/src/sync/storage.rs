@@ -1,8 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use ratatoskr_stores::attachment_cache::hash_bytes;
 use ratatoskr_stores::body_store::BodyStoreState;
-use ratatoskr_db::db::lookups;
 use ratatoskr_stores::inline_image_store::{InlineImage, MAX_INLINE_SIZE};
 use ratatoskr_search::{SearchDocument, SearchState};
 
@@ -73,52 +72,7 @@ pub(super) async fn delete_messages(ctx: &SyncCtx<'_>, message_ids: &[&str]) -> 
             let tx = conn
                 .unchecked_transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
-
-            // Collect affected thread IDs before deleting
-            let mut affected_threads = HashSet::new();
-            for id in &ids {
-                if let Ok(Some(tid)) = lookups::get_thread_id_for_message(&tx, &aid, id) {
-                    affected_threads.insert(tid);
-                }
-            }
-
-            // Delete the messages
-            for id in &ids {
-                tx.execute(
-                    "DELETE FROM messages WHERE account_id = ?1 AND id = ?2",
-                    rusqlite::params![aid, id],
-                )
-                .map_err(|e| format!("delete message: {e}"))?;
-            }
-
-            // Update or remove affected threads
-            for tid in &affected_threads {
-                let remaining: i64 = tx
-                    .query_row(
-                        "SELECT COUNT(*) AS cnt FROM messages WHERE thread_id = ?1 AND account_id = ?2",
-                        rusqlite::params![tid, aid],
-                        |row| row.get("cnt"),
-                    )
-                    .map_err(|e| format!("count remaining: {e}"))?;
-
-                if remaining == 0 {
-                    // Orphan thread -- remove it and its labels
-                    tx.execute(
-                        "DELETE FROM threads WHERE id = ?1 AND account_id = ?2",
-                        rusqlite::params![tid, aid],
-                    )
-                    .map_err(|e| format!("delete orphan thread: {e}"))?;
-                    tx.execute(
-                        "DELETE FROM thread_labels WHERE thread_id = ?1 AND account_id = ?2",
-                        rusqlite::params![tid, aid],
-                    )
-                    .map_err(|e| format!("delete orphan thread labels: {e}"))?;
-                } else {
-                    // Re-aggregate thread fields from remaining messages
-                    reaggregate_thread(&tx, &aid, tid)?;
-                }
-            }
-
+            sync_persistence::delete_messages_and_cleanup_threads(&tx, &aid, &ids)?;
             tx.commit().map_err(|e| format!("commit: {e}"))?;
             Ok(())
         })
@@ -136,16 +90,6 @@ pub(super) async fn delete_messages(ctx: &SyncCtx<'_>, message_ids: &[&str]) -> 
     }
 
     Ok(())
-}
-
-/// Re-aggregate thread fields from remaining messages after deletion.
-fn reaggregate_thread(
-    tx: &rusqlite::Transaction,
-    account_id: &str,
-    thread_id: &str,
-) -> Result<(), String> {
-    let aggregate = sync_persistence::compute_thread_aggregate(tx, account_id, thread_id)?;
-    sync_persistence::upsert_thread_aggregate(tx, account_id, thread_id, &aggregate, None)
 }
 
 // ---------------------------------------------------------------------------
@@ -325,21 +269,21 @@ fn sync_keyword_categories(
 
     // Upsert each keyword into the categories table
     for keyword in &unique_keywords {
-        tx.execute(
-            "INSERT INTO categories \
-             (id, account_id, display_name, color_preset, color_bg, color_fg, \
-              provider_id, sync_state, sort_order) \
-             VALUES (?1, ?2, ?3, NULL, NULL, NULL, ?4, 'synced', 0) \
-             ON CONFLICT(account_id, display_name) DO UPDATE SET \
-               provider_id = ?4, sync_state = 'synced'",
-            rusqlite::params![
-                format!("kw_{keyword}"),
-                account_id,
-                keyword,
-                keyword,
-            ],
-        )
-        .map_err(|e| format!("upsert jmap keyword category: {e}"))?;
+        ratatoskr_db::db::queries::upsert_category(
+            &tx,
+            &format!("kw_{keyword}"),
+            account_id,
+            keyword,
+            &ratatoskr_db::db::queries::CategoryColors {
+                preset: None,
+                bg: None,
+                fg: None,
+            },
+            keyword,
+            0,
+            false,
+            ratatoskr_db::db::queries::CategorySortOnConflict::Keep,
+        )?;
     }
 
     // Link thread to the first keyword category (don't overwrite manual assignments)

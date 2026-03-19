@@ -417,22 +417,21 @@ pub fn sync_folders_to_labels(
         if mapping.label_type != "user" {
             continue;
         }
-        conn.execute(
-            "INSERT INTO categories \
-             (id, account_id, display_name, color_preset, color_bg, color_fg, \
-              provider_id, sync_state, sort_order) \
-             VALUES (?1, ?2, ?3, NULL, NULL, NULL, ?4, 'synced', ?5) \
-             ON CONFLICT(account_id, display_name) DO UPDATE SET \
-               provider_id = ?4, sync_state = 'synced'",
-            rusqlite::params![
-                mapping.label_id,
-                account_id,
-                mapping.label_name,
-                folder.raw_path,
-                i as i64,
-            ],
-        )
-        .map_err(|e| format!("upsert imap category: {e}"))?;
+        ratatoskr_db::db::queries::upsert_category(
+            conn,
+            &mapping.label_id,
+            account_id,
+            &mapping.label_name,
+            &ratatoskr_db::db::queries::CategoryColors {
+                preset: None,
+                bg: None,
+                fg: None,
+            },
+            &folder.raw_path,
+            i as i64,
+            false,
+            ratatoskr_db::db::queries::CategorySortOnConflict::Keep,
+        )?;
     }
 
     Ok(())
@@ -679,58 +678,8 @@ pub fn remove_deleted_messages(
         .unchecked_transaction()
         .map_err(|e| format!("deletion tx: {e}"))?;
 
-    // Collect affected thread IDs before deleting
-    let mut affected_threads: HashSet<String> = HashSet::new();
-    for id in deleted_message_ids {
-        if let Ok(tid) = tx.query_row(
-            "SELECT thread_id FROM messages WHERE account_id = ?1 AND id = ?2",
-            rusqlite::params![account_id, id],
-            |row| row.get::<_, String>("thread_id"),
-        ) {
-            affected_threads.insert(tid);
-        }
-    }
-
-    // Delete the messages
-    for id in deleted_message_ids {
-        tx.execute(
-            "DELETE FROM messages WHERE account_id = ?1 AND id = ?2",
-            rusqlite::params![account_id, id],
-        )
-        .map_err(|e| format!("delete message: {e}"))?;
-    }
-
-    // Update or remove affected threads
-    for tid in &affected_threads {
-        let remaining: i64 = tx
-            .query_row(
-                "SELECT COUNT(*) AS cnt FROM messages WHERE thread_id = ?1 AND account_id = ?2",
-                rusqlite::params![tid, account_id],
-                |row| row.get("cnt"),
-            )
-            .map_err(|e| format!("count remaining: {e}"))?;
-
-        if remaining == 0 {
-            // Orphan thread — remove it and its labels
-            tx.execute(
-                "DELETE FROM threads WHERE id = ?1 AND account_id = ?2",
-                rusqlite::params![tid, account_id],
-            )
-            .map_err(|e| format!("delete orphan thread: {e}"))?;
-            tx.execute(
-                "DELETE FROM thread_labels WHERE thread_id = ?1 AND account_id = ?2",
-                rusqlite::params![tid, account_id],
-            )
-            .map_err(|e| format!("delete orphan thread labels: {e}"))?;
-        } else {
-            // Re-aggregate thread fields from remaining messages
-            let aggregate =
-                persistence::compute_thread_aggregate(&tx, account_id, tid)?;
-            persistence::upsert_thread_aggregate(
-                &tx, account_id, tid, &aggregate, None,
-            )?;
-        }
-    }
+    let affected_threads =
+        persistence::delete_messages_and_cleanup_threads(&tx, account_id, deleted_message_ids)?;
 
     tx.commit()
         .map_err(|e| format!("deletion commit: {e}"))?;
@@ -741,5 +690,5 @@ pub fn remove_deleted_messages(
         affected_threads.len()
     );
 
-    Ok(affected_threads.into_iter().collect())
+    Ok(affected_threads)
 }

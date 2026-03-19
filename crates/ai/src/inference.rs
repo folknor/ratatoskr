@@ -4,21 +4,9 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use ratatoskr_core::db::DbState;
 use ratatoskr_core::provider::crypto::{AppCryptoState, decrypt_value, is_encrypted};
 
+use ratatoskr_core::provider::http::shared_http_client;
+
 use crate::types::{AiCompletionRequest, AiConfig, AiError, AiProvider};
-
-// ---------------------------------------------------------------------------
-// Shared HTTP client
-// ---------------------------------------------------------------------------
-
-fn shared_http_client() -> &'static reqwest::Client {
-    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
-            .build()
-            .unwrap_or_default()
-    })
-}
 
 // ---------------------------------------------------------------------------
 // Config loading from DB

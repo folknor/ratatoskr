@@ -1,6 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-use ratatoskr_db::db::{DbState, lookups};
+use ratatoskr_db::db::DbState;
 
 use super::super::client::GraphClient;
 use super::super::parse::ParsedGraphMessage;
@@ -80,52 +80,7 @@ pub(super) async fn delete_messages(
             let tx = conn
                 .unchecked_transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
-
-            // Collect affected thread IDs before deleting
-            let mut affected_threads = HashSet::new();
-            for id in &ids {
-                if let Ok(Some(tid)) = lookups::get_thread_id_for_message(&tx, &aid, id) {
-                    affected_threads.insert(tid);
-                }
-            }
-
-            // Delete the messages
-            for id in &ids {
-                tx.execute(
-                    "DELETE FROM messages WHERE account_id = ?1 AND id = ?2",
-                    rusqlite::params![aid, id],
-                )
-                .map_err(|e| format!("delete message: {e}"))?;
-            }
-
-            // Update or remove affected threads
-            for tid in &affected_threads {
-                let remaining: i64 = tx
-                    .query_row(
-                        "SELECT COUNT(*) AS cnt FROM messages WHERE thread_id = ?1 AND account_id = ?2",
-                        rusqlite::params![tid, aid],
-                        |row| row.get("cnt"),
-                    )
-                    .map_err(|e| format!("count remaining: {e}"))?;
-
-                if remaining == 0 {
-                    // Orphan thread — remove it and its labels
-                    tx.execute(
-                        "DELETE FROM threads WHERE id = ?1 AND account_id = ?2",
-                        rusqlite::params![tid, aid],
-                    )
-                    .map_err(|e| format!("delete orphan thread: {e}"))?;
-                    tx.execute(
-                        "DELETE FROM thread_labels WHERE thread_id = ?1 AND account_id = ?2",
-                        rusqlite::params![tid, aid],
-                    )
-                    .map_err(|e| format!("delete orphan thread labels: {e}"))?;
-                } else {
-                    // Re-aggregate thread fields from remaining messages
-                    reaggregate_thread(&tx, &aid, tid)?;
-                }
-            }
-
+            sync_persistence::delete_messages_and_cleanup_threads(&tx, &aid, &ids)?;
             tx.commit().map_err(|e| format!("commit: {e}"))?;
             Ok(())
         })
@@ -143,16 +98,6 @@ pub(super) async fn delete_messages(
     }
 
     Ok(())
-}
-
-/// Re-aggregate thread fields from remaining messages after deletion.
-fn reaggregate_thread(
-    tx: &rusqlite::Transaction,
-    account_id: &str,
-    thread_id: &str,
-) -> Result<(), String> {
-    let aggregate = sync_persistence::compute_thread_aggregate(tx, account_id, thread_id)?;
-    sync_persistence::upsert_thread_aggregate(tx, account_id, thread_id, &aggregate, None)
 }
 
 // ---------------------------------------------------------------------------

@@ -5,7 +5,6 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -51,12 +50,9 @@ const MICROSOFT_GRAPH_SCOPES: [&str; 10] = [
     "User.Read",
 ];
 
-type OAuthFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+use ratatoskr_provider_utils::http::shared_http_client;
 
-fn shared_http_client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new)
-}
+type OAuthFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 #[derive(Serialize)]
 pub struct OAuthResult {

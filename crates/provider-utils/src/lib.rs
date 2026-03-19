@@ -1,4 +1,5 @@
 pub mod attachment_dedup;
+pub mod state;
 pub mod crypto;
 pub mod email_parsing;
 pub mod encoding;

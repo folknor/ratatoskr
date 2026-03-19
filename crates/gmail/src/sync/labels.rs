@@ -89,24 +89,21 @@ fn sync_labels_to_categories(
         let color_bg = label.color.as_ref().map(|c| c.background_color.as_str());
         let color_fg = label.color.as_ref().map(|c| c.text_color.as_str());
 
-        conn.execute(
-            "INSERT INTO categories \
-             (id, account_id, display_name, color_preset, color_bg, color_fg, \
-              provider_id, sync_state, sort_order) \
-             VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, 'synced', ?7) \
-             ON CONFLICT(account_id, display_name) DO UPDATE SET \
-               color_bg = ?4, color_fg = ?5, provider_id = ?6, sync_state = 'synced'",
-            rusqlite::params![
-                label.id,
-                account_id,
-                label.name,
-                color_bg,
-                color_fg,
-                label.id,
-                sort,
-            ],
-        )
-        .map_err(|e| format!("upsert gmail category: {e}"))?;
+        ratatoskr_db::db::queries::upsert_category(
+            conn,
+            &label.id,
+            account_id,
+            &label.name,
+            &ratatoskr_db::db::queries::CategoryColors {
+                preset: None,
+                bg: color_bg,
+                fg: color_fg,
+            },
+            &label.id,
+            sort,
+            true,
+            ratatoskr_db::db::queries::CategorySortOnConflict::Keep,
+        )?;
 
         sort += 1;
     }

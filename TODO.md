@@ -50,19 +50,19 @@
 
 #### LARGE — Provider infrastructure consolidation
 
-- [ ] **Consolidate OAuth token refresh infrastructure** — Same decrypt/persist/refresh-lock/http-client/endpoint-resolution code duplicated across all 4 provider clients (~300 lines). `provider-utils` already has `token.rs` — extend it to own the full refresh lifecycle. Files: `gmail/src/client.rs`, `graph/src/client.rs`, `jmap/src/client.rs`, `imap/src/account_config.rs`.
+- [ ] **Consolidate OAuth token refresh infrastructure** — Remaining: decrypt/refresh-lock/endpoint-resolution still duplicated across 4 providers. `shared_http_client`, `persist_refreshed_token`, and `ProviderState` are done. Files: `gmail/src/client.rs`, `graph/src/client.rs`, `jmap/src/client.rs`, `imap/src/account_config.rs`.
 
-- [ ] **Extract shared HTTP response handling** — `check_response_status` and `parse_json_response` are character-identical in gmail + graph (differ only by error prefix). `execute_with_retry` is also structurally identical. Move to `provider-utils/src/http.rs`. Files: `gmail/src/client.rs:454-484`, `graph/src/client.rs:671-700`.
+- [x] **Extract shared HTTP response handling** — `check_response_status` and `parse_json_response` extracted to `provider-utils/src/http.rs` with `provider: &str` param. `execute_with_retry` left in place (differs between providers due to `&self` methods).
 
-- [ ] **Generic `ProviderState<C>` client registry** — `GmailState`, `GraphState`, `JmapState` are structurally identical (`Arc<RwLock<HashMap<String, Client>>>` + encryption key + same methods). Extract to `provider-utils`. Files: `gmail/src/client.rs:42-78`, `graph/src/client.rs:57-90`, `jmap/src/client.rs:414-450`.
+- [x] **Generic `ProviderState<C>` client registry** — Extracted to `provider-utils/src/state.rs` with `provider_name` field for error messages. Provider crates use type aliases.
 
 #### MEDIUM — Duplicated logic
 
-- [ ] **Extract message deletion + thread cleanup** — Same delete-messages/count-remaining/delete-orphans/reaggregate logic in 3 providers. Move to `sync/src/persistence.rs`. Files: `jmap/src/sync/storage.rs:77-125`, `graph/src/sync/persistence.rs:80-132`, `imap/src/sync_pipeline.rs:680-730`.
+- [x] **Extract message deletion + thread cleanup** — Extracted `delete_messages_and_cleanup_threads` to `sync/src/persistence.rs`. All 3 providers call it.
 
-- [ ] **Deduplicate token refresh SQL** — Same `UPDATE accounts SET access_token, token_expires_at, updated_at WHERE id` in all 4 providers.
+- [x] **Deduplicate token refresh SQL** — Extracted `persist_refreshed_token()` in `db/queries.rs`, all 4 providers now call it.
 
-- [ ] **Extract category upsert helper** — Similar `INSERT INTO categories` across 4 providers with slightly different ON CONFLICT clauses.
+- [x] **Extract category upsert helper** — Extracted `upsert_category()` in `db/queries.rs` with configurable color/sort conflict behavior, all 4 providers (5 call sites) now use it.
 
 - [x] **Consolidate `blocked_thread_ids` / `get_skipped_thread_ids`** — Same query, two implementations in `sync/src/pending.rs` (async) and `sync/src/pipeline.rs` (sync).
 

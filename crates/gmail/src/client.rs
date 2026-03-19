@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -37,44 +36,12 @@ struct ClientInner {
     sync_cycle_counter: AtomicU32,
 }
 
-/// Tauri-managed state holding all Gmail clients and the encryption key.
-#[derive(Clone)]
-pub struct GmailState {
-    clients: Arc<RwLock<HashMap<String, GmailClient>>>,
-    encryption_key: [u8; 32],
-}
+/// State holding all Gmail clients and the encryption key.
+pub type GmailState = ratatoskr_provider_utils::state::ProviderState<GmailClient>;
 
-impl GmailState {
-    pub fn new(encryption_key: [u8; 32]) -> Self {
-        Self {
-            clients: Arc::new(RwLock::new(HashMap::new())),
-            encryption_key,
-        }
-    }
-
-    /// Get a client for the given account, or return an error if not initialized.
-    pub async fn get(&self, account_id: &str) -> Result<GmailClient, String> {
-        self.clients
-            .read()
-            .await
-            .get(account_id)
-            .cloned()
-            .ok_or_else(|| format!("Gmail client not initialized for account {account_id}"))
-    }
-
-    /// Insert (or replace) a client for the given account.
-    pub async fn insert(&self, account_id: String, client: GmailClient) {
-        self.clients.write().await.insert(account_id, client);
-    }
-
-    /// Remove the client for the given account.
-    pub async fn remove(&self, account_id: &str) {
-        self.clients.write().await.remove(account_id);
-    }
-
-    pub fn encryption_key(&self) -> &[u8; 32] {
-        &self.encryption_key
-    }
+/// Create a new `GmailState` with the given encryption key.
+pub fn new_gmail_state(encryption_key: [u8; 32]) -> GmailState {
+    GmailState::new(encryption_key, "Gmail")
 }
 
 impl GmailClient {
@@ -198,9 +165,9 @@ impl GmailClient {
             let retry = self
                 .execute_with_retry(&url, "DELETE", None::<&()>, &new_token)
                 .await?;
-            check_response_status(retry).await?;
+            http::check_response_status(retry, "Gmail API").await?;
         } else {
-            check_response_status(response).await?;
+            http::check_response_status(response, "Gmail API").await?;
         }
         Ok(())
     }
@@ -227,10 +194,10 @@ impl GmailClient {
             let retry = self
                 .execute_with_retry(url, method, body, &new_token)
                 .await?;
-            return parse_json_response(retry).await;
+            return http::parse_json_response(retry, "Gmail API").await;
         }
 
-        parse_json_response(response).await
+        http::parse_json_response(response, "Gmail API").await
     }
 
     /// Execute an HTTP request with retry on 429 (rate limit).
@@ -440,45 +407,8 @@ async fn persist_refreshed_token(
     let aid = account_id.to_string();
 
     db.with_conn(move |conn| {
-        conn.execute(
-            "UPDATE accounts SET access_token = ?1, token_expires_at = ?2, updated_at = unixepoch() WHERE id = ?3",
-            rusqlite::params![encrypted, expires_at, aid],
-        )
-        .map_err(|e| format!("Failed to persist refreshed token: {e}"))?;
-        Ok(())
+        ratatoskr_db::db::queries::persist_refreshed_token(conn, &aid, &encrypted, expires_at)
     })
     .await
 }
 
-/// Check HTTP response status, returning error details on failure.
-async fn check_response_status(response: reqwest::Response) -> Result<(), String> {
-    if response.status().is_success() || response.status().as_u16() == 204 {
-        return Ok(());
-    }
-    let status = response.status();
-    let body = response.text().await.unwrap_or_default();
-    Err(format!("Gmail API error: {status} {body}"))
-}
-
-/// Parse a JSON response, handling 204 No Content.
-async fn parse_json_response<T: DeserializeOwned>(
-    response: reqwest::Response,
-) -> Result<T, String> {
-    let status = response.status();
-
-    if !status.is_success() && status.as_u16() != 204 {
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("Gmail API error: {status} {body}"));
-    }
-
-    if status.as_u16() == 204 {
-        // For 204 No Content, try to create a default value
-        return serde_json::from_str("null")
-            .map_err(|e| format!("Cannot deserialize null for 204 response: {e}"));
-    }
-
-    response
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse Gmail API response: {e}"))
-}

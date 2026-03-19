@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use rusqlite::Transaction;
 
+use ratatoskr_db::db::lookups;
 use ratatoskr_stores::body_store::{BodyStoreState, MessageBody};
 use ratatoskr_stores::inline_image_store::{InlineImage, InlineImageStoreState};
 use ratatoskr_search::{SearchDocument, SearchState};
@@ -177,6 +178,74 @@ pub fn upsert_thread_aggregate(
     }
 
     Ok(())
+}
+
+/// Delete messages from the `messages` table and clean up orphaned threads.
+///
+/// For each deleted message, looks up its parent thread. After deletion:
+/// - Orphan threads (0 remaining messages) are removed along with their labels.
+/// - Surviving threads are reaggregated from their remaining messages.
+///
+/// Returns the set of affected thread IDs (useful for UI refresh).
+///
+/// **Must be called inside a transaction** — the caller owns the transaction
+/// boundary so it can combine this with other writes (body store, search, etc.).
+pub fn delete_messages_and_cleanup_threads(
+    tx: &Transaction,
+    account_id: &str,
+    message_ids: &[impl AsRef<str>],
+) -> Result<Vec<String>, String> {
+    if message_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Collect affected thread IDs before deleting
+    let mut affected_threads: HashSet<String> = HashSet::new();
+    for id in message_ids {
+        if let Ok(Some(tid)) = lookups::get_thread_id_for_message(tx, account_id, id.as_ref()) {
+            affected_threads.insert(tid);
+        }
+    }
+
+    // Delete the messages
+    for id in message_ids {
+        tx.execute(
+            "DELETE FROM messages WHERE account_id = ?1 AND id = ?2",
+            rusqlite::params![account_id, id.as_ref()],
+        )
+        .map_err(|e| format!("delete message: {e}"))?;
+    }
+
+    // Update or remove affected threads
+    for tid in &affected_threads {
+        let remaining: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) AS cnt FROM messages WHERE thread_id = ?1 AND account_id = ?2",
+                rusqlite::params![tid, account_id],
+                |row| row.get("cnt"),
+            )
+            .map_err(|e| format!("count remaining: {e}"))?;
+
+        if remaining == 0 {
+            // Orphan thread — remove it and its labels
+            tx.execute(
+                "DELETE FROM threads WHERE id = ?1 AND account_id = ?2",
+                rusqlite::params![tid, account_id],
+            )
+            .map_err(|e| format!("delete orphan thread: {e}"))?;
+            tx.execute(
+                "DELETE FROM thread_labels WHERE thread_id = ?1 AND account_id = ?2",
+                rusqlite::params![tid, account_id],
+            )
+            .map_err(|e| format!("delete orphan thread labels: {e}"))?;
+        } else {
+            // Re-aggregate thread fields from remaining messages
+            let aggregate = compute_thread_aggregate(tx, account_id, tid)?;
+            upsert_thread_aggregate(tx, account_id, tid, &aggregate, None)?;
+        }
+    }
+
+    Ok(affected_threads.into_iter().collect())
 }
 
 pub fn replace_thread_labels<'a>(

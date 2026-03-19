@@ -6,6 +6,7 @@ use tokio::sync::RwLock;
 
 use ratatoskr_db::db::DbState;
 use ratatoskr_provider_utils::crypto::{decrypt_value, encrypt_value, is_encrypted};
+use ratatoskr_provider_utils::http::shared_http_client;
 use ratatoskr_provider_utils::token::refresh_oauth_token;
 
 /// Cached mailbox list entry: (mailbox_id, role, name).
@@ -24,11 +25,6 @@ fn get_refresh_lock(account_id: &str) -> Arc<tokio::sync::Mutex<()>> {
             .entry(account_id.to_string())
             .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
     )
-}
-
-fn shared_http_client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new)
 }
 
 /// Per-account JMAP client with support for both Basic and Bearer (OAuth2)
@@ -187,13 +183,12 @@ impl JmapClient {
         let aid = self.account_id.clone();
         let new_expires = refreshed.expires_at;
         db.with_conn(move |conn| {
-            conn.execute(
-                "UPDATE accounts SET access_token = ?1, token_expires_at = ?2, \
-                 updated_at = unixepoch() WHERE id = ?3",
-                rusqlite::params![encrypted_access, new_expires, aid],
+            ratatoskr_db::db::queries::persist_refreshed_token(
+                conn,
+                &aid,
+                &encrypted_access,
+                new_expires,
             )
-            .map_err(|e| format!("Failed to persist refreshed JMAP OAuth token: {e}"))?;
-            Ok(())
         })
         .await?;
 
@@ -409,44 +404,12 @@ fn oauth_token_endpoint(
 // JmapState — global JMAP client registry
 // ---------------------------------------------------------------------------
 
-/// Tauri-managed state holding all JMAP clients.
-#[derive(Clone)]
-pub struct JmapState {
-    clients: Arc<RwLock<HashMap<String, JmapClient>>>,
-    encryption_key: [u8; 32],
-}
+/// State holding all JMAP clients and the encryption key.
+pub type JmapState = ratatoskr_provider_utils::state::ProviderState<JmapClient>;
 
-impl JmapState {
-    pub fn new(encryption_key: [u8; 32]) -> Self {
-        Self {
-            clients: Arc::new(RwLock::new(HashMap::new())),
-            encryption_key,
-        }
-    }
-
-    /// Get a client for the given account, or return an error if not initialized.
-    pub async fn get(&self, account_id: &str) -> Result<JmapClient, String> {
-        self.clients
-            .read()
-            .await
-            .get(account_id)
-            .cloned()
-            .ok_or_else(|| format!("JMAP client not initialized for account {account_id}"))
-    }
-
-    /// Insert (or replace) a client for the given account.
-    pub async fn insert(&self, account_id: String, client: JmapClient) {
-        self.clients.write().await.insert(account_id, client);
-    }
-
-    /// Remove the client for the given account.
-    pub async fn remove(&self, account_id: &str) {
-        self.clients.write().await.remove(account_id);
-    }
-
-    pub fn encryption_key(&self) -> &[u8; 32] {
-        &self.encryption_key
-    }
+/// Create a new `JmapState` with the given encryption key.
+pub fn new_jmap_state(encryption_key: [u8; 32]) -> JmapState {
+    JmapState::new(encryption_key, "JMAP")
 }
 
 // ---------------------------------------------------------------------------

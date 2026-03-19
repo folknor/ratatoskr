@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -8,7 +7,7 @@ use tokio::sync::{Mutex, RwLock, Semaphore};
 
 use ratatoskr_db::db::DbState;
 use ratatoskr_provider_utils::crypto;
-use ratatoskr_provider_utils::http::RetryConfig;
+use ratatoskr_provider_utils::http::{self, RetryConfig};
 use ratatoskr_provider_utils::token::{self, TokenState};
 
 use super::folder_mapper::FolderMap;
@@ -52,41 +51,12 @@ struct ClientInner {
     sync_cycle_counter: AtomicU32,
 }
 
-/// Tauri-managed state holding all Graph clients and the encryption key.
-#[derive(Clone)]
-pub struct GraphState {
-    clients: Arc<RwLock<HashMap<String, GraphClient>>>,
-    encryption_key: [u8; 32],
-}
+/// State holding all Graph clients and the encryption key.
+pub type GraphState = ratatoskr_provider_utils::state::ProviderState<GraphClient>;
 
-impl GraphState {
-    pub fn new(encryption_key: [u8; 32]) -> Self {
-        Self {
-            clients: Arc::new(RwLock::new(HashMap::new())),
-            encryption_key,
-        }
-    }
-
-    pub async fn get(&self, account_id: &str) -> Result<GraphClient, String> {
-        self.clients
-            .read()
-            .await
-            .get(account_id)
-            .cloned()
-            .ok_or_else(|| format!("Graph client not initialized for account {account_id}"))
-    }
-
-    pub async fn insert(&self, account_id: String, client: GraphClient) {
-        self.clients.write().await.insert(account_id, client);
-    }
-
-    pub async fn remove(&self, account_id: &str) {
-        self.clients.write().await.remove(account_id);
-    }
-
-    pub fn encryption_key(&self) -> &[u8; 32] {
-        &self.encryption_key
-    }
+/// Create a new `GraphState` with the given encryption key.
+pub fn new_graph_state(encryption_key: [u8; 32]) -> GraphState {
+    GraphState::new(encryption_key, "Graph")
 }
 
 impl GraphClient {
@@ -286,9 +256,9 @@ impl GraphClient {
             let retry = self
                 .execute_with_retry(&url, "POST", body, &new_token)
                 .await?;
-            return check_response_status(retry).await;
+            return http::check_response_status(retry, "Graph API").await;
         }
-        check_response_status(response).await
+        http::check_response_status(response, "Graph API").await
     }
 
     /// Authenticated PATCH against the Graph API.
@@ -315,9 +285,9 @@ impl GraphClient {
             let retry = self
                 .execute_with_retry(&url, "PATCH", Some(body), &new_token)
                 .await?;
-            return check_response_status(retry).await;
+            return http::check_response_status(retry, "Graph API").await;
         }
-        check_response_status(response).await
+        http::check_response_status(response, "Graph API").await
     }
 
     /// Authenticated DELETE against the Graph API.
@@ -339,9 +309,9 @@ impl GraphClient {
             let retry = self
                 .execute_with_retry(&url, "DELETE", None::<&()>, &new_token)
                 .await?;
-            return check_response_status(retry).await;
+            return http::check_response_status(retry, "Graph API").await;
         }
-        check_response_status(response).await
+        http::check_response_status(response, "Graph API").await
     }
 
     /// Upload a byte range to an absolute URL (for resumable upload sessions).
@@ -434,10 +404,10 @@ impl GraphClient {
             let retry = self
                 .execute_with_retry(url, method, body, &new_token)
                 .await?;
-            return parse_json_response(retry).await;
+            return http::parse_json_response(retry, "Graph API").await;
         }
 
-        parse_json_response(response).await
+        http::parse_json_response(response, "Graph API").await
     }
 
     /// Request returning raw bytes (for `/$value` endpoints).
@@ -656,47 +626,9 @@ async fn persist_refreshed_token(
     let aid = account_id.to_string();
 
     db.with_conn(move |conn| {
-        conn.execute(
-            "UPDATE accounts SET access_token = ?1, token_expires_at = ?2, \
-             updated_at = unixepoch() WHERE id = ?3",
-            rusqlite::params![encrypted, expires_at, aid],
-        )
-        .map_err(|e| format!("Failed to persist refreshed token: {e}"))?;
-        Ok(())
+        ratatoskr_db::db::queries::persist_refreshed_token(conn, &aid, &encrypted, expires_at)
     })
     .await
-}
-
-/// Check HTTP response status, returning error details on failure.
-async fn check_response_status(response: reqwest::Response) -> Result<(), String> {
-    if response.status().is_success() || response.status().as_u16() == 204 {
-        return Ok(());
-    }
-    let status = response.status();
-    let body = response.text().await.unwrap_or_default();
-    Err(format!("Graph API error: {status} {body}"))
-}
-
-/// Parse a JSON response, handling 204 No Content.
-async fn parse_json_response<T: DeserializeOwned>(
-    response: reqwest::Response,
-) -> Result<T, String> {
-    let status = response.status();
-
-    if !status.is_success() && status.as_u16() != 204 {
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("Graph API error: {status} {body}"));
-    }
-
-    if status.as_u16() == 204 {
-        return serde_json::from_str("null")
-            .map_err(|e| format!("Cannot deserialize null for 204 response: {e}"));
-    }
-
-    response
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse Graph API response: {e}"))
 }
 
 /// Parse a bytes response.
