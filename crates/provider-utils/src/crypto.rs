@@ -119,3 +119,33 @@ pub fn is_encrypted(value: &str) -> bool {
     };
     iv.len() == 12 && STANDARD.decode(ct_part).is_ok()
 }
+
+/// Try to decrypt a value, falling back to the raw string for pre-encryption data.
+///
+/// Used by Gmail and Graph where the value is always present (non-Option).
+pub fn decrypt_or_raw(key: &[u8; 32], value: &str) -> String {
+    if is_encrypted(value) {
+        decrypt_value(key, value).unwrap_or_else(|_| value.to_string())
+    } else {
+        value.to_string()
+    }
+}
+
+/// Decrypt an `Option<String>` if it looks encrypted, pass through otherwise.
+///
+/// Used by JMAP and IMAP where credentials may be `None`.
+pub fn decrypt_if_needed(
+    key: &[u8; 32],
+    value: Option<String>,
+) -> Result<Option<String>, String> {
+    value
+        .map(|raw| {
+            if is_encrypted(&raw) {
+                decrypt_value(key, &raw)
+                    .map_err(|e| format!("decrypt credential: {e}"))
+            } else {
+                Ok(raw)
+            }
+        })
+        .transpose()
+}

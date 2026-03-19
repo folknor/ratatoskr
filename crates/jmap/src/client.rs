@@ -1,31 +1,15 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex as StdMutex, OnceLock, RwLock as StdRwLock};
+use std::sync::{Arc, RwLock as StdRwLock};
 
 use jmap_client::client::{Client, Credentials};
 use tokio::sync::RwLock;
 
 use ratatoskr_db::db::DbState;
-use ratatoskr_provider_utils::crypto::{decrypt_value, encrypt_value, is_encrypted};
+use ratatoskr_provider_utils::crypto::{decrypt_if_needed, encrypt_value};
 use ratatoskr_provider_utils::http::shared_http_client;
-use ratatoskr_provider_utils::token::refresh_oauth_token;
+use ratatoskr_provider_utils::token::{get_refresh_lock, oauth_token_endpoint, refresh_oauth_token};
 
 /// Cached mailbox list entry: (mailbox_id, role, name).
 pub type MailboxListEntry = (String, Option<String>, String);
-
-/// Per-account refresh lock registry — prevents concurrent token refreshes
-/// for the same JMAP account.
-static JMAP_REFRESH_LOCKS: OnceLock<StdMutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
-    OnceLock::new();
-
-fn get_refresh_lock(account_id: &str) -> Arc<tokio::sync::Mutex<()>> {
-    let map = JMAP_REFRESH_LOCKS.get_or_init(|| StdMutex::new(HashMap::new()));
-    let mut guard = map.lock().expect("JMAP refresh lock map poisoned");
-    Arc::clone(
-        guard
-            .entry(account_id.to_string())
-            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
-    )
-}
 
 /// Per-account JMAP client with support for both Basic and Bearer (OAuth2)
 /// authentication.
@@ -362,44 +346,6 @@ fn read_jmap_credentials(
     })
 }
 
-/// Decrypt a value if it looks encrypted, pass through otherwise.
-fn decrypt_if_needed(key: &[u8; 32], value: Option<String>) -> Result<Option<String>, String> {
-    value
-        .map(|raw| {
-            if is_encrypted(&raw) {
-                decrypt_value(key, &raw)
-                    .map_err(|e| format!("decrypt JMAP credential: {e}"))
-            } else {
-                Ok(raw)
-            }
-        })
-        .transpose()
-}
-
-// ---------------------------------------------------------------------------
-// OAuth token endpoint resolution
-// ---------------------------------------------------------------------------
-
-const MICROSOFT_TOKEN_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
-const FASTMAIL_TOKEN_URL: &str = "https://api.fastmail.com/oauth/token";
-
-fn oauth_token_endpoint(
-    provider_id: &str,
-    stored_url: Option<&str>,
-) -> Result<String, String> {
-    if let Some(url) = stored_url.filter(|u| !u.is_empty()) {
-        return Ok(url.to_string());
-    }
-    match provider_id {
-        "microsoft" | "microsoft_graph" => Ok(MICROSOFT_TOKEN_URL.to_string()),
-        "fastmail" | "jmap" => Ok(FASTMAIL_TOKEN_URL.to_string()),
-        other => Err(format!(
-            "Unsupported OAuth provider for JMAP account: {other}. \
-             Set oauth_token_url in the account record."
-        )),
-    }
-}
-
 // ---------------------------------------------------------------------------
 // JmapState — global JMAP client registry
 // ---------------------------------------------------------------------------
@@ -439,7 +385,7 @@ mod tests {
         let key = [7u8; 32];
         let encrypted_like = Some("AAAAAAAAAAAAAAAA:AAAA".to_string());
         let err = decrypt_if_needed(&key, encrypted_like).expect_err("expected decrypt failure");
-        assert!(err.contains("decrypt JMAP credential"));
+        assert!(err.contains("decrypt credential"));
     }
 
     #[test]
@@ -451,13 +397,16 @@ mod tests {
     #[test]
     fn oauth_token_endpoint_resolves_microsoft() {
         let url = oauth_token_endpoint("microsoft", None);
-        assert_eq!(url.unwrap(), MICROSOFT_TOKEN_URL);
+        assert_eq!(
+            url.unwrap(),
+            "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+        );
     }
 
     #[test]
     fn oauth_token_endpoint_resolves_fastmail() {
         let url = oauth_token_endpoint("fastmail", None);
-        assert_eq!(url.unwrap(), FASTMAIL_TOKEN_URL);
+        assert_eq!(url.unwrap(), "https://api.fastmail.com/oauth/token");
     }
 
     #[test]

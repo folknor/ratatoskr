@@ -50,7 +50,7 @@
 
 #### LARGE — Provider infrastructure consolidation
 
-- [ ] **Consolidate OAuth token refresh infrastructure** — Remaining: decrypt/refresh-lock/endpoint-resolution still duplicated across 4 providers. `shared_http_client`, `persist_refreshed_token`, and `ProviderState` are done. Files: `gmail/src/client.rs`, `graph/src/client.rs`, `jmap/src/client.rs`, `imap/src/account_config.rs`.
+- [x] **Consolidate OAuth token refresh infrastructure** — Done: `decrypt_or_raw`/`decrypt_if_needed` to crypto.rs, `get_refresh_lock` to token.rs, `oauth_token_endpoint` to token.rs (merged known providers). Gmail/Graph per-instance locks left as-is (different pattern).
 
 - [x] **Extract shared HTTP response handling** — `check_response_status` and `parse_json_response` extracted to `provider-utils/src/http.rs` with `provider: &str` param. `execute_with_retry` left in place (differs between providers due to `&self` methods).
 

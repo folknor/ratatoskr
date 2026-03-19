@@ -363,19 +363,19 @@ fn read_account_tokens(
     let enc_refresh = row.1.ok_or("No refresh_token for account")?;
     let expires_at = row.2.unwrap_or(0);
 
-    let access_token = decrypt_or_raw(key, &enc_access);
-    let refresh_token = decrypt_or_raw(key, &enc_refresh);
+    let access_token = crypto::decrypt_or_raw(key, &enc_access);
+    let refresh_token = crypto::decrypt_or_raw(key, &enc_refresh);
 
     let client_id = row
         .3
         .filter(|s| !s.is_empty())
-        .map(|s| decrypt_or_raw(key, &s))
+        .map(|s| crypto::decrypt_or_raw(key, &s))
         .ok_or_else(|| "Account missing OAuth credentials — reauthorize to fix".to_string())?;
 
     let client_secret = row
         .4
         .filter(|s| !s.is_empty())
-        .map(|s| decrypt_or_raw(key, &s));
+        .map(|s| crypto::decrypt_or_raw(key, &s));
 
     Ok((
         access_token,
@@ -384,15 +384,6 @@ fn read_account_tokens(
         client_id,
         client_secret,
     ))
-}
-
-/// Try to decrypt, falling back to raw value for pre-encryption data.
-fn decrypt_or_raw(key: &[u8; 32], value: &str) -> String {
-    if crypto::is_encrypted(value) {
-        crypto::decrypt_value(key, value).unwrap_or_else(|_| value.to_string())
-    } else {
-        value.to_string()
-    }
 }
 
 /// Persist a refreshed access token (encrypted) to the database.

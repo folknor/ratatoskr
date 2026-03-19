@@ -1,6 +1,12 @@
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
+
 use serde::Deserialize;
 
 const GOOGLE_TOKEN_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
+const MICROSOFT_TOKEN_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+const FASTMAIL_TOKEN_URL: &str = "https://api.fastmail.com/oauth/token";
+const YAHOO_TOKEN_URL: &str = "https://api.login.yahoo.com/oauth2/get_token";
 
 /// In-memory token state for an OAuth2 account.
 pub struct TokenState {
@@ -92,4 +98,57 @@ pub async fn refresh_google_token(
         client_secret,
     )
     .await
+}
+
+// ---------------------------------------------------------------------------
+// Per-account refresh lock registry
+// ---------------------------------------------------------------------------
+
+/// Global per-account refresh lock registry.
+///
+/// Prevents concurrent token refreshes for the same account across any
+/// provider (JMAP, IMAP, etc.). Each account ID maps to a shared async mutex.
+static REFRESH_LOCKS: OnceLock<StdMutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
+    OnceLock::new();
+
+/// Get (or create) the per-account refresh lock for the given account ID.
+///
+/// Used by providers that read token state from the DB and need to serialize
+/// refresh attempts across concurrent tasks for the same account.
+pub fn get_refresh_lock(account_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    let map = REFRESH_LOCKS.get_or_init(|| StdMutex::new(HashMap::new()));
+    let mut guard = map.lock().expect("refresh lock map poisoned");
+    Arc::clone(
+        guard
+            .entry(account_id.to_string())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// OAuth token endpoint resolution
+// ---------------------------------------------------------------------------
+
+/// Resolve the OAuth2 token endpoint URL for a provider.
+///
+/// If a `stored_url` is present and non-empty, it takes precedence. Otherwise,
+/// the provider ID is matched against known providers (Microsoft, Google,
+/// Fastmail, Yahoo). Returns an error for unknown providers without a stored URL.
+pub fn oauth_token_endpoint(
+    provider_id: &str,
+    stored_url: Option<&str>,
+) -> Result<String, String> {
+    if let Some(url) = stored_url.filter(|u| !u.is_empty()) {
+        return Ok(url.to_string());
+    }
+    match provider_id {
+        "microsoft" | "microsoft_graph" => Ok(MICROSOFT_TOKEN_URL.to_string()),
+        "google" | "gmail" => Ok(GOOGLE_TOKEN_ENDPOINT.to_string()),
+        "fastmail" | "jmap" => Ok(FASTMAIL_TOKEN_URL.to_string()),
+        "yahoo" => Ok(YAHOO_TOKEN_URL.to_string()),
+        other => Err(format!(
+            "Unsupported OAuth provider: {other}. \
+             Set oauth_token_url in the account record."
+        )),
+    }
 }

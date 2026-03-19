@@ -1,30 +1,12 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex as StdMutex, OnceLock};
-
 use rusqlite::OptionalExtension;
 
 use ratatoskr_db::db::DbState;
-use ratatoskr_provider_utils::crypto::{decrypt_value, encrypt_value, is_encrypted};
+use ratatoskr_provider_utils::crypto::{decrypt_if_needed, encrypt_value};
 use ratatoskr_provider_utils::http::shared_http_client;
-use ratatoskr_provider_utils::token::refresh_oauth_token;
+use ratatoskr_provider_utils::token::{get_refresh_lock, oauth_token_endpoint, refresh_oauth_token};
 use ratatoskr_smtp::types::SmtpConfig;
 
 use super::types::ImapConfig;
-
-static IMAP_REFRESH_LOCKS: OnceLock<StdMutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
-    OnceLock::new();
-
-fn get_refresh_lock(account_id: &str) -> Arc<tokio::sync::Mutex<()>> {
-    let map = IMAP_REFRESH_LOCKS.get_or_init(|| StdMutex::new(HashMap::new()));
-    let mut guard = map.lock().expect("IMAP refresh lock map poisoned");
-    guard
-        .entry(account_id.to_string())
-        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
-        .clone()
-}
-
-const MICROSOFT_TOKEN_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
-const YAHOO_TOKEN_URL: &str = "https://api.login.yahoo.com/oauth2/get_token";
 
 struct AccountConfigRecord {
     email: String,
@@ -63,37 +45,6 @@ fn map_security(security: Option<&str>) -> String {
     }
 }
 
-fn decrypt_if_needed(
-    encryption_key: &[u8; 32],
-    value: Option<String>,
-) -> Result<Option<String>, String> {
-    value
-        .map(|raw| {
-            if is_encrypted(&raw) {
-                decrypt_value(encryption_key, &raw)
-                    .map_err(|e| format!("decrypt stored account credential: {e}"))
-            } else {
-                Ok(raw)
-            }
-        })
-        .transpose()
-}
-
-fn oauth_token_endpoint<'a>(
-    provider_id: &str,
-    stored_url: Option<&'a str>,
-) -> Result<std::borrow::Cow<'a, str>, String> {
-    if let Some(url) = stored_url.filter(|u| !u.is_empty()) {
-        return Ok(std::borrow::Cow::Borrowed(url));
-    }
-    match provider_id {
-        "microsoft" | "microsoft_graph" => Ok(std::borrow::Cow::Borrowed(MICROSOFT_TOKEN_URL)),
-        "yahoo" => Ok(std::borrow::Cow::Borrowed(YAHOO_TOKEN_URL)),
-        other => Err(format!(
-            "Unsupported OAuth provider for IMAP account: {other}. Set oauth_token_url in the account record."
-        )),
-    }
-}
 
 async fn load_account_record(
     db: &DbState,
@@ -328,13 +279,13 @@ pub async fn load_both_configs(
 
 #[cfg(test)]
 mod tests {
-    use super::decrypt_if_needed;
+    use ratatoskr_provider_utils::crypto::decrypt_if_needed;
 
     #[test]
     fn decrypt_failure_returns_err() {
         let key = [7_u8; 32];
         let encrypted_like = Some("AAAAAAAAAAAAAAAA:AAAA".to_string());
         let err = decrypt_if_needed(&key, encrypted_like).expect_err("expected decrypt failure");
-        assert!(err.contains("decrypt stored account credential"));
+        assert!(err.contains("decrypt credential"));
     }
 }
