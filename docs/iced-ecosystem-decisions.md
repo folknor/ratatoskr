@@ -1,6 +1,6 @@
 # Iced Ecosystem Decisions
 
-Research and decisions on dependencies, forks, and widget strategies for the iced migration. Conducted March 2026.
+Research and decisions on dependencies, forks, and widget strategies for the iced app. Originally conducted March 2026, updated as upstream iced evolves.
 
 ## Iced Fork: squidowl/iced (Halloy's fork)
 
@@ -20,10 +20,14 @@ We pin to `squidowl/iced` rev `b201e4f` (the `arboard-less-patch` branch). Updat
 
 **API changes from the March 2026 rebase:**
 - `palette::Extended` renamed to `Palette`, old `Palette` renamed to `Seed`
-- `Font::with_name()` → `Font::new()`
+- `Font::with_name()` → `Font::new()` (now a builder: `Font::new("Inter").weight(Weight::Bold).style(Style::Italic)`)
 - `Theme::custom()` now takes `Seed` instead of `Palette`
 - `theme.extended_palette()` → `theme.palette()`
-- New: `font::set_defaults` task, `Color::mix()`, scale factor in window opened event
+- New: `font::set_defaults` task (change default font at runtime, triggers full relayout)
+- New: `font::list` task (enumerate system font families — enables font-picker UI)
+- New: Dynamic font names via `Family::name()` with global string interning (no more `&'static str` restriction)
+- New: `Color::mix()`, scale factor in `Window::Opened` event
+- `graphics::Settings` split into `compositor::Settings` + `renderer::Settings`
 - macOS Tahoe `objc2` panic fix
 
 **Revisit when:** upstream addresses issue #904, or Halloy's patches get upstreamed.
@@ -128,12 +132,13 @@ Six systems were studied to inform our approach:
 
 - **Text:** Inter variable (regular + italic TTFs, SIL OFL 1.1 license)
 - **Icons:** Lucide icon font (custom TTF, ISC license)
-- Both bundled in `iced-proto/fonts/` with license files
+- Both bundled in `crates/app/fonts/` with license files
 - Loaded at startup via `include_bytes!` + `app.font()`
 - `default_font` set to Inter
+- Upstream now supports dynamic fonts (`Font::new()` builder, `font::list` task, `font::set_defaults` task) — could enable a user font-picker in settings without restart
 
 ## Open Questions
 
 - **When to add iced_palace?** When we implement proper text truncation in the thread list.
 - **Will we need to fork iced ourselves?** Halloy covers our needs for now. If we need patches they don't carry (e.g., specific email-related widget behavior), we'd fork from theirs, not upstream.
-- **CEF vs litehtml for email body rendering?** Still needs testing against real email corpus (see iced-migration-research.md).
+- **CEF vs litehtml for email body rendering?** Still needs testing against real email corpus.

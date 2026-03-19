@@ -65,7 +65,7 @@ CTag-based change detection: skip sync entirely when CTag is unchanged. ETag com
 ## Research
 
 **Date**: March 2026
-**Context**: Ground-up implementation for the iced (pure Rust) rewrite. No assumptions about existing Tauri/React schemas or backend. All provider interactions are raw HTTP via `reqwest` (Graph, Google) or `jmap-client` (JMAP).
+**Context**: Implementation for the pure-Rust iced desktop app. Contacts code lives across several crates: `ratatoskr-core` (`crates/core/`) owns contact queries (`db/queries_extra/contacts.rs`, `db/queries_extra/contact_groups.rs`), contact photos (`contact_photos.rs`), and CardDAV sync (`carddav/`). Provider-specific contact sync lives in each provider crate: `crates/graph/` (`contact_sync.rs`, `group_sync.rs`) and `crates/gmail/` (`contacts/`). The `seen-addresses` crate (`crates/seen-addresses/`) handles observed-address ingestion and backfill. The `crates/db/` crate owns migrations and types. All provider interactions are raw HTTP via `reqwest` (Graph, Google) or `jmap-client` (JMAP).
 
 ---
 

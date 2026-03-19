@@ -1,7 +1,7 @@
 # Scheduled Send
 
 **Tier**: 2 — Keeps users from going back
-**Status**: ✅ **Done** — Full implementation with server-native delegation. `scheduled_send.rs`: delegation routing (`determine_send_delegation_for_account` routes Exchange/JMAP to server, Gmail/IMAP to local), overdue handling (auto-send if <24h, flag for review if >24h). Exchange deferred delivery via `PidTagDeferredSendTime` extended property (`schedule_send`, `cancel_scheduled_send`, `reschedule_send` in `graph/ops.rs`). JMAP FUTURERELEASE via `EmailSubmission` with `HOLDUNTIL` parameter (`schedule_send_jmap`, `cancel_scheduled_send_jmap` in `jmap/ops.rs`). Gmail/IMAP use local timer.
+**Status**: ✅ **Done** — Full implementation with server-native delegation. `crates/core/src/scheduled_send.rs`: delegation routing (`determine_send_delegation_for_account` routes Exchange/JMAP to server, Gmail/IMAP to local), overdue handling (auto-send if <24h, flag for review if >24h). DB schema and queries in `crates/db/` (migrations, types) and `crates/core/src/db/queries_extra/compose.rs`. Exchange deferred delivery via `PidTagDeferredSendTime` extended property (`schedule_send`, `cancel_scheduled_send`, `reschedule_send` in `crates/graph/src/ops/mod.rs`). JMAP FUTURERELEASE via `EmailSubmission` with `HOLDUNTIL` parameter (`schedule_send_jmap`, `cancel_scheduled_send_jmap` in `crates/jmap/src/ops.rs`). Gmail/IMAP use local timer.
 
 ---
 

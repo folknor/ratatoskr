@@ -162,8 +162,8 @@ Serde's default behavior is to **silently ignore unknown fields** — exactly wh
 
 ### 9. Implementation Priority
 
-1. ✅ **Phase 1 (defensive)**: Serde default ignore-unknown-fields handles reaction fields. Gmail `is_reaction` flag on messages prevents reaction MIME from rendering as body text.
-2. ✅ **Phase 2 (Gmail read)**: `extract_reaction_emoji()` parses `text/vnd.google.email-reaction+json` MIME parts during sync. `insert_reactions()` resolves target via `In-Reply-To` and populates `message_reactions` with `source = 'gmail_mime'`. Migration v37.
-3. ✅ **Phase 3 (Exchange read)**: `extract_reaction_properties()` reads `OwnerReactionType` and `ReactionsCount` extended properties (GUID `{41F28F13-...}`). `insert_exchange_reactions()` stores owner reaction + count metadata. `refresh_reactions_for_recent_messages()` polls via `$batch` every 5th sync cycle to catch reaction changes missed by delta queries.
-4. ✅ **Phase 4 (Gmail write)**: `send_reaction()` in `gmail/ops.rs` builds correct MIME structure with `build_reaction_mime()` and sends via Gmail API.
+1. ✅ **Phase 1 (defensive)**: Serde default ignore-unknown-fields handles reaction fields. Gmail `is_reaction` flag on messages prevents reaction MIME from rendering as body text. Reaction-only messages excluded from thread aggregates in `sync/src/persistence.rs`.
+2. ✅ **Phase 2 (Gmail read)**: `extract_reaction_emoji()` in `gmail/src/parse.rs` parses `text/vnd.google.email-reaction+json` MIME parts during sync. `insert_reactions()` in `gmail/src/sync/storage.rs` resolves target via `In-Reply-To` and populates `message_reactions` with `source = 'gmail_mime'`. Migration v37 in `db` crate.
+3. ✅ **Phase 3 (Exchange read)**: `extract_reaction_properties()` in `graph/src/parse.rs` reads `OwnerReactionType` and `ReactionsCount` extended properties (GUID `{41F28F13-...}`). `insert_exchange_reactions()` in `graph/src/sync/persistence.rs` stores owner reaction + count metadata. `refresh_reactions_for_recent_messages()` in the same module polls via `$batch` every 5th sync cycle to catch reaction changes missed by delta queries.
+4. ✅ **Phase 4 (Gmail write)**: `send_reaction()` in `gmail/src/ops.rs` builds correct MIME structure with `build_reaction_mime()` and sends via Gmail API.
 5. **Phase 5 (Exchange write)**: Blocked on Microsoft providing a public API. Do not reverse-engineer.

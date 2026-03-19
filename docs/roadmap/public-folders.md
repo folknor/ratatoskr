@@ -1,7 +1,7 @@
 # Public Folders
 
 **Tier**: 1 — Blocks switching from Outlook
-**Status**: 🟡 **In progress** — Minimal EWS SOAP client implemented (FindFolder, GetFolder, FindItem, GetItem, CreateItem), PR_REPLICA_LIST decoder done, EffectiveRights parsing done. Missing: Autodiscover routing, offline sync, IMAP NAMESPACE public folders, UI integration.
+**Status**: 🟡 **In progress** — EWS SOAP client implemented in `crates/graph/src/ews/` (FindFolder, GetFolder, FindItem, GetItem, CreateItem), PR_REPLICA_LIST decoder done, EffectiveRights parsing done. Autodiscover routing implemented in `crates/graph/src/autodiscover.rs`. Offline sync for pinned folders implemented in `crates/graph/src/public_folder_sync.rs`. IMAP NAMESPACE public folders implemented in `crates/imap/src/public_folders.rs`. DB schema in place (`crates/db/`). Missing: UI integration.
 
 ---
 
@@ -37,7 +37,7 @@ Browse public folder hierarchy (lazy-loaded) for Exchange accounts, favorite/pin
 ## Research
 
 **Date**: March 2026
-**Context**: Ground-up implementation research for the iced (pure Rust) rewrite. No assumptions about existing Tauri/React schemas or backend architecture.
+**Context**: Ground-up implementation research for the iced (pure Rust) email client. No assumptions about existing schemas or backend architecture.
 
 ---
 
@@ -214,7 +214,7 @@ Thunderbird (Mozilla) has built a Rust EWS crate: [thunderbird/ews-rs](https://g
 
 **Recommendation**: Option B. A focused EWS client is more maintainable than depending on Thunderbird's crate (which will evolve for Thunderbird's needs, not ours). The shared-mailboxes research already identified `quick-xml` or `roxmltree` for Autodiscover XML parsing (~100-200 lines). Public folders extend this to a larger but still bounded EWS surface.
 
-**Update (March 2026)**: Option B was implemented in `core/src/graph/ews.rs` (~1000 lines). Uses `quick-xml` + `reqwest` with OAuth bearer auth. Covers FindFolder, GetFolder, FindItem (with paging), GetItem, CreateItem, plus `decode_replica_list()` for PR_REPLICA_LIST binary parsing and `EwsEffectiveRights` extraction. The estimate of 1500-2500 lines was conservative — the focused approach came in under 1100 lines.
+**Update (March 2026)**: Option B was implemented in `crates/graph/src/ews/` (~1600 lines across 4 modules: `mod.rs`, `client.rs`, `parsers.rs`, `xml_helpers.rs`). Uses `quick-xml` + `reqwest` with OAuth bearer auth. Covers FindFolder, GetFolder, FindItem (with paging), GetItem, CreateItem, plus `decode_replica_list()` for PR_REPLICA_LIST binary parsing and `EwsEffectiveRights` extraction. Additionally, Autodiscover routing lives in `crates/graph/src/autodiscover.rs` (~600 lines), offline sync for pinned folders in `crates/graph/src/public_folder_sync.rs` (~900 lines), and IMAP NAMESPACE public folders in `crates/imap/src/public_folders.rs` (~800 lines). DB tables (`public_folders`, `public_folder_items`, `public_folder_pins`, `public_folder_sync_state`, `public_folder_content_routing`) are defined in `crates/db/src/db/migrations.rs`.
 
 #### Authentication
 
@@ -449,18 +449,18 @@ Public folders will exist in Exchange Online for years to come. Microsoft cannot
 
 | Area | Difficulty | Impact | Priority | Status |
 |---|---|---|---|---|
-| Minimal EWS client (quick-xml + reqwest) | Medium | Critical (enables everything) | P0 | ✅ Done — `graph/ews.rs`, ~1000 lines. FindFolder, GetFolder, FindItem, GetItem, CreateItem with full XML request/response parsing. |
+| Minimal EWS client (quick-xml + reqwest) | Medium | Critical (enables everything) | P0 | ✅ Done — `crates/graph/src/ews/` (~1600 lines, 4 modules). FindFolder, GetFolder, FindItem, GetItem, CreateItem with full XML request/response parsing. |
 | EWS OAuth token acquisition (reuse existing flow) | Low | Critical | P0 | ✅ Done — reuses existing Graph OAuth bearer tokens. |
 | PR_REPLICA_LIST decoding | Medium | Medium (correctness) | P1 | ✅ Done — `decode_replica_list()` extracts content mailbox GUIDs from binary extended property. |
 | EffectiveRights permission checking | Low | High | P1 | ✅ Done — `EwsEffectiveRights` struct parsed from FindFolder/GetFolder responses. |
-| Autodiscover for public folder routing | Medium | Critical | P0 | ❌ Not started — need GetUserSettings SOAP for hierarchy routing headers + POX Autodiscover for content routing. |
-| FindFolder hierarchy browsing (lazy-load) | Medium | Critical | P0 | 🟡 API ready — FindFolder operation implemented, but no lazy-load UI or hierarchy caching yet. |
-| FindItem for folder contents | Medium | Critical | P0 | 🟡 API ready — FindItem operation implemented with paging, but no sync loop or local storage yet. |
-| Pin/favorite folders to sidebar | Low | Critical for UX | P0 | ❌ Not started |
-| Offline sync for pinned folders | Medium-High | High | P1 | ❌ Not started |
+| Autodiscover for public folder routing | Medium | Critical | P0 | ✅ Done — `crates/graph/src/autodiscover.rs` (~600 lines). `discover_public_folder_routing()` for hierarchy headers, `discover_content_mailbox()` for content routing, `construct_replica_smtp()` for GUID-to-SMTP. |
+| FindFolder hierarchy browsing (lazy-load) | Medium | Critical | P0 | 🟡 API ready — FindFolder operation implemented, `browse_public_folders()` in `crates/graph/src/public_folder_sync.rs`. DB caching via `public_folders` table. No lazy-load UI yet. |
+| FindItem for folder contents | Medium | Critical | P0 | ✅ Done — FindItem with paging implemented. `sync_pinned_public_folder()` and `sync_all_pinned_folders()` in `crates/graph/src/public_folder_sync.rs` handle sync loop with local storage in `public_folder_items` table. |
+| Pin/favorite folders to sidebar | Low | Critical for UX | P0 | 🟡 Backend done — `pin_public_folder()` / `unpin_public_folder()` in `crates/graph/src/public_folder_sync.rs`, `public_folder_pins` DB table. No sidebar UI yet. |
+| Offline sync for pinned folders | Medium-High | High | P1 | ✅ Done — `crates/graph/src/public_folder_sync.rs` (~900 lines). Timestamp-based polling, deletion scan throttled to 1hr intervals, content routing cache in `public_folder_content_routing` table. |
 | Mail-enabled folder reply/forward | Medium | High | P1 | 🟡 API ready — CreateItem operation implemented. |
 | CreateItem (post to public folder) | Low | Medium | P2 | 🟡 API ready — CreateItem operation implemented. |
-| IMAP NAMESPACE discovery | Low | Low-Medium (self-hosted only) | P2 | ❌ Not started |
-| IMAP shared namespace folder access | Low | Low-Medium | P2 | ❌ Not started |
+| IMAP NAMESPACE discovery | Low | Low-Medium (self-hosted only) | P2 | ✅ Done — `crates/imap/src/public_folders.rs` (~800 lines). `discover_imap_public_folders()` uses NAMESPACE + LIST, `check_folder_rights()` uses MYRIGHTS (RFC 4314). |
+| IMAP shared namespace folder access | Low | Low-Medium | P2 | ✅ Done — `sync_imap_public_folder()` in `crates/imap/src/public_folders.rs`. Bridges to provider-agnostic `public_folders` DB table. |
 
-The critical path is: EWS client + Autodiscover + FindFolder + FindItem + pin UX. This gives users the ability to browse and read public folders. Everything else layers on top.
+The backend critical path is complete: EWS client, Autodiscover routing, FindFolder browsing, FindItem sync, pin/unpin, offline sync, and IMAP NAMESPACE support are all implemented across `crates/graph/` and `crates/imap/`. The remaining work is UI integration in `crates/app/`: public folder browser panel, sidebar pins, and folder content views.

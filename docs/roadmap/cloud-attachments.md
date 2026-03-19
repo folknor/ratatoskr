@@ -1,7 +1,7 @@
 # Cloud Attachment Linking (OneDrive / Google Drive)
 
 **Tier**: 1 — Blocks switching from Outlook
-**Status**: ⚠️ **Partially implemented** — Google Drive upload (resumable chunked upload via Drive API v3, `drive.file` OAuth scope, sharing permissions with `anyone` or `domain` scoping, web view link retrieval) is implemented in `core/src/gmail/gdrive.rs`. OneDrive upload (resumable 320 KiB-aligned chunked upload via Graph API, `Ratatoskr Attachments` folder, `organization`-scoped sharing links, `referenceAttachment` creation via beta endpoint) is implemented in `core/src/graph/onedrive.rs` and `core/src/graph/ops.rs`. Raw reqwest is used for both providers (no SDK crate). **Remaining**: incoming cloud link detection (URL pattern matching), UI for cloud attachment compose flow, offline upload queue, JMAP/IMAP graceful degradation, `cloud_attachments` DB table.
+**Status**: ⚠️ **Partially implemented** — Google Drive upload (resumable chunked upload via Drive API v3, `drive.file` OAuth scope, sharing permissions with `anyone` or `domain` scoping, web view link retrieval) is implemented in the `ratatoskr-gmail` crate (`crates/gmail/src/gdrive.rs`). OneDrive upload (resumable 320 KiB-aligned chunked upload via Graph API, `Ratatoskr Attachments` folder, `organization`-scoped sharing links, `referenceAttachment` creation via beta endpoint) is implemented in the `ratatoskr-graph` crate (`crates/graph/src/onedrive.rs` and `crates/graph/src/ops.rs`). Cloud attachment orchestration logic lives in `crates/core/src/cloud_attachments.rs`. Raw reqwest is used for both providers (no SDK crate). **Remaining**: incoming cloud link detection (URL pattern matching), UI for cloud attachment compose flow, offline upload queue, JMAP/IMAP graceful degradation, `cloud_attachments` DB table.
 
 ---
 
@@ -333,7 +333,7 @@ When a cloud link is detected, we optionally fetch metadata to display a rich at
 
 **Verdict**: Neither crate is a clear win. `graph-rs-sdk` is comprehensive but heavy, has build issues, and pulls in webview dependencies we do not want (Ratatoskr uses iced, not webview). `onedrive-api` is lighter but does not clearly cover the `createLink` endpoint we need for sharing.
 
-**Recommendation**: Use **raw reqwest** against the Graph API, same as our existing Exchange provider. We already have Graph API authentication, token refresh, and request infrastructure in `ratatoskr-core`. Adding OneDrive upload + sharing is a handful of endpoints — the overhead of an SDK crate is not justified. The upload session flow is ~100 lines of Rust (create session, loop uploading chunks, handle resume). The sharing link call is a single POST.
+**Recommendation**: Use **raw reqwest** against the Graph API, same as our existing Exchange provider. We already have Graph API authentication, token refresh, and request infrastructure in the `ratatoskr-graph` crate (`crates/graph/`). Adding OneDrive upload + sharing is a handful of endpoints — the overhead of an SDK crate is not justified. The upload session flow is ~100 lines of Rust (create session, loop uploading chunks, handle resume). The sharing link call is a single POST.
 
 #### Google Drive
 
@@ -479,7 +479,7 @@ When the user composes offline with a large attachment destined for cloud upload
 
 ~~This is the Tier 1 blocker. Enterprise Outlook users constantly send and receive OneDrive/SharePoint links.~~
 
-1. **Outgoing**: ✅ Upload via Graph API resumable upload to `Ratatoskr Attachments` folder is implemented (`core/src/graph/onedrive.rs`). Creates `organization`-scoped `view` sharing links via `createLink`. Creates `referenceAttachment` on draft messages via the beta endpoint (`core/src/graph/ops.rs`). Uses raw reqwest against Graph API — no SDK crate.
+1. **Outgoing**: ✅ Upload via Graph API resumable upload to `Ratatoskr Attachments` folder is implemented (`crates/graph/src/onedrive.rs`). Creates `organization`-scoped `view` sharing links via `createLink`. Creates `referenceAttachment` on draft messages via the beta endpoint (`crates/graph/src/ops.rs`). Uses raw reqwest against Graph API — no SDK crate.
 
 2. **Incoming**: ❌ Not started. Detect OneDrive/SharePoint URLs in HTML body via regex. Fetch `driveItem` metadata via the Graph sharing API for enriched display. Fall back to link text + generic icon.
 
@@ -487,7 +487,7 @@ When the user composes offline with a large attachment destined for cloud upload
 
 #### Phase 2: Google Drive for Gmail accounts — ✅ upload done
 
-1. **Outgoing**: ✅ Upload via resumable chunked upload to Drive is implemented (`core/src/gmail/gdrive.rs`). Creates sharing permissions with `anyone` or `domain` scoping. Retrieves web view link for insertion into message body. Uses raw reqwest — `google-drive3` crate was not needed. The `drive.file` OAuth scope has been added to the Google OAuth flow (`src/oauth.rs`).
+1. **Outgoing**: ✅ Upload via resumable chunked upload to Drive is implemented (`crates/gmail/src/gdrive.rs`). Creates sharing permissions with `anyone` or `domain` scoping. Retrieves web view link for insertion into message body. Uses raw reqwest — `google-drive3` crate was not needed. The `drive.file` OAuth scope has been added to the Google OAuth flow (`crates/core/src/oauth.rs`).
 
 2. **Incoming**: ❌ Not started. Detect `drive.google.com` / `docs.google.com` URLs. Fetch file metadata via Drive API for enrichment.
 

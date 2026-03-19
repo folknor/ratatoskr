@@ -308,12 +308,12 @@ During Exchange message sync (beta endpoint):
 
 ### 9. Implementation Plan
 
-**Phase 1: Display (read-only)** — ✅ Done (`core/src/mentions.rs`, `core/src/graph/mentions.rs`, migration v39)
-1. ✅ During Exchange sync, `mentionsPreview.isMentioned` extracted in `graph/parse.rs` and stored in `messages.is_mentioned` column
-2. ✅ `mentions` table created (message_id, account_id, mentioned_address, etc.) with upsert on conflict
-3. ✅ Lazy-load mention details via `fetch_and_store_mentions()` — calls `GET /beta/me/messages/{id}?$expand=mentions` and upserts into DB
-4. ✅ HTML body correlation via `correlate_mentions_in_html()` — regex matches `<a href="mailto:...">` against mentions table, returns `MentionAnnotation` with byte offsets for styling
-5. ✅ Send mentions via `graph/ops.rs` — `send_via_draft()` accepts `mentions: &[(String, String)]` (name, address pairs) and includes them in the beta API `sendMail` request
+**Phase 1: Display (read-only)** — Done (`crates/core/src/mentions.rs`, `crates/graph/src/mentions.rs`, migration v40 in `crates/db/src/db/migrations.rs`)
+1. During Exchange sync, `mentionsPreview.isMentioned` extracted in `crates/graph/src/parse.rs` and stored in `messages.is_mentioned` column
+2. `mentions` table created (message_id, account_id, mentioned_address, etc.) with upsert on conflict
+3. Lazy-load mention details via `fetch_and_store_mentions()` in `crates/graph/src/mentions.rs` — calls `GET /beta/me/messages/{id}?$expand=mentions` and upserts into DB
+4. HTML body correlation via `correlate_mentions_in_html()` in `crates/core/src/mentions.rs` — regex matches `<a href="mailto:...">` against mentions table, returns `MentionAnnotation` with byte offsets for styling
+5. Send mentions via `crates/graph/src/ops/send.rs` — `send_via_draft()` accepts `mentions: &[(String, String)]` (name, address pairs) and includes them in the beta API request using the beta endpoint
 
 **Phase 2: Compose**
 1. Implement @-autocomplete trigger detection in the compose `text_editor`

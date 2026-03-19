@@ -1,7 +1,7 @@
 # BIMI (Brand Indicators for Message Identification)
 
 **Tier**: 3 — Differentiators and polish
-**Status**: ✅ **Phase 1 complete** — DNS lookup, SVG fetch/validation/rasterization, DB caching, LRU, cache warming all implemented in `core/src/bimi.rs`
+**Status**: ✅ **Phase 1 complete** — DNS lookup, SVG fetch/validation/rasterization, DB caching, LRU, cache warming all implemented in `crates/core/src/bimi.rs`
 
 ---
 
@@ -261,7 +261,7 @@ For Gmail, JMAP (Fastmail): decode base64 SVG from header, rasterize, cache by d
 
 ### Implementation Plan
 
-**Phase 1 (ship with iced MVP)**: ✅ Done — `core/src/bimi.rs`, migration v38
+**Phase 1 (ship with iced MVP)**: ✅ Done — `crates/core/src/bimi.rs`, migration v38 (`crates/db/src/db/migrations.rs`)
 - ✅ Parse `Authentication-Results` for `dmarc=pass` — `dmarc_passed()` string check
 - ✅ Check `BIMI-Indicator` header first — `decode_bimi_indicator()` base64 decode shortcut
 - ✅ DNS lookup via hickory-resolver — `lookup_bimi_dns()` with org-domain fallback

@@ -28,10 +28,10 @@
 ## Work
 
 - ✅ DB schema extended with sync columns (`server_id`, `server_html_hash`, `source`, `last_synced_at`, `is_reply_default`, `body_text`)
-- ✅ Gmail `sendAs` signature fetch — pulled on initial sync and delta sync (`sync_signatures` in `gmail/sync.rs`)
-- ✅ Gmail bidirectional sync — local edits pushed via `update_send_as_signature`, conflict resolution by server HTML hash
-- ✅ JMAP Identity signature sync — `sync_jmap_identity_signatures` in `jmap/signatures.rs`, upserts `htmlSignature`/`textSignature` keyed by `(account_id, server_id)`
-- ✅ Inline image handling — `provider/signature_images.rs` extracts base64 data-URIs and CID references from signature HTML, deduplicates via xxh3, stores in inline image store
+- ✅ Gmail `sendAs` signature fetch — pulled on initial sync and delta sync (`sync_signatures` in `crates/gmail/src/sync/labels.rs`)
+- ✅ Gmail bidirectional sync — local edits pushed via `update_send_as_signature` (`crates/gmail/src/api.rs`), conflict resolution by server HTML hash
+- ✅ JMAP Identity signature sync — `sync_jmap_identity_signatures` in `crates/jmap/src/signatures.rs`, upserts `htmlSignature`/`textSignature` keyed by `(account_id, server_id)`
+- ✅ Inline image handling — `crates/provider-utils/src/signature_images.rs` extracts base64 data-URIs and CID references from signature HTML, deduplicates via xxh3, stores in inline image store
 - ⬚ Exchange — no public Graph API exists for roaming signatures (see Research §1–2); sent-mail heuristic deferred to post-MVP
 - ⬚ Signature placement in compose (iced UI work)
 
@@ -116,7 +116,7 @@ With full `SendAs` resource in the body.
 
 #### Existing codebase support
 
-The `GmailSendAs` struct in `core/src/gmail/types.rs` already deserializes the signature field. The `send_as_aliases` table has a `signature_id` FK pointing to the `signatures` table. On first sync, extract the `signature` HTML from the Gmail API response and insert it into the local `signatures` table.
+The `GmailSendAs` struct in `crates/gmail/src/types.rs` already deserializes the signature field. The `send_as_aliases` table has a `signature_id` FK pointing to the `signatures` table. On first sync, extract the `signature` HTML from the Gmail API response and insert it into the local `signatures` table.
 
 #### Required OAuth scope
 

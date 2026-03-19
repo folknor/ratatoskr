@@ -1,7 +1,7 @@
 # IMAP CONDSTORE/QRESYNC (RFC 7162)
 
 **Tier**: 1 — Blocks switching from Outlook
-**Status**: ✅ **Phases 1-2 complete, Phase 3 blocked** — Full CONDSTORE implementation: capability detection and QRESYNC negotiation (`connection.rs::negotiate_condstore_qresync`), `select_condstore()` for HIGHESTMODSEQ tracking, fast-path skip when modseq unchanged, `CHANGEDSINCE` flag sync when modseq changes, modseq persisted in `folder_sync_state`, HIGHESTMODSEQ reset detection (server modseq went backwards). iCloud QRESYNC workaround implemented (detects missing `ENABLED` response, falls back to CONDSTORE-only). UID-based deletion detection without QRESYNC implemented (`imap_delta.rs::run_deletion_detection`), throttled per-folder. Phase 3 (QRESYNC VANISHED parsing) blocked on upstream async-imap: https://github.com/chatmail/async-imap/issues/130
+**Status**: ✅ **Phases 1-2 complete, Phase 3 blocked** — Full CONDSTORE implementation in `crates/imap/`: capability detection and QRESYNC negotiation (`connection.rs::negotiate_condstore_qresync`), HIGHESTMODSEQ tracking via SELECT, fast-path skip when modseq unchanged, `CHANGEDSINCE` flag sync when modseq changes, modseq persisted in `folder_sync_state`, HIGHESTMODSEQ reset detection (server modseq went backwards). iCloud QRESYNC workaround implemented (detects missing `ENABLED` response, falls back to CONDSTORE-only). UID-based deletion detection without QRESYNC implemented (`imap_delta.rs::run_deletion_detection`), throttled per-folder. Phase 3 (QRESYNC VANISHED parsing) blocked on upstream async-imap: https://github.com/chatmail/async-imap/issues/130
 
 ---
 
@@ -73,30 +73,31 @@ UIDVALIDITY is the guard rail for the entire system. When UIDVALIDITY changes (m
 
 In the QRESYNC SELECT flow, if the client sends a stale UIDVALIDITY, the server silently ignores the QRESYNC parameters and returns a fresh SELECT response with the new UIDVALIDITY. The client detects this by comparing UIDVALIDITY values and triggers a full resync.
 
-Our codebase already handles UIDVALIDITY changes in `imap_delta.rs` (`process_folder_delta` triggers full resync when `delta.uidvalidity_changed` is true). This logic remains valid for CONDSTORE — we just need to additionally clear the cached HIGHESTMODSEQ.
+Our codebase already handles UIDVALIDITY changes in `crates/imap/src/imap_delta.rs` (`process_folder_delta` triggers full resync when `delta.uidvalidity_changed` is true). This logic remains valid for CONDSTORE — we just need to additionally clear the cached HIGHESTMODSEQ.
 
 ### Current codebase state
 
-The groundwork for CONDSTORE exists but is incomplete:
+CONDSTORE is fully implemented (Phases 1-2). All IMAP CONDSTORE/QRESYNC code lives in the `crates/imap/` crate, with DB schema in `crates/db/` and DB types shared via `ratatoskr-db`.
 
-**What's already in place:**
-- `ImapFolderStatus` struct has `highest_modseq: Option<u64>` (in `core/src/imap/types.rs`)
+**Foundation (in place since early development):**
+- `ImapFolderStatus` struct has `highest_modseq: Option<u64>` (in `crates/imap/src/types.rs`)
 - `async-imap` parses `HIGHESTMODSEQ` from SELECT responses into `Mailbox.highest_modseq`
-- The `folder_sync_state` table has a `modseq INTEGER` column (migration v14 in `core/src/db/migrations.rs`)
-- `ImapFolderStatus` is populated with `highest_modseq` on every SELECT in `client.rs` (lines 105, 447, 664, 723)
-- The DB types (`DbFolderSyncState`) include `modseq: Option<i64>`
+- The `folder_sync_state` table has a `modseq INTEGER` column (migration in `crates/db/src/db/migrations.rs`)
+- `ImapFolderStatus` is populated with `highest_modseq` on every SELECT across `crates/imap/src/client/` (in `mod.rs`, `commands.rs`, and `sync.rs`)
+- The DB types (`DbFolderSyncState` in `crates/db/src/db/types.rs`) include `modseq: Option<i64>`
 
-**What's not connected:**
-- `FolderSyncState` in `pipeline.rs` stores the modseq column as `_modseq` (underscore prefix = unused)
-- `upsert_folder_sync_state()` hardcodes `modseq = NULL` on every write
-- No CONDSTORE capability detection — `CAPABILITY` response is never inspected for `CONDSTORE` or `QRESYNC`
-- No call to `select_condstore()` — all SELECTs use plain `session.select()`
-- No CHANGEDSINCE FETCH — delta sync uses `UID SEARCH last_uid+1:*` (new UIDs only, no flag changes)
-- No VANISHED handling — expunge detection doesn't exist at all
-- No flag-only sync path — delta sync always fetches `BODY.PEEK[]` for every message
-- `delta_check_folders()` and `fetch_new_uids()` only look for new UIDs, never for changed or deleted messages
+**What's been implemented (Phases 1-2 complete):**
+- CONDSTORE/QRESYNC capability detection and negotiation (`crates/imap/src/connection.rs::negotiate_condstore_qresync`) — probes CAPABILITY for `CONDSTORE`/`QRESYNC`, sends `ENABLE QRESYNC` when available, detects iCloud's missing `ENABLED` response and falls back to CONDSTORE-only
+- `FolderSyncState` in `crates/imap/src/sync_pipeline.rs` stores `modseq: Option<u64>` (actively used)
+- `upsert_folder_sync_state()` in `crates/imap/src/sync_pipeline.rs` writes the server's HIGHESTMODSEQ into `folder_sync_state.modseq`
+- `delta_check_folders()` in `crates/imap/src/client/sync.rs` implements CONDSTORE fast-path: compares cached modseq vs server HIGHESTMODSEQ, skips UID SEARCH when unchanged, detects modseq reset (server < cached)
+- CHANGEDSINCE flag sync in `crates/imap/src/imap_delta.rs::process_folder_delta` — when modseq changed, issues `UID FETCH ... (CHANGEDSINCE <cached>)` for efficient flag diff
+- `fetch_flags_changedsince()` in `crates/imap/src/client/commands.rs` — raw IMAP command for CHANGEDSINCE FETCH
+- `apply_flag_changes()` in `crates/imap/src/sync_pipeline.rs` — batch-updates message flags from CHANGEDSINCE results
+- Non-CONDSTORE fallback: `sync_flags_without_condstore()` in `crates/imap/src/imap_delta.rs` — periodic full `UID FETCH 1:* (FLAGS)` for servers without CONDSTORE (Exchange IMAP, Courier, hMailServer)
+- UID-based deletion detection: `run_deletion_detection()` in `crates/imap/src/imap_delta.rs` — throttled per-folder `UID SEARCH ALL` diffed against local UIDs
 
-**Gap:** The current delta sync (`imap_delta.rs`) detects new messages and UIDVALIDITY changes but completely ignores flag changes and message deletions. A message marked as read on another client will never sync. A message deleted on the server will persist locally forever. CONDSTORE/QRESYNC addresses both gaps.
+**Remaining gap (Phase 3):** QRESYNC VANISHED parsing is blocked on upstream async-imap (https://github.com/chatmail/async-imap/issues/130). Without VANISHED response support, deletion detection uses the UID-comparison fallback instead of the more efficient QRESYNC SELECT single-round-trip approach.
 
 ### Rust IMAP crate CONDSTORE support
 
@@ -121,7 +122,7 @@ The groundwork for CONDSTORE exists but is incomplete:
 3. For CHANGEDSINCE FETCH, use `run_command()` to send `UID FETCH 1:* (FLAGS) (CHANGEDSINCE <modseq>)` and parse the response stream manually.
 4. QRESYNC is impractical — VANISHED response parsing would require extending `imap-proto` or building a custom parser for the raw response bytes.
 
-This hybrid approach (typed API for SELECT, raw commands for CHANGEDSINCE) is the same pattern used by Delta Chat when they need IMAP features beyond `async-imap`'s typed API, and is consistent with our existing `raw.rs` fallback pattern.
+This hybrid approach (typed API for SELECT, raw commands for CHANGEDSINCE) is the same pattern used by Delta Chat when they need IMAP features beyond `async-imap`'s typed API, and is consistent with our existing `crates/imap/src/raw.rs` fallback pattern.
 
 #### imap-codec / imap-types (duesee — v2.0.0-alpha)
 
@@ -191,7 +192,7 @@ MOVE is relevant because it interacts with CONDSTORE/QRESYNC mod-sequence tracki
 - Servers supporting UIDPLUS SHOULD send `COPYUID` in the MOVE response, giving the client the new UIDs in the destination mailbox.
 - Without MOVE (copy+delete+expunge), the source mailbox sees a flag change (`\Deleted`) followed by expunge, and the destination sees a new message. With CONDSTORE, both changes are tracked by mod-sequence. Without CONDSTORE, the client must detect both independently.
 
-Our `move_messages()` in `client.rs` already tries MOVE first and falls back to COPY+DELETE+EXPUNGE. This is correct for CONDSTORE — the mod-sequence increments will be captured by CHANGEDSINCE on next sync regardless of which path was taken.
+Our `move_messages()` in `crates/imap/src/client/commands.rs` already tries MOVE first and falls back to COPY+DELETE+EXPUNGE. This is correct for CONDSTORE — the mod-sequence increments will be captured by CHANGEDSINCE on next sync regardless of which path was taken.
 
 ### IDLE interaction
 
@@ -201,11 +202,11 @@ The RFC does not mandate that IDLE notifications include MODSEQ data. In practic
 - However, EXPUNGE notifications during IDLE do NOT include MODSEQ. With QRESYNC enabled, the server sends VANISHED instead of EXPUNGE, which includes UIDs (but still not MODSEQ).
 - EXISTS notifications (new messages) during IDLE never include MODSEQ. The client must issue a FETCH after leaving IDLE to get the new message's metadata.
 
-**Practical impact for Ratatoskr:** Our IDLE handler currently exits IDLE and does a delta check on any notification. With CONDSTORE, the delta check should use CHANGEDSINCE instead of UID SEARCH for flag changes. No architectural change needed — just swap the implementation inside `imap_delta_sync`.
+**Practical impact for Ratatoskr:** Our IDLE handler currently exits IDLE and does a delta check on any notification. With CONDSTORE, the delta check uses CHANGEDSINCE instead of UID SEARCH for flag changes. This is already implemented in `crates/imap/src/imap_delta.rs`.
 
 ### Data model for mod-seq tracking
 
-The schema is already in place. The `folder_sync_state` table has:
+The schema is in place (defined in `crates/db/src/db/migrations.rs`). The `folder_sync_state` table has:
 
 ```sql
 CREATE TABLE folder_sync_state (
@@ -213,37 +214,32 @@ CREATE TABLE folder_sync_state (
   folder_path TEXT NOT NULL,
   uidvalidity INTEGER,
   last_uid INTEGER DEFAULT 0,
-  modseq INTEGER,            -- ← this column exists but is always NULL
+  modseq INTEGER,                -- ← populated with server's HIGHESTMODSEQ
   last_sync_at INTEGER,
+  last_deletion_check_at INTEGER, -- ← throttles UID-based deletion detection
   PRIMARY KEY (account_id, folder_path)
 );
 ```
 
-**Changes needed:**
+**Status of these changes (all complete):**
 
-1. **Start writing `modseq`.** `pipeline::upsert_folder_sync_state()` currently hardcodes `modseq = NULL`. Add a `modseq: Option<u64>` parameter and write the server's HIGHESTMODSEQ from SELECT responses.
+1. **modseq is written.** `upsert_folder_sync_state()` in `crates/imap/src/sync_pipeline.rs` accepts `modseq: Option<u64>` and writes the server's HIGHESTMODSEQ from SELECT responses.
 
-2. **Rename `_modseq` to `modseq`.** In `pipeline::FolderSyncState`, the field is prefixed with `_` to suppress unused warnings. Remove the prefix and use it in delta sync logic.
+2. **`modseq` field is active.** `FolderSyncState` in `crates/imap/src/sync_pipeline.rs` has `modseq: Option<u64>` (actively read and used in delta sync logic). Only `_last_sync_at` remains underscore-prefixed.
 
-3. **Add `capabilities` to connection state.** Need to remember whether the server supports CONDSTORE and/or QRESYNC. This could be a per-session flag set during initial CAPABILITY check, or stored persistently per account. Per-session is simpler and more correct (capabilities can change with server upgrades).
+3. **Capability state is per-session.** `CondstoreQresyncState` in `crates/imap/src/connection.rs` tracks `condstore: bool` and `qresync: bool`, negotiated via `negotiate_condstore_qresync()` after authentication.
 
-4. **No new tables needed.** Per-message mod-sequences do not need to be stored locally — we only need the mailbox-level HIGHESTMODSEQ for CHANGEDSINCE queries. The server does the heavy lifting of tracking which messages changed.
+4. **No new tables needed.** Per-message mod-sequences are not stored locally — only the mailbox-level HIGHESTMODSEQ for CHANGEDSINCE queries. A `last_deletion_check_at` column was added to `folder_sync_state` for throttling UID-based deletion detection.
 
 ### Fallback strategy for servers without CONDSTORE
 
 For servers without CONDSTORE (Exchange IMAP via non-Graph path, Courier, hMailServer, miscellaneous corporate servers), the current UID-based approach must remain:
 
-**Current approach (what we have):**
-- Delta check: `UID SEARCH last_uid+1:*` to find new messages
-- UIDVALIDITY comparison to detect mailbox recreation
-- No flag change detection
-- No deletion detection
-
-**Improved UID-based fallback (without CONDSTORE):**
-1. **New messages:** `UID SEARCH last_uid+1:*` — same as current.
-2. **Flag changes:** Periodic `UID FETCH 1:* (FLAGS)` and diff against local DB. For a 50k-message mailbox this returns ~50k small responses (UID + flags only, no bodies). Expensive but unavoidable without CONDSTORE.
-3. **Deletions:** `UID SEARCH ALL` returns all existing UIDs. Diff against locally cached UIDs to find deletions. Same cost concern as flag sync.
-4. **Frequency:** Flag sync and deletion detection can run at lower frequency (every 5-10 minutes) than new-message detection (every 1-2 minutes or via IDLE).
+**Current fallback implementation (in `crates/imap/src/imap_delta.rs`):**
+1. **New messages:** `UID SEARCH last_uid+1:*` to find new messages.
+2. **UIDVALIDITY comparison** to detect mailbox recreation.
+3. **Flag changes:** `sync_flags_without_condstore()` performs periodic `UID FETCH 1:* (FLAGS)` and diffs against local DB. For a 50k-message mailbox this returns ~50k small responses (UID + flags only, no bodies). Expensive but unavoidable without CONDSTORE. Throttled via `NON_CONDSTORE_FLAG_SYNC_INTERVAL_SECS`.
+4. **Deletions:** `run_deletion_detection()` performs `UID SEARCH ALL`, diffs against locally cached UIDs. Throttled to 10-minute intervals per folder via `last_deletion_check_at`.
 
 This is the same approach every IMAP client without CONDSTORE uses. The cost is O(N) per folder where N = message count, vs O(delta) with CONDSTORE.
 
@@ -267,7 +263,7 @@ This is the same approach every IMAP client without CONDSTORE uses. The cost is 
 
 **CONDSTORE without HIGHESTMODSEQ:**
 - Per RFC 7162, a server that doesn't return HIGHESTMODSEQ in SELECT does not support persistent mod-sequences for that mailbox, even if CONDSTORE is in the capability list. Must check for HIGHESTMODSEQ presence, not just CONDSTORE capability.
-- Our `ImapFolderStatus.highest_modseq` is already `Option<u64>`, so this check is natural: if `highest_modseq.is_none()`, fall back to UID comparison.
+- Our `ImapFolderStatus.highest_modseq` (in `crates/imap/src/types.rs`) is already `Option<u64>`, so this check is natural: if `highest_modseq.is_none()`, fall back to UID comparison.
 
 **Mod-sequence resets:**
 - A server MAY reset mod-sequences, in which case UIDVALIDITY will also change. Our existing UIDVALIDITY change detection handles this automatically.
@@ -275,32 +271,14 @@ This is the same approach every IMAP client without CONDSTORE uses. The cost is 
 
 ### Recommended implementation plan
 
-**Phase 1 — CONDSTORE flag sync (medium effort, high value):**
-1. On connect, detect `CONDSTORE` in CAPABILITY response.
-2. If supported, use `select_condstore()` instead of `select()`.
-3. Store `highest_modseq` from SELECT response into `folder_sync_state.modseq`.
-4. In delta sync, compare cached modseq vs server's HIGHESTMODSEQ:
-   - If equal: skip flag sync entirely (nothing changed).
-   - If server's is higher: issue `UID FETCH 1:* (FLAGS) (CHANGEDSINCE <cached>)` via `run_command()`.
-   - Parse the response to extract UID + FLAGS pairs, update local DB.
-   - Update cached modseq to server's HIGHESTMODSEQ.
-5. Continue using `UID SEARCH last_uid+1:*` for new message detection (orthogonal to CONDSTORE).
+**Phase 1 — CONDSTORE flag sync: COMPLETE.**
+Implemented in `crates/imap/src/connection.rs` (capability detection, QRESYNC negotiation), `crates/imap/src/client/sync.rs` (CONDSTORE fast-path in `delta_check_folders`), `crates/imap/src/client/commands.rs` (`fetch_flags_changedsince`), `crates/imap/src/imap_delta.rs` (CHANGEDSINCE flag sync in `process_folder_delta`), and `crates/imap/src/sync_pipeline.rs` (modseq persistence, `apply_flag_changes`). Non-CONDSTORE fallback via `sync_flags_without_condstore()` handles servers without CONDSTORE support.
 
-This phase uses only `select_condstore()` (typed API) and `run_command()` (raw), both available in async-imap today. No parser extensions needed.
+**Phase 2 — Deletion detection: COMPLETE.**
+UID-based deletion detection without QRESYNC is implemented in `crates/imap/src/imap_delta.rs::run_deletion_detection`. Uses `UID SEARCH ALL` diffed against locally cached UIDs, throttled per-folder (10-minute interval via `last_deletion_check_at` column in `folder_sync_state`).
 
-**Phase 2 — Deletion detection (medium effort, medium value):**
-1. Without QRESYNC: periodic `UID SEARCH ALL` to get current UID set, diff against local cache.
-2. With QRESYNC (if we decide to pursue it): `ENABLE QRESYNC` + SELECT QRESYNC to get VANISHED (EARLIER) in one round trip.
-3. QRESYNC requires extending response parsing beyond what async-imap provides — either via raw response parsing or contributing upstream.
-
-**Phase 3 — QRESYNC full sync (high effort, high value for large mailboxes):**
-1. Detect QRESYNC in CAPABILITY.
-2. Send `ENABLE QRESYNC` via raw command after auth.
-3. Send `SELECT mailbox (QRESYNC (<uidvalidity> <modseq> [<known-uids>]))` via raw command.
-4. Parse VANISHED (EARLIER) responses and FETCH responses from the SELECT response stream.
-5. This requires building a custom response parser or extending `imap-proto`'s parser.
-
-**Recommendation: Start with Phase 1.** It covers the most impactful use case (flag sync, particularly read status) with the least implementation risk. Phase 1 uses existing async-imap APIs and requires no parser work. Phase 2 adds deletion detection. Phase 3 (QRESYNC) should wait until either (a) `imap-codec`'s `ext_condstore_qresync` feature matures, or (b) we hit performance problems that justify building a custom VANISHED parser.
+**Phase 3 — QRESYNC VANISHED parsing: BLOCKED.**
+QRESYNC negotiation is implemented (`ENABLE QRESYNC` with iCloud workaround), but VANISHED response parsing requires upstream async-imap support. Blocked on https://github.com/chatmail/async-imap/issues/130. When unblocked, this would replace the UID-comparison deletion detection with a single-round-trip `SELECT ... (QRESYNC (...))` that returns both flag changes and `VANISHED (EARLIER)` expunge lists. Would also require building a custom VANISHED parser or extending `imap-proto`.
 
 ### Sources
 

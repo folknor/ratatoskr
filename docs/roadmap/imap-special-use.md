@@ -1,7 +1,7 @@
 # IMAP SPECIAL-USE (RFC 6154)
 
 **Tier**: 3 — Differentiators and polish
-**Status**: ✅ **Done** — Full implementation in `imap/parse.rs`: detects `\Sent`, `\Trash`, `\Drafts`, `\Junk`, `\Archive`, `\All`, `\Flagged` attributes from LIST response. Heuristic fallback via `imap_name_to_special_use()` covers 50+ folder name variations across languages. Role mapping in `provider/folder_roles.rs`.
+**Status**: Done -- Full implementation in `crates/imap/src/parse.rs` (`ratatoskr-imap`): detects `\Sent`, `\Trash`, `\Drafts`, `\Junk`, `\Archive`, `\All`, `\Flagged` attributes from LIST response. Heuristic fallback via `imap_name_to_special_use()` covers 50+ folder name variations across languages. Role mapping in `crates/provider-utils/src/folder_roles.rs` (`ratatoskr-provider-utils`).
 
 ---
 
@@ -23,7 +23,7 @@ Check `SPECIAL-USE` capability on LIST response, read `\Trash`/`\Sent`/`\Drafts`
 ## Research
 
 **Date**: March 2026
-**Context**: Feature is fully implemented. This research documents the existing cross-provider folder role unification, evaluates completeness, and identifies minor improvements for the iced migration.
+**Context**: Feature is fully implemented. This research documents the existing cross-provider folder role unification, evaluates completeness, and identifies minor improvements.
 
 ---
 
@@ -77,7 +77,7 @@ NameAttribute::Extension(s) if s.eq_ignore_ascii_case("\\Important") => Some("\\
 
 ### 4. Cross-Provider Folder Role Mapping
 
-The `SystemFolderRole` in `provider/folder_roles.rs` is the unification hub:
+The `SystemFolderRole` in `crates/provider-utils/src/folder_roles.rs` (`ratatoskr-provider-utils`) is the unification hub:
 
 | Internal `label_id` | IMAP `\Attribute` | JMAP `role` | Graph `wellKnownName` | Gmail label |
 |---------------------|-------------------|-------------|----------------------|-------------|
@@ -91,9 +91,9 @@ The `SystemFolderRole` in `provider/folder_roles.rs` is the unification hub:
 | `all-mail` | `\All` | (none) | (none) | `[Gmail]/All Mail` |
 | `IMPORTANT` | `\Important` | `important` | (none) | `IMPORTANT` |
 
-Each provider has a dedicated mapper module converting provider-native folder identity into the shared `label_id` space. The `SYSTEM_FOLDER_ROLES` const table is the single source of truth.
+Each provider has a dedicated mapper module converting provider-native folder identity into the shared `label_id` space: `crates/imap/src/folder_mapper.rs`, `crates/graph/src/folder_mapper.rs`, `crates/jmap/src/mailbox_mapper.rs`. The `SYSTEM_FOLDER_ROLES` const table in `ratatoskr-provider-utils` is the single source of truth.
 
-**For the iced migration**: The entire module lives in `ratatoskr-core` with zero framework dependencies. Carries over unchanged.
+**Current state**: The shared role definitions live in `ratatoskr-provider-utils` and each provider crate owns its own mapper. No framework dependencies anywhere.
 
 ### 5. Heuristic Name Matching
 
@@ -124,16 +124,17 @@ Check overrides *before* attribute/heuristic detection. Expose in settings UI. P
 
 **Priority**: Low. Automatic detection covers the vast majority of cases.
 
-### 7. Iced Migration Impact
+### 7. Current Architecture
 
-**Zero migration work required.** The entire implementation lives in `ratatoskr-core`:
+The implementation is spread across dedicated crates with no framework dependencies:
 
-| Module | Framework deps | Action |
-|--------|---------------|--------|
-| `provider/folder_roles.rs` | None | Carry over unchanged |
-| `imap/parse.rs` | None | Carry over unchanged |
-| `sync/folder_mapper.rs` | None | Carry over unchanged |
-| Provider-specific mappers | None | Carry over unchanged |
+| Module | Crate | Purpose |
+|--------|-------|---------|
+| `crates/provider-utils/src/folder_roles.rs` | `ratatoskr-provider-utils` | `SystemFolderRole` definitions, `SYSTEM_FOLDER_ROLES` table, `imap_name_to_special_use()` heuristic |
+| `crates/imap/src/parse.rs` | `ratatoskr-imap` | `detect_special_use()` — reads RFC 6154 attributes from LIST response |
+| `crates/imap/src/folder_mapper.rs` | `ratatoskr-imap` | Maps IMAP special-use flags to internal label IDs |
+| `crates/graph/src/folder_mapper.rs` | `ratatoskr-graph` | Graph/Exchange folder role mapping |
+| `crates/jmap/src/mailbox_mapper.rs` | `ratatoskr-jmap` | JMAP mailbox role mapping |
 
 **Optional improvements** (all minor):
 1. Add `NameAttribute::Extension` match for `\Important`
