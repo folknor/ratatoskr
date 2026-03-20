@@ -5,9 +5,13 @@
 /// If the header already exists or no `From:` address is found, returns the
 /// bytes unchanged.
 pub fn inject_read_receipt_header(raw: &[u8]) -> Vec<u8> {
-    // Don't add if already present
+    // Don't add if already present — only check the header block (before
+    // the \r\n\r\n separator) to avoid false positives from body content.
     let raw_str = String::from_utf8_lossy(raw);
-    if raw_str
+    let header_block = raw_str
+        .split_once("\r\n\r\n")
+        .map_or(raw_str.as_ref(), |(headers, _)| headers);
+    if header_block
         .lines()
         .any(|line| line.to_ascii_lowercase().starts_with("disposition-notification-to:"))
     {

@@ -310,6 +310,7 @@ pub struct SignatureEditorState {
 #[derive(Debug, Clone)]
 pub struct ContactEditorState {
     pub contact_id: Option<String>,
+    pub account_id: Option<String>,
     pub display_name: String,
     pub email: String,
     pub email2: String,
@@ -933,6 +934,7 @@ impl Settings {
         if let Some(contact) = self.contacts.iter().find(|c| c.id == contact_id) {
             self.contact_editor = Some(ContactEditorState {
                 contact_id: Some(contact.id.clone()),
+                account_id: contact.account_id.clone(),
                 display_name: contact.display_name.clone().unwrap_or_default(),
                 email: contact.email.clone(),
                 email2: contact.email2.clone().unwrap_or_default(),
@@ -950,6 +952,7 @@ impl Settings {
     fn open_new_contact_editor(&mut self) {
         self.contact_editor = Some(ContactEditorState {
             contact_id: None,
+            account_id: None,
             display_name: String::new(),
             email: String::new(),
             email2: String::new(),
@@ -977,7 +980,7 @@ impl Settings {
             phone: non_empty(editor.phone.trim()),
             company: non_empty(editor.company.trim()),
             notes: non_empty(editor.notes.trim()),
-            account_id: None,
+            account_id: editor.account_id.clone(),
             account_color: None,
             groups: Vec::new(),
         };

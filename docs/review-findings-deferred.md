@@ -36,7 +36,12 @@ window position tracking. Acceptable for V1.
 
 ## d650308 — Pop-out compose window
 
-*(All findings in this commit were fixed.)*
+### Reply All cc_addresses not yet available
+`cc_addresses` is not in `ThreadMessage` or `MessageViewState`. Reply
+All currently opens with no Cc recipients (previously it wrongly
+duplicated To recipients into Cc). Proper Reply All requires adding
+`cc_addresses` to both data models and populating from the DB.
+See TODO comments in `crates/app/src/main.rs:2281` and `:2327`.
 
 ---
 

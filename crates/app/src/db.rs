@@ -496,9 +496,10 @@ impl Db {
         thread_ids: Vec<(String, String)>,
     ) -> Result<i64, String> {
         self.with_write_conn(move |conn| {
+            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
             let now = chrono::Utc::now().timestamp();
 
-            let existing_id: Option<i64> = conn
+            let existing_id: Option<i64> = tx
                 .query_row(
                     "SELECT id FROM pinned_searches WHERE query = ?1",
                     params![query],
@@ -507,42 +508,45 @@ impl Db {
                 .ok();
 
             let pinned_id = if let Some(id) = existing_id {
-                conn.execute(
+                tx.execute(
                     "UPDATE pinned_searches SET updated_at = ?1 WHERE id = ?2",
                     params![now, id],
                 )
                 .map_err(|e| e.to_string())?;
                 id
             } else {
-                conn.execute(
+                tx.execute(
                     "INSERT INTO pinned_searches (query, created_at, updated_at)
                      VALUES (?1, ?2, ?2)",
                     params![query, now],
                 )
                 .map_err(|e| e.to_string())?;
-                conn.last_insert_rowid()
+                tx.last_insert_rowid()
             };
 
             // Replace thread snapshot
-            conn.execute(
+            tx.execute(
                 "DELETE FROM pinned_search_threads WHERE pinned_search_id = ?1",
                 params![pinned_id],
             )
             .map_err(|e| e.to_string())?;
 
-            let mut stmt = conn
-                .prepare(
-                    "INSERT INTO pinned_search_threads
-                        (pinned_search_id, thread_id, account_id)
-                     VALUES (?1, ?2, ?3)",
-                )
-                .map_err(|e| e.to_string())?;
-
-            for (thread_id, account_id) in &thread_ids {
-                stmt.execute(params![pinned_id, thread_id, account_id])
+            {
+                let mut stmt = tx
+                    .prepare(
+                        "INSERT INTO pinned_search_threads
+                            (pinned_search_id, thread_id, account_id)
+                         VALUES (?1, ?2, ?3)",
+                    )
                     .map_err(|e| e.to_string())?;
+
+                for (thread_id, account_id) in &thread_ids {
+                    stmt.execute(params![pinned_id, thread_id, account_id])
+                        .map_err(|e| e.to_string())?;
+                }
             }
 
+            tx.commit().map_err(|e| e.to_string())?;
             Ok(pinned_id)
         })
         .await
@@ -558,10 +562,11 @@ impl Db {
         thread_ids: Vec<(String, String)>,
     ) -> Result<(), String> {
         self.with_write_conn(move |conn| {
+            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
             let now = chrono::Utc::now().timestamp();
 
             // Check for a different pinned search with this query
-            let conflict_id: Option<i64> = conn
+            let conflict_id: Option<i64> = tx
                 .query_row(
                     "SELECT id FROM pinned_searches WHERE query = ?1 AND id != ?2",
                     params![query, id],
@@ -569,14 +574,14 @@ impl Db {
                 )
                 .ok();
             if let Some(cid) = conflict_id {
-                conn.execute(
+                tx.execute(
                     "DELETE FROM pinned_searches WHERE id = ?1",
                     params![cid],
                 )
                 .map_err(|e| e.to_string())?;
             }
 
-            conn.execute(
+            tx.execute(
                 "UPDATE pinned_searches
                  SET query = ?1, updated_at = ?2
                  WHERE id = ?3",
@@ -584,25 +589,28 @@ impl Db {
             )
             .map_err(|e| e.to_string())?;
 
-            conn.execute(
+            tx.execute(
                 "DELETE FROM pinned_search_threads WHERE pinned_search_id = ?1",
                 params![id],
             )
             .map_err(|e| e.to_string())?;
 
-            let mut stmt = conn
-                .prepare(
-                    "INSERT INTO pinned_search_threads
-                        (pinned_search_id, thread_id, account_id)
-                     VALUES (?1, ?2, ?3)",
-                )
-                .map_err(|e| e.to_string())?;
-
-            for (thread_id, account_id) in &thread_ids {
-                stmt.execute(params![id, thread_id, account_id])
+            {
+                let mut stmt = tx
+                    .prepare(
+                        "INSERT INTO pinned_search_threads
+                            (pinned_search_id, thread_id, account_id)
+                         VALUES (?1, ?2, ?3)",
+                    )
                     .map_err(|e| e.to_string())?;
+
+                for (thread_id, account_id) in &thread_ids {
+                    stmt.execute(params![id, thread_id, account_id])
+                        .map_err(|e| e.to_string())?;
+                }
             }
 
+            tx.commit().map_err(|e| e.to_string())?;
             Ok(())
         })
         .await

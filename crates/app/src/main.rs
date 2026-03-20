@@ -636,6 +636,9 @@ impl App {
                     // Empty query while in search mode → restore folder view
                     // immediately so the user doesn't see stale search results.
                     if self.thread_list.mode == ui::thread_list::ThreadListMode::Search {
+                        self.clear_pinned_search_context();
+                        self.nav_generation += 1;
+                        self.search_generation += 1;
                         return self.restore_folder_view();
                     }
                 } else {
@@ -2275,12 +2278,15 @@ impl App {
             _ => return Task::none(),
         };
 
+        // TODO: cc_addresses not yet in MessageViewState — pass None
+        // until the data model is extended. Passing to_addresses was wrong
+        // (it duplicated To recipients into Cc).
         let state = ComposeState::new_reply(
             &self.sidebar.accounts,
             mode.clone(),
             mv.from_address.as_deref(),
             mv.from_name.as_deref(),
-            mv.to_addresses.as_deref(),
+            None,
             mv.body_text.as_deref().or(mv.snippet.as_deref()),
             Some(&mv.thread_id),
             Some(&mv.message_id),
@@ -2318,7 +2324,10 @@ impl App {
 
         let to_email = last_message.and_then(|m| m.from_address.as_deref());
         let to_name = last_message.and_then(|m| m.from_name.as_deref());
-        let cc_emails = last_message.and_then(|m| m.to_addresses.as_deref());
+        // TODO: cc_addresses not yet in ThreadMessage — pass None until
+        // the data model is extended. Passing to_addresses here was wrong
+        // (it duplicated To recipients into Cc).
+        let cc_emails: Option<&str> = None;
         let thread_id = selected_thread.map(|t| t.id.as_str());
         let message_id = last_message.map(|m| m.id.as_str());
         let snippet = last_message.and_then(|m| m.snippet.as_deref());

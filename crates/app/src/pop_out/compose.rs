@@ -162,19 +162,21 @@ impl ComposeState {
         // Set subject
         state.subject = mode.prefixed_subject();
 
-        // Add To recipient
-        if let Some(email) = to_email {
-            let label = to_name
-                .filter(|n| !n.is_empty())
-                .unwrap_or(email);
-            let id = state.to.next_token_id();
-            state.to.tokens.push(token_input::Token {
-                id,
-                email: email.to_string(),
-                label: label.to_string(),
-                is_group: false,
-                group_id: None,
-            });
+        // Add To recipient (not for Forward — forward starts with empty To)
+        if !matches!(state.mode, ComposeMode::Forward { .. }) {
+            if let Some(email) = to_email {
+                let label = to_name
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or(email);
+                let id = state.to.next_token_id();
+                state.to.tokens.push(token_input::Token {
+                    id,
+                    email: email.to_string(),
+                    label: label.to_string(),
+                    is_group: false,
+                    group_id: None,
+                });
+            }
         }
 
         // Add Cc recipients for ReplyAll
