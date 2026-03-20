@@ -374,7 +374,9 @@ pub enum Action {
 - Font sizes: H1 = 18px, H2 = 16px, H3 = 14px, body = 13px
 - Block spacing, blockquote border/indent, list marker width constants
 - Drawing helpers: `draw_horizontal_rule()`, `draw_blockquote_border()`,
-  `draw_list_marker()`, `draw_paragraph()`
+  `draw_paragraph()`. `draw_list_marker()` exists but is not wired into the
+  runtime draw path yet (lists currently render as a combined placeholder
+  paragraph).
 
 ### Hit testing and cursor (widget/cursor.rs)
 
@@ -386,8 +388,10 @@ pub enum Action {
   translate to block-local coordinates
 - `selection_block_ranges()` — decompose selection into per-block participation
   (Single/First/Full/Last)
-- `prepare_move_up()` / `prepare_move_down()` — vertical cursor movement with
-  cross-block boundary handling
+- `prepare_move_up()` / `prepare_move_down()` — infrastructure for vertical
+  cursor movement with cross-block boundary handling. These helpers exist and
+  are tested, but the widget currently uses a simpler adjacent-block fallback
+  (see Known limitations).
 
 Hit testing in the Widget's `update()` method uses `ParagraphCache::block_at_y()`
 to find the clicked block, then `Paragraph::hit_test()` on the cached paragraph
@@ -409,8 +413,9 @@ blockquote indent) are accounted for.
 ### Widget trait implementation
 
 - `layout()` — uses ParagraphCache to compute block paragraph layouts
-- `draw()` — iterates blocks: fills paragraphs, draws HR/blockquote/list
-  decorations, renders selection highlight rectangles, draws blinking cursor
+- `draw()` — iterates blocks: fills paragraphs, draws HR/blockquote
+  decorations, renders selection highlight rectangles, draws blinking cursor.
+  List marker drawing is not yet wired in (see Known limitations).
 - `update()` — handles window focus/blink, keyboard events (mapped via
   input::map_key_event), mouse click/drag/release with hit testing
 - `mouse_interaction()` — Text cursor when hovering, NotAllowed when disabled
