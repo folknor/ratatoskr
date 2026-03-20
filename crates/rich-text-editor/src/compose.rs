@@ -56,8 +56,10 @@ pub fn assemble_compose_document(
     // 1. Initial empty paragraph for user content.
     blocks.push(Block::empty_paragraph());
 
-    // 2. Signature (if any).
-    if let Some(sig_html) = signature_html {
+    // 2. Signature (if any, and non-blank).
+    if let Some(sig_html) = signature_html
+        && !is_blank_html(sig_html)
+    {
         sig_sep_index = Some(blocks.len());
         blocks.push(Block::HorizontalRule);
 
@@ -80,6 +82,20 @@ pub fn assemble_compose_document(
         document: Document::from_blocks(blocks),
         signature_separator_index: sig_sep_index,
     }
+}
+
+// ── Helpers ──────────────────────────────────────────────
+
+/// Check whether an HTML string is effectively blank (empty, whitespace-only,
+/// or parses to a document with only empty/whitespace blocks).
+fn is_blank_html(html: &str) -> bool {
+    if html.trim().is_empty() {
+        return true;
+    }
+    let doc = from_html(html);
+    doc.blocks
+        .iter()
+        .all(|b| b.flattened_text().trim().is_empty())
 }
 
 // ── Attribution / forward header builders ───────────────
@@ -119,8 +135,21 @@ pub fn build_forward_header() -> Block {
 /// Insert a signature into an existing document at the given position.
 ///
 /// Inserts a `HorizontalRule` separator followed by the signature blocks.
-/// Returns the index of the separator.
-pub fn insert_signature(document: &mut Document, at_index: usize, signature_html: &str) -> usize {
+/// Returns the index of the separator, or `None` if the signature HTML is
+/// blank/empty.
+///
+/// `at_index` is clamped to the document's block count (inserting at the end
+/// if out of range).
+pub fn insert_signature(
+    document: &mut Document,
+    at_index: usize,
+    signature_html: &str,
+) -> Option<usize> {
+    if is_blank_html(signature_html) {
+        return None;
+    }
+
+    let at_index = at_index.min(document.block_count());
     let sig_doc = from_html(signature_html);
 
     document.insert_block(at_index, Block::HorizontalRule);
@@ -130,7 +159,7 @@ pub fn insert_signature(document: &mut Document, at_index: usize, signature_html
         document.insert_block(at_index + 1 + i, block);
     }
 
-    at_index
+    Some(at_index)
 }
 
 /// Remove a signature region from a document.
@@ -138,15 +167,19 @@ pub fn insert_signature(document: &mut Document, at_index: usize, signature_html
 /// Removes blocks from `separator_index` up to (but not including)
 /// `end_index`. If `end_index` is `None`, removes to the end of the document
 /// (but keeps at least one block).
+///
+/// Out-of-range indices are clamped to the document's block count.
 pub fn remove_signature(
     document: &mut Document,
     separator_index: usize,
     end_index: Option<usize>,
 ) {
-    let end = end_index.unwrap_or(document.block_count());
+    let count = document.block_count();
+    let start = separator_index.min(count);
+    let end = end_index.unwrap_or(count).min(count);
 
     // Remove from end to start to avoid index shifting.
-    for i in (separator_index..end).rev() {
+    for i in (start..end).rev() {
         // `remove_block` refuses to remove the last block, which is the
         // safety valve we need.
         document.remove_block(i);
@@ -165,7 +198,7 @@ pub fn replace_signature(
 ) -> Option<usize> {
     remove_signature(document, old_separator_index, old_end_index);
 
-    new_signature_html.map(|sig_html| insert_signature(document, old_separator_index, sig_html))
+    new_signature_html.and_then(|sig_html| insert_signature(document, old_separator_index, sig_html))
 }
 
 // ── Tests ───────────────────────────────────────────────
@@ -312,7 +345,7 @@ mod tests {
         // Block 2: HorizontalRule
         // Block 3: "Best,"
         // Block 4: "Alice"
-        assert_eq!(sep_idx, 2);
+        assert_eq!(sep_idx, Some(2));
         assert_eq!(doc.block_count(), 5);
         assert_eq!(doc.block(2), Some(&Block::HorizontalRule));
         assert_eq!(
@@ -329,7 +362,7 @@ mod tests {
     fn insert_signature_at_beginning() {
         let mut doc = Document::from_blocks(vec![Block::paragraph("Content")]);
         let sep_idx = insert_signature(&mut doc, 0, "<p>Sig</p>");
-        assert_eq!(sep_idx, 0);
+        assert_eq!(sep_idx, Some(0));
         assert_eq!(doc.block_count(), 3);
         assert_eq!(doc.block(0), Some(&Block::HorizontalRule));
         assert_eq!(
@@ -516,5 +549,54 @@ mod tests {
         } else {
             panic!("expected BlockQuote, got {bq:?}");
         }
+    }
+
+    // ── Blank signature handling ─────────────────────────
+
+    #[test]
+    fn assemble_blank_signature_omitted() {
+        let result = assemble_compose_document(Some(""), None);
+        assert_eq!(result.document.block_count(), 1);
+        assert!(result.signature_separator_index.is_none());
+    }
+
+    #[test]
+    fn assemble_whitespace_signature_omitted() {
+        let result = assemble_compose_document(Some("   \n  "), None);
+        assert_eq!(result.document.block_count(), 1);
+        assert!(result.signature_separator_index.is_none());
+    }
+
+    #[test]
+    fn assemble_empty_paragraph_signature_omitted() {
+        let result = assemble_compose_document(Some("<p>  </p>"), None);
+        assert_eq!(result.document.block_count(), 1);
+        assert!(result.signature_separator_index.is_none());
+    }
+
+    #[test]
+    fn insert_blank_signature_returns_none() {
+        let mut doc = Document::from_blocks(vec![Block::paragraph("hello")]);
+        assert!(insert_signature(&mut doc, 1, "").is_none());
+        assert_eq!(doc.block_count(), 1);
+    }
+
+    // ── Out-of-range index clamping ─────────────────────
+
+    #[test]
+    fn insert_signature_out_of_range_clamps() {
+        let mut doc = Document::from_blocks(vec![Block::paragraph("hello")]);
+        let sep = insert_signature(&mut doc, 100, "<p>Sig</p>");
+        // Should clamp to end (index 1), not panic.
+        assert_eq!(sep, Some(1));
+        assert_eq!(doc.block_count(), 3);
+    }
+
+    #[test]
+    fn remove_signature_out_of_range_no_panic() {
+        let mut doc = Document::from_blocks(vec![Block::paragraph("hello")]);
+        // Should not panic with out-of-range indices.
+        remove_signature(&mut doc, 10, Some(20));
+        assert_eq!(doc.block_count(), 1);
     }
 }
