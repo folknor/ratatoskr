@@ -186,6 +186,84 @@ pub fn build_spans_for_block<'a>(
         .collect()
 }
 
+/// Build spans for a block, handling container blocks by flattening their
+/// content into text. Unlike [`build_spans_for_block`], this never returns
+/// empty for valid blocks — container blocks (List, BlockQuote) are
+/// recursively flattened into their inline text with newline separators.
+pub fn build_spans_for_any_block(
+    block: &Block,
+    base_font: Font,
+    text_color: Color,
+    link_color: Color,
+) -> Vec<Span<'_, String, Font>> {
+    // Try the normal path first (works for Paragraph, Heading).
+    let spans = build_spans_for_block(block, base_font, text_color, link_color);
+    if !spans.is_empty() {
+        return spans;
+    }
+
+    // For container blocks, flatten to text.
+    let text = block.flattened_text();
+    if text.is_empty() {
+        // Use the block's own text extraction for containers.
+        let flat = flatten_container_text(block);
+        if flat.is_empty() {
+            return Vec::new();
+        }
+        return vec![Span::new(flat)
+            .font(base_font)
+            .size(FONT_SIZE_BODY)
+            .color(text_color)];
+    }
+
+    vec![Span::new(text)
+        .font(base_font)
+        .size(FONT_SIZE_BODY)
+        .color(text_color)]
+}
+
+/// Recursively extract text from a container block.
+fn flatten_container_text(block: &Block) -> String {
+    match block {
+        Block::List { items, ordered } => {
+            let mut buf = String::new();
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    buf.push('\n');
+                }
+                if *ordered {
+                    buf.push_str(&(i + 1).to_string());
+                    buf.push_str(". ");
+                } else {
+                    buf.push_str("\u{2022} ");
+                }
+                for child in &item.blocks {
+                    buf.push_str(&child_block_text(child));
+                }
+            }
+            buf
+        }
+        Block::BlockQuote { blocks } => {
+            let mut buf = String::new();
+            for (i, child) in blocks.iter().enumerate() {
+                if i > 0 {
+                    buf.push('\n');
+                }
+                buf.push_str(&child_block_text(child));
+            }
+            buf
+        }
+        _ => block.flattened_text(),
+    }
+}
+
+fn child_block_text(block: &Block) -> String {
+    match block {
+        Block::Paragraph { .. } | Block::Heading { .. } => block.flattened_text(),
+        _ => flatten_container_text(block),
+    }
+}
+
 // ── Paragraph cache ─────────────────────────────────────
 
 /// A laid-out paragraph for a child element within a container block
@@ -475,7 +553,7 @@ fn layout_block<P: Paragraph<Font = Font>>(
                 // Lay out ALL blocks in the item, not just the first.
                 // This handles multi-paragraph list items and nested lists.
                 for item_block in &item.blocks {
-                    let item_spans = build_spans_for_block(
+                    let item_spans = build_spans_for_any_block(
                         item_block.as_ref(),
                         base_font,
                         text_color,
@@ -514,7 +592,7 @@ fn layout_block<P: Paragraph<Font = Font>>(
             let mut y = 0.0f32;
 
             for (i, child) in bq_children.iter().enumerate() {
-                let child_spans = build_spans_for_block(
+                let child_spans = build_spans_for_any_block(
                     child.as_ref(),
                     base_font,
                     text_color,

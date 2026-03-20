@@ -478,30 +478,8 @@ impl EditorState {
                 }
             }
 
-            // Restore link metadata if the pasted run has a link.
-            // InsertText inherits the containing run's link, which may differ
-            // from the pasted run's link. We fix this by directly modifying the
-            // isolated run range. The undo path captures full run structure via
-            // DeletedContent, so this is safe for undo.
-            if let Some(block) = self.document.block(pos.block_index) {
-                let inherited_link = block.resolve_offset(insert_pos.offset).and_then(|(ri, _)| {
-                    block.runs().and_then(|runs| runs.get(ri).and_then(|r| r.link.clone()))
-                });
-                if run.link != inherited_link {
-                    let mut block_clone = block.clone();
-                    if let Some(runs) = block_clone.runs_mut() {
-                        let range = isolate_runs(
-                            runs,
-                            current_offset,
-                            current_offset + char_count,
-                        );
-                        for r in &mut runs[range] {
-                            r.link = run.link.clone();
-                        }
-                    }
-                    self.document.replace_block(pos.block_index, block_clone);
-                }
-            }
+            // Restore link metadata if needed.
+            self.repair_link_on_paste(pos.block_index, current_offset, char_count, &run.link);
 
             current_offset += char_count;
         }
@@ -631,6 +609,9 @@ impl EditorState {
                 }
             }
 
+            // Restore link metadata if needed.
+            self.repair_link_on_paste(block_idx, offset, char_count, &run.link);
+
             offset += char_count;
         }
     }
@@ -674,7 +655,45 @@ impl EditorState {
                 }
             }
 
+            // Restore link metadata if needed.
+            self.repair_link_on_paste(block_idx, offset, char_count, &run.link);
+
             offset += char_count;
+        }
+    }
+
+    /// Repair link metadata on a freshly pasted run range.
+    ///
+    /// `InsertText` inherits the containing run's link, which may differ from the
+    /// pasted run's intended link. This isolates the inserted range and sets the
+    /// link directly. Safe for undo because `DeleteRange` captures full run
+    /// structure via `DeletedContent`.
+    fn repair_link_on_paste(
+        &mut self,
+        block_idx: usize,
+        start_offset: usize,
+        char_count: usize,
+        desired_link: &Option<String>,
+    ) {
+        let Some(block) = self.document.block(block_idx) else {
+            return;
+        };
+        let inherited_link = block
+            .resolve_offset(start_offset)
+            .and_then(|(ri, _)| {
+                block
+                    .runs()
+                    .and_then(|runs| runs.get(ri).and_then(|r| r.link.clone()))
+            });
+        if *desired_link != inherited_link {
+            let mut block_clone = block.clone();
+            if let Some(runs) = block_clone.runs_mut() {
+                let range = isolate_runs(runs, start_offset, start_offset + char_count);
+                for r in &mut runs[range] {
+                    r.link.clone_from(desired_link);
+                }
+            }
+            self.document.replace_block(block_idx, block_clone);
         }
     }
 
