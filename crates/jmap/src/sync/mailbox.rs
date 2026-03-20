@@ -26,7 +26,24 @@ pub(super) async fn sync_mailboxes(
     let mut mailbox_data = Vec::new();
 
     let aid = ctx.account_id.to_string();
-    let mut label_rows: Vec<(String, String, String, String)> = Vec::new();
+
+    // First pass: build raw JMAP mailbox ID → label ID map for parent resolution
+    let mut jmap_id_to_label_id: HashMap<String, String> = HashMap::new();
+    for mb in &mailboxes {
+        let Some(id) = mb.id() else { continue };
+        let name = mb.name().unwrap_or("(unnamed)");
+        let role = mb.role();
+        let role_str = if role == Role::None {
+            None
+        } else {
+            Some(role_to_str(&role))
+        };
+        let mapping = map_mailbox_to_label(role_str, id, name);
+        jmap_id_to_label_id.insert(id.to_string(), mapping.label_id);
+    }
+
+    // Second pass: build label rows with parent_label_id resolved
+    let mut label_rows: Vec<(String, String, String, String, Option<String>)> = Vec::new();
 
     for mb in &mailboxes {
         let Some(id) = mb.id() else { continue };
@@ -49,11 +66,16 @@ pub(super) async fn sync_mailboxes(
         mailbox_data.push((id.to_string(), role_str.map(String::from), name.to_string()));
 
         let mapping = map_mailbox_to_label(role_str, id, name);
+        let parent_label_id = mb
+            .parent_id()
+            .and_then(|pid| jmap_id_to_label_id.get(pid))
+            .cloned();
         label_rows.push((
             mapping.label_id,
             aid.clone(),
             mapping.label_name,
             mapping.label_type.to_string(),
+            parent_label_id,
         ));
     }
 
@@ -63,13 +85,14 @@ pub(super) async fn sync_mailboxes(
         aid.clone(),
         "Unread".to_string(),
         "system".to_string(),
+        None,
     ));
 
     // Persist labels + categories to DB
     let category_rows: Vec<(String, String)> = label_rows
         .iter()
-        .filter(|(_, _, _, lt)| lt == "user")
-        .map(|(id, _, name, _)| (id.clone(), name.clone()))
+        .filter(|(_, _, _, lt, _)| lt == "user")
+        .map(|(id, _, name, _, _)| (id.clone(), name.clone()))
         .collect();
 
     ctx.db
@@ -77,11 +100,11 @@ pub(super) async fn sync_mailboxes(
             let tx = conn
                 .unchecked_transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
-            for (label_id, account_id, name, label_type) in &label_rows {
+            for (label_id, account_id, name, label_type, parent_label_id) in &label_rows {
                 tx.execute(
-                    "INSERT OR REPLACE INTO labels (id, account_id, name, type) \
-                     VALUES (?1, ?2, ?3, ?4)",
-                    rusqlite::params![label_id, account_id, name, label_type],
+                    "INSERT OR REPLACE INTO labels (id, account_id, name, type, parent_label_id) \
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    rusqlite::params![label_id, account_id, name, label_type, parent_label_id],
                 )
                 .map_err(|e| format!("upsert label: {e}"))?;
             }

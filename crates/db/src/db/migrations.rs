@@ -1324,6 +1324,11 @@ static MIGRATIONS: &[Migration] = &[
             ALTER TABLE accounts ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
         "#,
     },
+    Migration {
+        version: 61,
+        description: "Add parent_label_id for folder hierarchy support",
+        sql: "ALTER TABLE labels ADD COLUMN parent_label_id TEXT;",
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -1563,6 +1568,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) AS max_ver FROM _migrations", [], |row| row.get("max_ver"))
             .expect("query");
-        assert_eq!(max_ver, 60);
+        assert_eq!(max_ver, 61);
     }
 }

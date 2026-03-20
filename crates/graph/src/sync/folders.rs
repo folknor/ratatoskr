@@ -52,7 +52,7 @@ pub(super) async fn sync_folders(
 async fn persist_labels(ctx: &ProviderCtx<'_>, folder_map: &FolderMap) -> Result<(), String> {
     let aid = ctx.account_id.to_string();
 
-    let label_rows: Vec<(String, String, String, String)> = folder_map
+    let label_rows: Vec<(String, String, String, String, Option<String>)> = folder_map
         .all_mappings()
         .map(|m| {
             (
@@ -60,6 +60,7 @@ async fn persist_labels(ctx: &ProviderCtx<'_>, folder_map: &FolderMap) -> Result
                 aid.clone(),
                 m.label_name.clone(),
                 m.label_type.to_string(),
+                m.parent_label_id.clone(),
             )
         })
         .chain(std::iter::once((
@@ -67,6 +68,7 @@ async fn persist_labels(ctx: &ProviderCtx<'_>, folder_map: &FolderMap) -> Result
             aid.clone(),
             "Unread".to_string(),
             "system".to_string(),
+            None,
         )))
         .collect();
 
@@ -75,11 +77,11 @@ async fn persist_labels(ctx: &ProviderCtx<'_>, folder_map: &FolderMap) -> Result
             let tx = conn
                 .unchecked_transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
-            for (label_id, account_id, name, label_type) in &label_rows {
+            for (label_id, account_id, name, label_type, parent_label_id) in &label_rows {
                 tx.execute(
-                    "INSERT OR REPLACE INTO labels (id, account_id, name, type) \
-                     VALUES (?1, ?2, ?3, ?4)",
-                    rusqlite::params![label_id, account_id, name, label_type],
+                    "INSERT OR REPLACE INTO labels (id, account_id, name, type, parent_label_id) \
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    rusqlite::params![label_id, account_id, name, label_type, parent_label_id],
                 )
                 .map_err(|e| format!("upsert label: {e}"))?;
             }

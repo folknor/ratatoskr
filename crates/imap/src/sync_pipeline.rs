@@ -384,12 +384,29 @@ pub fn sync_folders_to_labels(
     account_id: &str,
     folders: &[&ImapFolder],
 ) -> Result<(), String> {
+    // Build path → label_id map for parent resolution
+    let path_to_label_id: std::collections::HashMap<&str, String> = folders
+        .iter()
+        .map(|f| {
+            let mapping = map_folder_to_label(f);
+            (f.path.as_str(), mapping.label_id)
+        })
+        .collect();
+
     for folder in folders {
         let mapping = map_folder_to_label(folder);
+
+        // Derive parent_label_id from folder path by splitting on delimiter
+        let parent_label_id = derive_imap_parent_label_id(
+            &folder.path,
+            &folder.delimiter,
+            &path_to_label_id,
+        );
+
         conn.execute(
             "INSERT OR REPLACE INTO labels \
-             (id, account_id, name, type, imap_folder_path, imap_special_use) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+             (id, account_id, name, type, imap_folder_path, imap_special_use, parent_label_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             rusqlite::params![
                 mapping.label_id,
                 account_id,
@@ -397,6 +414,7 @@ pub fn sync_folders_to_labels(
                 mapping.label_type,
                 folder.raw_path,
                 folder.special_use,
+                parent_label_id,
             ],
         )
         .map_err(|e| format!("upsert label: {e}"))?;
@@ -433,6 +451,28 @@ pub fn sync_folders_to_labels(
     }
 
     Ok(())
+}
+
+/// Derive a parent label ID for an IMAP folder by splitting its path on the
+/// hierarchy delimiter and looking up the parent path in the path-to-label map.
+///
+/// For example, with delimiter `/` and path `Work/Projects/Active`, the parent
+/// path is `Work/Projects`. If that path exists in the map, its label ID is
+/// returned.
+fn derive_imap_parent_label_id(
+    path: &str,
+    delimiter: &str,
+    path_to_label_id: &std::collections::HashMap<&str, String>,
+) -> Option<String> {
+    if delimiter.is_empty() {
+        return None;
+    }
+    let last_delim = path.rfind(delimiter)?;
+    if last_delim == 0 {
+        return None;
+    }
+    let parent_path = &path[..last_delim];
+    path_to_label_id.get(parent_path).cloned()
 }
 
 /// Update folder sync state in DB.

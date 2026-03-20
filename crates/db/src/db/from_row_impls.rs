@@ -84,6 +84,7 @@ impl_from_row!(DbLabel {
     sort_order,
     imap_folder_path,
     imap_special_use,
+    parent_label_id,
 });
 
 // ── Category ────────────────────────────────────────────────

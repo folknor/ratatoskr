@@ -89,6 +89,7 @@ pub struct GraphMailFolder {
     pub id: String,
     pub display_name: String,
     pub child_folder_count: Option<i32>,
+    pub parent_folder_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

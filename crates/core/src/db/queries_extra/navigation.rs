@@ -24,6 +24,15 @@ pub enum FolderKind {
     AccountLabel,
 }
 
+/// Whether a navigation item is a non-exclusive tag or an exclusive folder.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum LabelSemantics {
+    /// Non-exclusive tag (Gmail labels). A message can have multiple.
+    Tag,
+    /// Exclusive folder (Exchange, IMAP, JMAP). A message lives in exactly one.
+    Folder,
+}
+
 /// A single item in the sidebar navigation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,6 +42,10 @@ pub struct NavigationFolder {
     pub folder_kind: FolderKind,
     pub unread_count: i64,
     pub account_id: Option<String>,
+    /// Parent folder ID for tree rendering. `None` means top-level.
+    pub parent_id: Option<String>,
+    /// Tag vs Folder semantics. Only meaningful for `AccountLabel` items.
+    pub label_semantics: Option<LabelSemantics>,
 }
 
 /// The complete navigation state returned to the frontend.
@@ -123,6 +136,8 @@ fn build_universal_folders(
                 folder_kind: FolderKind::Universal,
                 unread_count: unread,
                 account_id: None,
+                parent_id: None,
+                label_semantics: None,
             }
         })
         .collect();
@@ -158,6 +173,8 @@ fn build_smart_folders(
                 folder_kind: FolderKind::SmartFolder,
                 unread_count,
                 account_id: sf.account_id,
+                parent_id: None,
+                label_semantics: None,
             }
         })
         .collect())
@@ -185,6 +202,8 @@ fn build_account_labels(
     conn: &Connection,
     account_id: &str,
 ) -> Result<Vec<NavigationFolder>, String> {
+    let provider = get_account_provider(conn, account_id)?;
+    let semantics = label_semantics_for_provider(&provider);
     let all_labels = get_labels(conn, account_id.to_owned())?;
     let system_ids = system_label_ids();
     let unread_by_label = get_label_unread_counts(conn, account_id)?;
@@ -205,9 +224,32 @@ fn build_account_labels(
                 folder_kind: FolderKind::AccountLabel,
                 unread_count,
                 account_id: Some(label.account_id),
+                parent_id: label.parent_label_id,
+                label_semantics: Some(semantics.clone()),
             }
         })
         .collect())
+}
+
+/// Determine label semantics based on the email provider.
+fn label_semantics_for_provider(provider: &str) -> LabelSemantics {
+    match provider {
+        "gmail_api" => LabelSemantics::Tag,
+        _ => LabelSemantics::Folder,
+    }
+}
+
+/// Look up the provider string for an account.
+fn get_account_provider(
+    conn: &Connection,
+    account_id: &str,
+) -> Result<String, String> {
+    conn.query_row(
+        "SELECT provider FROM accounts WHERE id = ?1",
+        rusqlite::params![account_id],
+        |row| row.get::<_, String>(0),
+    )
+    .map_err(|e| format!("get_account_provider: {e}"))
 }
 
 /// Batch-fetch unread thread counts for all labels belonging to an account.

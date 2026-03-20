@@ -19,6 +19,8 @@ pub struct FolderLabelMapping {
     pub label_id: String,
     pub label_name: String,
     pub label_type: &'static str, // "system" or "user"
+    /// The parent folder's label ID, if this is a nested folder.
+    pub parent_label_id: Option<String>,
 }
 
 impl FolderMap {
@@ -31,22 +33,43 @@ impl FolderMap {
         resolved_wellknown: &HashMap<String, (&str, &str)>,
         all_folders: &[GraphMailFolder],
     ) -> Self {
+        // First pass: build opaque_id → label_id map for parent resolution
+        let opaque_to_label: HashMap<&str, String> = all_folders
+            .iter()
+            .map(|folder| {
+                let label_id = if let Some(&(lid, _)) = resolved_wellknown.get(&folder.id) {
+                    lid.to_string()
+                } else {
+                    format!("graph-{}", folder.id)
+                };
+                (folder.id.as_str(), label_id)
+            })
+            .collect();
+
         let mut by_id = HashMap::new();
         let mut by_label = HashMap::new();
 
         for folder in all_folders {
+            let parent_label_id = folder
+                .parent_folder_id
+                .as_deref()
+                .and_then(|pid| opaque_to_label.get(pid))
+                .cloned();
+
             let mapping = if let Some(&(label_id, label_name)) = resolved_wellknown.get(&folder.id)
             {
                 FolderLabelMapping {
                     label_id: label_id.to_string(),
                     label_name: label_name.to_string(),
                     label_type: "system",
+                    parent_label_id,
                 }
             } else {
                 FolderLabelMapping {
                     label_id: format!("graph-{}", folder.id),
                     label_name: folder.display_name.clone(),
                     label_type: "user",
+                    parent_label_id,
                 }
             };
 

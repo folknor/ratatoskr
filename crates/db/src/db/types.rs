@@ -128,6 +128,7 @@ pub struct DbLabel {
     pub sort_order: i64,
     pub imap_folder_path: Option<String>,
     pub imap_special_use: Option<String>,
+    pub parent_label_id: Option<String>,
 }
 
 // ── Category ─────────────────────────────────────────────────

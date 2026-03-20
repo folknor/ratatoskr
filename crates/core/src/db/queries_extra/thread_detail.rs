@@ -431,6 +431,7 @@ fn query_thread_labels(
             sort_order: 0,
             imap_folder_path: None,
             imap_special_use: None,
+            parent_label_id: None,
         };
 
         let (bg, fg) = resolve_label_color(&db_label);
