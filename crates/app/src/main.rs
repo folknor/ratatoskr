@@ -173,6 +173,7 @@ pub enum Message {
     // Account management
     AddAccount(AddAccountMessage),
     OpenAddAccount,
+    ReloadSignatures,
 }
 
 struct App {
@@ -606,6 +607,10 @@ impl App {
                     .collect();
                 self.add_account_wizard =
                     Some(AddAccountWizard::new_add_account(used_colors, Arc::clone(&self.db)));
+                Task::none()
+            }
+            Message::ReloadSignatures => {
+                self.load_signatures_into_settings();
                 Task::none()
             }
         }
@@ -1196,30 +1201,31 @@ impl App {
                     async move {
                         db.with_write_conn(move |conn| {
                             if let Some(ref id) = req.id {
-                                // Update existing signature
                                 conn.execute(
                                     "UPDATE signatures SET name = ?1, body_html = ?2, \
-                                     is_default = ?3 WHERE id = ?4",
+                                     is_default = ?3, is_reply_default = ?4 WHERE id = ?5",
                                     rusqlite::params![
                                         req.name,
                                         req.body_html,
                                         if req.is_default { 1 } else { 0 },
+                                        if req.is_reply_default { 1 } else { 0 },
                                         id,
                                     ],
                                 )
                                 .map_err(|e| e.to_string())?;
                             } else {
-                                // Insert new signature
                                 let id = uuid::Uuid::new_v4().to_string();
                                 conn.execute(
-                                    "INSERT INTO signatures (id, account_id, name, body_html, is_default) \
-                                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                                    "INSERT INTO signatures (id, account_id, name, body_html, \
+                                     is_default, is_reply_default) \
+                                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                                     rusqlite::params![
                                         id,
                                         req.account_id,
                                         req.name,
                                         req.body_html,
                                         if req.is_default { 1 } else { 0 },
+                                        if req.is_reply_default { 1 } else { 0 },
                                     ],
                                 )
                                 .map_err(|e| e.to_string())?;
@@ -1232,8 +1238,7 @@ impl App {
                         if let Err(e) = result {
                             eprintln!("Failed to save signature: {e}");
                         }
-                        // Reload signatures after save
-                        Message::Noop // TODO: add a SignaturesReload message
+                        Message::ReloadSignatures
                     },
                 )
             }
@@ -1255,7 +1260,7 @@ impl App {
                         if let Err(e) = result {
                             eprintln!("Failed to delete signature: {e}");
                         }
-                        Message::Noop // TODO: add a SignaturesReload message
+                        Message::ReloadSignatures
                     },
                 )
             }
@@ -1591,7 +1596,8 @@ impl App {
         let result = self.db.with_conn_sync(|conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, account_id, name, body_html, is_default, sort_order
+                    "SELECT id, account_id, name, body_html, is_default,
+                            is_reply_default, sort_order
                      FROM signatures ORDER BY account_id, sort_order, name",
                 )
                 .map_err(|e| e.to_string())?;
@@ -1605,7 +1611,9 @@ impl App {
                             .unwrap_or_default(),
                         body_text: None,
                         is_default: row.get::<_, i64>("is_default").unwrap_or(0) != 0,
-                        is_reply_default: false,
+                        is_reply_default: row.get::<_, i64>("is_reply_default")
+                            .unwrap_or(0)
+                            != 0,
                     })
                 })
                 .map_err(|e| e.to_string())?;
