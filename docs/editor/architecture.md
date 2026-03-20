@@ -10,7 +10,7 @@ only reference project that solves rendering + input on a declarative UI framewo
 without contentEditable). See `docs/editor/research-summary.md` for detailed
 analysis of all four.
 
-**Crate:** `crates/rich-text-editor/` — 11,400+ lines, 368 tests, zero clippy
+**Crate:** `crates/rich-text-editor/` — 14,300+ lines, 432 tests, zero clippy
 warnings. Pure-Rust core modules (no iced dependency) + feature-gated widget.
 
 ---
@@ -32,6 +32,7 @@ Block
   List       { ordered: bool, items: Vec<ListItem> }
   BlockQuote { blocks: Vec<Arc<Block>> }
   HorizontalRule
+  Image      { src: String, alt: String, width: Option<u32>, height: Option<u32> }
 
 ListItem
   blocks: Vec<Arc<Block>>       // usually one Paragraph; can nest Lists
@@ -449,6 +450,9 @@ Vertical scroll support with:
   list items are not separately editable as cursor-addressable blocks. The
   cursor addresses top-level blocks only.
 - **Drag auto-scroll:** No auto-scroll when dragging above/below the viewport.
+- **Image rendering:** Images render as placeholder rectangles with alt text.
+  Actual image loading (`inline-image:<hash>` resolution, data-URI decoding)
+  is the app's responsibility — the editor stores src references only.
 
 ---
 
@@ -459,13 +463,14 @@ crates/rich-text-editor/
   Cargo.toml
   src/
     lib.rs                    // re-exports + feature gate
-    document.rs               // Document, Block, StyledRun, InlineStyle, DocPosition, DocSlice
+    document.rs               // Document, Block (6 variants), StyledRun, InlineStyle, DocPosition, DocSlice
     operations.rs             // EditOp, PosMap, apply/invert, run splitting helpers
     normalize.rs              // Normalization pass: merge runs, enforce structural invariants
     rules.rs                  // Heuristic rules: insert/delete/format behavior
     undo.rs                   // UndoStack, UndoGroup, cursor bookmark mapping
-    html_serialize.rs         // Document → HTML
-    html_parse.rs             // HTML → Document (html5ever TreeSink)
+    html_serialize.rs         // Document → HTML (including <img>)
+    html_parse.rs             // HTML → Document (html5ever TreeSink, including <img>)
+    compose.rs                // Compose document assembly: signatures, reply quoting, forward headers
     widget/
       mod.rs                  // EditorState, Action, RichTextEditor widget (Widget trait impl)
       input.rs                // Key binding → action mapping, cursor movement helpers
@@ -506,42 +511,48 @@ sending `Action::Edit(EditAction::ToggleInlineStyle(...))` etc.
 
 ## Implementation Status
 
-### What's done (Phases 1–4 complete)
+### What's done (Phases 1–5 editor-side complete)
 
-- Document model with all 5 block types, Arc structural sharing, DocSlice
+- Document model with all 6 block types (Paragraph, Heading, List, BlockQuote,
+  HorizontalRule, Image), Arc structural sharing, DocSlice
 - All 8 EditOp variants with correct apply, invert, and PosMap (including
   split_offset, merge_offset, start_offset on structural changes)
 - Normalization with dirty tracking and safety valve
 - Rules engine with insert/delete/format behavior, including pending style
   application, link boundary exclusivity, link formatting at caret, heading
-  reset on split-at-end
+  reset on split-at-end, image block embed rules (backspace/delete remove,
+  Enter inserts paragraph after)
 - Undo/redo with grouping, cursor bookmarks, and correct PosMap mapping
-- HTML serialization and parsing with round-trip tests
+- HTML serialization and parsing with round-trip tests (including `<img>`
+  with src, alt, width, height)
 - Structured clipboard: internal copy preserves DocSlice with formatting +
   links, paste uses block-swap strategy (redo-safe), external paste falls
   back to plain text
+- Compose document assembly: signature insertion/removal/replacement, reply
+  attribution (italic), forward header, quoted content in BlockQuote. Blank
+  signature detection, out-of-range index clamping.
+- Block::Image: atomic block embed with src/alt/width/height. Widget renders
+  placeholder rectangle with alt text; actual image loading is app-side.
 - Widget: paragraph caching with per-item list/blockquote rendering, exact
   cursor placement via grapheme_position, per-line selection rectangles,
-  scrolling (wheel + auto-scroll), mouse hit testing with Paragraph::hit_test
-- 394 tests across all modules
+  scrolling (wheel + auto-scroll with per-line precision), mouse hit testing
+  with Paragraph::hit_test
+- 432 tests across all modules
 
 ### What remains
 
-**Phase 3 gaps (rules):**
+**App-crate integration (not in the editor crate):**
+- Settings UI: signature list, signature editor overlay with rich text editor
+- Compose window: wire up compose document assembly, From-account signature
+  switching, draft persistence
+- Actual image loading: resolve `inline-image:<hash>` src URIs via the
+  inline image store, render real images instead of placeholders
+
+**Editor-crate polish:**
 - Auto-exit block (double-Enter exits list/quote) — needs per-item cursor
   addressing
-- Block embed isolation — deferred until Block::Image exists
-
-**Phase 4 gap (clipboard):**
 - Paste HTML from external clipboard (iced's Clipboard trait only provides
   plain text; HTML clipboard needs platform-specific code)
-
-**Phase 5: Signatures, inline images, reply quoting**
-- Not started
-- Block::Image variant, signature insertion, reply quoting with attribution,
-  platform IME refinement, plain-text projection for IME sync
-
-**Widget polish:**
 - IME preedit/commit integration
 - Drag auto-scroll (auto-scroll when dragging above/below viewport)
 - Per-item cursor addressing for lists (currently cursor addresses top-level
