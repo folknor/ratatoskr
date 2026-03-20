@@ -10,7 +10,7 @@ only reference project that solves rendering + input on a declarative UI framewo
 without contentEditable). See `docs/editor/research-summary.md` for detailed
 analysis of all four.
 
-**Crate:** `crates/rich-text-editor/` — 14,300+ lines, 432 tests, zero clippy
+**Crate:** `crates/rich-text-editor/` — 14,300+ lines, 428 tests, zero clippy
 warnings. Pure-Rust core modules (no iced dependency) + feature-gated widget.
 
 ---
@@ -29,13 +29,10 @@ Document
 Block
   Paragraph  { runs: Vec<StyledRun> }
   Heading    { level: HeadingLevel, runs: Vec<StyledRun> }
-  List       { ordered: bool, items: Vec<ListItem> }
+  ListItem   { ordered: bool, indent_level: u8, runs: Vec<StyledRun> }
   BlockQuote { blocks: Vec<Arc<Block>> }
   HorizontalRule
   Image      { src: String, alt: String, width: Option<u32>, height: Option<u32> }
-
-ListItem
-  blocks: Vec<Arc<Block>>       // usually one Paragraph; can nest Lists
 
 StyledRun
   text: String
@@ -49,17 +46,24 @@ InlineStyle (bitflags)
   STRIKETHROUGH
 ```
 
-Note: `link` is a field on `StyledRun`, not on `InlineStyle`. This was a
-deliberate deviation from the original spec (which had `link` as an
-`InlineStyle` optional field) — links are semantically different from
-formatting flags, and keeping them separate simplifies the `same_formatting()`
-check used by normalization.
+Note: `link` is a field on `StyledRun`, not on `InlineStyle`. Links are
+semantically different from formatting flags, and keeping them separate
+simplifies the `same_formatting()` check used by normalization.
+
+**Flat list model:** Lists use `Block::ListItem` with `indent_level` rather
+than a nested `Block::List { items: Vec<ListItem> }` container. This makes
+every list item cursor-addressable (it has runs, like `Paragraph`), enabling
+direct editing, splitting, merging, and the auto-exit rule. The HTML
+serializer reconstructs `<ul>`/`<ol>` nesting from consecutive `ListItem`
+blocks by tracking indent_level transitions. This matches what Gmail, Outlook,
+and most web editors do internally.
 
 ### Immutability and structural sharing
 
 `Document.blocks` is `Vec<Arc<Block>>`. After an edit, only the affected block
 gets a new `Arc` allocation. Unchanged blocks are `Arc::clone` — cheap pointer
-copies. `ListItem.blocks` and `BlockQuote.blocks` also use `Arc<Block>`.
+copies. `BlockQuote.blocks` also uses `Arc<Block>`. `ListItem` is a flat
+inline block (no nested `Arc`).
 
 ### Normalization invariant
 
@@ -219,11 +223,12 @@ Invariants enforced:
 1. Adjacent `StyledRun`s with identical `(style, link)` merge
 2. Empty runs removed (but keep one empty run per inline block for cursor anchoring)
 3. Every inline block has ≥1 run
-4. Every `ListItem` has ≥1 block
+4. Every `ListItem` has ≥1 run (same as Paragraph/Heading)
 5. Every `BlockQuote` has ≥1 block
 6. Document has ≥1 block
 
-Normalization is recursive for container blocks (List items, BlockQuote children).
+Normalization is recursive for container blocks (BlockQuote children).
+`ListItem` normalizes the same as `Paragraph` (inline runs).
 
 ---
 
@@ -244,7 +249,7 @@ pending_style) -> Vec<EditOp>` dispatches to per-action resolvers.
 | Pending style override | Done | Emits ToggleInlineStyle after InsertText if style differs |
 | Heading reset on split at end | Done | SplitBlock + SetBlockType to Paragraph |
 | Preserve block style on split | Done | SplitBlock preserves heading/paragraph type |
-| Auto-exit block | **Not done** | Needs list item nesting context |
+| Auto-exit block | Done | Enter on empty ListItem → SetBlockType to Paragraph |
 | Block embed isolation | **Not done** | Needs Block::Image (Phase 5) |
 
 ### Delete rules
@@ -436,6 +441,8 @@ Vertical scroll support with:
 - Content drawn with `with_layer()` (clip) + `with_translation()` (offset).
   Cursor drawn inside the translation layer — no manual viewport clipping.
 - Hit testing converts viewport-relative to content-relative coordinates
+- Drag auto-scroll: proportional speed when dragging above/below viewport,
+  capped at 30px/frame, continuous redraws while mouse held outside bounds
 
 ### Known limitations
 
@@ -445,11 +452,8 @@ Vertical scroll support with:
   (target_column) across blocks, but not pixel-precise x-coordinate via
   `Paragraph::grapheme_position()` (which would need the paragraph cache in
   EditorState).
-- **Nested container editing:** Lists and blockquotes render correctly
-  (per-item paragraphs with recursive styled span collection), but individual
-  list items are not separately editable as cursor-addressable blocks. The
-  cursor addresses top-level blocks only.
-- **Drag auto-scroll:** No auto-scroll when dragging above/below the viewport.
+- **Drag auto-scroll:** Implemented. Scrolls proportionally to cursor distance
+  from viewport edge, capped at 30px/frame, with continuous redraws.
 - **Image rendering:** Images render as placeholder rectangles with alt text.
   Actual image loading (`inline-image:<hash>` resolution, data-URI decoding)
   is the app's responsibility — the editor stores src references only.
@@ -521,7 +525,8 @@ sending `Action::Edit(EditAction::ToggleInlineStyle(...))` etc.
 - Rules engine with insert/delete/format behavior, including pending style
   application, link boundary exclusivity, link formatting at caret, heading
   reset on split-at-end, image block embed rules (backspace/delete remove,
-  Enter inserts paragraph after)
+  Enter inserts paragraph after), auto-exit list (Enter on empty ListItem →
+  Paragraph)
 - Undo/redo with grouping, cursor bookmarks, and correct PosMap mapping
 - HTML serialization and parsing with round-trip tests (including `<img>`
   with src, alt, width, height)
@@ -533,11 +538,13 @@ sending `Action::Edit(EditAction::ToggleInlineStyle(...))` etc.
   signature detection, out-of-range index clamping.
 - Block::Image: atomic block embed with src/alt/width/height. Widget renders
   placeholder rectangle with alt text; actual image loading is app-side.
-- Widget: paragraph caching with per-item list/blockquote rendering, exact
-  cursor placement via grapheme_position, per-line selection rectangles,
-  scrolling (wheel + auto-scroll with per-line precision), mouse hit testing
-  with Paragraph::hit_test
-- 432 tests across all modules
+- Flat list model: `Block::ListItem { ordered, indent_level, runs }` — each
+  list item is cursor-addressable. HTML serializer reconstructs `<ul>`/`<ol>`
+  nesting. HTML parser flattens into items with tracked indent_level.
+- Widget: paragraph caching, exact cursor placement via grapheme_position,
+  per-line selection rectangles, scrolling (wheel + auto-scroll + drag
+  auto-scroll), mouse hit testing with Paragraph::hit_test
+- 428 tests across all modules
 
 ### What remains
 
@@ -548,15 +555,10 @@ sending `Action::Edit(EditAction::ToggleInlineStyle(...))` etc.
 - Actual image loading: resolve `inline-image:<hash>` src URIs via the
   inline image store, render real images instead of placeholders
 
-**Editor-crate polish:**
-- Auto-exit block (double-Enter exits list/quote) — needs per-item cursor
-  addressing
+**Editor-crate deferred:**
 - Paste HTML from external clipboard (iced's Clipboard trait only provides
   plain text; HTML clipboard needs platform-specific code)
 - IME preedit/commit integration
-- Drag auto-scroll (auto-scroll when dragging above/below viewport)
-- Per-item cursor addressing for lists (currently cursor addresses top-level
-  blocks only)
 
 ---
 
