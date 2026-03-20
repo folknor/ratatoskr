@@ -456,10 +456,12 @@ fn layout_block<P: Paragraph<Font = Font>>(
 
             let height = paragraph.min_bounds().height;
             entry.paragraph = Some(paragraph);
+            entry.child_paragraphs.clear();
             height
         }
         Block::HorizontalRule => {
             entry.paragraph = None;
+            entry.child_paragraphs.clear();
             HR_BLOCK_HEIGHT
         }
         Block::List { items, .. } => {
@@ -470,8 +472,9 @@ fn layout_block<P: Paragraph<Font = Font>>(
             let mut y = 0.0f32;
 
             for (item_idx, item) in items.iter().enumerate() {
-                // Use the first block in the item for rendering.
-                if let Some(item_block) = item.blocks.first() {
+                // Lay out ALL blocks in the item, not just the first.
+                // This handles multi-paragraph list items and nested lists.
+                for item_block in &item.blocks {
                     let item_spans = build_spans_for_block(
                         item_block.as_ref(),
                         base_font,

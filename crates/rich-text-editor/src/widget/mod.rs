@@ -36,7 +36,9 @@ pub mod cursor;
 pub mod input;
 pub mod render;
 
-use crate::document::{Block, DocPosition, DocSelection, DocSlice, Document, InlineStyle, StyledRun};
+use crate::document::{
+    Block, DocPosition, DocSelection, DocSlice, Document, InlineStyle, StyledRun, isolate_runs,
+};
 use crate::html_parse::from_html;
 use crate::html_serialize::to_html;
 use crate::normalize::{normalize, normalize_blocks};
@@ -461,10 +463,10 @@ impl EditorState {
 
             // Determine the inherited style and toggle any differing bits.
             let inherited = run_style_at_for_paste(&self.document, insert_pos);
+            let insert_end =
+                DocPosition::new(pos.block_index, current_offset + char_count);
             let diff = run.style.symmetric_difference(inherited);
             if !diff.is_empty() {
-                let insert_end =
-                    DocPosition::new(pos.block_index, current_offset + char_count);
                 for bit in diff.iter() {
                     let toggle_op = EditOp::ToggleInlineStyle {
                         start: insert_pos,
@@ -473,6 +475,31 @@ impl EditorState {
                     };
                     toggle_op.apply(&mut self.document);
                     ops.push(toggle_op);
+                }
+            }
+
+            // Restore link metadata if the pasted run has a link.
+            // InsertText inherits the containing run's link, which may differ
+            // from the pasted run's link. We fix this by directly modifying the
+            // isolated run range. The undo path captures full run structure via
+            // DeletedContent, so this is safe for undo.
+            if let Some(block) = self.document.block(pos.block_index) {
+                let inherited_link = block.resolve_offset(insert_pos.offset).and_then(|(ri, _)| {
+                    block.runs().and_then(|runs| runs.get(ri).and_then(|r| r.link.clone()))
+                });
+                if run.link != inherited_link {
+                    let mut block_clone = block.clone();
+                    if let Some(runs) = block_clone.runs_mut() {
+                        let range = isolate_runs(
+                            runs,
+                            current_offset,
+                            current_offset + char_count,
+                        );
+                        for r in &mut runs[range] {
+                            r.link = run.link.clone();
+                        }
+                    }
+                    self.document.replace_block(pos.block_index, block_clone);
                 }
             }
 
