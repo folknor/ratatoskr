@@ -547,8 +547,10 @@ fn layout_block<P: Paragraph<Font = Font>>(
 ) -> f32 {
     match block {
         Block::Paragraph { .. } | Block::Heading { .. } | Block::ListItem { .. } => {
-            let content_width = if matches!(block, Block::ListItem { .. }) {
-                (available_width - LIST_MARKER_WIDTH).max(0.0)
+            let content_width = if let Block::ListItem { indent_level, .. } = block {
+                let indent = LIST_MARKER_WIDTH
+                    + (*indent_level as f32) * LIST_INDENT_PER_LEVEL;
+                (available_width - indent).max(0.0)
             } else {
                 available_width
             };

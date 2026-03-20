@@ -1006,38 +1006,45 @@ impl<Message> RichTextEditor<'_, Message> {
                         );
                     }
                 }
-                Block::ListItem { ordered, .. } => {
+                Block::ListItem { ordered, indent_level, .. } => {
                     if let Some(paragraph) = entry.paragraph() {
+                        let indent = render::LIST_MARKER_WIDTH
+                            + (*indent_level as f32) * render::LIST_INDENT_PER_LEVEL;
                         let content_origin = Point::new(
-                            block_origin.x + render::LIST_MARKER_WIDTH,
+                            block_origin.x + indent,
                             block_origin.y,
                         );
                         let content_bounds = Rectangle::new(
                             content_origin,
                             Size::new(
-                                (text_bounds.width - render::LIST_MARKER_WIDTH).max(0.0),
+                                (text_bounds.width - indent).max(0.0),
                                 entry.height(),
                             ),
                         );
                         // Determine the item index for numbered lists by
                         // counting consecutive preceding ListItem blocks
-                        // with the same `ordered` flag.
+                        // with the same `ordered` flag AND indent_level.
                         let item_idx = {
                             let mut idx = 0usize;
                             for prev_i in (0..i).rev() {
-                                if let Some(b) = self.state.document.block(prev_i) {
-                                    if let Block::ListItem {
-                                        ordered: prev_ord, ..
-                                    } = b
+                                if let Some(Block::ListItem {
+                                    ordered: prev_ord,
+                                    indent_level: prev_indent,
+                                    ..
+                                }) = self.state.document.block(prev_i)
+                                {
+                                    if *prev_ord == *ordered
+                                        && *prev_indent == *indent_level
                                     {
-                                        if *prev_ord == *ordered {
-                                            idx += 1;
-                                        } else {
-                                            break;
-                                        }
-                                    } else {
+                                        idx += 1;
+                                    } else if *prev_indent < *indent_level {
+                                        // Hit parent level — stop counting.
                                         break;
                                     }
+                                    // Skip items at deeper indent (nested
+                                    // sublists between siblings at our level).
+                                } else {
+                                    break;
                                 }
                             }
                             idx
@@ -1722,7 +1729,9 @@ fn splice_runs_into_block(
 /// blocks indent their paragraph content.
 fn block_content_x_offset(block: &Block) -> f32 {
     match block {
-        Block::ListItem { .. } => render::LIST_MARKER_WIDTH,
+        Block::ListItem { indent_level, .. } => {
+            render::LIST_MARKER_WIDTH + (*indent_level as f32) * render::LIST_INDENT_PER_LEVEL
+        }
         Block::BlockQuote { .. } => render::BLOCKQUOTE_INDENT,
         _ => 0.0,
     }
