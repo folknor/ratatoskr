@@ -97,6 +97,8 @@ pub enum TextClass {
     Muted,
     /// Text on a primary-colored background (e.g. help tooltips).
     OnPrimary,
+    /// Warning text/icon color (for status bar warnings).
+    Warning,
 }
 
 impl TextClass {
@@ -106,6 +108,7 @@ impl TextClass {
             Self::Tertiary => style_text_tertiary,
             Self::Muted => style_text_muted,
             Self::OnPrimary => style_text_on_primary,
+            Self::Warning => style_text_warning,
         }
     }
 }
@@ -124,6 +127,10 @@ fn style_text_muted(theme: &Theme) -> text::Style {
 
 fn style_text_on_primary(theme: &Theme) -> text::Style {
     text::Style { color: Some(theme.palette().primary.base.text) }
+}
+
+fn style_text_warning(theme: &Theme) -> text::Style {
+    text::Style { color: Some(theme.palette().warning.base.color) }
 }
 
 // ── ButtonClass ─────────────────────────────────────────
@@ -228,6 +235,8 @@ pub enum ContainerClass {
     KeyBadge,
     /// Active drag-reorder row highlight.
     DraggingRow,
+    /// Status bar background.
+    StatusBar,
 }
 
 impl ContainerClass {
@@ -249,6 +258,7 @@ impl ContainerClass {
             Self::ThemeSelectedRing => style_theme_selected_ring,
             Self::KeyBadge => style_key_badge_container,
             Self::DraggingRow => style_dragging_row_container,
+            Self::StatusBar => style_status_bar_container,
         }
     }
 }
@@ -901,6 +911,19 @@ fn style_dragging_row_container(theme: &Theme) -> container::Style {
             color: p.primary.base.color.scale_alpha(0.3),
             width: 1.0,
             radius: RADIUS_SM.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn style_status_bar_container(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    container::Style {
+        background: Some(p.background.weaker.color.into()),
+        border: iced::Border {
+            color: p.background.strongest.color.scale_alpha(0.1),
+            width: 1.0,
+            radius: 0.0.into(),
         },
         ..Default::default()
     }

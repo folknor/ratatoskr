@@ -317,3 +317,16 @@ pub const GRIP_SLOT_WIDTH: f32 = 16.0;
 
 /// Space between scrollbar and content (embeds scrollbar instead of overlaying)
 pub const SCROLLBAR_SPACING: f32 = SPACE_XXXS;
+
+// ── Status bar ──────────────────────────────────────────
+
+/// Status bar fixed height (one line of text + padding).
+pub const STATUS_BAR_HEIGHT: f32 = 28.0;
+
+/// Status bar internal padding (compact vertical, standard horizontal).
+pub const PAD_STATUS_BAR: Padding = Padding {
+    top: 4.0,
+    right: 12.0,
+    bottom: 4.0,
+    left: 12.0,
+};

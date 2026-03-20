@@ -14,7 +14,7 @@ use command_dispatch::{
 };
 use component::Component;
 use db::{Db, Thread};
-use iced::widget::{container, mouse_area, row};
+use iced::widget::{column, container, mouse_area, row};
 use iced::{Element, Length, Point, Size, Task, Theme};
 use ratatoskr_command_palette::{
     BindingTable, Chord, CommandArgs, CommandId, CommandRegistry, FocusedRegion, ResolveResult,
@@ -29,6 +29,7 @@ use ui::layout::{RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LI
 use ui::reading_pane::{ReadingPane, ReadingPaneMessage};
 use ui::settings::{Settings, SettingsEvent, SettingsMessage};
 use ui::sidebar::{Sidebar, SidebarEvent, SidebarMessage};
+use ui::status_bar::{StatusBar, StatusBarEvent, StatusBarMessage};
 use ui::thread_list::{ThreadList, ThreadListEvent, ThreadListMessage};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -108,6 +109,7 @@ pub enum Message {
     ThreadList(ThreadListMessage),
     ReadingPane(ReadingPaneMessage),
     Settings(SettingsMessage),
+    StatusBar(StatusBarMessage),
 
     // Existing data loading
     AccountsLoaded(u64, Result<Vec<db::Account>, String>),
@@ -158,6 +160,7 @@ struct App {
     thread_list: ThreadList,
     reading_pane: ReadingPane,
     settings: Settings,
+    status_bar: StatusBar,
     status: String,
     mode: appearance::Mode,
     sidebar_width: f32,
@@ -203,6 +206,7 @@ impl App {
             settings: Settings::with_scale(
                 *DEFAULT_SCALE.get().unwrap_or(&1.0),
             ),
+            status_bar: StatusBar::new(),
             status: "Loading...".to_string(),
             mode: appearance::Mode::Dark,
             sidebar_width: window.sidebar_width,
@@ -276,6 +280,7 @@ impl App {
             self.thread_list.subscription().map(Message::ThreadList),
             self.reading_pane.subscription().map(Message::ReadingPane),
             self.settings.subscription().map(Message::Settings),
+            self.status_bar.subscription().map(Message::StatusBar),
         ];
 
         // Pending chord timeout
@@ -303,6 +308,7 @@ impl App {
             Message::ThreadList(msg) => self.handle_thread_list(msg),
             Message::ReadingPane(msg) => self.handle_reading_pane(msg),
             Message::Settings(msg) => self.handle_settings(msg),
+            Message::StatusBar(msg) => self.handle_status_bar(msg),
             Message::AppearanceChanged(mode) => {
                 self.mode = mode;
                 Task::none()
@@ -483,15 +489,18 @@ impl App {
         let layout = row![sidebar, divider_sidebar, thread_list, divider_thread, reading_pane, right_sidebar]
             .height(Length::Fill);
 
+        let status_bar = self.status_bar.view().map(Message::StatusBar);
+        let full_layout = column![layout, status_bar];
+
         // Wrap in a mouse_area to track drag movement across the full window
         if self.dragging.is_some() {
-            mouse_area(layout)
+            mouse_area(full_layout)
                 .on_move(Message::DividerDragMove)
                 .on_release(Message::DividerDragEnd)
                 .interaction(iced::mouse::Interaction::ResizingHorizontally)
                 .into()
         } else {
-            layout.into()
+            full_layout.into()
         }
     }
 }
@@ -669,6 +678,26 @@ impl App {
     fn handle_reading_pane(&mut self, msg: ReadingPaneMessage) -> Task<Message> {
         let (task, _event) = self.reading_pane.update(msg);
         task.map(Message::ReadingPane)
+    }
+
+    fn handle_status_bar(&mut self, msg: StatusBarMessage) -> Task<Message> {
+        let (task, event) = self.status_bar.update(msg);
+        let mut tasks = vec![task.map(Message::StatusBar)];
+        if let Some(evt) = event {
+            tasks.push(self.handle_status_bar_event(evt));
+        }
+        Task::batch(tasks)
+    }
+
+    fn handle_status_bar_event(&mut self, event: StatusBarEvent) -> Task<Message> {
+        match event {
+            StatusBarEvent::RequestReauth { account_id } => {
+                // TODO: Open re-authentication flow for this account.
+                // This will be wired when the accounts UI is implemented.
+                let _ = account_id;
+                Task::none()
+            }
+        }
     }
 
     fn handle_settings(&mut self, msg: SettingsMessage) -> Task<Message> {

@@ -9,4 +9,5 @@ pub mod theme;
 pub mod thread_list;
 pub mod undoable;
 pub mod undoable_text_input;
+pub mod status_bar;
 pub mod widgets;
