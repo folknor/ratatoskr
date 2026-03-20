@@ -36,7 +36,7 @@ pub mod cursor;
 pub mod input;
 pub mod render;
 
-use crate::document::{Block, DocPosition, DocSelection, Document, InlineStyle};
+use crate::document::{Block, DocPosition, DocSelection, DocSlice, Document, InlineStyle, StyledRun};
 use crate::html_parse::from_html;
 use crate::html_serialize::to_html;
 use crate::normalize::{normalize, normalize_blocks};
@@ -105,6 +105,22 @@ pub enum Action {
     Blur,
 }
 
+// ── Internal clipboard ───────────────────────────────────
+
+/// A structured clipboard entry captured from an internal copy/cut operation.
+///
+/// Stores the `DocSlice` alongside the plain-text representation that was
+/// written to the system clipboard. On paste, if the system clipboard text
+/// still matches `plain_text`, the structured `slice` is used instead of
+/// plain-text insertion -- preserving block structure and inline formatting.
+#[derive(Debug, Clone)]
+struct InternalClipboard {
+    /// The structured document slice that was copied.
+    slice: DocSlice,
+    /// The plain-text that was written to the system clipboard at copy time.
+    plain_text: String,
+}
+
 // ── EditorState (application-owned mutable state) ───────
 
 /// The mutable state of a rich text editor, owned by the application.
@@ -126,6 +142,9 @@ pub struct EditorState {
     cursor: CursorState,
     /// Active mouse drag state.
     drag: Option<DragState>,
+    /// Internal clipboard: stores a structured slice from the last copy/cut
+    /// within this editor, enabling formatted paste.
+    internal_clipboard: Option<InternalClipboard>,
 }
 
 impl EditorState {
@@ -138,6 +157,7 @@ impl EditorState {
             pending_style: InlineStyle::empty(),
             cursor: CursorState::new(),
             drag: None,
+            internal_clipboard: None,
         }
     }
 
@@ -150,6 +170,7 @@ impl EditorState {
             pending_style: InlineStyle::empty(),
             cursor: CursorState::new(),
             drag: None,
+            internal_clipboard: None,
         }
     }
 
@@ -212,15 +233,44 @@ impl EditorState {
             Action::Undo => self.undo(),
             Action::Redo => self.redo(),
             Action::Copy | Action::Cut => {
-                // Clipboard operations are handled by the widget's update()
-                // method which has clipboard access. The perform() call for
-                // Cut will just delete the selection.
+                // Capture the structured slice into the internal clipboard.
+                if !self.selection.is_collapsed() {
+                    let plain_text = self.selection_text();
+                    let start = self.selection.start();
+                    let end = self.selection.end();
+                    if let Some(slice) = self.document.slice(start, end) {
+                        self.internal_clipboard = Some(InternalClipboard {
+                            slice,
+                            plain_text,
+                        });
+                    }
+                }
+                // The widget's update() method writes to the system clipboard.
+                // For Cut, also delete the selection.
                 if matches!(action, Action::Cut) && !self.selection.is_collapsed() {
                     self.apply_action(EditAction::DeleteSelection);
                 }
             }
             Action::Paste(text) => {
-                self.apply_action(EditAction::InsertText(text));
+                // Check if we have a structured internal clipboard whose
+                // plain text matches what came from the system clipboard.
+                // If so, paste with structure preservation; otherwise fall
+                // back to plain-text insertion.
+                let use_structured = self
+                    .internal_clipboard
+                    .as_ref()
+                    .is_some_and(|ic| ic.plain_text == text);
+                if use_structured {
+                    let slice = self
+                        .internal_clipboard
+                        .as_ref()
+                        .expect("checked above")
+                        .slice
+                        .clone();
+                    self.paste_slice(&slice);
+                } else {
+                    self.apply_action(EditAction::InsertText(text));
+                }
             }
             Action::Click(doc_pos) => {
                 self.handle_click(doc_pos);
@@ -304,6 +354,301 @@ impl EditorState {
         self.cursor.reset_blink();
         self.cursor.clear_target_x();
         self.cursor.clear_target_column();
+    }
+
+    /// Paste a structured `DocSlice` into the document, preserving block
+    /// structure and inline formatting.
+    ///
+    /// The algorithm:
+    /// 1. Delete the current selection (if non-collapsed).
+    /// 2. For a single-block slice with `open_start && open_end` (inline
+    ///    fragment): insert each run's text individually, applying style
+    ///    toggles where the run style differs from what would be inherited.
+    /// 3. For multi-block slices: split the current block at the cursor,
+    ///    merge the first slice block's runs into the left half, insert
+    ///    middle blocks, and merge the last slice block's runs into the
+    ///    right half.
+    fn paste_slice(&mut self, slice: &DocSlice) {
+        if slice.blocks.is_empty() {
+            return;
+        }
+
+        let cursor_before = self.selection;
+
+        // Step 1: delete selection if non-collapsed.
+        let mut all_ops: Vec<EditOp> = Vec::new();
+        let insert_pos = if !self.selection.is_collapsed() {
+            let delete_ops = rules::resolve(
+                &self.document,
+                self.selection,
+                EditAction::DeleteSelection,
+                InlineStyle::empty(),
+            );
+            for op in &delete_ops {
+                let pos_map = op.apply(&mut self.document);
+                self.selection.anchor = pos_map.map(self.selection.anchor);
+                self.selection.focus = pos_map.map(self.selection.focus);
+            }
+            let pos = self.selection.start();
+            self.selection = DocSelection::caret(pos);
+            all_ops.extend(delete_ops);
+            pos
+        } else {
+            self.selection.focus
+        };
+
+        // Step 2: determine paste strategy based on slice shape.
+        if slice.blocks.len() == 1 && slice.open_start && slice.open_end {
+            // Inline fragment: insert runs preserving their styles.
+            self.paste_inline_runs(insert_pos, &slice.blocks[0], &mut all_ops);
+        } else {
+            // Multi-block paste: split, insert blocks, merge edges.
+            self.paste_multi_block(insert_pos, slice, &mut all_ops);
+        }
+
+        // Normalize the entire document after paste.
+        normalize(&mut self.document);
+
+        // Clamp selection.
+        self.selection.anchor = self.document.clamp_position(self.selection.anchor);
+        self.selection.focus = self.document.clamp_position(self.selection.focus);
+
+        let cursor_after = self.selection;
+
+        // Push to undo stack as one group.
+        if !all_ops.is_empty() {
+            self.undo_stack.push(all_ops, cursor_before, cursor_after);
+        }
+
+        self.pending_style = InlineStyle::empty();
+        self.cursor.reset_blink();
+        self.cursor.clear_target_x();
+        self.cursor.clear_target_column();
+    }
+
+    /// Paste an inline fragment (single block, both ends open) at `pos`.
+    ///
+    /// Inserts each run's text individually, applying style toggles where
+    /// the run's style differs from the inherited style at the insertion
+    /// point.
+    fn paste_inline_runs(
+        &mut self,
+        pos: DocPosition,
+        block: &Block,
+        ops: &mut Vec<EditOp>,
+    ) {
+        let Some(runs) = block.runs() else {
+            return;
+        };
+
+        let mut current_offset = pos.offset;
+
+        for run in runs {
+            if run.text.is_empty() {
+                continue;
+            }
+
+            let char_count = run.text.chars().count();
+            let insert_pos = DocPosition::new(pos.block_index, current_offset);
+
+            // Insert the text (inherits the style of the run at the insertion point).
+            let insert_op = EditOp::InsertText {
+                position: insert_pos,
+                text: run.text.clone(),
+            };
+            insert_op.apply(&mut self.document);
+            ops.push(insert_op);
+
+            // Determine the inherited style and toggle any differing bits.
+            let inherited = run_style_at_for_paste(&self.document, insert_pos);
+            let diff = run.style.symmetric_difference(inherited);
+            if !diff.is_empty() {
+                let insert_end =
+                    DocPosition::new(pos.block_index, current_offset + char_count);
+                for bit in diff.iter() {
+                    let toggle_op = EditOp::ToggleInlineStyle {
+                        start: insert_pos,
+                        end: insert_end,
+                        style_bit: bit,
+                    };
+                    toggle_op.apply(&mut self.document);
+                    ops.push(toggle_op);
+                }
+            }
+
+            current_offset += char_count;
+        }
+
+        self.selection = DocSelection::caret(DocPosition::new(pos.block_index, current_offset));
+    }
+
+    /// Paste a multi-block slice at `pos`.
+    ///
+    /// Strategy: always merge the first and last slice blocks into the
+    /// surrounding content (regardless of `open_start`/`open_end`). This
+    /// matches the natural user expectation: pasting "A\nB" at the cursor
+    /// appends A's content to the left of the cursor and prepends B's
+    /// content to the right.
+    ///
+    /// 1. Split the block at `pos` into left and right halves.
+    /// 2. Append the first slice block's runs to the left half.
+    /// 3. Insert middle blocks (indices 1..len-1) between.
+    /// 4. Prepend the last slice block's runs to the right half.
+    /// 5. Place cursor at the end of the last pasted content.
+    fn paste_multi_block(
+        &mut self,
+        pos: DocPosition,
+        slice: &DocSlice,
+        ops: &mut Vec<EditOp>,
+    ) {
+        let block_count = slice.blocks.len();
+
+        // Split at cursor to create left and right halves.
+        let split_op = EditOp::SplitBlock { position: pos };
+        split_op.apply(&mut self.document);
+        ops.push(split_op);
+
+        // After split: left half at pos.block_index, right half at pos.block_index + 1.
+        let left_idx = pos.block_index;
+
+        // Merge first slice block's runs into the left half (append at end).
+        if let Some(runs) = slice.blocks[0].runs() {
+            self.append_runs_to_block(left_idx, runs, ops);
+        }
+
+        // Track where we insert middle blocks (between left and right halves).
+        let mut insert_idx = pos.block_index + 1;
+
+        // Insert middle blocks (indices 1..block_count-1).
+        if block_count > 2 {
+            for block in &slice.blocks[1..block_count - 1] {
+                let insert_op = EditOp::InsertBlock {
+                    index: insert_idx,
+                    block: block.clone(),
+                };
+                insert_op.apply(&mut self.document);
+                ops.push(insert_op);
+                insert_idx += 1;
+            }
+        }
+
+        // Handle the last block (only when there are 2+ blocks).
+        let cursor_block;
+        let cursor_offset;
+
+        if block_count > 1 {
+            let last_block = &slice.blocks[block_count - 1];
+            // Merge last slice block's runs into the right half (prepend at start).
+            let right_idx = insert_idx;
+            if let Some(runs) = last_block.runs() {
+                let pasted_len: usize = runs.iter().map(StyledRun::char_len).sum();
+                self.prepend_runs_to_block(right_idx, runs, ops);
+                cursor_block = right_idx;
+                cursor_offset = pasted_len;
+            } else {
+                cursor_block = right_idx;
+                cursor_offset = 0;
+            }
+        } else {
+            // Single block in the slice (shouldn't reach here for multi-block,
+            // but handle gracefully).
+            cursor_block = left_idx;
+            cursor_offset = self
+                .document
+                .block(left_idx)
+                .map_or(0, Block::char_len);
+        }
+
+        self.selection = DocSelection::caret(DocPosition::new(cursor_block, cursor_offset));
+    }
+
+    /// Append styled runs to the end of a block, preserving their formatting.
+    fn append_runs_to_block(
+        &mut self,
+        block_idx: usize,
+        runs: &[StyledRun],
+        ops: &mut Vec<EditOp>,
+    ) {
+        let mut offset = self
+            .document
+            .block(block_idx)
+            .map_or(0, Block::char_len);
+
+        for run in runs {
+            if run.text.is_empty() {
+                continue;
+            }
+            let char_count = run.text.chars().count();
+            let insert_pos = DocPosition::new(block_idx, offset);
+
+            let insert_op = EditOp::InsertText {
+                position: insert_pos,
+                text: run.text.clone(),
+            };
+            insert_op.apply(&mut self.document);
+            ops.push(insert_op);
+
+            // Toggle style bits that differ from what was inherited.
+            let inherited = run_style_at_for_paste(&self.document, insert_pos);
+            let diff = run.style.symmetric_difference(inherited);
+            if !diff.is_empty() {
+                let end = DocPosition::new(block_idx, offset + char_count);
+                for bit in diff.iter() {
+                    let toggle_op = EditOp::ToggleInlineStyle {
+                        start: insert_pos,
+                        end,
+                        style_bit: bit,
+                    };
+                    toggle_op.apply(&mut self.document);
+                    ops.push(toggle_op);
+                }
+            }
+
+            offset += char_count;
+        }
+    }
+
+    /// Prepend styled runs to the start of a block, preserving their formatting.
+    fn prepend_runs_to_block(
+        &mut self,
+        block_idx: usize,
+        runs: &[StyledRun],
+        ops: &mut Vec<EditOp>,
+    ) {
+        let mut offset = 0;
+
+        for run in runs {
+            if run.text.is_empty() {
+                continue;
+            }
+            let char_count = run.text.chars().count();
+            let insert_pos = DocPosition::new(block_idx, offset);
+
+            let insert_op = EditOp::InsertText {
+                position: insert_pos,
+                text: run.text.clone(),
+            };
+            insert_op.apply(&mut self.document);
+            ops.push(insert_op);
+
+            // Toggle style bits that differ from what was inherited.
+            let inherited = run_style_at_for_paste(&self.document, insert_pos);
+            let diff = run.style.symmetric_difference(inherited);
+            if !diff.is_empty() {
+                let end = DocPosition::new(block_idx, offset + char_count);
+                for bit in diff.iter() {
+                    let toggle_op = EditOp::ToggleInlineStyle {
+                        start: insert_pos,
+                        end,
+                        style_bit: bit,
+                    };
+                    toggle_op.apply(&mut self.document);
+                    ops.push(toggle_op);
+                }
+            }
+
+            offset += char_count;
+        }
     }
 
     /// Update the cursor position after applying ops.
@@ -787,13 +1132,17 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
                         if !text.is_empty() {
                             clipboard.write(iced::advanced::clipboard::Kind::Standard, text);
                         }
+                        // Emit Action::Copy so EditorState captures the structured slice.
+                        shell.publish(on_action(Action::Copy));
                         shell.capture_event();
                     }
                     KeyAction::Cut => {
                         let text = self.state.selection_text();
                         if !text.is_empty() {
                             clipboard.write(iced::advanced::clipboard::Kind::Standard, text.clone());
-                            shell.publish(on_action(Action::Edit(EditAction::DeleteSelection)));
+                            // Emit Action::Cut so EditorState captures the structured
+                            // slice and then deletes the selection.
+                            shell.publish(on_action(Action::Cut));
                         }
                         shell.capture_event();
                     }
@@ -915,31 +1264,45 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
                     );
                     render::draw_blockquote_border(renderer, bq_bounds, self.text_color);
 
-                    if let Some(paragraph) = entry.paragraph() {
+                    for child in entry.child_paragraphs() {
                         let para_origin = Point::new(
                             block_origin.x + render::BLOCKQUOTE_INDENT,
-                            block_origin.y,
+                            block_origin.y + child.local_y_offset,
                         );
                         render::draw_paragraph(
                             renderer,
-                            paragraph,
+                            &child.paragraph,
                             para_origin,
                             self.text_color,
                             text_bounds,
                         );
                     }
                 }
-                Block::List { .. } => {
-                    // Draw the combined paragraph if available.
-                    if let Some(paragraph) = entry.paragraph() {
-                        let para_origin = Point::new(
-                            block_origin.x + render::LIST_MARKER_WIDTH,
-                            block_origin.y,
+                Block::List { ordered, .. } => {
+                    for (item_idx, child) in entry.child_paragraphs().iter().enumerate() {
+                        let content_bounds = Rectangle::new(
+                            Point::new(
+                                block_origin.x + render::LIST_MARKER_WIDTH,
+                                block_origin.y + child.local_y_offset,
+                            ),
+                            Size::new(
+                                (text_bounds.width - render::LIST_MARKER_WIDTH).max(0.0),
+                                child.height,
+                            ),
+                        );
+                        render::draw_list_marker(
+                            renderer,
+                            content_bounds,
+                            *ordered,
+                            item_idx,
+                            self.font,
+                            self.text_color,
+                            text_bounds,
                         );
                         render::draw_paragraph(
                             renderer,
-                            paragraph,
-                            para_origin,
+                            &child.paragraph,
+                            content_bounds.position(),
                             self.text_color,
                             text_bounds,
                         );
@@ -1117,6 +1480,36 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
             mouse::Interaction::default()
         }
     }
+}
+
+// ── Paste style helper ───────────────────────────────────
+
+/// Determine the inline style that `InsertText` would inherit at the given
+/// position. Mirrors the logic in `operations::insert_text_into_runs`: the
+/// inserted text lands in whichever run contains the offset, so the
+/// inherited style is that run's style.
+fn run_style_at_for_paste(doc: &Document, pos: DocPosition) -> InlineStyle {
+    let Some(block) = doc.block(pos.block_index) else {
+        return InlineStyle::empty();
+    };
+    let Some(runs) = block.runs() else {
+        return InlineStyle::empty();
+    };
+    if runs.is_empty() {
+        return InlineStyle::empty();
+    }
+
+    let mut char_pos = 0;
+    for run in runs {
+        let run_len = run.char_len();
+        if pos.offset >= char_pos && pos.offset <= char_pos + run_len {
+            return run.style;
+        }
+        char_pos += run_len;
+    }
+
+    // Past the end: use last run's style.
+    runs.last().map_or(InlineStyle::empty(), |r| r.style)
 }
 
 // ── Block content x-offset helper ────────────────────────
@@ -1325,15 +1718,44 @@ fn hit_test_content_point(
         return DocPosition::new(block_index, 0);
     };
 
-    let Some(paragraph) = entry.paragraph() else {
-        // No paragraph (e.g. HorizontalRule) — place cursor at start of block.
-        return DocPosition::new(block_index, 0);
-    };
-
     let content_x_offset = document
         .block(block_index)
         .map(block_content_x_offset)
         .unwrap_or(0.0);
+
+    // For container blocks (List, BlockQuote) with child paragraphs,
+    // find which child the click falls in and hit-test that child.
+    let children = entry.child_paragraphs();
+    if !children.is_empty() {
+        let local_y = content_pos.y - entry.y_offset();
+
+        // Find the child whose y-range contains the click. Fall back to
+        // the last child if the click is below all children.
+        let child = children
+            .iter()
+            .rev()
+            .find(|c| local_y >= c.local_y_offset)
+            .unwrap_or(&children[0]);
+
+        let local_point = Point::new(
+            content_pos.x - content_x_offset,
+            local_y - child.local_y_offset,
+        );
+
+        let char_offset = child
+            .paragraph
+            .hit_test(local_point)
+            .map(iced::advanced::text::Hit::cursor)
+            .unwrap_or(0);
+
+        return DocPosition::new(block_index, char_offset);
+    }
+
+    // For inline blocks, hit-test the single paragraph.
+    let Some(paragraph) = entry.paragraph() else {
+        // No paragraph (e.g. HorizontalRule) — place cursor at start of block.
+        return DocPosition::new(block_index, 0);
+    };
 
     // Translate into paragraph-local coordinates.
     let local_point = Point::new(
@@ -1966,5 +2388,237 @@ mod tests {
             bold_runs.iter().all(|r| r.style.contains(InlineStyle::BOLD)),
             "all non-empty runs should be bold, got: {bold_runs:?}",
         );
+    }
+
+    // ── Clipboard: internal copy/paste ───────────────────
+
+    #[test]
+    fn copy_captures_internal_clipboard() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![
+            Block::paragraph("hello world"),
+        ]));
+        state.selection = DocSelection::range(
+            DocPosition::new(0, 0),
+            DocPosition::new(0, 5),
+        );
+        state.perform(Action::Copy);
+        assert!(state.internal_clipboard.is_some());
+        let ic = state.internal_clipboard.as_ref().expect("clipboard");
+        assert_eq!(ic.plain_text, "hello");
+        assert!(ic.slice.open_start);
+        assert!(ic.slice.open_end);
+    }
+
+    #[test]
+    fn copy_paste_plain_text_within_single_block() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![
+            Block::paragraph("hello world"),
+        ]));
+        // Copy "world"
+        state.selection = DocSelection::range(
+            DocPosition::new(0, 6),
+            DocPosition::new(0, 11),
+        );
+        state.perform(Action::Copy);
+
+        // Move cursor to start and paste
+        state.selection = DocSelection::caret(DocPosition::new(0, 0));
+        state.perform(Action::Paste("world".into()));
+
+        assert_eq!(
+            state.document.block(0).map(Block::flattened_text).as_deref(),
+            Some("worldhello world"),
+        );
+    }
+
+    #[test]
+    fn copy_paste_preserves_bold_formatting() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![
+            Block::Paragraph {
+                runs: vec![
+                    StyledRun::plain("hello "),
+                    StyledRun::styled("bold", InlineStyle::BOLD),
+                    StyledRun::plain(" text"),
+                ],
+            },
+        ]));
+        // Copy "bold" (offsets 6..10)
+        state.selection = DocSelection::range(
+            DocPosition::new(0, 6),
+            DocPosition::new(0, 10),
+        );
+        state.perform(Action::Copy);
+
+        // Move cursor to end and paste
+        state.selection = DocSelection::caret(DocPosition::new(0, 15));
+        state.perform(Action::Paste("bold".into()));
+
+        // The pasted "bold" at the end should be bold.
+        let runs = state.document.block(0).and_then(Block::runs).expect("runs");
+        let total_text: String = runs.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(total_text, "hello bold textbold");
+
+        // Find the last "bold" — it should have BOLD style.
+        let mut pos = 0;
+        let mut found_pasted_bold = false;
+        for run in runs {
+            let rlen = run.char_len();
+            let rend = pos + rlen;
+            // The pasted text starts at offset 15.
+            if pos >= 15 && rlen > 0 {
+                assert!(
+                    run.style.contains(InlineStyle::BOLD),
+                    "pasted run '{}' at [{pos}..{rend}) should be bold",
+                    run.text,
+                );
+                found_pasted_bold = true;
+            }
+            pos = rend;
+        }
+        assert!(found_pasted_bold, "should have found the pasted bold run");
+    }
+
+    #[test]
+    fn copy_paste_cross_block() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![
+            Block::paragraph("first"),
+            Block::paragraph("second"),
+            Block::paragraph("third"),
+        ]));
+
+        // Copy "first\nsecond" (blocks 0 and 1 entirely)
+        state.selection = DocSelection::range(
+            DocPosition::new(0, 0),
+            DocPosition::new(1, 6),
+        );
+        state.perform(Action::Copy);
+
+        // Paste at end of "third"
+        state.selection = DocSelection::caret(DocPosition::new(2, 5));
+        state.perform(Action::Paste("first\nsecond".into()));
+
+        // Should now have: "first", "second", "thirdfirst", "second"
+        assert_eq!(state.document.block_count(), 4);
+        assert_eq!(
+            state.document.block(2).map(Block::flattened_text).as_deref(),
+            Some("thirdfirst"),
+        );
+        assert_eq!(
+            state.document.block(3).map(Block::flattened_text).as_deref(),
+            Some("second"),
+        );
+    }
+
+    #[test]
+    fn cut_captures_and_deletes() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![
+            Block::paragraph("hello world"),
+        ]));
+        state.selection = DocSelection::range(
+            DocPosition::new(0, 5),
+            DocPosition::new(0, 11),
+        );
+        state.perform(Action::Cut);
+
+        // Text should be deleted.
+        assert_eq!(
+            state.document.block(0).map(Block::flattened_text).as_deref(),
+            Some("hello"),
+        );
+
+        // Internal clipboard should have the cut content.
+        assert!(state.internal_clipboard.is_some());
+        let ic = state.internal_clipboard.as_ref().expect("clipboard");
+        assert_eq!(ic.plain_text, " world");
+    }
+
+    #[test]
+    fn paste_external_text_when_clipboard_differs() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![
+            Block::paragraph("hello"),
+        ]));
+        // Copy "hello"
+        state.selection = DocSelection::range(
+            DocPosition::new(0, 0),
+            DocPosition::new(0, 5),
+        );
+        state.perform(Action::Copy);
+
+        // Now paste something different from the system clipboard
+        // (simulating the user copying from another app).
+        state.selection = DocSelection::caret(DocPosition::new(0, 5));
+        state.perform(Action::Paste("external".into()));
+
+        assert_eq!(
+            state.document.block(0).map(Block::flattened_text).as_deref(),
+            Some("helloexternal"),
+        );
+    }
+
+    #[test]
+    fn paste_replaces_selection() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![
+            Block::paragraph("hello world"),
+        ]));
+        // Copy "hello"
+        state.selection = DocSelection::range(
+            DocPosition::new(0, 0),
+            DocPosition::new(0, 5),
+        );
+        state.perform(Action::Copy);
+
+        // Select " world" and paste "hello" over it.
+        state.selection = DocSelection::range(
+            DocPosition::new(0, 5),
+            DocPosition::new(0, 11),
+        );
+        state.perform(Action::Paste("hello".into()));
+
+        assert_eq!(
+            state.document.block(0).map(Block::flattened_text).as_deref(),
+            Some("hellohello"),
+        );
+    }
+
+    #[test]
+    fn copy_paste_preserves_multi_block_structure_at_cursor_mid_block() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![
+            Block::paragraph("aaa"),
+            Block::paragraph("bbb"),
+            Block::paragraph("target text"),
+        ]));
+
+        // Copy "aaa\nbbb" (two complete blocks)
+        state.selection = DocSelection::range(
+            DocPosition::new(0, 0),
+            DocPosition::new(1, 3),
+        );
+        state.perform(Action::Copy);
+
+        // Paste in the middle of "target text" at offset 6
+        state.selection = DocSelection::caret(DocPosition::new(2, 6));
+        state.perform(Action::Paste("aaa\nbbb".into()));
+
+        // Expected: "target" + "aaa" content merged, then "bbb" + " text" merged
+        // Block 0: "aaa", Block 1: "bbb", Block 2: "targetaaa", Block 3: "bbb text"
+        assert!(state.document.block_count() >= 4);
+        assert_eq!(
+            state.document.block(2).map(Block::flattened_text).as_deref(),
+            Some("targetaaa"),
+        );
+        assert_eq!(
+            state.document.block(3).map(Block::flattened_text).as_deref(),
+            Some("bbb text"),
+        );
+    }
+
+    #[test]
+    fn collapsed_copy_does_not_capture() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![
+            Block::paragraph("hello"),
+        ]));
+        state.selection = DocSelection::caret(DocPosition::new(0, 3));
+        state.perform(Action::Copy);
+        assert!(state.internal_clipboard.is_none());
     }
 }

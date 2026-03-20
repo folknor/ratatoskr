@@ -188,11 +188,26 @@ pub fn build_spans_for_block<'a>(
 
 // ── Paragraph cache ─────────────────────────────────────
 
+/// A laid-out paragraph for a child element within a container block
+/// (list item or blockquote child).
+pub struct ChildParagraph<P: Paragraph<Font = Font>> {
+    /// The laid-out paragraph for this child.
+    pub paragraph: P,
+    /// Y offset relative to the container block's top edge (px).
+    pub local_y_offset: f32,
+    /// Height of this child paragraph (px).
+    pub height: f32,
+}
+
 /// A cached paragraph for a single document block.
 pub struct CacheEntry<P: Paragraph<Font = Font>> {
     /// The laid-out paragraph. `None` if the block has no inline content
-    /// (e.g. `HorizontalRule`).
+    /// (e.g. `HorizontalRule`) or if it is a container block that uses
+    /// `child_paragraphs` instead.
     paragraph: Option<P>,
+    /// Per-child paragraphs for container blocks (List, BlockQuote).
+    /// Empty for non-container blocks.
+    child_paragraphs: Vec<ChildParagraph<P>>,
     /// Whether this entry needs re-layout on the next frame.
     dirty: bool,
     /// Y offset from the top of the editor widget (px).
@@ -205,6 +220,7 @@ impl<P: Paragraph<Font = Font>> Default for CacheEntry<P> {
     fn default() -> Self {
         Self {
             paragraph: None,
+            child_paragraphs: Vec::new(),
             dirty: true,
             y_offset: 0.0,
             height: 0.0,
@@ -216,6 +232,12 @@ impl<P: Paragraph<Font = Font>> CacheEntry<P> {
     /// The pre-laid-out paragraph, if this block has inline content.
     pub fn paragraph(&self) -> Option<&P> {
         self.paragraph.as_ref()
+    }
+
+    /// Per-child paragraphs for container blocks (List, BlockQuote).
+    /// Empty for non-container blocks.
+    pub fn child_paragraphs(&self) -> &[ChildParagraph<P>] {
+        &self.child_paragraphs
     }
 
     /// Whether this entry is dirty (needs re-layout).
@@ -440,15 +462,16 @@ fn layout_block<P: Paragraph<Font = Font>>(
             entry.paragraph = None;
             HR_BLOCK_HEIGHT
         }
-        Block::List { items, ordered } => {
-            // For the initial implementation, lay out list items as simple
-            // indented paragraphs. Each item's first block gets a paragraph.
-            // The total height is the sum of all item heights.
-            let mut total = 0.0f32;
-            let content_width = available_width - LIST_MARKER_WIDTH;
+        Block::List { items, .. } => {
+            // Lay out each list item's first block as a separate paragraph,
+            // storing them as child_paragraphs for per-item rendering.
+            let content_width = (available_width - LIST_MARKER_WIDTH).max(0.0);
+            let mut children = Vec::with_capacity(items.len());
+            let mut y = 0.0f32;
 
             for (item_idx, item) in items.iter().enumerate() {
-                for item_block in &item.blocks {
+                // Use the first block in the item for rendering.
+                if let Some(item_block) = item.blocks.first() {
                     let item_spans = build_spans_for_block(
                         item_block.as_ref(),
                         base_font,
@@ -458,52 +481,36 @@ fn layout_block<P: Paragraph<Font = Font>>(
                     let item_font_size = block_font_size(item_block.as_ref());
                     let item_para = build_paragraph::<P>(
                         &item_spans,
-                        content_width.max(0.0),
+                        content_width,
                         base_font,
                         item_font_size,
                     );
-                    total += item_para.min_bounds().height;
-                    // Use the last item's paragraph as a representative for
-                    // hit testing. A proper implementation would store per-item
-                    // paragraphs, but that requires a richer cache structure.
-                    let _ = item_para;
+                    let h = item_para.min_bounds().height;
+                    children.push(ChildParagraph {
+                        paragraph: item_para,
+                        local_y_offset: y,
+                        height: h,
+                    });
+                    y += h;
                 }
 
                 if item_idx + 1 < items.len() {
-                    total += SPACING_LIST_ITEM;
+                    y += SPACING_LIST_ITEM;
                 }
             }
 
-            // For now, build a simple combined paragraph for the list by
-            // concatenating item text. This is a placeholder — the full
-            // implementation will store per-item paragraphs.
-            let combined_text = list_combined_text(items, *ordered);
-            if !combined_text.is_empty() {
-                let spans: Vec<Span<'_, String, Font>> =
-                    vec![Span::new(combined_text.as_str())
-                        .font(base_font)
-                        .size(FONT_SIZE_BODY)
-                        .color(text_color)];
-                let paragraph = build_paragraph::<P>(
-                    &spans,
-                    available_width,
-                    base_font,
-                    FONT_SIZE_BODY,
-                );
-                let height = paragraph.min_bounds().height;
-                entry.paragraph = Some(paragraph);
-                return height;
-            }
-
             entry.paragraph = None;
-            total
+            entry.child_paragraphs = children;
+            y
         }
-        Block::BlockQuote { blocks: children } => {
-            // Lay out blockquote children within a narrower width.
-            let inner_width = available_width - BLOCKQUOTE_INDENT;
-            let mut total = 0.0f32;
+        Block::BlockQuote { blocks: bq_children } => {
+            // Lay out each child block as a separate paragraph within a
+            // narrower width, storing them as child_paragraphs.
+            let inner_width = (available_width - BLOCKQUOTE_INDENT).max(0.0);
+            let mut children = Vec::with_capacity(bq_children.len());
+            let mut y = 0.0f32;
 
-            for (i, child) in children.iter().enumerate() {
+            for (i, child) in bq_children.iter().enumerate() {
                 let child_spans = build_spans_for_block(
                     child.as_ref(),
                     base_font,
@@ -513,42 +520,26 @@ fn layout_block<P: Paragraph<Font = Font>>(
                 let child_font_size = block_font_size(child.as_ref());
                 let child_para = build_paragraph::<P>(
                     &child_spans,
-                    inner_width.max(0.0),
+                    inner_width,
                     base_font,
                     child_font_size,
                 );
-                total += child_para.min_bounds().height;
+                let h = child_para.min_bounds().height;
+                children.push(ChildParagraph {
+                    paragraph: child_para,
+                    local_y_offset: y,
+                    height: h,
+                });
+                y += h;
 
-                if i + 1 < children.len() {
-                    total += SPACING_PARAGRAPH;
+                if i + 1 < bq_children.len() {
+                    y += SPACING_PARAGRAPH;
                 }
-
-                // Store the last child's paragraph as a representative.
-                // Full implementation will need per-child paragraphs.
-                let _ = child_para;
-            }
-
-            // Build a combined paragraph as placeholder.
-            let combined_text = blockquote_combined_text(children);
-            if !combined_text.is_empty() {
-                let spans: Vec<Span<'_, String, Font>> =
-                    vec![Span::new(combined_text.as_str())
-                        .font(base_font)
-                        .size(FONT_SIZE_BODY)
-                        .color(text_color)];
-                let paragraph = build_paragraph::<P>(
-                    &spans,
-                    inner_width.max(0.0),
-                    base_font,
-                    FONT_SIZE_BODY,
-                );
-                let height = paragraph.min_bounds().height;
-                entry.paragraph = Some(paragraph);
-                return height;
             }
 
             entry.paragraph = None;
-            total
+            entry.child_paragraphs = children;
+            y
         }
     }
 }
@@ -574,44 +565,6 @@ fn build_paragraph<P: Paragraph<Font = Font>>(
         hint_factor: None,
     };
     P::with_spans(text)
-}
-
-// ── Text extraction helpers for container blocks ────────
-
-/// Build a simple combined text representation of list items.
-fn list_combined_text(
-    items: &[crate::document::ListItem],
-    ordered: bool,
-) -> String {
-    let mut buf = String::new();
-    for (i, item) in items.iter().enumerate() {
-        if i > 0 {
-            buf.push('\n');
-        }
-        if ordered {
-            buf.push_str(&(i + 1).to_string());
-            buf.push_str(". ");
-        } else {
-            buf.push_str(BULLET_CHAR);
-            buf.push(' ');
-        }
-        for block in &item.blocks {
-            buf.push_str(&block.flattened_text());
-        }
-    }
-    buf
-}
-
-/// Build a simple combined text representation of blockquote children.
-fn blockquote_combined_text(children: &[std::sync::Arc<Block>]) -> String {
-    let mut buf = String::new();
-    for (i, child) in children.iter().enumerate() {
-        if i > 0 {
-            buf.push('\n');
-        }
-        buf.push_str(&child.flattened_text());
-    }
-    buf
 }
 
 // ── Drawing helpers ─────────────────────────────────────
@@ -792,25 +745,19 @@ mod tests {
     }
 
     #[test]
-    fn list_combined_text_unordered() {
-        let items = vec![
-            crate::document::ListItem::plain("first"),
-            crate::document::ListItem::plain("second"),
-        ];
-        let text = list_combined_text(&items, false);
-        assert!(text.contains(BULLET_CHAR));
-        assert!(text.contains("first"));
-        assert!(text.contains("second"));
+    fn block_font_size_list() {
+        let block = Block::List {
+            ordered: false,
+            items: vec![crate::document::ListItem::plain("item")],
+        };
+        assert!((block_font_size(&block) - FONT_SIZE_BODY).abs() < f32::EPSILON);
     }
 
     #[test]
-    fn list_combined_text_ordered() {
-        let items = vec![
-            crate::document::ListItem::plain("alpha"),
-            crate::document::ListItem::plain("beta"),
-        ];
-        let text = list_combined_text(&items, true);
-        assert!(text.contains("1. alpha"));
-        assert!(text.contains("2. beta"));
+    fn block_font_size_blockquote() {
+        let block = Block::BlockQuote {
+            blocks: vec![std::sync::Arc::new(Block::paragraph("quoted"))],
+        };
+        assert!((block_font_size(&block) - FONT_SIZE_BODY).abs() < f32::EPSILON);
     }
 }
