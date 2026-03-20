@@ -1,5 +1,6 @@
 mod appearance;
 mod command_dispatch;
+mod command_resolver;
 mod component;
 mod db;
 mod display;
@@ -18,8 +19,8 @@ use iced::widget::{column, container, mouse_area, row, stack};
 use iced::{Element, Length, Point, Size, Task, Theme};
 use ui::palette::PaletteState;
 use ratatoskr_command_palette::{
-    BindingTable, Chord, CommandArgs, CommandId, CommandRegistry, FocusedRegion, ResolveResult,
-    current_platform,
+    BindingTable, Chord, CommandArgs, CommandId, CommandInputResolver, CommandRegistry,
+    FocusedRegion, OptionItem, ResolveResult, current_platform,
 };
 use ratatoskr_core::db::queries_extra::navigation::{
     NavigationState, get_navigation_state,
@@ -189,6 +190,8 @@ struct App {
     pending_chord: Option<PendingChord>,
     /// Command palette overlay state.
     palette: PaletteState,
+    /// Resolver for parameterized command options (stage 2).
+    resolver: Arc<command_resolver::AppInputResolver>,
 }
 
 impl App {
@@ -200,6 +203,7 @@ impl App {
 
         let registry = CommandRegistry::new();
         let binding_table = BindingTable::new(&registry, current_platform());
+        let resolver = Arc::new(command_resolver::AppInputResolver::new(Arc::clone(&db)));
 
         let app = Self {
             db,
@@ -228,6 +232,7 @@ impl App {
             composer_is_open: false,
             pending_chord: None,
             palette: PaletteState::new(),
+            resolver,
         };
         let load_gen = app.nav_generation;
         (app, Task::perform(
@@ -525,6 +530,7 @@ impl App {
                 |q| Message::Palette(PaletteMessage::QueryChanged(q)),
                 Message::Palette(PaletteMessage::Confirm),
                 |idx| Message::Palette(PaletteMessage::ClickResult(idx)),
+                |idx| Message::Palette(PaletteMessage::ClickOption(idx)),
             );
 
             let palette_positioned = container(palette_widget)
@@ -692,26 +698,49 @@ impl App {
                 self.palette.query.clear();
                 self.palette.results = results;
                 self.palette.selected_index = 0;
+                self.palette.stage = ui::palette::PaletteStage::CommandSearch;
                 iced::widget::operation::focus::<Message>("palette-input".to_string())
             }
             PaletteMessage::Close => {
-                self.palette.open = false;
-                self.palette.query.clear();
-                self.palette.results.clear();
-                self.palette.selected_index = 0;
+                // In stage 2, Escape goes back to stage 1 instead of closing.
+                if self.palette.is_option_pick() {
+                    let ctx = command_dispatch::build_context(self);
+                    self.palette.back_to_stage1();
+                    self.palette.results = self.registry.query(&ctx, "");
+                    return iced::widget::operation::focus::<Message>(
+                        "palette-input".to_string(),
+                    );
+                }
+                self.palette.close();
                 Task::none()
             }
             PaletteMessage::QueryChanged(query) => {
-                let ctx = command_dispatch::build_context(self);
-                self.palette.results = self.registry.query(&ctx, &query);
-                self.palette.query = query;
-                self.palette.selected_index = 0;
+                if self.palette.is_option_pick() {
+                    // Stage 2: filter options with fuzzy search
+                    self.palette.option_matches = ratatoskr_command_palette::search_options(
+                        &self.palette.option_items,
+                        &query,
+                    );
+                    self.palette.query = query;
+                    self.palette.selected_index = 0;
+                } else {
+                    // Stage 1: query the registry
+                    let ctx = command_dispatch::build_context(self);
+                    self.palette.results = self.registry.query(&ctx, &query);
+                    self.palette.query = query;
+                    self.palette.selected_index = 0;
+                }
                 Task::none()
             }
             PaletteMessage::SelectNext => {
-                if !self.palette.results.is_empty() {
+                let len = if self.palette.is_option_pick() {
+                    self.palette.option_matches.len()
+                } else {
+                    self.palette.results.len()
+                };
+                if len > 0 {
                     self.palette.selected_index = (self.palette.selected_index + 1)
-                        .min(self.palette.results.len() - 1);
+                        .min(len - 1);
                 }
                 Task::none()
             }
@@ -719,7 +748,13 @@ impl App {
                 self.palette.selected_index = self.palette.selected_index.saturating_sub(1);
                 Task::none()
             }
-            PaletteMessage::Confirm => self.palette_confirm(),
+            PaletteMessage::Confirm => {
+                if self.palette.is_option_pick() {
+                    self.palette_confirm_option()
+                } else {
+                    self.palette_confirm()
+                }
+            }
             PaletteMessage::ClickResult(idx) => {
                 if idx < self.palette.results.len() {
                     self.palette.selected_index = idx;
@@ -727,6 +762,17 @@ impl App {
                 } else {
                     Task::none()
                 }
+            }
+            PaletteMessage::ClickOption(idx) => {
+                if idx < self.palette.option_matches.len() {
+                    self.palette.selected_index = idx;
+                    self.palette_confirm_option()
+                } else {
+                    Task::none()
+                }
+            }
+            PaletteMessage::OptionsLoaded(generation, command_id, result) => {
+                self.handle_options_loaded(generation, command_id, result)
             }
         }
     }
@@ -743,21 +789,125 @@ impl App {
 
         match input_mode {
             ratatoskr_command_palette::InputMode::Direct => {
-                self.palette.open = false;
-                self.palette.query.clear();
-                self.palette.results.clear();
-                self.palette.selected_index = 0;
+                self.palette.close();
                 self.update(Message::ExecuteCommand(id))
             }
-            ratatoskr_command_palette::InputMode::Parameterized { .. } => {
-                // Stage 2 is next slice — close palette for now.
-                self.palette.open = false;
+            ratatoskr_command_palette::InputMode::Parameterized { schema } => {
+                // Get the param label for the placeholder text
+                let param_label = schema
+                    .param_at(0)
+                    .map(|p| match p {
+                        ratatoskr_command_palette::ParamDef::ListPicker { label } => label,
+                        ratatoskr_command_palette::ParamDef::DateTime { label } => label,
+                        ratatoskr_command_palette::ParamDef::Enum { label, .. } => label,
+                        ratatoskr_command_palette::ParamDef::Text { label, .. } => label,
+                    })
+                    .unwrap_or("option");
+
+                // Skip DateTime commands for now (snooze picker is complex)
+                if matches!(
+                    schema.param_at(0),
+                    Some(ratatoskr_command_palette::ParamDef::DateTime { .. })
+                ) {
+                    self.palette.close();
+                    return Task::none();
+                }
+
+                // Transition to stage 2
+                self.palette.stage = ui::palette::PaletteStage::OptionPick;
                 self.palette.query.clear();
-                self.palette.results.clear();
                 self.palette.selected_index = 0;
-                Task::none()
+                self.palette.stage2_command_id = Some(id);
+                self.palette.stage2_label = param_label.to_string();
+                self.palette.option_items.clear();
+                self.palette.option_matches.clear();
+                self.palette.options_loading = true;
+                self.palette.option_load_generation += 1;
+                let generation = self.palette.option_load_generation;
+
+                // Dispatch async resolver call
+                let resolver = Arc::clone(&self.resolver);
+                let ctx = command_dispatch::build_context(self);
+                let focus_task = iced::widget::operation::focus::<Message>(
+                    "palette-input".to_string(),
+                );
+                let load_task = Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            resolver.get_options(id, 0, &[], &ctx)
+                        })
+                        .await
+                        .unwrap_or_else(|e| Err(format!("spawn_blocking: {e}")))
+                    },
+                    move |result| {
+                        Message::Palette(PaletteMessage::OptionsLoaded(
+                            generation, id, result,
+                        ))
+                    },
+                );
+                Task::batch([focus_task, load_task])
             }
         }
+    }
+
+    fn handle_options_loaded(
+        &mut self,
+        generation: u64,
+        command_id: CommandId,
+        result: Result<Vec<ratatoskr_command_palette::OptionItem>, String>,
+    ) -> Task<Message> {
+        // Discard stale results
+        if generation < self.palette.option_load_generation {
+            return Task::none();
+        }
+        // Verify we're still in the right stage for this command
+        if self.palette.stage2_command_id != Some(command_id) {
+            return Task::none();
+        }
+
+        self.palette.options_loading = false;
+
+        match result {
+            Ok(items) => {
+                self.palette.option_matches =
+                    ratatoskr_command_palette::search_options(&items, &self.palette.query);
+                self.palette.option_items = items;
+                self.palette.selected_index = 0;
+            }
+            Err(msg) => {
+                // On error, show empty list. The placeholder text
+                // changes from "Loading..." to the search prompt,
+                // making it clear no options were found.
+                self.palette.option_items.clear();
+                self.palette.option_matches.clear();
+                self.status = format!("Palette error: {msg}");
+            }
+        }
+        Task::none()
+    }
+
+    fn palette_confirm_option(&mut self) -> Task<Message> {
+        let Some(option_match) = self
+            .palette
+            .option_matches
+            .get(self.palette.selected_index)
+        else {
+            return Task::none();
+        };
+        if option_match.item.disabled {
+            return Task::none();
+        }
+
+        let Some(command_id) = self.palette.stage2_command_id else {
+            return Task::none();
+        };
+
+        let Some(args) = build_command_args(command_id, &option_match.item) else {
+            return Task::none();
+        };
+
+        self.palette.close();
+        self.update(Message::ExecuteParameterized(command_id, args))
     }
 }
 
@@ -1061,6 +1211,33 @@ async fn load_threads_scoped(
             .collect())
     })
     .await
+}
+
+/// Build typed `CommandArgs` from the selected option item.
+///
+/// Maps each parameterized `CommandId` to its corresponding `CommandArgs`
+/// variant, extracting the item's ID (and for cross-account commands,
+/// splitting the `"account_id:label_id"` encoding).
+fn build_command_args(command_id: CommandId, item: &OptionItem) -> Option<CommandArgs> {
+    match command_id {
+        CommandId::EmailMoveToFolder => Some(CommandArgs::MoveToFolder {
+            folder_id: item.id.clone(),
+        }),
+        CommandId::EmailAddLabel => Some(CommandArgs::AddLabel {
+            label_id: item.id.clone(),
+        }),
+        CommandId::EmailRemoveLabel => Some(CommandArgs::RemoveLabel {
+            label_id: item.id.clone(),
+        }),
+        CommandId::EmailSnooze => {
+            // DateTime picker returns a stringified unix timestamp
+            item.id
+                .parse::<i64>()
+                .ok()
+                .map(|ts| CommandArgs::Snooze { until: ts })
+        }
+        _ => None,
+    }
 }
 
 fn db_thread_to_app_thread(t: DbThread) -> Thread {

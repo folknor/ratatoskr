@@ -1,4 +1,4 @@
-use ratatoskr_command_palette::{CommandArgs, CommandContext, CommandId, ViewType};
+use ratatoskr_command_palette::{CommandArgs, CommandContext, CommandId, OptionItem, ViewType};
 
 use crate::App;
 use crate::Message;
@@ -78,6 +78,11 @@ pub enum PaletteMessage {
     Confirm,
     /// Mouse click on a result row.
     ClickResult(usize),
+    /// Stage 2: option list loaded from resolver.
+    /// The `u64` is the generation counter to discard stale results.
+    OptionsLoaded(u64, CommandId, Result<Vec<OptionItem>, String>),
+    /// Mouse click on a stage 2 option row.
+    ClickOption(usize),
 }
 
 #[derive(Debug, Clone)]
