@@ -536,7 +536,7 @@ fn node_to_blocks(node: &Handle, blocks: &mut Vec<Block>) {
 
             match tag {
                 "p" => {
-                    if children_have_img(&borrow.children) {
+                    if tree_has_img(&borrow.children) {
                         collect_blocks_with_inline_images(
                             &borrow.children,
                             blocks,
@@ -554,7 +554,7 @@ fn node_to_blocks(node: &Handle, blocks: &mut Vec<Block>) {
                         // H4-H6 map to H3 per spec
                         _ => HeadingLevel::H3,
                     };
-                    let has_img = children_have_img(&borrow.children);
+                    let has_img = tree_has_img(&borrow.children);
                     if has_img {
                         collect_blocks_with_inline_images(
                             &borrow.children,
@@ -645,7 +645,7 @@ fn node_to_blocks(node: &Handle, blocks: &mut Vec<Block>) {
                     }
                 }
                 "td" | "th" => {
-                    if children_have_img(&borrow.children) {
+                    if tree_has_img(&borrow.children) {
                         collect_blocks_with_inline_images(
                             &borrow.children,
                             blocks,
@@ -745,56 +745,144 @@ fn parse_list_item(li_node: &Handle) -> ListItem {
 /// Collect blocks from children that may contain `<img>` elements mixed with
 /// inline content. Flushes accumulated inline runs as block-level elements
 /// (using `wrap_runs`) whenever an `<img>` is encountered.
-/// Check if any direct children of a node are `<img>` elements.
-fn children_have_img(children: &[Handle]) -> bool {
+/// Check whether a node tree contains any `<img>` elements at any depth.
+fn tree_has_img(children: &[Handle]) -> bool {
     children.iter().any(|c| {
         let cb = c.borrow();
         if let NodeData::Element { ref name, .. } = cb.data {
-            name.local.as_ref() == "img"
-        } else {
-            false
+            if name.local.as_ref() == "img" {
+                return true;
+            }
+            // Recurse into inline wrappers.
+            if !is_block_element(name.local.as_ref()) {
+                return tree_has_img(&cb.children);
+            }
         }
+        false
     })
 }
 
+/// An item produced during mixed inline/image collection.
+enum InlineOrImage {
+    Run(StyledRun),
+    Image {
+        src: String,
+        alt: String,
+        width: Option<u32>,
+        height: Option<u32>,
+    },
+}
+
+/// Collect inline runs and images from a node, handling `<img>` at any
+/// nesting depth within inline wrappers.
+fn collect_inline_or_images(
+    node: &Handle,
+    ctx: &StyleContext,
+    out: &mut Vec<InlineOrImage>,
+) {
+    let borrow = node.borrow();
+    match borrow.data {
+        NodeData::Text(ref text) => {
+            let collapsed = collapse_whitespace(text);
+            if !collapsed.is_empty() {
+                // Try to merge with the previous run if same formatting.
+                let can_merge = matches!(out.last(), Some(InlineOrImage::Run(last)) if last.style == ctx.style && last.link == ctx.link);
+                if can_merge
+                    && let Some(InlineOrImage::Run(last)) = out.last_mut()
+                {
+                    last.text.push_str(&collapsed);
+                    return;
+                }
+                out.push(InlineOrImage::Run(StyledRun {
+                    text: collapsed,
+                    style: ctx.style,
+                    link: ctx.link.clone(),
+                }));
+            }
+        }
+        NodeData::Element {
+            ref name,
+            ref attrs,
+            ..
+        } => {
+            let tag = name.local.as_ref();
+
+            if tag == "br" {
+                out.push(InlineOrImage::Run(StyledRun {
+                    text: "\n".to_owned(),
+                    style: ctx.style,
+                    link: ctx.link.clone(),
+                }));
+                return;
+            }
+
+            if tag == "img" {
+                out.push(InlineOrImage::Image {
+                    src: get_attr(attrs, "src").unwrap_or_default(),
+                    alt: get_attr(attrs, "alt").unwrap_or_default(),
+                    width: get_attr(attrs, "width").and_then(|w| w.parse().ok()),
+                    height: get_attr(attrs, "height").and_then(|h| h.parse().ok()),
+                });
+                return;
+            }
+
+            let child_ctx = if tag == "a" {
+                if let Some(href) = get_href(attrs) {
+                    ctx.with_link(href)
+                } else {
+                    ctx.clone()
+                }
+            } else if let Some(inline_style) = tag_to_inline_style(tag) {
+                ctx.with_style(inline_style)
+            } else {
+                ctx.clone()
+            };
+
+            for child in &borrow.children {
+                collect_inline_or_images(child, &child_ctx, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Collect blocks from children that may contain `<img>` mixed with inline
+/// content at any nesting depth. Flushes pending runs as blocks when an
+/// image is encountered.
 fn collect_blocks_with_inline_images(
     children: &[Handle],
     blocks: &mut Vec<Block>,
     wrap_runs: impl Fn(Vec<StyledRun>) -> Block,
 ) {
     let ctx = StyleContext::new();
-    let mut pending_runs: Vec<StyledRun> = Vec::new();
+    let mut items: Vec<InlineOrImage> = Vec::new();
 
     for child in children {
-        // Check if this child is an <img> element and extract its data
-        // before dropping the borrow.
-        let img_data = {
-            let child_borrow = child.borrow();
-            if let NodeData::Element { ref name, ref attrs, .. } = child_borrow.data {
-                if name.local.as_ref() == "img" {
-                    Some((
-                        get_attr(attrs, "src").unwrap_or_default(),
-                        get_attr(attrs, "alt").unwrap_or_default(),
-                        get_attr(attrs, "width").and_then(|w| w.parse().ok()),
-                        get_attr(attrs, "height").and_then(|h| h.parse().ok()),
-                    ))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        };
-
-        if let Some((src, alt, width, height)) = img_data {
-            flush_pending_runs(&mut pending_runs, blocks, &wrap_runs);
-            blocks.push(Block::Image { src, alt, width, height });
-        } else {
-            collect_inline_runs(child, &ctx, &mut pending_runs);
-        }
+        collect_inline_or_images(child, &ctx, &mut items);
     }
 
-    // Flush any remaining inline runs.
+    // Convert the mixed stream into blocks: consecutive runs become one
+    // block, images become Image blocks.
+    let mut pending_runs: Vec<StyledRun> = Vec::new();
+    for item in items {
+        match item {
+            InlineOrImage::Run(run) => pending_runs.push(run),
+            InlineOrImage::Image {
+                src,
+                alt,
+                width,
+                height,
+            } => {
+                flush_pending_runs(&mut pending_runs, blocks, &wrap_runs);
+                blocks.push(Block::Image {
+                    src,
+                    alt,
+                    width,
+                    height,
+                });
+            }
+        }
+    }
     flush_pending_runs(&mut pending_runs, blocks, &wrap_runs);
 }
 
@@ -1354,6 +1442,29 @@ mod tests {
         let html = r#"<img src="cid:abc">"#;
         let doc = from_html(html);
         assert_eq!(to_html(&doc), html);
+    }
+
+    #[test]
+    fn image_inside_inline_wrapper_in_heading() {
+        // <img> wrapped in <a> inside a heading — must not be dropped.
+        let doc = from_html(r#"<h1>before<a href="https://x.com"><img src="logo.png" alt="logo"></a>after</h1>"#);
+        // Should produce: heading "before", image block, heading "after"
+        assert!(doc.block_count() >= 2, "got {} blocks", doc.block_count());
+        let has_image = (0..doc.block_count()).any(|i| {
+            matches!(doc.block(i), Some(Block::Image { .. }))
+        });
+        assert!(has_image, "expected an Image block, got: {:?}",
+            (0..doc.block_count()).map(|i| doc.block(i).map(Block::kind)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn image_inside_strong_in_paragraph() {
+        // <img> wrapped in <strong> inside a paragraph.
+        let doc = from_html(r#"<p><strong><img src="pic.jpg" alt="pic"></strong></p>"#);
+        let has_image = (0..doc.block_count()).any(|i| {
+            matches!(doc.block(i), Some(Block::Image { .. }))
+        });
+        assert!(has_image, "expected an Image block");
     }
 
     #[test]
