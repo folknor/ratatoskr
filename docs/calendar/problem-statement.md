@@ -243,7 +243,7 @@ Clicking an event block opens a popover. Clicking outside or pressing Escape dis
 
 #### Popover Size
 
-- **Fixed width**: approximately the sidebar width (~180px).
+- **Fixed width**: ~300px.
 - **Dynamic height**: grows to fit content. Elements with no data are hidden entirely, so a minimal event (title + time only) produces a compact popover.
 
 #### Popover Contents (top to bottom, all full-width)
@@ -292,13 +292,13 @@ The modal dims and blocks interaction with the rest of the calendar window. It s
 
 #### Modal Size and Layout
 
-- **Fixed width**: 1200px
+- **Max width**: 80% of window width
 - **Height**: full window height minus ~30px margin on each side
-- **Two-panel layout**: ~850px left panel (event details), ~350px right panel (day view)
+- **Two-panel layout**: ~70% left panel (event details), ~30% right panel (day view)
 
 ```
 ┌────────────────────────────────────────────────────┬──────────────────┐
-│ Event Details (left panel, ~850px)                  │ Day View (~350px)│
+│ Event Details (left panel, ~70%)                     │ Day View (~30%) │
 │                                                    │                  │
 │ Calendar: [Work Calendar ▾]                        │  8:00            │
 │                                                    │  9:00 ┌────────┐│
@@ -507,8 +507,6 @@ For events the user is invited to (not the organizer), RSVP actions appear in th
 - **Accept** — marks attendance as accepted, sends response to organizer
 - **Tentative** — marks as tentative
 - **Decline** — marks as declined, optionally hides event from view
-- **Propose New Time** — opens a time picker, sends counter-proposal (provider-dependent)
-
 RSVP is especially important because meeting invites arrive as email. The 📅 button on a meeting invitation email should open the event in the calendar with RSVP actions ready.
 
 ## Pop-Out Window
