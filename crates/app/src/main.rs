@@ -634,11 +634,10 @@ impl App {
             }
             SidebarEvent::AllAccountsSelected => {
                 self.thread_list.selected_thread = None;
-                self.thread_list.threads.clear();
                 self.nav_generation += 1;
                 self.thread_generation += 1;
                 self.update_thread_list_context_from_sidebar();
-                self.fire_navigation_load()
+                self.load_navigation_and_threads()
             }
             SidebarEvent::CycleAccount => Task::none(),
             SidebarEvent::LabelSelected(label_id) => {
@@ -905,7 +904,7 @@ async fn load_threads_scoped(
 ) -> Result<Vec<Thread>, String> {
     db.with_conn(move |conn| {
         let db_threads =
-            get_threads_scoped(conn, &scope, label_id.as_deref(), Some(50), None)?;
+            get_threads_scoped(conn, &scope, label_id.as_deref(), Some(1000), None)?;
         Ok(db_threads
             .into_iter()
             .map(db_thread_to_app_thread)
