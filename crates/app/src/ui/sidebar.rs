@@ -153,7 +153,7 @@ impl Component for Sidebar {
         .padding(PAD_SIDEBAR)
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(theme::sidebar_container)
+        .style(theme::ContainerClass::Sidebar.style())
         .into()
     }
 }

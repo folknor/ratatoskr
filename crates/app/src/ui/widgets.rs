@@ -6,7 +6,6 @@ use crate::font;
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
-use crate::Message;
 
 // ── Leading slot ───────────────────────────────────────
 // Wraps any content (icon, avatar, dot) in a fixed-size
@@ -70,7 +69,7 @@ pub fn count_badge<'a, M: 'a>(count: i64) -> Element<'a, M> {
     };
     container(text(label).size(TEXT_XS).style(text::secondary))
         .padding(PAD_BADGE)
-        .style(theme::badge_container)
+        .style(theme::ContainerClass::Badge.style())
         .into()
 }
 
@@ -98,12 +97,12 @@ pub fn nav_button<'a, M: Clone + 'a>(
     let label_style: fn(&Theme) -> text::Style = if active {
         text::primary
     } else {
-        theme::text_muted
+        theme::TextClass::Muted.style()
     };
     let icon_style: fn(&Theme) -> text::Style = if active {
         text::primary
     } else {
-        theme::text_muted
+        theme::TextClass::Muted.style()
     };
     let pad = match size {
         NavSize::Compact => PAD_NAV_ITEM,
@@ -143,7 +142,7 @@ pub fn nav_button<'a, M: Clone + 'a>(
     button(content)
         .on_press(on_press)
         .padding(pad)
-        .style(theme::nav_button(active))
+        .style(theme::ButtonClass::Nav { active }.style())
         .width(Length::Fill)
         .into()
 }
@@ -206,7 +205,7 @@ pub fn label_nav_item<'a, M: Clone + 'a>(
     )
     .on_press(on_press)
     .padding(PAD_ICON_BTN)
-    .style(theme::nav_button(active))
+    .style(theme::ButtonClass::Nav { active }.style())
     .width(Length::Fill)
     .into()
 }
@@ -214,7 +213,7 @@ pub fn label_nav_item<'a, M: Clone + 'a>(
 // ── Dividers & section breaks ───────────────────────────
 
 pub fn divider<'a, M: 'a>() -> Element<'a, M> {
-    rule::horizontal(1).style(theme::divider_rule).into()
+    rule::horizontal(1).style(theme::RuleClass::Divider.style()).into()
 }
 
 pub fn section_break<'a, M: 'a>() -> Element<'a, M> {
@@ -242,17 +241,17 @@ pub fn collapsible_section<'a, M: Clone + 'a>(
 
     let header = button(
         row![
-            container(text(title).size(TEXT_XS).style(theme::text_tertiary))
+            container(text(title).size(TEXT_XS).style(theme::TextClass::Tertiary.style()))
                 .align_y(Alignment::Center),
             Space::new().width(Length::Fill),
-            container(chevron.size(ICON_XS).style(theme::text_tertiary))
+            container(chevron.size(ICON_XS).style(theme::TextClass::Tertiary.style()))
                 .align_y(Alignment::Center),
         ]
         .align_y(Alignment::Center),
     )
     .on_press(on_toggle)
     .padding(PAD_COLLAPSIBLE_HEADER)
-    .style(theme::action_button)
+    .style(theme::ButtonClass::Action.style())
     .width(Length::Fill);
 
     let mut col = column![header].spacing(SPACE_XXS);
@@ -324,7 +323,7 @@ pub fn dropdown<'a, M: Clone + 'a>(
                 .width(Length::Fill)
                 .align_y(Alignment::Center),
             // chevron_slot
-            container(icon::chevron_down().size(ICON_SM).style(theme::text_tertiary))
+            container(icon::chevron_down().size(ICON_SM).style(theme::TextClass::Tertiary.style()))
                 .align_y(Alignment::Center),
         ]
         .spacing(SPACE_XS)
@@ -332,7 +331,7 @@ pub fn dropdown<'a, M: Clone + 'a>(
     )
     .on_press(on_toggle.clone())
     .padding(PAD_DROPDOWN)
-    .style(theme::action_button)
+    .style(theme::ButtonClass::Action.style())
     .width(Length::Fill);
 
     if !open {
@@ -362,7 +361,7 @@ pub fn dropdown<'a, M: Clone + 'a>(
             .on_press(entry.on_press)
             .padding(PAD_NAV_ITEM)
             .height(DROPDOWN_ITEM_HEIGHT)
-            .style(theme::dropdown_button(entry.selected))
+            .style(theme::ButtonClass::Dropdown { selected: entry.selected }.style())
             .width(Length::Fill)
             .into()
         })
@@ -372,7 +371,7 @@ pub fn dropdown<'a, M: Clone + 'a>(
         column(menu_items).spacing(SPACE_XXS).width(Length::Fill),
     )
     .padding(PAD_DROPDOWN)
-    .style(theme::floating_container)
+    .style(theme::ContainerClass::Floating.style())
     .width(Length::Fill);
 
     crate::ui::popover::popover(trigger)
@@ -415,7 +414,7 @@ pub fn select<'a, M: Clone + 'a>(
     )
     .on_press(on_toggle.clone())
     .padding(PAD_SELECT_TRIGGER)
-    .style(theme::ghost_button)
+    .style(theme::ButtonClass::Ghost.style())
     .width(SELECT_MIN_WIDTH);
 
     if !open {
@@ -448,7 +447,7 @@ pub fn select<'a, M: Clone + 'a>(
             .on_press(on_select(option.to_string()))
             .padding(PAD_NAV_ITEM)
             .height(DROPDOWN_ITEM_HEIGHT)
-            .style(theme::dropdown_button(is_selected))
+            .style(theme::ButtonClass::Dropdown { selected: is_selected }.style())
             .width(Length::Fill)
             .into()
         })
@@ -458,7 +457,7 @@ pub fn select<'a, M: Clone + 'a>(
         column(menu_items).spacing(SPACE_XXS).width(Length::Fill),
     )
     .padding(PAD_DROPDOWN)
-    .style(theme::select_menu_container);
+    .style(theme::ContainerClass::SelectMenu.style());
 
     crate::ui::popover::popover(trigger)
         .popup(menu)
@@ -485,7 +484,7 @@ pub fn compose_button<'a, M: Clone + 'a>(on_press: M) -> Element<'a, M> {
     )
     .on_press(on_press)
     .padding(PAD_BUTTON)
-    .style(theme::primary_button)
+    .style(theme::ButtonClass::Primary.style())
     .width(Length::Fill)
     .into()
 }
@@ -507,7 +506,7 @@ pub fn settings_button<'a, M: Clone + 'a>(on_press: M) -> Element<'a, M> {
         .center_x(Length::Fill),
     )
     .on_press(on_press)
-    .style(theme::secondary_button)
+    .style(theme::ButtonClass::Secondary.style())
     .padding(PAD_BUTTON)
     .width(Length::Fill)
     .into()
@@ -521,7 +520,7 @@ struct ThemePreviewPainter {
     radius: f32,
 }
 
-impl canvas::Program<Message> for ThemePreviewPainter {
+impl<M> canvas::Program<M> for ThemePreviewPainter {
     type State = ();
 
     fn draw(
@@ -608,11 +607,11 @@ fn rounded_rect(builder: &mut canvas::path::Builder, w: f32, h: f32, r: f32) {
 }
 
 /// Theme preview: 6 vertical stripes in a rounded 16:9 rectangle.
-pub fn theme_preview<'a>(
+pub fn theme_preview<'a, M: Clone + 'a>(
     palette: &iced::theme::palette::Seed,
     selected: bool,
-    on_press: Message,
-) -> Element<'a, Message> {
+    on_press: M,
+) -> Element<'a, M> {
     let colors = [
         palette.background,
         palette.text,
@@ -640,13 +639,13 @@ pub fn theme_preview<'a>(
 
     if selected {
         container(container(preview_canvas).padding(total_inset))
-            .style(theme::theme_selected_ring)
+            .style(theme::ContainerClass::ThemeSelectedRing.style())
             .into()
     } else {
         button(container(preview_canvas).padding(total_inset))
             .on_press(on_press)
             .padding(0)
-            .style(theme::bare_transparent_button)
+            .style(theme::ButtonClass::BareTransparent.style())
             .into()
     }
 }
@@ -680,7 +679,7 @@ impl<M> canvas::Program<M> for CirclePainter {
 
 // ── Label dot (thread card indicators) ──────────────────
 
-pub fn label_dot<'a>(color: Color) -> Element<'a, Message> {
+pub fn label_dot<'a, M: 'a>(color: Color) -> Element<'a, M> {
     let dot = Canvas::new(DotPainter { color })
         .width(LABEL_DOT_SIZE)
         .height(LABEL_DOT_SIZE);
@@ -691,12 +690,13 @@ pub fn label_dot<'a>(color: Color) -> Element<'a, Message> {
 
 // ── Thread card ─────────────────────────────────────────
 
-pub fn thread_card<'a>(
+pub fn thread_card<'a, M: Clone + 'a>(
     thread: &'a Thread,
     index: usize,
     selected: bool,
     label_colors: &[(Color,)],
-) -> Element<'a, Message> {
+    on_select: impl Fn(usize) -> M,
+) -> Element<'a, M> {
     let sender = thread
         .from_name
         .as_deref()
@@ -732,9 +732,9 @@ pub fn thread_card<'a>(
 
     // Subject: accent if unread, muted if read; always normal weight
     let subject_style: fn(&Theme) -> text::Style = if thread.is_read {
-        theme::text_muted
+        theme::TextClass::Muted.style()
     } else {
-        theme::text_accent
+        theme::TextClass::Accent.style()
     };
 
     // Line 3 indicators: label dots + attachment icon
@@ -743,7 +743,7 @@ pub fn thread_card<'a>(
         indicators = indicators.push(label_dot(color));
     }
     if thread.has_attachments {
-        indicators = indicators.push(icon::paperclip().size(ICON_XS).style(theme::text_tertiary));
+        indicators = indicators.push(icon::paperclip().size(ICON_XS).style(theme::TextClass::Tertiary.style()));
     }
 
     // Line 1: sender + date
@@ -755,7 +755,7 @@ pub fn thread_card<'a>(
                 .font(sender_font),
         )
         .width(Length::Fill),
-        container(text(date_str).size(TEXT_XS).style(theme::text_tertiary)),
+        container(text(date_str).size(TEXT_XS).style(theme::TextClass::Tertiary.style())),
     ]
     .align_y(Alignment::Center);
 
@@ -794,16 +794,20 @@ pub fn thread_card<'a>(
             .height(THREAD_CARD_HEIGHT)
             .width(Length::Fill),
     )
-    .on_press(Message::SelectThread(index))
+    .on_press(on_select(index))
     .padding(0)
-    .style(theme::thread_card_button(selected, thread.is_starred))
+    .style(theme::ButtonClass::ThreadCard { selected, starred: thread.is_starred }.style())
     .width(Length::Fill)
     .into()
 }
 
 // ── Action / reply buttons ──────────────────────────────
 
-pub fn action_icon_button<'a>(ico: iced::widget::Text<'a>, label: &'a str) -> Element<'a, Message> {
+pub fn action_icon_button<'a, M: Clone + 'a>(
+    ico: iced::widget::Text<'a>,
+    label: &'a str,
+    on_press: M,
+) -> Element<'a, M> {
     button(
         row![
             container(ico.size(ICON_MD).style(text::secondary))
@@ -814,13 +818,17 @@ pub fn action_icon_button<'a>(ico: iced::widget::Text<'a>, label: &'a str) -> El
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),
     )
-    .on_press(Message::Noop)
+    .on_press(on_press)
     .padding(PAD_ICON_BTN)
-    .style(theme::action_button)
+    .style(theme::ButtonClass::Action.style())
     .into()
 }
 
-pub fn reply_button<'a>(ico: iced::widget::Text<'a>, label: &'a str) -> Element<'a, Message> {
+pub fn reply_button<'a, M: Clone + 'a>(
+    ico: iced::widget::Text<'a>,
+    label: &'a str,
+    on_press: M,
+) -> Element<'a, M> {
     button(
         row![
             container(ico.size(ICON_XL).style(text::secondary))
@@ -831,7 +839,7 @@ pub fn reply_button<'a>(ico: iced::widget::Text<'a>, label: &'a str) -> Element<
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),
     )
-    .on_press(Message::Noop)
+    .on_press(on_press)
     .padding(PAD_BUTTON)
     .style(button::secondary)
     .into()
@@ -839,7 +847,7 @@ pub fn reply_button<'a>(ico: iced::widget::Text<'a>, label: &'a str) -> Element<
 
 // ── Message card ────────────────────────────────────────
 
-pub fn message_card(thread: &Thread) -> Element<'_, Message> {
+pub fn message_card<'a, M: 'a>(thread: &'a Thread) -> Element<'a, M> {
     let sender = thread
         .from_name
         .as_deref()
@@ -861,11 +869,11 @@ pub fn message_card(thread: &Thread) -> Element<'_, Message> {
             row![
                 text(sender).size(TEXT_LG).style(text::base),
                 Space::new().width(Length::Fill),
-                text(date_str).size(TEXT_SM).style(theme::text_tertiary),
+                text(date_str).size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
             ],
             text(thread.from_address.as_deref().unwrap_or(""))
                 .size(TEXT_SM)
-                .style(theme::text_tertiary),
+                .style(theme::TextClass::Tertiary.style()),
         ]
         .spacing(SPACE_XXXS)
         .width(Length::Fill),
@@ -880,18 +888,20 @@ pub fn message_card(thread: &Thread) -> Element<'_, Message> {
     container(column![header, body].spacing(SPACE_XS))
         .padding(PAD_CARD)
         .width(Length::Fill)
-        .style(theme::message_card_container)
+        .style(theme::ContainerClass::MessageCard.style())
         .into()
 }
 
 // ── Expanded message card ───────────────────────────────
 
-pub fn expanded_message_card<'a>(
+pub fn expanded_message_card<'a, M: Clone + 'a>(
     msg: &'a ThreadMessage,
     index: usize,
     date_display: DateDisplay,
     first_message_date: Option<i64>,
-) -> Element<'a, Message> {
+    on_toggle: impl Fn(usize) -> M,
+    noop: M,
+) -> Element<'a, M> {
     let sender = msg
         .from_name
         .as_deref()
@@ -918,14 +928,14 @@ pub fn expanded_message_card<'a>(
                 container(
                     text(date_str)
                         .size(TEXT_SM)
-                        .style(theme::text_tertiary),
+                        .style(theme::TextClass::Tertiary.style()),
                 )
                 .align_y(Alignment::Center),
             ]
             .align_y(Alignment::Center),
             text(recipients)
                 .size(TEXT_SM)
-                .style(theme::text_tertiary),
+                .style(theme::TextClass::Tertiary.style()),
         ]
         .spacing(SPACE_XXXS)
         .width(Length::Fill),
@@ -938,9 +948,9 @@ pub fn expanded_message_card<'a>(
         .padding(PAD_BODY);
 
     let actions = row![
-        reply_button(icon::reply(), "Reply"),
-        reply_button(icon::reply_all(), "Reply All"),
-        reply_button(icon::forward(), "Forward"),
+        reply_button(icon::reply(), "Reply", noop.clone()),
+        reply_button(icon::reply_all(), "Reply All", noop.clone()),
+        reply_button(icon::forward(), "Forward", noop),
     ]
     .spacing(SPACE_XS);
 
@@ -950,21 +960,22 @@ pub fn expanded_message_card<'a>(
         container(card_content)
             .padding(PAD_CARD)
             .width(Length::Fill)
-            .style(theme::message_card_container),
+            .style(theme::ContainerClass::MessageCard.style()),
     )
-    .on_press(Message::ToggleMessageExpanded(index))
+    .on_press(on_toggle(index))
     .padding(0)
-    .style(theme::bare_transparent_button)
+    .style(theme::ButtonClass::BareTransparent.style())
     .width(Length::Fill)
     .into()
 }
 
 // ── Collapsed message row ───────────────────────────────
 
-pub fn collapsed_message_row<'a>(
+pub fn collapsed_message_row<'a, M: Clone + 'a>(
     msg: &'a ThreadMessage,
     index: usize,
-) -> Element<'a, Message> {
+    on_toggle: impl Fn(usize) -> M,
+) -> Element<'a, M> {
     let sender = msg
         .from_name
         .as_deref()
@@ -983,7 +994,7 @@ pub fn collapsed_message_row<'a>(
     let snippet = truncate_snippet(msg.snippet.as_deref(), 60);
 
     let content = row![
-        container(text("\u{2014}").size(TEXT_SM).style(theme::text_tertiary))
+        container(text("\u{2014}").size(TEXT_SM).style(theme::TextClass::Tertiary.style()))
             .align_y(Alignment::Center),
         container(
             text(sender)
@@ -992,16 +1003,16 @@ pub fn collapsed_message_row<'a>(
                 .style(text::base),
         )
         .align_y(Alignment::Center),
-        container(text("\u{00B7}").size(TEXT_SM).style(theme::text_tertiary))
+        container(text("\u{00B7}").size(TEXT_SM).style(theme::TextClass::Tertiary.style()))
             .align_y(Alignment::Center),
-        container(text(short_date).size(TEXT_SM).style(theme::text_tertiary))
+        container(text(short_date).size(TEXT_SM).style(theme::TextClass::Tertiary.style()))
             .align_y(Alignment::Center),
-        container(text("\u{00B7}").size(TEXT_SM).style(theme::text_tertiary))
+        container(text("\u{00B7}").size(TEXT_SM).style(theme::TextClass::Tertiary.style()))
             .align_y(Alignment::Center),
         container(
             text(snippet)
                 .size(TEXT_SM)
-                .style(theme::text_tertiary)
+                .style(theme::TextClass::Tertiary.style())
                 .wrapping(text::Wrapping::None),
         )
         .width(Length::Fill)
@@ -1020,16 +1031,16 @@ pub fn collapsed_message_row<'a>(
     button(
         container(content).padding(pad).width(Length::Fill),
     )
-    .on_press(Message::ToggleMessageExpanded(index))
+    .on_press(on_toggle(index))
     .padding(0)
-    .style(theme::collapsed_message_button)
+    .style(theme::ButtonClass::CollapsedMessage.style())
     .width(Length::Fill)
     .into()
 }
 
 // ── Attachment card ─────────────────────────────────────
 
-pub fn attachment_card<'a>(att: &'a ThreadAttachment, version_count: usize) -> Element<'a, Message> {
+pub fn attachment_card<'a, M: 'a>(att: &'a ThreadAttachment, version_count: usize) -> Element<'a, M> {
     let filename = att.filename.as_deref().unwrap_or("(unnamed)");
     let file_icon = file_type_icon(att.mime_type.as_deref());
     let meta = format_attachment_meta(att);
@@ -1055,19 +1066,19 @@ pub fn attachment_card<'a>(att: &'a ThreadAttachment, version_count: usize) -> E
             container(
                 text(format!("{version_count} versions"))
                     .size(TEXT_XS)
-                    .style(theme::text_tertiary),
+                    .style(theme::TextClass::Tertiary.style()),
             )
             .align_y(Alignment::Center),
         );
     }
 
-    let line2 = text(meta).size(TEXT_SM).style(theme::text_tertiary);
+    let line2 = text(meta).size(TEXT_SM).style(theme::TextClass::Tertiary.style());
 
     container(
         column![line1, line2].spacing(SPACE_XXXS),
     )
     .padding(PAD_NAV_ITEM)
-    .style(theme::elevated_container)
+    .style(theme::ContainerClass::Elevated.style())
     .width(Length::Fill)
     .into()
 }
@@ -1154,11 +1165,11 @@ fn format_file_size(size: Option<i64>) -> String {
 
 // ── Empty state placeholder ─────────────────────────────
 
-pub fn empty_placeholder<'a>(title: &'a str, subtitle: &'a str) -> Element<'a, Message> {
+pub fn empty_placeholder<'a, M: 'a>(title: &'a str, subtitle: &'a str) -> Element<'a, M> {
     container(
         column![
-            text(title).size(TEXT_TITLE).style(theme::text_tertiary),
-            text(subtitle).size(TEXT_MD).style(theme::text_tertiary),
+            text(title).size(TEXT_TITLE).style(theme::TextClass::Tertiary.style()),
+            text(subtitle).size(TEXT_MD).style(theme::TextClass::Tertiary.style()),
         ]
         .spacing(SPACE_XXS)
         .align_x(Alignment::Center),
@@ -1172,17 +1183,17 @@ pub fn empty_placeholder<'a>(title: &'a str, subtitle: &'a str) -> Element<'a, M
 
 // ── Section header / stat row ───────────────────────────
 
-pub fn section_header<'a>(label: &'a str) -> Element<'a, Message> {
-    container(text(label).size(TEXT_XS).style(theme::text_tertiary))
+pub fn section_header<'a, M: 'a>(label: &'a str) -> Element<'a, M> {
+    container(text(label).size(TEXT_XS).style(theme::TextClass::Tertiary.style()))
         .padding(PAD_SECTION_HEADER)
         .width(Length::Fill)
         .into()
 }
 
-pub fn stat_row<'a>(label: &'a str, value: &'a str) -> Element<'a, Message> {
+pub fn stat_row<'a, M: 'a>(label: &'a str, value: &'a str) -> Element<'a, M> {
     container(
         row![
-            text(label).size(TEXT_SM).style(theme::text_tertiary),
+            text(label).size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
             Space::new().width(Length::Fill),
             text(value).size(TEXT_SM).style(text::secondary),
         ]

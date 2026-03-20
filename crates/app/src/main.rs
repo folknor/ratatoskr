@@ -8,11 +8,14 @@ mod ui;
 mod window_state;
 
 use component::Component;
-use db::{DateDisplay, Db, Label, Thread, ThreadAttachment, ThreadMessage};
+use db::{Db, Label, Thread};
 use iced::widget::{container, mouse_area, row};
 use iced::{Element, Length, Point, Size, Task, Theme};
 use ui::layout::{RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH};
+use ui::reading_pane::{ReadingPane, ReadingPaneMessage};
+use ui::settings::{Settings, SettingsEvent, SettingsMessage};
 use ui::sidebar::{Sidebar, SidebarEvent, SidebarMessage};
+use ui::thread_list::{ThreadList, ThreadListEvent, ThreadListMessage};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -77,14 +80,15 @@ const DIVIDER_WIDTH: f32 = 2.0;
 #[derive(Debug, Clone)]
 pub enum Message {
     Sidebar(SidebarMessage),
+    ThreadList(ThreadListMessage),
+    ReadingPane(ReadingPaneMessage),
+    Settings(SettingsMessage),
     AccountsLoaded(u64, Result<Vec<db::Account>, String>),
     LabelsLoaded(u64, Result<Vec<Label>, String>),
     ThreadsLoaded(u64, Result<Vec<Thread>, String>),
-    SelectThread(usize),
     Compose,
     Noop,
     ToggleSettings,
-    Settings(ui::settings::SettingsMessage),
     AppearanceChanged(appearance::Mode),
     DividerDragStart(Divider),
     DividerDragMove(Point),
@@ -94,20 +98,18 @@ pub enum Message {
     WindowResized(Size),
     WindowMoved(Point),
     ToggleRightSidebar,
-    ThreadMessagesLoaded(u64, Result<Vec<ThreadMessage>, String>),
-    ThreadAttachmentsLoaded(u64, Result<Vec<ThreadAttachment>, String>),
-    ToggleMessageExpanded(usize),
-    ToggleAllMessages,
-    ToggleAttachmentsCollapsed,
-    SetDateDisplay(DateDisplay),
+    ThreadMessagesLoaded(u64, Result<Vec<db::ThreadMessage>, String>),
+    ThreadAttachmentsLoaded(u64, Result<Vec<db::ThreadAttachment>, String>),
+    SetDateDisplay(db::DateDisplay),
     WindowCloseRequested(iced::window::Id),
 }
 
 struct App {
     db: Arc<Db>,
     sidebar: Sidebar,
-    threads: Vec<Thread>,
-    selected_thread: Option<usize>,
+    thread_list: ThreadList,
+    reading_pane: ReadingPane,
+    settings: Settings,
     status: String,
     mode: appearance::Mode,
     sidebar_width: f32,
@@ -115,13 +117,7 @@ struct App {
     dragging: Option<Divider>,
     hovered_divider: Option<Divider>,
     right_sidebar_open: bool,
-    thread_messages: Vec<ThreadMessage>,
-    thread_attachments: Vec<ThreadAttachment>,
-    message_expanded: Vec<bool>,
-    attachments_collapsed: bool,
-    attachment_collapse_cache: std::collections::HashMap<String, bool>,
     show_settings: bool,
-    settings: ui::settings::SettingsState,
     window: window_state::WindowState,
     /// Incremented on every navigation load (accounts, labels, threads).
     nav_generation: u64,
@@ -138,8 +134,11 @@ impl App {
         let app = Self {
             db,
             sidebar: Sidebar::new(),
-            threads: Vec::new(),
-            selected_thread: None,
+            thread_list: ThreadList::new(),
+            reading_pane: ReadingPane::new(),
+            settings: Settings::with_scale(
+                *DEFAULT_SCALE.get().unwrap_or(&1.0),
+            ),
             status: "Loading...".to_string(),
             mode: appearance::Mode::Dark,
             sidebar_width: window.sidebar_width,
@@ -147,15 +146,7 @@ impl App {
             dragging: None,
             hovered_divider: None,
             right_sidebar_open: window.right_sidebar_open,
-            thread_messages: Vec::new(),
-            thread_attachments: Vec::new(),
-            message_expanded: Vec::new(),
-            attachments_collapsed: false,
-            attachment_collapse_cache: std::collections::HashMap::new(),
             show_settings: false,
-            settings: ui::settings::SettingsState::with_scale(
-                *DEFAULT_SCALE.get().unwrap_or(&1.0),
-            ),
             window,
             nav_generation: 1,
             thread_generation: 0,
@@ -185,6 +176,7 @@ impl App {
 
     fn subscription(&self) -> iced::Subscription<Message> {
         let mut subs = vec![
+            // App-level subscriptions
             appearance::subscription().map(Message::AppearanceChanged),
             iced::window::resize_events().map(|(_id, size)| Message::WindowResized(size)),
             iced::window::close_requests().map(Message::WindowCloseRequested),
@@ -195,13 +187,18 @@ impl App {
                     None
                 }
             }),
+            // Component subscriptions
+            self.sidebar.subscription().map(Message::Sidebar),
+            self.thread_list.subscription().map(Message::ThreadList),
+            self.reading_pane.subscription().map(Message::ReadingPane),
+            self.settings.subscription().map(Message::Settings),
         ];
 
         // Drive overlay slide animation
         if self.settings.overlay_anim.is_animating(iced::time::Instant::now()) {
             subs.push(
                 iced::window::frames()
-                    .map(|at| Message::Settings(ui::settings::SettingsMessage::OverlayAnimTick(at))),
+                    .map(|at| Message::Settings(SettingsMessage::OverlayAnimTick(at))),
             );
         }
 
@@ -211,22 +208,15 @@ impl App {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Sidebar(msg) => self.handle_sidebar(msg),
+            Message::ThreadList(msg) => self.handle_thread_list(msg),
+            Message::ReadingPane(msg) => self.handle_reading_pane(msg),
+            Message::Settings(msg) => self.handle_settings(msg),
             Message::AppearanceChanged(mode) => {
                 self.mode = mode;
                 Task::none()
             }
             Message::AccountsLoaded(g, _) if g != self.nav_generation => Task::none(),
-            Message::AccountsLoaded(_, Ok(accounts)) => {
-                self.sidebar.accounts = accounts;
-                if !self.sidebar.accounts.is_empty() {
-                    self.sidebar.selected_account = Some(0);
-                    let id = self.sidebar.accounts[0].id.clone();
-                    self.status = format!("Loaded {} accounts", self.sidebar.accounts.len());
-                    return self.load_labels_and_threads(&id);
-                }
-                self.status = "No accounts found".to_string();
-                Task::none()
-            }
+            Message::AccountsLoaded(_, Ok(accounts)) => self.handle_accounts_loaded(accounts),
             Message::AccountsLoaded(_, Err(e)) => {
                 self.status = format!("Error: {e}");
                 Task::none()
@@ -243,32 +233,18 @@ impl App {
             Message::ThreadsLoaded(g, _) if g != self.nav_generation => Task::none(),
             Message::ThreadsLoaded(_, Ok(threads)) => {
                 self.status = format!("{} threads", threads.len());
-                self.threads = threads;
+                self.thread_list.set_threads(threads);
                 Task::none()
             }
             Message::ThreadsLoaded(_, Err(e)) => {
                 self.status = format!("Threads error: {e}");
                 Task::none()
             }
-            Message::SelectThread(idx) => self.handle_select_thread(idx),
             Message::DividerDragStart(divider) => {
                 self.dragging = Some(divider);
                 Task::none()
             }
-            Message::DividerDragMove(point) => {
-                match self.dragging {
-                    Some(Divider::Sidebar) => {
-                        self.sidebar_width = point.x.max(SIDEBAR_MIN_WIDTH);
-                    }
-                    Some(Divider::ThreadList) => {
-                        let new_width = (point.x - self.sidebar_width - DIVIDER_WIDTH)
-                            .max(THREAD_LIST_MIN_WIDTH);
-                        self.thread_list_width = new_width;
-                    }
-                    None => {}
-                }
-                Task::none()
-            }
+            Message::DividerDragMove(point) => self.handle_divider_drag(point),
             Message::DividerDragEnd => {
                 self.dragging = None;
                 Task::none()
@@ -285,13 +261,6 @@ impl App {
                 self.show_settings = !self.show_settings;
                 Task::none()
             }
-            Message::Settings(ui::settings::SettingsMessage::Close) => {
-                self.show_settings = false;
-                Task::none()
-            }
-            Message::Settings(msg) => {
-                self.settings.update(msg).map(Message::Settings)
-            }
             Message::ToggleRightSidebar => {
                 self.right_sidebar_open = !self.right_sidebar_open;
                 Task::none()
@@ -307,18 +276,11 @@ impl App {
                 self.window.set_position(point);
                 Task::none()
             }
-            Message::WindowCloseRequested(id) => {
-                let data_dir = APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
-                self.window.sidebar_width = self.sidebar_width;
-                self.window.thread_list_width = self.thread_list_width;
-                self.window.right_sidebar_open = self.right_sidebar_open;
-                self.window.save(data_dir);
-                iced::window::close(id)
-            }
+            Message::WindowCloseRequested(id) => self.handle_window_close(id),
             Message::ThreadMessagesLoaded(g, _) if g != self.thread_generation => Task::none(),
             Message::ThreadMessagesLoaded(_, Ok(messages)) => {
-                self.apply_message_expansion(&messages);
-                self.thread_messages = messages;
+                self.reading_pane.apply_message_expansion(&messages);
+                self.reading_pane.thread_messages = messages;
                 Task::none()
             }
             Message::ThreadMessagesLoaded(_, Err(e)) => {
@@ -327,37 +289,15 @@ impl App {
             }
             Message::ThreadAttachmentsLoaded(g, _) if g != self.thread_generation => Task::none(),
             Message::ThreadAttachmentsLoaded(_, Ok(attachments)) => {
-                self.thread_attachments = attachments;
+                self.reading_pane.thread_attachments = attachments;
                 Task::none()
             }
             Message::ThreadAttachmentsLoaded(_, Err(e)) => {
                 self.status = format!("Attachments error: {e}");
                 Task::none()
             }
-            Message::ToggleMessageExpanded(index) => {
-                if let Some(e) = self.message_expanded.get_mut(index) {
-                    *e = !*e;
-                }
-                Task::none()
-            }
-            Message::ToggleAllMessages => {
-                let all_expanded = self.message_expanded.iter().all(|&e| e);
-                for e in &mut self.message_expanded {
-                    *e = !all_expanded;
-                }
-                Task::none()
-            }
-            Message::ToggleAttachmentsCollapsed => {
-                self.attachments_collapsed = !self.attachments_collapsed;
-                if let Some(thread) = self.selected_thread.and_then(|i| self.threads.get(i)) {
-                    let key = format!("{}:{}", thread.account_id, thread.id);
-                    self.attachment_collapse_cache
-                        .insert(key, self.attachments_collapsed);
-                }
-                Task::none()
-            }
             Message::SetDateDisplay(display) => {
-                self.settings.date_display = display;
+                self.reading_pane.date_display = display;
                 Task::none()
             }
             Message::Compose | Message::Noop => Task::none(),
@@ -366,91 +306,26 @@ impl App {
 
     fn view(&self) -> Element<'_, Message> {
         if self.show_settings {
-            return ui::settings::view(&self.settings).map(Message::Settings);
+            return self.settings.view().map(Message::Settings);
         }
-
-        let selected_thread = self
-            .selected_thread
-            .and_then(|idx| self.threads.get(idx));
 
         let sidebar = container(self.sidebar.view().map(Message::Sidebar))
             .width(self.sidebar_width)
             .height(Length::Fill);
 
-        let sidebar_divider_style = if self.hovered_divider == Some(Divider::Sidebar)
-            || self.dragging == Some(Divider::Sidebar)
-        {
-            ui::theme::divider_hover_container as fn(&Theme) -> _
-        } else {
-            ui::theme::divider_container
-        };
-        let divider_sidebar = mouse_area(
-            container("")
-                .width(DIVIDER_WIDTH)
-                .height(Length::Fill)
-                .style(sidebar_divider_style),
-        )
-        .on_press(Message::DividerDragStart(Divider::Sidebar))
-        .on_release(Message::DividerDragEnd)
-        .on_enter(Message::DividerHover(Divider::Sidebar))
-        .on_exit(Message::DividerUnhover)
-        .interaction(iced::mouse::Interaction::ResizingHorizontally);
+        let divider_sidebar = self.build_divider(Divider::Sidebar);
 
-        let folder_name = self
-            .sidebar.selected_label
-            .as_ref()
-            .and_then(|lid| {
-                self.sidebar.labels.iter()
-                    .find(|l| l.id == *lid)
-                    .map(|l| l.name.as_str())
-            })
-            .unwrap_or("Inbox");
-        let scope_name = self
-            .sidebar.selected_account
-            .and_then(|idx| self.sidebar.accounts.get(idx))
-            .and_then(|a| a.display_name.as_deref().or(Some(a.email.as_str())))
-            .unwrap_or("All");
+        let thread_list = container(self.thread_list.view().map(Message::ThreadList))
+            .width(self.thread_list_width)
+            .height(Length::Fill);
 
-        let thread_list = container(ui::thread_list::view(
-            &self.threads,
-            self.selected_thread,
-            folder_name,
-            scope_name,
-        ))
-        .width(self.thread_list_width)
-        .height(Length::Fill);
+        let divider_thread = self.build_divider(Divider::ThreadList);
 
-        let thread_divider_style = if self.hovered_divider == Some(Divider::ThreadList)
-            || self.dragging == Some(Divider::ThreadList)
-        {
-            ui::theme::divider_hover_container as fn(&Theme) -> _
-        } else {
-            ui::theme::divider_container
-        };
-        let divider_thread = mouse_area(
-            container("")
-                .width(DIVIDER_WIDTH)
-                .height(Length::Fill)
-                .style(thread_divider_style),
-        )
-        .on_press(Message::DividerDragStart(Divider::ThreadList))
-        .on_release(Message::DividerDragEnd)
-        .on_enter(Message::DividerHover(Divider::ThreadList))
-        .on_exit(Message::DividerUnhover)
-        .interaction(iced::mouse::Interaction::ResizingHorizontally);
-
-        let reading_pane = container(ui::reading_pane::view(
-            selected_thread,
-            &self.thread_messages,
-            &self.message_expanded,
-            &self.thread_attachments,
-            self.attachments_collapsed,
-            self.settings.date_display,
-        ))
+        let reading_pane = container(self.reading_pane.view().map(Message::ReadingPane))
             .width(Length::Fill)
             .height(Length::Fill);
 
-        let right_sidebar = ui::right_sidebar::view(self.right_sidebar_open);
+        let right_sidebar = ui::right_sidebar::view::<Message>(self.right_sidebar_open);
 
         let layout = row![sidebar, divider_sidebar, thread_list, divider_thread, reading_pane, right_sidebar]
             .height(Length::Fill);
@@ -468,7 +343,7 @@ impl App {
     }
 }
 
-// ── Sidebar event handling ─────────────────────────────
+// ── Component event handlers ───────────────────────────
 
 impl App {
     fn handle_sidebar(&mut self, msg: SidebarMessage) -> Task<Message> {
@@ -483,9 +358,10 @@ impl App {
     fn handle_sidebar_event(&mut self, event: SidebarEvent) -> Task<Message> {
         match event {
             SidebarEvent::AccountSelected(idx) => {
-                self.selected_thread = None;
+                self.thread_list.selected_thread = None;
                 self.nav_generation += 1;
                 self.thread_generation += 1;
+                self.update_thread_list_context_from_sidebar();
                 if let Some(account) = self.sidebar.accounts.get(idx) {
                     let id = account.id.clone();
                     return self.load_labels_and_threads(&id);
@@ -493,38 +369,83 @@ impl App {
                 Task::none()
             }
             SidebarEvent::AllAccountsSelected => {
-                self.selected_thread = None;
-                self.threads.clear();
+                self.thread_list.selected_thread = None;
+                self.thread_list.threads.clear();
                 self.sidebar.labels.clear();
+                self.update_thread_list_context_from_sidebar();
                 Task::none()
             }
-            SidebarEvent::CycleAccount => {
-                // Already handled inside sidebar.update() — no extra work needed
-                Task::none()
-            }
+            SidebarEvent::CycleAccount => Task::none(),
             SidebarEvent::LabelSelected(label_id) => {
-                self.selected_thread = None;
-                self.nav_generation += 1;
-                self.thread_generation += 1;
-                if let Some(idx) = self.sidebar.selected_account
-                    && let Some(account) = self.sidebar.accounts.get(idx)
-                {
-                    let db = Arc::clone(&self.db);
-                    let id = account.id.clone();
-                    let load_gen = self.nav_generation;
-                    return Task::perform(
-                        async move {
-                            let r = load_threads(db, id, label_id).await;
-                            (load_gen, r)
-                        },
-                        |(g, result)| Message::ThreadsLoaded(g, result),
-                    );
-                }
-                Task::none()
+                self.update_thread_list_context_from_sidebar();
+                self.handle_label_selected(label_id)
             }
             SidebarEvent::Compose => Task::none(),
             SidebarEvent::ToggleSettings => {
                 self.show_settings = !self.show_settings;
+                Task::none()
+            }
+        }
+    }
+
+    fn handle_label_selected(&mut self, label_id: Option<String>) -> Task<Message> {
+        self.thread_list.selected_thread = None;
+        self.nav_generation += 1;
+        self.thread_generation += 1;
+        if let Some(idx) = self.sidebar.selected_account
+            && let Some(account) = self.sidebar.accounts.get(idx)
+        {
+            let db = Arc::clone(&self.db);
+            let id = account.id.clone();
+            let load_gen = self.nav_generation;
+            return Task::perform(
+                async move {
+                    let r = load_threads(db, id, label_id).await;
+                    (load_gen, r)
+                },
+                |(g, result)| Message::ThreadsLoaded(g, result),
+            );
+        }
+        Task::none()
+    }
+
+    fn handle_thread_list(&mut self, msg: ThreadListMessage) -> Task<Message> {
+        let (task, event) = self.thread_list.update(msg);
+        let mut tasks = vec![task.map(Message::ThreadList)];
+        if let Some(evt) = event {
+            tasks.push(self.handle_thread_list_event(evt));
+        }
+        Task::batch(tasks)
+    }
+
+    fn handle_thread_list_event(&mut self, event: ThreadListEvent) -> Task<Message> {
+        match event {
+            ThreadListEvent::ThreadSelected(idx) => self.handle_select_thread(idx),
+        }
+    }
+
+    fn handle_reading_pane(&mut self, msg: ReadingPaneMessage) -> Task<Message> {
+        let (task, _event) = self.reading_pane.update(msg);
+        task.map(Message::ReadingPane)
+    }
+
+    fn handle_settings(&mut self, msg: SettingsMessage) -> Task<Message> {
+        let (task, event) = self.settings.update(msg);
+        let mut tasks = vec![task.map(Message::Settings)];
+        if let Some(evt) = event {
+            tasks.push(self.handle_settings_event(evt));
+        }
+        Task::batch(tasks)
+    }
+
+    fn handle_settings_event(&mut self, event: SettingsEvent) -> Task<Message> {
+        match event {
+            SettingsEvent::Closed => {
+                self.show_settings = false;
+                Task::none()
+            }
+            SettingsEvent::DateDisplayChanged(display) => {
+                self.reading_pane.date_display = display;
                 Task::none()
             }
         }
@@ -560,19 +481,10 @@ impl App {
     }
 
     fn handle_select_thread(&mut self, idx: usize) -> Task<Message> {
-        self.selected_thread = Some(idx);
-        self.thread_messages.clear();
-        self.thread_attachments.clear();
-        self.message_expanded.clear();
+        let thread = self.thread_list.threads.get(idx);
+        self.reading_pane.set_thread(thread);
         self.thread_generation += 1;
-        // Restore attachment collapse state from cache
-        self.attachments_collapsed = self.threads.get(idx)
-            .map(|t| {
-                let key = format!("{}:{}", t.account_id, t.id);
-                self.attachment_collapse_cache.get(&key).copied().unwrap_or(false)
-            })
-            .unwrap_or(false);
-        if let Some(thread) = self.threads.get(idx) {
+        if let Some(thread) = thread {
             let db = Arc::clone(&self.db);
             let account_id = thread.account_id.clone();
             let thread_id = thread.id.clone();
@@ -600,17 +512,81 @@ impl App {
         Task::none()
     }
 
-    fn apply_message_expansion(&mut self, messages: &[ThreadMessage]) {
-        let len = messages.len();
-        let mut expanded = vec![false; len];
-
-        for (i, msg) in messages.iter().enumerate() {
-            if !msg.is_read || i == 0 || i == len - 1 {
-                expanded[i] = true;
-            }
+    fn handle_accounts_loaded(&mut self, accounts: Vec<db::Account>) -> Task<Message> {
+        self.sidebar.accounts = accounts;
+        if !self.sidebar.accounts.is_empty() {
+            self.sidebar.selected_account = Some(0);
+            let id = self.sidebar.accounts[0].id.clone();
+            self.status = format!("Loaded {} accounts", self.sidebar.accounts.len());
+            return self.load_labels_and_threads(&id);
         }
+        self.status = "No accounts found".to_string();
+        Task::none()
+    }
 
-        self.message_expanded = expanded;
+    fn handle_divider_drag(&mut self, point: Point) -> Task<Message> {
+        match self.dragging {
+            Some(Divider::Sidebar) => {
+                self.sidebar_width = point.x.max(SIDEBAR_MIN_WIDTH);
+            }
+            Some(Divider::ThreadList) => {
+                let new_width = (point.x - self.sidebar_width - DIVIDER_WIDTH)
+                    .max(THREAD_LIST_MIN_WIDTH);
+                self.thread_list_width = new_width;
+            }
+            None => {}
+        }
+        Task::none()
+    }
+
+    fn handle_window_close(&mut self, id: iced::window::Id) -> Task<Message> {
+        let data_dir = APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
+        self.window.sidebar_width = self.sidebar_width;
+        self.window.thread_list_width = self.thread_list_width;
+        self.window.right_sidebar_open = self.right_sidebar_open;
+        self.window.save(data_dir);
+        iced::window::close(id)
+    }
+
+    fn build_divider(&self, divider: Divider) -> Element<'_, Message> {
+        let class = if self.hovered_divider == Some(divider)
+            || self.dragging == Some(divider)
+        {
+            ui::theme::ContainerClass::DividerHover
+        } else {
+            ui::theme::ContainerClass::Divider
+        };
+        mouse_area(
+            container("")
+                .width(DIVIDER_WIDTH)
+                .height(Length::Fill)
+                .style(class.style()),
+        )
+        .on_press(Message::DividerDragStart(divider))
+        .on_release(Message::DividerDragEnd)
+        .on_enter(Message::DividerHover(divider))
+        .on_exit(Message::DividerUnhover)
+        .interaction(iced::mouse::Interaction::ResizingHorizontally)
+        .into()
+    }
+
+    fn update_thread_list_context_from_sidebar(&mut self) {
+        let folder_name = self
+            .sidebar.selected_label
+            .as_ref()
+            .and_then(|lid| {
+                self.sidebar.labels.iter()
+                    .find(|l| l.id == *lid)
+                    .map(|l| l.name.clone())
+            })
+            .unwrap_or_else(|| "Inbox".to_string());
+        let scope_name = self
+            .sidebar.selected_account
+            .and_then(|idx| self.sidebar.accounts.get(idx))
+            .and_then(|a| a.display_name.as_deref().or(Some(a.email.as_str())))
+            .unwrap_or("All")
+            .to_string();
+        self.thread_list.set_context(folder_name, scope_name);
     }
 }
 

@@ -4,9 +4,8 @@ use iced::{Element, Length};
 use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::widgets;
-use crate::Message;
 
-pub fn view<'a>(open: bool) -> Element<'a, Message> {
+pub fn view<'a, M: 'a>(open: bool) -> Element<'a, M> {
     if !open {
         return Space::new().width(0).height(0).into();
     }
@@ -22,18 +21,18 @@ pub fn view<'a>(open: bool) -> Element<'a, Message> {
     container(scrollable(content).spacing(SCROLLBAR_SPACING).height(Length::Fill))
         .width(RIGHT_SIDEBAR_WIDTH)
         .height(Length::Fill)
-        .style(theme::sidebar_container)
+        .style(theme::ContainerClass::Sidebar.style())
         .into()
 }
 
-fn calendar_section<'a>() -> Element<'a, Message> {
+fn calendar_section<'a, M: 'a>() -> Element<'a, M> {
     container(
         column![
             widgets::section_header("CALENDAR"),
             container(
                 text("Calendar placeholder")
                     .size(TEXT_SM)
-                    .style(theme::text_tertiary),
+                    .style(theme::TextClass::Tertiary.style()),
             )
             .padding(PAD_ICON_BTN),
         ]
@@ -43,14 +42,14 @@ fn calendar_section<'a>() -> Element<'a, Message> {
     .into()
 }
 
-fn pinned_section<'a>() -> Element<'a, Message> {
+fn pinned_section<'a, M: 'a>() -> Element<'a, M> {
     container(
         column![
             widgets::section_header("PINNED ITEMS"),
             container(
                 text("No pinned items")
                     .size(TEXT_SM)
-                    .style(theme::text_tertiary),
+                    .style(theme::TextClass::Tertiary.style()),
             )
             .padding(PAD_ICON_BTN),
         ]

@@ -1,4 +1,4 @@
-use iced::{Element, Task};
+use iced::{Element, Subscription, Task};
 
 /// A self-contained UI component with its own message and event types.
 ///
@@ -7,10 +7,19 @@ use iced::{Element, Task};
 ///
 /// The parent dispatches incoming messages via `update()`, maps the returned
 /// `Task` with its own wrapper, and handles any emitted `Event`.
+///
+/// Components that need background event streams override `subscription()`.
+/// The app batches all component subscriptions together with its own app-level
+/// subscriptions (appearance, window events, etc.).
 pub trait Component {
     type Message;
     type Event;
 
     fn update(&mut self, message: Self::Message) -> (Task<Self::Message>, Option<Self::Event>);
     fn view(&self) -> Element<'_, Self::Message>;
+
+    /// Background event stream for this component. Defaults to none.
+    fn subscription(&self) -> Subscription<Self::Message> {
+        Subscription::none()
+    }
 }

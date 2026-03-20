@@ -3,6 +3,7 @@ use iced::time::{Duration, Instant};
 use iced::widget::{button, column, container, mouse_area, radio, row, scrollable, slider, text, text_input, Space};
 use iced::{Alignment, Element, Length, Point, Task};
 
+use crate::component::Component;
 use crate::db::DateDisplay;
 use crate::ui::animated_toggler::animated_toggler;
 
@@ -86,6 +87,13 @@ pub enum SettingsMessage {
     OverlayAnimTick(Instant),
 }
 
+/// Events the settings component emits upward to the App.
+#[derive(Debug, Clone)]
+pub enum SettingsEvent {
+    Closed,
+    DateDisplayChanged(DateDisplay),
+}
+
 /// Overlays that slide in from the right, covering the settings content.
 /// One level deep — no stacking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -164,7 +172,7 @@ impl Tab {
 
 // ── State ───────────────────────────────────────────────
 
-pub struct SettingsState {
+pub struct Settings {
     pub active_tab: Tab,
     pub open_select: Option<SelectField>,
     // General
@@ -241,7 +249,7 @@ pub struct EditableItem {
     pub enabled: Option<bool>,
 }
 
-impl SettingsState {
+impl Settings {
     pub fn with_scale(scale: f32) -> Self {
         Self {
             scale,
@@ -250,7 +258,7 @@ impl SettingsState {
     }
 }
 
-impl Default for SettingsState {
+impl Default for Settings {
     fn default() -> Self {
         Self {
             active_tab: Tab::General,
@@ -312,19 +320,55 @@ impl Default for SettingsState {
     }
 }
 
-impl SettingsState {
-    pub fn update(&mut self, message: SettingsMessage) -> Task<SettingsMessage> {
+// ── Component impl ─────────────────────────────────────
+
+impl Component for Settings {
+    type Message = SettingsMessage;
+    type Event = SettingsEvent;
+
+    fn update(
+        &mut self,
+        message: SettingsMessage,
+    ) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
         match message {
+            SettingsMessage::Close => {
+                return (Task::none(), Some(SettingsEvent::Closed));
+            }
             SettingsMessage::FocusInput(id) => {
-                return iced::widget::operation::focus(id);
+                return (iced::widget::operation::focus(id), None);
             }
             SettingsMessage::CopyToClipboard(contents) => {
-                return iced::clipboard::write(contents);
+                return (iced::clipboard::write(contents), None);
             }
-            SettingsMessage::Noop => {}
-            SettingsMessage::HelpHover(id) => {
-                self.hovered_help = Some(id);
+            SettingsMessage::DateDisplayChanged(v) => {
+                self.date_display = match v.as_str() {
+                    "Absolute" => DateDisplay::Absolute,
+                    _ => DateDisplay::RelativeOffset,
+                };
+                self.open_select = None;
+                return (Task::none(), Some(SettingsEvent::DateDisplayChanged(self.date_display)));
             }
+            SettingsMessage::ListDragMove(list_id, point) => {
+                return (self.handle_drag_move(list_id, point), None);
+            }
+            _ => self.handle_simple_message(message),
+        }
+        (Task::none(), None)
+    }
+
+    fn view(&self) -> Element<'_, SettingsMessage> {
+        settings_view(self)
+    }
+}
+
+impl Settings {
+    fn handle_simple_message(&mut self, message: SettingsMessage) {
+        match message {
+            SettingsMessage::Noop
+            | SettingsMessage::CheckForUpdates
+            | SettingsMessage::OpenGithub
+            | SettingsMessage::OverlayAnimTick(_) => {}
+            SettingsMessage::HelpHover(id) => self.hovered_help = Some(id),
             SettingsMessage::HelpUnhover(id) => {
                 if self.hovered_help.as_ref() == Some(&id) {
                     self.hovered_help = None;
@@ -341,52 +385,36 @@ impl SettingsState {
                 self.pinned_help = None;
                 self.hovered_help = None;
             }
-            SettingsMessage::Close => {}
             SettingsMessage::SelectTab(tab) => {
                 self.active_tab = tab;
                 self.pinned_help = None;
             }
             SettingsMessage::ToggleSelect(field) => {
-                self.open_select = if self.open_select == Some(field) {
-                    None
-                } else {
-                    Some(field)
-                };
+                self.open_select = if self.open_select == Some(field) { None } else { Some(field) };
             }
-            // General
             SettingsMessage::ScaleDragged(v) => self.scale_preview = Some(v),
             SettingsMessage::ScaleReleased => {
-                if let Some(v) = self.scale_preview.take() {
-                    self.scale = v;
-                }
+                if let Some(v) = self.scale_preview.take() { self.scale = v; }
             }
             SettingsMessage::ThemeChanged(v) => { self.theme = v; self.open_select = None; }
             SettingsMessage::DensityChanged(v) => { self.density = v; self.open_select = None; }
             SettingsMessage::FontSizeChanged(v) => { self.font_size = v; self.open_select = None; }
             SettingsMessage::ReadingPaneChanged(v) => { self.reading_pane_position = v; self.open_select = None; }
-            SettingsMessage::ThemeSelected(i) => {
-                self.selected_theme = Some(i);
-                self.theme = "Theme".into();
-            }
+            SettingsMessage::ThemeSelected(i) => { self.selected_theme = Some(i); self.theme = "Theme".into(); }
             SettingsMessage::ToggleSyncStatusBar(v) => self.sync_status_bar = v,
             SettingsMessage::ToggleBlockRemoteImages(v) => self.block_remote_images = v,
             SettingsMessage::TogglePhishingDetection(v) => self.phishing_detection = v,
             SettingsMessage::PhishingSensitivityChanged(v) => self.phishing_sensitivity = v,
-            SettingsMessage::DateDisplayChanged(v) => {
-                self.date_display = match v.as_str() {
-                    "Absolute" => DateDisplay::Absolute,
-                    _ => DateDisplay::RelativeOffset,
-                };
-                self.open_select = None;
-            }
-            // About
-            SettingsMessage::CheckForUpdates | SettingsMessage::OpenGithub => {}
-            // Composing
             SettingsMessage::ToggleSendAndArchive(v) => self.send_and_archive = v,
             SettingsMessage::UndoDelayChanged(v) => { self.undo_delay = v; self.open_select = None; }
             SettingsMessage::DefaultReplyChanged(v) => { self.default_reply_mode = v; self.open_select = None; }
             SettingsMessage::MarkAsReadChanged(v) => { self.mark_as_read = v; self.open_select = None; }
-            // Notifications
+            _ => self.handle_remaining_message(message),
+        }
+    }
+
+    fn handle_remaining_message(&mut self, message: SettingsMessage) {
+        match message {
             SettingsMessage::ToggleNotifications(v) => self.notifications_enabled = v,
             SettingsMessage::ToggleSmartNotifications(v) => self.smart_notifications = v,
             SettingsMessage::ToggleNotifyCategory(cat) => {
@@ -404,10 +432,7 @@ impl SettingsState {
                     self.vip_email_input.clear();
                 }
             }
-            SettingsMessage::RemoveVipSender(email) => {
-                self.vip_senders.retain(|e| e != &email);
-            }
-            // AI
+            SettingsMessage::RemoveVipSender(email) => self.vip_senders.retain(|e| e != &email),
             SettingsMessage::AiProviderChanged(v) => { self.ai_provider = v; self.open_select = None; }
             SettingsMessage::AiModelChanged(v) => { self.ai_model = v; self.open_select = None; }
             SettingsMessage::ToggleAiEnabled(v) => self.ai_enabled = v,
@@ -423,94 +448,36 @@ impl SettingsState {
             SettingsMessage::OllamaUrlChanged(v) => self.ai_ollama_url = v,
             SettingsMessage::OllamaModelChanged(v) => self.ai_ollama_model = v,
             SettingsMessage::SaveAiSettings => self.ai_key_saved = true,
-            // Editable list
             SettingsMessage::ListGripPress(list_id, index) => {
                 self.drag_state = Some(DragState {
-                    list_id,
-                    dragging_index: index,
-                    start_y: -1.0, // Set on first move
-                    is_dragging: false,
+                    list_id, dragging_index: index, start_y: -1.0, is_dragging: false,
                 });
             }
-            SettingsMessage::ListDragMove(list_id, point) => {
-                // Only act if drag was initiated from the grip.
-                let has_drag = self.drag_state.as_ref()
-                    .is_some_and(|d| d.list_id == list_id);
-                if !has_drag { return Task::none(); }
-
-                // Record start_y on first move event.
-                if let Some(ref mut drag) = self.drag_state
-                    && drag.start_y < 0.0
-                {
-                    drag.start_y = point.y;
-                    return Task::none();
-                }
-
-                let Some(drag_ref) = self.drag_state.as_ref() else {
-                    return Task::none();
-                };
-                let (from, start_y) = (drag_ref.dragging_index, drag_ref.start_y);
-
-                // Check if we've moved enough to start dragging.
-                if !drag_ref.is_dragging {
-                    if (point.y - start_y).abs() < DRAG_START_THRESHOLD {
-                        return Task::none();
-                    }
-                    if let Some(ref mut drag) = self.drag_state {
-                        drag.is_dragging = true;
-                    }
-                }
-
-                // Compute target index from cursor Y relative to list top.
-                // Each row is SETTINGS_ROW_HEIGHT, plus 1px divider between rows.
-                let row_step = SETTINGS_ROW_HEIGHT + 1.0;
-                let count = self.list_items_mut(&list_id).len();
-                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                let target = ((point.y / row_step).max(0.0) as usize).min(count.saturating_sub(1));
-
-                if target != from {
-                    self.list_items_mut(&list_id).swap(from, target);
-                    if let Some(ref mut drag) = self.drag_state {
-                        drag.dragging_index = target;
-                    }
-                }
-            }
-            SettingsMessage::ListDragEnd(_) => {
-                self.drag_state = None;
-            }
+            SettingsMessage::ListDragEnd(_) => self.drag_state = None,
             SettingsMessage::ListRowClick(list_id, index) => {
-                // Only toggle if no drag is active.
-                if self.drag_state.is_some() { return Task::none(); }
-                let items = self.list_items_mut(&list_id);
-                if let Some(item) = items.get_mut(index)
-                    && let Some(ref mut enabled) = item.enabled
-                {
-                    *enabled = !*enabled;
+                if self.drag_state.is_none() {
+                    let items = self.list_items_mut(&list_id);
+                    if let Some(item) = items.get_mut(index)
+                        && let Some(ref mut enabled) = item.enabled
+                    {
+                        *enabled = !*enabled;
+                    }
                 }
             }
             SettingsMessage::ListRemove(list_id, index) => {
                 let items = self.list_items_mut(&list_id);
-                if index < items.len() {
-                    items.remove(index);
-                }
+                if index < items.len() { items.remove(index); }
             }
             SettingsMessage::ListAdd(list_id) => {
                 let items = self.list_items_mut(&list_id);
-                items.push(EditableItem {
-                    label: format!("New item {}", items.len() + 1),
-                    enabled: None,
-                });
+                items.push(EditableItem { label: format!("New item {}", items.len() + 1), enabled: None });
             }
             SettingsMessage::ListToggle(list_id, index, value) => {
-                let items = self.list_items_mut(&list_id);
-                if let Some(item) = items.get_mut(index) {
+                if let Some(item) = self.list_items_mut(&list_id).get_mut(index) {
                     item.enabled = Some(value);
                 }
             }
-            SettingsMessage::ListMenu(_, _) => {
-                // TODO: open context menu
-            }
-            // Overlay
+            SettingsMessage::ListMenu(_, _) => {}
             SettingsMessage::OpenOverlay(overlay) => {
                 self.overlay = Some(overlay);
                 self.overlay_anim.go_mut(true, Instant::now());
@@ -519,9 +486,37 @@ impl SettingsState {
                 self.overlay = None;
                 self.overlay_anim.go_mut(false, Instant::now());
             }
-            SettingsMessage::OverlayAnimTick(_) => {
-                // Just triggers a redraw — the animation reads Instant::now() in view.
-            }
+            _ => {} // Already handled in update() or handle_simple_message()
+        }
+    }
+
+    fn handle_drag_move(&mut self, list_id: String, point: Point) -> Task<SettingsMessage> {
+        let has_drag = self.drag_state.as_ref().is_some_and(|d| d.list_id == list_id);
+        if !has_drag { return Task::none(); }
+
+        if let Some(ref mut drag) = self.drag_state
+            && drag.start_y < 0.0
+        {
+            drag.start_y = point.y;
+            return Task::none();
+        }
+
+        let Some(drag_ref) = self.drag_state.as_ref() else { return Task::none() };
+        let (from, start_y) = (drag_ref.dragging_index, drag_ref.start_y);
+
+        if !drag_ref.is_dragging {
+            if (point.y - start_y).abs() < DRAG_START_THRESHOLD { return Task::none(); }
+            if let Some(ref mut drag) = self.drag_state { drag.is_dragging = true; }
+        }
+
+        let row_step = SETTINGS_ROW_HEIGHT + 1.0;
+        let count = self.list_items_mut(&list_id).len();
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let target = ((point.y / row_step).max(0.0) as usize).min(count.saturating_sub(1));
+
+        if target != from {
+            self.list_items_mut(&list_id).swap(from, target);
+            if let Some(ref mut drag) = self.drag_state { drag.dragging_index = target; }
         }
         Task::none()
     }
@@ -537,7 +532,7 @@ impl SettingsState {
 
 // ── View ────────────────────────────────────────────────
 
-pub fn view(state: &SettingsState) -> Element<'_, SettingsMessage> {
+fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
     let nav = tab_nav(state.active_tab);
     let content = match state.active_tab {
         Tab::General => general_tab(state),
@@ -564,7 +559,7 @@ pub fn view(state: &SettingsState) -> Element<'_, SettingsMessage> {
     )
     .width(Length::Fill)
     .height(Length::Fill)
-    .style(theme::content_container);
+    .style(theme::ContainerClass::Content.style());
 
     let main_content: Element<'_, SettingsMessage> = if show_overlay {
         let overlay_content = match state.overlay {
@@ -588,7 +583,7 @@ pub fn view(state: &SettingsState) -> Element<'_, SettingsMessage> {
                     )
                     .on_press(SettingsMessage::CloseOverlay)
                     .padding(PAD_NAV_ITEM)
-                    .style(theme::bare_icon_button),
+                    .style(theme::ButtonClass::BareIcon.style()),
                 )
                 .padding(PAD_SETTINGS_ROW)
                 .width(Length::Fill),
@@ -601,7 +596,7 @@ pub fn view(state: &SettingsState) -> Element<'_, SettingsMessage> {
         )
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(theme::content_container);
+        .style(theme::ContainerClass::Content.style());
 
         // Slide from right: use a large fixed offset (2000px) scaled by (1-t).
         // The stack clips to bounds so overshooting doesn't matter.
@@ -634,7 +629,7 @@ pub fn view(state: &SettingsState) -> Element<'_, SettingsMessage> {
 
     row![
         nav,
-        iced::widget::rule::vertical(1).style(theme::sidebar_divider_rule),
+        iced::widget::rule::vertical(1).style(theme::RuleClass::SidebarDivider.style()),
         main_content,
     ]
     .into()
@@ -670,13 +665,13 @@ fn tab_nav(active: Tab) -> Element<'static, SettingsMessage> {
     container(scrollable(col).spacing(SCROLLBAR_SPACING).height(Length::Fill))
         .padding(PAD_SIDEBAR)
         .height(Length::Fill)
-        .style(theme::sidebar_container)
+        .style(theme::ContainerClass::Sidebar.style())
         .into()
 }
 
 // ── General tab ─────────────────────────────────────────
 
-fn general_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
+fn general_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(SETTINGS_CONTENT_MAX_WIDTH);
 
     col = col.push(section("Appearance", vec![
@@ -726,11 +721,11 @@ fn general_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
         content: column![
             text("Remote images can be used to track when you open an email. Blocking them prevents this but some emails may not display correctly.")
                 .size(TEXT_SM)
-                .style(theme::text_on_primary),
+                .style(theme::TextClass::OnPrimary.style()),
             Space::new().height(SPACE_XS),
             text("Phishing detection analyzes incoming emails for suspicious links, sender spoofing, and social engineering patterns.")
                 .size(TEXT_SM)
-                .style(theme::text_on_primary),
+                .style(theme::TextClass::OnPrimary.style()),
         ]
         .into(),
         visible: privacy_help_visible,
@@ -745,7 +740,7 @@ fn general_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
 
 // ── Theme tab ───────────────────────────────────────────
 
-fn theme_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
+fn theme_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(SETTINGS_CONTENT_MAX_WIDTH);
 
     // Build a 3-column grid of theme previews
@@ -809,8 +804,8 @@ fn theme_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
     for (label, idx) in &experiments {
         let btn_width = Length::Fixed(120.0);
         let pair = row![
-            button(container(text(*label).size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::exp_btn(*idx)).padding(PAD_BUTTON).width(btn_width),
-            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::primary_button).padding(PAD_BUTTON).width(btn_width),
+            button(container(text(*label).size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::ButtonClass::Experiment { variant: *idx }.style()).padding(PAD_BUTTON).width(btn_width),
+            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::ButtonClass::Primary.style()).padding(PAD_BUTTON).width(btn_width),
         ].spacing(SPACE_XXS);
 
         current_row = current_row.push(container(pair).width(Length::FillPortion(1)));
@@ -841,8 +836,8 @@ fn theme_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
     for (label, idx) in &experiments {
         let btn_width = Length::Fixed(120.0);
         let pair = row![
-            button(container(text(*label).size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::exp_btn(*idx)).padding(PAD_BUTTON).width(btn_width),
-            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::primary_button).padding(PAD_BUTTON).width(btn_width),
+            button(container(text(*label).size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::ButtonClass::Experiment { variant: *idx }.style()).padding(PAD_BUTTON).width(btn_width),
+            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::ButtonClass::Primary.style()).padding(PAD_BUTTON).width(btn_width),
         ].spacing(SPACE_XXS);
         current_row2 = current_row2.push(container(pair).width(Length::FillPortion(1)));
         col_count2 += 1;
@@ -859,13 +854,13 @@ fn theme_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
 
     let content_bg_box = container(
         column![
-            text("Content / main area background").size(TEXT_SM).style(theme::text_tertiary),
+            text("Content / main area background").size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
             grid2,
         ].spacing(SPACE_SM),
     )
     .padding(PAD_SETTINGS_ROW)
     .width(Length::Fill)
-    .style(theme::content_container);
+    .style(theme::ContainerClass::Content.style());
 
     col = col.push(content_bg_box);
 
@@ -876,8 +871,8 @@ fn theme_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
     for (label, idx) in &experiments {
         let btn_width = Length::Fixed(120.0);
         let pair = row![
-            button(container(text(*label).size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::exp_btn(*idx)).padding(PAD_BUTTON).width(btn_width),
-            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::primary_button).padding(PAD_BUTTON).width(btn_width),
+            button(container(text(*label).size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::ButtonClass::Experiment { variant: *idx }.style()).padding(PAD_BUTTON).width(btn_width),
+            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::ButtonClass::Primary.style()).padding(PAD_BUTTON).width(btn_width),
         ].spacing(SPACE_XXS);
         current_row3 = current_row3.push(container(pair).width(Length::FillPortion(1)));
         col_count3 += 1;
@@ -894,13 +889,13 @@ fn theme_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
 
     let sidebar_bg_box = container(
         column![
-            text("Sidebar background").size(TEXT_SM).style(theme::text_tertiary),
+            text("Sidebar background").size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
             grid3,
         ].spacing(SPACE_SM),
     )
     .padding(PAD_SETTINGS_ROW)
     .width(Length::Fill)
-    .style(theme::sidebar_container);
+    .style(theme::ContainerClass::Sidebar.style());
 
     col = col.push(sidebar_bg_box);
 
@@ -908,20 +903,20 @@ fn theme_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
     let btn_width = Length::Fixed(120.0);
     let semantic_grid = column![
         row![
-            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::primary_button).padding(PAD_BUTTON).width(btn_width),
-            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::primary_button).padding(PAD_BUTTON).width(btn_width),
+            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::ButtonClass::Primary.style()).padding(PAD_BUTTON).width(btn_width),
+            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::ButtonClass::Primary.style()).padding(PAD_BUTTON).width(btn_width),
         ].spacing(SPACE_XXS),
         row![
-            button(container(text("Success").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::exp_semantic_btn(0)).padding(PAD_BUTTON).width(btn_width),
-            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::primary_button).padding(PAD_BUTTON).width(btn_width),
+            button(container(text("Success").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::ButtonClass::ExperimentSemantic { variant: 0 }.style()).padding(PAD_BUTTON).width(btn_width),
+            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::ButtonClass::Primary.style()).padding(PAD_BUTTON).width(btn_width),
         ].spacing(SPACE_XXS),
         row![
-            button(container(text("Warning").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::exp_semantic_btn(1)).padding(PAD_BUTTON).width(btn_width),
-            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::primary_button).padding(PAD_BUTTON).width(btn_width),
+            button(container(text("Warning").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::ButtonClass::ExperimentSemantic { variant: 1 }.style()).padding(PAD_BUTTON).width(btn_width),
+            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::ButtonClass::Primary.style()).padding(PAD_BUTTON).width(btn_width),
         ].spacing(SPACE_XXS),
         row![
-            button(container(text("Danger").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::exp_semantic_btn(2)).padding(PAD_BUTTON).width(btn_width),
-            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::primary_button).padding(PAD_BUTTON).width(btn_width),
+            button(container(text("Danger").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::ButtonClass::ExperimentSemantic { variant: 2 }.style()).padding(PAD_BUTTON).width(btn_width),
+            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill)).on_press(SettingsMessage::Noop).style(theme::ButtonClass::Primary.style()).padding(PAD_BUTTON).width(btn_width),
         ].spacing(SPACE_XXS),
     ].spacing(SPACE_XS);
 
@@ -934,7 +929,7 @@ fn theme_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
 
 // ── Composing tab ────────────────────────────────────────
 
-fn composing_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
+fn composing_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(SETTINGS_CONTENT_MAX_WIDTH);
 
     col = col.push(section("Sending", vec![
@@ -976,7 +971,7 @@ fn composing_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
 
 // ── Notifications tab ────────────────────────────────────
 
-fn notifications_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
+fn notifications_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(SETTINGS_CONTENT_MAX_WIDTH);
 
     col = col.push(section("Notifications", vec![
@@ -995,7 +990,7 @@ fn notifications_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
                     button(text(*cat).size(TEXT_SM))
                         .on_press(SettingsMessage::ToggleNotifyCategory((*cat).to_string()))
                         .padding(PAD_ICON_BTN)
-                        .style(theme::chip_button(active))
+                        .style(theme::ButtonClass::Chip { active }.style())
                         .into()
                 })
                 .collect();
@@ -1010,7 +1005,7 @@ fn notifications_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
             container(
                 text("Always notify when email arrives from a VIP sender.")
                     .size(TEXT_SM)
-                    .style(theme::text_tertiary),
+                    .style(theme::TextClass::Tertiary.style()),
             )
             .padding(PAD_SETTINGS_ROW)
             .width(Length::Fill),
@@ -1026,7 +1021,7 @@ fn notifications_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
                         button(text("Remove").size(TEXT_SM).style(text::danger))
                             .on_press(SettingsMessage::RemoveVipSender(email.clone()))
                             .padding(PAD_ICON_BTN)
-                            .style(theme::action_button),
+                            .style(theme::ButtonClass::Action.style()),
                     ]
                     .align_y(Alignment::Center),
                 )
@@ -1043,13 +1038,13 @@ fn notifications_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
                         .on_submit(SettingsMessage::AddVipSender)
                         .size(TEXT_LG)
                         .padding(PAD_INPUT)
-                        .style(theme::settings_text_input)
+                        .style(theme::TextInputClass::Settings.style())
                         .width(Length::Fill),
                     Space::new().width(SPACE_XS),
                     button(text("Add").size(TEXT_LG))
                         .on_press(SettingsMessage::AddVipSender)
                         .padding(PAD_ICON_BTN)
-                        .style(theme::secondary_button),
+                        .style(theme::ButtonClass::Secondary.style()),
                 ]
                 .align_y(Alignment::Center),
             )
@@ -1065,7 +1060,7 @@ fn notifications_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
 
 // ── Mail Rules tab ───────────────────────────────────────
 
-fn mail_rules_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
+fn mail_rules_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(SETTINGS_CONTENT_MAX_WIDTH);
 
     col = col.push(section("Labels", vec![
@@ -1161,7 +1156,7 @@ fn shortcuts_tab<'a>() -> Element<'a, SettingsMessage> {
                             .width(Length::Fill),
                         container(text(*key).size(TEXT_SM).style(text::secondary))
                             .padding(PAD_ICON_BTN)
-                            .style(theme::key_badge_container),
+                            .style(theme::ContainerClass::KeyBadge.style()),
                     ]
                     .align_y(Alignment::Center),
                 )
@@ -1176,7 +1171,7 @@ fn shortcuts_tab<'a>() -> Element<'a, SettingsMessage> {
 
 // ── AI tab ───────────────────────────────────────────────
 
-fn ai_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
+fn ai_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(SETTINGS_CONTENT_MAX_WIDTH);
 
     col = col.push(section("Provider", vec![
@@ -1220,7 +1215,7 @@ fn ai_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
                             .secure(true)
                             .size(TEXT_LG)
                             .padding(PAD_INPUT)
-                            .style(theme::settings_text_input)
+                            .style(theme::TextInputClass::Settings.style())
                             .width(Length::Fill),
                         Space::new().width(SPACE_XS),
                         button(
@@ -1228,7 +1223,7 @@ fn ai_tab(state: &SettingsState) -> Element<'_, SettingsMessage> {
                         )
                         .on_press(SettingsMessage::SaveAiSettings)
                         .padding(PAD_ICON_BTN)
-                        .style(theme::secondary_button),
+                        .style(theme::ButtonClass::Secondary.style()),
                     ]
                     .align_y(Alignment::Center),
                 ]
@@ -1299,7 +1294,7 @@ fn about_tab<'a>() -> Element<'a, SettingsMessage> {
                 Space::new().height(SPACE_XS),
                 text("Licensed under the Apache License, Version 2.0. You may obtain a copy of the License at:")
                     .size(TEXT_SM)
-                    .style(theme::text_tertiary),
+                    .style(theme::TextClass::Tertiary.style()),
                 Space::new().height(SPACE_XXS),
                 text("https://www.apache.org/licenses/LICENSE-2.0")
                     .size(TEXT_SM)
@@ -1307,7 +1302,7 @@ fn about_tab<'a>() -> Element<'a, SettingsMessage> {
                 Space::new().height(SPACE_SM),
                 text("Copyright 2024-2026 Ratatoskr contributors.")
                     .size(TEXT_SM)
-                    .style(theme::text_tertiary),
+                    .style(theme::TextClass::Tertiary.style()),
             ]
         ).padding(PAD_SETTINGS_ROW).into(),
     ]));
@@ -1367,13 +1362,13 @@ fn section_inner<'a>(
     let mut col = column![].width(Length::Fill).padding(1);
     for (i, item) in items.into_iter().enumerate() {
         if i > 0 {
-            col = col.push(iced::widget::rule::horizontal(1).style(theme::subtle_divider_rule));
+            col = col.push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
         }
         col = col.push(item);
     }
     let section_box = container(col)
         .width(Length::Fill)
-        .style(theme::settings_section_container);
+        .style(theme::ContainerClass::SettingsSection.style());
 
     if let Some(title) = title {
         let title_text: Element<'a, SettingsMessage> = text(title)
@@ -1389,7 +1384,7 @@ fn section_inner<'a>(
             let icon_style: fn(&iced::Theme) -> text::Style = if help_cfg.pinned {
                 text::primary
             } else {
-                theme::text_muted
+                theme::TextClass::Muted.style()
             };
 
             let help_icon = mouse_area(
@@ -1400,7 +1395,7 @@ fn section_inner<'a>(
                 )
                 .on_press(SettingsMessage::ToggleHelpPin(help_id.clone()))
                 .padding(PAD_ICON_BTN)
-                .style(theme::bare_icon_button),
+                .style(theme::ButtonClass::BareIcon.style()),
             )
             .on_enter(SettingsMessage::HelpHover(help_id_hover))
             .on_exit(SettingsMessage::HelpUnhover(help_id_unhover));
@@ -1415,7 +1410,7 @@ fn section_inner<'a>(
                         container(help_cfg.content)
                             .padding(PAD_SETTINGS_ROW)
                             .width(Length::Fill)
-                            .style(theme::floating_container),
+                            .style(theme::ContainerClass::Floating.style()),
                     )
                     .on_dismiss(SettingsMessage::DismissHelp);
             }
@@ -1437,7 +1432,7 @@ fn section_inner<'a>(
             header = header.push(
                 text(subtitle)
                     .size(TEXT_SM)
-                    .style(theme::text_tertiary),
+                    .style(theme::TextClass::Tertiary.style()),
             );
         }
 
@@ -1482,7 +1477,7 @@ fn setting_row<'a>(
     )
     .on_press(on_press)
     .padding(0)
-    .style(theme::action_button)
+    .style(theme::ButtonClass::Action.style())
     .width(Length::Fill)
     .into()
 }
@@ -1502,11 +1497,11 @@ fn toggle_row<'a>(
             row![
                 column![
                     text(label).size(TEXT_LG).style(text::base),
-                    text(description).size(TEXT_SM).style(theme::text_tertiary),
+                    text(description).size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
                 ]
                 .spacing(SPACE_XXXS),
                 Space::new().width(Length::Fill),
-                animated_toggler(value).size(TEXT_HEADING).on_toggle(on_toggle).style(theme::settings_toggler),
+                animated_toggler(value).size(TEXT_HEADING).on_toggle(on_toggle).style(theme::TogglerClass::Settings.style()),
             ]
             .align_y(Alignment::Center),
         )
@@ -1517,7 +1512,7 @@ fn toggle_row<'a>(
     )
     .on_press(on_press_msg)
     .padding(0)
-    .style(theme::action_button)
+    .style(theme::ButtonClass::Action.style())
     .width(Length::Fill)
     .into()
 }
@@ -1532,12 +1527,12 @@ fn info_row(
     container(
         row![
             column![
-                text(label_owned).size(TEXT_SM).style(theme::text_tertiary),
+                text(label_owned).size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
                 text_input("", &value_owned)
                     .on_input(|_| SettingsMessage::Noop)
                     .size(TEXT_LG)
                     .padding(0)
-                    .style(theme::inline_text_input),
+                    .style(theme::TextInputClass::Inline.style()),
             ]
             .spacing(SPACE_XXXS)
             .width(Length::Fill),
@@ -1548,7 +1543,7 @@ fn info_row(
             )
             .on_press(SettingsMessage::CopyToClipboard(value_for_clipboard))
             .padding(PAD_ICON_BTN)
-            .style(theme::bare_icon_button),
+            .style(theme::ButtonClass::BareIcon.style()),
         ]
         .spacing(SPACE_SM)
         .align_y(Alignment::Center),
@@ -1574,13 +1569,13 @@ fn input_row(
             container(
                 row![
                     column![
-                        text(label_owned).size(TEXT_SM).style(theme::text_tertiary),
+                        text(label_owned).size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
                         text_input(&placeholder_owned, &value_owned)
                             .id(id_owned.clone())
                             .on_input(on_input)
                             .size(TEXT_LG)
                             .padding(0)
-                            .style(theme::inline_text_input),
+                            .style(theme::TextInputClass::Inline.style()),
                     ]
                     .spacing(SPACE_XXXS)
                     .width(Length::Fill),
@@ -1596,7 +1591,7 @@ fn input_row(
         )
         .on_press(SettingsMessage::FocusInput(id_owned.clone()))
         .padding(0)
-        .style(theme::action_button)
+        .style(theme::ButtonClass::Action.style())
         .width(Length::Fill),
     )
     .interaction(iced::mouse::Interaction::Text)
@@ -1608,7 +1603,7 @@ fn coming_soon_row<'a>(feature: &'a str) -> Element<'a, SettingsMessage> {
         SETTINGS_ROW_HEIGHT,
         text(format!("{feature} coming soon."))
             .size(TEXT_LG)
-            .style(theme::text_tertiary),
+            .style(theme::TextClass::Tertiary.style()),
     )
 }
 
@@ -1627,7 +1622,7 @@ fn slider_row<'a>(
     let mut slider_widget = slider(range, value, on_change)
         .default(default)
         .step(step)
-        .style(theme::settings_slider)
+        .style(theme::SliderClass::Settings.style())
         .width(Length::Fill);
     if let Some(msg) = on_release {
         slider_widget = slider_widget.on_release(msg);
@@ -1682,7 +1677,7 @@ where
                         radio("", *value, selected, on_select)
                             .size(RADIO_SIZE)
                             .spacing(0)
-                            .style(theme::settings_radio),
+                            .style(theme::RadioClass::Settings.style()),
                         container(text(*label).size(TEXT_LG).style(text::base))
                             .align_y(Alignment::Center),
                     ]
@@ -1696,7 +1691,7 @@ where
             )
             .on_press(msg)
             .padding(0)
-            .style(theme::action_button)
+            .style(theme::ButtonClass::Action.style())
             .width(Length::Fill)
             .into()
         })
@@ -1723,7 +1718,7 @@ fn editable_list<'a>(
 
     for (i, item) in items.iter().enumerate() {
         if i > 0 {
-            col = col.push(iced::widget::rule::horizontal(1).style(theme::subtle_divider_rule));
+            col = col.push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
         }
 
         let is_drag_item = drag_state
@@ -1734,7 +1729,7 @@ fn editable_list<'a>(
         let lid_grip = id.clone();
         let grip_slot = mouse_area(
             container(
-                icon::grip_vertical().size(ICON_MD).style(theme::text_tertiary),
+                icon::grip_vertical().size(ICON_MD).style(theme::TextClass::Tertiary.style()),
             )
             .width(GRIP_SLOT_WIDTH)
             .align_x(Alignment::Center)
@@ -1765,7 +1760,7 @@ fn editable_list<'a>(
                 animated_toggler(enabled)
                     .size(TEXT_HEADING)
                     .on_toggle(move |v| SettingsMessage::ListToggle(lid.clone(), idx, v))
-                    .style(theme::settings_toggler)
+                    .style(theme::TogglerClass::Settings.style())
                     .into(),
             );
         }
@@ -1779,7 +1774,7 @@ fn editable_list<'a>(
             )
             .on_press(SettingsMessage::ListMenu(id.clone(), i))
             .padding(PAD_ICON_BTN)
-            .style(theme::bare_icon_button)
+            .style(theme::ButtonClass::BareIcon.style())
             .into(),
         );
 
@@ -1792,7 +1787,7 @@ fn editable_list<'a>(
             )
             .on_press(SettingsMessage::ListRemove(id.clone(), i))
             .padding(PAD_ICON_BTN)
-            .style(theme::bare_icon_button)
+            .style(theme::ButtonClass::BareIcon.style())
             .into(),
         );
 
@@ -1814,13 +1809,13 @@ fn editable_list<'a>(
             .align_y(Alignment::Center);
 
         if is_drag_item {
-            inner_container = inner_container.style(theme::dragging_row_container);
+            inner_container = inner_container.style(theme::ContainerClass::DraggingRow.style());
         }
 
         let item_btn = button(inner_container)
             .on_press(SettingsMessage::ListRowClick(lid_click, i))
             .padding(0)
-            .style(theme::action_button)
+            .style(theme::ButtonClass::Action.style())
             .width(Length::Fill);
 
         col = col.push(item_btn);
@@ -1828,7 +1823,7 @@ fn editable_list<'a>(
 
     // Divider before Add button (if there are items)
     if !items.is_empty() {
-        col = col.push(iced::widget::rule::horizontal(1).style(theme::subtle_divider_rule));
+        col = col.push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
     }
 
     // Add button — label centered
@@ -1848,7 +1843,7 @@ fn editable_list<'a>(
     )
     .on_press(SettingsMessage::ListAdd(add_id))
     .padding(PAD_SETTINGS_ROW)
-    .style(theme::action_button)
+    .style(theme::ButtonClass::Action.style())
     .width(Length::Fill)
     .height(SETTINGS_ROW_HEIGHT);
 
@@ -1899,7 +1894,7 @@ fn action_row<'a>(
     let label_col: Element<'a, SettingsMessage> = if let Some(desc) = description {
         column![
             text(label).size(TEXT_LG).style(text::base),
-            text(desc).size(TEXT_SM).style(theme::text_tertiary),
+            text(desc).size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
         ]
         .spacing(SPACE_XXXS)
         .into()
@@ -1922,7 +1917,7 @@ fn action_row<'a>(
     button(content)
         .on_press(on_press)
         .padding(PAD_SETTINGS_ROW)
-        .style(theme::action_button)
+        .style(theme::ButtonClass::Action.style())
         .width(Length::Fill)
         .into()
 }

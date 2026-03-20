@@ -33,58 +33,23 @@ These patterns appeared across 6-8+ specs and should be adopted as foundational 
 
 - [ ] **Component trait for panel isolation**
 
-  Trait defined in `crates/app/src/component.rs` with `Message`/`Event` associated types, `update()` returning `(Task, Option<Event>)`, and `view()`. Sidebar extracted as first component (`crates/app/src/ui/sidebar.rs`): owns accounts/labels/selection state, emits `SidebarEvent` variants. App dispatches via `Message::Sidebar(SidebarMessage)` and routes events. Shared widget functions genericized to work with any message type.
+  Trait defined in `crates/app/src/component.rs` with `Message`/`Event` associated types, `update()`, `view()`, and `subscription()` (default `Subscription::none()`). Extracted components: sidebar, thread list, reading pane, settings. App dispatches via `Message::Sidebar(...)`, `Message::ThreadList(...)`, `Message::ReadingPane(...)`, `Message::Settings(...)` and routes events. Shared widget functions genericized to work with any message type.
 
-  **Remaining panels to componentize**:
-  - **Thread list** — emits `ThreadSelected(thread_id)`, `BulkAction(action)`, `SearchExecuted(query)`
-  - **Reading pane** — emits `Reply(thread_id)`, `Archive(thread_id)`, `LabelToggled(thread_id, label_id)`
+  **Remaining panels to componentize** (as these features are built):
   - **Compose** — emits `Sent(draft_id)`, `DraftSaved(draft_id)`, `Discarded`
   - **Calendar** — emits `EventSelected(event_id)`, `DateNavigated(date)`
   - **Command palette** — emits `CommandExecuted(CommandId, CommandArgs)`, `Dismissed`
   - **Status bar** — emits `RequestReauth(account_id)`, `WarningClicked(account_id)`
-  - **Settings** — emits `SettingsChanged(diff)`, `AccountReauthRequested(account_id)`
 
 ---
 
 - [ ] **Token-to-Catalog bridge for theming**
 
-  Create an `AppTheme` newtype wrapping iced's `Theme` that implements all widget `Catalog` traits, bridging the existing seed-based palette into iced's styling system. This eliminates inline style closures and ensures visual consistency across all panels.
+  Style migration complete. 8 class enums defined in `theme.rs`: `ButtonClass`, `ContainerClass`, `TextClass`, `RuleClass`, `TextInputClass`, `SliderClass`, `RadioClass`, `TogglerClass`, `PickListClass`. All ~30 style functions centralized behind enum dispatch with `.style()` methods returning the appropriate fn pointer or closure. ~80 call sites across all view files migrated from inline closures to named classes. Color utilities (`mix()`, `ON_AVATAR`, etc.) preserved.
 
-  **The problem**: Currently, ~30 style functions in `theme.rs` return inline `Style` structs by reaching into `theme.palette()`. Every widget call site uses `.style(|theme, status| { ... })` closures. This works but has drawbacks: (1) style logic is scattered across closures in view code, not centralized; (2) you can't share a style definition between widgets without passing closures around; (3) iced's `Catalog` system (the idiomatic approach since 0.13) is designed for `.class(MyClass::Primary)` which is more readable and composable.
-
-  **The pattern** (from iced-plus `research/iced-plus/iced_plus_theme/src/theme.rs`):
-  ```rust
-  pub struct AppTheme(pub Theme);
-
-  impl button::Catalog for AppTheme {
-      type Class<'a> = ButtonClass;
-
-      fn style(&self, class: &ButtonClass, status: button::Status) -> button::Style {
-          let p = self.0.palette();
-          match class {
-              ButtonClass::Primary => { /* use p.primary.base, etc. */ }
-              ButtonClass::Nav { active } => { /* nav_button style */ }
-              ButtonClass::Ghost => { /* ghost button style */ }
-              // ... all existing style functions become match arms
-          }
-      }
-  }
-  ```
-
-  **What migrates**:
-  - All `nav_button`, `thread_card`, `badge`, `popover`, `dropdown_item`, `toolbar_button` etc. style functions become `ButtonClass` / `ContainerClass` / `TextClass` variants
-  - The `mix()` helper and `ON_AVATAR` semantic color stay in `theme.rs` as utilities
-  - The spacing scale and layout constants in `layout.rs` are unaffected — they're already centralized
-
-  **Token registry** (from shadcn-rs `research/shadcn-rs/crates/iced-shadcn/src/tokens.rs`): shadcn-rs goes further with a `ThemeTokenRegistry` (BTreeMap<String, Color|f32|u64|String>) that separates token definition from consumption. This level of indirection is useful if we want user-customizable themes beyond the 6-seed system, but is optional for the initial implementation. Start with the `AppTheme` Catalog bridge; add the token registry later if needed.
-
-  **Phantom-type variants** (from iced-plus `research/iced-plus/iced_plus_components/src/button.rs`): For compile-time safety, button variants can use phantom types: `Button<Primary, Medium, Message>` where `Primary` and `Medium` are unit types implementing sealed `ButtonVariant` and `ButtonSize` traits. This enables monomorphization and prevents invalid combinations. Worth evaluating but may be over-engineering for our needs — start with a simple enum and escalate if the variant space grows.
-
-  **Where referenced**: Every UI spec. Most directly: `docs/iced-ecosystem-decisions.md`, `docs/main-layout/problem-statement.md`, `docs/sidebar/problem-statement.md`, `docs/status-bar/problem-statement.md`, `docs/calendar/problem-statement.md`.
-
-  **Interaction with other items**: The Component trait means each panel's `view()` receives `&AppTheme` (or it's available via iced's theme system). The Catalog bridge is what makes `.class(ButtonClass::Nav { active: true })` work inside component view functions.
-
-  **Reference**: iced-plus `research/iced-plus/iced_plus_theme/src/theme.rs` (Catalog bridge), shadcn-rs `research/shadcn-rs/crates/iced-shadcn/src/tokens.rs` (token registry), `research/shadcn-rs/crates/iced-shadcn/src/theme.rs` (Palette struct with 35 tokens).
+  **Future enhancements** (optional, evaluate as needed):
+  - **Token registry** (from shadcn-rs): `ThemeTokenRegistry` (BTreeMap) separating token definition from consumption. Useful if user-customizable themes beyond the 6-seed system are needed.
+  - **Phantom-type variants** (from iced-plus): Compile-time safe button variants like `Button<Primary, Medium, Message>`. May be over-engineering — evaluate if the variant space grows significantly.
 
 ---
 
@@ -117,51 +82,14 @@ These patterns appeared across 6-8+ specs and should be adopted as foundational 
 
 - [ ] **Subscription orchestration pattern**
 
-  Establish a standard pattern for how the app composes all background event streams into a single `Subscription::batch()`. This is infrastructure that every async feature depends on.
+  Infrastructure established. `Component` trait has `subscription()` with default `Subscription::none()`. `App::subscription()` batches all component subscriptions alongside app-level ones (mundy appearance, window events, settings animation). All 4 components currently return `Subscription::none()`.
 
-  **The problem**: The app already has subscriptions (OS appearance changes via `mundy`, window resize events). As features land, more subscriptions arrive: sync pipeline events (4 providers), keyboard capture for shortcuts, timer ticks (status bar cycling at 3s, auto-save at 30s, debounce for search at 150ms), file system watches (draft changes, attachment modifications), and provider push notifications (IMAP IDLE, JMAP push, Graph webhooks, Gmail watch). Without a standard pattern, each feature adds its subscription ad-hoc, leading to inconsistent error handling, unclear ownership, and subscription lifecycle bugs (the existing mundy D-Bus freeze is likely a subscription lifecycle issue).
-
-  **The pattern** (from pikeru `research/pikeru/` and rustcast `research/rustcast/src/app/tile/elm.rs` lines 158-237):
-
-  Each subsystem provides a function returning `Subscription<SubsystemMessage>`:
-  ```rust
-  // Each component/subsystem:
-  fn subscription(&self) -> Subscription<SyncMessage> { ... }
-  fn subscription(&self) -> Subscription<StatusBarMessage> { ... }
-
-  // Top-level App::subscription():
-  fn subscription(&self) -> Subscription<AppMessage> {
-      Subscription::batch([
-          self.sync_pipeline.subscription().map(AppMessage::Sync),
-          self.status_bar.subscription().map(AppMessage::StatusBar),
-          self.keyboard.subscription().map(AppMessage::Keyboard),
-          self.appearance.subscription().map(AppMessage::Appearance),
-          // ... each component's subscription
-      ])
-  }
-  ```
-
-  For subsystems that multiplex multiple async sources (e.g., sync across 4 providers + push notification channels), use `subscription::channel` with `tokio::select!`:
-  ```rust
-  fn sync_subscription(providers: &[ProviderState]) -> Subscription<SyncMessage> {
-      subscription::channel(Id::unique(), 100, |mut sender| async move {
-          loop {
-              tokio::select! {
-                  progress = gmail_rx.recv() => sender.send(SyncMessage::Progress(progress)).await,
-                  progress = graph_rx.recv() => sender.send(SyncMessage::Progress(progress)).await,
-                  push = push_notification_rx.recv() => sender.send(SyncMessage::PushReceived(push)).await,
-                  _ = tokio::time::sleep(POLL_INTERVAL) => sender.send(SyncMessage::PollTick).await,
-              }
-          }
-      })
-  }
-  ```
-
-  **Where referenced**: `docs/calendar/problem-statement.md`, `docs/main-layout/problem-statement.md`, `docs/search/implementation-spec.md`, `docs/status-bar/problem-statement.md`, `docs/accounts/problem-statement.md`, `docs/pop-out-windows/problem-statement.md`.
-
-  **Interaction with other items**: The Component trait means each component owns its subscription. The generational load tracking interacts with how async results are delivered — `Task::perform` for one-shot loads, `subscription::channel` for streaming updates.
-
-  **Reference**: pikeru (subscription::channel + tokio::select! for concurrent thumbnail loading, file watching, and search), rustcast (`research/rustcast/src/app/tile/elm.rs` lines 158-237 for Subscription::batch).
+  **Remaining work** (as these features are built):
+  - Sync pipeline events (4 providers) — use `subscription::channel` with `tokio::select!` to multiplex
+  - Keyboard capture for shortcuts — `subscription::events_with` for raw key interception
+  - Timer ticks (status bar cycling at 3s, auto-save at 30s, search debounce at 150ms)
+  - File system watches (draft changes, attachment modifications)
+  - Provider push notifications (IMAP IDLE, JMAP push, Graph webhooks, Gmail watch)
 
 ---
 
