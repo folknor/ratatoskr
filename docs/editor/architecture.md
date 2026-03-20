@@ -429,9 +429,11 @@ blockquote indent) are accounted for.
 Vertical scroll support with:
 - Mouse wheel handling (ScrollDelta::Lines at 20px/line, ScrollDelta::Pixels
   for trackpad)
-- Auto-scroll on cursor movement (edits, arrow keys, etc.)
+- Auto-scroll on cursor movement tracks actual caret line within wrapped
+  paragraphs via `grapheme_pixel_position()`, not just block top
 - Scroll offset clamped to `[0, max_scroll]` on resize and content changes
-- Content drawn with clip layer + translation offset
+- Content drawn with `with_layer()` (clip) + `with_translation()` (offset).
+  Cursor drawn inside the translation layer — no manual viewport clipping.
 - Hit testing converts viewport-relative to content-relative coordinates
 
 ### Known limitations
