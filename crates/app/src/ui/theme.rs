@@ -619,6 +619,16 @@ fn style_pinned_search_button(
 ) -> button::Style {
     let p = theme.palette();
     match status {
+        button::Status::Hovered if active => button::Style {
+            background: Some(p.background.strongest.color.into()),
+            text_color: p.background.base.text,
+            border: iced::Border {
+                color: p.background.strongest.color.scale_alpha(0.1),
+                width: 1.0,
+                radius: RADIUS_MD.into(),
+            },
+            ..Default::default()
+        },
         button::Status::Hovered => button::Style {
             background: Some(p.background.weak.color.into()),
             text_color: p.background.base.text,

@@ -296,6 +296,9 @@ pub const SETTINGS_NAV_WIDTH: f32 = 200.0;
 /// Settings content max width
 pub const SETTINGS_CONTENT_MAX_WIDTH: u32 = 600;
 
+/// Width for editor action buttons (Save, Cancel, Delete).
+pub const EDITOR_BUTTON_WIDTH: f32 = 100.0;
+
 /// Minimum width for select widget (trigger + menu)
 pub const SELECT_MIN_WIDTH: f32 = 140.0;
 

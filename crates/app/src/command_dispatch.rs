@@ -91,6 +91,7 @@ pub enum KeyEventMessage {
         key: iced::keyboard::Key,
         modifiers: iced::keyboard::Modifiers,
         status: iced::event::Status,
+        window_id: iced::window::Id,
     },
     PendingChordTimeout,
 }

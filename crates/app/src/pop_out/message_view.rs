@@ -48,6 +48,7 @@ pub struct MessageViewState {
 
     // Body
     pub body_text: Option<String>,
+    pub body_html: Option<String>,
     /// Snippet fallback used before async body load completes.
     pub snippet: Option<String>,
 
@@ -71,6 +72,7 @@ impl MessageViewState {
             subject: msg.subject.clone(),
             date: msg.date,
             body_text: None,
+            body_html: None,
             snippet: msg.snippet.clone(),
             attachments: Vec::new(),
             width: MESSAGE_VIEW_DEFAULT_WIDTH,

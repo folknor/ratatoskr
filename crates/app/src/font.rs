@@ -71,6 +71,7 @@ pub fn text_light() -> iced::Font {
 }
 
 /// Monospace font for source view and code blocks.
+/// Uses `Default::default()` intentionally — system monospace, not Inter.
 pub fn monospace() -> iced::Font {
     iced::Font {
         family: iced::font::Family::Monospace,

@@ -23,6 +23,29 @@ pub enum ComposeMode {
     Forward { original_subject: String },
 }
 
+impl ComposeMode {
+    /// Returns the subject line with the appropriate prefix applied.
+    pub fn prefixed_subject(&self) -> String {
+        match self {
+            Self::New => String::new(),
+            Self::Reply { original_subject } | Self::ReplyAll { original_subject } => {
+                if original_subject.starts_with("Re: ") {
+                    original_subject.clone()
+                } else {
+                    format!("Re: {original_subject}")
+                }
+            }
+            Self::Forward { original_subject } => {
+                if original_subject.starts_with("Fwd: ") {
+                    original_subject.clone()
+                } else {
+                    format!("Fwd: {original_subject}")
+                }
+            }
+        }
+    }
+}
+
 /// Account info for the From dropdown.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountInfo {
@@ -49,8 +72,8 @@ pub enum ComposeMessage {
     SubjectChanged(String),
     BodyChanged(iced::widget::text_editor::Action),
     FromAccountChanged(AccountInfo),
-    ToggleCc,
-    ToggleBcc,
+    ShowCc,
+    ShowBcc,
     ToTokenInput(TokenInputMessage),
     CcTokenInput(TokenInputMessage),
     BccTokenInput(TokenInputMessage),
@@ -91,6 +114,10 @@ pub struct ComposeState {
 
     // Status message (e.g. "Send not yet wired")
     pub status: Option<String>,
+
+    // Window geometry
+    pub width: f32,
+    pub height: f32,
 }
 
 impl ComposeState {
@@ -114,6 +141,8 @@ impl ComposeState {
             reply_thread_id: None,
             reply_message_id: None,
             status: None,
+            width: COMPOSE_DEFAULT_WIDTH,
+            height: COMPOSE_DEFAULT_HEIGHT,
         }
     }
 
@@ -131,24 +160,7 @@ impl ComposeState {
         state.mode = mode.clone();
 
         // Set subject
-        state.subject = match &mode {
-            ComposeMode::New => String::new(),
-            ComposeMode::Reply { original_subject }
-            | ComposeMode::ReplyAll { original_subject } => {
-                if original_subject.starts_with("Re: ") {
-                    original_subject.clone()
-                } else {
-                    format!("Re: {original_subject}")
-                }
-            }
-            ComposeMode::Forward { original_subject } => {
-                if original_subject.starts_with("Fwd: ") {
-                    original_subject.clone()
-                } else {
-                    format!("Fwd: {original_subject}")
-                }
-            }
-        };
+        state.subject = mode.prefixed_subject();
 
         // Add To recipient
         if let Some(email) = to_email {
@@ -205,27 +217,7 @@ impl ComposeState {
     pub fn window_title(&self) -> String {
         match &self.mode {
             ComposeMode::New => "New Message".to_string(),
-            ComposeMode::Reply { original_subject } => {
-                if original_subject.starts_with("Re: ") {
-                    original_subject.clone()
-                } else {
-                    format!("Re: {original_subject}")
-                }
-            }
-            ComposeMode::ReplyAll { original_subject } => {
-                if original_subject.starts_with("Re: ") {
-                    original_subject.clone()
-                } else {
-                    format!("Re: {original_subject}")
-                }
-            }
-            ComposeMode::Forward { original_subject } => {
-                if original_subject.starts_with("Fwd: ") {
-                    original_subject.clone()
-                } else {
-                    format!("Fwd: {original_subject}")
-                }
-            }
+            _ => self.mode.prefixed_subject(),
         }
     }
 }
@@ -239,8 +231,8 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
         ComposeMessage::FromAccountChanged(account) => {
             state.from_account = Some(account);
         }
-        ComposeMessage::ToggleCc => state.show_cc = true,
-        ComposeMessage::ToggleBcc => state.show_bcc = true,
+        ComposeMessage::ShowCc => state.show_cc = true,
+        ComposeMessage::ShowBcc => state.show_bcc = true,
         ComposeMessage::ToTokenInput(msg) => {
             handle_token_input_message(&mut state.to, msg, &mut state.selected_to_token);
         }
@@ -441,10 +433,10 @@ fn build_from_row<'a>(
     if !state.show_cc {
         from_row = from_row.push(
             button(text("Cc").size(TEXT_SM))
-                .style(button::text)
+                .style(theme::ButtonClass::Ghost.style())
                 .on_press(Message::PopOut(
                     window_id,
-                    PopOutMessage::Compose(ComposeMessage::ToggleCc),
+                    PopOutMessage::Compose(ComposeMessage::ShowCc),
                 ))
                 .padding(PAD_INPUT),
         );
@@ -452,10 +444,10 @@ fn build_from_row<'a>(
     if !state.show_bcc {
         from_row = from_row.push(
             button(text("Bcc").size(TEXT_SM))
-                .style(button::text)
+                .style(theme::ButtonClass::Ghost.style())
                 .on_press(Message::PopOut(
                     window_id,
-                    PopOutMessage::Compose(ComposeMessage::ToggleBcc),
+                    PopOutMessage::Compose(ComposeMessage::ShowBcc),
                 ))
                 .padding(PAD_INPUT),
         );
@@ -552,9 +544,8 @@ fn compose_body<'a>(
 
 fn compose_footer<'a>(
     window_id: iced::window::Id,
-    state: &'a ComposeState,
+    _state: &'a ComposeState,
 ) -> Element<'a, Message> {
-    let _ = state; // state reserved for future validation indicators
 
     let discard_btn = button(
         row![
@@ -564,7 +555,7 @@ fn compose_footer<'a>(
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),
     )
-    .style(button::text)
+    .style(theme::ButtonClass::Ghost.style())
     .on_press(Message::PopOut(
         window_id,
         PopOutMessage::Compose(ComposeMessage::Discard),
@@ -579,7 +570,7 @@ fn compose_footer<'a>(
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),
     )
-    .style(button::primary)
+    .style(theme::ButtonClass::Primary.style())
     .on_press(Message::PopOut(
         window_id,
         PopOutMessage::Compose(ComposeMessage::Send),

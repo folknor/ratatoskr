@@ -403,12 +403,12 @@ fn pinned_search_card(
 /// Formats a unix timestamp as "Mar 19, 14:32" for the pinned search card.
 fn format_pinned_search_date(timestamp: i64) -> String {
     chrono::DateTime::from_timestamp(timestamp, 0)
-        .map(|dt| dt.format("%b %d, %H:%M").to_string())
+        .map(|dt| dt.with_timezone(&chrono::Local).format("%b %d, %H:%M").to_string())
         .unwrap_or_else(|| "Unknown".to_string())
 }
 
 /// Truncates a query string for display, adding ellipsis if needed.
-fn truncate_query(query: &str, max_chars: usize) -> String {
+pub fn truncate_query(query: &str, max_chars: usize) -> String {
     if query.len() <= max_chars {
         query.to_string()
     } else {

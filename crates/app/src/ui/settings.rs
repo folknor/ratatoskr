@@ -123,6 +123,7 @@ pub enum SettingsMessage {
     GroupEditorAddMember(String),
     GroupEditorSave,
     GroupEditorFilterChanged(String),
+    GroupMembersLoaded(Result<Vec<String>, String>),
 }
 
 /// Which field in the contact editor changed.
@@ -158,6 +159,8 @@ pub enum SettingsEvent {
     LoadContacts(String),
     /// Request the App to load groups (with filter).
     LoadGroups(String),
+    /// Request the App to load group members by group ID.
+    LoadGroupMembers(String),
 }
 
 /// Overlays that slide in from the right, covering the settings content.
@@ -572,6 +575,10 @@ impl Component for Settings {
                 self.group_filter = v.clone();
                 return (Task::none(), Some(SettingsEvent::LoadGroups(v)));
             }
+            SettingsMessage::GroupClick(id) => {
+                self.open_group_editor(&id);
+                return (Task::none(), Some(SettingsEvent::LoadGroupMembers(id)));
+            }
             _ => self.handle_simple_message(message),
         }
         (Task::none(), None)
@@ -767,11 +774,23 @@ impl Settings {
             SettingsMessage::ContactsLoaded(Ok(contacts)) => {
                 self.contacts = contacts;
             }
-            SettingsMessage::ContactsLoaded(Err(_)) => {}
+            SettingsMessage::ContactsLoaded(Err(e)) => {
+                eprintln!("Failed to load contacts: {e}");
+            }
             SettingsMessage::GroupsLoaded(Ok(groups)) => {
                 self.groups = groups;
             }
-            SettingsMessage::GroupsLoaded(Err(_)) => {}
+            SettingsMessage::GroupsLoaded(Err(e)) => {
+                eprintln!("Failed to load groups: {e}");
+            }
+            SettingsMessage::GroupMembersLoaded(Ok(members)) => {
+                if let Some(ref mut editor) = self.group_editor {
+                    editor.members = members;
+                }
+            }
+            SettingsMessage::GroupMembersLoaded(Err(e)) => {
+                eprintln!("Failed to load group members: {e}");
+            }
             SettingsMessage::ContactClick(id) => {
                 self.open_contact_editor(&id);
             }
@@ -1858,7 +1877,7 @@ fn signature_editor_overlay(state: &Settings) -> Element<'_, SettingsMessage> {
     )
     .padding(PAD_BUTTON)
     .style(theme::ButtonClass::Primary.style())
-    .width(Length::Fixed(100.0));
+    .width(Length::Fixed(EDITOR_BUTTON_WIDTH));
     if can_save {
         save_btn = save_btn.on_press(SettingsMessage::SignatureEditorSave);
     }
@@ -2003,13 +2022,21 @@ fn group_card(group: &crate::db::GroupEntry) -> Element<'_, SettingsMessage> {
     } else {
         format!("{} members", group.member_count)
     };
+    let updated_label = chrono::DateTime::from_timestamp(group.updated_at, 0)
+        .map(|dt| dt.with_timezone(&chrono::Local).format("%b %d, %Y").to_string())
+        .unwrap_or_default();
 
     let content = row![
         column![
             text(&group.name).size(TEXT_LG).style(text::base),
         ]
         .width(Length::Fill),
-        text(member_label).size(TEXT_SM).style(text::secondary),
+        column![
+            text(member_label).size(TEXT_SM).style(text::secondary),
+            text(updated_label).size(TEXT_SM).style(theme::TextClass::Muted.style()),
+        ]
+        .align_x(Alignment::End)
+        .spacing(SPACE_XXXS),
     ]
     .spacing(SPACE_SM)
     .align_y(Alignment::Center);
@@ -2135,7 +2162,7 @@ fn contact_editor_buttons(editor: &ContactEditorState) -> Element<'_, SettingsMe
     )
     .padding(PAD_BUTTON)
     .style(theme::ButtonClass::Primary.style())
-    .width(Length::Fixed(100.0));
+    .width(Length::Fixed(EDITOR_BUTTON_WIDTH));
     if can_save {
         save_btn = save_btn.on_press(SettingsMessage::ContactEditorSave);
     }
@@ -2310,7 +2337,7 @@ fn group_editor_buttons(editor: &GroupEditorState) -> Element<'_, SettingsMessag
     )
     .padding(PAD_BUTTON)
     .style(theme::ButtonClass::Primary.style())
-    .width(Length::Fixed(100.0));
+    .width(Length::Fixed(EDITOR_BUTTON_WIDTH));
     if can_save {
         save_btn = save_btn.on_press(SettingsMessage::GroupEditorSave);
     }

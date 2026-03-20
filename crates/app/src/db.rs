@@ -1095,6 +1095,17 @@ impl Db {
         .await
     }
 
+    /// Get member emails for a group.
+    pub async fn get_group_member_emails(
+        &self,
+        group_id: String,
+    ) -> Result<Vec<String>, String> {
+        self.with_conn(move |conn| {
+            load_group_member_emails(conn, &group_id)
+        })
+        .await
+    }
+
     /// Insert or update a contact.
     pub async fn save_contact(
         &self,
@@ -1156,43 +1167,42 @@ fn load_contacts_filtered(
     filter: &str,
 ) -> Result<Vec<ContactEntry>, String> {
     let trimmed = filter.trim();
-    let (sql, use_filter) = if trimmed.is_empty() {
-        (
-            "SELECT c.id, c.email, c.display_name, c.email2, c.phone,
-                    c.company, c.notes, c.account_id,
-                    a.account_color
-             FROM contacts c
-             LEFT JOIN accounts a ON a.id = c.account_id
-             WHERE c.source != 'seen'
-             ORDER BY c.frequency DESC, c.display_name ASC
-             LIMIT 200"
-                .to_string(),
-            false,
-        )
-    } else {
-        let pattern = format!("%{trimmed}%");
-        (
-            format!(
-                "SELECT c.id, c.email, c.display_name, c.email2, c.phone,
-                        c.company, c.notes, c.account_id,
-                        a.account_color
-                 FROM contacts c
-                 LEFT JOIN accounts a ON a.id = c.account_id
-                 WHERE c.source != 'seen'
-                   AND (c.email LIKE '{pattern}'
-                        OR c.display_name LIKE '{pattern}'
-                        OR c.company LIKE '{pattern}')
-                 ORDER BY c.frequency DESC, c.display_name ASC
-                 LIMIT 200"
-            ),
-            true,
-        )
-    };
-    let _ = use_filter; // used to build the SQL above
+    let pattern = format!("%{trimmed}%");
 
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    // Always pass the pattern param; when no filter is active the WHERE clause
+    // is trivially true (empty pattern = '%') so the param is harmless.
+    let sql = if trimmed.is_empty() {
+        "SELECT c.id, c.email, c.display_name, c.email2, c.phone,
+                c.company, c.notes, c.account_id,
+                a.account_color
+         FROM contacts c
+         LEFT JOIN accounts a ON a.id = c.account_id
+         WHERE c.source != 'seen'
+         ORDER BY c.frequency DESC, c.display_name ASC
+         LIMIT 200"
+    } else {
+        "SELECT c.id, c.email, c.display_name, c.email2, c.phone,
+                c.company, c.notes, c.account_id,
+                a.account_color
+         FROM contacts c
+         LEFT JOIN accounts a ON a.id = c.account_id
+         WHERE c.source != 'seen'
+           AND (c.email LIKE ?1
+                OR c.display_name LIKE ?1
+                OR c.company LIKE ?1)
+         ORDER BY c.frequency DESC, c.display_name ASC
+         LIMIT 200"
+    };
+
+    let params: &[&dyn rusqlite::types::ToSql] = if trimmed.is_empty() {
+        &[]
+    } else {
+        &[&pattern]
+    };
+
+    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map([], |row| {
+        .query_map(params, |row| {
             Ok(ContactEntry {
                 id: row.get("id")?,
                 email: row.get("email")?,
@@ -1245,6 +1255,8 @@ fn load_groups_filtered(
     filter: &str,
 ) -> Result<Vec<GroupEntry>, String> {
     let trimmed = filter.trim();
+    let pattern = format!("%{trimmed}%");
+
     let sql = if trimmed.is_empty() {
         "SELECT g.id, g.name, g.created_at, g.updated_at,
                 (SELECT COUNT(*) FROM contact_group_members m
@@ -1252,23 +1264,25 @@ fn load_groups_filtered(
          FROM contact_groups g
          ORDER BY g.updated_at DESC
          LIMIT 100"
-            .to_string()
     } else {
-        let pattern = format!("%{trimmed}%");
-        format!(
-            "SELECT g.id, g.name, g.created_at, g.updated_at,
-                    (SELECT COUNT(*) FROM contact_group_members m
-                     WHERE m.group_id = g.id) AS member_count
-             FROM contact_groups g
-             WHERE g.name LIKE '{pattern}'
-             ORDER BY g.updated_at DESC
-             LIMIT 100"
-        )
+        "SELECT g.id, g.name, g.created_at, g.updated_at,
+                (SELECT COUNT(*) FROM contact_group_members m
+                 WHERE m.group_id = g.id) AS member_count
+         FROM contact_groups g
+         WHERE g.name LIKE ?1
+         ORDER BY g.updated_at DESC
+         LIMIT 100"
     };
 
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let params: &[&dyn rusqlite::types::ToSql] = if trimmed.is_empty() {
+        &[]
+    } else {
+        &[&pattern]
+    };
+
+    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map([], |row| {
+        .query_map(params, |row| {
             Ok(GroupEntry {
                 id: row.get("id")?,
                 name: row.get("name")?,
@@ -1279,6 +1293,24 @@ fn load_groups_filtered(
         })
         .map_err(|e| e.to_string())?;
 
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+fn load_group_member_emails(
+    conn: &Connection,
+    group_id: &str,
+) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT member_value FROM contact_group_members
+             WHERE group_id = ?1 AND member_type = 'email'
+             ORDER BY member_value ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![group_id], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
 }

@@ -40,7 +40,7 @@ use ui::layout::{
 use ui::add_account::{AddAccountEvent, AddAccountMessage, AddAccountWizard};
 use ui::reading_pane::{ReadingPane, ReadingPaneEvent, ReadingPaneMessage};
 use ui::settings::{Settings, SettingsEvent, SettingsMessage};
-use ui::sidebar::{Sidebar, SidebarEvent, SidebarMessage};
+use ui::sidebar::{Sidebar, SidebarEvent, SidebarMessage, truncate_query};
 use ui::status_bar::{StatusBar, StatusBarEvent, StatusBarMessage};
 use ui::thread_list::{ThreadList, ThreadListEvent, ThreadListMessage};
 use std::collections::HashMap;
@@ -390,7 +390,7 @@ impl App {
                 }
             }),
             // Global keyboard dispatch
-            iced::event::listen_with(|event, status, _id| {
+            iced::event::listen_with(|event, status, id| {
                 if let iced::Event::Keyboard(
                     iced::keyboard::Event::KeyPressed { key, modifiers, .. }
                 ) = &event {
@@ -398,6 +398,7 @@ impl App {
                         key: key.clone(),
                         modifiers: *modifiers,
                         status,
+                        window_id: id,
                     }))
                 } else {
                     None
@@ -513,11 +514,18 @@ impl App {
                     {
                         self.right_sidebar_open = false;
                     }
-                } else if let Some(PopOutWindow::MessageView(state)) =
-                    self.pop_out_windows.get_mut(&id)
-                {
-                    state.width = size.width;
-                    state.height = size.height;
+                } else {
+                    match self.pop_out_windows.get_mut(&id) {
+                        Some(PopOutWindow::MessageView(state)) => {
+                            state.width = size.width;
+                            state.height = size.height;
+                        }
+                        Some(PopOutWindow::Compose(state)) => {
+                            state.width = size.width;
+                            state.height = size.height;
+                        }
+                        None => {}
+                    }
                 }
                 Task::none()
             }
@@ -986,7 +994,17 @@ impl App {
                 key,
                 modifiers,
                 status,
-            } => self.handle_key_pressed(key, modifiers, status),
+                window_id,
+            } => {
+                // Escape in a pop-out window closes that window
+                if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape)
+                    && window_id != self.main_window_id
+                    && self.pop_out_windows.contains_key(&window_id)
+                {
+                    return self.handle_window_close(window_id);
+                }
+                self.handle_key_pressed(key, modifiers, status)
+            }
             KeyEventMessage::PendingChordTimeout => {
                 self.pending_chord = None;
                 Task::none()
@@ -1623,6 +1641,13 @@ impl App {
                     |result| Message::Settings(SettingsMessage::GroupsLoaded(result)),
                 )
             }
+            SettingsEvent::LoadGroupMembers(group_id) => {
+                let db = Arc::clone(&self.db);
+                Task::perform(
+                    async move { db.get_group_member_emails(group_id).await },
+                    |result| Message::Settings(SettingsMessage::GroupMembersLoaded(result)),
+                )
+            }
         }
     }
 
@@ -1909,6 +1934,9 @@ impl App {
         }
 
         // Pop-out window closed — remove from registry
+        if matches!(self.pop_out_windows.get(&id), Some(PopOutWindow::Compose(_))) {
+            self.composer_is_open = false;
+        }
         self.pop_out_windows.remove(&id);
         iced::window::close(id)
     }
@@ -2109,6 +2137,7 @@ impl App {
                 PopOutMessage::Compose(ComposeMessage::Discard),
             ) => {
                 self.pop_out_windows.remove(&window_id);
+                self.composer_is_open = false;
                 iced::window::close(window_id)
             }
             (
@@ -2204,25 +2233,7 @@ impl App {
         mode: ComposeMode,
     ) -> Task<Message> {
         state.mode = mode;
-        // Re-derive subject from mode
-        state.subject = match &state.mode {
-            ComposeMode::New => String::new(),
-            ComposeMode::Reply { original_subject }
-            | ComposeMode::ReplyAll { original_subject } => {
-                if original_subject.starts_with("Re: ") {
-                    original_subject.clone()
-                } else {
-                    format!("Re: {original_subject}")
-                }
-            }
-            ComposeMode::Forward { original_subject } => {
-                if original_subject.starts_with("Fwd: ") {
-                    original_subject.clone()
-                } else {
-                    format!("Fwd: {original_subject}")
-                }
-            }
-        };
+        state.subject = state.mode.prefixed_subject();
 
         let settings = iced::window::Settings {
             size: Size::new(COMPOSE_DEFAULT_WIDTH, COMPOSE_DEFAULT_HEIGHT),
@@ -2332,16 +2343,23 @@ fn handle_message_view_update(
     msg: MessageViewMessage,
 ) -> Task<Message> {
     match msg {
-        MessageViewMessage::BodyLoaded(Ok((body_text, _body_html))) => {
+        MessageViewMessage::BodyLoaded(Ok((body_text, body_html))) => {
             state.body_text = body_text;
+            state.body_html = body_html;
             Task::none()
         }
-        MessageViewMessage::BodyLoaded(Err(_)) => Task::none(),
+        MessageViewMessage::BodyLoaded(Err(e)) => {
+            eprintln!("Pop-out body load failed: {e}");
+            Task::none()
+        }
         MessageViewMessage::AttachmentsLoaded(Ok(attachments)) => {
             state.attachments = attachments;
             Task::none()
         }
-        MessageViewMessage::AttachmentsLoaded(Err(_)) => Task::none(),
+        MessageViewMessage::AttachmentsLoaded(Err(e)) => {
+            eprintln!("Pop-out attachments load failed: {e}");
+            Task::none()
+        }
         MessageViewMessage::Reply
         | MessageViewMessage::ReplyAll
         | MessageViewMessage::Forward
@@ -2349,14 +2367,6 @@ fn handle_message_view_update(
     }
 }
 
-/// Truncates a query string for display, adding ellipsis if needed.
-fn truncate_query(query: &str, max_chars: usize) -> String {
-    if query.len() <= max_chars {
-        query.to_string()
-    } else {
-        format!("{}...", &query[..query.floor_char_boundary(max_chars)])
-    }
-}
 
 async fn load_accounts(db: Arc<Db>) -> Result<Vec<db::Account>, String> {
     db.get_accounts().await
