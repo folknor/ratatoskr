@@ -467,6 +467,13 @@ impl<P: Paragraph<Font = Font>> ParagraphCache<P> {
         link_color: Color,
     ) -> f32 {
         self.resize(blocks.len());
+
+        // Pessimistic: mark every entry dirty so edits that don't change
+        // block count (typing, backspace within a block, formatting toggle)
+        // still get re-laid-out. This is fine for typical email-length
+        // documents (tens of blocks). For very long documents (hundreds+),
+        // replace with a generation counter or per-block dirty tracking
+        // to avoid re-laying-out unchanged paragraphs every frame.
         self.mark_all_dirty();
 
         let mut y = 0.0f32;

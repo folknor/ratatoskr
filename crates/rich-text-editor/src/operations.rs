@@ -1231,6 +1231,43 @@ mod tests {
     }
 
     #[test]
+    fn insert_text_into_bold_undo_redo_preserves_style() {
+        // Insert plain text into a bold run. The text inherits bold on apply.
+        // Undo (via invert_with_doc) should capture the bold runs, so redo
+        // (restore) splices bold runs back — not plain text.
+        let mut doc = Document::from_blocks(vec![Block::Paragraph {
+            runs: vec![StyledRun::styled("hello", InlineStyle::BOLD)],
+        }]);
+
+        let op = EditOp::InsertText {
+            position: DocPosition::new(0, 5),
+            text: " world".into(),
+        };
+        op.apply(&mut doc);
+        assert_eq!(block_text(&doc, 0), "hello world");
+
+        // Undo: invert_with_doc captures the actual bold runs from the doc.
+        let inverse = op.invert_with_doc(&doc);
+        inverse.apply(&mut doc);
+        assert_eq!(block_text(&doc, 0), "hello");
+
+        // Redo: invert the inverse → restore. The deleted content should
+        // carry bold styling, so the restored text is bold, not plain.
+        inverse.invert().apply(&mut doc);
+        assert_eq!(block_text(&doc, 0), "hello world");
+        let runs = doc.block(0).and_then(|b| b.runs()).expect("runs");
+        for run in runs {
+            if !run.is_empty() {
+                assert!(
+                    run.style.contains(InlineStyle::BOLD),
+                    "run {:?} should be bold after redo",
+                    run.text
+                );
+            }
+        }
+    }
+
+    #[test]
     fn insert_text_unicode() {
         let mut doc = Document::from_blocks(vec![Block::paragraph("caf\u{00e9}")]);
         EditOp::InsertText {
