@@ -412,28 +412,41 @@ blockquote indent) are accounted for.
 
 ### Widget trait implementation
 
-- `layout()` — uses ParagraphCache to compute block paragraph layouts
-- `draw()` — iterates blocks: fills paragraphs, draws HR/blockquote
-  decorations, renders selection highlight rectangles, draws blinking cursor.
-  List marker drawing is not yet wired in (see Known limitations).
+- `layout()` — uses ParagraphCache to compute block paragraph layouts, clamps
+  scroll offset, auto-scrolls to keep cursor visible
+- `draw()` — renders via `renderer.with_layer()` (clipping) +
+  `renderer.with_translation()` (scroll offset). Draws paragraphs, HR/blockquote
+  decorations, list markers (bullet/number per item), per-line selection
+  rectangles with precise start/end x-coordinates, and blinking cursor at exact
+  grapheme position.
 - `update()` — handles window focus/blink, keyboard events (mapped via
-  input::map_key_event), mouse click/drag/release with hit testing
+  input::map_key_event), mouse click/drag/release with hit testing (accounts
+  for scroll offset), mouse wheel scrolling (Lines + Pixels deltas)
 - `mouse_interaction()` — Text cursor when hovering, NotAllowed when disabled
+
+### Scrolling
+
+Vertical scroll support with:
+- Mouse wheel handling (ScrollDelta::Lines at 20px/line, ScrollDelta::Pixels
+  for trackpad)
+- Auto-scroll on cursor movement (edits, arrow keys, etc.)
+- Scroll offset clamped to `[0, max_scroll]` on resize and content changes
+- Content drawn with clip layer + translation offset
+- Hit testing converts viewport-relative to content-relative coordinates
 
 ### Known limitations
 
-- **Container block rendering:** Lists and blockquotes use a combined-text
-  placeholder paragraph. Proper rendering needs per-item/per-child paragraphs
-  in the cache.
-- **Cursor placement precision:** The cursor is drawn at the block's x-origin,
-  not at the exact grapheme position from `Paragraph::grapheme_position()`.
-  Selection highlights cover full block height, not per-line rectangles.
-- **Vertical cursor movement:** Currently moves to the same offset in the
-  adjacent block. Proper behavior needs `Paragraph::grapheme_position()` to
-  maintain x-coordinate across visual lines.
-- **Scrolling:** No scroll offset implemented yet.
 - **IME:** Basic keyboard input works; no preedit/commit or platform IME
   protocol integration.
+- **Vertical cursor movement precision:** Uses character offset preservation
+  (target_column) across blocks, but not pixel-precise x-coordinate via
+  `Paragraph::grapheme_position()` (which would need the paragraph cache in
+  EditorState).
+- **Nested container editing:** Lists and blockquotes render correctly
+  (per-item paragraphs with recursive styled span collection), but individual
+  list items are not separately editable as cursor-addressable blocks. The
+  cursor addresses top-level blocks only.
+- **Drag auto-scroll:** No auto-scroll when dragging above/below the viewport.
 
 ---
 
@@ -491,30 +504,35 @@ sending `Action::Edit(EditAction::ToggleInlineStyle(...))` etc.
 
 ## Implementation Status
 
-### What's done (Phases 1–3 complete)
+### What's done (Phases 1–4 complete)
 
 - Document model with all 5 block types, Arc structural sharing, DocSlice
-- All 8 EditOp variants with correct apply, invert, and PosMap
+- All 8 EditOp variants with correct apply, invert, and PosMap (including
+  split_offset, merge_offset, start_offset on structural changes)
 - Normalization with dirty tracking and safety valve
-- Rules engine with insert/delete/format behavior
-- Undo/redo with grouping and cursor bookmarks
+- Rules engine with insert/delete/format behavior, including pending style
+  application, link boundary exclusivity, link formatting at caret, heading
+  reset on split-at-end
+- Undo/redo with grouping, cursor bookmarks, and correct PosMap mapping
 - HTML serialization and parsing with round-trip tests
-- Widget with paragraph caching, keyboard input, mouse hit testing,
-  cursor blink, selection rendering, clipboard (Ctrl+C/X/V)
-- 368 tests across all modules
+- Structured clipboard: internal copy preserves DocSlice with formatting +
+  links, paste uses block-swap strategy (redo-safe), external paste falls
+  back to plain text
+- Widget: paragraph caching with per-item list/blockquote rendering, exact
+  cursor placement via grapheme_position, per-line selection rectangles,
+  scrolling (wheel + auto-scroll), mouse hit testing with Paragraph::hit_test
+- 394 tests across all modules
 
 ### What remains
 
 **Phase 3 gaps (rules):**
-- Auto-exit block (double-Enter exits list/quote) — needs list item context
+- Auto-exit block (double-Enter exits list/quote) — needs per-item cursor
+  addressing
 - Block embed isolation — deferred until Block::Image exists
-- Link formatting at caret — find link boundaries, format whole link
 
-**Phase 4: Clipboard (partially scaffolded)**
-- DocSlice type exists with open_start/open_end
-- Copy/cut/paste actions defined and wired
-- Not yet done: paste HTML from clipboard (detect text/html, parse via
-  html_parse, apply with open-end merging), copy as text/html + text/plain
+**Phase 4 gap (clipboard):**
+- Paste HTML from external clipboard (iced's Clipboard trait only provides
+  plain text; HTML clipboard needs platform-specific code)
 
 **Phase 5: Signatures, inline images, reply quoting**
 - Not started
@@ -522,11 +540,10 @@ sending `Action::Edit(EditAction::ToggleInlineStyle(...))` etc.
   platform IME refinement, plain-text projection for IME sync
 
 **Widget polish:**
-- Per-item paragraph cache for lists and blockquotes
-- Exact cursor placement via `Paragraph::grapheme_position()`
-- Per-line selection rectangles
-- Scroll offset
 - IME preedit/commit integration
+- Drag auto-scroll (auto-scroll when dragging above/below viewport)
+- Per-item cursor addressing for lists (currently cursor addresses top-level
+  blocks only)
 
 ---
 
