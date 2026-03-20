@@ -1,3 +1,4 @@
+pub mod add_account;
 pub mod animated_toggler;
 pub mod right_sidebar;
 pub mod layout;

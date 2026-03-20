@@ -27,6 +27,7 @@ dissimilar.workspace = true
 ratatoskr-system-fonts = { path = "../system-fonts" }
 ratatoskr-command-palette = { path = "../command-palette" }
 ratatoskr-core = { path = "../core" }
+ratatoskr-label-colors = { path = "../label-colors" }
 toml = "0.8"
 mundy = { version = "0.1.9", default-features = false, features = ["color-scheme", "tokio", "log"] }
 display-info = "0.5"

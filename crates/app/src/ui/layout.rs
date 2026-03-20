@@ -335,6 +335,19 @@ pub const PALETTE_KEYBINDING_WIDTH: f32 = 100.0;
 
 // ── Status bar ──────────────────────────────────────────
 
+// ── Account modal ───────────────────────────────────────
+
+/// Add Account modal width
+pub const ACCOUNT_MODAL_WIDTH: f32 = 520.0;
+/// Add Account modal max height
+pub const ACCOUNT_MODAL_MAX_HEIGHT: f32 = 640.0;
+/// Color swatch size in the palette picker
+pub const COLOR_SWATCH_SIZE: f32 = 28.0;
+/// Color palette grid columns
+pub const COLOR_PALETTE_COLUMNS: usize = 5;
+/// Protocol selection card height
+pub const PROTOCOL_CARD_HEIGHT: f32 = 64.0;
+
 /// Status bar fixed height (one line of text + padding).
 pub const STATUS_BAR_HEIGHT: f32 = 28.0;
 

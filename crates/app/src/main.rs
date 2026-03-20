@@ -28,6 +28,7 @@ use ratatoskr_core::db::queries_extra::navigation::{
 use ratatoskr_core::db::queries_extra::get_threads_scoped;
 use ratatoskr_core::db::types::{AccountScope, DbThread};
 use ui::layout::{RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH};
+use ui::add_account::{AddAccountEvent, AddAccountMessage, AddAccountWizard};
 use ui::reading_pane::{ReadingPane, ReadingPaneMessage};
 use ui::settings::{Settings, SettingsEvent, SettingsMessage};
 use ui::sidebar::{Sidebar, SidebarEvent, SidebarMessage};
@@ -154,6 +155,10 @@ pub enum Message {
 
     // Palette placeholder (Slice 6b)
     Palette(PaletteMessage),
+
+    // Account management
+    AddAccount(AddAccountMessage),
+    OpenAddAccount,
 }
 
 struct App {
@@ -192,6 +197,11 @@ struct App {
     palette: PaletteState,
     /// Resolver for parameterized command options (stage 2).
     resolver: Arc<command_resolver::AppInputResolver>,
+
+    /// True when the app has no configured accounts.
+    no_accounts: bool,
+    /// The add-account wizard state. Some when the modal is open.
+    add_account_wizard: Option<AddAccountWizard>,
 }
 
 impl App {
@@ -233,6 +243,8 @@ impl App {
             pending_chord: None,
             palette: PaletteState::new(),
             resolver,
+            no_accounts: false,
+            add_account_wizard: None,
         };
         let load_gen = app.nav_generation;
         (app, Task::perform(
@@ -465,10 +477,29 @@ impl App {
                 Task::none()
             }
             Message::Palette(msg) => self.handle_palette(msg),
+
+            // Account management
+            Message::AddAccount(msg) => self.handle_add_account(msg),
+            Message::OpenAddAccount => {
+                let used_colors = self.sidebar.accounts.iter()
+                    .filter_map(|a| a.account_color.clone())
+                    .collect();
+                self.add_account_wizard =
+                    Some(AddAccountWizard::new_add_account(used_colors));
+                Task::none()
+            }
         }
     }
 
     fn view(&self) -> Element<'_, Message> {
+        // Add-account wizard modal takes precedence
+        if let Some(ref wizard) = self.add_account_wizard {
+            if self.no_accounts {
+                return self.view_first_launch_modal(wizard);
+            }
+            return self.view_with_add_account_modal(wizard);
+        }
+
         if self.show_settings {
             let settings_view = self.settings.view().map(Message::Settings);
             let status_bar = self.status_bar.view().map(Message::StatusBar);
@@ -1021,6 +1052,54 @@ impl App {
                 self.reading_pane.date_display = display;
                 Task::none()
             }
+            SettingsEvent::OpenAddAccountWizard => {
+                let used_colors = self.sidebar.accounts.iter()
+                    .filter_map(|a| a.account_color.clone())
+                    .collect();
+                self.add_account_wizard =
+                    Some(AddAccountWizard::new_add_account(used_colors));
+                self.show_settings = false;
+                Task::none()
+            }
+        }
+    }
+
+    fn handle_add_account(&mut self, msg: AddAccountMessage) -> Task<Message> {
+        let wizard = match self.add_account_wizard.as_mut() {
+            Some(w) => w,
+            None => return Task::none(),
+        };
+
+        let (task, event) = wizard.update(msg);
+        let mut tasks = vec![task.map(Message::AddAccount)];
+
+        if let Some(evt) = event {
+            tasks.push(self.handle_add_account_event(evt));
+        }
+        Task::batch(tasks)
+    }
+
+    fn handle_add_account_event(&mut self, event: AddAccountEvent) -> Task<Message> {
+        match event {
+            AddAccountEvent::AccountAdded(_account_id) => {
+                self.add_account_wizard = None;
+                self.no_accounts = false;
+                // Reload accounts list
+                let db = Arc::clone(&self.db);
+                self.nav_generation += 1;
+                let load_gen = self.nav_generation;
+                Task::perform(
+                    async move { (load_gen, load_accounts(db).await) },
+                    |(g, result)| Message::AccountsLoaded(g, result),
+                )
+            }
+            AddAccountEvent::Cancelled => {
+                // Only allow cancel if there are existing accounts
+                if !self.no_accounts {
+                    self.add_account_wizard = None;
+                }
+                Task::none()
+            }
         }
     }
 }
@@ -1108,13 +1187,124 @@ impl App {
 
     fn handle_accounts_loaded(&mut self, accounts: Vec<db::Account>) -> Task<Message> {
         self.sidebar.accounts = accounts;
-        if !self.sidebar.accounts.is_empty() {
-            self.sidebar.selected_account = Some(0);
-            self.status = format!("Loaded {} accounts", self.sidebar.accounts.len());
-            return self.load_navigation_and_threads();
+        if self.sidebar.accounts.is_empty() {
+            self.no_accounts = true;
+            self.add_account_wizard = Some(AddAccountWizard::new_first_launch());
+            self.status = "Welcome".to_string();
+            return Task::none();
         }
-        self.status = "No accounts found".to_string();
-        Task::none()
+        self.no_accounts = false;
+        // Sync managed accounts for settings tab
+        self.settings.managed_accounts = self
+            .sidebar
+            .accounts
+            .iter()
+            .map(|a| ui::settings::ManagedAccount {
+                id: a.id.clone(),
+                email: a.email.clone(),
+                provider: a.provider.clone(),
+                account_name: a.account_name.clone(),
+                account_color: a.account_color.clone(),
+                display_name: a.display_name.clone(),
+                last_sync_at: a.last_sync_at,
+            })
+            .collect();
+        self.sidebar.selected_account = Some(0);
+        self.status = format!("Loaded {} accounts", self.sidebar.accounts.len());
+        self.load_navigation_and_threads()
+    }
+
+    fn view_first_launch_modal<'a>(
+        &'a self,
+        wizard: &'a AddAccountWizard,
+    ) -> Element<'a, Message> {
+        use ui::layout::{ACCOUNT_MODAL_MAX_HEIGHT, ACCOUNT_MODAL_WIDTH};
+
+        let modal_content = wizard.view().map(Message::AddAccount);
+
+        let modal = container(modal_content)
+            .width(Length::Fixed(ACCOUNT_MODAL_WIDTH))
+            .max_height(ACCOUNT_MODAL_MAX_HEIGHT)
+            .padding(ui::layout::PAD_SETTINGS_CONTENT)
+            .style(ui::theme::ContainerClass::Elevated.style());
+
+        container(modal)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .style(ui::theme::ContainerClass::Content.style())
+            .into()
+    }
+
+    fn view_with_add_account_modal<'a>(
+        &'a self,
+        wizard: &'a AddAccountWizard,
+    ) -> Element<'a, Message> {
+        use ui::layout::{ACCOUNT_MODAL_MAX_HEIGHT, ACCOUNT_MODAL_WIDTH};
+
+        let base_layout = self.view_main_layout();
+
+        let modal_content = wizard.view().map(Message::AddAccount);
+
+        let modal = container(modal_content)
+            .width(Length::Fixed(ACCOUNT_MODAL_WIDTH))
+            .max_height(ACCOUNT_MODAL_MAX_HEIGHT)
+            .padding(ui::layout::PAD_SETTINGS_CONTENT)
+            .style(ui::theme::ContainerClass::Elevated.style());
+
+        let centered_modal = container(modal)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill);
+
+        // Event blocker between base and modal
+        let blocker = mouse_area(
+            container("")
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(ui::theme::ContainerClass::ModalBackdrop.style()),
+        )
+        .on_press(Message::Noop);
+
+        stack![base_layout, blocker, centered_modal]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+
+    /// Build the main three-panel layout without modal overlays.
+    fn view_main_layout(&self) -> Element<'_, Message> {
+        let sidebar = container(self.sidebar.view().map(Message::Sidebar))
+            .width(self.sidebar_width)
+            .height(Length::Fill);
+        let divider_sidebar = self.build_divider(Divider::Sidebar);
+        let thread_list =
+            container(self.thread_list.view().map(Message::ThreadList))
+                .width(self.thread_list_width)
+                .height(Length::Fill);
+        let divider_thread = self.build_divider(Divider::ThreadList);
+        let ctx = command_dispatch::build_context(self);
+        let reading_pane = container(
+            self.reading_pane
+                .view_with_commands(&self.registry, &self.binding_table, &ctx),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill);
+        let right_sidebar =
+            ui::right_sidebar::view::<Message>(self.right_sidebar_open);
+        let layout = row![
+            sidebar,
+            divider_sidebar,
+            thread_list,
+            divider_thread,
+            reading_pane,
+            right_sidebar
+        ]
+        .height(Length::Fill);
+        let status_bar = self.status_bar.view().map(Message::StatusBar);
+        column![layout, status_bar].into()
     }
 
     fn handle_divider_drag(&mut self, point: Point) -> Task<Message> {

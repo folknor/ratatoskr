@@ -21,6 +21,10 @@ pub struct Account {
     pub email: String,
     pub display_name: Option<String>,
     pub provider: String,
+    pub account_name: Option<String>,
+    pub account_color: Option<String>,
+    pub last_sync_at: Option<i64>,
+    pub sort_order: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -119,9 +123,11 @@ impl Db {
         self.with_conn(|conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, email, display_name, provider
+                    "SELECT id, email, display_name, provider,
+                            account_name, account_color, last_sync_at,
+                            COALESCE(sort_order, 0) AS sort_order
                      FROM accounts WHERE is_active = 1
-                     ORDER BY created_at ASC",
+                     ORDER BY sort_order ASC, created_at ASC",
                 )
                 .map_err(|e| e.to_string())?;
 
@@ -131,6 +137,10 @@ impl Db {
                     email: row.get("email")?,
                     display_name: row.get("display_name")?,
                     provider: row.get("provider")?,
+                    account_name: row.get("account_name")?,
+                    account_color: row.get("account_color")?,
+                    last_sync_at: row.get("last_sync_at")?,
+                    sort_order: row.get("sort_order")?,
                 })
             })
             .map_err(|e| e.to_string())?

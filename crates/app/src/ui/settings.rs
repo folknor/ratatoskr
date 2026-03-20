@@ -89,6 +89,8 @@ pub enum SettingsMessage {
     OpenOverlay(SettingsOverlay),
     CloseOverlay,
     OverlayAnimTick(Instant),
+    // Accounts tab
+    AddAccountFromSettings,
 }
 
 /// Events the settings component emits upward to the App.
@@ -96,6 +98,7 @@ pub enum SettingsMessage {
 pub enum SettingsEvent {
     Closed,
     DateDisplayChanged(DateDisplay),
+    OpenAddAccountWizard,
 }
 
 /// Overlays that slide in from the right, covering the settings content.
@@ -121,6 +124,7 @@ pub enum SelectField {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
+    Accounts,
     General,
     Theme,
     Notifications,
@@ -134,6 +138,7 @@ pub enum Tab {
 
 impl Tab {
     const ALL: &[Tab] = &[
+        Tab::Accounts,
         Tab::General,
         Tab::Theme,
         Tab::Notifications,
@@ -147,6 +152,7 @@ impl Tab {
 
     fn label(self) -> &'static str {
         match self {
+            Tab::Accounts => "Accounts",
             Tab::General => "General",
             Tab::Theme => "Theme",
             Tab::Notifications => "Notifications",
@@ -161,6 +167,7 @@ impl Tab {
 
     fn icon(self) -> iced::widget::Text<'static> {
         match self {
+            Tab::Accounts => icon::users(),
             Tab::General => icon::settings(),
             Tab::Theme => icon::palette(),
             Tab::Notifications => icon::bell(),
@@ -238,6 +245,20 @@ pub struct Settings {
     // Demo data for Mail Rules tab
     pub demo_labels: Vec<EditableItem>,
     pub demo_filters: Vec<EditableItem>,
+    // Accounts tab
+    pub managed_accounts: Vec<ManagedAccount>,
+}
+
+/// An account card in the settings list.
+#[derive(Debug, Clone)]
+pub struct ManagedAccount {
+    pub id: String,
+    pub email: String,
+    pub provider: String,
+    pub account_name: Option<String>,
+    pub account_color: Option<String>,
+    pub display_name: Option<String>,
+    pub last_sync_at: Option<i64>,
 }
 
 /// State for an active drag operation.
@@ -328,6 +349,7 @@ impl Default for Settings {
                 EditableItem { label: "Auto-archive promotions".into(), enabled: Some(true) },
                 EditableItem { label: "Star from VIPs".into(), enabled: Some(true) },
             ],
+            managed_accounts: Vec::new(),
         }
     }
 }
@@ -359,6 +381,9 @@ impl Component for Settings {
                 };
                 self.open_select = None;
                 return (Task::none(), Some(SettingsEvent::DateDisplayChanged(self.date_display)));
+            }
+            SettingsMessage::AddAccountFromSettings => {
+                return (Task::none(), Some(SettingsEvent::OpenAddAccountWizard));
             }
             SettingsMessage::ListDragMove(list_id, point) => {
                 return (self.handle_drag_move(list_id, point), None);
@@ -567,6 +592,7 @@ impl Settings {
 fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
     let nav = tab_nav(state.active_tab);
     let content = match state.active_tab {
+        Tab::Accounts => accounts_tab(state),
         Tab::General => general_tab(state),
         Tab::Theme => theme_tab(state),
         Tab::Notifications => notifications_tab(state),
@@ -1348,6 +1374,131 @@ fn about_tab<'a>() -> Element<'a, SettingsMessage> {
     ]));
 
     col.into()
+}
+
+// ── Accounts tab ────────────────────────────────────────
+
+fn accounts_tab(state: &Settings) -> Element<'_, SettingsMessage> {
+    let mut col = column![]
+        .spacing(SPACE_LG)
+        .width(Length::Fill)
+        .max_width(SETTINGS_CONTENT_MAX_WIDTH);
+
+    let mut cards: Vec<Element<'_, SettingsMessage>> = Vec::new();
+    for account in &state.managed_accounts {
+        cards.push(account_card(account));
+    }
+
+    // Add Account button at the bottom
+    cards.push(
+        button(
+            container(
+                row![
+                    icon::plus().size(ICON_MD).style(text::base),
+                    text("Add Account")
+                        .size(TEXT_LG)
+                        .style(text::base)
+                        .font(iced::Font {
+                            weight: iced::font::Weight::Bold,
+                            ..crate::font::text()
+                        }),
+                ]
+                .spacing(SPACE_XS)
+                .align_y(Alignment::Center),
+            )
+            .center_x(Length::Fill)
+            .align_y(Alignment::Center),
+        )
+        .on_press(SettingsMessage::AddAccountFromSettings)
+        .padding(PAD_SETTINGS_ROW)
+        .style(theme::ButtonClass::Action.style())
+        .width(Length::Fill)
+        .height(SETTINGS_ROW_HEIGHT)
+        .into(),
+    );
+
+    col = col.push(section("Accounts", cards));
+
+    col.into()
+}
+
+fn account_card(account: &ManagedAccount) -> Element<'_, SettingsMessage> {
+    let name = account
+        .account_name
+        .as_deref()
+        .or(account.display_name.as_deref())
+        .unwrap_or(&account.email);
+
+    let provider_label = format_provider_label(&account.provider);
+    let sync_label = format_last_sync(account.last_sync_at);
+
+    let mut left = row![].spacing(SPACE_SM).align_y(Alignment::Center);
+
+    // Color indicator
+    if let Some(ref hex) = account.account_color {
+        let color = crate::ui::theme::hex_to_color(hex);
+        left = left.push(crate::ui::widgets::color_dot(color));
+    }
+
+    left = left.push(
+        column![
+            text(name).size(TEXT_LG).style(text::base),
+            text(&account.email).size(TEXT_SM).style(text::secondary),
+        ]
+        .spacing(SPACE_XXXS)
+        .width(Length::Fill),
+    );
+
+    let right = column![
+        text(provider_label).size(TEXT_SM).style(text::secondary),
+        text(sync_label).size(TEXT_XS).style(text::secondary),
+    ]
+    .spacing(SPACE_XXXS)
+    .align_x(Alignment::End);
+
+    let content = row![left, right,]
+        .spacing(SPACE_SM)
+        .align_y(Alignment::Center);
+
+    // TODO: AccountCardClicked for slide-in editor (Phase 5b)
+    container(content)
+        .padding(PAD_SETTINGS_ROW)
+        .width(Length::Fill)
+        .height(SETTINGS_TOGGLE_ROW_HEIGHT)
+        .align_y(Alignment::Center)
+        .into()
+}
+
+fn format_provider_label(provider: &str) -> String {
+    match provider {
+        "gmail_api" => "Gmail".to_string(),
+        "graph" => "Microsoft 365".to_string(),
+        "jmap" => "JMAP".to_string(),
+        "imap" => "IMAP".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn format_last_sync(last_sync_at: Option<i64>) -> String {
+    match last_sync_at {
+        None => "Never synced".to_string(),
+        Some(ts) => {
+            let Some(dt) = chrono::DateTime::from_timestamp(ts, 0) else {
+                return "Unknown".to_string();
+            };
+            let now = chrono::Utc::now();
+            let diff = now.signed_duration_since(dt);
+            if diff.num_minutes() < 1 {
+                "Just now".to_string()
+            } else if diff.num_minutes() < 60 {
+                format!("{} min ago", diff.num_minutes())
+            } else if diff.num_hours() < 24 {
+                format!("{} hours ago", diff.num_hours())
+            } else {
+                format!("{} days ago", diff.num_days())
+            }
+        }
+    }
 }
 
 // ── Shared setting widgets ──────────────────────────────

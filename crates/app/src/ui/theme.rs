@@ -243,6 +243,8 @@ pub enum ContainerClass {
     PaletteCard,
     /// Palette selected result row.
     PaletteSelectedRow,
+    /// Semi-transparent dark overlay behind modals.
+    ModalBackdrop,
 }
 
 impl ContainerClass {
@@ -268,6 +270,7 @@ impl ContainerClass {
             Self::PaletteBackdrop => style_palette_backdrop_container,
             Self::PaletteCard => style_palette_card_container,
             Self::PaletteSelectedRow => style_palette_selected_row_container,
+            Self::ModalBackdrop => style_modal_backdrop_container,
         }
     }
 }
@@ -975,6 +978,13 @@ fn style_palette_selected_row_container(theme: &Theme) -> container::Style {
     }
 }
 
+fn style_modal_backdrop_container(_theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.5 }.into()),
+        ..Default::default()
+    }
+}
+
 // ── Rule style implementations ──────────────────────────
 
 fn style_divider_rule(theme: &Theme) -> rule::Style {
@@ -1176,7 +1186,7 @@ fn mix(a: Color, b: Color, t: f32) -> Color {
     )
 }
 
-fn hex_to_color(hex: &str) -> Color {
+pub fn hex_to_color(hex: &str) -> Color {
     let hex = hex.trim_start_matches('#');
     let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(0);
     let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0);
