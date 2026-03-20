@@ -4,6 +4,7 @@ use rusqlite::Connection;
 // `bundles_categories.rs`) can keep importing via this path.
 pub use ratatoskr_db::db::queries::load_recent_rule_categorized_threads;
 
+mod accounts_crud;
 mod accounts_messages;
 mod ai_state;
 mod allowlists;
@@ -22,6 +23,7 @@ mod tasks;
 pub mod thread_detail;
 mod thread_ui_state;
 
+pub use accounts_crud::*;
 pub use accounts_messages::*;
 pub use ai_state::*;
 pub use allowlists::*;

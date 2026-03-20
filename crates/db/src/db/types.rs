@@ -52,6 +52,9 @@ pub struct DbAccount {
     pub calendar_provider: Option<String>,
     pub accept_invalid_certs: i64,
     pub jmap_url: Option<String>,
+    pub account_color: Option<String>,
+    pub account_name: Option<String>,
+    pub sort_order: i64,
 }
 
 // ── Thread ───────────────────────────────────────────────────

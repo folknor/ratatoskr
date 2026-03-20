@@ -128,12 +128,16 @@ fn build_universal_folders(
     Ok(folders)
 }
 
-/// Smart folders from the database, scoped appropriately.
+/// Smart folders from the database.
+///
+/// Smart folders always appear regardless of the current scope — only the
+/// sidebar *listing* is unscoped.  Query *execution* (when the user clicks
+/// a smart folder) still respects `AccountScope`.
 fn build_smart_folders(
     conn: &Connection,
-    scope: &AccountScope,
+    _scope: &AccountScope,
 ) -> Result<Vec<NavigationFolder>, String> {
-    let smart_folders = query_smart_folders_sync(conn, scope)?;
+    let smart_folders = query_all_smart_folders_sync(conn)?;
 
     Ok(smart_folders
         .into_iter()
@@ -150,37 +154,21 @@ fn build_smart_folders(
         .collect())
 }
 
-/// Synchronous query for smart folders (the existing helper is async via `DbState`).
-fn query_smart_folders_sync(
+/// Return all smart folders, regardless of scope.
+///
+/// The old `query_smart_folders_sync` filtered by `AccountScope`, hiding
+/// account-specific smart folders in the unified view.  Per the sidebar spec
+/// (Phase 1B), smart folders must always be listed.
+fn query_all_smart_folders_sync(
     conn: &Connection,
-    scope: &AccountScope,
 ) -> Result<Vec<DbSmartFolder>, String> {
-    match scope {
-        AccountScope::Single(account_id) => {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT * FROM smart_folders WHERE account_id IS NULL OR account_id = ?1
-                     ORDER BY sort_order, created_at",
-                )
-                .map_err(|e| e.to_string())?;
-            stmt.query_map(rusqlite::params![account_id], DbSmartFolder::from_row)
-                .map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())
-        }
-        AccountScope::Multiple(_) | AccountScope::All => {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT * FROM smart_folders WHERE account_id IS NULL
-                     ORDER BY sort_order, created_at",
-                )
-                .map_err(|e| e.to_string())?;
-            stmt.query_map([], DbSmartFolder::from_row)
-                .map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())
-        }
-    }
+    let mut stmt = conn
+        .prepare("SELECT * FROM smart_folders ORDER BY sort_order, created_at")
+        .map_err(|e| e.to_string())?;
+    stmt.query_map([], DbSmartFolder::from_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 /// Account-specific labels, filtering out system labels.

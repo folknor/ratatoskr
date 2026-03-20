@@ -45,6 +45,9 @@ impl_from_row!(DbAccount {
     calendar_provider,
     accept_invalid_certs,
     jmap_url,
+    account_color,
+    account_name,
+    sort_order,
 });
 
 // ── Thread ──────────────────────────────────────────────────

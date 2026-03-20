@@ -1315,6 +1315,15 @@ static MIGRATIONS: &[Migration] = &[
             );
         "#,
     },
+    Migration {
+        version: 60,
+        description: "Account metadata: color, display name, sort order",
+        sql: r#"
+            ALTER TABLE accounts ADD COLUMN account_color TEXT;
+            ALTER TABLE accounts ADD COLUMN account_name TEXT;
+            ALTER TABLE accounts ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -1554,6 +1563,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) AS max_ver FROM _migrations", [], |row| row.get("max_ver"))
             .expect("query");
-        assert_eq!(max_ver, 59);
+        assert_eq!(max_ver, 60);
     }
 }

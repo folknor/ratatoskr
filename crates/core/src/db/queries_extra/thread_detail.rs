@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 /// Map from message ID to (text_body, html_body).
-type BodyMap = BodyMap;
+type BodyMap = HashMap<String, (Option<String>, Option<String>)>;
 
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
