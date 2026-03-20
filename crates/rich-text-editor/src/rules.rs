@@ -589,12 +589,31 @@ fn find_link_boundaries(doc: &Document, pos: DocPosition) -> Option<(DocPosition
         return None;
     }
 
-    let (run_idx, _offset_in_run) = block.resolve_offset(pos.offset)?;
+    let (run_idx, offset_in_run) = block.resolve_offset(pos.offset)?;
     let run = &runs[run_idx];
-    let href = run.link.as_ref()?;
+
+    // If we're at a run boundary (offset_in_run == 0) and the current run
+    // has no link, check the previous run. resolve_offset advances to the
+    // next run at internal boundaries, so a caret at the end of a link
+    // followed by plain text resolves to the plain run. We want to still
+    // recognize the caret as "at the link boundary" for formatting purposes.
+    let href = match run.link.as_ref() {
+        Some(h) => h,
+        None if offset_in_run == 0 && run_idx > 0 => {
+            runs[run_idx - 1].link.as_ref()?
+        }
+        None => return None,
+    };
+
+    // If we fell back to the previous run, adjust run_idx for the walk.
+    let anchor_run_idx = if run.link.as_ref() == Some(href) {
+        run_idx
+    } else {
+        run_idx - 1
+    };
 
     // Walk backward to find the first run with the same link href.
-    let mut start_run_idx = run_idx;
+    let mut start_run_idx = anchor_run_idx;
     while start_run_idx > 0 {
         if runs[start_run_idx - 1].link.as_ref() == Some(href) {
             start_run_idx -= 1;
@@ -604,7 +623,7 @@ fn find_link_boundaries(doc: &Document, pos: DocPosition) -> Option<(DocPosition
     }
 
     // Walk forward to find the last run with the same link href.
-    let mut end_run_idx = run_idx;
+    let mut end_run_idx = anchor_run_idx;
     while end_run_idx + 1 < runs.len() {
         if runs[end_run_idx + 1].link.as_ref() == Some(href) {
             end_run_idx += 1;
@@ -1664,6 +1683,34 @@ mod tests {
             assert_eq!(*end, DocPosition::new(0, 9));
         } else {
             panic!("expected ToggleInlineStyle op");
+        }
+    }
+
+    #[test]
+    fn toggle_at_link_end_boundary_formats_whole_link() {
+        // Cursor at the END of a link (right after link, before plain text).
+        // resolve_offset puts this in the plain run, but find_link_boundaries
+        // should fall back to the previous run and recognize the link.
+        let doc = Document::from_blocks(vec![Block::Paragraph {
+            runs: vec![
+                StyledRun::linked("link text", InlineStyle::empty(), "https://example.com"),
+                StyledRun::plain(" after"),
+            ],
+        }]);
+        // Cursor at offset 9 = right after "link text", at boundary with " after"
+        let sel = DocSelection::caret(DocPosition::new(0, 9));
+        let ops = resolve(
+            &doc,
+            sel,
+            EditAction::ToggleInlineStyle(InlineStyle::BOLD),
+            InlineStyle::empty(),
+        );
+        assert_eq!(ops.len(), 1);
+        if let EditOp::ToggleInlineStyle { start, end, .. } = &ops[0] {
+            assert_eq!(*start, DocPosition::new(0, 0));
+            assert_eq!(*end, DocPosition::new(0, 9));
+        } else {
+            panic!("expected ToggleInlineStyle op, got: {ops:?}");
         }
     }
 

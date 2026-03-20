@@ -1671,8 +1671,11 @@ fn compute_selection_rects(
             para_origin_x + pos.x
         };
 
-        let x_end = if sel_end_in_line >= line_end && i + 1 < line_count {
+        let x_end = if sel_end_in_line >= line_end {
             // Selection extends to or past the end of this line — use right edge.
+            // This covers both middle lines (where line_end is the next line's
+            // start) and the last line when end_offset >= the block's char count
+            // (or is usize::MAX, as used by BlockSelectionKind::First).
             para_origin_x + available_width
         } else {
             let within_line = sel_end_in_line.saturating_sub(line_start);
