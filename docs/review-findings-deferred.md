@@ -36,6 +36,10 @@ window position tracking. Acceptable for V1.
 
 ## d650308 — Pop-out compose window
 
+Fixed: composer_is_open never reset, raw button styles, subject prefix
+3x duplication, ToggleCc/ToggleBcc naming, WindowResized ignoring
+Compose, unused state param.
+
 ### Reply All cc_addresses not yet available
 `cc_addresses` is not in `ThreadMessage` or `MessageViewState`. Reply
 All currently opens with no Cc recipients (previously it wrongly

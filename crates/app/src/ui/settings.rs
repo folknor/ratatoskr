@@ -812,9 +812,6 @@ impl Settings {
             }
             SettingsMessage::ContactSaved(Ok(())) | SettingsMessage::ContactDeleted(Ok(())) => {}
             SettingsMessage::ContactSaved(Err(_)) | SettingsMessage::ContactDeleted(Err(_)) => {}
-            SettingsMessage::GroupClick(id) => {
-                self.open_group_editor(&id);
-            }
             SettingsMessage::GroupCreate => {
                 self.open_new_group_editor();
             }
