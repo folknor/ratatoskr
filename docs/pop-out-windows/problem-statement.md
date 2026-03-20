@@ -169,7 +169,7 @@ A horizontal row of formatting buttons above the compose body. Always visible, n
 
 An **emoji picker** button is required — opens the shared emoji picker (see `docs/emoji-picker/problem-statement.md`) for insertion at the cursor.
 
-The compose body is a rich text editor. The internal format is HTML — what gets sent is HTML email. Plain text fallback is auto-generated from the HTML for the `text/plain` multipart alternative.
+The compose body is a rich text editor. The internal format is HTML — what gets sent is HTML email. Plain text fallback is auto-generated from the HTML for the `text/plain` multipart alternative. See `docs/editor/architecture.md` for the editor's document model, widget strategy, and implementation phases.
 
 ### Signature
 
@@ -248,12 +248,7 @@ Drafts are visible in the thread list when viewing the Drafts folder. Clicking a
 
 1. ~~**Cc/Bcc visibility**~~ **Resolved.** Hidden by default, toggled via buttons on the From row. Auto-shown when pre-filled.
 
-2. **Rich text editor implementation** — HTML editing in iced is a significant unsolved problem. No WYSIWYG rich text editor exists in the iced ecosystem. Research (cosmic-edit, halloy, frostmark, iced_webview_v2, iced-code-editor) found no suitable base. Realistic options:
-   - **cosmic-text as shaping engine + custom canvas widget** — build formatting model on top of cosmic-text's proportional text capabilities. Most "pure iced" approach, significant effort.
-   - **CEF `contentEditable`** via iced_webview_v2 — proven HTML editing, but embeds a browser engine (~200-300 MB).
-   - **Non-WYSIWYG for V1** — plain text compose, formatting toolbar inserts HTML tags as visible markup, rendered at send time. Ships fastest.
-
-   This is a blocking technical decision.
+2. ~~**Rich text editor implementation**~~ **Resolved.** Custom WYSIWYG widget built from scratch using iced's `Paragraph::with_spans` for per-block rendering and a block-tree document model with inline styled runs. No existing iced rich text editor was suitable as a base. Full architecture in `docs/editor/architecture.md`.
 
 3. **Spell check** — OS-level spell check integration, or custom? Defer to implementation.
 

@@ -266,43 +266,6 @@ These patterns appeared across 6-8+ specs and should be adopted as foundational 
 
 ---
 
-- [ ] **Patch-based undo/redo for compose editor**
-
-  When the compose editor lands, use the `dissimilar` crate for compact diff-based undo history. This is a deferred item — it's not needed until compose exists — but the architectural decision should be made now because it affects how draft state is stored and how the compose Component is designed.
-
-  **The problem**: Email compose drafts can be large (quoted reply chains, inline images, signatures). Naive undo (storing full text snapshots per keystroke) would be expensive in memory. At 100 undo levels with a 50KB HTML draft, that's 5MB per compose window — and users may have multiple compose windows open.
-
-  **The pattern** (from cedilla `research/cedilla/src/editor.rs`):
-  ```rust
-  struct UndoHistory {
-      patches: VecDeque<Vec<DiffChunk>>,  // circular buffer
-      position: usize,                     // current position in history
-      max_size: usize,                     // ~100 patches
-  }
-
-  fn push_edit(&mut self, old_text: &str, new_text: &str) {
-      let diff = dissimilar::diff(old_text, new_text);
-      // Convert diff to compact patch representation
-      // Push to circular buffer, evicting oldest if at capacity
-  }
-
-  fn undo(&mut self) -> Option<String> { /* apply patch in reverse */ }
-  fn redo(&mut self) -> Option<String> { /* apply patch forward */ }
-  ```
-
-  The `dissimilar` crate produces `Chunk::Equal`, `Chunk::Insert`, `Chunk::Delete` variants. Storing only the insert/delete chunks (with position offsets) gives ~100x compression over full snapshots for typical edits (single character insertions, word deletions, paste operations).
-
-  **Also applicable to**:
-  - Contact notes editing (immediate-save fields with undo) — `docs/contacts/problem-statement.md`
-  - Calendar event description editing — `docs/calendar/problem-statement.md`
-  - Command palette undo tokens (different domain — action-compensation, not text-diff — but the circular buffer concept applies) — `docs/command-palette/roadmap.md`
-
-  **Interaction with other items**: The Component trait means the compose component owns the undo history. Auto-save (from pop-out windows spec, 30s interval) can use the undo history as a change detector: if patches have been pushed since last save, the draft has unsaved changes. The config shadow pattern is related but different — config shadow is for commit/cancel semantics on structured data, undo is for keystroke-level text editing.
-
-  **Reference**: cedilla `research/cedilla/src/editor.rs` (`EditorState::push_history`, `undo`, `redo`). The `dissimilar` crate itself is by dtolnay, well-maintained, no dependencies.
-
----
-
 - [ ] **Config shadow pattern for settings/edit flows**
 
   Any UI that edits persistent state should clone the real state into an `editing_*` shadow on open. This prevents partial saves, enables live preview, and provides trivial change detection.
@@ -373,6 +336,21 @@ These patterns appeared across 6-8+ specs and should be adopted as foundational 
 - [ ] **Scrollbars must shift layout, not overlay** — When a scrollbar appears (e.g., content grows beyond the viewport), it must push the content inward rather than overlaying existing UI elements. Overlay scrollbars cause text/buttons to be hidden behind the scrollbar track. Ensure all `scrollable` widgets use a mode that reserves space for the scrollbar or accounts for its width in the layout.
 
 - [ ] **Thread list pagination (revisit later)** — Currently loads all threads at once (LIMIT 1000). This is fast with the test dataset (1000 threads renders instantly). We attempted batched lazy loading (200 per page, `on_scroll` trigger, spacer for honest scrollbar) but reverted: (1) `on_scroll` fires on every pixel of scroll movement, causing a full `update()`/`view()` cycle per pixel which made scrolling sluggish; (2) the spacer approach for honest scrollbar sizing made the content area huge, worsening the `on_scroll` overhead; (3) without the spacer the scrollbar thumb jumps when batches load (content height changes suddenly). The DB layer already supports `LIMIT`/`OFFSET` (`db.get_threads` has the params, `count_threads` exists). Revisit when thread counts actually cause problems — likely needs iced-level virtual scrolling (only render visible rows) rather than application-level pagination, since the bottleneck is widget count in the scrollable, not query speed.
+
+- [ ] **Undo/redo for all text inputs** — iced's built-in `TextInput` and `TextEditor` do not support Ctrl+Z/Ctrl+Y out of the box. Every text field in the app should support basic undo/redo like users expect from any desktop application.
+
+  **Approach**: Use the `dissimilar` crate to maintain a compact diff-based undo history per input. On each change, diff old vs new text, store the patch in a circular buffer (~50 entries). Ctrl+Z applies the patch in reverse, Ctrl+Y reapplies forward. This is lightweight — patches for single-character edits are a few bytes.
+
+  **Standard text inputs** (straightforward): Search bar, subject line, smart folder query editor, contact notes, calendar event fields, account display name, any single-line or multi-line plain text field. Wrap the undo logic in a reusable struct (`UndoableText { current: String, history: VecDeque<Patch>, position: usize }`) that any input can use.
+
+  **Inputs that need special treatment**:
+  - **To/Cc/Bcc recipient fields**: These autocomplete to contact "pills" — the underlying state is a `Vec<Recipient>`, not a plain string. Undo needs to operate on the recipient list (undo adding a pill, undo removing one), not on raw text. The text portion (what the user is currently typing before it resolves to a pill) can use standard text undo, but pill add/remove needs its own operation stack.
+  - **Rich text compose editor**: Already has operation-based undo/redo designed into its architecture (`docs/editor/architecture.md`). Does not use `dissimilar` — the structured document model captures edits as reversible `EditOp`s, which is more appropriate than string diffing for formatted text.
+  - **Label/tag pill inputs**: Same pill pattern as recipients — undo operates on the tag list, not raw text.
+
+  **Implementation**: Add a `UndoableText` helper to `crates/app/src/ui/` and integrate it into the key handler for each text input (intercept Ctrl+Z/Ctrl+Y before iced processes them). For pill-based inputs, define an `UndoableList<T>` that tracks add/remove operations.
+
+  **Reference**: cedilla `research/cedilla/src/app/core/history.rs` (dissimilar-based undo with circular buffer).
 
 ## UI Specs Needed
 

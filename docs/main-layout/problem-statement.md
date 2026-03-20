@@ -578,7 +578,7 @@ This document introduces several categories of persisted and non-persisted UI st
 
 - **Message body rendering**: The conversation view needs rendered email bodies. This is a separate technical challenge (HTML email in iced via iced_webview_v2 or litehtml). Phase 2 can proceed with snippet-only rendering while body rendering is developed in parallel.
 - **Command palette iced integration**: Keyboard shortcuts and action dispatch depend on the palette's iced integration (see `docs/command-palette/roadmap.md`, "Future: Iced Integration"). Phase 1-2 can use direct message dispatch; palette integration lands in Phase 3.
-- **Compose window**: The inline reply composer (Phase 3) is a simplified version of the full compose window. Full compose is a separate feature with its own design considerations (rich text editing, attachments, signature management).
+- **Compose window**: The inline reply composer (Phase 3) is a simplified version of the full compose window. Full compose is a separate feature with its own design considerations (rich text editing, attachments, signature management). The rich text editor architecture is documented in `docs/editor/architecture.md`.
 
 ## Ecosystem Patterns
 
@@ -607,5 +607,5 @@ How requirements in this spec map to patterns found in the [iced ecosystem surve
 These requirements have no solution in the surveyed iced ecosystem and will require custom implementation:
 
 - **Scroll virtualization**: No iced ecosystem project implements virtualized scrolling. The thread list needs to handle 1000+ fixed-height cards efficiently. The fixed `THREAD_CARD_HEIGHT` design enables a future virtualization layer, but the implementation is entirely custom.
-- **Inline reply composer**: No surveyed project embeds a text editor inside a scrollable content list. The reply composer appearing below a specific message card, within the scrollable conversation view, is a novel layout challenge.
+- **Inline reply composer**: No surveyed project embeds a text editor inside a scrollable content list. The reply composer appearing below a specific message card, within the scrollable conversation view, is a novel layout challenge. The editor itself is a custom WYSIWYG widget — see `docs/editor/architecture.md`.
 - **Pop-out windows**: No surveyed project demonstrates multi-window iced with shared state. Double-click-to-pop-out on message cards and the compose pop-out button both depend on this unsolved pattern.
