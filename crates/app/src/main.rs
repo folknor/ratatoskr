@@ -13,13 +13,18 @@ use command_dispatch::{
     ReadingPanePosition, TaskAction,
 };
 use component::Component;
-use db::{Db, Label, Thread};
+use db::{Db, Thread};
 use iced::widget::{container, mouse_area, row};
 use iced::{Element, Length, Point, Size, Task, Theme};
 use ratatoskr_command_palette::{
     BindingTable, Chord, CommandArgs, CommandId, CommandRegistry, FocusedRegion, ResolveResult,
     current_platform,
 };
+use ratatoskr_core::db::queries_extra::navigation::{
+    NavigationState, get_navigation_state,
+};
+use ratatoskr_core::db::queries_extra::get_threads_scoped;
+use ratatoskr_core::db::types::{AccountScope, DbThread};
 use ui::layout::{RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH};
 use ui::reading_pane::{ReadingPane, ReadingPaneMessage};
 use ui::settings::{Settings, SettingsEvent, SettingsMessage};
@@ -106,7 +111,7 @@ pub enum Message {
 
     // Existing data loading
     AccountsLoaded(u64, Result<Vec<db::Account>, String>),
-    LabelsLoaded(u64, Result<Vec<Label>, String>),
+    NavigationLoaded(u64, Result<NavigationState, String>),
     ThreadsLoaded(u64, Result<Vec<Thread>, String>),
     ThreadMessagesLoaded(u64, Result<Vec<db::ThreadMessage>, String>),
     ThreadAttachmentsLoaded(u64, Result<Vec<db::ThreadAttachment>, String>),
@@ -308,13 +313,13 @@ impl App {
                 self.status = format!("Error: {e}");
                 Task::none()
             }
-            Message::LabelsLoaded(g, _) if g != self.nav_generation => Task::none(),
-            Message::LabelsLoaded(_, Ok(labels)) => {
-                self.sidebar.labels = labels;
+            Message::NavigationLoaded(g, _) if g != self.nav_generation => Task::none(),
+            Message::NavigationLoaded(_, Ok(nav_state)) => {
+                self.sidebar.nav_state = Some(nav_state);
                 Task::none()
             }
-            Message::LabelsLoaded(_, Err(e)) => {
-                self.status = format!("Labels error: {e}");
+            Message::NavigationLoaded(_, Err(e)) => {
+                self.status = format!("Navigation error: {e}");
                 Task::none()
             }
             Message::ThreadsLoaded(g, _) if g != self.nav_generation => Task::none(),
@@ -611,23 +616,20 @@ impl App {
 
     fn handle_sidebar_event(&mut self, event: SidebarEvent) -> Task<Message> {
         match event {
-            SidebarEvent::AccountSelected(idx) => {
+            SidebarEvent::AccountSelected(_idx) => {
                 self.thread_list.selected_thread = None;
                 self.nav_generation += 1;
                 self.thread_generation += 1;
                 self.update_thread_list_context_from_sidebar();
-                if let Some(account) = self.sidebar.accounts.get(idx) {
-                    let id = account.id.clone();
-                    return self.load_labels_and_threads(&id);
-                }
-                Task::none()
+                self.load_navigation_and_threads()
             }
             SidebarEvent::AllAccountsSelected => {
                 self.thread_list.selected_thread = None;
                 self.thread_list.threads.clear();
-                self.sidebar.labels.clear();
+                self.nav_generation += 1;
+                self.thread_generation += 1;
                 self.update_thread_list_context_from_sidebar();
-                Task::none()
+                self.fire_navigation_load()
             }
             SidebarEvent::CycleAccount => Task::none(),
             SidebarEvent::LabelSelected(label_id) => {
@@ -642,25 +644,11 @@ impl App {
         }
     }
 
-    fn handle_label_selected(&mut self, label_id: Option<String>) -> Task<Message> {
+    fn handle_label_selected(&mut self, _label_id: Option<String>) -> Task<Message> {
         self.thread_list.selected_thread = None;
         self.nav_generation += 1;
         self.thread_generation += 1;
-        if let Some(idx) = self.sidebar.selected_account
-            && let Some(account) = self.sidebar.accounts.get(idx)
-        {
-            let db = Arc::clone(&self.db);
-            let id = account.id.clone();
-            let load_gen = self.nav_generation;
-            return Task::perform(
-                async move {
-                    let r = load_threads(db, id, label_id).await;
-                    (load_gen, r)
-                },
-                |(g, result)| Message::ThreadsLoaded(g, result),
-            );
-        }
-        Task::none()
+        self.load_threads_for_current_view()
     }
 
     fn handle_thread_list(&mut self, msg: ThreadListMessage) -> Task<Message> {
@@ -709,28 +697,49 @@ impl App {
 // ── Helper methods ─────────────────────────────────────
 
 impl App {
-    fn load_labels_and_threads(&mut self, account_id: &str) -> Task<Message> {
-        self.nav_generation += 1;
+    fn current_scope(&self) -> AccountScope {
+        match self.sidebar.selected_account {
+            Some(idx) => {
+                let Some(account) = self.sidebar.accounts.get(idx) else {
+                    return AccountScope::All;
+                };
+                AccountScope::Single(account.id.clone())
+            }
+            None => AccountScope::All,
+        }
+    }
+
+    fn fire_navigation_load(&self) -> Task<Message> {
         let db = Arc::clone(&self.db);
-        let db2 = Arc::clone(&self.db);
-        let id = account_id.to_string();
-        let id2 = id.clone();
+        let scope = self.current_scope();
         let load_gen = self.nav_generation;
+        Task::perform(
+            async move {
+                let r = load_navigation(db, scope).await;
+                (load_gen, r)
+            },
+            |(g, result)| Message::NavigationLoaded(g, result),
+        )
+    }
+
+    fn load_threads_for_current_view(&self) -> Task<Message> {
+        let db = Arc::clone(&self.db);
+        let scope = self.current_scope();
+        let label_id = self.sidebar.selected_label.clone();
+        let load_gen = self.nav_generation;
+        Task::perform(
+            async move {
+                let r = load_threads_scoped(db, scope, label_id).await;
+                (load_gen, r)
+            },
+            |(g, result)| Message::ThreadsLoaded(g, result),
+        )
+    }
+
+    fn load_navigation_and_threads(&self) -> Task<Message> {
         Task::batch([
-            Task::perform(
-                async move {
-                    let r = load_labels(db, id).await;
-                    (load_gen, r)
-                },
-                |(g, result)| Message::LabelsLoaded(g, result),
-            ),
-            Task::perform(
-                async move {
-                    let r = load_threads(db2, id2, None).await;
-                    (load_gen, r)
-                },
-                |(g, result)| Message::ThreadsLoaded(g, result),
-            ),
+            self.fire_navigation_load(),
+            self.load_threads_for_current_view(),
         ])
     }
 
@@ -770,9 +779,8 @@ impl App {
         self.sidebar.accounts = accounts;
         if !self.sidebar.accounts.is_empty() {
             self.sidebar.selected_account = Some(0);
-            let id = self.sidebar.accounts[0].id.clone();
             self.status = format!("Loaded {} accounts", self.sidebar.accounts.len());
-            return self.load_labels_and_threads(&id);
+            return self.load_navigation_and_threads();
         }
         self.status = "No accounts found".to_string();
         Task::none()
@@ -826,16 +834,21 @@ impl App {
 
     fn update_thread_list_context_from_sidebar(&mut self) {
         let folder_name = self
-            .sidebar.selected_label
+            .sidebar
+            .selected_label
             .as_ref()
             .and_then(|lid| {
-                self.sidebar.labels.iter()
-                    .find(|l| l.id == *lid)
-                    .map(|l| l.name.clone())
+                self.sidebar.nav_state.as_ref().and_then(|ns| {
+                    ns.folders
+                        .iter()
+                        .find(|f| f.id == *lid)
+                        .map(|f| f.name.clone())
+                })
             })
             .unwrap_or_else(|| "Inbox".to_string());
         let scope_name = self
-            .sidebar.selected_account
+            .sidebar
+            .selected_account
             .and_then(|idx| self.sidebar.accounts.get(idx))
             .and_then(|a| a.display_name.as_deref().or(Some(a.email.as_str())))
             .unwrap_or("All")
@@ -848,17 +861,42 @@ async fn load_accounts(db: Arc<Db>) -> Result<Vec<db::Account>, String> {
     db.get_accounts().await
 }
 
-async fn load_labels(
+async fn load_navigation(
     db: Arc<Db>,
-    account_id: String,
-) -> Result<Vec<Label>, String> {
-    db.get_labels(account_id).await
+    scope: AccountScope,
+) -> Result<NavigationState, String> {
+    db.with_conn(move |conn| get_navigation_state(conn, &scope))
+        .await
 }
 
-async fn load_threads(
+async fn load_threads_scoped(
     db: Arc<Db>,
-    account_id: String,
+    scope: AccountScope,
     label_id: Option<String>,
 ) -> Result<Vec<Thread>, String> {
-    db.get_threads(account_id, label_id, 1000).await
+    db.with_conn(move |conn| {
+        let db_threads =
+            get_threads_scoped(conn, &scope, label_id.as_deref(), Some(50), None)?;
+        Ok(db_threads
+            .into_iter()
+            .map(db_thread_to_app_thread)
+            .collect())
+    })
+    .await
+}
+
+fn db_thread_to_app_thread(t: DbThread) -> Thread {
+    Thread {
+        id: t.id,
+        account_id: t.account_id,
+        subject: t.subject,
+        snippet: t.snippet,
+        last_message_at: t.last_message_at.and_then(|s| s.parse().ok()),
+        message_count: t.message_count,
+        is_read: t.is_read,
+        is_starred: t.is_starred,
+        has_attachments: t.has_attachments,
+        from_name: t.from_name,
+        from_address: t.from_address,
+    }
 }

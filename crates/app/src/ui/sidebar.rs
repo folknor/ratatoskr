@@ -2,11 +2,14 @@ use iced::widget::{column, container, scrollable, Space};
 use iced::{Element, Length, Task};
 
 use crate::component::Component;
-use crate::db::{Account, Label};
+use crate::db::Account;
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::widgets::{self, DropdownEntry, DropdownIcon, NavItem};
+use ratatoskr_core::db::queries_extra::navigation::{
+    FolderKind, NavigationState,
+};
 
 // ── Messages & Events ──────────────────────────────────
 
@@ -39,7 +42,7 @@ pub enum SidebarEvent {
 
 pub struct Sidebar {
     pub accounts: Vec<Account>,
-    pub labels: Vec<Label>,
+    pub nav_state: Option<NavigationState>,
     pub selected_account: Option<usize>,
     pub selected_label: Option<String>,
     pub scope_dropdown_open: bool,
@@ -51,7 +54,7 @@ impl Sidebar {
     pub fn new() -> Self {
         Self {
             accounts: Vec::new(),
-            labels: Vec::new(),
+            nav_state: None,
             selected_account: None,
             selected_label: None,
             scope_dropdown_open: false,
@@ -60,7 +63,7 @@ impl Sidebar {
         }
     }
 
-    fn is_all_accounts(&self) -> bool {
+    pub fn is_all_accounts(&self) -> bool {
         self.selected_account.is_none()
     }
 }
@@ -126,6 +129,8 @@ impl Component for Sidebar {
     }
 
     fn view(&self) -> Element<'_, SidebarMessage> {
+        let show_labels = self.selected_account.is_some();
+
         let mut col = column![
             scope_dropdown(self),
             Space::new().height(SPACE_XXS),
@@ -133,12 +138,12 @@ impl Component for Sidebar {
             Space::new().height(SPACE_XS),
             nav_items(self),
             widgets::section_break(),
-            smart_folders(self.smart_folders_expanded),
+            smart_folders(self),
         ]
         .spacing(0)
         .width(Length::Fill);
 
-        if !self.is_all_accounts() {
+        if show_labels {
             col = col.push(widgets::section_break::<SidebarMessage>());
             col = col.push(labels(self));
         }
@@ -202,47 +207,86 @@ fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
 // ── Nav items ───────────────────────────────────────────
 
 fn nav_items(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
-    let mut items = vec![
-        NavItem { label: "Inbox",   id: "INBOX",     unread: 12 },
-        NavItem { label: "Starred", id: "__starred",  unread: 0 },
-        NavItem { label: "Snoozed", id: "__snoozed",  unread: 2 },
-        NavItem { label: "Sent",    id: "__sent",     unread: 0 },
-        NavItem { label: "Drafts",  id: "__drafts",   unread: 3 },
-        NavItem { label: "Trash",   id: "__trash",    unread: 0 },
-    ];
-    if !sidebar.is_all_accounts() {
-        items.push(NavItem { label: "Spam",     id: "__spam",     unread: 0 });
-        items.push(NavItem { label: "All Mail", id: "__all_mail", unread: 0 });
-    }
-    widgets::nav_group(&items, &sidebar.selected_label, SidebarMessage::SelectLabel)
+    let folders = sidebar
+        .nav_state
+        .as_ref()
+        .map(|ns| &ns.folders[..])
+        .unwrap_or(&[]);
+
+    let universal: Vec<NavItem<'_>> = folders
+        .iter()
+        .filter(|f| matches!(f.folder_kind, FolderKind::Universal))
+        .filter(|f| {
+            // Spam and All Mail only when scoped to a single account
+            if sidebar.is_all_accounts() {
+                !matches!(f.id.as_str(), "SPAM" | "ALL_MAIL")
+            } else {
+                true
+            }
+        })
+        .map(|f| NavItem {
+            label: &f.name,
+            id: &f.id,
+            unread: f.unread_count,
+        })
+        .collect();
+
+    widgets::nav_group(
+        &universal,
+        &sidebar.selected_label,
+        SidebarMessage::SelectLabel,
+    )
 }
 
-fn smart_folders(expanded: bool) -> Element<'static, SidebarMessage> {
+fn smart_folders(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
+    let folders = sidebar
+        .nav_state
+        .as_ref()
+        .map(|ns| &ns.folders[..])
+        .unwrap_or(&[]);
+
+    let children: Vec<Element<'_, SidebarMessage>> = folders
+        .iter()
+        .filter(|f| matches!(f.folder_kind, FolderKind::SmartFolder))
+        .map(|f| {
+            widgets::nav_button(
+                None,
+                &f.name,
+                sidebar.selected_label.as_deref() == Some(&f.id),
+                widgets::NavSize::Compact,
+                Some(f.unread_count),
+                SidebarMessage::SelectLabel(Some(f.id.clone())),
+            )
+        })
+        .collect();
+
     widgets::collapsible_section(
         "SMART FOLDERS",
-        expanded,
+        sidebar.smart_folders_expanded,
         SidebarMessage::ToggleSmartFoldersSection,
-        vec![
-            widgets::nav_button(None, "VIP", false, widgets::NavSize::Compact, Some(3), SidebarMessage::Noop),
-            widgets::nav_button(None, "Newsletters", false, widgets::NavSize::Compact, Some(0), SidebarMessage::Noop),
-        ],
+        children,
     )
 }
 
 fn labels(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
-    let children = sidebar
-        .labels
+    let folders = sidebar
+        .nav_state
+        .as_ref()
+        .map(|ns| &ns.folders[..])
+        .unwrap_or(&[]);
+
+    let children: Vec<Element<'_, SidebarMessage>> = folders
         .iter()
-        .filter(|l| !is_system_label(&l.name))
+        .filter(|f| matches!(f.folder_kind, FolderKind::AccountLabel))
         .take(12)
-        .map(|l| {
-            let active = sidebar.selected_label.as_deref() == Some(&l.id);
+        .map(|f| {
+            let active = sidebar.selected_label.as_deref() == Some(&f.id);
             widgets::label_nav_item(
-                &l.name,
-                &l.id,
-                theme::avatar_color(&l.name),
+                &f.name,
+                &f.id,
+                theme::avatar_color(&f.name),
                 active,
-                SidebarMessage::SelectLabel(Some(l.id.clone())),
+                SidebarMessage::SelectLabel(Some(f.id.clone())),
             )
         })
         .collect();
@@ -252,15 +296,5 @@ fn labels(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
         sidebar.labels_expanded,
         SidebarMessage::ToggleLabelsSection,
         children,
-    )
-}
-
-fn is_system_label(name: &str) -> bool {
-    matches!(
-        name,
-        "INBOX" | "Sent" | "Drafts" | "Trash" | "Spam" | "Archive"
-            | "Junk" | "Templates" | "Calendar" | "Contacts"
-            | "Journal" | "Notes" | "Outbox" | "Deleted Items"
-            | "Sent Items" | "Conversation History"
     )
 }
