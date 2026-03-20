@@ -1,4 +1,5 @@
 pub mod add_account;
+pub mod emoji_picker;
 pub mod animated_toggler;
 pub mod right_sidebar;
 pub mod layout;

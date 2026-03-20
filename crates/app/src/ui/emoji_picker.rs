@@ -1,0 +1,455 @@
+// Emoji picker widget — a stateless view function that builds a searchable,
+// categorized emoji grid. The caller owns visibility state and positioning.
+//
+// NOTE: Emoji rendering depends on the system emoji font. On Linux, this
+// typically requires `noto-fonts-emoji` or similar. The picker will display
+// boxes/tofu without emoji fonts, but the selected emoji is inserted as
+// text regardless.
+
+use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::{Alignment, Element, Length};
+
+use crate::ui::layout::*;
+use crate::ui::theme;
+
+// ── Emoji data model ────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EmojiCategory {
+    Smileys,
+    People,
+    Nature,
+    Food,
+    Activities,
+    Travel,
+    Objects,
+    Symbols,
+}
+
+impl EmojiCategory {
+    pub const ALL: &[Self] = &[
+        Self::Smileys,
+        Self::People,
+        Self::Nature,
+        Self::Food,
+        Self::Activities,
+        Self::Travel,
+        Self::Objects,
+        Self::Symbols,
+    ];
+
+    /// Representative emoji shown on the category tab.
+    pub fn tab_emoji(self) -> &'static str {
+        match self {
+            Self::Smileys => "\u{1F600}",    // 😀
+            Self::People => "\u{1F44B}",     // 👋
+            Self::Nature => "\u{1F338}",     // 🌸
+            Self::Food => "\u{1F354}",       // 🍔
+            Self::Activities => "\u{26BD}",  // ⚽
+            Self::Travel => "\u{2708}\u{FE0F}", // ✈️
+            Self::Objects => "\u{1F4A1}",    // 💡
+            Self::Symbols => "\u{267B}\u{FE0F}", // ♻️
+        }
+    }
+}
+
+pub struct EmojiEntry {
+    pub emoji: &'static str,
+    pub name: &'static str,
+    pub category: EmojiCategory,
+}
+
+// ── Static emoji table ──────────────────────────────────
+// ~250 commonly used emoji, organized by category.
+
+pub static EMOJI_TABLE: &[EmojiEntry] = &[
+    // ── Smileys ─────────────────────────────────────────
+    EmojiEntry { emoji: "\u{1F600}", name: "grinning face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F603}", name: "grinning face with big eyes", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F604}", name: "grinning face with smiling eyes", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F601}", name: "beaming face with smiling eyes", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F606}", name: "grinning squinting face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F605}", name: "grinning face with sweat", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F923}", name: "rolling on the floor laughing", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F602}", name: "face with tears of joy", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F642}", name: "slightly smiling face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F60A}", name: "smiling face with smiling eyes", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F607}", name: "smiling face with halo", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F970}", name: "smiling face with hearts", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F60D}", name: "smiling face with heart eyes", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F929}", name: "star struck", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F618}", name: "face blowing a kiss", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F617}", name: "kissing face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F61A}", name: "kissing face with closed eyes", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F619}", name: "kissing face with smiling eyes", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F972}", name: "smiling face with tear", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F60B}", name: "face savoring food", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F61B}", name: "face with tongue", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F61C}", name: "winking face with tongue", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F92A}", name: "zany face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F61D}", name: "squinting face with tongue", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F911}", name: "money mouth face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F917}", name: "hugging face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F92D}", name: "face with hand over mouth", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F92B}", name: "shushing face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F914}", name: "thinking face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F910}", name: "zipper mouth face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F928}", name: "face with raised eyebrow", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F610}", name: "neutral face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F611}", name: "expressionless face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F636}", name: "face without mouth", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F60F}", name: "smirking face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F612}", name: "unamused face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F644}", name: "face with rolling eyes", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F62C}", name: "grimacing face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F925}", name: "lying face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F60C}", name: "relieved face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F614}", name: "pensive face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F62A}", name: "sleepy face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F924}", name: "drooling face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F634}", name: "sleeping face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F637}", name: "face with medical mask", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F912}", name: "face with thermometer", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F915}", name: "face with head bandage", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F922}", name: "nauseated face", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F92E}", name: "face vomiting", category: EmojiCategory::Smileys },
+    EmojiEntry { emoji: "\u{1F927}", name: "sneezing face", category: EmojiCategory::Smileys },
+
+    // ── People (hands & gestures) ───────────────────────
+    EmojiEntry { emoji: "\u{1F44B}", name: "waving hand", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F91A}", name: "raised back of hand", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{270B}", name: "raised hand", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F596}", name: "vulcan salute", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F44C}", name: "ok hand", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{270C}\u{FE0F}", name: "victory hand", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F91E}", name: "crossed fingers", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F91F}", name: "love you gesture", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F918}", name: "sign of the horns", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F919}", name: "call me hand", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F448}", name: "backhand index pointing left", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F449}", name: "backhand index pointing right", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F446}", name: "backhand index pointing up", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F595}", name: "middle finger", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F447}", name: "backhand index pointing down", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{261D}\u{FE0F}", name: "index pointing up", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F44D}", name: "thumbs up", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F44E}", name: "thumbs down", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{270A}", name: "raised fist", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F44A}", name: "oncoming fist", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F91B}", name: "left facing fist", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F91C}", name: "right facing fist", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F44F}", name: "clapping hands", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F64C}", name: "raising hands", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F450}", name: "open hands", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F932}", name: "palms up together", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F91D}", name: "handshake", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F64F}", name: "folded hands", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F4AA}", name: "flexed biceps", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F9E0}", name: "brain", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F441}\u{FE0F}", name: "eye", category: EmojiCategory::People },
+    EmojiEntry { emoji: "\u{1F440}", name: "eyes", category: EmojiCategory::People },
+
+    // ── Nature ──────────────────────────────────────────
+    EmojiEntry { emoji: "\u{1F338}", name: "cherry blossom", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F33A}", name: "hibiscus", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F33B}", name: "sunflower", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F33C}", name: "blossom", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F337}", name: "tulip", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F339}", name: "rose", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F490}", name: "bouquet", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F340}", name: "four leaf clover", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F33F}", name: "herb", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{2618}\u{FE0F}", name: "shamrock", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F343}", name: "leaf fluttering in wind", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F331}", name: "seedling", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F334}", name: "palm tree", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F333}", name: "deciduous tree", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F332}", name: "evergreen tree", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F342}", name: "fallen leaf", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F341}", name: "maple leaf", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F436}", name: "dog face", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F431}", name: "cat face", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F42D}", name: "mouse face", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F439}", name: "hamster", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F430}", name: "rabbit face", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F98A}", name: "fox", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F43B}", name: "bear", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F43C}", name: "panda", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F428}", name: "koala", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F42F}", name: "tiger face", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F981}", name: "lion", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F984}", name: "unicorn", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F41D}", name: "honeybee", category: EmojiCategory::Nature },
+    EmojiEntry { emoji: "\u{1F98B}", name: "butterfly", category: EmojiCategory::Nature },
+
+    // ── Food ────────────────────────────────────────────
+    EmojiEntry { emoji: "\u{1F34E}", name: "red apple", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F34A}", name: "tangerine", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F34B}", name: "lemon", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F34C}", name: "banana", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F349}", name: "watermelon", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F347}", name: "grapes", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F353}", name: "strawberry", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F352}", name: "cherries", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F351}", name: "peach", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F34D}", name: "pineapple", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F96D}", name: "mango", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F951}", name: "avocado", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F955}", name: "carrot", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F33D}", name: "ear of corn", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F336}\u{FE0F}", name: "hot pepper", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F354}", name: "hamburger", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F355}", name: "pizza", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F32E}", name: "taco", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F32F}", name: "burrito", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F363}", name: "sushi", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F35C}", name: "steaming bowl", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F370}", name: "shortcake", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F382}", name: "birthday cake", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F36B}", name: "chocolate bar", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F369}", name: "doughnut", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F36A}", name: "cookie", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{2615}", name: "hot beverage", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F37A}", name: "beer mug", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F377}", name: "wine glass", category: EmojiCategory::Food },
+    EmojiEntry { emoji: "\u{1F379}", name: "tropical drink", category: EmojiCategory::Food },
+
+    // ── Activities ──────────────────────────────────────
+    EmojiEntry { emoji: "\u{26BD}", name: "soccer ball", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F3C0}", name: "basketball", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F3C8}", name: "american football", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{26BE}", name: "baseball", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F3BE}", name: "tennis", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F3D0}", name: "volleyball", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F3B3}", name: "bowling", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F3CF}", name: "cricket game", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{26F3}", name: "flag in hole", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F3AF}", name: "bullseye", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F3AE}", name: "video game", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F3B2}", name: "game die", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F3B5}", name: "musical note", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F3B6}", name: "musical notes", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F3A4}", name: "microphone", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F3AC}", name: "clapper board", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F3A8}", name: "artist palette", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F3AD}", name: "performing arts", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F3C6}", name: "trophy", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F3C5}", name: "sports medal", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F947}", name: "first place medal", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F948}", name: "second place medal", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F949}", name: "third place medal", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F3C3}", name: "person running", category: EmojiCategory::Activities },
+    EmojiEntry { emoji: "\u{1F6B4}", name: "person biking", category: EmojiCategory::Activities },
+
+    // ── Travel ──────────────────────────────────────────
+    EmojiEntry { emoji: "\u{2708}\u{FE0F}", name: "airplane", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F680}", name: "rocket", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F697}", name: "automobile", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F695}", name: "taxi", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F68C}", name: "bus", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F682}", name: "locomotive", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F6A2}", name: "ship", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F6F3}\u{FE0F}", name: "passenger ship", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F3D6}\u{FE0F}", name: "beach with umbrella", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F3D4}\u{FE0F}", name: "snow capped mountain", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F30D}", name: "globe europe africa", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F30E}", name: "globe americas", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F30F}", name: "globe asia australia", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F5FA}\u{FE0F}", name: "world map", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F3E0}", name: "house", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F3E2}", name: "office building", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F3EB}", name: "school", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F3E5}", name: "hospital", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{26F0}\u{FE0F}", name: "mountain", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F30B}", name: "volcano", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F307}", name: "sunset", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F305}", name: "sunrise", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F319}", name: "crescent moon", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{2B50}", name: "star", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F31F}", name: "glowing star", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{2600}\u{FE0F}", name: "sun", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F326}\u{FE0F}", name: "sun behind rain cloud", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F308}", name: "rainbow", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{2744}\u{FE0F}", name: "snowflake", category: EmojiCategory::Travel },
+    EmojiEntry { emoji: "\u{1F525}", name: "fire", category: EmojiCategory::Travel },
+
+    // ── Objects ─────────────────────────────────────────
+    EmojiEntry { emoji: "\u{1F4A1}", name: "light bulb", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F4BB}", name: "laptop", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F4F1}", name: "mobile phone", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F4E7}", name: "email", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F4E8}", name: "incoming envelope", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F4E9}", name: "envelope with arrow", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F4EC}", name: "open mailbox with raised flag", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F4ED}", name: "open mailbox with lowered flag", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F4DD}", name: "memo", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F4D6}", name: "open book", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F4DA}", name: "books", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F4CE}", name: "paperclip", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F4CB}", name: "clipboard", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F4C5}", name: "calendar", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F4C6}", name: "tear off calendar", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F4C8}", name: "chart increasing", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F4C9}", name: "chart decreasing", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F4CA}", name: "bar chart", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F512}", name: "locked", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F513}", name: "unlocked", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F511}", name: "key", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F50D}", name: "magnifying glass left", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F50E}", name: "magnifying glass right", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{2699}\u{FE0F}", name: "gear", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F527}", name: "wrench", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F528}", name: "hammer", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F4B0}", name: "money bag", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F4B5}", name: "dollar banknote", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F381}", name: "wrapped gift", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F389}", name: "party popper", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F38A}", name: "confetti ball", category: EmojiCategory::Objects },
+    EmojiEntry { emoji: "\u{1F3B0}", name: "slot machine", category: EmojiCategory::Objects },
+
+    // ── Symbols ─────────────────────────────────────────
+    EmojiEntry { emoji: "\u{267B}\u{FE0F}", name: "recycling symbol", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{2764}\u{FE0F}", name: "red heart", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{1F9E1}", name: "orange heart", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{1F49B}", name: "yellow heart", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{1F49A}", name: "green heart", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{1F499}", name: "blue heart", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{1F49C}", name: "purple heart", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{1F5A4}", name: "black heart", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{1F494}", name: "broken heart", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{1F495}", name: "two hearts", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{1F496}", name: "sparkling heart", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{1F4AF}", name: "hundred points", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{1F4A5}", name: "collision", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{1F4AB}", name: "dizzy", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{2728}", name: "sparkles", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{1F4A2}", name: "anger symbol", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{2757}", name: "red exclamation mark", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{2753}", name: "red question mark", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{2705}", name: "check mark button", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{274C}", name: "cross mark", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{274E}", name: "cross mark button", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{2795}", name: "plus", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{2796}", name: "minus", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{27A1}\u{FE0F}", name: "right arrow", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{2B05}\u{FE0F}", name: "left arrow", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{2B06}\u{FE0F}", name: "up arrow", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{2B07}\u{FE0F}", name: "down arrow", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{1F504}", name: "counterclockwise arrows", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{1F51D}", name: "top arrow", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{1F6AB}", name: "prohibited", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{26A0}\u{FE0F}", name: "warning", category: EmojiCategory::Symbols },
+    EmojiEntry { emoji: "\u{2139}\u{FE0F}", name: "information", category: EmojiCategory::Symbols },
+];
+
+// ── View function ───────────────────────────────────────
+
+/// Builds the emoji picker widget. The caller owns visibility state and positioning.
+///
+/// - `search_query`: current text in the search field
+/// - `selected_category`: which category tab is active
+/// - `on_select`: called with the emoji string when a user clicks one
+/// - `on_category_changed`: called when the user clicks a category tab
+/// - `on_search_changed`: called when the search input text changes
+pub fn emoji_picker<'a, M: 'a + Clone>(
+    search_query: &str,
+    selected_category: EmojiCategory,
+    on_select: impl Fn(&'static str) -> M + 'a,
+    on_category_changed: impl Fn(EmojiCategory) -> M + 'a,
+    on_search_changed: impl Fn(String) -> M + 'a,
+) -> Element<'a, M> {
+    // Filter emoji by search query or selected category.
+    let filtered: Vec<&EmojiEntry> = if search_query.is_empty() {
+        EMOJI_TABLE
+            .iter()
+            .filter(|e| e.category == selected_category)
+            .collect()
+    } else {
+        let query = search_query.to_lowercase();
+        EMOJI_TABLE
+            .iter()
+            .filter(|e| e.name.contains(&query))
+            .collect()
+    };
+
+    // Search bar
+    let search = text_input("Search emoji...", search_query)
+        .on_input(on_search_changed)
+        .padding(PAD_INPUT)
+        .size(TEXT_MD)
+        .style(theme::TextInputClass::Settings.style());
+
+    // Category tabs
+    let mut tab_row = row![].spacing(SPACE_XXXS).align_y(Alignment::Center);
+    for &cat in EmojiCategory::ALL {
+        let is_active = cat == selected_category;
+        let tab = button(
+            container(text(cat.tab_emoji()).size(TEXT_TITLE))
+                .width(EMOJI_BUTTON_SIZE)
+                .height(EMOJI_BUTTON_SIZE)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
+        )
+        .on_press(on_category_changed(cat))
+        .padding(0)
+        .style(theme::ButtonClass::Chip { active: is_active }.style());
+        tab_row = tab_row.push(tab);
+    }
+
+    // Emoji grid — build rows of EMOJI_GRID_COLUMNS items.
+    let mut grid_col = column![].spacing(SPACE_XXXS);
+    let mut current_row = row![].spacing(SPACE_XXXS);
+    let mut col_idx = 0;
+
+    for entry in &filtered {
+        let emoji_btn = button(
+            container(text(entry.emoji).size(TEXT_TITLE))
+                .width(EMOJI_BUTTON_SIZE)
+                .height(EMOJI_BUTTON_SIZE)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
+        )
+        .on_press(on_select(entry.emoji))
+        .padding(0)
+        .style(theme::ButtonClass::BareIcon.style());
+
+        current_row = current_row.push(emoji_btn);
+        col_idx += 1;
+
+        if col_idx >= EMOJI_GRID_COLUMNS {
+            grid_col = grid_col.push(current_row);
+            current_row = row![].spacing(SPACE_XXXS);
+            col_idx = 0;
+        }
+    }
+
+    // Push trailing partial row if any.
+    if col_idx > 0 {
+        // Pad remaining cells with empty space so alignment stays consistent.
+        for _ in col_idx..EMOJI_GRID_COLUMNS {
+            current_row = current_row
+                .push(Space::new().width(EMOJI_BUTTON_SIZE).height(EMOJI_BUTTON_SIZE));
+        }
+        grid_col = grid_col.push(current_row);
+    }
+
+    let grid_scrollable = scrollable(
+        container(grid_col).padding([SPACE_XXS, 0.0]),
+    )
+    .height(Length::Fill);
+
+    // Assemble
+    container(
+        column![
+            search,
+            tab_row,
+            grid_scrollable,
+        ]
+        .spacing(SPACE_XS),
+    )
+    .padding(SPACE_XS)
+    .width(EMOJI_PICKER_WIDTH)
+    .height(EMOJI_PICKER_MAX_HEIGHT)
+    .style(theme::ContainerClass::SelectMenu.style())
+    .into()
+}

@@ -408,3 +408,14 @@ pub const COMPOSE_MIN_WIDTH: f32 = 480.0;
 pub const COMPOSE_MIN_HEIGHT: f32 = 360.0;
 /// Width of the label column (From, To, Cc, Bcc, Subject) in compose.
 pub const COMPOSE_LABEL_WIDTH: f32 = 52.0;
+
+// ── Emoji picker ────────────────────────────────────────
+
+/// Emoji picker popup width.
+pub const EMOJI_PICKER_WIDTH: f32 = 300.0;
+/// Emoji picker popup max height.
+pub const EMOJI_PICKER_MAX_HEIGHT: f32 = 350.0;
+/// Individual emoji button size (width and height).
+pub const EMOJI_BUTTON_SIZE: f32 = 36.0;
+/// Number of columns in the emoji grid.
+pub const EMOJI_GRID_COLUMNS: usize = 8;
