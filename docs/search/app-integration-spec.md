@@ -327,14 +327,21 @@ iced::event::listen_with(|event, _status, _id| {
 
 **Important:** The `/` shortcut must only fire when the search bar is not already focused and no other text input has focus. Iced's `_status` parameter in `listen_with` can be used to check if the event was captured by a widget. If `status == Status::Captured`, skip it — a text input consumed the keypress.
 
-**Escape behavior:**
-- If search bar has content: clear the query, increment `search_generation`, restore folder view.
-- If search bar is empty and focused: blur the search bar.
-- If search bar is empty and not focused: no-op (or propagate to other handlers).
+**Escape behavior (three states):**
+- If search bar has content: dispatch `SearchClear` — clears the query, increments `search_generation`, restores folder view.
+- If search bar is empty and focused: dispatch `SearchBlur` — unfocuses the search bar via `widget::operation::unfocus("search-input")`. This is a separate message from `SearchClear` because blur-without-clear has no side effects on the thread list.
+- If search bar is empty and not focused: no-op (propagate to other handlers, e.g., command palette Escape).
+
+Add `SearchBlur` to the Message enum:
+```rust
+SearchBlur, // Unfocus the search bar without clearing
+```
 
 ### 1.7 Debounce
 
 Search should execute after a brief debounce (150ms) while the user is typing, and immediately on Enter. The debounce prevents hammering the search pipeline on every keystroke while keeping the feel instant.
+
+**V1 timer strategy:** The implementation below uses a polling `iced::time::every(50ms)` subscription that checks a deadline. This is simple but slightly wasteful (ticks even when idle). A cleaner approach would be a one-shot timer that fires once at the deadline, but iced does not expose a one-shot timer primitive directly. The polling approach is acceptable for V1 — the subscription is only active when `search_debounce_deadline` is `Some`, and 50ms ticks are negligible overhead.
 
 #### Implementation via subscription
 
@@ -455,6 +462,17 @@ let search_state = SearchState::open(&app_data_dir.join("search_index"))
 
 Since `SearchState` is `Clone` (wraps `Arc`), pass a clone into the search task.
 
+#### Result type roles
+
+There are four result types in play. Their roles are distinct:
+
+- **`UnifiedSearchResult`** (`crates/core/src/search_pipeline.rs`) — the core pipeline's output. Carries thread-level search results with relevance scores. This is the authoritative search contract.
+- **`Thread`** (`crates/app/src/db.rs`) — the app's display type for the thread list. The thread card widget renders these. Search results are converted to `Thread` before reaching the UI.
+- **`DbThread`** (`crates/db/src/db/types.rs`) — the raw DB row type. Smart folder execution historically returned these. The migration adapter converts `UnifiedSearchResult` → `DbThread` for backward compatibility with sidebar unread-count code.
+- **`SearchResult`** (`docs/search/problem-statement.md`) — the product-level contract. `UnifiedSearchResult` is the implementation of this contract.
+
+The conversion flow is: `search()` → `Vec<UnifiedSearchResult>` → `unified_to_app_thread()` → `Vec<Thread>` → thread list. Smart folder compatibility: `UnifiedSearchResult` → `unified_to_db_thread()` → `Vec<DbThread>`. Long-term, per the search implementation spec, these should converge into a unified thread-presentation type.
+
 #### UnifiedSearchResult to Thread conversion
 
 ```rust
@@ -559,6 +577,8 @@ fn restore_folder_view(&mut self) -> Task<Message> {
 ```
 
 **Memory consideration:** Cloning the thread list before search is acceptable. A list of 1000 `Thread` structs is roughly 100-200 KB — trivial. The alternative (re-querying the database for the folder's threads) is correct but slower and produces a visible reload flicker.
+
+**V1 shortcut note:** This clone-and-restore approach is pragmatic but not the long-term design. It assumes folder view is "whatever threads happened to be on screen," which breaks if the underlying data changed during search (new messages, sync, etc.). The eventual design should restore by re-navigating to the explicit `NavigationTarget` (as proposed in the command palette spec) rather than replaying cached state. For V1, the clone is good enough — stale-after-search is a minor edge case, and the alternative (full re-query) adds latency.
 
 ---
 
@@ -735,73 +755,82 @@ When the search bar shows a smart folder's query and the user modifies it:
 
 ### 2.5 Smart Folder CRUD via Command Palette
 
-Smart folder management moves from the settings UI to the command palette. The settings-based smart folder editor is removed.
+Smart folder management moves from the settings UI to the command palette. The settings-based smart folder editor is removed. These commands use the real `CommandId` / `CommandDescriptor` / `CommandArgs` system from the command palette spec — not a separate command model.
 
-#### "Save as Smart Folder"
+#### New CommandId variants
 
-Available when the search bar has a non-empty query (regardless of whether it came from a smart folder or ad-hoc search):
+Add to `crates/command-palette/src/id.rs`:
 
 ```rust
-Command {
-    id: "save_as_smart_folder",
-    label: "Save as Smart Folder",
-    available: |ctx| !ctx.search_query.is_empty(),
-    action: CommandAction::PromptInput {
-        placeholder: "Smart folder name...",
-        on_confirm: |name, ctx| {
-            // INSERT INTO smart_folders (name, query, icon) VALUES (?, ?, NULL)
-            // Refresh sidebar
-        },
-    },
+CommandId::SmartFolderSave,     // "Save as Smart Folder"
+CommandId::SmartFolderUpdate,   // "Update Smart Folder"
+CommandId::SmartFolderDelete,   // "Delete Smart Folder"
+CommandId::SmartFolderRename,   // "Rename Smart Folder"
+```
+
+#### Registration in the registry
+
+```rust
+// In register_app() in crates/command-palette/src/registry.rs:
+
+// SmartFolderSave — parameterized (Text input for name)
+// Available when search_query is non-empty.
+// InputSchema::Single(ParamDef::Text { label: "Name", placeholder: "Smart folder name..." })
+
+// SmartFolderUpdate — direct (no parameters)
+// Available when active_smart_folder_id is Some.
+
+// SmartFolderDelete — direct (no parameters)
+// Available when active_smart_folder_id is Some.
+
+// SmartFolderRename — parameterized (Text input for new name)
+// Available when active_smart_folder_id is Some.
+// InputSchema::Single(ParamDef::Text { label: "New name", placeholder: "Folder name..." })
+```
+
+#### CommandContext extension
+
+`CommandContext` needs `search_query` and `active_smart_folder_id` fields for the availability predicates:
+
+```rust
+pub struct CommandContext {
+    // ... existing fields ...
+    pub search_query: Option<String>,
+    pub active_smart_folder_id: Option<String>,
 }
 ```
 
-#### "Update Smart Folder"
+These are populated by `build_context()` from the app state.
 
-Available when `active_smart_folder_id` is `Some` and the query has been modified from the saved version:
+#### CommandArgs variants
 
 ```rust
-Command {
-    id: "update_smart_folder",
-    label: "Update Smart Folder",
-    available: |ctx| ctx.active_smart_folder_id.is_some(),
-    action: CommandAction::Immediate(|ctx| {
-        // UPDATE smart_folders SET query = ? WHERE id = ?
-        // using ctx.search_query and ctx.active_smart_folder_id
-    }),
+pub enum CommandArgs {
+    // ... existing variants ...
+    SmartFolderSave { name: String },
+    SmartFolderRename { name: String },
 }
 ```
 
-#### "Delete Smart Folder" / "Rename Smart Folder"
+`SmartFolderUpdate` and `SmartFolderDelete` are direct commands — they use `active_smart_folder_id` from context, not from args.
 
-Available when a smart folder is selected:
+#### App dispatch
 
 ```rust
-Command {
-    id: "delete_smart_folder",
-    label: "Delete Smart Folder",
-    available: |ctx| ctx.active_smart_folder_id.is_some(),
-    action: CommandAction::Confirm {
-        message: "Delete this smart folder?",
-        on_confirm: |ctx| {
-            // DELETE FROM smart_folders WHERE id = ?
-            // Clear active_smart_folder_id, restore folder view
-        },
-    },
-}
+// In dispatch_command():
+CommandId::SmartFolderUpdate => Some(Message::SmartFolderUpdate),
+CommandId::SmartFolderDelete => Some(Message::SmartFolderDelete),
 
-Command {
-    id: "rename_smart_folder",
-    label: "Rename Smart Folder",
-    available: |ctx| ctx.active_smart_folder_id.is_some(),
-    action: CommandAction::PromptInput {
-        placeholder: "New name...",
-        on_confirm: |name, ctx| {
-            // UPDATE smart_folders SET name = ? WHERE id = ?
-        },
-    },
+// In dispatch_parameterized():
+(CommandId::SmartFolderSave, CommandArgs::SmartFolderSave { name }) => {
+    Some(Message::SmartFolderSave { name })
+}
+(CommandId::SmartFolderRename, CommandArgs::SmartFolderRename { name }) => {
+    Some(Message::SmartFolderRename { name })
 }
 ```
+
+The `update()` handlers for these messages perform the DB operations (INSERT/UPDATE/DELETE on `smart_folders` table) and refresh the sidebar navigation.
 
 ### 2.6 Smart Folder Unread Counts
 

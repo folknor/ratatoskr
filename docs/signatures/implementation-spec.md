@@ -4,9 +4,7 @@ Detailed implementation spec for email signature management, editing, and
 compose insertion. Covers four phases: data model + CRUD, management UI in
 Settings, compose insertion behavior, and account-switching replacement.
 
-**Depends on:** Rich text editor (`crates/rich-text-editor/`) — the signature
-editor IS the rich text editor. The editor must be at Phase 3 (HTML round-trip)
-before Phase 2 of this spec can start.
+**Depends on:** The rich text editor subsystem (see `docs/editor/architecture.md`; currently targeting `crates/rich-text-editor/`, though the final crate location may differ) — the signature editor IS the rich text editor. The editor must be at Phase 3 (HTML round-trip) before Phase 2 of this spec can start. This spec references editor types by logical name (`Document`, `Block`, `EditorAction`) rather than hard-coding import paths, so the crate location is not a blocking decision.
 
 **References:**
 - `docs/editor/architecture.md` — Document model, Block tree, StyledRun, HTML
@@ -462,8 +460,9 @@ This is a `widgets::select` showing all signatures for the account plus "None".
 Selecting a signature calls `db_update_signature` to set `is_default = 1` on
 the chosen signature (and clear the old default).
 
-This provides a second path to assign defaults — the first is the checkbox in
-the signature editor itself. Both paths use the same underlying CRUD operations.
+This provides a second path to assign defaults — the first is the checkbox in the signature editor itself. Both paths are equivalent surfaces over the same state (`is_default` / `is_reply_default` columns on the `signatures` table) and use the same underlying CRUD operations. They must not diverge.
+
+**Dependency:** This section requires the account settings implementation (`docs/accounts/implementation-spec.md`) to be real enough to supply the account editor slide-in with account grouping and a dropdown insertion point. The signature management UI (Phase 2's list grouped by account) also depends on account metadata being accessible. If account settings ships first, the default-signature dropdown is a small addition. If signatures ship first, the dropdown is deferred until the account editor exists.
 
 ---
 
@@ -495,9 +494,9 @@ Block M+1:  BlockQuote containing quoted content
 
 #### Separator convention
 
-The signature separator is a `Block::HorizontalRule`. In HTML serialization,
-it becomes `<hr>`. When the editor serializes the full document for sending,
-the `<hr>` naturally appears between the user's content and the signature.
+The signature separator is a `Block::HorizontalRule`. In HTML serialization, it becomes `<hr>`. When the editor serializes the full document for sending, the `<hr>` naturally appears between the user's content and the signature.
+
+**This is a deliberate outgoing markup choice.** An `<hr>` is a stronger visual separator than a simple divider line, and it will be visible in the recipient's mail client. This matches the convention used by Outlook, Thunderbird, and Apple Mail for signature separation. If user feedback indicates the `<hr>` is too heavy, it can be replaced with a styled `<div>` border or a lighter visual treatment — but for V1, `<hr>` is the simplest correct choice because it has universal mail-client support and clear semantic meaning.
 
 For RFC 3676 compliance in the `text/plain` alternative, the plain-text
 serializer emits `-- \n` (dash dash space newline) before the signature's
@@ -513,11 +512,9 @@ When serializing to HTML for send, the signature blocks are wrapped in:
 </div>
 ```
 
-This wrapper is NOT part of the editor's document model — it is added during
-HTML serialization for outgoing email only. It serves two purposes:
+This wrapper is NOT part of the editor's document model — it is added during HTML serialization for outgoing email only. Its primary purpose is **interoperability**: other email clients can identify and strip the signature on reply, and web-based clients can style or collapse it. The `data-signature-id` attribute also enables Ratatoskr to identify its own signatures when re-parsing sent messages.
 
-1. Other email clients can identify and strip the signature on reply
-2. Draft restoration can identify which blocks are the signature
+Draft restoration does NOT depend on this wrapper. Drafts persist the editor `Document` plus `ComposeDocumentState` metadata (including `signature_separator_index` and `active_signature_id`), so the signature region is known structurally without reparsing HTML.
 
 #### Tracking signature block range
 
@@ -530,6 +527,13 @@ pub struct ComposeDocumentState {
     pub editor_state: EditorWidgetState,
     /// Block index where the signature separator (HorizontalRule) is.
     /// None if no signature is inserted.
+    ///
+    /// V1 region model: the signature region is "everything from this index
+    /// to the attribution line (or end of document)." This is pragmatic but
+    /// fragile — if block insertions/deletions shift indices, this must be
+    /// updated. A stronger approach (e.g., region markers or block-level
+    /// metadata) can replace this if signatures and quoted content become
+    /// more structurally complex.
     pub signature_separator_index: Option<usize>,
     /// The signature_id that was inserted, for change detection.
     pub active_signature_id: Option<String>,

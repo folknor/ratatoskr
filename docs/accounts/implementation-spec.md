@@ -2,7 +2,7 @@
 
 ## Overview
 
-This spec covers the UI layer for account management in Ratatoskr. The backend is complete: auto-discovery (`crates/core/src/discovery/`), OAuth with PKCE (`crates/core/src/oauth.rs`), IMAP credential handling, and account storage (`crates/db/src/db/types.rs` `DbAccount`). This spec defines the app-side state, messages, views, and phasing for:
+This spec covers account management in Ratatoskr. The backend for discovery, OAuth, and IMAP credential handling is complete (`crates/core/src/discovery/`, `crates/core/src/oauth.rs`). However, this spec is not purely app-side work — Phase 0 adds new DB columns (`account_color`, `account_name`, `sort_order`), a migration, and new CRUD functions in `crates/core/`. The remaining phases are app-layer UI work. This spec defines the state, messages, views, and phasing for:
 
 1. First-launch experience (centered modal over empty window)
 2. Add Account wizard (multi-step state machine)
@@ -118,14 +118,30 @@ pub enum AccountHealth {
 }
 ```
 
-Health is derived client-side from the account's token state and last sync time. No DB column -- computed on demand:
+Health is derived client-side from the account's token state and last sync time. No DB column — computed on demand. The app-side `Account` type must carry the fields needed for this derivation:
 
 ```rust
+pub struct Account {
+    // ... existing fields ...
+    pub token_expires_at: Option<i64>,  // from DbAccount (OAuth accounts)
+    pub last_sync_at: Option<i64>,      // from DbAccount
+    pub is_active: bool,                // from DbAccount (user can disable)
+}
+
 fn compute_health(account: &Account) -> AccountHealth {
-    // token_expires_at in the past + no successful recent sync → Error
-    // token_expires_at within 24h → Warning
-    // is_active == 0 → Disabled
-    // otherwise → Healthy
+    if !account.is_active {
+        return AccountHealth::Disabled;
+    }
+    let now = chrono::Utc::now().timestamp();
+    if let Some(expires) = account.token_expires_at {
+        if expires < now && account.last_sync_at.map_or(true, |ls| now - ls > 3600) {
+            return AccountHealth::Error; // token expired + no recent sync
+        }
+        if expires < now + 86400 {
+            return AccountHealth::Warning; // token expires within 24h
+        }
+    }
+    AccountHealth::Healthy
 }
 ```
 
@@ -515,11 +531,19 @@ impl Component for AddAccountWizard {
                 self.generation += 1;
                 let gen = self.generation;
 
-                // Check for duplicate account first, then run discovery
+                // Check for duplicate account first, then run discovery.
+                // Both are async: duplicate check hits the DB, discovery hits the network.
+                let db = Arc::clone(&self.db);
+                let email_clone = email.clone();
                 let task = Task::perform(
                     async move {
-                        // TODO: check db_account_exists_by_email here
-                        let result = ratatoskr_core::discovery::discover(&email).await;
+                        // Duplicate check — must happen before discovery
+                        let exists = db_account_exists_by_email(&db, email_clone.clone()).await
+                            .unwrap_or(false);
+                        if exists {
+                            return (gen, Err(format!("This account is already configured.")));
+                        }
+                        let result = ratatoskr_core::discovery::discover(&email_clone).await;
                         (gen, result)
                     },
                     |(gen, result)| AddAccountMessage::DiscoveryComplete(gen, result),
@@ -584,11 +608,18 @@ impl AddAccountWizard {
 
         self.discovery = Some(config.clone());
 
-        // High confidence: single option from registry source
-        let high_confidence = config.options.len() == 1
-            && config.options[0].source.confidence() == 0;
+        // Auto-proceed rule (from problem statement): only skip the
+        // protocol selection step when there is exactly one option AND
+        // it comes from a high-confidence source (hardcoded registry
+        // match or a well-known endpoint that responded successfully).
+        // If there is any ambiguity — multiple viable protocols, a
+        // registry match contradicted by live probing, or a lower-
+        // confidence source — always show the selection step. It is
+        // better to show a simple choice than to silently pick wrong.
+        let auto_proceed = config.options.len() == 1
+            && config.options[0].source.is_high_confidence();
 
-        if high_confidence {
+        if auto_proceed {
             self.selected_option = Some(0);
             return self.proceed_to_auth(&config.options[0]);
         }
@@ -684,7 +715,10 @@ impl AddAccountWizard {
             };
             self.auth_state.username = self.email.clone();
         }
-        // Pre-fill identity name from domain
+        // Pre-fill account name (not display name) from domain.
+        // account_name is the user-chosen label ("Work", "Personal") used
+        // in the sidebar dropdown and compose From selector.
+        // display_name is the sender name in outgoing email — separate concern.
         let domain = self.email.split('@').nth(1).unwrap_or("");
         let name = domain.split('.').next().unwrap_or(domain);
         self.identity.name = titlecase(name);
@@ -988,6 +1022,8 @@ fn view_oauth_waiting(&self) -> Element<'_, AddAccountMessage> {
 ```
 
 ### Step 3b: Password Auth
+
+**Plaintext passwords:** Per the problem statement, password fields display plaintext — no masking with dots or asterisks. This is an intentional product decision. Use `text_input` without `.secure(true)`. This is non-default behavior and easy to accidentally revert during implementation — flag it in code comments.
 
 ```rust
 fn view_password_auth(&self) -> Element<'_, AddAccountMessage> {

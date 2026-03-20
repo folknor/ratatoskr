@@ -150,9 +150,13 @@ impl Db {
 
 Updates an existing pinned search's query and thread snapshot. Used when the user edits a query in-place.
 
+**Conflict case:** If the new query matches a *different* existing pinned search (unique index conflict), the update must merge: delete the other row and keep this one. This can happen when the user edits a pinned search's query to something they searched before. The merge preserves the current pinned search's identity (it stays selected in the sidebar) and removes the stale duplicate.
+
 ```rust
 impl Db {
     /// Updates a pinned search's query string and thread snapshot.
+    /// If the new query conflicts with another pinned search, the
+    /// conflicting row is deleted (merge behavior).
     pub async fn update_pinned_search(
         &self,
         id: i64,
@@ -161,6 +165,20 @@ impl Db {
     ) -> Result<(), String> {
         self.with_conn(move |conn| {
             let now = chrono::Utc::now().timestamp();
+
+            // Check for a different pinned search with this query
+            let conflict_id: Option<i64> = conn
+                .query_row(
+                    "SELECT id FROM pinned_searches WHERE query = ?1 AND id != ?2",
+                    params![query, id],
+                    |row| row.get(0),
+                )
+                .ok();
+            if let Some(cid) = conflict_id {
+                // Merge: delete the conflicting row (CASCADE deletes its threads)
+                conn.execute("DELETE FROM pinned_searches WHERE id = ?1", params![cid])
+                    .map_err(|e| e.to_string())?;
+            }
 
             conn.execute(
                 "UPDATE pinned_searches
@@ -431,13 +449,11 @@ impl Db {
 
 ### 1.4 Database Initialization
 
-The `Db::open()` function currently sets `PRAGMA query_only = ON`, which prevents writes. Pinned searches require writes. Two options:
+The `Db::open()` function currently sets `PRAGMA query_only = ON`, which prevents writes. Pinned searches require writes.
 
-**Option A (recommended):** Use a separate connection for pinned search writes that does not set `query_only`. This is clean because pinned searches are local app state, not synced data, and a separate writable connection avoids mixing read-only sync data access with local state writes.
+**Cross-cutting architecture note:** This is not just a pinned-search concern. Multiple features need local-state writes: pinned searches, attachment collapse state (`thread_ui_state`), window session restore, keybinding overrides, and usage tracking. The writable-connection decision should be made as a broader app DB architecture choice, not driven by this spec alone. This spec assumes the solution exists and uses it — it does not own the decision.
 
-**Option B:** Remove `query_only` from the main connection. Simpler but loses the safety guard against accidental writes to synced data.
-
-The recommended approach:
+**Recommended approach (for whatever feature drives the decision first):** A separate writable connection for local app state, keeping `query_only` on the main connection for synced data safety:
 
 ```rust
 pub struct Db {
@@ -490,7 +506,7 @@ struct App {
 }
 ```
 
-The `PreSearchView` captures what to restore when the user presses Escape:
+The `PreSearchView` captures what to restore when the user presses Escape. This restores by re-navigating to an explicit navigation target rather than replaying cached thread state — an improvement over the search app integration spec's `pre_search_threads` clone approach (which that spec labels as a V1 shortcut). Both specs should converge on this navigation-target-based restoration model.
 
 ```rust
 /// Captures the sidebar state before a pinned search was activated,
@@ -503,6 +519,8 @@ pub struct PreSearchView {
     pub selected_label: Option<String>,
 }
 ```
+
+**Alignment note:** The search app integration spec (`docs/search/app-integration-spec.md`) currently uses `pre_search_threads: Option<Vec<Thread>>` (clone the thread list, restore on Escape). This spec uses navigation-state restoration instead, which is more robust. The search integration spec should adopt this approach — re-navigate to the saved `PreSearchView` target rather than replaying stale cached threads.
 
 ### 1.6 Message Variants
 
@@ -593,7 +611,7 @@ pub struct Sidebar {
 }
 ```
 
-The parent `App` keeps `pinned_searches` and `active_pinned_search` in sync with the sidebar's copies. When `App` loads pinned searches or the active state changes, it writes to `self.sidebar.pinned_searches` and `self.sidebar.active_pinned_search`.
+**Ownership model:** `App` is the source of truth for `pinned_searches` and `active_pinned_search`. The sidebar does not own separate copies — it holds references to the App-owned data. In practice, since iced's Elm architecture passes data into `view()` functions, the sidebar's `view()` receives pinned search data as parameters from the parent rather than maintaining internal duplicates. The `Sidebar` struct's `pinned_searches` and `active_pinned_search` fields are written by `App` before each `view()` call — they are downstream mirrors, not independent state. If the sidebar component pattern requires internal fields, they should be documented as "set by parent, not independently mutated."
 
 #### View function
 

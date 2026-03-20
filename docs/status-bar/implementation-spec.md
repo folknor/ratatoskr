@@ -26,8 +26,9 @@ Add `pub mod status_bar;` to `crates/app/src/ui/mod.rs`. Add `status_bar: Status
 
 ```rust
 pub struct StatusBar {
-    /// Currently active warnings, keyed by account ID.
-    warnings: Vec<AccountWarning>,
+    /// Currently active warnings. At most one per account — setting a
+    /// warning for an account that already has one replaces it.
+    warnings: HashMap<String, AccountWarning>,
 
     /// Per-account sync progress, keyed by account ID.
     sync_progress: HashMap<String, SyncAccountProgress>,
@@ -35,8 +36,10 @@ pub struct StatusBar {
     /// Currently displayed transient confirmation, if any.
     confirmation: Option<Confirmation>,
 
-    /// Index for cycling through multiple warnings or syncing accounts.
-    cycle_index: usize,
+    /// Index for cycling through multiple warnings.
+    warning_cycle_index: usize,
+    /// Index for cycling through syncing accounts.
+    sync_cycle_index: usize,
 }
 ```
 
@@ -224,7 +227,7 @@ const CYCLE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3);
 
 ```rust
 fn resolve_warning(&self) -> ResolvedContent<'_> {
-    let idx = self.cycle_index % self.warnings.len();
+    let idx = self.warning_cycle_index % self.warnings.len();
     let warning = &self.warnings[idx];
     let clickable = matches!(warning.kind, WarningKind::TokenExpiry);
 
@@ -267,7 +270,7 @@ fn resolve_sync_progress(&self) -> ResolvedContent<'_> {
         let p = accounts[0];
         format!("Syncing {} ({} / {})", p.email, format_number(p.current), format_number(p.total))
     } else {
-        let idx = self.cycle_index % accounts.len();
+        let idx = self.sync_cycle_index % accounts.len();
         let p = accounts[idx];
         format!(
             "Syncing {} accounts... ({}: {} / {})",
@@ -316,7 +319,8 @@ impl Component for StatusBar {
     ) -> (Task<StatusBarMessage>, Option<StatusBarEvent>) {
         match message {
             StatusBarMessage::CycleTick(now) => {
-                self.cycle_index = self.cycle_index.wrapping_add(1);
+                self.warning_cycle_index = self.warning_cycle_index.wrapping_add(1);
+                self.sync_cycle_index = self.sync_cycle_index.wrapping_add(1);
 
                 // Expire confirmation if past its duration.
                 if let Some(ref conf) = self.confirmation {
@@ -331,7 +335,7 @@ impl Component for StatusBar {
                 if self.warnings.is_empty() {
                     return (Task::none(), None);
                 }
-                let idx = self.cycle_index % self.warnings.len();
+                let idx = self.warning_cycle_index % self.warnings.len();
                 let warning = &self.warnings[idx];
                 match warning.kind {
                     WarningKind::TokenExpiry => {
@@ -341,7 +345,11 @@ impl Component for StatusBar {
                         (Task::none(), Some(event))
                     }
                     WarningKind::ConnectionFailure { .. } => {
-                        // Not clickable — no event.
+                        // Connection failures are informational only in V1.
+                        // The problem statement mentions "retry connection"
+                        // as a recovery action, but retries happen automatically
+                        // via backoff. Clickable retry can be added later if
+                        // users need manual retry control.
                         (Task::none(), None)
                     }
                 }
@@ -779,7 +787,7 @@ Connection failures auto-resolve when a subsequent sync succeeds. The sync orche
 
 - Warnings are keyed by `account_id`. Setting a new warning for an account replaces any existing warning for that account.
 - `clear_warning()` removes the warning for the given account.
-- When a warning is cleared and `cycle_index` exceeds the new warning count, it wraps naturally on the next `resolve()` call (via `%`).
+- When a warning is cleared and `warning_cycle_index` exceeds the new warning count, it wraps naturally on the next `resolve()` call (via `%`). Same for `sync_cycle_index`.
 
 ---
 

@@ -23,6 +23,8 @@ The token input widget is used in three contexts:
 
 All three share the same widget. The caller configures which search pools to include.
 
+**Compose-first, reusable by design.** This spec describes the token input and autocomplete in the context of compose recipient fields, because that is the first and most complex integration point. Calendar attendee fields and the group editor reuse the same widget and search infrastructure with different parent orchestration (different `ContactSearchMode`, different context menu options, no cross-field drag). The widget itself is context-agnostic — all compose-specific behavior (Bcc suggestions, field-move menu items, cross-field drag) lives in the parent compose view, not the widget.
+
 ---
 
 ## Phase 1: Token Input Widget (Custom `advanced::Widget`)
@@ -59,6 +61,12 @@ pub struct Token {
 
 /// Opaque token identifier. Wraps a u64 counter, monotonically increasing
 /// per widget instance to guarantee uniqueness across add/remove cycles.
+///
+/// Cross-field drag/drop: when a token is moved from To to Cc, it is
+/// removed from the source field and recreated in the target field with
+/// a new TokenId. Tokens do not retain identity across fields — the
+/// email address is the semantic identity, not the TokenId. This keeps
+/// each widget instance's ID space independent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TokenId(pub u64);
 
@@ -517,14 +525,19 @@ The compose view:
 /// Blends synced contacts, seen addresses, and cached GAL entries.
 #[derive(Debug, Clone)]
 pub struct ContactSearchResult {
-    /// The email address (primary key for dedup).
-    pub email: String,
+    /// The email address. Present for person results (primary key for
+    /// dedup). None for group results (groups don't have a single email).
+    pub email: Option<String>,
     /// Display name, resolved from highest-priority source.
     pub display_name: Option<String>,
     /// Avatar URL if available (synced contacts only).
     pub avatar_url: Option<String>,
-    /// Relevance score for ranking (higher = more relevant).
-    pub score: f64,
+    /// Recency score for ranking (higher = more recent interaction).
+    /// Per the product spec, recency dominates ranking. This is derived
+    /// from last_contacted_at or similar timestamp, not frequency count.
+    /// The exact formula is tuned empirically — this field carries the
+    /// computed score, not raw data.
+    pub recency_score: f64,
     /// The kind of result (person vs group).
     pub kind: ContactSearchKind,
 }
@@ -589,10 +602,10 @@ pub fn search_contacts_unified(
                 let idx = results.len();
                 seen_emails.insert(c.email.to_lowercase(), idx);
                 results.push(ContactSearchResult {
-                    email: c.email,
+                    email: Some(c.email),
                     display_name: c.display_name,
                     avatar_url: c.avatar_url,
-                    score: c.frequency as f64,
+                    recency_score: compute_recency_score(&c),
                     kind: ContactSearchKind::Person,
                 });
             }
@@ -605,10 +618,10 @@ pub fn search_contacts_unified(
             let groups = db_search_contact_groups_sync(conn, query, limit)?;
             for g in groups {
                 results.push(ContactSearchResult {
-                    email: String::new(), // Groups don't have a single email
+                    email: None, // Groups don't have a single email
                     display_name: Some(g.name.clone()),
                     avatar_url: None,
-                    score: 0.0, // Groups ranked by name match quality
+                    recency_score: 0.0, // Groups ranked by name match quality, not recency
                     kind: ContactSearchKind::Group {
                         group_id: g.id,
                         member_count: g.member_count,
@@ -623,7 +636,7 @@ pub fn search_contacts_unified(
                     email: String::new(),
                     display_name: Some(g.name.clone()),
                     avatar_url: None,
-                    score: 0.0,
+                    recency_score: 0.0,
                     kind: ContactSearchKind::Group {
                         group_id: g.id,
                         member_count: g.member_count,
@@ -866,9 +879,13 @@ The parsing function is **not** a full RFC 5322 parser. It handles the common fo
 1. User pastes text (Ctrl+V / Cmd+V)
 2. Token input widget emits `TokenInputMessage::Paste(clipboard_text)`
 3. Compose view's `update()` calls `parse_pasted_addresses()`
-4. For each parsed address: create a `Token` with the extracted display name and email
-5. Add all tokens to the model, clear text input
-6. **No autocomplete dropdown** — paste bypasses search entirely
+4. **Dedup within paste:** remove duplicate emails from the parsed set (keep first occurrence)
+5. **Dedup against existing tokens:** skip any parsed address whose email already exists as a token in this field
+6. **Invalid addresses:** addresses that fail basic validation (no `@`, empty local/domain) are silently dropped. No error per-address — the count in the Bcc banner reflects only successfully tokenized addresses.
+7. For each valid, non-duplicate address: create a `Token` with the extracted display name and email
+8. Add all tokens to the model, clear text input
+9. **No autocomplete dropdown** — paste bypasses search entirely
+10. **Bulk paste banner:** if 10+ addresses are successfully tokenized, show the Bcc/group-creation suggestion banner (see below)
 
 ### Bcc Suggestion Banner
 

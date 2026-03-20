@@ -5,6 +5,8 @@ Phased implementation spec for the pop-out message view window. This is the simp
 **Product spec:** `docs/pop-out-windows/problem-statement.md`
 **Tier:** 3 in `docs/implementation-plan.md` — mostly independent, no heavy blockers.
 
+**Shared infrastructure note:** Phase 1 of this spec establishes multi-window architecture that all pop-out windows will share — compose, message view, and eventually calendar. Implementers should understand that Phase 1 is shared platform work, not feature-local scaffolding. The window registry, daemon migration, per-window routing, and cascade-close behavior are foundational infrastructure reused by every future pop-out spec.
+
 ## Table of Contents
 
 1. [Multi-Window Architecture in iced](#phase-1-multi-window-architecture)
@@ -490,6 +492,12 @@ pub enum RenderingMode {
 #### Construction
 
 ```rust
+// V1 data model note: MessageViewState is seeded from the app's ThreadMessage
+// type, which is a prototype-level model missing some fields (cc_addresses,
+// bcc_addresses). The long-term path is to seed from core's ThreadDetailMessage
+// (from get_thread_detail()), which has the full field set. This is acceptable
+// for the first iteration because the async body/attachment loads fill in the
+// critical missing data after window creation.
 impl MessageViewState {
     pub fn from_thread_message(msg: &ThreadMessage) -> Self {
         Self {
@@ -717,7 +725,7 @@ fn message_view_header<'a>(
 
 ### Body Rendering
 
-For Phase 2, the body renders as plain text (using the snippet or body_text). Full HTML rendering is Phase 3.
+**Phased deviation from product spec:** The problem statement treats full rendered message body as core to the message-view window. Phase 2 delivers plain text only (using `body_text` or snippet fallback). Full HTML rendering (Simple HTML, Original HTML with remote-content controls) arrives in Phase 3. This is a deliberate phasing choice — the multi-window infrastructure and basic message display ship first, rendering fidelity follows. Phase 2 is functionally useful (users can reference message content) but visually incomplete.
 
 ```rust
 fn message_view_body<'a>(
@@ -1450,11 +1458,17 @@ After `boot` completes, restored windows need their data loaded. This can be tri
 
 ### Best-Effort Restore
 
-Per the problem statement, restoration is best-effort. If the message was deleted between sessions:
+Per the problem statement, restoration is best-effort. Specific failure and edge cases:
 
-1. The data load query returns no results.
-2. The window shows an error banner: "This message is no longer available."
-3. The window remains open (user can close it) but the body area shows the error.
+**Message deleted:** The data load query returns no results. The window shows an error banner: "This message is no longer available." The window remains open (user can close it) but the body area shows the error.
+
+**Body/attachment load failure:** Network or DB error during async load. The window shows the header (from session data) but the body area shows a "Failed to load message body" error with a retry button.
+
+**Rendering mode:** Not persisted — restored windows reset to the system default rendering mode. Per-window rendering mode overrides are transient (problem statement: "not persisted").
+
+**Scroll offset:** Not restored. Restoring exact scroll position after async body load is unreliable (content may have changed, HTML layout differs). Windows open scrolled to top.
+
+**Reloading body and attachments:** Restored windows trigger the same async data loads as newly opened windows. The session entry provides the message_id and account_id needed to query the body store and attachments table. Body/attachment data is never cached in the session file — it is always loaded fresh from the database.
 
 ```rust
 /// Error state for a message view that failed to restore.
@@ -1511,6 +1525,8 @@ Going forward, save only `session.json`. The old `window.json` can be left in pl
 ---
 
 ## Phase 6: Save As (.eml, .txt)
+
+**Product-surface deviation:** The problem statement specifies three formats: `.eml`, `.pdf`, and `.txt`. This phase delivers `.eml` and `.txt` only. PDF export is deliberately deferred per the updated problem statement ("PDF export should be treated as a later-phase feature") because it requires a separate rendering pipeline to faithfully paginate HTML to PDF. The `.eml` and `.txt` formats are straightforward serialization and cover the primary use cases (archival and plain-text reference).
 
 ### File Picker
 
