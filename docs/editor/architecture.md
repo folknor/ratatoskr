@@ -10,179 +10,273 @@ only reference project that solves rendering + input on a declarative UI framewo
 without contentEditable). See `docs/editor/research-summary.md` for detailed
 analysis of all four.
 
+**Crate:** `crates/rich-text-editor/` — 11,400+ lines, 368 tests, zero clippy
+warnings. Pure-Rust core modules (no iced dependency) + feature-gated widget.
+
 ---
 
 ## Document Model
+
+**Status: fully implemented.**
 
 Block tree with inline runs. Maps naturally to both HTML (DOM) and iced rendering
 (column of `Paragraph` widgets).
 
 ```
 Document
-  blocks: Vec<Block>
+  blocks: Vec<Arc<Block>>       // Arc for structural sharing
 
 Block
   Paragraph  { runs: Vec<StyledRun> }
-  Heading    { level: u8 (1-3), runs: Vec<StyledRun> }
+  Heading    { level: HeadingLevel, runs: Vec<StyledRun> }
   List       { ordered: bool, items: Vec<ListItem> }
-  BlockQuote { blocks: Vec<Block> }
+  BlockQuote { blocks: Vec<Arc<Block>> }
   HorizontalRule
 
 ListItem
-  blocks: Vec<Block>          // usually one Paragraph; can nest Lists
+  blocks: Vec<Arc<Block>>       // usually one Paragraph; can nest Lists
 
 StyledRun
   text: String
   style: InlineStyle
+  link: Option<String>          // href
 
-InlineStyle (bitflags + optional fields)
+InlineStyle (bitflags)
   BOLD
   ITALIC
   UNDERLINE
   STRIKETHROUGH
-  link: Option<String>        // href
 ```
+
+Note: `link` is a field on `StyledRun`, not on `InlineStyle`. This was a
+deliberate deviation from the original spec (which had `link` as an
+`InlineStyle` optional field) — links are semantically different from
+formatting flags, and keeping them separate simplifies the `same_formatting()`
+check used by normalization.
+
+### Immutability and structural sharing
+
+`Document.blocks` is `Vec<Arc<Block>>`. After an edit, only the affected block
+gets a new `Arc` allocation. Unchanged blocks are `Arc::clone` — cheap pointer
+copies. `ListItem.blocks` and `BlockQuote.blocks` also use `Arc<Block>`.
 
 ### Normalization invariant
 
-Adjacent `StyledRun`s within the same block must have different `InlineStyle`s.
-After every edit, adjacent runs with identical styles merge. This keeps run counts
-small and makes boundary operations predictable.
+Adjacent `StyledRun`s within the same block must have different `(style, link)`
+pairs. After every edit, adjacent runs with identical formatting merge. This
+keeps run counts small and makes boundary operations predictable.
 
 ### Cursor and selection
 
 ```
 DocPosition
   block_index: usize
-  offset: usize               // char offset in block's flattened text (all runs concatenated)
+  offset: usize               // char offset in block's flattened text
 
 DocSelection
   anchor: DocPosition          // where selection started
-  focus: DocPosition           // where the caret visually is (can be before or after anchor)
+  focus: DocPosition           // where the caret visually is
 ```
 
-Why flattened offsets, not `(run_index, char_offset)`: edits frequently split and
-merge runs. With flattened offsets the cursor is stable across run restructuring.
-Resolving a flattened offset to a specific run is O(runs_per_block), which is
-trivially small for email text.
+Flattened char offsets (not `(run_index, char_offset)`) — stable across run
+restructuring. `DocPosition` implements `Ord` for range comparisons.
+`DocSelection` provides `start()`, `end()`, `is_collapsed()`, `block_range()`.
 
-Cross-block selection: anchor in block 3, focus in block 7 means blocks 4–6 are
-fully selected. Delete, paste, and format operations handle this naturally.
-
----
-
-## Widget Strategy
-
-Custom `Widget` trait implementation. Not a `TextEditor` fork — `TextEditor`
-delegates to cosmic-text's monolithic `Buffer` which has no concept of blocks,
-and its `Highlighter` API only carries color + font per range (no underline,
-strikethrough, size, or background).
-
-### Rendering
-
-One `Renderer::Paragraph` per `Block`, created via `Paragraph::with_spans()`:
-
-- Each `StyledRun` maps to an iced `Span` with the appropriate `font`
-  (bold → `font::TEXT_BOLD`, italic → `font::TEXT_ITALIC`, bold+italic →
-  `font::TEXT_BOLD_ITALIC`), `underline`, `strikethrough`, `color`, and `size`.
-- Blocks stacked vertically with spacing from the layout system:
-  - Headings: H1 = `TEXT_HEADING` (18), H2 = `TEXT_TITLE` (16), H3 = `TEXT_XL` (14)
-  - List items: bullet/number prefix in fixed-width leading container, indent for nesting
-  - Block quotes: 2px left border + 16px indent + muted text color
-  - Horizontal rule: `fill_quad` line across the width
-- Blocks are drawn via `renderer.fill_paragraph()`.
-
-### Cursor and selection rendering
-
-- Cursor: `fill_quad` vertical line at `Paragraph::grapheme_position(line, index)`.
-  Blinks on 500ms interval (same as iced's `text_editor`).
-- Selection: blue `fill_quad` rectangles per line span, computed from
-  `grapheme_position` for start and end of each selected line within each block.
-
-### Input handling
-
-The widget's `update()` method handles:
-
-- **Keyboard text input** → document edit operations (insert, delete, split block)
-- **Mouse click** → `hit_test()` on each block's `Paragraph` to find char offset,
-  map to `DocPosition`
-- **Mouse drag** → track start, update selection focus on move
-- **IME** → forward preedit/commit (same pattern as iced's text_editor)
-- **Format shortcuts** → intercept Ctrl+B/I/U before text insertion
-
-### Paragraph caching
+### DocSlice (clipboard)
 
 ```
-EditorWidgetState
-  paragraphs: Vec<CachedParagraph>    // one per block, invalidated on edit
-  focus: Option<Focus>                 // tracks blink timing + window focus
-  scroll_offset: f32
-  drag_state: Option<DragState>
-  ime_preedit: Option<Preedit>
-
-CachedParagraph
-  paragraph: Renderer::Paragraph
-  dirty: bool
-  y_offset: f32                        // computed during layout
-  height: f32
+DocSlice
+  blocks: Vec<Block>
+  open_start: bool
+  open_end: bool
 ```
 
-Only dirty paragraphs re-layout. Most edits dirty a single block.
+Used for cross-block copy/paste. `Document::slice(start, end)` extracts a
+slice from a selection. `DocSlice::inline_fragment(runs)` creates a
+single-block open-ended fragment.
+
+### Key helpers on document types
+
+- `StyledRun::split_at(char_offset) -> (StyledRun, StyledRun)`
+- `isolate_runs(runs, start, end) -> Range<usize>` — split runs at boundaries
+  for surgical style application
+- `Block::resolve_offset(offset) -> Option<(run_index, offset_in_run)>`
+- `Block::flattened_text()`, `Block::char_len()`, `Block::kind() -> BlockKind`
+- `Document::slice()`, `Document::clamp_position()`, `Document::end_position()`
 
 ---
 
 ## Editing Operations
 
-Operation-based for undo/redo, not patch-based (`dissimilar`). Patch diffing
-operates on flat strings — it can't capture "toggled bold on characters 12-25"
-or "changed this paragraph to a heading." With a structured Document model, each
-operation already knows exactly what changed and how to reverse it. Memory is
-negligible: `EditOp`s are positions + small strings, not full-document snapshots.
+**Status: fully implemented. All 8 variants with apply + invert.**
 
-(`dissimilar` remains appropriate for flat text fields like contact notes or
-calendar descriptions that don't have a structured model.)
-
-Every user action creates an `EditOp` that knows how to apply and reverse itself.
+Operation-based for undo/redo, not patch-based. Every user action creates an
+`EditOp` that knows how to apply and reverse itself. Each `apply()` returns a
+`PosMap` describing what shifted. Each `invert()` returns the exact inverse
+operation.
 
 ```
 EditOp
   InsertText       { position, text }
   DeleteRange      { start, end, deleted: DeletedContent }
-  SplitBlock       { position }                              // Enter key
-  MergeBlocks      { block_index, saved: Block }             // Backspace at block start
+  SplitBlock       { position }
+  MergeBlocks      { block_index, saved: Block, merge_offset: usize }
   ToggleInlineStyle { start, end, style_bit }
   SetBlockType     { block_index, old: BlockKind, new: BlockKind }
   InsertBlock      { index, block }
   RemoveBlock      { index, saved: Block }
 
 DeletedContent
-  blocks: Vec<Block>    // enough to reconstruct original structure on undo
+  blocks: Vec<Block>    // full run structure preserved for undo
 ```
+
+### Implementation notes
+
+- `MergeBlocks` stores `merge_offset` (char length of the block being merged
+  into). This allows `invert()` to produce a correct `SplitBlock` without
+  needing the document.
+- `DeleteRange` undo uses a sentinel pattern: `invert()` always produces
+  `DeleteRange { start, end: start, deleted }` regardless of single-block or
+  cross-block. `apply()` detects start == end with non-empty deleted content
+  and routes to `apply_restore_deleted()`, which reconstructs the original
+  block structure including all run styling and links.
+- `ToggleInlineStyle` uses `isolate_runs()` for surgical run splitting. Checks
+  `all_text_has_style()` to decide add vs. remove. Self-inverse.
+- Cross-block `DeleteRange` truncates the start block, removes middle blocks,
+  and appends the end block's tail. The inverse reconstructs all blocks.
+
+### Position mapping (PosMap)
+
+```
+PosMap
+  block_index: usize
+  entries: Vec<PosMapEntry>               // char-level changes
+  structural: Option<StructuralChange>    // block-level changes
+
+PosMapEntry { old_offset, old_len, new_len }
+
+StructuralChange
+  Split   { block_index, split_offset }
+  Merge   { block_index, merge_offset }
+  Insert  { block_index }
+  Remove  { block_index }
+  CrossBlockDelete { start_block, removed_count, start_offset }
+```
+
+`PosMap::map(pos)` applies structural changes first, then char-level entry
+mapping. Split remaps positions after the split offset into the new block.
+Merge adds merge_offset when collapsing positions. CrossBlockDelete collapses
+positions in deleted blocks to the deletion point.
+
+### Missing operation
+
+`SetBlockAttrs` for block-level attributes that aren't type changes (text
+alignment, list indent level). Add when implementing alignment or indentation.
 
 ### Undo stack
 
-`Vec<UndoGroup>` where each `UndoGroup` is a batch of `EditOp`s from one logical
-user action, plus cursor positions before/after. Consecutive character insertions
-group into one entry (split on pause, format change, or cursor jump).
+**Status: fully implemented.**
+
+`Vec<UndoGroup>` where each `UndoGroup` is a batch of `EditOp`s from one
+logical user action, plus cursor positions before/after.
+
+Consecutive `InsertText` at adjacent positions merge into one group. A new
+group starts on: pause (`break_group()`), format change, cursor jump, or
+different operation type. Redo stack cleared on new push. Max 100 entries with
+oldest eviction.
+
+`map_cursors(&PosMap)` maps stored cursor bookmarks through edits
+(infrastructure in place, delegating to `PosMap::map`).
 
 ### Format toggle logic
 
-**With selection:** Walk each block in the selection range. Find overlapping runs,
-split at selection boundaries, flip the style bit. If all text in the range
-already has the style, remove it; otherwise, add it. Normalize (merge adjacent
-same-style runs) afterward.
+**With selection:** `ToggleInlineStyle` operation — walks blocks, uses
+`isolate_runs()` to split at boundaries, flips the style bit. If all text
+already has the style, removes it; otherwise adds it. Normalization merges
+same-style runs afterward.
 
-**Without selection (caret):** Toggle a "pending style" flag on the editor state.
-The next inserted character inherits this pending style. This is standard rich
-text editor behavior.
+**Without selection (caret):** Toggles `pending_style` flag on `EditorState`.
+On the next `InsertText`, the rules engine compares the desired style (from
+pending_style or cursor context) against the run at the insertion point. If
+they differ, it emits `ToggleInlineStyle` ops after the insert to correct the
+styling. Pending style is cleared after the edit.
+
+---
+
+## Normalization
+
+**Status: fully implemented.**
+
+Slate-inspired dirty-block normalization with safety valve
+(max iterations = dirty_count × 42).
+
+Two entry points:
+- `normalize(doc)` — normalize entire document
+- `normalize_blocks(doc, dirty_indices)` — fast path, most edits dirty 1–2 blocks
+
+Invariants enforced:
+1. Adjacent `StyledRun`s with identical `(style, link)` merge
+2. Empty runs removed (but keep one empty run per inline block for cursor anchoring)
+3. Every inline block has ≥1 run
+4. Every `ListItem` has ≥1 block
+5. Every `BlockQuote` has ≥1 block
+6. Document has ≥1 block
+
+Normalization is recursive for container blocks (List items, BlockQuote children).
+
+---
+
+## Heuristic Rules Engine
+
+**Status: mostly implemented. See gaps below.**
+
+Chain of responsibility pattern. `rules::resolve(doc, selection, action,
+pending_style) -> Vec<EditOp>` dispatches to per-action resolvers.
+
+### Insert rules
+
+| Rule | Status | Notes |
+|------|--------|-------|
+| Insert replaces selection | Done | Emits DeleteRange before InsertText |
+| Inline style inheritance | Done | `resolve_style_at()` with left-affinity heuristic |
+| Link boundary exclusivity | Done | At link edges, style resolves to non-link neighbor |
+| Pending style override | Done | Emits ToggleInlineStyle after InsertText if style differs |
+| Heading reset on split at end | Done | SplitBlock + SetBlockType to Paragraph |
+| Preserve block style on split | Done | SplitBlock preserves heading/paragraph type |
+| Auto-exit block | **Not done** | Needs list item nesting context |
+| Block embed isolation | **Not done** | Needs Block::Image (Phase 5) |
+
+### Delete rules
+
+| Rule | Status |
+|------|--------|
+| Delete selection first | Done |
+| Backspace at block start merges | Done |
+| Delete forward at block end merges | Done |
+| Merge preserves first block's type | Done |
+| Backspace at document start is no-op | Done |
+| Document minimum (≥1 block) | Done |
+| Block embed protection | **Not done** (needs Block::Image) |
+
+### Format rules
+
+| Rule | Status | Notes |
+|------|--------|-------|
+| Toggle with selection → ToggleInlineStyle | Done | |
+| Toggle at caret → pending style | Done | |
+| Link formatting at caret | **Not done** | Find link boundaries, format whole link |
+| Line vs inline scope | Done | ToggleInlineStyle only applies to inline blocks |
 
 ---
 
 ## HTML Serialization
 
+**Status: fully implemented.**
+
 ### Document → HTML
 
-Recursive walk, ~100 lines:
+Recursive walk (~140 lines). Consistent nesting order:
+`<a><strong><em><u><s>text</s></u></em></strong></a>`
 
 ```
 Paragraph  → <p>{runs}</p>
@@ -190,350 +284,151 @@ Heading(n) → <h{n}>{runs}</h{n}>
 List(ord)  → <ol>/<ul> with <li> children
 BlockQuote → <blockquote>{children}</blockquote>
 HRule      → <hr>
-
-run → wrap text in <strong>/<em>/<u>/<s>/<a> as needed
 ```
 
-Nesting order: `<a><strong><em><u><s>text</s></u></em></strong></a>` — consistent
-ordering avoids ambiguity.
+HTML escaping for `&`, `<`, `>`, `"` in both text content and href attributes.
+Empty runs skipped.
 
 ### HTML → Document
 
-Parse with `html5ever` into DOM tree, then recursive walk:
+Parse with html5ever via custom `TreeSink` implementation (Rc<RefCell<Node>>
+handles). Recursive DOM walk with `StyleContext` accumulating inline styles.
 
-1. Block-level elements (`<p>`, `<h1>`–`<h6>`, `<ul>`, `<ol>`, `<li>`,
-   `<blockquote>`, `<div>`, `<br>`) create `Block`s.
-2. Inline elements (`<strong>`/`<b>`, `<em>`/`<i>`, `<u>`,
-   `<s>`/`<strike>`/`<del>`, `<a>`) push style bits onto a stack (frostmark's
-   `ChildData` bitflags pattern).
-3. Text nodes create `StyledRun`s with accumulated style.
-4. Unknown block elements → Paragraph. Unknown inline elements → pass through
-   content, ignore tag.
+- Block elements: `<p>`, `<h1>`–`<h6>` (H4-H6 → H3), `<ul>`, `<ol>`, `<li>`,
+  `<blockquote>`, `<div>`, `<hr>`, `<pre>`
+- Inline elements: `<strong>`/`<b>`, `<em>`/`<i>`, `<u>`, `<s>`/`<strike>`/`<del>`, `<a>`
+- Tables and complex layouts flatten to text paragraphs
+- Unknown block elements → recurse; unknown inline → pass through content
+- Whitespace collapsing (runs of whitespace → single space)
+- 37 tests including round-trip tests against html_serialize output
 
-The existing sanitizer pipeline (`css-inline` + `lol_html` in
-`crates/provider-utils/src/html_sanitizer.rs`) runs before parsing to normalize
-inline styles into tags.
-
-**Scope is narrow.** This parser only handles the editor's own HTML subset: drafts
-we previously saved, signatures from the signatures table, and reply-quoted
-content. It does not need to handle arbitrary wild HTML from the internet — that's
-the job of `litehtml-rs` (`/home/folk/Programs/litehtml-rs`), a separate pure Rust
-rendering pipeline (scraper → lightningcss → taffy → cosmic-text → tiny-skia) that
-renders arbitrary HTML emails to rasterized images in 3-23ms. The editor parser
-can be strict and simple because it only round-trips its own output.
-
-Tables and complex layouts encountered in quoted content flatten to text. This is
-acceptable — the user is editing a reply, not viewing the original. The original
-renders via litehtml-rs in the reading pane.
+**Scope is narrow.** Only handles the editor's own HTML subset (drafts,
+signatures, reply-quoted content). Arbitrary wild HTML is rendered by
+`litehtml-rs`, a separate pure-Rust HTML rendering pipeline.
 
 ---
 
-## Lessons from ProseMirror, Slate, and Quill
+## Widget
 
-Deep study of these editors surfaced several concerns our initial design
-underspecified. Each heading below describes a problem they solve and how we
-should address it.
+**Status: implemented with known limitations.**
 
-### Immutability and structural sharing
+Custom `Widget` trait implementation for iced. Not a `TextEditor` fork.
 
-ProseMirror nodes are fully immutable — edits create new nodes, sharing unchanged
-subtrees via reference. Slate uses a similar approach (new references for changed
-nodes, identity comparison for "did this change?"). This is critical for:
-- Efficient re-rendering (only dirty blocks need new paragraphs)
-- Safe undo (old documents are preserved, not mutated)
-- Predictable behavior (no aliasing bugs)
+### Architecture
 
-**For us:** `Document` and `Block` should be `Clone` with `Arc`-wrapped children
-where structural sharing matters. After an edit, only the affected block (and its
-ancestors in the document) get new allocations. Unchanged blocks are `Arc::clone`.
+The widget follows iced's ownership pattern:
 
-### Position mapping across edits
+- `EditorState` — application-owned mutable state (Document, selection,
+  undo stack, pending style, cursor state, drag state)
+- `RichTextEditor<'a, Message>` — the widget struct, created in `view()` with
+  `&'a EditorState`. Builder pattern for font, colors, padding, dimensions.
+- `Action` — events emitted by the widget to the application
+- `WidgetState` — internal tree state holding `ParagraphCache` and focus timing
 
-ProseMirror's `StepMap` encodes each edit as `[start, oldSize, newSize]` triples.
-When a cursor or selection needs to survive an edit, it's mapped through the
-StepMap. The `Mapping` class chains multiple StepMaps for multi-step transactions,
-with a `mirror` system that links a step to its inverse for undo recovery.
+The application calls `EditorState::perform(action)` in its `update()` to
+apply each action.
 
-Our architecture has `DocPosition` but no mechanism for mapping positions through
-edits. This matters for:
-- Selection preservation during undo/redo
-- Cursor stability when operations modify earlier parts of the document
-- Future: collaborative editing
+### EditorState
 
-**For us:** Each `EditOp::apply()` should return a `PosMap` (similar to StepMap)
-describing what shifted. `DocPosition::map(pos_map)` adjusts a position through
-an edit. The undo stack stores cursor positions that get mapped through subsequent
-edits.
-
-Simplified version for our block-based model: a `PosMap` is
-`{ block_index: usize, old_offset: usize, old_len: usize, new_len: usize }` for
-intra-block changes, plus block-level insert/remove/split/merge deltas. This is
-much simpler than ProseMirror's fully general mapping because we have two levels
-(block index + char offset) rather than one flat integer space.
-
-### Normalization as a formal pass
-
-Slate's normalization system is its most distinctive feature. After every
-operation, "dirty paths" are computed and each affected node is normalized. The
-default normalizer enforces:
-- Elements must have at least one child
-- Inline/block consistency within a parent
-- Adjacent identically-formatted text nodes merge
-- Inline nodes must be surrounded by text nodes
-
-Our doc mentions "adjacent runs with identical styles merge" as an invariant but
-doesn't formalize when and how normalization runs.
-
-**For us:** Add a `normalize()` method on `Document` that runs after every edit
-(or batched via `without_normalizing` for multi-op transactions):
-1. Merge adjacent `StyledRun`s with identical `InlineStyle`
-2. Remove empty runs (except: keep one empty run per block for cursor anchoring)
-3. Ensure every `Block` has at least one run (insert empty run if needed)
-4. Ensure `List` items each contain at least one block
-
-This runs on only the affected blocks (track dirty block indices per operation),
-not the entire document. Slate's safety valve (max iterations = dirty_count × 42)
-is worth stealing to prevent infinite loops from buggy normalizers.
-
-### The Slice problem (cross-block copy/paste)
-
-ProseMirror's `Slice` = `{ content: Fragment, openStart: number, openEnd: number }`.
-When you copy from the middle of one paragraph to the middle of another, the
-slice captures the partial paragraphs with "open" depths indicating how many
-levels are cut through.
-
-Our architecture doesn't address how cross-block clipboard content is
-represented. Without something like Slice, pasting "half a heading + two
-paragraphs + half a paragraph" has no clean representation.
-
-**For us:** Define a `DocSlice`:
-```
-DocSlice
-  blocks: Vec<Block>
-  open_start: bool    // first block is a fragment, not a complete block
-  open_end: bool      // last block is a fragment, not a complete block
+```rust
+pub struct EditorState {
+    pub document: Document,
+    pub selection: DocSelection,
+    pub undo_stack: UndoStack,
+    pub pending_style: InlineStyle,
+    cursor: CursorState,
+    drag: Option<DragState>,
+}
 ```
 
-Simpler than ProseMirror's arbitrary-depth open counts because our tree is only
-two levels deep (document → blocks → runs). When pasting:
-- If `open_start`: merge the first slice block's runs into the block at the
-  cursor position (after splitting it at the cursor offset)
-- Middle blocks insert as-is
-- If `open_end`: merge the last slice block's runs into the block after the split
+Key methods:
+- `perform(action: Action)` — central dispatch for all editor actions
+- `apply_action(EditAction)` — resolve through rules, apply ops, normalize,
+  push to undo
+- `undo()` / `redo()` — apply inverse/forward ops, restore cursor
+- `to_html()` / `from_html()` / `selection_text()`
 
-### Operation completeness
+### Action enum
 
-Comparing our `EditOp` set against ProseMirror's steps and Slate's 9 operations:
-
-| Our EditOp | PM equivalent | Slate equivalent | Notes |
-|------------|---------------|------------------|-------|
-| InsertText | ReplaceStep | insert_text | OK |
-| DeleteRange | ReplaceStep | remove_text + remove_node | Need to handle cross-block |
-| SplitBlock | ReplaceStep (structural) | split_node | OK |
-| MergeBlocks | ReplaceStep (structural) | merge_node | OK |
-| ToggleInlineStyle | AddMarkStep/RemoveMarkStep | set_node (on text) | OK |
-| SetBlockType | ReplaceAroundStep | set_node (on element) | OK |
-| InsertBlock | ReplaceStep | insert_node | OK |
-| RemoveBlock | ReplaceStep | remove_node | OK |
-| — | — | move_node | Not needed for email compose |
-| — | AttrStep | — | Could add for block attrs (alignment, indent) |
-
-**Missing:** A `SetBlockAttrs` operation for block-level attributes that aren't
-type changes (e.g., text alignment, list indent level). ProseMirror uses
-`AttrStep` for this; Slate uses `set_node`. Add when we implement alignment or
-indentation.
-
-### Invertibility must be explicit
-
-Both ProseMirror and Slate make every operation trivially invertible:
-- Slate: `insert_node` ↔ `remove_node` (same payload), `split_node` ↔
-  `merge_node`, etc.
-- ProseMirror: `step.invert(oldDoc)` captures the replaced content
-
-Our `EditOp` already stores enough to invert (e.g., `DeleteRange` captures
-`deleted: DeletedContent`), but we should formalize this: every `EditOp` must
-implement `fn invert(&self) -> EditOp` that returns the exact inverse operation.
-The undo stack stores the inverse, not the original.
-
-### Content validation (schema-lite)
-
-ProseMirror compiles content expressions (`"paragraph+ heading*"`) into DFAs for
-validation. This is powerful but heavy. Slate has no schema — validity is
-enforced purely by normalization.
-
-For an email editor, full schema validation is overkill. But we need at least:
-- `List` must contain only `ListItem` children
-- `ListItem` must contain at least one block
-- `BlockQuote` must contain at least one block
-- `Document` must contain at least one block
-
-**For us:** Encode these as assertions in `normalize()` rather than a separate
-schema system. If normalization encounters a violation, it fixes it (insert empty
-paragraph, unwrap invalid nesting). This is Slate's approach and is sufficient
-for our constrained block set.
-
----
-
-## Lessons from Fleather (Native Flutter Editor)
-
-Fleather is the only reference project that solves the full stack — document
-model, rendering, and input — on a declarative UI framework without
-contentEditable. Flutter's `RenderBox` + `TextPainter` is analogous to iced's
-`Widget` + `Paragraph`. Four additional concerns surfaced.
-
-### Heuristic rules for edit behavior
-
-Fleather has a formal rules engine: 15 pure functions
-`(document, position, data) → operation` organized as a chain of responsibility.
-Rules are tried in priority order; first match wins. This encodes "what should
-happen when the user does X" separately from the low-level operation machinery.
-
-**Insert rules (our equivalents needed):**
-
-1. **Block embed isolation** — block-level embeds (images, HRs) must get their
-   own line. If inserting adjacent to one, force a newline.
-2. **Auto-exit block** — pressing Enter on an empty line at the end of a list or
-   blockquote exits the block (or de-indents one level). Only fires at the last
-   item. This is the "double-Enter to exit" behavior users expect.
-3. **Preserve block style on split** — inserting a newline inside a list item
-   creates a new list item, not a plain paragraph.
-4. **Preserve line style on split** — splitting a heading mid-text creates two
-   headings. But splitting at the *end* of a heading creates a heading + a
-   paragraph (reset heading for the new line).
-5. **Inline style inheritance** — typing inside a bold run continues bold. But
-   typing at the boundary of a link does NOT extend the link (link boundaries are
-   exclusive).
-6. **Pending style override** — if the user toggled bold at the caret (pending
-   style), that overrides inheritance for the next insertion.
-
-**Delete rules:**
-
-1. **Preserve line style on merge** — backspace at the start of a line merges it
-   with the previous line. The surviving line keeps the *first* line's style (the
-   one being merged into).
-2. **Block embed protection** — cannot merge lines across a block embed.
-3. **Document minimum** — cannot delete the last newline (document must always
-   have at least one block).
-
-**Format rules:**
-
-1. **Link formatting at caret** — when the cursor is inside a link and the user
-   applies link formatting, find the link boundaries and format the whole link,
-   not just the zero-width caret position.
-2. **Line vs inline scope** — block-level attributes (heading, list type) apply
-   only to the block, not to character ranges. Inline attributes apply to
-   character ranges, not blocks. The rules system enforces this separation.
-
-**For us:** Add a `rules.rs` module. Each rule is a function:
-```
-fn apply(doc: &Document, pos: DocPosition, action: EditAction) -> Option<Vec<EditOp>>
-```
-Rules are tried in order. First `Some` return wins. The top-level `insert()`,
-`delete()`, and `format()` methods on the editor state call through the rules
-chain rather than directly creating operations. This keeps the "what should
-happen" logic separate from the "how to apply it" operation machinery.
-
-This is where most of the editor's user-facing behavior lives. Getting these
-rules right is more important than getting the data structures right — users
-notice when Enter doesn't do what they expect, not when the run merging algorithm
-is suboptimal.
-
-### Cascading position mapping (rendering ↔ document)
-
-Fleather's rendering layer uses cascading delegation for hit testing and caret
-placement:
-
-```
-RenderEditor                 → find child at pixel offset
-  RenderEditableTextBlock    → subtract block's layout offset, find child line
-    RenderEditableTextLine   → subtract line's layout offset, delegate to body
-      RenderParagraphProxy   → delegate to Flutter's TextPainter (= cosmic-text)
+```rust
+pub enum Action {
+    Edit(EditAction),
+    Move(MoveAction),
+    Select(MoveAction),
+    SelectAll,
+    Undo, Redo,
+    Copy, Cut, Paste(String),
+    Click(DocPosition),      // resolved by widget via Paragraph::hit_test
+    Drag(DocPosition),
+    LinkClicked(String),
+    Focus, Blur,
+}
 ```
 
-Each level subtracts its own layout offset and delegates downward. The reverse
-path (document position → pixel offset for caret rendering) follows the same
-cascading pattern with `getOffsetForCaret()`.
+### Rendering (widget/render.rs)
 
-**For us:** Our widget's `draw()` already stacks blocks vertically with
-`y_offset` per `CachedParagraph`. Hit testing follows the same pattern:
-1. Binary search blocks by `y_offset` to find which block was clicked
-2. Subtract the block's `y_offset` from the click position
-3. Call `Paragraph::hit_test()` on that block's cached paragraph
-4. The returned char offset + the block index = `DocPosition`
+- `ParagraphCache<P>` — one `CacheEntry` per block with dirty tracking and
+  y-offsets. Only dirty entries re-layout via `Paragraph::with_spans()`.
+- `build_spans_for_block()` — converts StyledRuns to iced Spans with correct
+  font (bold/italic/bold-italic variants), size, color, underline, strikethrough
+- Font sizes: H1 = 18px, H2 = 16px, H3 = 14px, body = 13px
+- Block spacing, blockquote border/indent, list marker width constants
+- Drawing helpers: `draw_horizontal_rule()`, `draw_blockquote_border()`,
+  `draw_list_marker()`, `draw_paragraph()`
 
-Caret rendering reverses it:
-1. Look up `CachedParagraph` at `block_index`
-2. Call `Paragraph::grapheme_position(line, offset)` on it
-3. Add the block's `y_offset`
+### Hit testing and cursor (widget/cursor.rs)
 
-Vertical cursor movement (arrow up/down) needs special handling at block
-boundaries: when the cursor is on the first line of a block and moves up, the
-widget must find the previous block, get its last line's height, and compute the
-position at the same x-coordinate in that line. Fleather solves this with a
-`VerticalCaretMovementRun` iterator that tracks the x-coordinate across
-consecutive vertical moves.
+- `BlockLayout` — per-block layout info (y_offset, height, content_offset)
+- `CursorState` — blink timing (500ms), focus tracking, target_x for vertical
+  movement
+- `DragState` — anchor position and active flag
+- `hit_test()` / `find_block_at_point()` — binary search blocks by y_offset,
+  translate to block-local coordinates
+- `selection_block_ranges()` — decompose selection into per-block participation
+  (Single/First/Full/Last)
+- `prepare_move_up()` / `prepare_move_down()` — vertical cursor movement with
+  cross-block boundary handling
 
-### Text input strategy
+Hit testing in the Widget's `update()` method uses `ParagraphCache::block_at_y()`
+to find the clicked block, then `Paragraph::hit_test()` on the cached paragraph
+to get the character offset. Block-type-specific x-offsets (list marker width,
+blockquote indent) are accounted for.
 
-ProseMirror, Slate, and Quill all use `contentEditable` and let the browser
-handle text input — then reconcile. Fleather cannot do this (Flutter has no
-browser) and instead uses Flutter's `DeltaTextInputClient` protocol:
+### Input handling (widget/input.rs)
 
-1. On focus, connect to the platform IME
-2. Send the current text + selection state to the platform
-3. Receive delta events back (insertions, deletions, replacements)
-4. Map each platform delta to a document operation
-5. After the operation, sync the new text + selection back to the platform
+- `map_key_event(key, modifiers, text) -> KeyAction` — central key binding
+  dispatch. Standard desktop bindings: arrows (±Shift ±Ctrl), Home/End,
+  Backspace/Delete, Enter, Ctrl+B/I/U, Ctrl+C/X/V, Ctrl+Z/Y/Shift+Z, Ctrl+A
+- `KeyAction` enum: Edit, Move, Select, SelectAll, Copy, Cut, Paste, Undo, Redo
+- `MoveAction` enum: Left, Right, Up, Down, Home, End, WordLeft, WordRight,
+  DocumentStart, DocumentEnd
+- Cursor movement helpers: `move_left()`, `move_right()`, `word_left()`,
+  `word_right()`, `home()`, `end()`, `document_start()`, `document_end()`
+- Word boundary detection: three-class heuristic (word chars, whitespace, other)
 
-**For us:** iced's existing text input handling (in `text_editor.rs`) already
-receives keyboard events and IME preedit/commit through iced's event system. We
-can start with this — it handles basic typing, composition, and clipboard on all
-platforms. Proper platform IME protocol integration (IBus/Fcitx on Linux,
-NSTextInputClient on macOS, TSF on Windows) can come later if iced's built-in
-handling proves insufficient.
+### Widget trait implementation
 
-The key insight from fleather: **the editor must always be able to tell the
-platform what its current text and selection state is**, so the platform's IME can
-offer correct suggestions, composition, and autocorrect. This means maintaining a
-plain-text projection of the document (or at least the current block) that can be
-sent to the platform on demand.
+- `layout()` — uses ParagraphCache to compute block paragraph layouts
+- `draw()` — iterates blocks: fills paragraphs, draws HR/blockquote/list
+  decorations, renders selection highlight rectangles, draws blinking cursor
+- `update()` — handles window focus/blink, keyboard events (mapped via
+  input::map_key_event), mouse click/drag/release with hit testing
+- `mouse_interaction()` — Text cursor when hovering, NotAllowed when disabled
 
-### Run splitting for inline format application
+### Known limitations
 
-Fleather's `LeafNode` has three surgical operations: `splitAt(index)`,
-`cutAt(index)`, and `isolate(index, length)`. When applying bold to characters
-12-25 of a paragraph:
-
-1. `isolate(12, 13)` splits the containing run twice — once at 12, once at 25 —
-   producing up to three runs: `[0..12)`, `[12..25)`, `[25..end)`
-2. Apply bold to the middle run
-3. `optimize()` merges adjacent runs with identical styles
-
-This split-apply-merge pattern is the standard approach across all editors we
-studied. ProseMirror's `mapFragment` in `AddMarkStep` does the same.
-
-**For us:** `StyledRun` needs:
-```
-fn split_at(&self, offset: usize) -> (StyledRun, StyledRun)
-fn isolate(runs: &mut Vec<StyledRun>, start: usize, end: usize) -> Range<usize>
-```
-Where `isolate` returns the index range of the affected runs after splitting.
-These are the building blocks for `ToggleInlineStyle` and any future mark
-operations. After applying the style change, `normalize()` merges adjacent
-same-style runs.
-
-### Vec vs linked list for runs
-
-Fleather uses Dart's `LinkedList` for all node children, giving O(1)
-insert/remove for the split-apply-merge pattern. Our `Vec<StyledRun>` means
-splitting a run requires shifting elements.
-
-**For us:** `Vec` is fine. Email paragraphs rarely have more than ~10 styled
-runs. The shift cost for `Vec::insert` on 10 elements is negligible compared to
-the text shaping cost of re-laying-out the paragraph. The cache friendliness and
-simpler code of `Vec` outweigh the theoretical O(n) disadvantage. If profiling
-ever shows run manipulation as a bottleneck (it won't for email), `SmallVec<[StyledRun; 8]>`
-is the first optimization — not a linked list.
+- **Container block rendering:** Lists and blockquotes use a combined-text
+  placeholder paragraph. Proper rendering needs per-item/per-child paragraphs
+  in the cache.
+- **Cursor placement precision:** The cursor is drawn at the block's x-origin,
+  not at the exact grapheme position from `Paragraph::grapheme_position()`.
+  Selection highlights cover full block height, not per-line rectangles.
+- **Vertical cursor movement:** Currently moves to the same offset in the
+  adjacent block. Proper behavior needs `Paragraph::grapheme_position()` to
+  maintain x-coordinate across visual lines.
+- **Scrolling:** No scroll offset implemented yet.
+- **IME:** Basic keyboard input works; no preedit/commit or platform IME
+  protocol integration.
 
 ---
 
@@ -543,107 +438,90 @@ is the first optimization — not a linked list.
 crates/rich-text-editor/
   Cargo.toml
   src/
-    lib.rs
-    document.rs           // Document, Block, StyledRun, InlineStyle, DocPosition, DocSlice
-    operations.rs         // EditOp, PosMap, apply/invert, format toggle, run splitting
-    normalize.rs          // Normalization pass: merge runs, enforce structural invariants
-    rules.rs              // Heuristic rules: insert/delete/format behavior (chain of responsibility)
-    undo.rs               // UndoStack, UndoGroup, cursor bookmark mapping
-    html_serialize.rs     // Document → HTML
-    html_parse.rs         // HTML → Document (html5ever)
+    lib.rs                    // re-exports + feature gate
+    document.rs               // Document, Block, StyledRun, InlineStyle, DocPosition, DocSlice
+    operations.rs             // EditOp, PosMap, apply/invert, run splitting helpers
+    normalize.rs              // Normalization pass: merge runs, enforce structural invariants
+    rules.rs                  // Heuristic rules: insert/delete/format behavior
+    undo.rs                   // UndoStack, UndoGroup, cursor bookmark mapping
+    html_serialize.rs         // Document → HTML
+    html_parse.rs             // HTML → Document (html5ever TreeSink)
     widget/
-      mod.rs              // RichTextEditor widget (Widget trait impl)
-      input.rs            // Key binding → action mapping, text input strategy
-      render.rs           // Paragraph caching, draw logic, block-level rendering
-      cursor.rs           // Cursor/selection rendering, hit testing, vertical movement
+      mod.rs                  // EditorState, Action, RichTextEditor widget (Widget trait impl)
+      input.rs                // Key binding → action mapping, cursor movement helpers
+      render.rs               // ParagraphCache, span building, draw helpers
+      cursor.rs               // CursorState, hit testing, selection rects, vertical movement
 ```
 
-**Pure Rust** (no iced dependency): `document`, `operations`, `html_serialize`,
-`html_parse`. Unit-testable without a GUI.
+**Pure Rust** (no iced dependency): `document`, `operations`, `normalize`,
+`rules`, `undo`, `html_serialize`, `html_parse`. Unit-testable without a GUI.
 
 **Feature-gated** (`widget` feature, default on): `widget/` module depends on iced.
 
-**Dependencies:**
-- `html5ever` + `markup5ever` — HTML parsing
-- `bitflags` — `InlineStyle`
-- `iced` — widget (feature-gated)
+**Dependencies:** `bitflags` 2, `html5ever` 0.35, `markup5ever` 0.16, `iced`
+(optional, path dep to local fork).
 
 ### App crate integration
 
-The app crate's compose view creates a `RichTextEditor` widget, holding a
-`Document` in `App` state. The toolbar is standard iced buttons in the app crate
-(not in the editor crate), sending messages like
-`Message::Compose(ComposeAction::ToggleBold)` that `update()` forwards to
-`document.toggle_inline_style(...)`.
+```rust
+// In the app's state:
+editor: EditorState,
+
+// In view():
+rich_text_editor(&self.editor)
+    .on_action(Message::EditorAction)
+    .font(font::text())
+    .into()
+
+// In update():
+Message::EditorAction(action) => {
+    self.editor.perform(action);
+}
+```
+
+The toolbar is standard iced buttons in the app crate (not in the editor crate),
+sending `Action::Edit(EditAction::ToggleInlineStyle(...))` etc.
 
 ---
 
-## Implementation Phases
+## Implementation Status
 
-### Phase 1: Document model + plain text editing
+### What's done (Phases 1–3 complete)
 
-- `document.rs`: `Document`, `Block::Paragraph`, `StyledRun`, `DocPosition`,
-  `DocSelection`, `DocSlice`. Immutable blocks with `Arc` structural sharing.
-- `operations.rs`: `InsertText`, `DeleteRange`, `SplitBlock`, `MergeBlocks`.
-  Each returns a `PosMap`. Each implements `invert()`.
-- `normalize.rs`: merge adjacent runs, ensure blocks have ≥1 run, dirty tracking
-- `rules.rs`: basic insert rules (inline style inheritance, split-line style
-  preservation), basic delete rules (merge-line style preservation, document
-  minimum)
-- `undo.rs`: `UndoStack` with `UndoGroup` batching, cursor bookmark mapping
-  through `PosMap`s
-- Custom widget: render blocks as `Paragraph::with_spans` (uniform style),
-  keyboard input, mouse click/drag with cascading hit testing, cursor blink,
-  scroll, vertical cursor movement across block boundaries
-- Unit tests for all operations, normalization, and rules
-- **Milestone:** usable as a plain text compose field with undo/redo
+- Document model with all 5 block types, Arc structural sharing, DocSlice
+- All 8 EditOp variants with correct apply, invert, and PosMap
+- Normalization with dirty tracking and safety valve
+- Rules engine with insert/delete/format behavior
+- Undo/redo with grouping and cursor bookmarks
+- HTML serialization and parsing with round-trip tests
+- Widget with paragraph caching, keyboard input, mouse hit testing,
+  cursor blink, selection rendering, clipboard (Ctrl+C/X/V)
+- 368 tests across all modules
 
-### Phase 2: Inline formatting
+### What remains
 
-- `InlineStyle` bitflags, `ToggleInlineStyle` operation
-- Run splitting: `split_at()`, `isolate()` for surgical style application
-- Font mapping: bold → `font::TEXT_BOLD`, italic → `font::TEXT_ITALIC`,
-  bold+italic → `font::TEXT_BOLD_ITALIC`. Underline/strikethrough via Span flags.
-- Toolbar: row of icon buttons for B/I/U/S/Link
-- Keyboard shortcuts: Ctrl+B, Ctrl+I, Ctrl+U
-- Pending style state at caret
-- Rules: link boundary exclusivity (typing at link edge doesn't extend link),
-  pending style override
-- Tests: format toggle, pending style, run splitting + merging, link boundaries
-- **Milestone:** bold, italic, underline, strikethrough working
+**Phase 3 gaps (rules):**
+- Auto-exit block (double-Enter exits list/quote) — needs list item context
+- Block embed isolation — deferred until Block::Image exists
+- Link formatting at caret — find link boundaries, format whole link
 
-### Phase 3: Block types + HTML round-trip
+**Phase 4: Clipboard (partially scaffolded)**
+- DocSlice type exists with open_start/open_end
+- Copy/cut/paste actions defined and wired
+- Not yet done: paste HTML from clipboard (detect text/html, parse via
+  html_parse, apply with open-end merging), copy as text/html + text/plain
 
-- `Block::Heading`, `Block::List`, `Block::BlockQuote`
-- `SetBlockType` operation, `SetBlockAttrs` for indent level
-- Rules: auto-exit block (double-Enter exits list/quote), preserve block style
-  on split, heading reset on split-at-end, block embed isolation
-- Normalization: list items must contain ≥1 block, blockquotes must contain ≥1 block
-- `html_serialize.rs` and `html_parse.rs`
-- Link insertion (URL input dialog)
-- Block-specific rendering (heading sizes, list leading widgets with
-  bullet/number, quote left border, indent)
-- HTML round-trip tests against real email samples
-- **Milestone:** full compose workflow — type, format, send as HTML, edit drafts
+**Phase 5: Signatures, inline images, reply quoting**
+- Not started
+- Block::Image variant, signature insertion, reply quoting with attribution,
+  platform IME refinement, plain-text projection for IME sync
 
-### Phase 4: Clipboard
-
-- `DocSlice` with `open_start` / `open_end` for cross-block copy/paste
-- Copy: serialize selection to `DocSlice`, then to text/html + text/plain
-- Paste: detect HTML on clipboard → parse to `DocSlice` via `html_parse.rs`,
-  apply with open-end merging. Fall back to plain text.
-- Cut: copy + delete selection
-- Tests: cross-block copy/paste round-trip, paste from external HTML sources
-
-### Phase 5: Signatures, inline images, reply quoting
-
-- Signature insertion: parse `body_html` → Document blocks, append with separator
-- Inline images: new `Block::Image` or embed run variant, render via
-  `renderer.fill_quad` + `iced::widget::image`
-- Reply quoting: parse replied message HTML, wrap in `BlockQuote`, prepend
-  attribution line ("On {date}, {sender} wrote:")
-- Platform IME refinement if iced's built-in handling proves insufficient
-- Plain-text projection for IME state sync
+**Widget polish:**
+- Per-item paragraph cache for lists and blockquotes
+- Exact cursor placement via `Paragraph::grapheme_position()`
+- Per-line selection rectangles
+- Scroll offset
+- IME preedit/commit integration
 
 ---
 
@@ -652,27 +530,24 @@ The app crate's compose view creates a `RichTextEditor` widget, holding a
 | File | What to steal |
 |------|---------------|
 | **JS editors** | |
-| ProseMirror `prosemirror-model/src/resolvedpos.ts` | Position resolution: flat integer → tree context, caching strategy |
-| ProseMirror `prosemirror-transform/src/map.ts` | StepMap (`[start, oldSize, newSize]` triples), Mapping with mirror system |
-| ProseMirror `prosemirror-model/src/replace.ts` | Slice (`content, openStart, openEnd`) for cross-block clipboard |
-| ProseMirror `prosemirror-transform/src/mark_step.ts` | AddMarkStep: walk inline nodes, split at boundaries, coalesce adjacent |
-| Slate `packages/slate/src/editor/normalize.ts` | Dirty path tracking, normalize loop with safety valve (count × 42) |
-| Slate `packages/slate/src/interfaces/operation.ts` | 9 operations, each trivially invertible |
-| Slate `packages/slate-history/src/with-history.ts` | History batching: consecutive same-type at adjacent positions |
+| ProseMirror `prosemirror-transform/src/map.ts` | StepMap triples — informed our PosMap design |
+| ProseMirror `prosemirror-model/src/replace.ts` | Slice — informed our DocSlice |
+| ProseMirror `prosemirror-transform/src/mark_step.ts` | AddMarkStep — informed our ToggleInlineStyle + isolate_runs |
+| Slate `packages/slate/src/editor/normalize.ts` | Dirty path tracking — adopted directly (safety valve × 42) |
+| Slate `packages/slate/src/interfaces/operation.ts` | 9 invertible operations — informed our 8 EditOp variants |
+| Slate `packages/slate-history/src/with-history.ts` | History batching — adopted for UndoStack grouping |
 | **Flutter editors** | |
-| fleather `packages/parchment/lib/src/heuristics/insert_rules.dart` | 9 insert rules: auto-exit block, style inheritance, link boundary, heading reset |
-| fleather `packages/parchment/lib/src/heuristics/delete_rules.dart` | 3 delete rules: line merge style, embed protection, doc minimum |
-| fleather `packages/fleather/lib/src/rendering/editor.dart` | Cascading hit test: editor → block → line → paragraph proxy |
-| fleather `packages/fleather/lib/src/widgets/editor_input_client_mixin.dart` | Platform IME protocol: text/selection sync, delta-based input |
-| fleather `packages/parchment/lib/src/document/leaf.dart` | `splitAt`, `isolate`, `optimize` — run splitting pattern |
+| fleather `packages/parchment/lib/src/heuristics/insert_rules.dart` | Insert rules — adopted for rules.rs |
+| fleather `packages/parchment/lib/src/heuristics/delete_rules.dart` | Delete rules — adopted for rules.rs |
+| fleather `packages/fleather/lib/src/rendering/editor.dart` | Cascading hit test — adopted for widget/cursor.rs |
+| fleather `packages/parchment/lib/src/document/leaf.dart` | split/isolate/optimize — adopted for document.rs run splitting |
 | **iced ecosystem** | |
-| iced `widget/src/text_editor.rs` | Input handling: key bindings, mouse click/drag, IME, focus/blink, clipboard |
-| iced `widget/src/text/rich.rs` | `Paragraph::with_spans` rendering, span→font mapping, underline/strikethrough |
-| `crates/app/src/font.rs` | Font variants (TEXT_BOLD, TEXT_ITALIC, etc.) |
-| `crates/app/src/ui/layout.rs` | Type scale (TEXT_HEADING, TEXT_TITLE, TEXT_XL) and spacing constants |
-| `crates/provider-utils/src/html_sanitizer.rs` | Sanitizer pipeline — run before html5ever parse |
-| `crates/core/src/db/queries_extra/compose.rs` | Draft CRUD, signatures, templates |
-| `research/frostmark/src/renderer.rs` | HTML→widget DOM traversal with ChildData bitflags |
-| `research/halloy/src/widget/selectable_rich_text.rs` | Span-based display, selection math, link hover |
+| iced `widget/src/text_editor.rs` | Input handling, focus/blink, clipboard patterns |
+| iced `widget/src/text/rich.rs` | `Paragraph::with_spans`, span→font mapping |
+| `crates/app/src/font.rs` | Font variants (text_bold, text_italic, etc.) |
+| `crates/app/src/ui/layout.rs` | Type scale and spacing constants |
+| `crates/provider-utils/src/html_sanitizer.rs` | Sanitizer pipeline — runs before html5ever parse |
+| research/frostmark `renderer.rs` | ChildData bitflags — adopted for html_parse.rs StyleContext |
+| research/halloy `selectable_rich_text.rs` | Selection math reference |
 | **Email rendering** | |
-| `/home/folk/Programs/litehtml-rs/` | Separate HTML email viewer — handles arbitrary wild HTML. The editor does NOT need to handle complex HTML; `html_parse.rs` only round-trips its own output. |
+| `/home/folk/Programs/litehtml-rs/` | Separate HTML email viewer — editor does NOT handle arbitrary HTML |
