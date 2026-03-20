@@ -1,4 +1,5 @@
 # TODO
+.
 
 ## Inline Image Store Eviction
 
@@ -243,6 +244,126 @@ Deferred items from code review. Grouped by feature area.
 - [ ] **Recent/frequent emoji section and skin tone selection** — TODO.md (below) says the picker needs these. Neither is implemented.
 
 - [ ] **Flags emoji category** — Most emoji pickers include country/flag emoji. Not included in the static table.
+
+## Spec-vs-Code Audit (2026-03-20)
+
+Gaps found comparing current code against implementation specs. Grouped by feature.
+
+### Command Palette
+
+**Specs:** `docs/command-palette/app-integration-spec.md`, `docs/command-palette/problem-statement.md`
+
+- [ ] **`NavigateToLabel` command entirely missing** — `CommandArgs::NavigateToLabel` variant exists in `args.rs` but there is no `CommandId::NavigateToLabel`. No dispatch, no resolver, no `get_all_label_options_cross_account()`. Dead code on the args side.
+
+- [ ] **`provider_kind` always `None` in `CommandContext`** — `active_account_info()` in `command_dispatch.rs` hardcodes `provider_kind: None` in both branches. Provider-based availability predicates (e.g., "Add Label" only for Gmail) cannot work at the context level.
+
+- [ ] **`current_view` only detects 2 of 14+ view types** — Heuristically derived from sidebar fields in `current_view_and_label()`. Only `Settings` and `Label` are detected. `Starred`, `Sent`, `Drafts`, `Snoozed`, `Trash`, `Spam`, `AllMail`, `SmartFolder`, `Search`, `PinnedSearch` are all unhandled (defaults to `Inbox`). The spec explicitly warns: "Heuristic derivation is fragile."
+
+- [ ] **Thread state flags never populated** — `is_muted`, `is_pinned`, `is_draft`, `in_trash`, `in_spam` in `ThreadState` are always `None` even when a thread is selected. Toggle commands (Mute/Unmute, Pin/Unpin) and trash-specific commands (PermanentDelete) cannot resolve correctly.
+
+- [ ] **No pending chord indicator UI** — `PendingChord.started` field has `#[allow(dead_code)]`. Spec calls for a floating badge showing `"g..."` when a pending chord is active.
+
+- [ ] **Snooze/DateTime parameterized commands skipped** — Stage 2 for Snooze explicitly returns `Task::none()`. Spec says stage 2 should show preset times ("1 hour", "Tomorrow 9am", etc.).
+
+- [ ] **No scroll-to-selected in palette results** — Arrow keys update `selected_index` but no `scrollable::scroll_to` task is returned. Selected item can scroll off-screen.
+
+- [ ] **Palette not componentized** — Spec defines `PaletteEvent` enum following the Component trait pattern. Implementation puts palette logic directly in `App::handle_palette()`.
+
+- [ ] **Inline text style closure in `palette_result_row`** — Uses `|_theme| text::Style { color: None }` instead of a `TextClass` variant.
+
+### Sidebar
+
+**Specs:** `docs/sidebar/implementation-spec.md`, `docs/search/pinned-searches-implementation-spec.md`
+
+- [ ] **Spam/All Mail folders never appear** — Backend `SIDEBAR_UNIVERSAL_FOLDERS` doesn't include them. Sidebar filter code for `"SPAM"` and `"ALL_MAIL"` is dead code. Spec says these should appear when scoped to a single account.
+
+- [ ] **Magic number `28` in `truncate_query`** — `truncate_query(&ps.query, 28)` uses a raw number not from layout constants.
+
+- [ ] **`SidebarEvent::CycleAccount` is dead code** — Sidebar internally converts `CycleAccount` to `AccountSelected` in `update()`, so `CycleAccount` is never emitted as a `SidebarEvent`. The handler arm in `handle_sidebar_event` is unreachable.
+
+- [ ] **O(n²) HashMap rebuild in `is_hidden_by_collapsed_ancestor`** — Builds a `HashMap` from the full label list on every call, called once per tree node. Should build once and pass in.
+
+- [ ] **Pinned search visual deviations from spec** — Date format uses absolute ("Mar 19, 14:32") vs spec's relative ("5 min ago"). Text hierarchy inverted (date primary, query secondary — spec has query primary). Position is above compose button — spec puts them below. Uses `ButtonClass::PinnedSearch` instead of spec's `ButtonClass::Nav`.
+
+### Accounts
+
+**Spec:** `docs/accounts/implementation-spec.md`
+
+- [ ] **Discovery is completely faked** — `handle_submit_email()` immediately returns `Ok(())` without calling `ratatoskr_core::discovery::discover()`. No real discovery, no OAuth flow.
+
+- [ ] **Account creation bypasses core CRUD** — Raw SQL in `add_account.rs` via `db.with_write_conn()` instead of `db_create_account()` from `crates/core/src/db/queries_extra/accounts_crud.rs`. Core function is dead code.
+
+- [ ] **Hard-coded provider to `'imap'`** — Account creation always inserts `provider = 'imap'` and `auth_method = 'password'` regardless of what was selected.
+
+- [ ] **No `AccountHealth` enum** — Spec defines `Healthy/Warning/Error/Disabled` with `compute_health()`. Not implemented. `ManagedAccount` has no `health` field.
+
+- [ ] **No account editor in settings** — Account cards not clickable (TODO comment: "Phase 5b"). No slide-in editor, no `AccountEditor` struct, no config shadow pattern, no chevron, no health indicator.
+
+- [ ] **No duplicate account detection** — `db_account_exists_by_email` exists in core but wizard doesn't call it.
+
+- [ ] **Protocol selection is a stub** — "Protocol selection coming soon" text. No protocol cards, no `SelectProtocol`/`ConfirmProtocol`.
+
+- [ ] **`color_palette_grid` not reusable** — Hardcoded to `AddAccountMessage::SelectColor(i)`. Spec says generic widget in `widgets.rs` with `on_select` callback.
+
+- [ ] **Magic numbers in add_account.rs** — `icon::mail().size(48.0)`, `.padding(2)`, stroke width `2.0`, alpha `0.35`.
+
+- [ ] **No re-authentication flow (Phase 7)** — No `ReauthWizard`, no health indicators, no error recovery.
+
+### Search
+
+**Spec:** `docs/search/app-integration-spec.md`
+
+- [ ] **Search execution is a SQL LIKE stub** — `execute_search` does `WHERE subject LIKE ?1 OR snippet LIKE ?1`. No Tantivy/`SearchState` integration. Acknowledged with TODO comment.
+
+- [ ] **`SearchBlur` unfocus not wired** — Handler returns `Task::none()` instead of `widget::operation::unfocus("search-bar")`.
+
+- [ ] **Phases 2-4 not started** — Smart folder CRUD via command palette, typeahead suggestions, "Search here" scoped search.
+
+### Contacts Autocomplete
+
+**Spec:** `docs/contacts/autocomplete-implementation-spec.md`
+
+- [ ] **Ranking uses frequency instead of recency** — Sorts by `frequency DESC` for contacts and `last_seen_at DESC` for seen addresses. Spec says "recency dominates ranking... not frequency count."
+
+- [ ] **`ContactSearchResult` types in app crate instead of core** — Placed in `token_input.rs`. Spec says `crates/core/src/contacts/search.rs`. Violates crate boundary.
+
+- [ ] **Magic numbers in token input widget** — `0.54` char width heuristic, cursor offsets `2.0`/`4.0`, placeholder alpha `0.4`.
+
+- [ ] **`label.len()` byte count for width estimation** — Wrong for non-ASCII. Should use `label.chars().count()` or proper text measurement.
+
+- [ ] **No autocomplete dropdown (Phase 2)** — No compose integration, no dropdown overlay, no keyboard navigation for suggestions.
+
+- [ ] **No paste address parser (Phase 3)** — Widget emits `Paste(String)` but no `parse_pasted_addresses()` exists.
+
+- [ ] **No arrow key navigation between tokens** — Spec describes Left/Right through tokens. Not handled.
+
+- [ ] **No right-click context menu on tokens** — No `TokenContextMenu`, no `mouse::Button::Right` handling.
+
+- [ ] **No contact group or GAL search in autocomplete** — `search_contacts_for_autocomplete()` doesn't query `contact_groups` or GAL cache.
+
+### Signatures
+
+**Spec:** `docs/signatures/implementation-spec.md`
+
+- [ ] **Plain text editor instead of rich text** — Uses `text_input` for `body_html`. User must type raw HTML. The `rich-text-editor` crate exists and is complete — this is a wiring gap.
+
+- [ ] **Inline SQL bypasses core CRUD** — Save/insert/delete in `main.rs` uses raw SQL instead of `db_insert_signature()`/`db_update_signature()`/`db_delete_signature()` from `crates/core/`. Core functions are dead code.
+
+- [ ] **`is_reply_default` toggle doesn't clear old default transactionally** — Enabling `is_reply_default` for one signature doesn't clear the old default for the same account. Core CRUD handles this but is bypassed.
+
+- [ ] **No `body_text` auto-generation** — Spec calls for `html_to_plain_text()` to generate plain-text fallback. Stores `body_text: None`.
+
+- [ ] **No drag reordering of signatures** — Spec shows grip handles and `db_reorder_signatures()`.
+
+- [ ] **No delete confirmation for signatures** — Delete is immediate, spec says confirm first.
+
+- [ ] **Signatures loaded synchronously on UI thread** — `load_signatures_into_settings()` runs in accounts-loaded handler. Spec says async via `Task::perform` on tab selection.
+
+### Cross-Cutting
+
+- [ ] **Core CRUD bypassed in multiple places** — Accounts and signatures both write raw SQL in the app crate instead of using core functions. Core CRUD is dead code, and logic like transactional default-clearing is skipped.
+
+- [ ] **Dead code accumulation** — `NavigateToLabel` args variant, `SidebarEvent::CycleAccount`, Spam/All Mail sidebar filter, core CRUD functions for accounts and signatures.
 
 ## UI Specs Needed
 
