@@ -1122,20 +1122,21 @@ impl<Message> RichTextEditor<'_, Message> {
                         (para_origin_x, para_origin_y, lh)
                     };
 
-                let cursor_rect = Rectangle::new(
-                    Point::new(cursor_x, cursor_y),
-                    Size::new(CURSOR_WIDTH, cursor_height),
+                // Draw the cursor directly. We're inside with_layer(bounds)
+                // which clips to the viewport, so no manual intersection
+                // check is needed. (The previous check against text_bounds
+                // used viewport-space coordinates inside a content-space
+                // translation, causing the cursor to disappear when scrolled.)
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: Rectangle::new(
+                            Point::new(cursor_x, cursor_y),
+                            Size::new(CURSOR_WIDTH, cursor_height),
+                        ),
+                        ..Default::default()
+                    },
+                    self.cursor_color,
                 );
-
-                if let Some(clipped) = text_bounds.intersection(&cursor_rect) {
-                    renderer.fill_quad(
-                        renderer::Quad {
-                            bounds: clipped,
-                            ..Default::default()
-                        },
-                        self.cursor_color,
-                    );
-                }
             }
         }
     }
@@ -1207,21 +1208,23 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
         widget_state.scroll_offset = widget_state.scroll_offset.clamp(0.0, max_scroll);
 
         // Auto-scroll to keep the cursor visible after edits/moves.
+        // Use the actual caret line position within the block (not just
+        // the block top) so scrolling works correctly in wrapped paragraphs.
         if self.state.cursor.is_focused() {
             let focus_pos = self.state.selection.focus;
             if let Some(entry) = cache.get(focus_pos.block_index) {
-                // Estimate cursor y in content coordinates (relative to
-                // content top, before padding).
-                let cursor_y = entry.y_offset();
-                let cursor_height = if let Some(para) = entry.paragraph() {
-                    paragraph_line_height_px(para)
+                let (caret_y_in_block, line_h) = if let Some(para) = entry.paragraph() {
+                    let glyph_pos = grapheme_pixel_position(para, focus_pos.offset);
+                    (glyph_pos.y, paragraph_line_height_px(para))
                 } else {
-                    render::FONT_SIZE_BODY * render::LINE_HEIGHT_MULTIPLIER
+                    (0.0, render::FONT_SIZE_BODY * render::LINE_HEIGHT_MULTIPLIER)
                 };
+
+                let cursor_y = entry.y_offset() + caret_y_in_block;
                 ensure_cursor_visible(
                     &mut widget_state.scroll_offset,
                     cursor_y,
-                    cursor_height,
+                    line_h,
                     viewport_height,
                     total_height,
                 );
