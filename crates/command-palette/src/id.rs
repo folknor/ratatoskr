@@ -71,6 +71,7 @@ pub enum CommandId {
     CalendarViewWeek,
     CalendarViewMonth,
     CalendarToday,
+    CalendarCreateEvent,
 
     // App
     AppSearch,
@@ -138,6 +139,7 @@ const TABLE: &[(CommandId, &str)] = &[
     (CommandId::CalendarViewWeek, "calendar.viewWeek"),
     (CommandId::CalendarViewMonth, "calendar.viewMonth"),
     (CommandId::CalendarToday, "calendar.today"),
+    (CommandId::CalendarCreateEvent, "calendar.createEvent"),
     (CommandId::AppSearch, "app.search"),
     (CommandId::AppAskAi, "app.askAi"),
     (CommandId::AppHelp, "app.help"),
@@ -226,6 +228,7 @@ const ALL_IDS: &[CommandId] = &[
     CommandId::CalendarViewWeek,
     CommandId::CalendarViewMonth,
     CommandId::CalendarToday,
+    CommandId::CalendarCreateEvent,
     CommandId::AppSearch,
     CommandId::AppAskAi,
     CommandId::AppHelp,

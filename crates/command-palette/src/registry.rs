@@ -676,6 +676,14 @@ fn register_calendar(out: &mut Vec<CommandDescriptor>) {
         always,
         &["today", "now", "current date"],
     ));
+    out.push(desc_kw(
+        CommandId::CalendarCreateEvent,
+        "Create Event",
+        "Calendar",
+        None,
+        always,
+        &["new event", "add event"],
+    ));
 }
 
 fn register_app(out: &mut Vec<CommandDescriptor>) {

@@ -10,6 +10,6 @@ pub use contacts::{
 };
 pub use pinned_searches::PinnedSearch;
 pub use types::{
-    Account, DateDisplay, Label, MessageViewAttachment, Thread, ThreadAttachment,
-    ThreadMessage,
+    Account, CalendarEvent, DateDisplay, Label, MessageViewAttachment, Thread,
+    ThreadAttachment, ThreadMessage,
 };

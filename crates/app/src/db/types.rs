@@ -79,6 +79,19 @@ pub struct MessageViewAttachment {
     pub size: Option<i64>,
 }
 
+/// Calendar event data (subset of DbCalendarEvent for app-layer use).
+#[derive(Debug, Clone)]
+pub struct CalendarEvent {
+    pub id: String,
+    pub summary: Option<String>,
+    pub description: Option<String>,
+    pub location: Option<String>,
+    pub start_time: i64,
+    pub end_time: i64,
+    pub is_all_day: bool,
+    pub calendar_id: Option<String>,
+}
+
 pub(crate) fn row_to_thread(row: &Row<'_>) -> rusqlite::Result<Thread> {
     Ok(Thread {
         id: row.get("id")?,

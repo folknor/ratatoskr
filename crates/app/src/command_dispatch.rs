@@ -303,6 +303,9 @@ pub fn dispatch_command(id: CommandId, _app: &App) -> Option<Message> {
             crate::ui::calendar::CalendarView::Month,
         )),
         CommandId::CalendarToday => Some(Message::CalendarToday),
+        CommandId::CalendarCreateEvent => Some(Message::Calendar(
+            crate::ui::calendar::CalendarMessage::CreateEvent,
+        )),
 
         // App
         CommandId::AppSearch => Some(Message::FocusSearch),

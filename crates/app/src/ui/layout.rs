@@ -414,6 +414,16 @@ pub const TIME_GRID_HEADER_HEIGHT: f32 = 48.0;
 pub const TIME_GRID_ALL_DAY_HEIGHT: f32 = 32.0;
 /// Thickness of the current-time indicator line.
 pub const TIME_GRID_NOW_LINE_WIDTH: f32 = 2.0;
+
+// ── Calendar overlay (event detail / editor) ────────────
+/// Width of the event detail/editor modal.
+pub const CALENDAR_OVERLAY_WIDTH: f32 = 420.0;
+/// Maximum height of the event detail/editor modal.
+pub const CALENDAR_OVERLAY_MAX_HEIGHT: f32 = 560.0;
+/// Height of a form row in the event editor.
+pub const CALENDAR_FORM_ROW_HEIGHT: f32 = 36.0;
+/// Width of the label column in the event editor form.
+pub const CALENDAR_FORM_LABEL_WIDTH: f32 = 80.0;
 /// Group icon size on group tokens.
 pub const TOKEN_GROUP_ICON_SIZE: f32 = ICON_XS;
 
