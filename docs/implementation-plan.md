@@ -1,96 +1,125 @@
-# Implementation Spec Plan
+# Implementation Plan
 
-Prioritized plan for writing implementation specifications. Each entry represents an implementation spec to be written, not the implementation work itself. The editor is already in progress and not listed here.
+Prioritized implementation plan for Ratatoskr features. All implementation specs are written and reviewed. The editor is in progress and not listed here.
+
+## Spec Status
+
+| Spec | Doc | Status | Key Review Findings |
+|------|-----|--------|-------------------|
+| Command palette app integration | `docs/command-palette/app-integration-spec.md` | Written, reviewed | Explicit `NavigationTarget` model needed; resolver must be async with generation tracking; stage-2 is single-step V1 |
+| Sidebar | `docs/sidebar/implementation-spec.md` | Written, reviewed | Phase 1A is transitional (selected_label is semantically muddy); Phase 1D hierarchy is cross-provider schema work; Gmail stays flat |
+| Accounts | `docs/accounts/implementation-spec.md` | Written, reviewed | Phase 0 is backend work (not purely app); color picker in setup is intentional product decision; health derivation needs token/sync fields on Account type |
+| Status bar | `docs/status-bar/implementation-spec.md` | Written, reviewed | Warnings as HashMap not Vec; separate cycle indices; connection failures informational-only in V1 |
+| Contacts autocomplete | `docs/contacts/autocomplete-implementation-spec.md` | Written, reviewed | Compose-first, reusable by design; email is Option on search results; recency dominates ranking; paste needs dedup policy |
+| Search app integration | `docs/search/app-integration-spec.md` | Written, reviewed | Four result types with distinct roles; pre_search_threads is V1 shortcut; smart folder CRUD uses real CommandId system |
+| Signatures | `docs/signatures/implementation-spec.md` | Written, reviewed | Editor crate path is flexible; hr separator is deliberate; signature-region tracking is pragmatic V1; depends on account settings |
+| Pinned searches | `docs/search/pinned-searches-implementation-spec.md` | Written, reviewed | Writable DB connection is cross-cutting decision; query-update merges on conflict; App owns state, sidebar mirrors |
+| Pop-out message view | `docs/pop-out-windows/message-view-implementation-spec.md` | Written, reviewed | Phase 1 is shared multi-window infrastructure; body rendering is plain-text-first (HTML in Phase 3); PDF export deferred |
 
 ## Tier 1 — Shell / Unblockers
 
 The minimum for a non-seeded, navigable app. These form a single cluster — all are equally foundational.
 
-### Command Palette Slice 6 Elaboration
-Elaborate the existing roadmap's Slice 6 into a full implementation spec covering the three app integration paths: palette overlay UI, keyboard dispatch via iced subscriptions, and command-backed menus/toolbars/context surfaces. Must also cover `CommandArgs` enum and the typed execution contract (the most critical missing piece — see roadmap note), `CommandContext` assembly from app model state, real `CommandInputResolver` implementation querying `DbState`, and pending-chord UI indicator.
+### Command Palette App Integration
+Six sub-slices (6a–6f). 6a (keyboard dispatch + infrastructure) ships first — every keyboard shortcut works. 6b (palette UI stage 1) follows. 6c (parameterized commands) needs the real `AppInputResolver`. 6d (command-backed UI surfaces) can parallel 6b/6c. 6e/6f (persistence, keybinding management UI) are lower priority.
 
+**Spec:** `docs/command-palette/app-integration-spec.md`
 **Depends on:** Command palette slices 1-3 (done).
 **Unblocks:** Sidebar Phase 2 (action stripping), search smart folder management, keyboard shortcuts everywhere.
+**Cross-cutting:** Introduces `NavigationTarget` enum that sidebar, search, and pinned searches should all adopt.
 
 ### Sidebar
-Proper implementation spec for Phase 1 (live data wiring from `get_navigation_state()`, hierarchy support for Exchange/IMAP/JMAP folders, scope selector) and Phase 2 (strip actions, blocked on command palette slice 6). Phase 1 is partially implemented — the spec should distinguish what exists from what remains.
+Five sub-phases. 1A (live data wiring) is the critical path — connects existing `get_navigation_state()` to the sidebar. 1B (smart folder scoping fix) is a small backend change. 1C (unread counts) follows 1A. 1D (hierarchy) is the largest piece — requires DB migration, provider sync changes across Graph/JMAP/IMAP, and a composed tree renderer. 1E (pinned searches section) can be scaffolded early but full lifecycle waits on search integration. Phase 2 (strip actions) is blocked on command palette.
 
+**Spec:** `docs/sidebar/implementation-spec.md`
 **Depends on:** Phase 2 depends on command palette slice 6.
 **Unblocks:** Basic navigation for the entire app.
+**Note:** Phase 1A is transitional — uses `selected_label: Option<String>` which is semantically muddy. The app should eventually adopt `NavigationTarget` from the command palette spec.
 
 ### Accounts
-Implementation spec for the UI layer: first-launch modal, multi-step add-account wizard (email → discovery → auth → color picker → success), settings account list with editor slide-in, account health indicators, deletion edge cases. Backend exists — this is purely app-side work.
+Seven phases (0–7). Phase 0 (data model) adds DB columns and CRUD — this is backend work, not purely app-side. Phase 1 (first-launch detection) and Phase 2–3 (wizard state machine + views) are the core onboarding flow. Phase 4 (app wiring) connects the wizard to the main app. Phase 5 (settings management) adds account cards with health indicators. Phase 6 (sidebar enhancements) and Phase 7 (error states) are polish.
 
+**Spec:** `docs/accounts/implementation-spec.md`
 **Depends on:** Nothing (backend complete).
 **Unblocks:** User onboarding. Without this, the app requires a seeded database.
+**Note:** The writable DB connection needed here (for account_color, account_name, sort_order) is the same cross-cutting decision needed by pinned searches, session restore, and keybinding overrides. Whichever feature lands first should establish the pattern.
 
 ### Status Bar
-Small, independent spec. Pairs naturally with accounts/sidebar work since auth failures and sync progress need a surface. Priority preemption state machine, cycling logic for multiple accounts, clickable warnings triggering recovery flows.
+Single implementation phase with 5 ordered steps. Small, self-contained. Warnings use `HashMap<String, AccountWarning>` (at most one per account). Separate cycle indices for warnings and sync progress.
 
+**Spec:** `docs/status-bar/implementation-spec.md`
 **Depends on:** Nothing.
 **Unblocks:** Sync/auth feedback (linked to accounts spec — auth failures need recovery surface).
 
 ## Tier 2 — Core Email Loop
 
 ### Contacts: Autocomplete + Token Input
-Focused implementation spec covering only the compose-critical path: recipient token input widget (custom `advanced::Widget`), autocomplete dropdown with unified local search (synced contacts + seen addresses + cached GAL), paste tokenization, token drag-and-drop between To/Cc/Bcc, group tokens, contact resolution. Explicitly excludes the management UI and import wizard.
+Six phases. Phase 1 (token input widget) is the largest custom widget effort — full `advanced::Widget` implementation. Phase 2 (autocomplete dropdown) is a separate overlay managed by the parent view. Phase 3 (paste handling) needs dedup within paste, dedup against existing tokens, and invalid-address dropping. Phase 4–6 (context menu, drag-and-drop, group tokens) are additive.
 
+**Spec:** `docs/contacts/autocomplete-implementation-spec.md`
 **Depends on:** Nothing (backend complete).
 **Unblocks:** Compose (together with the editor). Required before pop-out compose windows.
+**Note:** Compose-first, reusable by design. Calendar attendee and group editor reuse the same widget with different parent orchestration.
 
-### Search App Integration (Slices 5-6 Elaboration)
-Elaborate the existing implementation spec's slices 5-6: wire the unified search function into the app's search bar, generational load tracking (correctness requirement, not polish), smart folder migration to the unified pipeline, and `SearchResult` → thread list rendering. The backend pipeline is complete — this is app integration and smart folder unification.
+### Search App Integration
+Four phases. Phase 1 (search bar + execution + generational tracking) is the core — generational load tracking is a correctness requirement. Phase 2 (smart folder migration) uses real `CommandId`/`CommandArgs` for CRUD. Phase 3 (operator typeahead) is the richest UI work. Phase 4 ("Search here" + polish) ties into sidebar.
 
+**Spec:** `docs/search/app-integration-spec.md`
 **Depends on:** Search slices 1-4 (done).
 **Unblocks:** Pinned searches (downstream). Makes the app feel "real" for daily use.
+**Note:** `pre_search_threads` clone is a V1 shortcut — should eventually restore via `NavigationTarget` re-navigation (as the pinned searches spec already does).
 
 ## Tier 3 — Compose / Advanced Surfaces
 
 ### Pop-Out Windows: Compose
-Implementation spec for the compose pop-out window only. Multi-window lifecycle in iced, compose window layout (recipient fields, formatting toolbar, editor integration, signature, quoted content, attachments with drag-and-drop zones), draft auto-save, discard confirmation, session restore for compose windows. This is the heavier half and depends on editor + contacts autocomplete.
+**Spec not yet written.** Depends on editor + contacts autocomplete + signatures.
 
-**Depends on:** Editor (in progress), contacts autocomplete.
+**Depends on:** Editor (in progress), contacts autocomplete, signatures.
 **Unblocks:** Full compose workflow.
 
 ### Pop-Out Windows: Message View
-Separate, simpler implementation spec. Single-message viewer with rendering mode toggle (plain/simple HTML/original HTML/source), header layout, reply/forward actions opening compose windows, Save As (.eml, .txt — PDF deferred). Lighter dependency profile than compose.
+Six phases. Phase 1 (multi-window architecture) is shared infrastructure — `iced::daemon` migration, window registry, per-window routing, cascade close. This is platform work reused by compose and calendar pop-outs. Phase 2 (basic message view) delivers plain text body — HTML rendering is Phase 3. Phase 6 (Save As) delivers .eml and .txt only — PDF deferred.
 
-**Depends on:** Nothing heavy (HTML rendering pipeline already exists).
-**Unblocks:** Multi-monitor message reference workflows.
+**Spec:** `docs/pop-out-windows/message-view-implementation-spec.md`
+**Depends on:** Nothing heavy (HTML rendering pipeline exists).
+**Unblocks:** Multi-monitor message reference workflows. Phase 1 also unblocks compose and calendar pop-outs.
 
 ### Signatures
-Design spec for signature management in Settings: creating/editing/deleting signatures, per-account default signature assignment, rich text editing (reuses the editor's document model and widget), and signature insertion behavior in compose (new message, reply, forward — where it's placed, how it interacts with quoted content, what happens when switching From account).
+Five phases. Phase 1 (data model) extends existing schema and CRUD. Phase 2 (settings UI) reuses the rich text editor for signature editing — this is the first real test of the editor's HTML round-trip. Phase 3 (compose insertion) defines document structure with signature region tracking. Phase 4 (account switching) handles replacement with edit detection. Phase 5 (send path) adds the wrapper div and RFC 3676 separator.
 
-**Depends on:** Editor (in progress).
-**Unblocks:** Complete compose workflow (signatures are expected in every outgoing email for enterprise users).
+**Spec:** `docs/signatures/implementation-spec.md`
+**Depends on:** Editor Phase 3 (HTML round-trip).
+**Unblocks:** Complete compose workflow.
+**Note:** Per-account default signature dropdown in account settings depends on the accounts implementation being real enough.
 
 ### Pinned Searches
-Implementation spec for the sidebar section, pinned search lifecycle (auto-creation, edit-in-place, refresh, dismissal, graduation to smart folder), SQLite persistence, and search bar interaction.
+Four phases. Phase 1 (schema + CRUD + sidebar) includes the writable DB connection (cross-cutting decision). Phase 2 (lifecycle + search bar) is the state machine. Phase 3 (graduation to smart folder) ties into the command palette. Phase 4 (auto-expiry) is 14-day cleanup per the updated product doc.
 
+**Spec:** `docs/search/pinned-searches-implementation-spec.md`
 **Depends on:** Search app integration.
 **Unblocks:** Task-oriented triage workflows.
 
 ## Tier 4 — Additive Management
 
 ### Contacts: Management + Import
-Implementation spec for the settings management UI (contact cards, group editor, slide-in editing, explicit Save for synced contacts) and the import wizard (CSV/XLSX/vCard parsing, column mapping preview, merge toggle). Separate crate for import (`crates/contact-import/`).
+**Spec not yet written.** Settings management UI, group editor, import wizard.
 
 **Depends on:** Contacts autocomplete spec (shared types/patterns).
 **Unblocks:** Bulk contact management for enterprise users.
 
 ### Emoji Picker
-Shared widget spec at `docs/emoji-picker/problem-statement.md`. Searchable grid, categories/tabs, recent/frequent section, skin tone selection. Used in compose toolbar, calendar event descriptions, contact notes, and anywhere text input supports emoji. Separate widget crate or module — not compose-specific.
+**Spec not yet written.** Shared widget: `docs/emoji-picker/problem-statement.md`.
 
 **Depends on:** Nothing (standalone widget).
-**Unblocks:** Polish across multiple text input surfaces. Not a hard blocker for any single feature.
+**Unblocks:** Polish across multiple text input surfaces.
 
 ### Read Receipts (Outgoing)
-No implementation spec needed. Direct implementation: add `Disposition-Notification-To` header in provider send functions. Track as a task, not a document.
+No spec needed. Direct implementation: add `Disposition-Notification-To` header in provider send functions.
 
 ## Tier 5 — Major Independent Workstream
 
-### Calendar Phased Implementation Spec
-The largest remaining spec effort. Needs phased implementation covering: new SQLite schema (calendars, events, attendees, recurrence rules, reminders), provider calendar API integration (Google Calendar, Microsoft Graph Calendar, CalDAV), mode switcher UI, calendar sidebar (mini-month, view switcher, calendar list), four main views (day, work week, week, month — each a custom iced widget), event blocks, event interaction (popover → modal), event CRUD, RSVP, recurrence expansion (rrule crate), time picker with timezone support, email ↔ calendar integration, and eventually pop-out calendar window.
+### Calendar
+**Spec not yet written.** The largest remaining effort — new schema, provider APIs, custom iced widgets, four calendar views, event CRUD, RSVP, recurrence, pop-out window.
 
 **Depends on:** Core app shell (Tier 1) should be solid first.
 **Unblocks:** Enterprise calendar workflows. Does not block the email product.
@@ -99,22 +128,24 @@ The largest remaining spec effort. Needs phased implementation covering: new SQL
 
 ```
 Tier 1 (parallel cluster):
-  Command Palette Slice 6
+  Command Palette Slice 6 (6a → 6b → 6c; 6d parallel; 6e → 6f)
     └── Sidebar Phase 2
-  Sidebar Phase 1 (independent)
-  Accounts (independent)
-  Status Bar (independent, pairs with Accounts)
+  Sidebar Phase 1A-1E (1A is critical path)
+  Accounts Phases 0-7 (Phase 0 is backend)
+  Status Bar (single phase, 5 steps)
 
 Tier 2:
-  Contacts Autocomplete (independent)
-    └── Pop-Out Compose (Tier 3)
-  Search App Integration
+  Contacts Autocomplete (6 phases)
+    └── Pop-Out Compose (Tier 3, spec not yet written)
+  Search App Integration (4 phases)
     └── Pinned Searches (Tier 3)
 
 Tier 3:
-  Pop-Out Compose (depends on: Editor + Contacts Autocomplete + Signatures)
-  Pop-Out Message View (mostly independent)
-  Signatures (depends on: Editor)
+  Pop-Out Message View Phase 1 (shared multi-window infra)
+    ├── Pop-Out Compose (+ Editor + Contacts Autocomplete + Signatures)
+    └── Calendar pop-out (Tier 5)
+  Pop-Out Message View Phases 2-6 (feature-specific)
+  Signatures (depends on: Editor Phase 3)
   Pinned Searches (depends on: Search App Integration)
 
 Tier 4:
@@ -125,9 +156,12 @@ Tier 5:
   Calendar (depends on: Tier 1 shell being solid)
 ```
 
-## Cross-Cutting Notes
+## Cross-Cutting Concerns
 
-- **Editor** is in progress and not tracked here. Together with contacts autocomplete, it unblocks serious compose work.
-- **Generational load tracking** (bloom pattern) should be treated as a foundational primitive — it appears in nearly every spec (search, calendar, main layout, sidebar, command palette, pinned searches, status bar, contacts).
-- **Pop-out windows** are deliberately split into compose and message-view specs because the compose half has heavy dependencies (editor, autocomplete) while message-view is comparatively self-contained.
-- **Contacts** are deliberately split into autocomplete (core email loop) and management (additive) because the token widget is a compose blocker while the settings UI is not.
+- **Writable DB connection:** Multiple features need local-state writes (pinned searches, attachment collapse, session restore, keybinding overrides, account metadata). The first feature to land should establish the `local_conn` pattern. This is a cross-cutting architecture decision, not owned by any single spec.
+- **NavigationTarget enum:** The command palette spec introduces this. Sidebar, search, and pinned searches should all adopt it to replace the semantically muddy `selected_label: Option<String>`. This is app-state normalization that should happen alongside or slightly ahead of command integration.
+- **Generational load tracking:** Appears in nearly every spec (search, sidebar, command palette, pinned searches, status bar, contacts, accounts). Should be treated as a foundational primitive with a shared helper, not reimplemented per-feature.
+- **Editor** is in progress and not tracked here. Together with contacts autocomplete, it unblocks serious compose work. Signatures depend on editor Phase 3 (HTML round-trip).
+- **Pop-out windows** are deliberately split into compose (heavy dependencies) and message-view (mostly independent, but Phase 1 is shared infrastructure).
+- **Contacts** are deliberately split into autocomplete (core email loop blocker) and management (additive, Tier 4).
+- **Result type convergence:** The search specs identify four overlapping thread-result types (`UnifiedSearchResult`, `Thread`, `DbThread`, `SearchResult`). Long-term, these should converge into a unified thread-presentation type.
