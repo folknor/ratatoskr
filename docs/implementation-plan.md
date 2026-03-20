@@ -96,6 +96,12 @@ Prioritized implementation plan for Ratatoskr features.
 - Missing FK constraints on `calendar_attendees`/`calendar_reminders` → `calendar_events`. Orphaned rows possible if events deleted without cleanup. `db_delete_calendar_event` doesn't cascade.
 - `mix()` made pub speculatively in theme.rs — revert if not used externally.
 - Unicode arrows (◀/▶) in mini-month nav — should use icon:: helpers for consistency.
+- O(n²) overlap computation in `set_total_columns()` — compares every event pair. Fine for typical day counts (<20 events) but should have a comment or TODO for future optimization.
+- Full event cloning per view rebuild in `events_for_date()` — manually clones every field (no Clone derive). Currently moot with empty event sets but will matter when real provider data arrives.
+- `TimeGridConfig` rebuilt unnecessarily for Month view — the Month branch in `rebuild_view_data()` builds a throwaway day view config that's never rendered. Wasteful, if harmless.
+- No scroll-to-now/working-hours — time grid renders 0–24 from midnight with no auto-scroll to current time or business hours.
+- No recurrence icon on event blocks — spec requires 🔁 indicator for recurring events, but `TimeGridEvent` has no `is_recurring` field yet.
+- Weekend columns not narrower in week view — spec notes this is common but says "often" not "must."
 
 ## Spec Status
 
