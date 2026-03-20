@@ -47,7 +47,7 @@ fn row_to_account(row: &Row<'_>) -> rusqlite::Result<DbAccount> {
 pub async fn db_get_all_accounts(db: &DbState) -> Result<Vec<DbAccount>, String> {
     db.with_conn(move |conn| {
         let mut stmt = conn
-            .prepare("SELECT * FROM accounts ORDER BY created_at ASC")
+            .prepare("SELECT * FROM accounts ORDER BY sort_order ASC, created_at ASC")
             .map_err(|e| e.to_string())?;
         stmt.query_map([], row_to_account)
             .map_err(|e| e.to_string())?

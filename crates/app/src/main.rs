@@ -532,15 +532,35 @@ impl App {
             if let Some(id) = self.binding_table.resolve_sequence(
                 &pending.first, &chord,
             ) {
-                return self.update(Message::ExecuteCommand(id));
+                if self.is_command_available(id) {
+                    return self.update(Message::ExecuteCommand(id));
+                }
+                return Task::none();
             }
-            // Second chord didn't match any sequence -- discard
-            return Task::none();
+            // Second chord didn't match any sequence — re-process as fresh first chord
+            return self.try_resolve_single_chord(chord);
         }
 
         // 4. Resolve single chord
+        self.try_resolve_single_chord(chord)
+    }
+
+    /// Check if a command is currently available given app context.
+    fn is_command_available(&self, id: CommandId) -> bool {
+        let ctx = command_dispatch::build_context(self);
+        self.registry.get(id).is_some_and(|desc| (desc.is_available)(&ctx))
+    }
+
+    /// Try to resolve a single chord, checking availability before dispatch.
+    fn try_resolve_single_chord(&mut self, chord: Chord) -> Task<Message> {
         match self.binding_table.resolve_chord(&chord) {
-            ResolveResult::Command(id) => self.update(Message::ExecuteCommand(id)),
+            ResolveResult::Command(id) => {
+                if self.is_command_available(id) {
+                    self.update(Message::ExecuteCommand(id))
+                } else {
+                    Task::none()
+                }
+            }
             ResolveResult::Pending => {
                 self.pending_chord = Some(PendingChord {
                     first: chord,

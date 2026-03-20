@@ -180,19 +180,16 @@ pub async fn db_update_account_sort_order(
     updates: Vec<(String, i64)>,
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
-        conn.execute_batch("BEGIN").map_err(|e| e.to_string())?;
-        let mut stmt = conn
-            .prepare("UPDATE accounts SET sort_order = ?1 WHERE id = ?2")
-            .map_err(|e| e.to_string())?;
-        for (id, order) in &updates {
-            if let Err(e) = stmt.execute(params![order, id]) {
-                drop(stmt);
-                let _ = conn.execute_batch("ROLLBACK");
-                return Err(e.to_string());
+        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        {
+            let mut stmt = tx
+                .prepare("UPDATE accounts SET sort_order = ?1 WHERE id = ?2")
+                .map_err(|e| e.to_string())?;
+            for (id, order) in &updates {
+                stmt.execute(params![order, id]).map_err(|e| e.to_string())?;
             }
         }
-        drop(stmt);
-        conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
         Ok(())
     })
     .await

@@ -2,6 +2,39 @@ use rusqlite::{Connection, OptionalExtension};
 
 use crate::provider::crypto::{decrypt_value, encrypt_value, is_encrypted};
 
+/// Derive an account name from an email address.
+/// "alice@corp.com" → "Corp", "bob@gmail.com" → "Gmail"
+fn derive_account_name(email: &str) -> String {
+    let domain = email.split('@').nth(1).unwrap_or("Account");
+    let name = domain.split('.').next().unwrap_or(domain);
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) => c.to_uppercase().chain(chars).collect(),
+        None => "Account".to_string(),
+    }
+}
+
+/// Pick the next unused account color from the label-colors palette.
+/// Falls back to the first color if all are used.
+fn next_account_color(conn: &Connection) -> String {
+    let used: Vec<String> = conn
+        .prepare("SELECT account_color FROM accounts WHERE account_color IS NOT NULL")
+        .and_then(|mut stmt| {
+            stmt.query_map([], |row| row.get::<_, String>(0))
+                .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        })
+        .unwrap_or_default();
+
+    let presets = ratatoskr_label_colors::category_colors::all_presets();
+    for (_, bg, _) in presets {
+        if !used.iter().any(|u| u == *bg) {
+            return (*bg).to_string();
+        }
+    }
+    // All used — return the first preset
+    presets.first().map_or("#3498db".to_string(), |(_, bg, _)| (*bg).to_string())
+}
+
 /// Check if a Gmail account with the given email already exists.
 /// Returns `Some(id)` if a duplicate exists.
 pub fn check_gmail_duplicate(
@@ -35,11 +68,13 @@ pub fn insert_gmail_account(
     conn: &Connection,
     params: &InsertGmailAccountParams,
 ) -> Result<(), String> {
+    let account_name = derive_account_name(&params.email);
+    let account_color = next_account_color(conn);
     conn.execute(
         "INSERT INTO accounts (id, email, display_name, avatar_url, access_token, \
          refresh_token, token_expires_at, provider, auth_method, oauth_client_id, \
-         oauth_client_secret) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'gmail_api', 'oauth2', ?8, ?9)",
+         oauth_client_secret, account_name, account_color) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'gmail_api', 'oauth2', ?8, ?9, ?10, ?11)",
         rusqlite::params![
             params.account_id,
             params.email,
@@ -50,6 +85,8 @@ pub fn insert_gmail_account(
             params.expires_at,
             params.encrypted_client_id,
             params.encrypted_client_secret,
+            account_name,
+            account_color,
         ],
     )
     .map_err(|e| format!("Failed to insert Gmail account: {e}"))?;
@@ -85,14 +122,16 @@ pub fn insert_imap_oauth_account(
     conn: &Connection,
     params: &InsertImapOAuthAccountParams,
 ) -> Result<(), String> {
+    let account_name = derive_account_name(&params.email);
+    let account_color = next_account_color(conn);
     conn.execute(
         "INSERT INTO accounts (id, email, display_name, avatar_url, access_token, \
          refresh_token, token_expires_at, provider, auth_method, imap_host, imap_port, \
          imap_security, smtp_host, smtp_port, smtp_security, oauth_provider, \
          oauth_client_id, oauth_client_secret, oauth_token_url, imap_username, \
-         accept_invalid_certs) \
+         accept_invalid_certs, account_name, account_color) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'imap', 'oauth2', ?8, ?9, ?10, ?11, ?12, \
-         ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+         ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
         rusqlite::params![
             params.account_id,
             params.email,
@@ -113,6 +152,8 @@ pub fn insert_imap_oauth_account(
             params.oauth_token_url,
             params.imap_username,
             if params.accept_invalid_certs { 1 } else { 0 },
+            account_name,
+            account_color,
         ],
     )
     .map_err(|e| format!("Failed to insert OAuth IMAP account: {e}"))?;
@@ -135,10 +176,13 @@ pub fn insert_graph_account(
     conn: &Connection,
     params: &InsertGraphAccountParams,
 ) -> Result<(), String> {
+    let account_name = derive_account_name(&params.email);
+    let account_color = next_account_color(conn);
     conn.execute(
         "INSERT INTO accounts (id, email, display_name, avatar_url, access_token, \
-         refresh_token, token_expires_at, provider, auth_method, oauth_client_id) \
-         VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, 'graph', 'oauth2', ?7)",
+         refresh_token, token_expires_at, provider, auth_method, oauth_client_id, \
+         account_name, account_color) \
+         VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, 'graph', 'oauth2', ?7, ?8, ?9)",
         rusqlite::params![
             params.account_id,
             params.email,
@@ -147,6 +191,8 @@ pub fn insert_graph_account(
             params.refresh_token,
             params.expires_at,
             params.encrypted_client_id,
+            account_name,
+            account_color,
         ],
     )
     .map_err(|e| format!("Failed to insert Graph account: {e}"))?;
