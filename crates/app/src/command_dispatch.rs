@@ -146,11 +146,26 @@ fn current_view_and_label(app: &App) -> (ViewType, Option<String>) {
 }
 
 fn active_account_info(app: &App) -> (Option<String>, Option<ratatoskr_command_palette::ProviderKind>) {
-    app.sidebar
+    // 1. If sidebar is scoped to a single account, use that.
+    if let Some(account) = app
+        .sidebar
         .selected_account
         .and_then(|idx| app.sidebar.accounts.get(idx))
-        .map(|a| (Some(a.id.clone()), None))
-        .unwrap_or((None, None))
+    {
+        return (Some(account.id.clone()), None);
+    }
+    // 2. If in unified view but a thread is selected, derive account
+    //    from the selected thread. This is critical for parameterized
+    //    commands (Move to Folder, Add/Remove Label) which need an
+    //    account to resolve options in stage 2.
+    if let Some(thread) = app
+        .thread_list
+        .selected_thread
+        .and_then(|idx| app.thread_list.threads.get(idx))
+    {
+        return (Some(thread.account_id.clone()), None);
+    }
+    (None, None)
 }
 
 struct ThreadState {

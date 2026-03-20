@@ -428,6 +428,25 @@ impl Db {
             .collect::<Result<Vec<_>, String>>()
         })
     }
+
+    /// Check whether an account uses folder-based semantics (Exchange/IMAP/JMAP)
+    /// as opposed to tag-based (Gmail). Folder-based providers don't support
+    /// Add Label / Remove Label — only Move to Folder.
+    pub fn is_folder_based_provider(
+        &self,
+        account_id: &str,
+    ) -> Result<bool, String> {
+        self.with_conn_sync(|conn| {
+            let provider: String = conn
+                .query_row(
+                    "SELECT provider FROM accounts WHERE id = ?1",
+                    params![account_id],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            Ok(provider != "gmail_api")
+        })
+    }
 }
 
 /// Convert a label name to an `OptionItem`, splitting `/`-delimited names
