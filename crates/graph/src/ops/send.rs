@@ -196,6 +196,7 @@ pub(super) fn mime_to_graph_message(
         mentions: None,
         from: None,
         sender: None,
+        is_read_receipt_requested: Some(true),
     })
 }
 

@@ -617,8 +617,9 @@ impl ProviderOps for ImapOps {
             .await?
             .unwrap_or_else(|| "Sent".to_string());
 
-        // Send via SMTP
-        let result = smtp::client::send_raw_email(&smtp_config, raw_base64url).await?;
+        // Inject read-receipt header and send via SMTP
+        let patched = ratatoskr_provider_utils::headers::inject_read_receipt_header_base64url(raw_base64url)?;
+        let result = smtp::client::send_raw_email(&smtp_config, &patched).await?;
         if !result.success {
             return Err(ProviderError::Server(format!("SMTP send failed: {}", result.message)));
         }
@@ -630,7 +631,7 @@ impl ProviderOps for ImapOps {
         );
 
         // Copy sent message to Sent folder (non-fatal if it fails)
-        let raw_b64url = raw_base64url.to_string();
+        let raw_b64url = patched;
         if let Err(e) = async {
             let raw_bytes = ratatoskr_provider_utils::encoding::decode_base64url_nopad(&raw_b64url)?;
 

@@ -210,9 +210,10 @@ impl ProviderOps for GmailOps {
         thread_id: Option<&str>,
         _mentions: &[(String, String)],
     ) -> Result<String, ProviderError> {
+        let patched = ratatoskr_provider_utils::headers::inject_read_receipt_header_base64url(raw_base64url)?;
         let msg = self
             .client
-            .send_message(raw_base64url, thread_id, ctx.db)
+            .send_message(&patched, thread_id, ctx.db)
             .await?;
         Ok(msg.id)
     }

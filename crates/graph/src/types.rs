@@ -165,6 +165,8 @@ pub struct GraphCreateMessage {
     pub from: Option<GraphRecipient>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sender: Option<GraphRecipient>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_read_receipt_requested: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
