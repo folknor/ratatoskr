@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use iced::widget::{container, mouse_area, row, text, Space};
 use iced::{Alignment, Element, Length};
@@ -79,7 +79,7 @@ pub enum StatusBarEvent {
 // ── State ───────────────────────────────────────────────
 
 pub struct StatusBar {
-    warnings: HashMap<String, AccountWarning>,
+    warnings: BTreeMap<String, AccountWarning>,
     sync_progress: HashMap<String, SyncAccountProgress>,
     confirmation: Option<Confirmation>,
     warning_cycle_index: usize,
@@ -89,7 +89,7 @@ pub struct StatusBar {
 impl StatusBar {
     pub fn new() -> Self {
         Self {
-            warnings: HashMap::new(),
+            warnings: BTreeMap::new(),
             sync_progress: HashMap::new(),
             confirmation: None,
             warning_cycle_index: 0,
@@ -284,11 +284,9 @@ impl Component for StatusBar {
 
         match content {
             ResolvedContent::Idle => {
-                container(Space::new().height(0))
-                    .width(Length::Fill)
-                    .height(STATUS_BAR_HEIGHT)
-                    .style(ContainerClass::StatusBar.style())
-                    .into()
+                // Nothing to show — collapse to zero height.
+                // "Absence means nothing to say" per the problem statement.
+                Space::new().width(0).height(0).into()
             }
             ResolvedContent::Warning {
                 text: warning_text,

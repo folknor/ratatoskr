@@ -465,7 +465,13 @@ impl App {
 
     fn view(&self) -> Element<'_, Message> {
         if self.show_settings {
-            return self.settings.view().map(Message::Settings);
+            let settings_view = self.settings.view().map(Message::Settings);
+            let status_bar = self.status_bar.view().map(Message::StatusBar);
+            return column![
+                container(settings_view).height(Length::Fill),
+                status_bar,
+            ]
+            .into();
         }
 
         let sidebar = container(self.sidebar.view().map(Message::Sidebar))
