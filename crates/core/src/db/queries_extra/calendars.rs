@@ -42,7 +42,7 @@ pub async fn db_get_calendars_for_account(
         let mut stmt = conn
             .prepare(
                 "SELECT * FROM calendars WHERE account_id = ?1 \
-                     ORDER BY is_primary DESC, display_name ASC",
+                     ORDER BY sort_order ASC, is_primary DESC, display_name ASC",
             )
             .map_err(|e| e.to_string())?;
         stmt.query_map(params![account_id], DbCalendar::from_row)
@@ -61,7 +61,7 @@ pub async fn db_get_visible_calendars(
         let mut stmt = conn
             .prepare(
                 "SELECT * FROM calendars WHERE account_id = ?1 AND is_visible = 1 \
-                     ORDER BY is_primary DESC, display_name ASC",
+                     ORDER BY sort_order ASC, is_primary DESC, display_name ASC",
             )
             .map_err(|e| e.to_string())?;
         stmt.query_map(params![account_id], DbCalendar::from_row)

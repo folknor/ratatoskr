@@ -254,8 +254,6 @@ pub enum ContainerClass {
     CalendarCell,
     /// Today's calendar cell (accent border/tint).
     CalendarCellToday,
-    /// Calendar event entry (colored background, rounded).
-    CalendarEvent,
     /// Non-current-month calendar cell (muted background).
     CalendarCellMuted,
     /// Mini-month selected date highlight.
@@ -288,7 +286,6 @@ impl ContainerClass {
             Self::ModalBackdrop => style_modal_backdrop_container,
             Self::CalendarCell => style_calendar_cell_container,
             Self::CalendarCellToday => style_calendar_cell_today_container,
-            Self::CalendarEvent => style_calendar_event_container,
             Self::CalendarCellMuted => style_calendar_cell_muted_container,
             Self::MiniMonthSelected => style_mini_month_selected_container,
         }
@@ -1081,18 +1078,6 @@ fn style_calendar_cell_today_container(theme: &Theme) -> container::Style {
     }
 }
 
-fn style_calendar_event_container(theme: &Theme) -> container::Style {
-    let p = theme.palette();
-    container::Style {
-        background: Some(p.primary.base.color.into()),
-        border: iced::Border {
-            radius: RADIUS_SM.into(),
-            ..Default::default()
-        },
-        ..Default::default()
-    }
-}
-
 fn style_calendar_cell_muted_container(theme: &Theme) -> container::Style {
     let p = theme.palette();
     container::Style {
@@ -1321,9 +1306,14 @@ pub fn mix(a: Color, b: Color, t: f32) -> Color {
 
 pub fn hex_to_color(hex: &str) -> Color {
     let hex = hex.trim_start_matches('#');
-    let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(0);
-    let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0);
-    let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0);
+    // Guard against short/malformed hex strings — fall back to mid-gray
+    // rather than panicking on slice bounds.
+    if hex.len() < 6 {
+        return Color::from_rgb8(128, 128, 128);
+    }
+    let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(128);
+    let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(128);
+    let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(128);
     Color::from_rgb8(r, g, b)
 }
 

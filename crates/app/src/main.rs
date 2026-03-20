@@ -904,17 +904,15 @@ impl App {
                 Task::none()
             }
             Message::SetCalendarView(view) => {
-                self.calendar.active_view = view;
-                // If not in calendar mode, switch to it
+                // Delegate to the Calendar handler, switching mode if needed
                 if self.app_mode != AppMode::Calendar {
                     self.app_mode = AppMode::Calendar;
                     self.sidebar.in_calendar_mode = true;
                 }
-                Task::none()
+                self.update(Message::Calendar(ui::calendar::CalendarMessage::SetView(view)))
             }
             Message::CalendarToday => {
-                self.calendar.go_to_today();
-                Task::none()
+                self.update(Message::Calendar(ui::calendar::CalendarMessage::Today))
             }
 
             // Account management

@@ -82,13 +82,18 @@ pub fn build_month_grid(
         });
 
         // Distribute events into this week's cells.
+        // Multi-day events appear on every day they span, not just the start date.
         for event in events {
-            let Some(event_date) = chrono::DateTime::from_timestamp(event.start_time, 0) else {
+            let Some(start_dt) = chrono::DateTime::from_timestamp(event.start_time, 0) else {
                 continue;
             };
-            let event_naive = event_date.date_naive();
+            let Some(end_dt) = chrono::DateTime::from_timestamp(event.end_time, 0) else {
+                continue;
+            };
+            let event_start = start_dt.date_naive();
+            let event_end = end_dt.date_naive();
             for day in &mut week {
-                if day.date == event_naive {
+                if day.date >= event_start && day.date <= event_end {
                     day.events.push(MonthEvent {
                         id: event.id.clone(),
                         title: event.title.clone(),
@@ -519,7 +524,7 @@ fn month_label(month: u32) -> &'static str {
 }
 
 /// Choose white or dark text based on background luminance.
-/// Uses the W3C relative luminance formula.
+/// Uses the ITU-R BT.601 luma formula (0.299R + 0.587G + 0.114B).
 fn contrasting_text_color(bg: iced::Color) -> iced::Color {
     let luminance = 0.299 * bg.r + 0.587 * bg.g + 0.114 * bg.b;
     if luminance > 0.5 {
