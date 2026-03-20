@@ -559,47 +559,52 @@ pub fn search_contacts_for_autocomplete(
     let mut results = Vec::new();
     let mut seen_emails: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    // Search contacts table first (higher priority)
+    // Search contacts table first (higher priority).
+    // Order by frequency DESC so frequently-contacted people rank higher,
+    // matching the product spec's "recency dominates" ranking model.
     let contacts_sql = "SELECT email, display_name FROM contacts
                         WHERE email LIKE ?1 OR display_name LIKE ?1
-                        ORDER BY display_name ASC
+                        ORDER BY frequency DESC, display_name ASC
                         LIMIT ?2";
-    if let Ok(mut stmt) = conn.prepare(contacts_sql) {
-        if let Ok(rows) = stmt.query_map(params![&pattern, limit], |row| {
+    let mut stmt = conn.prepare(contacts_sql).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![&pattern, limit], |row| {
             Ok(ContactMatch {
                 email: row.get("email")?,
                 display_name: row.get("display_name")?,
             })
-        }) {
-            for row in rows.flatten() {
-                let key = row.email.to_lowercase();
-                if seen_emails.insert(key) {
-                    results.push(row);
-                }
-            }
+        })
+        .map_err(|e| e.to_string())?;
+    for row in rows {
+        let contact = row.map_err(|e| e.to_string())?;
+        let key = contact.email.to_lowercase();
+        if seen_emails.insert(key) {
+            results.push(contact);
         }
     }
 
-    // Search seen_addresses table (lower priority, fills remaining slots)
+    // Search seen_addresses table (lower priority, fills remaining slots).
+    // Order by last_seen_at DESC for recency.
     let remaining = limit - results.len() as i64;
     if remaining > 0 {
         let seen_sql = "SELECT email, display_name FROM seen_addresses
                         WHERE email LIKE ?1 OR display_name LIKE ?1
                         ORDER BY last_seen_at DESC
                         LIMIT ?2";
-        if let Ok(mut stmt) = conn.prepare(seen_sql) {
-            if let Ok(rows) = stmt.query_map(params![&pattern, remaining], |row| {
+        let mut seen_stmt = conn.prepare(seen_sql).map_err(|e| e.to_string())?;
+        let seen_rows = seen_stmt
+            .query_map(params![&pattern, remaining], |row| {
                 Ok(ContactMatch {
                     email: row.get("email")?,
                     display_name: row.get("display_name")?,
                 })
-            }) {
-                for row in rows.flatten() {
-                    let key = row.email.to_lowercase();
-                    if seen_emails.insert(key) {
-                        results.push(row);
-                    }
-                }
+            })
+            .map_err(|e| e.to_string())?;
+        for row in seen_rows {
+            let contact = row.map_err(|e| e.to_string())?;
+            let key = contact.email.to_lowercase();
+            if seen_emails.insert(key) {
+                results.push(contact);
             }
         }
     }

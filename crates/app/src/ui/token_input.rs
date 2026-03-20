@@ -464,6 +464,14 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
                                     height: chip.height,
                                 };
                                 if abs.contains(pos) {
+                                    // Focus the widget so keyboard events
+                                    // (Backspace/Delete) work on the selected token
+                                    if !state.is_focused {
+                                        state.is_focused = true;
+                                        shell.publish((self.on_message)(
+                                            TokenInputMessage::Focused,
+                                        ));
+                                    }
                                     shell.publish((self.on_message)(
                                         TokenInputMessage::SelectToken(
                                             token.id,

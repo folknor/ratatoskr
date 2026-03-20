@@ -531,6 +531,11 @@ impl App {
                 self.thread_list.search_query.clone_from(&self.search_query);
                 if self.search_query.trim().is_empty() {
                     self.search_debounce_deadline = None;
+                    // Empty query while in search mode → restore folder view
+                    // immediately so the user doesn't see stale search results.
+                    if self.thread_list.mode == ui::thread_list::ThreadListMode::Search {
+                        return self.restore_folder_view();
+                    }
                 } else {
                     self.search_debounce_deadline = Some(
                         iced::time::Instant::now()
@@ -1185,9 +1190,75 @@ impl App {
                 self.show_settings = false;
                 Task::none()
             }
-            // Signature events added by parallel agent — stub until wired
-            #[allow(unreachable_patterns)]
-            _ => Task::none(),
+            SettingsEvent::SaveSignature(req) => {
+                let db = Arc::clone(&self.db);
+                Task::perform(
+                    async move {
+                        db.with_write_conn(move |conn| {
+                            if let Some(ref id) = req.id {
+                                // Update existing signature
+                                conn.execute(
+                                    "UPDATE signatures SET name = ?1, body_html = ?2, \
+                                     is_default = ?3 WHERE id = ?4",
+                                    rusqlite::params![
+                                        req.name,
+                                        req.body_html,
+                                        if req.is_default { 1 } else { 0 },
+                                        id,
+                                    ],
+                                )
+                                .map_err(|e| e.to_string())?;
+                            } else {
+                                // Insert new signature
+                                let id = uuid::Uuid::new_v4().to_string();
+                                conn.execute(
+                                    "INSERT INTO signatures (id, account_id, name, body_html, is_default) \
+                                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                                    rusqlite::params![
+                                        id,
+                                        req.account_id,
+                                        req.name,
+                                        req.body_html,
+                                        if req.is_default { 1 } else { 0 },
+                                    ],
+                                )
+                                .map_err(|e| e.to_string())?;
+                            }
+                            Ok(())
+                        })
+                        .await
+                    },
+                    |result| {
+                        if let Err(e) = result {
+                            eprintln!("Failed to save signature: {e}");
+                        }
+                        // Reload signatures after save
+                        Message::Noop // TODO: add a SignaturesReload message
+                    },
+                )
+            }
+            SettingsEvent::DeleteSignature(sig_id) => {
+                let db = Arc::clone(&self.db);
+                Task::perform(
+                    async move {
+                        db.with_write_conn(move |conn| {
+                            conn.execute(
+                                "DELETE FROM signatures WHERE id = ?1",
+                                rusqlite::params![sig_id],
+                            )
+                            .map_err(|e| e.to_string())?;
+                            Ok(())
+                        })
+                        .await
+                    },
+                    |result| {
+                        if let Err(e) = result {
+                            eprintln!("Failed to delete signature: {e}");
+                        }
+                        Message::Noop // TODO: add a SignaturesReload message
+                    },
+                )
+            }
         }
     }
 
@@ -1338,6 +1409,8 @@ impl App {
                 last_sync_at: a.last_sync_at,
             })
             .collect();
+        // Load signatures for the settings UI
+        self.load_signatures_into_settings();
         self.sidebar.selected_account = Some(0);
         self.status = format!("Loaded {} accounts", self.sidebar.accounts.len());
         self.load_navigation_and_threads()
@@ -1498,11 +1571,51 @@ impl App {
         self.thread_list.mode = ui::thread_list::ThreadListMode::Folder;
         self.search_query.clear();
         self.thread_list.search_query.clear();
+        // Clear selection to avoid stale state: the selected index from
+        // search results may point at a different thread in the restored
+        // folder list. Also clear the reading pane's messages.
+        self.thread_list.selected_thread = None;
+        self.reading_pane.thread_messages.clear();
+        self.reading_pane.thread_attachments.clear();
+        self.reading_pane.message_expanded.clear();
         if let Some(threads) = self.pre_search_threads.take() {
             self.status = format!("{} threads", threads.len());
             self.thread_list.set_threads(threads);
         }
         Task::none()
+    }
+
+    /// Load signatures from DB into settings.signatures synchronously.
+    /// Called after accounts load so the settings UI has signature data.
+    fn load_signatures_into_settings(&mut self) {
+        let result = self.db.with_conn_sync(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, account_id, name, body_html, is_default, sort_order
+                     FROM signatures ORDER BY account_id, sort_order, name",
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok(ui::settings::SignatureEntry {
+                        id: row.get("id")?,
+                        account_id: row.get("account_id")?,
+                        name: row.get("name")?,
+                        body_html: row.get::<_, Option<String>>("body_html")?
+                            .unwrap_or_default(),
+                        body_text: None,
+                        is_default: row.get::<_, i64>("is_default").unwrap_or(0) != 0,
+                        is_reply_default: false,
+                    })
+                })
+                .map_err(|e| e.to_string())?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())
+        });
+        match result {
+            Ok(sigs) => self.settings.signatures = sigs,
+            Err(e) => eprintln!("Failed to load signatures: {e}"),
+        }
     }
 
     fn update_thread_list_context_from_sidebar(&mut self) {
