@@ -156,6 +156,20 @@ pub enum Message {
     // Palette placeholder (Slice 6b)
     Palette(PaletteMessage),
 
+    // Search
+    /// The search bar text changed (debounced).
+    SearchQueryChanged(String),
+    /// Debounce fired or Enter pressed — execute search.
+    SearchExecute,
+    /// Async search results arrived. u64 is the generation for staleness detection.
+    SearchResultsLoaded(u64, Result<Vec<Thread>, String>),
+    /// Clear search and restore folder view.
+    SearchClear,
+    /// Focus the search bar (e.g. `/` shortcut).
+    FocusSearchBar,
+    /// Unfocus the search bar without clearing.
+    SearchBlur,
+
     // Account management
     AddAccount(AddAccountMessage),
     OpenAddAccount,
@@ -197,6 +211,16 @@ struct App {
     palette: PaletteState,
     /// Resolver for parameterized command options (stage 2).
     resolver: Arc<command_resolver::AppInputResolver>,
+
+    // Search state
+    /// Monotonically increasing counter for search result freshness.
+    search_generation: u64,
+    /// The query string currently in the search bar.
+    search_query: String,
+    /// When set, a search execution is pending after this instant (debounce).
+    search_debounce_deadline: Option<iced::time::Instant>,
+    /// Threads displayed before the current search, restored on SearchClear.
+    pre_search_threads: Option<Vec<Thread>>,
 
     /// True when the app has no configured accounts.
     no_accounts: bool,
@@ -243,6 +267,10 @@ impl App {
             pending_chord: None,
             palette: PaletteState::new(),
             resolver,
+            search_generation: 0,
+            search_query: String::new(),
+            search_debounce_deadline: None,
+            pre_search_threads: None,
             no_accounts: false,
             add_account_wizard: None,
         };
@@ -309,6 +337,20 @@ impl App {
             subs.push(
                 iced::time::every(CHORD_TIMEOUT)
                     .map(|_| Message::KeyEvent(KeyEventMessage::PendingChordTimeout)),
+            );
+        }
+
+        // Search debounce timer — polls every 50ms while a deadline is set
+        if let Some(deadline) = self.search_debounce_deadline {
+            subs.push(
+                iced::time::every(std::time::Duration::from_millis(50))
+                    .map(move |_| {
+                        if iced::time::Instant::now() >= deadline {
+                            Message::SearchExecute
+                        } else {
+                            Message::Noop
+                        }
+                    }),
             );
         }
 
@@ -436,6 +478,11 @@ impl App {
                 // Close settings overlay, deselect thread, etc.
                 if self.show_settings {
                     self.show_settings = false;
+                    return Task::none();
+                }
+                // If search has content, clear it
+                if !self.search_query.is_empty() {
+                    return self.update(Message::SearchClear);
                 }
                 Task::none()
             }
@@ -461,8 +508,8 @@ impl App {
                 Task::none()
             }
             Message::FocusSearch => {
-                // Stub: search focus not yet implemented.
-                Task::none()
+                // Delegate to the real FocusSearchBar handler
+                self.update(Message::FocusSearchBar)
             }
             Message::ShowHelp => {
                 // Stub: help overlay not yet implemented.
@@ -477,6 +524,74 @@ impl App {
                 Task::none()
             }
             Message::Palette(msg) => self.handle_palette(msg),
+
+            // Search
+            Message::SearchQueryChanged(query) => {
+                self.search_query = query;
+                self.thread_list.search_query.clone_from(&self.search_query);
+                if self.search_query.trim().is_empty() {
+                    self.search_debounce_deadline = None;
+                } else {
+                    self.search_debounce_deadline = Some(
+                        iced::time::Instant::now()
+                            + std::time::Duration::from_millis(150),
+                    );
+                }
+                Task::none()
+            }
+            Message::SearchExecute => {
+                self.search_debounce_deadline = None;
+                let query = self.search_query.trim().to_string();
+                if query.is_empty() {
+                    return self.restore_folder_view();
+                }
+
+                // Store pre-search threads on first search from folder mode
+                if self.thread_list.mode == ui::thread_list::ThreadListMode::Folder {
+                    self.pre_search_threads = Some(self.thread_list.threads.clone());
+                }
+
+                self.search_generation += 1;
+                let generation = self.search_generation;
+                let db = Arc::clone(&self.db);
+
+                Task::perform(
+                    async move {
+                        let result = execute_search(db, query).await;
+                        (generation, result)
+                    },
+                    |(g, result)| Message::SearchResultsLoaded(g, result),
+                )
+            }
+            Message::SearchResultsLoaded(g, _) if g != self.search_generation => {
+                // Stale results — silently drop.
+                Task::none()
+            }
+            Message::SearchResultsLoaded(_, Ok(threads)) => {
+                self.thread_list.mode = ui::thread_list::ThreadListMode::Search;
+                self.status = format!("{} results", threads.len());
+                self.thread_list.set_threads(threads);
+                self.thread_list.selected_thread = None;
+                Task::none()
+            }
+            Message::SearchResultsLoaded(_, Err(e)) => {
+                self.status = format!("Search error: {e}");
+                Task::none()
+            }
+            Message::SearchClear => {
+                self.search_query.clear();
+                self.thread_list.search_query.clear();
+                self.search_debounce_deadline = None;
+                self.search_generation += 1; // Invalidate in-flight searches
+                self.restore_folder_view()
+            }
+            Message::FocusSearchBar => {
+                iced::widget::operation::focus::<Message>("search-bar".to_string())
+            }
+            Message::SearchBlur => {
+                // Unfocus the search bar without clearing search state.
+                Task::none()
+            }
 
             // Account management
             Message::AddAccount(msg) => self.handle_add_account(msg),
@@ -960,6 +1075,7 @@ impl App {
     fn handle_sidebar_event(&mut self, event: SidebarEvent) -> Task<Message> {
         match event {
             SidebarEvent::AccountSelected(_idx) => {
+                self.clear_search_state();
                 self.thread_list.selected_thread = None;
                 self.nav_generation += 1;
                 self.thread_generation += 1;
@@ -967,6 +1083,7 @@ impl App {
                 self.load_navigation_and_threads()
             }
             SidebarEvent::AllAccountsSelected => {
+                self.clear_search_state();
                 self.thread_list.selected_thread = None;
                 self.nav_generation += 1;
                 self.thread_generation += 1;
@@ -975,6 +1092,7 @@ impl App {
             }
             SidebarEvent::CycleAccount => Task::none(),
             SidebarEvent::LabelSelected(label_id) => {
+                self.clear_search_state();
                 self.update_thread_list_context_from_sidebar();
                 self.handle_label_selected(label_id)
             }
@@ -1005,6 +1123,12 @@ impl App {
     fn handle_thread_list_event(&mut self, event: ThreadListEvent) -> Task<Message> {
         match event {
             ThreadListEvent::ThreadSelected(idx) => self.handle_select_thread(idx),
+            ThreadListEvent::SearchQueryChanged(query) => {
+                self.update(Message::SearchQueryChanged(query))
+            }
+            ThreadListEvent::SearchExecute => {
+                self.update(Message::SearchExecute)
+            }
         }
     }
 
@@ -1061,6 +1185,9 @@ impl App {
                 self.show_settings = false;
                 Task::none()
             }
+            // Signature events added by parallel agent — stub until wired
+            #[allow(unreachable_patterns)]
+            _ => Task::none(),
         }
     }
 
@@ -1355,6 +1482,29 @@ impl App {
         .into()
     }
 
+    /// Clear all search-related state without restoring pre-search threads.
+    /// Used when navigating via sidebar (new threads will be loaded).
+    fn clear_search_state(&mut self) {
+        self.search_query.clear();
+        self.thread_list.search_query.clear();
+        self.search_debounce_deadline = None;
+        self.search_generation += 1;
+        self.thread_list.mode = ui::thread_list::ThreadListMode::Folder;
+        self.pre_search_threads = None;
+    }
+
+    /// Restore the thread list to folder view after clearing search.
+    fn restore_folder_view(&mut self) -> Task<Message> {
+        self.thread_list.mode = ui::thread_list::ThreadListMode::Folder;
+        self.search_query.clear();
+        self.thread_list.search_query.clear();
+        if let Some(threads) = self.pre_search_threads.take() {
+            self.status = format!("{} threads", threads.len());
+            self.thread_list.set_threads(threads);
+        }
+        Task::none()
+    }
+
     fn update_thread_list_context_from_sidebar(&mut self) {
         let folder_name = self
             .sidebar
@@ -1433,6 +1583,60 @@ fn build_command_args(command_id: CommandId, item: &OptionItem) -> Option<Comman
         }
         _ => None,
     }
+}
+
+/// Execute search off the main thread via spawn_blocking.
+///
+/// TODO: Wire real SearchState once it is initialized at app startup.
+/// Currently stubs the search by querying the DB for threads matching
+/// the query as a substring in subject/snippet, since SearchState
+/// requires a Tantivy index that may not be available yet.
+async fn execute_search(
+    db: Arc<Db>,
+    query: String,
+) -> Result<Vec<Thread>, String> {
+    db.with_conn(move |conn| {
+        // Stub: use the unified search pipeline if SearchState is available.
+        // For now, do a simple SQL LIKE search as a placeholder so the full
+        // message flow, debounce, and generational tracking are exercised.
+        let pattern = format!("%{query}%");
+        let mut stmt = conn
+            .prepare(
+                "SELECT t.id, t.account_id, t.subject, t.snippet,
+                        t.last_message_at, t.message_count,
+                        t.is_read, t.is_starred, t.has_attachments,
+                        t.from_name, t.from_address
+                 FROM threads t
+                 WHERE t.subject LIKE ?1 OR t.snippet LIKE ?1
+                 ORDER BY t.last_message_at DESC
+                 LIMIT 200",
+            )
+            .map_err(|e| format!("prepare search: {e}"))?;
+        let rows = stmt
+            .query_map([&pattern], |row| {
+                Ok(Thread {
+                    id: row.get(0)?,
+                    account_id: row.get(1)?,
+                    subject: row.get(2)?,
+                    snippet: row.get(3)?,
+                    last_message_at: row.get::<_, Option<String>>(4)?
+                        .and_then(|s| s.parse().ok()),
+                    message_count: row.get(5)?,
+                    is_read: row.get(6)?,
+                    is_starred: row.get(7)?,
+                    has_attachments: row.get(8)?,
+                    from_name: row.get(9)?,
+                    from_address: row.get(10)?,
+                })
+            })
+            .map_err(|e| format!("search query: {e}"))?;
+        let mut threads = Vec::new();
+        for row in rows {
+            threads.push(row.map_err(|e| format!("search row: {e}"))?);
+        }
+        Ok(threads)
+    })
+    .await
 }
 
 fn db_thread_to_app_thread(t: DbThread) -> Thread {
