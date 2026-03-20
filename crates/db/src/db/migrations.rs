@@ -1337,6 +1337,44 @@ static MIGRATIONS: &[Migration] = &[
             ALTER TABLE accounts ADD COLUMN smtp_password TEXT;
         "#,
     },
+    Migration {
+        version: 63,
+        description: "Calendar attendees, reminders, and event schema enhancements",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS calendar_attendees (
+                event_id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                email TEXT NOT NULL,
+                name TEXT,
+                rsvp_status TEXT DEFAULT 'needs-action',
+                is_organizer INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (account_id, event_id, email)
+            );
+            CREATE INDEX IF NOT EXISTS idx_calendar_attendees_event ON calendar_attendees(account_id, event_id);
+
+            CREATE TABLE IF NOT EXISTS calendar_reminders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                minutes_before INTEGER NOT NULL,
+                method TEXT DEFAULT 'popup'
+            );
+            CREATE INDEX IF NOT EXISTS idx_calendar_reminders_event ON calendar_reminders(account_id, event_id);
+
+            ALTER TABLE calendar_events ADD COLUMN title TEXT;
+            ALTER TABLE calendar_events ADD COLUMN timezone TEXT;
+            ALTER TABLE calendar_events ADD COLUMN recurrence_rule TEXT;
+            ALTER TABLE calendar_events ADD COLUMN organizer_name TEXT;
+            ALTER TABLE calendar_events ADD COLUMN rsvp_status TEXT;
+            ALTER TABLE calendar_events ADD COLUMN created_at INTEGER;
+
+            ALTER TABLE calendars ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE calendars ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE calendars ADD COLUMN provider_id TEXT;
+
+            INSERT OR IGNORE INTO settings (key, value) VALUES ('calendar_default_view', 'month');
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -1576,6 +1614,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) AS max_ver FROM _migrations", [], |row| row.get("max_ver"))
             .expect("query");
-        assert_eq!(max_ver, 62);
+        assert_eq!(max_ver, 63);
     }
 }

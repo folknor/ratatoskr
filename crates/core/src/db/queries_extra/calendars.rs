@@ -1,5 +1,5 @@
 use super::super::DbState;
-use super::super::types::{DbCalendar, DbCalendarEvent};
+use super::super::types::{DbCalendar, DbCalendarAttendee, DbCalendarEvent, DbCalendarReminder};
 use crate::db::from_row::FromRow;
 use rusqlite::params;
 
@@ -303,6 +303,146 @@ pub async fn db_delete_calendar_event(db: &DbState, event_id: String) -> Result<
         )
         .map_err(|e| e.to_string())?;
         Ok(())
+    })
+    .await
+}
+
+// ── Attendee queries ───────────────────────────────────────
+
+pub async fn db_get_event_attendees(
+    db: &DbState,
+    account_id: String,
+    event_id: String,
+) -> Result<Vec<DbCalendarAttendee>, String> {
+    db.with_conn(move |conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT * FROM calendar_attendees \
+                 WHERE account_id = ?1 AND event_id = ?2 \
+                 ORDER BY is_organizer DESC, email ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        stmt.query_map(params![account_id, event_id], DbCalendarAttendee::from_row)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+pub async fn db_upsert_event_attendee(
+    db: &DbState,
+    account_id: String,
+    event_id: String,
+    email: String,
+    name: Option<String>,
+    rsvp_status: Option<String>,
+    is_organizer: bool,
+) -> Result<(), String> {
+    db.with_conn(move |conn| {
+        conn.execute(
+            "INSERT INTO calendar_attendees (event_id, account_id, email, name, rsvp_status, is_organizer)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(account_id, event_id, email) DO UPDATE SET
+                   name = ?4, rsvp_status = ?5, is_organizer = ?6",
+            params![event_id, account_id, email, name, rsvp_status, is_organizer as i64],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+}
+
+pub async fn db_delete_attendees_for_event(
+    db: &DbState,
+    account_id: String,
+    event_id: String,
+) -> Result<(), String> {
+    db.with_conn(move |conn| {
+        conn.execute(
+            "DELETE FROM calendar_attendees WHERE account_id = ?1 AND event_id = ?2",
+            params![account_id, event_id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+}
+
+// ── Reminder queries ───────────────────────────────────────
+
+pub async fn db_get_event_reminders(
+    db: &DbState,
+    account_id: String,
+    event_id: String,
+) -> Result<Vec<DbCalendarReminder>, String> {
+    db.with_conn(move |conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT * FROM calendar_reminders \
+                 WHERE account_id = ?1 AND event_id = ?2 \
+                 ORDER BY minutes_before ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        stmt.query_map(params![account_id, event_id], DbCalendarReminder::from_row)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+pub async fn db_add_event_reminder(
+    db: &DbState,
+    account_id: String,
+    event_id: String,
+    minutes_before: i64,
+    method: Option<String>,
+) -> Result<(), String> {
+    db.with_conn(move |conn| {
+        conn.execute(
+            "INSERT INTO calendar_reminders (event_id, account_id, minutes_before, method)
+                 VALUES (?1, ?2, ?3, ?4)",
+            params![event_id, account_id, minutes_before, method],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+}
+
+pub async fn db_delete_reminders_for_event(
+    db: &DbState,
+    account_id: String,
+    event_id: String,
+) -> Result<(), String> {
+    db.with_conn(move |conn| {
+        conn.execute(
+            "DELETE FROM calendar_reminders WHERE account_id = ?1 AND event_id = ?2",
+            params![account_id, event_id],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+}
+
+// ── All-account calendar queries (for unified calendar) ────
+
+pub async fn db_get_all_visible_calendars(
+    db: &DbState,
+) -> Result<Vec<DbCalendar>, String> {
+    db.with_conn(move |conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT * FROM calendars WHERE is_visible = 1 \
+                 ORDER BY account_id, is_primary DESC, sort_order, display_name ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        stmt.query_map([], DbCalendar::from_row)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
     })
     .await
 }

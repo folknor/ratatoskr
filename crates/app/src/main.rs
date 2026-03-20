@@ -38,11 +38,13 @@ use ui::layout::{
     THREAD_LIST_MIN_WIDTH,
 };
 use ui::add_account::{AddAccountEvent, AddAccountMessage, AddAccountWizard};
+use ui::calendar::{CalendarMessage, CalendarState, CalendarView};
 use ui::reading_pane::{ReadingPane, ReadingPaneEvent, ReadingPaneMessage};
 use ui::settings::{Settings, SettingsEvent, SettingsMessage};
 use ui::sidebar::{Sidebar, SidebarEvent, SidebarMessage, truncate_query};
 use ui::status_bar::{StatusBar, StatusBarEvent, StatusBarMessage};
 use ui::thread_list::{ThreadList, ThreadListEvent, ThreadListMessage};
+use chrono::Datelike;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -94,6 +96,13 @@ fn main() -> iced::Result {
     }
 
     app.run()
+}
+
+/// Whether the app is showing mail or calendar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppMode {
+    Mail,
+    Calendar,
 }
 
 /// Which vertical divider is being dragged.
@@ -188,6 +197,12 @@ pub enum Message {
     PinnedSearchSaved(Result<i64, String>),
     PinnedSearchesExpired(Result<u64, String>),
 
+    // Calendar
+    Calendar(CalendarMessage),
+    ToggleAppMode,
+    SetCalendarView(CalendarView),
+    CalendarToday,
+
     // Account management
     AddAccount(AddAccountMessage),
     OpenAddAccount,
@@ -209,6 +224,8 @@ struct App {
     status_bar: StatusBar,
     status: String,
     mode: appearance::Mode,
+    app_mode: AppMode,
+    calendar: CalendarState,
     sidebar_width: f32,
     thread_list_width: f32,
     dragging: Option<Divider>,
@@ -294,6 +311,8 @@ impl App {
             status_bar: StatusBar::new(),
             status: "Loading...".to_string(),
             mode: appearance::Mode::Dark,
+            app_mode: AppMode::Mail,
+            calendar: CalendarState::new(),
             sidebar_width: window.sidebar_width,
             thread_list_width: window.thread_list_width,
             dragging: None,
@@ -850,6 +869,54 @@ impl App {
                 Task::none()
             }
 
+            // Calendar
+            Message::Calendar(cal_msg) => {
+                match cal_msg {
+                    CalendarMessage::SelectDate(date) => {
+                        self.calendar.selected_date = date;
+                        self.calendar.mini_month_year = date.year();
+                        self.calendar.mini_month_month = date.month();
+                    }
+                    CalendarMessage::SetView(view) => {
+                        self.calendar.active_view = view;
+                    }
+                    CalendarMessage::PrevMonth => {
+                        self.calendar.prev_month();
+                    }
+                    CalendarMessage::NextMonth => {
+                        self.calendar.next_month();
+                    }
+                    CalendarMessage::Today => {
+                        self.calendar.go_to_today();
+                    }
+                    CalendarMessage::EventClicked(_event_id) => {
+                        // TODO: open event detail popover
+                    }
+                }
+                Task::none()
+            }
+            Message::ToggleAppMode => {
+                self.app_mode = match self.app_mode {
+                    AppMode::Mail => AppMode::Calendar,
+                    AppMode::Calendar => AppMode::Mail,
+                };
+                self.sidebar.in_calendar_mode = self.app_mode == AppMode::Calendar;
+                Task::none()
+            }
+            Message::SetCalendarView(view) => {
+                self.calendar.active_view = view;
+                // If not in calendar mode, switch to it
+                if self.app_mode != AppMode::Calendar {
+                    self.app_mode = AppMode::Calendar;
+                    self.sidebar.in_calendar_mode = true;
+                }
+                Task::none()
+            }
+            Message::CalendarToday => {
+                self.calendar.go_to_today();
+                Task::none()
+            }
+
             // Account management
             Message::AddAccount(msg) => self.handle_add_account(msg),
             Message::OpenAddAccount => {
@@ -920,23 +987,33 @@ impl App {
 
         let divider_sidebar = self.build_divider(Divider::Sidebar);
 
-        let thread_list = container(self.thread_list.view().map(Message::ThreadList))
-            .width(self.thread_list_width)
-            .height(Length::Fill);
+        let layout = match self.app_mode {
+            AppMode::Calendar => {
+                let calendar_view = ui::calendar::calendar_layout(&self.calendar)
+                    .map(Message::Calendar);
+                row![sidebar, divider_sidebar, calendar_view]
+                    .height(Length::Fill)
+            }
+            AppMode::Mail => {
+                let thread_list = container(self.thread_list.view().map(Message::ThreadList))
+                    .width(self.thread_list_width)
+                    .height(Length::Fill);
 
-        let divider_thread = self.build_divider(Divider::ThreadList);
+                let divider_thread = self.build_divider(Divider::ThreadList);
 
-        let ctx = command_dispatch::build_context(self);
-        let reading_pane = container(
-            self.reading_pane.view_with_commands(&self.registry, &self.binding_table, &ctx),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill);
+                let ctx = command_dispatch::build_context(self);
+                let reading_pane = container(
+                    self.reading_pane.view_with_commands(&self.registry, &self.binding_table, &ctx),
+                )
+                .width(Length::Fill)
+                .height(Length::Fill);
 
-        let right_sidebar = ui::right_sidebar::view::<Message>(self.right_sidebar_open);
+                let right_sidebar = ui::right_sidebar::view::<Message>(self.right_sidebar_open);
 
-        let layout = row![sidebar, divider_sidebar, thread_list, divider_thread, reading_pane, right_sidebar]
-            .height(Length::Fill);
+                row![sidebar, divider_sidebar, thread_list, divider_thread, reading_pane, right_sidebar]
+                    .height(Length::Fill)
+            }
+        };
 
         let status_bar = self.status_bar.view().map(Message::StatusBar);
         let full_layout = column![layout, status_bar];
@@ -1408,6 +1485,9 @@ impl App {
             }
             SidebarEvent::PinnedSearchDismissed(id) => {
                 self.update(Message::DismissPinnedSearch(id))
+            }
+            SidebarEvent::ModeToggled => {
+                self.update(Message::ToggleAppMode)
             }
         }
     }

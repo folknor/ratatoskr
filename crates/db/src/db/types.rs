@@ -412,6 +412,29 @@ pub struct DbCalendarEvent {
     pub uid: Option<String>,
 }
 
+// ── Calendar Attendee ──────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbCalendarAttendee {
+    pub event_id: String,
+    pub account_id: String,
+    pub email: String,
+    pub name: Option<String>,
+    pub rsvp_status: Option<String>,
+    pub is_organizer: i64,
+}
+
+// ── Calendar Reminder ─────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbCalendarReminder {
+    pub id: i64,
+    pub event_id: String,
+    pub account_id: String,
+    pub minutes_before: i64,
+    pub method: Option<String>,
+}
+
 // ── Attachment ──────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

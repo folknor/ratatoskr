@@ -285,6 +285,27 @@ impl_from_row!(DbCalendarEvent {
     uid,
 });
 
+// ── Calendar Attendee ──────────────────────────────────────
+
+impl_from_row!(DbCalendarAttendee {
+    event_id,
+    account_id,
+    email,
+    name,
+    rsvp_status,
+    is_organizer,
+});
+
+// ── Calendar Reminder ─────────────────────────────────────
+
+impl_from_row!(DbCalendarReminder {
+    id,
+    event_id,
+    account_id,
+    minutes_before,
+    method,
+});
+
 // ── Writing Style Profile ──────────────────────────────────
 
 impl_from_row!(DbWritingStyleProfile {

@@ -58,6 +58,7 @@ impl CommandRegistry {
         register_compose(&mut descriptors);
         register_tasks(&mut descriptors);
         register_view(&mut descriptors);
+        register_calendar(&mut descriptors);
         register_app(&mut descriptors);
 
         #[cfg(debug_assertions)]
@@ -651,6 +652,29 @@ fn register_view_reading_pane(out: &mut Vec<CommandDescriptor>) {
         "View",
         None,
         always,
+    ));
+}
+
+fn register_calendar(out: &mut Vec<CommandDescriptor>) {
+    out.push(desc_kw(
+        CommandId::CalendarToggle,
+        "Toggle Calendar",
+        "Calendar",
+        Some(KeyBinding::cmd_or_ctrl('2')),
+        always,
+        &["switch mode", "mail", "calendar"],
+    ));
+    out.push(desc(CommandId::CalendarViewDay, "Day View", "Calendar", None, always));
+    out.push(desc(CommandId::CalendarViewWorkWeek, "Work Week View", "Calendar", None, always));
+    out.push(desc(CommandId::CalendarViewWeek, "Week View", "Calendar", None, always));
+    out.push(desc(CommandId::CalendarViewMonth, "Month View", "Calendar", None, always));
+    out.push(desc_kw(
+        CommandId::CalendarToday,
+        "Go to Today",
+        "Calendar",
+        None,
+        always,
+        &["today", "now", "current date"],
     ));
 }
 

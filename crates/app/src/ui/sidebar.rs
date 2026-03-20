@@ -29,6 +29,7 @@ pub enum SidebarMessage {
     ToggleSettings,
     SelectPinnedSearch(i64),
     DismissPinnedSearch(i64),
+    ToggleMode,
     Noop,
 }
 
@@ -43,6 +44,7 @@ pub enum SidebarEvent {
     ToggleSettings,
     PinnedSearchSelected(i64),
     PinnedSearchDismissed(i64),
+    ModeToggled,
 }
 
 // ── State ──────────────────────────────────────────────
@@ -61,6 +63,8 @@ pub struct Sidebar {
     pub pinned_searches: Vec<PinnedSearch>,
     /// Currently selected pinned search, set by parent App.
     pub active_pinned_search: Option<i64>,
+    /// Whether the app is in calendar mode. Set by the parent App.
+    pub in_calendar_mode: bool,
 }
 
 impl Sidebar {
@@ -76,6 +80,7 @@ impl Sidebar {
             collapsed_folders: HashSet::new(),
             pinned_searches: Vec::new(),
             active_pinned_search: None,
+            in_calendar_mode: false,
         }
     }
 
@@ -152,6 +157,9 @@ impl Component for Sidebar {
             SidebarMessage::DismissPinnedSearch(id) => {
                 (Task::none(), Some(SidebarEvent::PinnedSearchDismissed(id)))
             }
+            SidebarMessage::ToggleMode => {
+                (Task::none(), Some(SidebarEvent::ModeToggled))
+            }
             SidebarMessage::Noop => (Task::none(), None),
         }
     }
@@ -159,8 +167,27 @@ impl Component for Sidebar {
     fn view(&self) -> Element<'_, SidebarMessage> {
         let show_labels = self.selected_account.is_some();
 
+        // Mode toggle + scope dropdown header
+        let mode_icon = if self.in_calendar_mode {
+            icon::mail()
+        } else {
+            icon::calendar()
+        };
+        let mode_btn = button(
+            container(mode_icon.size(ICON_SM))
+                .center(Length::Shrink),
+        )
+        .on_press(SidebarMessage::ToggleMode)
+        .padding(SPACE_XS)
+        .style(theme::ButtonClass::Ghost.style());
+
+        let header_row = row![mode_btn, scope_dropdown(self)]
+            .spacing(SPACE_XXS)
+            .align_y(Alignment::Center)
+            .width(Length::Fill);
+
         let mut col = column![
-            scope_dropdown(self),
+            header_row,
             Space::new().height(SPACE_XXS),
         ]
         .spacing(0)

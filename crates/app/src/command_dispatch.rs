@@ -288,6 +288,22 @@ pub fn dispatch_command(id: CommandId, _app: &App) -> Option<Message> {
             Some(Message::SetReadingPanePosition(ReadingPanePosition::Hidden))
         }
 
+        // Calendar
+        CommandId::CalendarToggle => Some(Message::ToggleAppMode),
+        CommandId::CalendarViewDay => Some(Message::SetCalendarView(
+            crate::ui::calendar::CalendarView::Day,
+        )),
+        CommandId::CalendarViewWorkWeek => Some(Message::SetCalendarView(
+            crate::ui::calendar::CalendarView::WorkWeek,
+        )),
+        CommandId::CalendarViewWeek => Some(Message::SetCalendarView(
+            crate::ui::calendar::CalendarView::Week,
+        )),
+        CommandId::CalendarViewMonth => Some(Message::SetCalendarView(
+            crate::ui::calendar::CalendarView::Month,
+        )),
+        CommandId::CalendarToday => Some(Message::CalendarToday),
+
         // App
         CommandId::AppSearch => Some(Message::FocusSearch),
         CommandId::AppAskAi => None,
