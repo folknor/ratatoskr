@@ -220,9 +220,11 @@ fn build_all_day_bar<'a, M: 'a + Clone>(
         return Space::new().height(SPACE_0).into();
     }
 
-    let mut bar_row = row![]
-        .spacing(SPACE_0)
-        .height(TIME_GRID_ALL_DAY_HEIGHT);
+    // Use Shrink height so the bar expands to fit multiple all-day events,
+    // but cap visible events at 2 per day with "+N more" overflow.
+    let max_visible_all_day = 2;
+
+    let mut bar_row = row![].spacing(SPACE_0);
 
     // Label column.
     bar_row = bar_row.push(
@@ -230,8 +232,7 @@ fn build_all_day_bar<'a, M: 'a + Clone>(
             text("All day").size(TEXT_XS).style(theme::TextClass::Muted.style()),
         )
         .width(TIME_GRID_HOUR_LABEL_WIDTH)
-        .height(TIME_GRID_ALL_DAY_HEIGHT)
-        .padding(Padding::from([0.0, SPACE_XXS]))
+        .padding(Padding::from([SPACE_XXXS, SPACE_XXS]))
         .align_y(Alignment::Center),
     );
 
@@ -239,18 +240,25 @@ fn build_all_day_bar<'a, M: 'a + Clone>(
         let all_day_events: Vec<&TimeGridEvent> =
             day.events.iter().filter(|e| e.all_day).collect();
         let cell = if all_day_events.is_empty() {
-            container(Space::new())
+            container(Space::new().height(TIME_GRID_ALL_DAY_HEIGHT))
                 .width(Length::Fill)
-                .height(TIME_GRID_ALL_DAY_HEIGHT)
                 .style(theme::ContainerClass::TimeGridCell.style())
         } else {
             let mut col = column![].spacing(SPACE_XXXS);
-            for ev in all_day_events {
+            let visible = all_day_events.len().min(max_visible_all_day);
+            for ev in &all_day_events[..visible] {
                 col = col.push(all_day_event_chip(ev, on_event_click(&ev.id)));
+            }
+            let overflow = all_day_events.len().saturating_sub(max_visible_all_day);
+            if overflow > 0 {
+                col = col.push(
+                    text(format!("+{overflow} more"))
+                        .size(TEXT_XS)
+                        .style(theme::TextClass::Muted.style()),
+                );
             }
             container(col)
                 .width(Length::Fill)
-                .height(TIME_GRID_ALL_DAY_HEIGHT)
                 .padding(Padding::from([SPACE_XXXS, SPACE_XXS]))
                 .style(theme::ContainerClass::TimeGridCell.style())
         };
@@ -381,7 +389,7 @@ fn build_day_column<'a, M: 'a + Clone>(
     }
 
     // Lay out events with overlap algorithm, render, and stack on top of slots.
-    let layouts = compute_overlap_layout(&timed_events, config);
+    let layouts = compute_overlap_layout(&timed_events, config, day.date);
     let events_layer = build_events_layer(
         &timed_events,
         &layouts,
@@ -438,12 +446,13 @@ fn build_hour_slots<'a, M: 'a + Clone>(
 fn compute_overlap_layout(
     events: &[&TimeGridEvent],
     config: &TimeGridConfig,
+    column_date: NaiveDate,
 ) -> Vec<LayoutEvent> {
     let mut items: Vec<LayoutEvent> = events
         .iter()
         .enumerate()
         .map(|(i, ev)| {
-            let (start_m, end_m) = event_minutes(ev, config);
+            let (start_m, end_m) = event_minutes(ev, config, column_date);
             LayoutEvent {
                 index: i,
                 start_minutes: start_m,
@@ -655,17 +664,41 @@ fn event_block<'a, M: 'a + Clone>(
 
 // ── Helpers ─────────────────────────────────────────────
 
-/// Get start/end as minutes-from-midnight for an event on a given day.
-fn event_minutes(event: &TimeGridEvent, config: &TimeGridConfig) -> (f32, f32) {
+/// Get start/end as minutes-from-midnight for an event on a specific
+/// column date. For multi-day events, the start is clamped to midnight
+/// if the event started on a previous day, and the end is clamped to
+/// 23:59 if the event continues past this day.
+fn event_minutes(
+    event: &TimeGridEvent,
+    config: &TimeGridConfig,
+    column_date: NaiveDate,
+) -> (f32, f32) {
     let start_dt = chrono::DateTime::from_timestamp(event.start_time, 0);
     let end_dt = chrono::DateTime::from_timestamp(event.end_time, 0);
+    let grid_start = config.hour_start as f32 * 60.0;
+    let grid_end = config.hour_end as f32 * 60.0;
+
     let (start_m, end_m) = match (start_dt, end_dt) {
         (Some(s), Some(e)) => {
-            let sm = s.time().hour() as f32 * 60.0 + s.time().minute() as f32;
-            let em = e.time().hour() as f32 * 60.0 + e.time().minute() as f32;
-            // Clamp to grid bounds.
-            let grid_start = config.hour_start as f32 * 60.0;
-            let grid_end = config.hour_end as f32 * 60.0;
+            let event_start_date = s.date_naive();
+            let event_end_date = e.date_naive();
+
+            // Clamp start: if event started before this column's day,
+            // treat as starting at midnight.
+            let sm = if event_start_date < column_date {
+                0.0
+            } else {
+                s.time().hour() as f32 * 60.0 + s.time().minute() as f32
+            };
+
+            // Clamp end: if event ends after this column's day,
+            // treat as ending at end-of-day.
+            let em = if event_end_date > column_date {
+                grid_end
+            } else {
+                e.time().hour() as f32 * 60.0 + e.time().minute() as f32
+            };
+
             (sm.max(grid_start), em.min(grid_end).max(sm + 1.0))
         }
         _ => (0.0, 60.0),
