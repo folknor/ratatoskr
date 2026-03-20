@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use iced::widget::{button, column, container, row, scrollable, text, Space};
 use iced::{Alignment, Element, Length, Padding, Task};
 
+use ratatoskr_command_palette::{BindingTable, CommandContext, CommandId, CommandRegistry};
+
 use crate::component::Component;
 use crate::db::{DateDisplay, Thread, ThreadAttachment, ThreadMessage};
 use crate::font;
@@ -10,6 +12,7 @@ use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::widgets;
+use crate::Message;
 
 // ── Messages & Events ──────────────────────────────────
 
@@ -147,6 +150,124 @@ impl Component for ReadingPane {
             Some(thread_ref) => thread_view(self, thread_ref),
         }
     }
+}
+
+// ── Command-backed view ─────────────────────────────────
+
+impl ReadingPane {
+    /// Render the reading pane with a command-backed toolbar.
+    ///
+    /// Unlike the `Component::view()` trait method (which returns
+    /// `Element<ReadingPaneMessage>`), this returns `Element<Message>`
+    /// so that toolbar buttons can emit `Message::ExecuteCommand`
+    /// directly. Internal reading pane messages are mapped via
+    /// `Message::ReadingPane`.
+    pub fn view_with_commands(
+        &self,
+        registry: &CommandRegistry,
+        binding_table: &BindingTable,
+        ctx: &CommandContext,
+    ) -> Element<'_, Message> {
+        match self.current_thread.as_ref() {
+            None => empty_reading_pane().map(Message::ReadingPane),
+            Some(thread_ref) => {
+                thread_view_with_commands(self, thread_ref, registry, binding_table, ctx)
+            }
+        }
+    }
+}
+
+fn thread_view_with_commands<'a>(
+    pane: &'a ReadingPane,
+    thread_ref: &'a ThreadRef,
+    registry: &CommandRegistry,
+    binding_table: &BindingTable,
+    ctx: &CommandContext,
+) -> Element<'a, Message> {
+    let mut col = column![].spacing(0).width(Length::Fill);
+
+    // Thread header (subject, expand/collapse) — uses ReadingPaneMessage internally
+    col = col.push(
+        thread_header(thread_ref, &pane.message_expanded, &pane.thread_messages)
+            .map(Message::ReadingPane),
+    );
+
+    // Command-backed toolbar
+    col = col.push(command_toolbar(registry, binding_table, ctx));
+
+    if !pane.thread_attachments.is_empty() {
+        col = col.push(
+            attachment_group(&pane.thread_attachments, pane.attachments_collapsed)
+                .map(Message::ReadingPane),
+        );
+    }
+
+    col = col.push(message_list(pane).map(Message::ReadingPane));
+    col.into()
+}
+
+/// Build the reading pane toolbar from command registry metadata.
+///
+/// Buttons pull labels, availability, and keybinding hints from the
+/// registry. Toggle commands (Star/Unstar) resolve their label
+/// automatically via `resolved_label()`.
+fn command_toolbar<'a>(
+    registry: &CommandRegistry,
+    binding_table: &BindingTable,
+    ctx: &CommandContext,
+) -> Element<'a, Message> {
+    let toolbar = row![
+        widgets::command_icon_button(
+            CommandId::ComposeReply,
+            icon::reply(),
+            registry,
+            binding_table,
+            ctx,
+        ),
+        widgets::command_icon_button(
+            CommandId::ComposeReplyAll,
+            icon::reply_all(),
+            registry,
+            binding_table,
+            ctx,
+        ),
+        widgets::command_icon_button(
+            CommandId::ComposeForward,
+            icon::forward(),
+            registry,
+            binding_table,
+            ctx,
+        ),
+        Space::new().width(Length::Fill),
+        widgets::command_icon_button(
+            CommandId::EmailArchive,
+            icon::archive(),
+            registry,
+            binding_table,
+            ctx,
+        ),
+        widgets::command_icon_button(
+            CommandId::EmailTrash,
+            icon::trash(),
+            registry,
+            binding_table,
+            ctx,
+        ),
+        widgets::command_icon_button(
+            CommandId::EmailStar,
+            icon::star(),
+            registry,
+            binding_table,
+            ctx,
+        ),
+    ]
+    .spacing(SPACE_XS)
+    .align_y(Alignment::Center);
+
+    container(toolbar)
+        .padding(PAD_TOOLBAR)
+        .width(Length::Fill)
+        .into()
 }
 
 // ── View helpers ────────────────────────────────────────

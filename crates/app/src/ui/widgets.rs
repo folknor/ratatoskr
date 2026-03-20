@@ -1,11 +1,114 @@
-use iced::widget::{button, canvas, column, container, row, rule, text, Canvas, Space};
+use iced::widget::{button, canvas, column, container, row, rule, text, tooltip, Canvas, Space};
 use iced::{mouse, Alignment, Color, Element, Length, Rectangle, Renderer, Theme};
+
+use ratatoskr_command_palette::{BindingTable, CommandContext, CommandId, CommandRegistry};
 
 use crate::db::{DateDisplay, Thread, ThreadAttachment, ThreadMessage};
 use crate::font;
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
+use crate::Message;
+
+// ── Command button ──────────────────────────────────────
+// Builds a button from a CommandId, pulling label, availability,
+// and keybinding hint from the registry. Disabled buttons are
+// greyed out but visible. Emits ExecuteCommand on click.
+
+/// Build a toolbar button for a registered command.
+///
+/// Pulls label (including toggle resolution like Star/Unstar),
+/// availability, and keybinding hint from the registry and
+/// binding table. Unavailable commands render as disabled buttons
+/// with muted text. Keybinding hints appear as tooltips.
+pub fn command_button<'a>(
+    id: CommandId,
+    registry: &CommandRegistry,
+    binding_table: &BindingTable,
+    ctx: &CommandContext,
+) -> Element<'a, Message> {
+    let desc = registry.get(id);
+    let (label, available) = desc.map_or(("???", false), |d| {
+        (d.resolved_label(ctx), (d.is_available)(ctx))
+    });
+    let keybinding = binding_table.display_binding(id);
+
+    let label_style: fn(&Theme) -> text::Style = if available {
+        text::secondary
+    } else {
+        theme::TextClass::Tertiary.style()
+    };
+
+    let label_text = text(label).size(TEXT_SM).style(label_style);
+    let mut btn = button(
+        container(label_text).align_y(Alignment::Center),
+    )
+    .padding(PAD_ICON_BTN)
+    .style(theme::ButtonClass::Action.style());
+
+    if available {
+        btn = btn.on_press(Message::ExecuteCommand(id));
+    }
+
+    if let Some(kb) = keybinding {
+        tooltip(btn, text(kb).size(TEXT_XS), tooltip::Position::Bottom)
+            .gap(SPACE_XXS)
+            .style(theme::ContainerClass::Floating.style())
+            .into()
+    } else {
+        btn.into()
+    }
+}
+
+/// Build a toolbar button for a registered command, with an icon.
+///
+/// Same as [`command_button`] but prepends an icon glyph before the label.
+pub fn command_icon_button<'a>(
+    id: CommandId,
+    ico: iced::widget::Text<'a>,
+    registry: &CommandRegistry,
+    binding_table: &BindingTable,
+    ctx: &CommandContext,
+) -> Element<'a, Message> {
+    let desc = registry.get(id);
+    let (label, available) = desc.map_or(("???", false), |d| {
+        (d.resolved_label(ctx), (d.is_available)(ctx))
+    });
+    let keybinding = binding_table.display_binding(id);
+
+    let label_style: fn(&Theme) -> text::Style = if available {
+        text::secondary
+    } else {
+        theme::TextClass::Tertiary.style()
+    };
+    let icon_style: fn(&Theme) -> text::Style = label_style;
+
+    let content = row![
+        container(ico.size(ICON_MD).style(icon_style))
+            .align_y(Alignment::Center),
+        container(text(label).size(TEXT_SM).style(label_style))
+            .align_y(Alignment::Center),
+    ]
+    .spacing(SPACE_XXS)
+    .align_y(Alignment::Center);
+
+    let mut btn = button(content)
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::Action.style());
+
+    if available {
+        btn = btn.on_press(Message::ExecuteCommand(id));
+    }
+
+    if let Some(kb) = keybinding {
+        tooltip(btn, text(kb).size(TEXT_XS), tooltip::Position::Bottom)
+            .gap(SPACE_XXS)
+            .style(theme::ContainerClass::Floating.style())
+            .into()
+    } else {
+        btn.into()
+    }
+}
 
 // ── Leading slot ───────────────────────────────────────
 // Wraps any content (icon, avatar, dot) in a fixed-size

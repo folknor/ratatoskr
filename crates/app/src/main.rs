@@ -491,9 +491,12 @@ impl App {
 
         let divider_thread = self.build_divider(Divider::ThreadList);
 
-        let reading_pane = container(self.reading_pane.view().map(Message::ReadingPane))
-            .width(Length::Fill)
-            .height(Length::Fill);
+        let ctx = command_dispatch::build_context(self);
+        let reading_pane = container(
+            self.reading_pane.view_with_commands(&self.registry, &self.binding_table, &ctx),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill);
 
         let right_sidebar = ui::right_sidebar::view::<Message>(self.right_sidebar_open);
 
