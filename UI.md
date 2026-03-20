@@ -2,46 +2,6 @@
 
 iced UI for the Ratatoskr email client (`crates/app/`). Uses iced 0.15-dev (Halloy's fork) against a seeded test database.
 
-## Commands
-
-- `python3 crates/app/seed-db.py [thunderbird.sqlite] [output-dir]` — seed a test DB from Thunderbird's `global-messages-db.sqlite` (defaults: `./thunderbird.sqlite` → `~/.local/share/com.velo.app/ratatoskr.db`)
-- `cargo run -p app` — run the app (requires a seeded `ratatoskr.db` in `~/.local/share/com.velo.app/`)
-- `cargo check -p app` — type-check
-- `cargo clippy -p app` — lint
-
-**All `src/` paths in this document are relative to `crates/app/`.**
-
-## Commits
-
-Don't create standalone commits for documentation-only changes (CLAUDE.md, TODO.md, comments). Fold them into the next real code commit instead. Keep the git history focused on meaningful changes. Don't push to remote unless explicitly asked.
-
-## Architecture
-
-Elm architecture (iced's `application()` — boot/update/view cycle). Single `App` struct holds all state. All DB access is async via `tokio::task::spawn_blocking` through a shared `Arc<Mutex<Connection>>`.
-
-### Files
-
-- **`seed-db.py`** — Creates a Ratatoskr-schema DB from Thunderbird's `global-messages-db.sqlite`. Extracts accounts from IMAP folder URIs, groups messages into threads by Thunderbird's `conversationID`, parses sender/recipient fields, and populates accounts/labels/threads/messages/contacts tables. Does NOT copy email bodies (just metadata + subjects as snippets). A `thunderbird.sqlite` file is checked into the repo for convenience.
-
-### Layout
-
-```
-[ Sidebar 180px | Thread List 400px | Reading Pane (fill) | Right Sidebar 240px (off by default) ]
-```
-
-### Message flow
-
-1. `boot()` → loads accounts from DB
-2. `AccountsLoaded` → auto-selects first account, fires parallel loads for labels + threads
-3. `SelectAccount` / `SelectLabel` → reloads threads for new filter
-4. `SelectThread` → loads conversation messages + attachments, updates reading pane
-
-### What's real vs placeholder
-
-**Real:** Account loading, label listing, thread queries with label filtering, date formatting (relative: time/day/date), read/unread/starred styling, three-line thread cards with label dots, conversation view with message collapsing, attachment group with deduplication, right sidebar scaffold, panel width persistence.
-
-**Placeholder:** Message bodies show snippets (no body store access yet), Compose/action buttons emit `Noop`, search bar is non-functional, keyboard shortcuts deferred, right sidebar content is placeholder.
-
 ## Gotchas
 
 **`Padding::from` with mixed types:** `Padding::from([0, CONSTANT])` won't compile if `CONSTANT` is `f32` — Rust infers the array as `[i32; 2]`. Always use `[0.0, CONSTANT]` to keep both elements `f32`.
@@ -201,15 +161,3 @@ Uses iced's built-in `Theme::custom(name, Seed)` with 6 seed colors. `Seed` (bac
 **Fonts:** Inter variable (regular + italic) for text, Lucide for icons. Constants in `src/font.rs`: `TEXT`, `TEXT_BOLD`, `TEXT_ITALIC`, `TEXT_SEMIBOLD`, `ICON`. Inter is set as `default_font`.
 
 **Dark mode:** `src/appearance.rs` uses `mundy` to stream OS color scheme changes via `iced::advanced::graphics::futures::subscription::Recipe`.
-
-## Migration context
-
-The ~22k LOC Rust backend (providers, DB, body store, encryption) lives in `crates/core/`. The React/TS frontend and Tauri app shell have been removed.
-
-**Ecosystem:** Multi-window (Halloy, libcosmic, Kraken Desktop), rich text (Halloy), HTML email rendering (iced_webview_v2 + litehtml), platform support (all three ship on Windows + Linux).
-
-**Forking iced:** We use Halloy's fork (`squidowl/iced`, `arboard-less-patch` branch) which adds primary clipboard, shift-click text selection, and drag selection expansion on top of upstream. libcosmic maintains a separate fork (`pop-os/iced`) which conflicts with ours. We fork from Halloy's only if we need patches they don't carry.
-
-**Email body rendering:** iced_webview_v2 with litehtml for table-based/basic emails, CEF fallback for complex HTML. Still needs testing against a real email corpus.
-
-**Reference projects:** Full analysis in `docs/iced-migration-research.md`.

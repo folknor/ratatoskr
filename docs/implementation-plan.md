@@ -79,11 +79,23 @@ Prioritized implementation plan for Ratatoskr features.
 | Emoji picker | Not yet written | Not started |
 | Read receipts (outgoing) | No spec needed | Not started |
 
-### Tier 5 — Major Independent Workstream
+### Tier 5 — Calendar
 
 | Task | Spec | Status |
 |------|------|--------|
-| Calendar | Not yet written | Not started |
+| Layer 1: Data model + mode switcher | No spec (product doc) | Done ✅ |
+| Layer 2: Month view + mini-month | No spec (product doc) | Done ✅ |
+| Layer 3: Day/Week/Work Week time grid | Not started | |
+| Layer 4: Event CRUD + popover/modal | Not started | |
+| Layer 5: Provider sync (Google/Graph/CalDAV) | Not started | |
+
+**Deferred calendar review items (tracked, not blocking):**
+- `calendar_default_view` setting seeded in DB but never read — `CalendarState::new()` hardcodes Month. Should read from settings table at boot.
+- New v63 schema fields (`title`, `timezone`, `recurrence_rule`, `organizer_name`, `rsvp_status`, `created_at` on events; `sort_order`, `is_default`, `provider_id` on calendars) not surfaced through `DbCalendarEvent`/`DbCalendar` types. Follow-on layers will need these in the canonical types.
+- `SELECT *` in some calendar queries — should use explicit column lists to avoid breakage if columns are added/reordered.
+- Missing FK constraints on `calendar_attendees`/`calendar_reminders` → `calendar_events`. Orphaned rows possible if events deleted without cleanup. `db_delete_calendar_event` doesn't cascade.
+- `mix()` made pub speculatively in theme.rs — revert if not used externally.
+- Unicode arrows (◀/▶) in mini-month nav — should use icon:: helpers for consistency.
 
 ## Spec Status
 
