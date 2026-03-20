@@ -88,14 +88,21 @@ pub fn assemble_compose_document(
 
 /// Check whether an HTML string is effectively blank (empty, whitespace-only,
 /// or parses to a document with only empty/whitespace blocks).
+///
+/// A document containing an Image block is never blank, even if the alt text
+/// is empty.
 fn is_blank_html(html: &str) -> bool {
     if html.trim().is_empty() {
         return true;
     }
     let doc = from_html(html);
-    doc.blocks
-        .iter()
-        .all(|b| b.flattened_text().trim().is_empty())
+    doc.blocks.iter().all(|b| {
+        // Image blocks are never blank — they represent visible content.
+        if matches!(b.as_ref(), Block::Image { .. }) {
+            return false;
+        }
+        b.flattened_text().trim().is_empty()
+    })
 }
 
 // ── Attribution / forward header builders ───────────────
@@ -590,6 +597,18 @@ mod tests {
         // Should clamp to end (index 1), not panic.
         assert_eq!(sep, Some(1));
         assert_eq!(doc.block_count(), 3);
+    }
+
+    #[test]
+    fn is_blank_html_false_for_image() {
+        // A document containing only an image should NOT be blank.
+        let result = assemble_compose_document(
+            Some(r#"<img src="inline-image:abc123" alt="logo">"#),
+            None,
+        );
+        // Should have: empty paragraph + HR + image block
+        assert!(result.signature_separator_index.is_some());
+        assert!(result.document.block_count() > 2);
     }
 
     #[test]

@@ -361,6 +361,7 @@ fn is_block_element(tag: &str) -> bool {
             | "tr"
             | "td"
             | "th"
+            | "img"
     )
 }
 
@@ -376,8 +377,13 @@ fn tag_to_inline_style(tag: &str) -> Option<InlineStyle> {
 
 /// Extract the `href` attribute from an `<a>` element's attributes.
 fn get_href(attrs: &[Attribute]) -> Option<String> {
+    get_attr(attrs, "href")
+}
+
+/// Extract a named attribute value from an element's attributes.
+fn get_attr(attrs: &[Attribute], name: &str) -> Option<String> {
     attrs.iter().find_map(|a| {
-        if a.name.local.as_ref() == "href" {
+        if a.name.local.as_ref() == name {
             Some(a.value.to_string())
         } else {
             None
@@ -530,8 +536,27 @@ fn node_to_blocks(node: &Handle, blocks: &mut Vec<Block>) {
 
             match tag {
                 "p" => {
-                    let runs = collect_element_runs(node, &borrow.children);
-                    blocks.push(Block::Paragraph { runs });
+                    // Check if any children are <img> elements — if so, we need
+                    // to split inline runs around them.
+                    let has_img = borrow.children.iter().any(|c| {
+                        let cb = c.borrow();
+                        if let NodeData::Element { ref name, .. } = cb.data {
+                            name.local.as_ref() == "img"
+                        } else {
+                            false
+                        }
+                    });
+
+                    if has_img {
+                        collect_blocks_with_inline_images(
+                            &borrow.children,
+                            blocks,
+                            |runs| Block::Paragraph { runs },
+                        );
+                    } else {
+                        let runs = collect_element_runs(node, &borrow.children);
+                        blocks.push(Block::Paragraph { runs });
+                    }
                 }
                 "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
                     let level = match tag {
@@ -574,6 +599,20 @@ fn node_to_blocks(node: &Handle, blocks: &mut Vec<Block>) {
                 }
                 "hr" => {
                     blocks.push(Block::HorizontalRule);
+                }
+                "img" => {
+                    if let NodeData::Element { ref attrs, .. } = borrow.data {
+                        let src = get_attr(attrs, "src").unwrap_or_default();
+                        let alt = get_attr(attrs, "alt").unwrap_or_default();
+                        let width = get_attr(attrs, "width").and_then(|w| w.parse().ok());
+                        let height = get_attr(attrs, "height").and_then(|h| h.parse().ok());
+                        blocks.push(Block::Image {
+                            src,
+                            alt,
+                            width,
+                            height,
+                        });
+                    }
                 }
                 "br" => {
                     // A <br> at block level creates an empty paragraph.
@@ -694,6 +733,69 @@ fn parse_list_item(li_node: &Handle) -> ListItem {
         ListItem {
             blocks: vec![Arc::new(Block::Paragraph { runs })],
         }
+    }
+}
+
+/// Collect blocks from children that may contain `<img>` elements mixed with
+/// inline content. Flushes accumulated inline runs as block-level elements
+/// (using `wrap_runs`) whenever an `<img>` is encountered.
+fn collect_blocks_with_inline_images(
+    children: &[Handle],
+    blocks: &mut Vec<Block>,
+    wrap_runs: impl Fn(Vec<StyledRun>) -> Block,
+) {
+    let ctx = StyleContext::new();
+    let mut pending_runs: Vec<StyledRun> = Vec::new();
+
+    for child in children {
+        // Check if this child is an <img> element and extract its data
+        // before dropping the borrow.
+        let img_data = {
+            let child_borrow = child.borrow();
+            if let NodeData::Element { ref name, ref attrs, .. } = child_borrow.data {
+                if name.local.as_ref() == "img" {
+                    Some((
+                        get_attr(attrs, "src").unwrap_or_default(),
+                        get_attr(attrs, "alt").unwrap_or_default(),
+                        get_attr(attrs, "width").and_then(|w| w.parse().ok()),
+                        get_attr(attrs, "height").and_then(|h| h.parse().ok()),
+                    ))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        if let Some((src, alt, width, height)) = img_data {
+            flush_pending_runs(&mut pending_runs, blocks, &wrap_runs);
+            blocks.push(Block::Image { src, alt, width, height });
+        } else {
+            collect_inline_runs(child, &ctx, &mut pending_runs);
+        }
+    }
+
+    // Flush any remaining inline runs.
+    flush_pending_runs(&mut pending_runs, blocks, &wrap_runs);
+}
+
+/// Flush accumulated inline runs into a block, if non-empty.
+fn flush_pending_runs(
+    runs: &mut Vec<StyledRun>,
+    blocks: &mut Vec<Block>,
+    wrap_runs: &impl Fn(Vec<StyledRun>) -> Block,
+) {
+    if runs.is_empty() {
+        return;
+    }
+    let mut flushed = std::mem::take(runs);
+    trim_runs(&mut flushed);
+    if flushed.is_empty() {
+        flushed.push(StyledRun::plain(String::new()));
+    }
+    if !runs_are_empty(&flushed) {
+        blocks.push(wrap_runs(flushed));
     }
 }
 
@@ -1178,6 +1280,62 @@ mod tests {
                 runs: vec![StyledRun::plain("")]
             }
         );
+    }
+
+    #[test]
+    fn image_block_parsed() {
+        let doc = from_html(r#"<img src="https://example.com/img.png" alt="A photo">"#);
+        assert_eq!(doc.block_count(), 1);
+        let block = doc.block(0).expect("block");
+        if let Block::Image { src, alt, width, height } = block {
+            assert_eq!(src, "https://example.com/img.png");
+            assert_eq!(alt, "A photo");
+            assert_eq!(*width, None);
+            assert_eq!(*height, None);
+        } else {
+            panic!("expected Image block, got {block:?}");
+        }
+    }
+
+    #[test]
+    fn image_block_with_dimensions() {
+        let doc = from_html(r#"<img src="cid:abc" alt="logo" width="100" height="50">"#);
+        assert_eq!(doc.block_count(), 1);
+        let block = doc.block(0).expect("block");
+        if let Block::Image { src, alt, width, height } = block {
+            assert_eq!(src, "cid:abc");
+            assert_eq!(alt, "logo");
+            assert_eq!(*width, Some(100));
+            assert_eq!(*height, Some(50));
+        } else {
+            panic!("expected Image block, got {block:?}");
+        }
+    }
+
+    #[test]
+    fn image_inside_paragraph_splits_into_blocks() {
+        let doc = from_html(r#"<p>before<img src="test.png" alt="img">after</p>"#);
+        // Should produce: paragraph("before"), Image, paragraph("after")
+        assert!(doc.block_count() >= 2, "got {} blocks", doc.block_count());
+        let has_image = (0..doc.block_count())
+            .any(|i| matches!(doc.block(i), Some(Block::Image { .. })));
+        assert!(has_image, "should contain an Image block");
+    }
+
+    #[test]
+    fn round_trip_image() {
+        use crate::html_serialize::to_html;
+        let html = r#"<img src="https://example.com/img.png" alt="A photo" width="100" height="50">"#;
+        let doc = from_html(html);
+        assert_eq!(to_html(&doc), html);
+    }
+
+    #[test]
+    fn round_trip_image_minimal() {
+        use crate::html_serialize::to_html;
+        let html = r#"<img src="cid:abc">"#;
+        let doc = from_html(html);
+        assert_eq!(to_html(&doc), html);
     }
 
     #[test]

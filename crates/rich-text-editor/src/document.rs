@@ -168,6 +168,22 @@ pub enum Block {
 
     /// A horizontal rule (thematic break).
     HorizontalRule,
+
+    /// An inline image (block embed).
+    ///
+    /// Images are atomic blocks with no inline text content. The editor
+    /// stores the `src` reference; the host application provides image data
+    /// at render time.
+    Image {
+        /// Image source: URL, data-URI, `cid:`, or `inline-image:<hash>`.
+        src: String,
+        /// Alt text for accessibility and placeholder display.
+        alt: String,
+        /// Optional explicit width in pixels.
+        width: Option<u32>,
+        /// Optional explicit height in pixels.
+        height: Option<u32>,
+    },
 }
 
 impl Block {
@@ -206,22 +222,27 @@ impl Block {
     /// Concatenate all run text into a single string.
     ///
     /// For blocks without inline runs (List, BlockQuote, HorizontalRule),
-    /// returns an empty string.
+    /// returns an empty string. For Image blocks, returns the alt text.
     pub fn flattened_text(&self) -> String {
-        match self.runs() {
-            Some(runs) => {
-                let total_len: usize = runs.iter().map(|r| r.text.len()).sum();
-                let mut buf = String::with_capacity(total_len);
-                for run in runs {
-                    buf.push_str(&run.text);
+        match self {
+            Self::Image { alt, .. } => alt.clone(),
+            _ => match self.runs() {
+                Some(runs) => {
+                    let total_len: usize = runs.iter().map(|r| r.text.len()).sum();
+                    let mut buf = String::with_capacity(total_len);
+                    for run in runs {
+                        buf.push_str(&run.text);
+                    }
+                    buf
                 }
-                buf
-            }
-            None => String::new(),
+                None => String::new(),
+            },
         }
     }
 
     /// Total character count of the block's flattened inline text.
+    ///
+    /// Images are atomic and return 0 (not character-addressable).
     pub fn char_len(&self) -> usize {
         match self.runs() {
             Some(runs) => runs.iter().map(StyledRun::char_len).sum(),
@@ -247,6 +268,7 @@ impl Block {
             Self::List { ordered, .. } => BlockKind::List(*ordered),
             Self::BlockQuote { .. } => BlockKind::BlockQuote,
             Self::HorizontalRule => BlockKind::HorizontalRule,
+            Self::Image { .. } => BlockKind::Image,
         }
     }
 
@@ -282,6 +304,7 @@ pub enum BlockKind {
     List(bool),
     BlockQuote,
     HorizontalRule,
+    Image,
 }
 
 // ── List item ───────────────────────────────────────────
@@ -906,5 +929,61 @@ mod tests {
         assert_eq!(extracted[1].style, InlineStyle::BOLD);
         assert_eq!(extracted[2].text, "c");
         assert_eq!(extracted[2].style, InlineStyle::ITALIC);
+    }
+
+    #[test]
+    fn image_block_char_len_is_zero() {
+        let img = Block::Image {
+            src: "https://example.com/img.png".into(),
+            alt: "photo".into(),
+            width: Some(100),
+            height: Some(50),
+        };
+        assert_eq!(img.char_len(), 0);
+    }
+
+    #[test]
+    fn image_block_flattened_text_returns_alt() {
+        let img = Block::Image {
+            src: "cid:abc".into(),
+            alt: "Company logo".into(),
+            width: None,
+            height: None,
+        };
+        assert_eq!(img.flattened_text(), "Company logo");
+    }
+
+    #[test]
+    fn image_block_kind_is_image() {
+        let img = Block::Image {
+            src: String::new(),
+            alt: String::new(),
+            width: None,
+            height: None,
+        };
+        assert_eq!(img.kind(), BlockKind::Image);
+    }
+
+    #[test]
+    fn image_block_is_not_inline_or_container() {
+        let img = Block::Image {
+            src: String::new(),
+            alt: String::new(),
+            width: None,
+            height: None,
+        };
+        assert!(!img.is_inline_block());
+        assert!(!img.is_container());
+    }
+
+    #[test]
+    fn image_block_runs_are_none() {
+        let img = Block::Image {
+            src: String::new(),
+            alt: String::new(),
+            width: None,
+            height: None,
+        };
+        assert!(img.runs().is_none());
     }
 }

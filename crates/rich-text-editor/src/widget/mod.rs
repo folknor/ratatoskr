@@ -1009,6 +1009,47 @@ impl<Message> RichTextEditor<'_, Message> {
                         );
                     }
                 }
+                Block::Image { .. } => {
+                    // Draw a placeholder rectangle with a 1px border.
+                    let img_bounds = Rectangle::new(
+                        block_origin,
+                        Size::new(text_bounds.width, entry.height()),
+                    );
+                    let border_color = Color {
+                        a: 0.3,
+                        ..self.text_color
+                    };
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds: img_bounds,
+                            border: iced::Border {
+                                color: border_color,
+                                width: 1.0,
+                                radius: 2.0.into(),
+                            },
+                            ..Default::default()
+                        },
+                        Color::TRANSPARENT,
+                    );
+                    // Draw alt text inside the placeholder.
+                    if let Some(paragraph) = entry.paragraph() {
+                        let text_origin = Point::new(
+                            block_origin.x + render::IMAGE_PLACEHOLDER_PADDING,
+                            block_origin.y + render::IMAGE_PLACEHOLDER_PADDING,
+                        );
+                        let alt_color = Color {
+                            a: 0.5,
+                            ..self.text_color
+                        };
+                        render::draw_paragraph(
+                            renderer,
+                            paragraph,
+                            text_origin,
+                            alt_color,
+                            *text_bounds,
+                        );
+                    }
+                }
             }
         }
 

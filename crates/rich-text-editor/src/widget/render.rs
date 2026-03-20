@@ -67,6 +67,13 @@ pub const HR_LINE_HEIGHT: f32 = 1.0;
 /// Total height of the horizontal rule block including padding (px).
 pub const HR_BLOCK_HEIGHT: f32 = 16.0;
 
+// ── Image placeholder constants ──────────────────────────
+
+/// Default placeholder height for image blocks (px).
+pub const IMAGE_PLACEHOLDER_HEIGHT: f32 = 150.0;
+/// Padding inside the image placeholder rectangle (px).
+pub const IMAGE_PLACEHOLDER_PADDING: f32 = 8.0;
+
 // ── Font size resolution ────────────────────────────────
 
 /// Returns the font size in pixels for a given block.
@@ -77,6 +84,7 @@ pub fn block_font_size(block: &Block) -> f32 {
         Block::List { .. } => FONT_SIZE_BODY,
         Block::BlockQuote { .. } => FONT_SIZE_BODY,
         Block::HorizontalRule => FONT_SIZE_BODY,
+        Block::Image { .. } => FONT_SIZE_BODY,
     }
 }
 
@@ -97,6 +105,7 @@ pub fn block_spacing(block: &Block) -> f32 {
         Block::List { .. } => SPACING_LIST,
         Block::BlockQuote { .. } => SPACING_BLOCKQUOTE,
         Block::HorizontalRule => SPACING_HR,
+        Block::Image { .. } => SPACING_PARAGRAPH,
     }
 }
 
@@ -269,7 +278,7 @@ fn collect_container_spans(
                 collect_container_spans(child, base_font, text_color, link_color, spans, i > 0);
             }
         }
-        Block::HorizontalRule => {}
+        Block::HorizontalRule | Block::Image { .. } => {}
     }
 }
 
@@ -582,6 +591,35 @@ fn layout_block<P: Paragraph<Font = Font>>(
             entry.paragraph = None;
             entry.child_paragraphs.clear();
             HR_BLOCK_HEIGHT
+        }
+        Block::Image { alt, height, .. } => {
+            // Lay out alt text as a simple paragraph for placeholder display.
+            let placeholder_text = if alt.is_empty() {
+                "[image]"
+            } else {
+                alt.as_str()
+            };
+            let runs = [StyledRun::plain(placeholder_text)];
+            let spans: Vec<_> = runs
+                .iter()
+                .map(|run| run_to_span(run, base_font, FONT_SIZE_BODY, text_color, link_color))
+                .collect();
+            let paragraph = build_paragraph::<P>(
+                &spans,
+                available_width - IMAGE_PLACEHOLDER_PADDING * 2.0,
+                base_font,
+                FONT_SIZE_BODY,
+            );
+
+            let text_height = paragraph.min_bounds().height;
+            let block_height = height
+                .map(|h| h as f32)
+                .unwrap_or(IMAGE_PLACEHOLDER_HEIGHT)
+                .max(text_height + IMAGE_PLACEHOLDER_PADDING * 2.0);
+
+            entry.paragraph = Some(paragraph);
+            entry.child_paragraphs.clear();
+            block_height
         }
         Block::List { items, .. } => {
             // Lay out each list item's first block as a separate paragraph,

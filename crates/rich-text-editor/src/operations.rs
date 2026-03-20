@@ -895,6 +895,7 @@ fn apply_set_block_type(doc: &mut Document, block_index: usize, new: BlockKind) 
         .expect("SetBlockType: block out of bounds");
 
     let runs = block.runs().unwrap_or(&[]).to_vec();
+    let flattened = block.flattened_text();
     let new_runs = if runs.is_empty() {
         vec![StyledRun::plain(String::new())]
     } else {
@@ -917,6 +918,17 @@ fn apply_set_block_type(doc: &mut Document, block_index: usize, new: BlockKind) 
             blocks: vec![Arc::new(Block::Paragraph { runs: new_runs })],
         },
         BlockKind::HorizontalRule => Block::HorizontalRule,
+        BlockKind::Image => {
+            // Converting to Image via SetBlockType doesn't make semantic sense,
+            // but handle gracefully by creating a placeholder image with the
+            // block's text as alt text.
+            Block::Image {
+                src: String::new(),
+                alt: flattened,
+                width: None,
+                height: None,
+            }
+        }
     };
 
     doc.replace_block(block_index, new_block);

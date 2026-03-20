@@ -52,6 +52,32 @@ fn serialize_block(block: &Block, buf: &mut String) {
         Block::HorizontalRule => {
             buf.push_str("<hr>");
         }
+        Block::Image {
+            src,
+            alt,
+            width,
+            height,
+        } => {
+            buf.push_str("<img src=\"");
+            html_escape_into(src, buf);
+            buf.push('"');
+            if !alt.is_empty() {
+                buf.push_str(" alt=\"");
+                html_escape_into(alt, buf);
+                buf.push('"');
+            }
+            if let Some(w) = width {
+                buf.push_str(" width=\"");
+                buf.push_str(&w.to_string());
+                buf.push('"');
+            }
+            if let Some(h) = height {
+                buf.push_str(" height=\"");
+                buf.push_str(&h.to_string());
+                buf.push('"');
+            }
+            buf.push('>');
+        }
     }
 }
 
@@ -406,5 +432,44 @@ mod tests {
     fn unicode_content() {
         let doc = Document::from_blocks(vec![Block::paragraph("Héllo wörld 🌍")]);
         assert_eq!(to_html(&doc), "<p>Héllo wörld 🌍</p>");
+    }
+
+    #[test]
+    fn image_block_with_all_attributes() {
+        let doc = Document::from_blocks(vec![Block::Image {
+            src: "https://example.com/img.png".into(),
+            alt: "A photo".into(),
+            width: Some(100),
+            height: Some(50),
+        }]);
+        assert_eq!(
+            to_html(&doc),
+            "<img src=\"https://example.com/img.png\" alt=\"A photo\" width=\"100\" height=\"50\">"
+        );
+    }
+
+    #[test]
+    fn image_block_without_optional_attributes() {
+        let doc = Document::from_blocks(vec![Block::Image {
+            src: "cid:abc123".into(),
+            alt: String::new(),
+            width: None,
+            height: None,
+        }]);
+        assert_eq!(to_html(&doc), "<img src=\"cid:abc123\">");
+    }
+
+    #[test]
+    fn image_block_escapes_src_and_alt() {
+        let doc = Document::from_blocks(vec![Block::Image {
+            src: "https://example.com/img?a=1&b=2".into(),
+            alt: "A \"quoted\" image".into(),
+            width: None,
+            height: None,
+        }]);
+        assert_eq!(
+            to_html(&doc),
+            "<img src=\"https://example.com/img?a=1&amp;b=2\" alt=\"A &quot;quoted&quot; image\">"
+        );
     }
 }

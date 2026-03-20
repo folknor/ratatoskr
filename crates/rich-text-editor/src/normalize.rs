@@ -101,6 +101,7 @@ fn normalize_block(block: Block) -> Block {
             Block::BlockQuote { blocks }
         }
         Block::HorizontalRule => Block::HorizontalRule,
+        Block::Image { .. } => block,
     }
 }
 
@@ -549,6 +550,30 @@ mod tests {
         let runs = doc.blocks[0].runs().expect("runs");
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].text, "untouched");
+    }
+
+    // ── Image passes through unchanged ─────────────────
+
+    #[test]
+    fn image_passes_through_unchanged() {
+        let mut doc = Document {
+            blocks: vec![Arc::new(Block::Image {
+                src: "https://example.com/img.png".into(),
+                alt: "photo".into(),
+                width: Some(100),
+                height: Some(50),
+            })],
+        };
+        normalize(&mut doc);
+
+        if let Block::Image { src, alt, width, height } = &*doc.blocks[0] {
+            assert_eq!(src, "https://example.com/img.png");
+            assert_eq!(alt, "photo");
+            assert_eq!(*width, Some(100));
+            assert_eq!(*height, Some(50));
+        } else {
+            panic!("expected Image block");
+        }
     }
 
     // ── HorizontalRule passes through ───────────────────

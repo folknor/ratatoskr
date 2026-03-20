@@ -228,8 +228,17 @@ fn resolve_delete_backward(doc: &Document, selection: DocSelection) -> Vec<EditO
         return vec![];
     }
 
-    // Rule 3: at offset 0 of a non-first block, merge with previous.
+    // Rule 3: at offset 0 of a non-first block — handle image blocks.
     if pos.offset == 0 {
+        // If the previous block is an image, delete (remove) it instead of merging.
+        if let Some(prev) = doc.block(pos.block_index - 1)
+            && matches!(prev, Block::Image { .. })
+        {
+            return vec![EditOp::RemoveBlock {
+                index: pos.block_index - 1,
+                saved: prev.clone(),
+            }];
+        }
         return resolve_merge_backward(doc, pos.block_index);
     }
 
@@ -331,8 +340,18 @@ fn resolve_delete_forward(doc: &Document, selection: DocSelection) -> Vec<EditOp
         return vec![];
     }
 
-    // Rule 3: at the end of a non-last block, merge next into current.
+    // Rule 3: at the end of a non-last block — handle image blocks.
     if at_block_end {
+        // If the next block is an image, delete (remove) it instead of merging.
+        let next_idx = pos.block_index + 1;
+        if let Some(next) = doc.block(next_idx)
+            && matches!(next, Block::Image { .. })
+        {
+            return vec![EditOp::RemoveBlock {
+                index: next_idx,
+                saved: next.clone(),
+            }];
+        }
         return resolve_merge_forward(doc, pos.block_index);
     }
 
@@ -500,6 +519,15 @@ fn resolve_split_block(doc: &Document, selection: DocSelection) -> Vec<EditOp> {
     let Some(block) = doc.block(split_pos.block_index) else {
         return ops;
     };
+
+    // Rule: Image blocks are atomic — Enter inserts a new paragraph after.
+    if matches!(block, Block::Image { .. }) {
+        ops.push(EditOp::InsertBlock {
+            index: split_pos.block_index + 1,
+            block: Block::empty_paragraph(),
+        });
+        return ops;
+    }
 
     // Rule 2: auto-exit block (double-Enter to exit list/blockquote).
     // Currently deferred: our document model treats List and BlockQuote as opaque
