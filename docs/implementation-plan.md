@@ -1,6 +1,6 @@
 # Implementation Plan
 
-Prioritized implementation plan for Ratatoskr features. All implementation specs are written and reviewed. The editor is in progress and not listed here.
+Prioritized implementation plan for Ratatoskr features. The first implementation-spec batch (Tiers 1–3) is written and reviewed. Remaining items are tracked below. The editor is in progress and not listed here.
 
 ## Spec Status
 
@@ -26,7 +26,7 @@ Six sub-slices (6a–6f). 6a (keyboard dispatch + infrastructure) ships first �
 **Spec:** `docs/command-palette/app-integration-spec.md`
 **Depends on:** Command palette slices 1-3 (done).
 **Unblocks:** Sidebar Phase 2 (action stripping), search smart folder management, keyboard shortcuts everywhere.
-**Cross-cutting:** Introduces `NavigationTarget` enum that sidebar, search, and pinned searches should all adopt.
+**Cross-cutting (Tier 1 execution guidance):** Introduces `NavigationTarget` enum that sidebar, search, and pinned searches should all adopt. This is one of the few architectural normalizations that clearly wants to happen early — it replaces the semantically muddy `selected_label: Option<String>` and gives the app an explicit view-state model. Should be implemented as part of slice 6a, not deferred.
 
 ### Sidebar
 Five sub-phases. 1A (live data wiring) is the critical path — connects existing `get_navigation_state()` to the sidebar. 1B (smart folder scoping fix) is a small backend change. 1C (unread counts) follows 1A. 1D (hierarchy) is the largest piece — requires DB migration, provider sync changes across Graph/JMAP/IMAP, and a composed tree renderer. 1E (pinned searches section) can be scaffolded early but full lifecycle waits on search integration. Phase 2 (strip actions) is blocked on command palette.
@@ -40,7 +40,7 @@ Five sub-phases. 1A (live data wiring) is the critical path — connects existin
 Seven phases (0–7). Phase 0 (data model) adds DB columns and CRUD — this is backend work, not purely app-side. Phase 1 (first-launch detection) and Phase 2–3 (wizard state machine + views) are the core onboarding flow. Phase 4 (app wiring) connects the wizard to the main app. Phase 5 (settings management) adds account cards with health indicators. Phase 6 (sidebar enhancements) and Phase 7 (error states) are polish.
 
 **Spec:** `docs/accounts/implementation-spec.md`
-**Depends on:** Nothing (backend complete).
+**Depends on:** No prior UI specs; includes required backend/data-model work in Phase 0 (new DB columns, migration, CRUD functions).
 **Unblocks:** User onboarding. Without this, the app requires a seeded database.
 **Note:** The writable DB connection needed here (for account_color, account_name, sort_order) is the same cross-cutting decision needed by pinned searches, session restore, and keybinding overrides. Whichever feature lands first should establish the pattern.
 
@@ -159,9 +159,9 @@ Tier 5:
 ## Cross-Cutting Concerns
 
 - **Writable DB connection:** Multiple features need local-state writes (pinned searches, attachment collapse, session restore, keybinding overrides, account metadata). The first feature to land should establish the `local_conn` pattern. This is a cross-cutting architecture decision, not owned by any single spec.
-- **NavigationTarget enum:** The command palette spec introduces this. Sidebar, search, and pinned searches should all adopt it to replace the semantically muddy `selected_label: Option<String>`. This is app-state normalization that should happen alongside or slightly ahead of command integration.
+- **NavigationTarget enum:** Promoted to Tier 1 execution guidance (see command palette entry above). Should land in slice 6a, not deferred.
 - **Generational load tracking:** Appears in nearly every spec (search, sidebar, command palette, pinned searches, status bar, contacts, accounts). Should be treated as a foundational primitive with a shared helper, not reimplemented per-feature.
 - **Editor** is in progress and not tracked here. Together with contacts autocomplete, it unblocks serious compose work. Signatures depend on editor Phase 3 (HTML round-trip).
 - **Pop-out windows** are deliberately split into compose (heavy dependencies) and message-view (mostly independent, but Phase 1 is shared infrastructure).
 - **Contacts** are deliberately split into autocomplete (core email loop blocker) and management (additive, Tier 4).
-- **Result type convergence:** The search specs identify four overlapping thread-result types (`UnifiedSearchResult`, `Thread`, `DbThread`, `SearchResult`). Long-term, these should converge into a unified thread-presentation type.
+- **Result type convergence:** The search specs identify four overlapping thread-result types (`UnifiedSearchResult`, `Thread`, `DbThread`, `SearchResult`). These should converge into a unified thread-presentation type. The natural time to do this is during search app integration (Tier 2) — specifically when wiring `UnifiedSearchResult` → `Thread` conversion in Phase 1 and the smart folder `DbThread` adapter in Phase 2. Not a blocker, but one of the cleaner refactor seams now visible.
