@@ -388,6 +388,17 @@ pub const PAD_TOKEN_INPUT: Padding = Padding {
 };
 /// Minimum width for the text input portion before wrapping.
 pub const TOKEN_TEXT_MIN_WIDTH: f32 = 120.0;
+
+// ── Calendar ────────────────────────────────────────────
+
+/// Minimum height for a day cell in the month grid.
+pub const CALENDAR_CELL_MIN_HEIGHT: f32 = 80.0;
+/// Height of a single event entry row in the month grid.
+pub const CALENDAR_EVENT_HEIGHT: f32 = 20.0;
+/// Height of the day-of-week header row in the month grid.
+pub const CALENDAR_HEADER_HEIGHT: f32 = 28.0;
+/// Cell size (width and height) for the mini-month date grid.
+pub const MINI_MONTH_CELL_SIZE: f32 = 28.0;
 /// Group icon size on group tokens.
 pub const TOKEN_GROUP_ICON_SIZE: f32 = ICON_XS;
 

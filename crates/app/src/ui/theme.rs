@@ -250,6 +250,16 @@ pub enum ContainerClass {
     PaletteSelectedRow,
     /// Semi-transparent dark overlay behind modals.
     ModalBackdrop,
+    /// Calendar day cell with subtle border.
+    CalendarCell,
+    /// Today's calendar cell (accent border/tint).
+    CalendarCellToday,
+    /// Calendar event entry (colored background, rounded).
+    CalendarEvent,
+    /// Non-current-month calendar cell (muted background).
+    CalendarCellMuted,
+    /// Mini-month selected date highlight.
+    MiniMonthSelected,
 }
 
 impl ContainerClass {
@@ -276,6 +286,11 @@ impl ContainerClass {
             Self::PaletteCard => style_palette_card_container,
             Self::PaletteSelectedRow => style_palette_selected_row_container,
             Self::ModalBackdrop => style_modal_backdrop_container,
+            Self::CalendarCell => style_calendar_cell_container,
+            Self::CalendarCellToday => style_calendar_cell_today_container,
+            Self::CalendarEvent => style_calendar_event_container,
+            Self::CalendarCellMuted => style_calendar_cell_muted_container,
+            Self::MiniMonthSelected => style_mini_month_selected_container,
         }
     }
 }
@@ -1038,6 +1053,71 @@ fn style_modal_backdrop_container(_theme: &Theme) -> container::Style {
     }
 }
 
+// ── Calendar container style implementations ────────────
+
+fn style_calendar_cell_container(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    container::Style {
+        background: Some(p.background.weakest.color.into()),
+        border: iced::Border {
+            color: p.background.strongest.color.scale_alpha(0.1),
+            width: 1.0,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn style_calendar_cell_today_container(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    container::Style {
+        background: Some(p.primary.base.color.scale_alpha(0.06).into()),
+        border: iced::Border {
+            color: p.primary.base.color.scale_alpha(0.4),
+            width: 1.0,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn style_calendar_event_container(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    container::Style {
+        background: Some(p.primary.base.color.into()),
+        border: iced::Border {
+            radius: RADIUS_SM.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+fn style_calendar_cell_muted_container(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    container::Style {
+        background: Some(p.background.base.color.into()),
+        border: iced::Border {
+            color: p.background.strongest.color.scale_alpha(0.08),
+            width: 1.0,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn style_mini_month_selected_container(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    container::Style {
+        background: Some(p.primary.base.color.scale_alpha(0.15).into()),
+        border: iced::Border {
+            radius: RADIUS_SM.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
 // ── Rule style implementations ──────────────────────────
 
 fn style_divider_rule(theme: &Theme) -> rule::Style {
@@ -1230,7 +1310,7 @@ pub fn initial(name: &str) -> String {
 // ── Color utilities ─────────────────────────────────────
 
 /// Mix two colors by ratio (0.0 = a, 1.0 = b).
-fn mix(a: Color, b: Color, t: f32) -> Color {
+pub fn mix(a: Color, b: Color, t: f32) -> Color {
     Color::from_rgba(
         a.r + (b.r - a.r) * t,
         a.g + (b.g - a.g) * t,
