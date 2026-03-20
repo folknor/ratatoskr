@@ -1,0 +1,21 @@
+[package]
+name = "ratatoskr-rich-text-editor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["widget"]
+widget = ["dep:iced"]
+
+[dependencies]
+bitflags = "2"
+html5ever = "0.35"
+markup5ever = "0.16"
+
+iced = { path = "/home/folk/Programs/sluggrs/repos/iced", default-features = false, features = [
+    "wgpu", "tokio", "lazy", "advanced", "web-colors", "wayland", "x11",
+], optional = true }

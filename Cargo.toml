@@ -21,6 +21,7 @@ members = [
     "crates/graph",
     "crates/imap",
     "crates/system-fonts",
+    "crates/rich-text-editor",
 ]
 
 exclude = [
