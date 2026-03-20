@@ -403,6 +403,10 @@ impl EditorState {
         if slice.blocks.len() == 1 && slice.open_start && slice.open_end {
             // Inline fragment: insert runs preserving their styles.
             self.paste_inline_runs(insert_pos, &slice.blocks[0], &mut all_ops);
+        } else if slice.blocks.iter().all(|b| !b.is_inline_block()) {
+            // All blocks are non-inline (Image, HR, etc.) — insert as
+            // complete blocks. These have no runs to merge.
+            self.paste_complete_blocks(insert_pos, &slice.blocks, &mut all_ops);
         } else {
             // Multi-block paste: split, insert blocks, merge edges.
             self.paste_multi_block(insert_pos, slice, &mut all_ops);
@@ -467,19 +471,39 @@ impl EditorState {
             DocSelection::caret(DocPosition::new(pos.block_index, pos.offset + total_chars));
     }
 
-    /// Paste a multi-block slice at `pos`.
-    ///
-    /// Strategy: always merge the first and last slice blocks into the
-    /// surrounding content (regardless of `open_start`/`open_end`). This
-    /// matches the natural user expectation: pasting "A\nB" at the cursor
-    /// appends A's content to the left of the cursor and prepends B's
-    /// content to the right.
-    ///
-    /// 1. Split the block at `pos` into left and right halves.
-    /// 2. Append the first slice block's runs to the left half.
-    /// 3. Insert middle blocks (indices 1..len-1) between.
-    /// 4. Prepend the last slice block's runs to the right half.
-    /// 5. Place cursor at the end of the last pasted content.
+    /// Insert atomic blocks like images and horizontal rules as complete blocks.
+    fn paste_complete_blocks(
+        &mut self,
+        pos: DocPosition,
+        blocks: &[Block],
+        ops: &mut Vec<EditOp>,
+    ) {
+        // If the cursor is mid-block, split first so blocks insert cleanly.
+        let mut insert_idx = if pos.offset > 0 {
+            let split_op = EditOp::SplitBlock { position: pos };
+            split_op.apply(&mut self.document);
+            ops.push(split_op);
+            pos.block_index + 1
+        } else {
+            pos.block_index
+        };
+
+        for block in blocks {
+            let insert_op = EditOp::InsertBlock {
+                index: insert_idx,
+                block: block.clone(),
+            };
+            insert_op.apply(&mut self.document);
+            ops.push(insert_op);
+            insert_idx += 1;
+        }
+
+        // Place cursor at the start of the block after the last inserted block.
+        let cursor_idx = insert_idx.min(self.document.block_count().saturating_sub(1));
+        self.selection = DocSelection::caret(DocPosition::new(cursor_idx, 0));
+    }
+
+    /// Paste a multi-block slice at `pos`, merging edges and inserting middles.
     fn paste_multi_block(
         &mut self,
         pos: DocPosition,
@@ -496,13 +520,22 @@ impl EditorState {
         // After split: left half at pos.block_index, right half at pos.block_index + 1.
         let left_idx = pos.block_index;
 
-        // Merge first slice block's runs into the left half (append at end).
+        // Merge first slice block into the left half.
+        // If the first block is inline, merge its runs. Otherwise insert as a
+        // complete block (e.g., Image, HR).
+        let mut insert_idx = pos.block_index + 1;
         if let Some(runs) = slice.blocks[0].runs() {
             self.append_runs_to_block(left_idx, runs, ops);
+        } else {
+            // Non-inline first block: insert it after the left half.
+            let insert_op = EditOp::InsertBlock {
+                index: insert_idx,
+                block: slice.blocks[0].clone(),
+            };
+            insert_op.apply(&mut self.document);
+            ops.push(insert_op);
+            insert_idx += 1;
         }
-
-        // Track where we insert middle blocks (between left and right halves).
-        let mut insert_idx = pos.block_index + 1;
 
         // Insert middle blocks (indices 1..block_count-1).
         if block_count > 2 {
@@ -517,26 +550,31 @@ impl EditorState {
             }
         }
 
-        // Handle the last block (only when there are 2+ blocks).
+        // Handle the last block.
         let cursor_block;
         let cursor_offset;
 
         if block_count > 1 {
             let last_block = &slice.blocks[block_count - 1];
-            // Merge last slice block's runs into the right half (prepend at start).
             let right_idx = insert_idx;
             if let Some(runs) = last_block.runs() {
+                // Inline last block: merge runs into the right half (prepend).
                 let pasted_len: usize = runs.iter().map(StyledRun::char_len).sum();
                 self.prepend_runs_to_block(right_idx, runs, ops);
                 cursor_block = right_idx;
                 cursor_offset = pasted_len;
             } else {
-                cursor_block = right_idx;
+                // Non-inline last block: insert as a complete block.
+                let insert_op = EditOp::InsertBlock {
+                    index: right_idx,
+                    block: last_block.clone(),
+                };
+                insert_op.apply(&mut self.document);
+                ops.push(insert_op);
+                cursor_block = right_idx + 1;
                 cursor_offset = 0;
             }
         } else {
-            // Single block in the slice (shouldn't reach here for multi-block,
-            // but handle gracefully).
             cursor_block = left_idx;
             cursor_offset = self
                 .document

@@ -536,18 +536,7 @@ fn node_to_blocks(node: &Handle, blocks: &mut Vec<Block>) {
 
             match tag {
                 "p" => {
-                    // Check if any children are <img> elements — if so, we need
-                    // to split inline runs around them.
-                    let has_img = borrow.children.iter().any(|c| {
-                        let cb = c.borrow();
-                        if let NodeData::Element { ref name, .. } = cb.data {
-                            name.local.as_ref() == "img"
-                        } else {
-                            false
-                        }
-                    });
-
-                    if has_img {
+                    if children_have_img(&borrow.children) {
                         collect_blocks_with_inline_images(
                             &borrow.children,
                             blocks,
@@ -565,8 +554,17 @@ fn node_to_blocks(node: &Handle, blocks: &mut Vec<Block>) {
                         // H4-H6 map to H3 per spec
                         _ => HeadingLevel::H3,
                     };
-                    let runs = collect_element_runs(node, &borrow.children);
-                    blocks.push(Block::Heading { level, runs });
+                    let has_img = children_have_img(&borrow.children);
+                    if has_img {
+                        collect_blocks_with_inline_images(
+                            &borrow.children,
+                            blocks,
+                            |runs| Block::Heading { level, runs },
+                        );
+                    } else {
+                        let runs = collect_element_runs(node, &borrow.children);
+                        blocks.push(Block::Heading { level, runs });
+                    }
                 }
                 "ul" | "ol" => {
                     let ordered = tag == "ol";
@@ -647,9 +645,17 @@ fn node_to_blocks(node: &Handle, blocks: &mut Vec<Block>) {
                     }
                 }
                 "td" | "th" => {
-                    let runs = collect_element_runs(node, &borrow.children);
-                    if !runs_are_empty(&runs) {
-                        blocks.push(Block::Paragraph { runs });
+                    if children_have_img(&borrow.children) {
+                        collect_blocks_with_inline_images(
+                            &borrow.children,
+                            blocks,
+                            |runs| Block::Paragraph { runs },
+                        );
+                    } else {
+                        let runs = collect_element_runs(node, &borrow.children);
+                        if !runs_are_empty(&runs) {
+                            blocks.push(Block::Paragraph { runs });
+                        }
                     }
                 }
                 "pre" => {
@@ -739,6 +745,18 @@ fn parse_list_item(li_node: &Handle) -> ListItem {
 /// Collect blocks from children that may contain `<img>` elements mixed with
 /// inline content. Flushes accumulated inline runs as block-level elements
 /// (using `wrap_runs`) whenever an `<img>` is encountered.
+/// Check if any direct children of a node are `<img>` elements.
+fn children_have_img(children: &[Handle]) -> bool {
+    children.iter().any(|c| {
+        let cb = c.borrow();
+        if let NodeData::Element { ref name, .. } = cb.data {
+            name.local.as_ref() == "img"
+        } else {
+            false
+        }
+    })
+}
+
 fn collect_blocks_with_inline_images(
     children: &[Handle],
     blocks: &mut Vec<Block>,
