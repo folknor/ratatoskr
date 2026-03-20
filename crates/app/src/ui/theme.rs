@@ -162,6 +162,8 @@ pub enum ButtonClass {
     StarActive,
     /// Toggleable chip / pill button.
     Chip { active: bool },
+    /// Pinned search card in the sidebar.
+    PinnedSearch { active: bool },
     /// Experimental numbered variant.
     Experiment { variant: usize },
     /// Experimental semantic variant (success/warning/danger).
@@ -190,6 +192,9 @@ impl ButtonClass {
             Self::CollapsedMessage => style_collapsed_message_button(theme, status),
             Self::StarActive => style_star_active_button(theme, status),
             Self::Chip { active } => style_chip_button(theme, status, active),
+            Self::PinnedSearch { active } => {
+                style_pinned_search_button(theme, status, active)
+            }
             Self::Experiment { variant } => style_exp_btn(theme, status, variant),
             Self::ExperimentSemantic { variant } => {
                 style_exp_semantic_btn(theme, status, variant)
@@ -604,6 +609,44 @@ fn style_chip_idle(p: &iced::theme::palette::Palette, active: bool) -> button::S
             radius: RADIUS_LG.into(),
         },
         ..Default::default()
+    }
+}
+
+fn style_pinned_search_button(
+    theme: &Theme,
+    status: button::Status,
+    active: bool,
+) -> button::Style {
+    let p = theme.palette();
+    match status {
+        button::Status::Hovered => button::Style {
+            background: Some(p.background.weak.color.into()),
+            text_color: p.background.base.text,
+            border: iced::Border {
+                color: p.background.strongest.color.scale_alpha(0.1),
+                width: 1.0,
+                radius: RADIUS_MD.into(),
+            },
+            ..Default::default()
+        },
+        _ => button::Style {
+            background: Some(if active {
+                p.background.strong.color.into()
+            } else {
+                p.background.weakest.color.into()
+            }),
+            text_color: if active {
+                p.primary.base.color
+            } else {
+                p.background.base.text
+            },
+            border: iced::Border {
+                color: p.background.strongest.color.scale_alpha(0.08),
+                width: 1.0,
+                radius: RADIUS_MD.into(),
+            },
+            ..Default::default()
+        },
     }
 }
 

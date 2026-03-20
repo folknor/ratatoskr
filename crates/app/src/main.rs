@@ -170,6 +170,16 @@ pub enum Message {
     /// Unfocus the search bar without clearing.
     SearchBlur,
 
+    // Pinned searches
+    PinnedSearchesLoaded(Result<Vec<db::PinnedSearch>, String>),
+    SelectPinnedSearch(i64),
+    PinnedSearchThreadIdsLoaded(u64, i64, Result<Vec<(String, String)>, String>),
+    PinnedSearchThreadsLoaded(u64, Result<Vec<Thread>, String>),
+    DismissPinnedSearch(i64),
+    PinnedSearchDismissed(i64, Result<(), String>),
+    PinnedSearchSaved(Result<i64, String>),
+    PinnedSearchesExpired(Result<u64, String>),
+
     // Account management
     AddAccount(AddAccountMessage),
     OpenAddAccount,
@@ -223,6 +233,16 @@ struct App {
     /// Threads displayed before the current search, restored on SearchClear.
     pre_search_threads: Option<Vec<Thread>>,
 
+    // Pinned searches
+    /// All pinned searches, loaded at boot. Ordered by updated_at DESC.
+    pinned_searches: Vec<db::PinnedSearch>,
+    /// The currently selected pinned search, if any.
+    active_pinned_search: Option<i64>,
+    /// Tracks which pinned search to update on next search execution.
+    editing_pinned_search: Option<i64>,
+    /// Whether auto-expiry has run this session.
+    expiry_ran: bool,
+
     /// True when the app has no configured accounts.
     no_accounts: bool,
     /// The add-account wizard state. Some when the modal is open.
@@ -233,6 +253,7 @@ impl App {
     fn boot() -> (Self, Task<Message>) {
         let db = Arc::clone(DB.get().expect("DB not initialized"));
         let db_ref = Arc::clone(&db);
+        let db_ref2 = Arc::clone(&db);
         let data_dir = APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
         let window = window_state::WindowState::load(data_dir);
 
@@ -272,14 +293,24 @@ impl App {
             search_query: String::new(),
             search_debounce_deadline: None,
             pre_search_threads: None,
+            pinned_searches: Vec::new(),
+            active_pinned_search: None,
+            editing_pinned_search: None,
+            expiry_ran: false,
             no_accounts: false,
             add_account_wizard: None,
         };
         let load_gen = app.nav_generation;
-        (app, Task::perform(
-            async move { (load_gen, load_accounts(db_ref).await) },
-            |(g, result)| Message::AccountsLoaded(g, result),
-        ))
+        (app, Task::batch([
+            Task::perform(
+                async move { (load_gen, load_accounts(db_ref).await) },
+                |(g, result)| Message::AccountsLoaded(g, result),
+            ),
+            Task::perform(
+                async move { db_ref2.list_pinned_searches().await },
+                Message::PinnedSearchesLoaded,
+            ),
+        ]))
     }
 
     fn theme(&self) -> Theme {
@@ -481,8 +512,12 @@ impl App {
                     self.show_settings = false;
                     return Task::none();
                 }
-                // If search has content, clear it
-                if !self.search_query.is_empty() {
+                // If search has content, clear it and deselect pinned search
+                // (but don't dismiss the pinned search).
+                if !self.search_query.is_empty() || self.active_pinned_search.is_some() {
+                    self.active_pinned_search = None;
+                    self.sidebar.active_pinned_search = None;
+                    self.editing_pinned_search = None;
                     return self.update(Message::SearchClear);
                 }
                 Task::none()
@@ -576,8 +611,37 @@ impl App {
             Message::SearchResultsLoaded(_, Ok(threads)) => {
                 self.thread_list.mode = ui::thread_list::ThreadListMode::Search;
                 self.status = format!("{} results", threads.len());
+
+                // Collect thread IDs for pinned search snapshot
+                let thread_ids: Vec<(String, String)> = threads
+                    .iter()
+                    .map(|t| (t.id.clone(), t.account_id.clone()))
+                    .collect();
+                let query = self.search_query.clone();
+
                 self.thread_list.set_threads(threads);
                 self.thread_list.selected_thread = None;
+
+                // Create or update pinned search
+                if !query.trim().is_empty() {
+                    let db = Arc::clone(&self.db);
+                    if let Some(editing_id) = self.editing_pinned_search {
+                        return Task::perform(
+                            async move {
+                                db.update_pinned_search(editing_id, query, thread_ids)
+                                    .await
+                                    .map(|()| editing_id)
+                            },
+                            Message::PinnedSearchSaved,
+                        );
+                    }
+                    return Task::perform(
+                        async move {
+                            db.create_or_update_pinned_search(query, thread_ids).await
+                        },
+                        Message::PinnedSearchSaved,
+                    );
+                }
                 Task::none()
             }
             Message::SearchResultsLoaded(_, Err(e)) => {
@@ -596,6 +660,124 @@ impl App {
             }
             Message::SearchBlur => {
                 // Unfocus the search bar without clearing search state.
+                Task::none()
+            }
+
+            // Pinned searches
+            Message::PinnedSearchesLoaded(Ok(searches)) => {
+                self.pinned_searches = searches;
+                self.sidebar.pinned_searches.clone_from(&self.pinned_searches);
+
+                if !self.expiry_ran {
+                    self.expiry_ran = true;
+                    let db = Arc::clone(&self.db);
+                    // 14 days in seconds
+                    return Task::perform(
+                        async move { db.expire_stale_pinned_searches(1_209_600).await },
+                        Message::PinnedSearchesExpired,
+                    );
+                }
+                Task::none()
+            }
+            Message::PinnedSearchesLoaded(Err(e)) => {
+                self.status = format!("Pinned searches error: {e}");
+                Task::none()
+            }
+            Message::SelectPinnedSearch(id) => {
+                self.handle_select_pinned_search(id)
+            }
+            Message::PinnedSearchThreadIdsLoaded(g, _, _) if g != self.nav_generation => {
+                Task::none()
+            }
+            Message::PinnedSearchThreadIdsLoaded(_, ps_id, Ok(ids)) => {
+                // Populate search bar with the pinned search query
+                if let Some(ps) = self.pinned_searches.iter().find(|p| p.id == ps_id) {
+                    self.search_query.clone_from(&ps.query);
+                    self.thread_list.search_query.clone_from(&ps.query);
+                }
+
+                let db = Arc::clone(&self.db);
+                let load_gen = self.nav_generation;
+                Task::perform(
+                    async move {
+                        let result = db.get_threads_by_ids(ids).await;
+                        (load_gen, result)
+                    },
+                    |(g, result)| Message::PinnedSearchThreadsLoaded(g, result),
+                )
+            }
+            Message::PinnedSearchThreadIdsLoaded(_, _, Err(e)) => {
+                self.status = format!("Error loading pinned search: {e}");
+                Task::none()
+            }
+            Message::PinnedSearchThreadsLoaded(g, _) if g != self.nav_generation => {
+                Task::none()
+            }
+            Message::PinnedSearchThreadsLoaded(_, Ok(threads)) => {
+                self.thread_list.mode = ui::thread_list::ThreadListMode::Search;
+                self.status = format!("{} threads (pinned search)", threads.len());
+                self.thread_list.set_threads(threads);
+                self.thread_list.selected_thread = None;
+                Task::none()
+            }
+            Message::PinnedSearchThreadsLoaded(_, Err(e)) => {
+                self.status = format!("Threads error: {e}");
+                Task::none()
+            }
+            Message::DismissPinnedSearch(id) => {
+                let db = Arc::clone(&self.db);
+                Task::perform(
+                    async move {
+                        let result = db.delete_pinned_search(id).await;
+                        (id, result)
+                    },
+                    |(id, result)| Message::PinnedSearchDismissed(id, result),
+                )
+            }
+            Message::PinnedSearchDismissed(id, Ok(())) => {
+                self.pinned_searches.retain(|ps| ps.id != id);
+                self.sidebar.pinned_searches.retain(|ps| ps.id != id);
+                if self.active_pinned_search == Some(id) {
+                    self.active_pinned_search = None;
+                    self.sidebar.active_pinned_search = None;
+                    self.editing_pinned_search = None;
+                    // Restore previous folder view
+                    return self.restore_folder_view();
+                }
+                Task::none()
+            }
+            Message::PinnedSearchDismissed(_, Err(e)) => {
+                self.status = format!("Dismiss error: {e}");
+                Task::none()
+            }
+            Message::PinnedSearchSaved(Ok(id)) => {
+                self.active_pinned_search = Some(id);
+                self.sidebar.active_pinned_search = Some(id);
+                self.editing_pinned_search = Some(id);
+
+                let db = Arc::clone(&self.db);
+                Task::perform(
+                    async move { db.list_pinned_searches().await },
+                    Message::PinnedSearchesLoaded,
+                )
+            }
+            Message::PinnedSearchSaved(Err(e)) => {
+                self.status = format!("Save pinned search error: {e}");
+                Task::none()
+            }
+            Message::PinnedSearchesExpired(Ok(count)) => {
+                if count > 0 {
+                    let db = Arc::clone(&self.db);
+                    Task::perform(
+                        async move { db.list_pinned_searches().await },
+                        Message::PinnedSearchesLoaded,
+                    )
+                } else {
+                    Task::none()
+                }
+            }
+            Message::PinnedSearchesExpired(Err(e)) => {
+                self.status = format!("Expiry warning: {e}");
                 Task::none()
             }
 
@@ -1086,6 +1268,7 @@ impl App {
         match event {
             SidebarEvent::AccountSelected(_idx) => {
                 self.clear_search_state();
+                self.clear_pinned_search_context();
                 self.thread_list.selected_thread = None;
                 self.nav_generation += 1;
                 self.thread_generation += 1;
@@ -1094,6 +1277,7 @@ impl App {
             }
             SidebarEvent::AllAccountsSelected => {
                 self.clear_search_state();
+                self.clear_pinned_search_context();
                 self.thread_list.selected_thread = None;
                 self.nav_generation += 1;
                 self.thread_generation += 1;
@@ -1103,6 +1287,7 @@ impl App {
             SidebarEvent::CycleAccount => Task::none(),
             SidebarEvent::LabelSelected(label_id) => {
                 self.clear_search_state();
+                self.clear_pinned_search_context();
                 self.update_thread_list_context_from_sidebar();
                 self.handle_label_selected(label_id)
             }
@@ -1110,6 +1295,12 @@ impl App {
             SidebarEvent::ToggleSettings => {
                 self.show_settings = !self.show_settings;
                 Task::none()
+            }
+            SidebarEvent::PinnedSearchSelected(id) => {
+                self.update(Message::SelectPinnedSearch(id))
+            }
+            SidebarEvent::PinnedSearchDismissed(id) => {
+                self.update(Message::DismissPinnedSearch(id))
             }
         }
     }
@@ -1560,6 +1751,49 @@ impl App {
         .into()
     }
 
+    /// Handle selecting a pinned search from the sidebar.
+    fn handle_select_pinned_search(&mut self, id: i64) -> Task<Message> {
+        // Save pre-search threads on first activation from folder mode
+        if self.active_pinned_search.is_none()
+            && self.thread_list.mode == ui::thread_list::ThreadListMode::Folder
+        {
+            self.pre_search_threads = Some(self.thread_list.threads.clone());
+        }
+
+        self.active_pinned_search = Some(id);
+        self.sidebar.active_pinned_search = Some(id);
+        self.editing_pinned_search = Some(id);
+        self.sidebar.selected_label = None;
+
+        self.nav_generation += 1;
+        self.thread_generation += 1;
+        self.thread_list.selected_thread = None;
+
+        // Update thread list context
+        if let Some(ps) = self.pinned_searches.iter().find(|p| p.id == id) {
+            let label = truncate_query(&ps.query, 30);
+            self.thread_list
+                .set_context(format!("Search: {label}"), "All Accounts".to_string());
+        }
+
+        let db = Arc::clone(&self.db);
+        let load_gen = self.nav_generation;
+        Task::perform(
+            async move {
+                let ids = db.get_pinned_search_thread_ids(id).await;
+                (load_gen, id, ids)
+            },
+            |(g, id, result)| Message::PinnedSearchThreadIdsLoaded(g, id, result),
+        )
+    }
+
+    /// Clear pinned search context on navigate-away.
+    fn clear_pinned_search_context(&mut self) {
+        self.active_pinned_search = None;
+        self.sidebar.active_pinned_search = None;
+        self.editing_pinned_search = None;
+    }
+
     /// Clear all search-related state without restoring pre-search threads.
     /// Used when navigating via sidebar (new threads will be loaded).
     fn clear_search_state(&mut self) {
@@ -1648,6 +1882,15 @@ impl App {
             .unwrap_or("All")
             .to_string();
         self.thread_list.set_context(folder_name, scope_name);
+    }
+}
+
+/// Truncates a query string for display, adding ellipsis if needed.
+fn truncate_query(query: &str, max_chars: usize) -> String {
+    if query.len() <= max_chars {
+        query.to_string()
+    } else {
+        format!("{}...", &query[..query.floor_char_boundary(max_chars)])
     }
 }
 

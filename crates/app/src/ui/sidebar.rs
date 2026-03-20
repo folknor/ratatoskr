@@ -4,7 +4,7 @@ use iced::widget::{button, column, container, row, scrollable, text, Space};
 use iced::{Alignment, Element, Length, Task};
 
 use crate::component::Component;
-use crate::db::Account;
+use crate::db::{Account, PinnedSearch};
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
@@ -27,6 +27,8 @@ pub enum SidebarMessage {
     ToggleFolderExpand(String),
     Compose,
     ToggleSettings,
+    SelectPinnedSearch(i64),
+    DismissPinnedSearch(i64),
     Noop,
 }
 
@@ -39,6 +41,8 @@ pub enum SidebarEvent {
     LabelSelected(Option<String>),
     Compose,
     ToggleSettings,
+    PinnedSearchSelected(i64),
+    PinnedSearchDismissed(i64),
 }
 
 // ── State ──────────────────────────────────────────────
@@ -53,6 +57,10 @@ pub struct Sidebar {
     pub smart_folders_expanded: bool,
     /// Set of folder IDs whose children are collapsed (hidden).
     pub collapsed_folders: HashSet<String>,
+    /// Pinned searches, set by parent App before each view.
+    pub pinned_searches: Vec<PinnedSearch>,
+    /// Currently selected pinned search, set by parent App.
+    pub active_pinned_search: Option<i64>,
 }
 
 impl Sidebar {
@@ -66,6 +74,8 @@ impl Sidebar {
             labels_expanded: true,
             smart_folders_expanded: true,
             collapsed_folders: HashSet::new(),
+            pinned_searches: Vec::new(),
+            active_pinned_search: None,
         }
     }
 
@@ -136,6 +146,12 @@ impl Component for Sidebar {
             SidebarMessage::ToggleSettings => {
                 (Task::none(), Some(SidebarEvent::ToggleSettings))
             }
+            SidebarMessage::SelectPinnedSearch(id) => {
+                (Task::none(), Some(SidebarEvent::PinnedSearchSelected(id)))
+            }
+            SidebarMessage::DismissPinnedSearch(id) => {
+                (Task::none(), Some(SidebarEvent::PinnedSearchDismissed(id)))
+            }
             SidebarMessage::Noop => (Task::none(), None),
         }
     }
@@ -146,14 +162,21 @@ impl Component for Sidebar {
         let mut col = column![
             scope_dropdown(self),
             Space::new().height(SPACE_XXS),
-            widgets::compose_button(SidebarMessage::Compose),
-            Space::new().height(SPACE_XS),
-            nav_items(self),
-            widgets::section_break(),
-            smart_folders(self),
         ]
         .spacing(0)
         .width(Length::Fill);
+
+        // Pinned searches (only if non-empty)
+        if !self.pinned_searches.is_empty() {
+            col = col.push(pinned_searches_section(self));
+            col = col.push(Space::new().height(SPACE_XXS));
+        }
+
+        col = col.push(widgets::compose_button(SidebarMessage::Compose));
+        col = col.push(Space::new().height(SPACE_XS));
+        col = col.push(nav_items(self));
+        col = col.push(widgets::section_break());
+        col = col.push(smart_folders(self));
 
         if show_labels {
             col = col.push(widgets::section_break::<SidebarMessage>());
@@ -306,6 +329,91 @@ fn labels(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
         SidebarMessage::ToggleLabelsSection,
         children,
     )
+}
+
+// ── Pinned searches ─────────────────────────────────────
+
+fn pinned_searches_section(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
+    let mut col = column![].spacing(SPACE_XXS);
+
+    for ps in &sidebar.pinned_searches {
+        col = col.push(pinned_search_card(
+            ps,
+            sidebar.active_pinned_search == Some(ps.id),
+        ));
+    }
+
+    col.into()
+}
+
+fn pinned_search_card(
+    ps: &PinnedSearch,
+    active: bool,
+) -> Element<'_, SidebarMessage> {
+    use iced::widget::text::Wrapping;
+
+    let date_label = format_pinned_search_date(ps.updated_at);
+    let query_display = truncate_query(&ps.query, 28);
+
+    let date_style: fn(&iced::Theme) -> text::Style = if active {
+        text::primary
+    } else {
+        text::base
+    };
+    let query_style: fn(&iced::Theme) -> text::Style = if active {
+        text::secondary
+    } else {
+        theme::TextClass::Muted.style()
+    };
+
+    let text_col = column![
+        text(date_label).size(TEXT_MD).style(date_style),
+        text(query_display)
+            .size(TEXT_SM)
+            .style(query_style)
+            .wrapping(Wrapping::None),
+    ]
+    .spacing(SPACE_XXXS)
+    .width(Length::Fill);
+
+    let dismiss_btn = button(
+        container(
+            icon::x().size(ICON_XS).style(theme::TextClass::Muted.style()),
+        )
+        .center(Length::Shrink),
+    )
+    .on_press(SidebarMessage::DismissPinnedSearch(ps.id))
+    .padding(SPACE_XXXS)
+    .style(theme::ButtonClass::BareIcon.style());
+
+    let content = row![text_col, dismiss_btn]
+        .spacing(SPACE_XXS)
+        .align_y(Alignment::Start);
+
+    button(
+        container(content).padding(PAD_NAV_ITEM),
+    )
+    .on_press(SidebarMessage::SelectPinnedSearch(ps.id))
+    .padding(0)
+    .style(theme::ButtonClass::PinnedSearch { active }.style())
+    .width(Length::Fill)
+    .into()
+}
+
+/// Formats a unix timestamp as "Mar 19, 14:32" for the pinned search card.
+fn format_pinned_search_date(timestamp: i64) -> String {
+    chrono::DateTime::from_timestamp(timestamp, 0)
+        .map(|dt| dt.format("%b %d, %H:%M").to_string())
+        .unwrap_or_else(|| "Unknown".to_string())
+}
+
+/// Truncates a query string for display, adding ellipsis if needed.
+fn truncate_query(query: &str, max_chars: usize) -> String {
+    if query.len() <= max_chars {
+        query.to_string()
+    } else {
+        format!("{}...", &query[..query.floor_char_boundary(max_chars)])
+    }
 }
 
 // ── Tree rendering helpers ───────────────────────────────
