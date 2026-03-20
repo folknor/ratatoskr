@@ -18,8 +18,8 @@ pub fn inject_read_receipt_header(raw: &[u8]) -> Vec<u8> {
         return raw.to_vec();
     }
 
-    // Extract sender from From: header
-    let from_addr = raw_str.lines().find_map(|line| {
+    // Extract sender from From: header (header block only)
+    let from_addr = header_block.lines().find_map(|line| {
         if !line.to_ascii_lowercase().starts_with("from:") {
             return None;
         }

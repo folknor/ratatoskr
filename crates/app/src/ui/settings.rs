@@ -123,7 +123,7 @@ pub enum SettingsMessage {
     GroupEditorAddMember(String),
     GroupEditorSave,
     GroupEditorFilterChanged(String),
-    GroupMembersLoaded(Result<Vec<String>, String>),
+    GroupMembersLoaded(String, Result<Vec<String>, String>),
 }
 
 /// Which field in the contact editor changed.
@@ -784,12 +784,14 @@ impl Settings {
             SettingsMessage::GroupsLoaded(Err(e)) => {
                 eprintln!("Failed to load groups: {e}");
             }
-            SettingsMessage::GroupMembersLoaded(Ok(members)) => {
+            SettingsMessage::GroupMembersLoaded(group_id, Ok(members)) => {
                 if let Some(ref mut editor) = self.group_editor {
-                    editor.members = members;
+                    if editor.group_id.as_deref() == Some(group_id.as_str()) {
+                        editor.members = members;
+                    }
                 }
             }
-            SettingsMessage::GroupMembersLoaded(Err(e)) => {
+            SettingsMessage::GroupMembersLoaded(_, Err(e)) => {
                 eprintln!("Failed to load group members: {e}");
             }
             SettingsMessage::ContactClick(id) => {

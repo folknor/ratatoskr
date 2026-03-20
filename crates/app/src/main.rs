@@ -1646,9 +1646,10 @@ impl App {
             }
             SettingsEvent::LoadGroupMembers(group_id) => {
                 let db = Arc::clone(&self.db);
+                let gid = group_id.clone();
                 Task::perform(
                     async move { db.get_group_member_emails(group_id).await },
-                    |result| Message::Settings(SettingsMessage::GroupMembersLoaded(result)),
+                    move |result| Message::Settings(SettingsMessage::GroupMembersLoaded(gid.clone(), result)),
                 )
             }
         }
