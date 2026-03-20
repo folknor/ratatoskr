@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
@@ -141,15 +143,22 @@ fn build_smart_folders(
 
     Ok(smart_folders
         .into_iter()
-        .map(|sf| NavigationFolder {
-            id: sf.id,
-            name: sf.name,
-            folder_kind: FolderKind::SmartFolder,
-            // TODO(scaffolding): Smart folder unread counts require executing
-            // each folder's query with an is_read=0 filter. Intentionally 0
-            // until the smart folder query engine is wired in here.
-            unread_count: 0,
-            account_id: sf.account_id,
+        .map(|sf| {
+            // Smart folders are scope-exempt: always count across all accounts.
+            let unread_count = ratatoskr_smart_folder::count_smart_folder_unread(
+                conn,
+                &sf.query,
+                &AccountScope::All,
+            )
+            .unwrap_or(0);
+
+            NavigationFolder {
+                id: sf.id,
+                name: sf.name,
+                folder_kind: FolderKind::SmartFolder,
+                unread_count,
+                account_id: sf.account_id,
+            }
         })
         .collect())
 }
@@ -178,20 +187,57 @@ fn build_account_labels(
 ) -> Result<Vec<NavigationFolder>, String> {
     let all_labels = get_labels(conn, account_id.to_owned())?;
     let system_ids = system_label_ids();
+    let unread_by_label = get_label_unread_counts(conn, account_id)?;
 
     Ok(all_labels
         .into_iter()
         .filter(|label| !system_ids.contains(&label.id.as_str()))
         .filter(|label| label.visible)
-        .map(|label| NavigationFolder {
-            id: label.id,
-            name: label.name,
-            folder_kind: FolderKind::AccountLabel,
-            // TODO(scaffolding): Per-label unread counts require a query per
-            // label (or a batched GROUP BY). Intentionally 0 until we decide
-            // whether the cost is acceptable for every navigation refresh.
-            unread_count: 0,
-            account_id: Some(label.account_id),
+        .map(|label| {
+            let unread_count = unread_by_label
+                .get(&label.id)
+                .copied()
+                .unwrap_or(0);
+
+            NavigationFolder {
+                id: label.id,
+                name: label.name,
+                folder_kind: FolderKind::AccountLabel,
+                unread_count,
+                account_id: Some(label.account_id),
+            }
         })
         .collect())
+}
+
+/// Batch-fetch unread thread counts for all labels belonging to an account.
+///
+/// Uses a single GROUP BY query regardless of label count.
+fn get_label_unread_counts(
+    conn: &Connection,
+    account_id: &str,
+) -> Result<HashMap<String, i64>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT tl.label_id, COUNT(*) AS unread_count
+             FROM threads t
+             INNER JOIN thread_labels tl
+               ON tl.account_id = t.account_id AND tl.thread_id = t.id
+             WHERE t.account_id = ?1 AND t.is_read = 0
+             GROUP BY tl.label_id",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([account_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut counts = HashMap::new();
+    for row in rows {
+        let (label_id, count) = row.map_err(|e| e.to_string())?;
+        counts.insert(label_id, count);
+    }
+    Ok(counts)
 }
