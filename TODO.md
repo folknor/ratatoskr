@@ -208,6 +208,42 @@ These patterns appeared across 6-8+ specs and should be adopted as foundational 
 
   **Reference**: cedilla `research/cedilla/src/app/core/history.rs` (dissimilar-based undo with circular buffer).
 
+## Review Findings (2026-03-20)
+
+Deferred items from code review. Grouped by feature area.
+
+### Pinned Searches (1ba6249)
+
+- [ ] **Replace `pre_search_threads` with `PreSearchView`** — The spec recommends against the `pre_search_threads` clone approach (calling it a "V1 shortcut") and proposes `PreSearchView` for navigation-target-based restoration. The implementation uses `pre_search_threads` for save and `restore_folder_view()` for dismiss. Both search and pinned searches should converge on `PreSearchView`.
+
+- [ ] **Cache `thread_ids` on `PinnedSearch` struct** — The spec defines `thread_ids: Vec<(String, String)>` on the struct (loaded lazily) so re-clicking the same pinned search doesn't re-query the DB. The implementation always re-queries. Minor — the DB query is fast.
+
+- [ ] **Pinned searches Phase 2 features** — No staleness label, no `SearchBarState` type, no periodic expiry subscription. Phase 2/4 items.
+
+### Pop-out Message View (c9d6a42)
+
+- [ ] **Add spec scaffolding fields to `MessageViewState`** — `cc_addresses`, `rendering_mode`, `raw_source`, `scroll_offset`, window position tracking. Acceptable for V1.
+
+### Pop-out Compose (d650308)
+
+- [ ] **Add `cc_addresses` to `ThreadMessage` and `MessageViewState` for Reply All** — `cc_addresses` is not in `ThreadMessage` or `MessageViewState`. Reply All currently opens with no Cc recipients (previously it wrongly duplicated To recipients into Cc). Proper Reply All requires adding `cc_addresses` to both data models and populating from the DB. See TODO comments in `crates/app/src/main.rs:2281` and `:2327`.
+
+### Contacts Management (033650c)
+
+- [ ] **Decide save pattern for contacts** — TODO.md (below) says "contacts save immediately with no Save/Cancel — shadow pattern does NOT apply." The spec distinguishes local (immediate save) vs synced (explicit Save). Implementation uses explicit Save for all contacts. Needs decision: immediate-save for local contacts, or keep explicit Save everywhere.
+
+- [ ] **Add account selector to contact editor** — No account selector dropdown — every contact is implicitly "Local." Spec calls for account association.
+
+- [ ] **Add delete confirmation for contacts and groups** — Spec says "Deletion prompts for confirmation." Both contact and group delete are immediate and irreversible.
+
+- [ ] **Replace N+1 group membership query with JOIN** — `load_contacts_filtered()` calls `load_contact_groups()` per contact. 200 contacts = 201 queries. Minor at current scale, but should be a single JOIN query.
+
+### Emoji Picker (b15cd89)
+
+- [ ] **Recent/frequent emoji section and skin tone selection** — TODO.md (below) says the picker needs these. Neither is implemented.
+
+- [ ] **Flags emoji category** — Most emoji pickers include country/flag emoji. Not included in the static table.
+
 ## UI Specs Needed
 
 - [ ] **Design Signatures UI** — Signature management lives in Settings. Needs spec for: creating/editing/deleting signatures, per-account default signature assignment, rich text editing (or HTML), signature insertion behavior in compose (new, reply, forward).
