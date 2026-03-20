@@ -394,3 +394,9 @@ pub const TOKEN_GROUP_ICON_SIZE: f32 = ICON_XS;
 pub const AUTOCOMPLETE_MAX_HEIGHT: f32 = 300.0;
 /// Height of each autocomplete suggestion row.
 pub const AUTOCOMPLETE_ROW_HEIGHT: f32 = 32.0;
+
+// ── Message view pop-out window ─────────────────────────
+pub const MESSAGE_VIEW_DEFAULT_WIDTH: f32 = 800.0;
+pub const MESSAGE_VIEW_DEFAULT_HEIGHT: f32 = 600.0;
+pub const MESSAGE_VIEW_MIN_WIDTH: f32 = 480.0;
+pub const MESSAGE_VIEW_MIN_HEIGHT: f32 = 320.0;

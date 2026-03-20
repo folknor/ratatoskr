@@ -384,6 +384,77 @@ impl Db {
     }
 }
 
+// ── Message view data loading ────────────────────────────────
+
+/// Attachment data for a single message in a pop-out view.
+#[derive(Debug, Clone)]
+pub struct MessageViewAttachment {
+    pub id: String,
+    pub filename: Option<String>,
+    pub mime_type: Option<String>,
+    pub size: Option<i64>,
+}
+
+impl Db {
+    /// Load the body (text + HTML) for a single message.
+    ///
+    /// In the full app, this would query the body store (bodies.db).
+    /// For the prototype, it uses the snippet as a fallback.
+    pub async fn load_message_body(
+        &self,
+        account_id: String,
+        message_id: String,
+    ) -> Result<(Option<String>, Option<String>), String> {
+        self.with_conn(move |conn| {
+            let snippet: Option<String> = conn
+                .query_row(
+                    "SELECT snippet FROM messages
+                     WHERE account_id = ?1 AND id = ?2",
+                    params![account_id, message_id],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+
+            // Return snippet as body_text; body_html is None for now.
+            Ok((snippet, None))
+        })
+        .await
+    }
+
+    /// Load attachments for a single message.
+    pub async fn load_message_attachments(
+        &self,
+        account_id: String,
+        message_id: String,
+    ) -> Result<Vec<MessageViewAttachment>, String> {
+        self.with_conn(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, filename, mime_type, size
+                     FROM attachments
+                     WHERE account_id = ?1 AND message_id = ?2
+                       AND is_inline = 0
+                       AND filename IS NOT NULL AND filename != ''
+                     ORDER BY filename ASC",
+                )
+                .map_err(|e| e.to_string())?;
+
+            stmt.query_map(params![account_id, message_id], |row| {
+                Ok(MessageViewAttachment {
+                    id: row.get("id")?,
+                    filename: row.get("filename")?,
+                    mime_type: row.get("mime_type")?,
+                    size: row.get("size")?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+        })
+        .await
+    }
+}
+
 // ── Pinned search CRUD ───────────────────────────────────────
 
 impl Db {

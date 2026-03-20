@@ -70,6 +70,14 @@ pub fn text_light() -> iced::Font {
     }
 }
 
+/// Monospace font for source view and code blocks.
+pub fn monospace() -> iced::Font {
+    iced::Font {
+        family: iced::font::Family::Monospace,
+        ..Default::default()
+    }
+}
+
 // ── Sizes ────────────────────────────────────────────────
 
 pub const TEXT_SIZE: f32 = 13.0;

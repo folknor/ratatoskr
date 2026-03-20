@@ -21,6 +21,7 @@ pub enum ReadingPaneMessage {
     ToggleMessageExpanded(usize),
     ToggleAllMessages,
     ToggleAttachmentsCollapsed,
+    PopOut(usize),
     Noop,
 }
 
@@ -28,6 +29,8 @@ pub enum ReadingPaneMessage {
 #[derive(Debug, Clone)]
 pub enum ReadingPaneEvent {
     AttachmentCollapseChanged { thread_key: String, collapsed: bool },
+    /// User clicked the pop-out button on a message; open it in a new window.
+    OpenMessagePopOut { message_index: usize },
 }
 
 // ── State ──────────────────────────────────────────────
@@ -139,6 +142,12 @@ impl Component for ReadingPane {
                     }
                 });
                 (Task::none(), event)
+            }
+            ReadingPaneMessage::PopOut(index) => {
+                let event = ReadingPaneEvent::OpenMessagePopOut {
+                    message_index: index,
+                };
+                (Task::none(), Some(event))
             }
             ReadingPaneMessage::Noop => (Task::none(), None),
         }
@@ -376,6 +385,7 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
                 pane.date_display,
                 first_message_date,
                 ReadingPaneMessage::ToggleMessageExpanded,
+                ReadingPaneMessage::PopOut,
                 ReadingPaneMessage::Noop,
             ));
         } else {

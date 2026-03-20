@@ -1003,6 +1003,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     date_display: DateDisplay,
     first_message_date: Option<i64>,
     on_toggle: impl Fn(usize) -> M,
+    on_pop_out: impl Fn(usize) -> M,
     noop: M,
 ) -> Element<'a, M> {
     let sender = msg
@@ -1015,6 +1016,14 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     let date_str = format_message_date(msg.date, first_message_date, date_display);
 
     let recipients = msg.to_addresses.as_deref().unwrap_or("");
+
+    // Pop-out icon button
+    let pop_out_btn = button(
+        icon::external_link().size(ICON_MD).style(text::secondary),
+    )
+    .on_press(on_pop_out(index))
+    .padding(PAD_ICON_BTN)
+    .style(theme::ButtonClass::BareIcon.style());
 
     let header = row![
         avatar,
@@ -1034,8 +1043,10 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
                         .style(theme::TextClass::Tertiary.style()),
                 )
                 .align_y(Alignment::Center),
+                pop_out_btn,
             ]
-            .align_y(Alignment::Center),
+            .align_y(Alignment::Center)
+            .spacing(SPACE_XS),
             text(recipients)
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),

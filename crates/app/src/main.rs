@@ -6,6 +6,7 @@ mod db;
 mod display;
 mod font;
 mod icon;
+mod pop_out;
 mod ui;
 mod window_state;
 
@@ -17,6 +18,8 @@ use component::Component;
 use db::{Db, Thread};
 use iced::widget::{column, container, mouse_area, row, stack};
 use iced::{Element, Length, Point, Size, Task, Theme};
+use pop_out::{PopOutMessage, PopOutWindow};
+use pop_out::message_view::{MessageViewMessage, MessageViewState};
 use ui::palette::PaletteState;
 use ratatoskr_command_palette::{
     BindingTable, Chord, CommandArgs, CommandId, CommandInputResolver, CommandRegistry,
@@ -27,13 +30,18 @@ use ratatoskr_core::db::queries_extra::navigation::{
 };
 use ratatoskr_core::db::queries_extra::get_threads_scoped;
 use ratatoskr_core::db::types::{AccountScope, DbThread};
-use ui::layout::{RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH};
+use ui::layout::{
+    MESSAGE_VIEW_DEFAULT_HEIGHT, MESSAGE_VIEW_DEFAULT_WIDTH, MESSAGE_VIEW_MIN_HEIGHT,
+    MESSAGE_VIEW_MIN_WIDTH, RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH,
+    THREAD_LIST_MIN_WIDTH,
+};
 use ui::add_account::{AddAccountEvent, AddAccountMessage, AddAccountWizard};
-use ui::reading_pane::{ReadingPane, ReadingPaneMessage};
+use ui::reading_pane::{ReadingPane, ReadingPaneEvent, ReadingPaneMessage};
 use ui::settings::{Settings, SettingsEvent, SettingsMessage};
 use ui::sidebar::{Sidebar, SidebarEvent, SidebarMessage};
 use ui::status_bar::{StatusBar, StatusBarEvent, StatusBarMessage};
 use ui::thread_list::{ThreadList, ThreadListEvent, ThreadListMessage};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -70,16 +78,14 @@ fn main() -> iced::Result {
     };
     font::set_system_ui_font(system_font_family);
 
-    let window = window_state::WindowState::load(&app_data_dir);
     let _ = APP_DATA_DIR.set(app_data_dir);
 
-    let mut app = iced::application(App::boot, App::update, App::view)
-        .title("Ratatoskr (iced prototype)")
-        .theme(App::theme)
-        .scale_factor(|app| app.settings.scale)
+    let mut app = iced::daemon(App::boot, App::update, App::view)
+        .title(App::title)
+        .theme(App::daemon_theme)
+        .scale_factor(|app, _window| app.settings.scale)
         .subscription(App::subscription)
-        .default_font(font::text())
-        .window(window.to_window_settings());
+        .default_font(font::text());
 
     for f in font::load() {
         app = app.font(f);
@@ -131,8 +137,8 @@ pub enum Message {
     DividerDragEnd,
     DividerHover(Divider),
     DividerUnhover,
-    WindowResized(Size),
-    WindowMoved(Point),
+    WindowResized(iced::window::Id, Size),
+    WindowMoved(iced::window::Id, Point),
     ToggleRightSidebar,
     SetDateDisplay(db::DateDisplay),
     WindowCloseRequested(iced::window::Id),
@@ -184,6 +190,12 @@ pub enum Message {
     AddAccount(AddAccountMessage),
     OpenAddAccount,
     ReloadSignatures,
+
+    // Pop-out windows
+    /// A message targeting a specific pop-out window.
+    PopOut(iced::window::Id, PopOutMessage),
+    /// Open a message view pop-out for a specific message index.
+    OpenMessageView(usize),
 }
 
 struct App {
@@ -202,6 +214,11 @@ struct App {
     right_sidebar_open: bool,
     show_settings: bool,
     window: window_state::WindowState,
+
+    /// The main window's ID, assigned during boot.
+    main_window_id: iced::window::Id,
+    /// All open pop-out windows. The main window is NOT in this map.
+    pop_out_windows: HashMap<iced::window::Id, PopOutWindow>,
     /// Incremented on every navigation load (accounts, labels, threads).
     nav_generation: u64,
     /// Incremented on every thread detail load (messages, attachments).
@@ -257,6 +274,9 @@ impl App {
         let data_dir = APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
         let window = window_state::WindowState::load(data_dir);
 
+        let (main_window_id, open_task) =
+            iced::window::open(window.to_window_settings());
+
         let registry = CommandRegistry::new();
         let binding_table = BindingTable::new(&registry, current_platform());
         let resolver = Arc::new(command_resolver::AppInputResolver::new(Arc::clone(&db)));
@@ -279,6 +299,8 @@ impl App {
             right_sidebar_open: window.right_sidebar_open,
             show_settings: false,
             window,
+            main_window_id,
+            pop_out_windows: HashMap::new(),
             nav_generation: 1,
             thread_generation: 0,
             registry,
@@ -302,6 +324,7 @@ impl App {
         };
         let load_gen = app.nav_generation;
         (app, Task::batch([
+            open_task.discard(),
             Task::perform(
                 async move { (load_gen, load_accounts(db_ref).await) },
                 |(g, result)| Message::AccountsLoaded(g, result),
@@ -311,6 +334,25 @@ impl App {
                 Message::PinnedSearchesLoaded,
             ),
         ]))
+    }
+
+    fn title(&self, window_id: iced::window::Id) -> String {
+        if window_id == self.main_window_id {
+            return "Ratatoskr".to_string();
+        }
+        if let Some(PopOutWindow::MessageView(state)) =
+            self.pop_out_windows.get(&window_id)
+        {
+            let subject = state.subject.as_deref().unwrap_or("(no subject)");
+            let sender = state.from_address.as_deref().unwrap_or("unknown");
+            return format!("{subject} \u{2014} {sender}");
+        }
+        "Ratatoskr".to_string()
+    }
+
+    /// Theme callback for daemon (receives window ID, ignored).
+    fn daemon_theme(&self, _window_id: iced::window::Id) -> Theme {
+        self.theme()
     }
 
     fn theme(&self) -> Theme {
@@ -333,11 +375,13 @@ impl App {
         let mut subs = vec![
             // App-level subscriptions
             appearance::subscription().map(Message::AppearanceChanged),
-            iced::window::resize_events().map(|(_id, size)| Message::WindowResized(size)),
+            iced::window::resize_events().map(|(id, size)| {
+                Message::WindowResized(id, size)
+            }),
             iced::window::close_requests().map(Message::WindowCloseRequested),
-            iced::event::listen_with(|event, _status, _id| {
+            iced::event::listen_with(|event, _status, id| {
                 if let iced::Event::Window(iced::window::Event::Moved(point)) = event {
-                    Some(Message::WindowMoved(point))
+                    Some(Message::WindowMoved(id, point))
                 } else {
                     None
                 }
@@ -458,15 +502,26 @@ impl App {
                 self.right_sidebar_open = !self.right_sidebar_open;
                 Task::none()
             }
-            Message::WindowResized(size) => {
-                self.window.set_size(size);
-                if size.width < RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH && self.right_sidebar_open {
-                    self.right_sidebar_open = false;
+            Message::WindowResized(id, size) => {
+                if id == self.main_window_id {
+                    self.window.set_size(size);
+                    if size.width < RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH
+                        && self.right_sidebar_open
+                    {
+                        self.right_sidebar_open = false;
+                    }
+                } else if let Some(PopOutWindow::MessageView(state)) =
+                    self.pop_out_windows.get_mut(&id)
+                {
+                    state.width = size.width;
+                    state.height = size.height;
                 }
                 Task::none()
             }
-            Message::WindowMoved(point) => {
-                self.window.set_position(point);
+            Message::WindowMoved(id, point) => {
+                if id == self.main_window_id {
+                    self.window.set_position(point);
+                }
                 Task::none()
             }
             Message::WindowCloseRequested(id) => self.handle_window_close(id),
@@ -795,10 +850,35 @@ impl App {
                 self.load_signatures_into_settings();
                 Task::none()
             }
+
+            // Pop-out windows
+            Message::PopOut(window_id, pop_out_msg) => {
+                self.handle_pop_out_message(window_id, pop_out_msg)
+            }
+            Message::OpenMessageView(message_index) => {
+                self.open_message_view_window(message_index)
+            }
         }
     }
 
-    fn view(&self) -> Element<'_, Message> {
+    fn view(&self, window_id: iced::window::Id) -> Element<'_, Message> {
+        if window_id == self.main_window_id {
+            return self.view_main_window();
+        }
+
+        if let Some(pop_out) = self.pop_out_windows.get(&window_id) {
+            return match pop_out {
+                PopOutWindow::MessageView(state) => {
+                    pop_out::message_view::view_message_window(window_id, state)
+                }
+            };
+        }
+
+        // Fallback for unknown window IDs (should not happen)
+        ui::widgets::empty_placeholder("Window not found", "").into()
+    }
+
+    fn view_main_window(&self) -> Element<'_, Message> {
         // Add-account wizard modal takes precedence
         if let Some(ref wizard) = self.add_account_wizard {
             if self.no_accounts {
@@ -1334,8 +1414,24 @@ impl App {
     }
 
     fn handle_reading_pane(&mut self, msg: ReadingPaneMessage) -> Task<Message> {
-        let (task, _event) = self.reading_pane.update(msg);
-        task.map(Message::ReadingPane)
+        let (task, event) = self.reading_pane.update(msg);
+        let mut tasks = vec![task.map(Message::ReadingPane)];
+        if let Some(evt) = event {
+            tasks.push(self.handle_reading_pane_event(evt));
+        }
+        Task::batch(tasks)
+    }
+
+    fn handle_reading_pane_event(
+        &mut self,
+        event: ReadingPaneEvent,
+    ) -> Task<Message> {
+        match event {
+            ReadingPaneEvent::AttachmentCollapseChanged { .. } => Task::none(),
+            ReadingPaneEvent::OpenMessagePopOut { message_index } => {
+                self.open_message_view_window(message_index)
+            }
+        }
     }
 
     fn handle_status_bar(&mut self, msg: StatusBarMessage) -> Task<Message> {
@@ -1721,11 +1817,27 @@ impl App {
     }
 
     fn handle_window_close(&mut self, id: iced::window::Id) -> Task<Message> {
-        let data_dir = APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
-        self.window.sidebar_width = self.sidebar_width;
-        self.window.thread_list_width = self.thread_list_width;
-        self.window.right_sidebar_open = self.right_sidebar_open;
-        self.window.save(data_dir);
+        if id == self.main_window_id {
+            // Save main window state
+            let data_dir = APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
+            self.window.sidebar_width = self.sidebar_width;
+            self.window.thread_list_width = self.thread_list_width;
+            self.window.right_sidebar_open = self.right_sidebar_open;
+            self.window.save(data_dir);
+            // Close all pop-out windows, then close main and exit
+            let mut tasks: Vec<Task<Message>> = self
+                .pop_out_windows
+                .keys()
+                .map(|&win_id| iced::window::close(win_id))
+                .collect();
+            self.pop_out_windows.clear();
+            tasks.push(iced::window::close(id));
+            tasks.push(iced::exit());
+            return Task::batch(tasks);
+        }
+
+        // Pop-out window closed — remove from registry
+        self.pop_out_windows.remove(&id);
         iced::window::close(id)
     }
 
@@ -1882,6 +1994,116 @@ impl App {
             .unwrap_or("All")
             .to_string();
         self.thread_list.set_context(folder_name, scope_name);
+    }
+}
+
+// ── Pop-out window handling ─────────────────────────────
+
+impl App {
+    fn handle_pop_out_message(
+        &mut self,
+        window_id: iced::window::Id,
+        pop_out_msg: PopOutMessage,
+    ) -> Task<Message> {
+        let Some(window) = self.pop_out_windows.get_mut(&window_id) else {
+            return Task::none();
+        };
+        match (window, pop_out_msg) {
+            (
+                PopOutWindow::MessageView(state),
+                PopOutMessage::MessageView(msg),
+            ) => handle_message_view_update(state, msg),
+        }
+    }
+
+    fn open_message_view_window(
+        &mut self,
+        message_index: usize,
+    ) -> Task<Message> {
+        let Some(msg) = self.reading_pane.thread_messages.get(message_index)
+        else {
+            return Task::none();
+        };
+
+        let state = MessageViewState::from_thread_message(msg);
+        let account_id = state.account_id.clone();
+        let message_id = state.message_id.clone();
+
+        let settings = iced::window::Settings {
+            size: Size::new(
+                MESSAGE_VIEW_DEFAULT_WIDTH,
+                MESSAGE_VIEW_DEFAULT_HEIGHT,
+            ),
+            min_size: Some(Size::new(
+                MESSAGE_VIEW_MIN_WIDTH,
+                MESSAGE_VIEW_MIN_HEIGHT,
+            )),
+            exit_on_close_request: false,
+            ..Default::default()
+        };
+
+        let (window_id, open_task) = iced::window::open(settings);
+        self.pop_out_windows
+            .insert(window_id, PopOutWindow::MessageView(state));
+
+        // Dispatch async data loads for body and attachments
+        let db = Arc::clone(&self.db);
+        let db2 = Arc::clone(&self.db);
+        let account_id2 = account_id.clone();
+        let message_id2 = message_id.clone();
+
+        Task::batch([
+            open_task.discard(),
+            Task::perform(
+                async move {
+                    db.load_message_body(account_id, message_id).await
+                },
+                move |result| {
+                    Message::PopOut(
+                        window_id,
+                        PopOutMessage::MessageView(
+                            MessageViewMessage::BodyLoaded(result),
+                        ),
+                    )
+                },
+            ),
+            Task::perform(
+                async move {
+                    db2.load_message_attachments(account_id2, message_id2)
+                        .await
+                },
+                move |result| {
+                    Message::PopOut(
+                        window_id,
+                        PopOutMessage::MessageView(
+                            MessageViewMessage::AttachmentsLoaded(result),
+                        ),
+                    )
+                },
+            ),
+        ])
+    }
+}
+
+fn handle_message_view_update(
+    state: &mut MessageViewState,
+    msg: MessageViewMessage,
+) -> Task<Message> {
+    match msg {
+        MessageViewMessage::BodyLoaded(Ok((body_text, _body_html))) => {
+            state.body_text = body_text;
+            Task::none()
+        }
+        MessageViewMessage::BodyLoaded(Err(_)) => Task::none(),
+        MessageViewMessage::AttachmentsLoaded(Ok(attachments)) => {
+            state.attachments = attachments;
+            Task::none()
+        }
+        MessageViewMessage::AttachmentsLoaded(Err(_)) => Task::none(),
+        MessageViewMessage::Reply
+        | MessageViewMessage::ReplyAll
+        | MessageViewMessage::Forward
+        | MessageViewMessage::Noop => Task::none(),
     }
 }
 
