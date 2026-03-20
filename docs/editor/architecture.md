@@ -250,7 +250,7 @@ pending_style) -> Vec<EditOp>` dispatches to per-action resolvers.
 | Heading reset on split at end | Done | SplitBlock + SetBlockType to Paragraph |
 | Preserve block style on split | Done | SplitBlock preserves heading/paragraph type |
 | Auto-exit block | Done | Enter on empty ListItem → SetBlockType to Paragraph |
-| Block embed isolation | **Not done** | Needs Block::Image (Phase 5) |
+| Block embed isolation | Done | Enter on Image → SplitBlock rules in rules.rs |
 
 ### Delete rules
 
@@ -262,7 +262,7 @@ pending_style) -> Vec<EditOp>` dispatches to per-action resolvers.
 | Merge preserves first block's type | Done |
 | Backspace at document start is no-op | Done |
 | Document minimum (≥1 block) | Done |
-| Block embed protection | **Not done** (needs Block::Image) |
+| Block embed protection | Done | Backspace/delete at Image boundary → RemoveBlock (rules.rs) |
 
 ### Format rules
 
@@ -270,7 +270,7 @@ pending_style) -> Vec<EditOp>` dispatches to per-action resolvers.
 |------|--------|-------|
 | Toggle with selection → ToggleInlineStyle | Done | |
 | Toggle at caret → pending style | Done | |
-| Link formatting at caret | **Not done** | Find link boundaries, format whole link |
+| Link formatting at caret | Done | `find_link_boundaries` in rules.rs, tested at lines 1627-1779 |
 | Line vs inline scope | Done | ToggleInlineStyle only applies to inline blocks |
 
 ---

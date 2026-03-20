@@ -592,13 +592,8 @@ fn extract_runs(runs: &[StyledRun], start_offset: usize, end_offset: usize) -> V
 pub fn isolate_runs(runs: &mut Vec<StyledRun>, start: usize, end: usize) -> Range<usize> {
     assert!(start <= end, "isolate_runs: start ({start}) > end ({end})");
     if runs.is_empty() || start == end { return 0..0; }
-    let len_before = runs.len();
     let start_idx = split_runs_at(runs, start);
-    let inserted_by_start = runs.len() - len_before;
-    let len_before = runs.len();
     let end_idx = split_runs_at(runs, end);
-    let _ = runs.len() - len_before;
-    let _ = inserted_by_start;
     start_idx..end_idx
 }
 

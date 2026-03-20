@@ -56,8 +56,8 @@ pub enum StructuralChange {
         block_index: usize,
         merge_offset: usize,
     },
-    /// A block was inserted at `block_index`.
-    Insert { block_index: usize },
+    /// One or more blocks were inserted starting at `block_index`.
+    Insert { block_index: usize, count: usize },
     /// A block was removed at `block_index`.
     Remove { block_index: usize },
     /// Multiple blocks were removed/merged in a cross-block delete.
@@ -195,9 +195,9 @@ impl PosMap {
                 }
             }
 
-            Some(StructuralChange::Insert { block_index }) => {
+            Some(StructuralChange::Insert { block_index, count }) => {
                 if pos.block_index >= block_index {
-                    DocPosition::new(pos.block_index + 1, pos.offset)
+                    DocPosition::new(pos.block_index + count, pos.offset)
                 } else {
                     pos
                 }
@@ -265,6 +265,12 @@ impl PosMap {
 impl EditOp {
     /// Apply this operation to a document, returning the position map.
     ///
+    /// **Note:** `apply()` does *not* normalize the document afterward.
+    /// Adjacent runs with identical formatting may remain un-merged.
+    /// Callers should call [`normalize_blocks()`](crate::normalize::normalize_blocks)
+    /// after applying operations to restore the normalization invariant.
+    /// `EditorState::apply_action()` does this automatically.
+    ///
     /// # Panics
     ///
     /// Panics if the operation references out-of-bounds block indices or
@@ -295,18 +301,43 @@ impl EditOp {
     }
 
     /// Return the inverse operation (for undo).
+    ///
+    /// For `InsertText`, the captured `DeletedContent` uses plain (unstyled)
+    /// runs because `invert()` has no document access. Use
+    /// [`invert_with_doc`] when the document is available to capture the
+    /// actual styled runs at the insertion range.
     pub fn invert(&self) -> Self {
+        self.invert_inner(None)
+    }
+
+    /// Return the inverse operation, using the document to capture styled
+    /// runs when inverting `InsertText`. This produces a correct
+    /// `DeletedContent` so that redo-after-undo restores formatting.
+    pub fn invert_with_doc(&self, doc: &Document) -> Self {
+        self.invert_inner(Some(doc))
+    }
+
+    fn invert_inner(&self, doc: Option<&Document>) -> Self {
         match self {
             Self::InsertText { position, text } => {
                 let char_count = text.chars().count();
                 let end = DocPosition::new(position.block_index, position.offset + char_count);
+
+                // When the document is available, capture the actual styled
+                // runs so redo-after-undo preserves formatting.
+                let deleted_runs = doc
+                    .and_then(|d| d.block(position.block_index))
+                    .and_then(|b| b.runs())
+                    .map(|runs| {
+                        extract_runs_from_range(runs, position.offset, position.offset + char_count)
+                    })
+                    .unwrap_or_else(|| vec![StyledRun::plain(text.clone())]);
+
                 Self::DeleteRange {
                     start: *position,
                     end,
                     deleted: DeletedContent {
-                        blocks: vec![Block::Paragraph {
-                            runs: vec![StyledRun::plain(text.clone())],
-                        }],
+                        blocks: vec![Block::Paragraph { runs: deleted_runs }],
                     },
                 }
             }
@@ -538,10 +569,11 @@ fn apply_restore_deleted(
 ) -> PosMap {
     let deleted_count = deleted.blocks.len();
 
-    // Single-block restore: just re-insert the deleted text.
+    // Single-block restore: splice the deleted runs back at the insertion offset,
+    // preserving their original styling (bold, italic, links, etc.).
     if deleted_count == 1 {
-        let text = deleted.blocks[0].flattened_text();
-        let char_count = text.chars().count();
+        let deleted_runs = deleted.blocks[0].runs().unwrap_or(&[]);
+        let char_count: usize = deleted_runs.iter().map(StyledRun::char_len).sum();
 
         let block = doc
             .block(position.block_index)
@@ -549,7 +581,15 @@ fn apply_restore_deleted(
             .clone();
         let mut block = block;
         if let Some(runs) = block.runs_mut() {
-            insert_text_into_runs(runs, position.offset, &text);
+            let head = extract_runs_up_to(runs, position.offset);
+            let tail = extract_runs_from_offset(runs, position.offset);
+            let mut new_runs = head;
+            new_runs.extend(deleted_runs.iter().cloned());
+            new_runs.extend(tail);
+            if new_runs.is_empty() {
+                new_runs.push(StyledRun::plain(String::new()));
+            }
+            *runs = new_runs;
         }
         doc.replace_block(position.block_index, block);
 
@@ -623,6 +663,7 @@ fn apply_restore_deleted(
         entries: Vec::new(),
         structural: Some(StructuralChange::Insert {
             block_index: position.block_index,
+            count: deleted_count,
         }),
     }
 }
@@ -975,7 +1016,7 @@ fn apply_insert_block(doc: &mut Document, index: usize, block: &Block) -> PosMap
     PosMap {
         block_index: index,
         entries: Vec::new(),
-        structural: Some(StructuralChange::Insert { block_index: index }),
+        structural: Some(StructuralChange::Insert { block_index: index, count: 1 }),
     }
 }
 
@@ -987,6 +1028,49 @@ fn apply_remove_block(doc: &mut Document, index: usize) -> PosMap {
         entries: Vec::new(),
         structural: Some(StructuralChange::Remove { block_index: index }),
     }
+}
+
+// ── Run range extraction ────────────────────────────────
+
+/// Extract styled runs covering `[start_offset..end_offset)` from a run list.
+/// Preserves style and link information. Returns at least one (possibly empty) run.
+fn extract_runs_from_range(
+    runs: &[StyledRun],
+    start_offset: usize,
+    end_offset: usize,
+) -> Vec<StyledRun> {
+    if start_offset >= end_offset {
+        return vec![StyledRun::plain(String::new())];
+    }
+    let mut result = Vec::new();
+    let mut pos = 0;
+    for run in runs {
+        let run_len = run.char_len();
+        let run_start = pos;
+        let run_end = pos + run_len;
+        if run_end <= start_offset {
+            pos = run_end;
+            continue;
+        }
+        if run_start >= end_offset {
+            break;
+        }
+        let overlap_start = start_offset.max(run_start) - run_start;
+        let overlap_end = end_offset.min(run_end) - run_start;
+        let byte_start = run.char_to_byte_offset(overlap_start);
+        let byte_end = run.char_to_byte_offset(overlap_end);
+        let text = run.text[byte_start..byte_end].to_owned();
+        result.push(StyledRun {
+            text,
+            style: run.style,
+            link: run.link.clone(),
+        });
+        pos = run_end;
+    }
+    if result.is_empty() {
+        result.push(StyledRun::plain(String::new()));
+    }
+    result
 }
 
 // ── Invert helpers ──────────────────────────────────────
@@ -1837,10 +1921,21 @@ mod tests {
         let pm = PosMap {
             block_index: 2,
             entries: Vec::new(),
-            structural: Some(StructuralChange::Insert { block_index: 2 }),
+            structural: Some(StructuralChange::Insert { block_index: 2, count: 1 }),
         };
         assert_eq!(pm.map(DocPosition::new(1, 5)), DocPosition::new(1, 5));
         assert_eq!(pm.map(DocPosition::new(2, 0)), DocPosition::new(3, 0));
+    }
+
+    #[test]
+    fn posmap_insert_multiple_blocks() {
+        let pm = PosMap {
+            block_index: 1,
+            entries: Vec::new(),
+            structural: Some(StructuralChange::Insert { block_index: 1, count: 3 }),
+        };
+        assert_eq!(pm.map(DocPosition::new(0, 5)), DocPosition::new(0, 5));
+        assert_eq!(pm.map(DocPosition::new(1, 0)), DocPosition::new(4, 0));
     }
 
     #[test]

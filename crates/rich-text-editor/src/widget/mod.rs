@@ -44,7 +44,7 @@ use crate::document::Block;
 use cursor::{
     BlockSelectionKind, SelectionRect, CURSOR_WIDTH, SELECTION_ALPHA,
 };
-use input::{KeyAction, MoveAction};
+use input::KeyAction;
 use render::ParagraphCache;
 
 use iced::advanced::layout;
@@ -208,6 +208,264 @@ impl<'a, Message> RichTextEditor<'a, Message> {
     }
 }
 
+// ── Event handling helpers ───────────────────────────────
+
+impl<Message> RichTextEditor<'_, Message> {
+    /// Handle window focus/unfocus and redraw-requested events for cursor blink.
+    fn handle_window_events(
+        widget_state: &mut WidgetState,
+        event: &Event,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        match event {
+            Event::Window(window::Event::Unfocused) => {
+                if let Some(focus) = &mut widget_state.focus {
+                    focus.is_window_focused = false;
+                }
+            }
+            Event::Window(window::Event::Focused) => {
+                if let Some(focus) = &mut widget_state.focus {
+                    focus.is_window_focused = true;
+                    focus.updated_at = Instant::now();
+                    shell.request_redraw();
+                }
+            }
+            Event::Window(window::Event::RedrawRequested(now)) => {
+                if let Some(focus) = &mut widget_state.focus
+                    && focus.is_window_focused
+                {
+                    focus.now = *now;
+
+                    let elapsed = (focus.now - focus.updated_at).as_millis()
+                        % FocusState::BLINK_INTERVAL_MILLIS;
+                    let millis_until_redraw =
+                        FocusState::BLINK_INTERVAL_MILLIS.saturating_sub(elapsed);
+
+                    shell.request_redraw_at(
+                        focus.now
+                            + Duration::from_millis(
+                                u64::try_from(millis_until_redraw).unwrap_or(500),
+                            ),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Handle keyboard events (key presses) when the editor is focused.
+    fn handle_keyboard(
+        &self,
+        widget_state: &mut WidgetState,
+        event: &Event,
+        on_action: &dyn Fn(Action) -> Message,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        if let Event::Keyboard(keyboard::Event::KeyPressed {
+            key,
+            modifiers,
+            text,
+            ..
+        }) = event
+            && widget_state.focus.is_some()
+        {
+                let text_str = text.as_deref();
+                let key_action = input::map_key_event(key, *modifiers, text_str);
+
+                match key_action {
+                    KeyAction::Edit(edit_action) => {
+                        shell.publish(on_action(Action::Edit(edit_action)));
+                        shell.capture_event();
+                    }
+                    KeyAction::Move(move_action) => {
+                        shell.publish(on_action(Action::Move(move_action)));
+                        shell.capture_event();
+                    }
+                    KeyAction::Select(move_action) => {
+                        shell.publish(on_action(Action::Select(move_action)));
+                        shell.capture_event();
+                    }
+                    KeyAction::SelectAll => {
+                        shell.publish(on_action(Action::SelectAll));
+                        shell.capture_event();
+                    }
+                    KeyAction::Copy => {
+                        let text = self.state.selection_text();
+                        if !text.is_empty() {
+                            clipboard.write(iced::advanced::clipboard::Kind::Standard, text);
+                        }
+                        // Emit Action::Copy so EditorState captures the structured slice.
+                        shell.publish(on_action(Action::Copy));
+                        shell.capture_event();
+                    }
+                    KeyAction::Cut => {
+                        let text = self.state.selection_text();
+                        if !text.is_empty() {
+                            clipboard.write(iced::advanced::clipboard::Kind::Standard, text.clone());
+                            // Emit Action::Cut so EditorState captures the structured
+                            // slice and then deletes the selection.
+                            shell.publish(on_action(Action::Cut));
+                        }
+                        shell.capture_event();
+                    }
+                    KeyAction::Paste => {
+                        if let Some(contents) =
+                            clipboard.read(iced::advanced::clipboard::Kind::Standard)
+                        {
+                            shell.publish(on_action(Action::Paste(contents)));
+                        }
+                        shell.capture_event();
+                    }
+                    KeyAction::Undo => {
+                        shell.publish(on_action(Action::Undo));
+                        shell.capture_event();
+                    }
+                    KeyAction::Redo => {
+                        shell.publish(on_action(Action::Redo));
+                        shell.capture_event();
+                    }
+                    KeyAction::None => {}
+                }
+
+                // Reset blink on any handled key.
+                if let Some(focus) = &mut widget_state.focus {
+                    focus.updated_at = Instant::now();
+                }
+        }
+    }
+
+    /// Handle a drag move: auto-scroll when above/below the viewport,
+    /// normal drag within bounds.
+    #[allow(clippy::too_many_arguments)]
+    fn handle_drag(
+        &self,
+        widget_state: &mut WidgetState,
+        position: Point,
+        bounds: Rectangle,
+        cursor_pos: mouse::Cursor,
+        on_action: &dyn Fn(Action) -> Message,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        if position.y < bounds.y {
+            // Cursor is above the viewport — scroll up.
+            let overshoot = bounds.y - position.y;
+            let scroll_amount = (overshoot * DRAG_SCROLL_SPEED).min(DRAG_SCROLL_MAX);
+            widget_state.scroll_offset =
+                (widget_state.scroll_offset - scroll_amount).max(0.0);
+
+            let content_pos = Point::new(position.x - bounds.x - self.padding.left, 0.0);
+            let doc_pos =
+                hit_test_content_point(content_pos, &widget_state.cache, &self.state.document);
+            shell.publish(on_action(Action::Drag(doc_pos)));
+            shell.request_redraw();
+            shell.capture_event();
+        } else if position.y > bounds.y + bounds.height {
+            // Cursor is below the viewport — scroll down.
+            let overshoot = position.y - (bounds.y + bounds.height);
+            let scroll_amount = (overshoot * DRAG_SCROLL_SPEED).min(DRAG_SCROLL_MAX);
+            let viewport_height = bounds.height - self.padding.top - self.padding.bottom;
+            let total_height = widget_state.cache.total_height();
+            let max_scroll = (total_height - viewport_height).max(0.0);
+            widget_state.scroll_offset =
+                (widget_state.scroll_offset + scroll_amount).min(max_scroll);
+
+            let content_pos = Point::new(
+                position.x - bounds.x - self.padding.left,
+                widget_state.scroll_offset + viewport_height,
+            );
+            let doc_pos =
+                hit_test_content_point(content_pos, &widget_state.cache, &self.state.document);
+            shell.publish(on_action(Action::Drag(doc_pos)));
+            shell.request_redraw();
+            shell.capture_event();
+        } else if let Some(rel_pos) = cursor_pos.position_in(bounds) {
+            // Normal drag within bounds.
+            let content_pos = Point::new(
+                rel_pos.x - self.padding.left,
+                rel_pos.y - self.padding.top + widget_state.scroll_offset,
+            );
+            let doc_pos =
+                hit_test_content_point(content_pos, &widget_state.cache, &self.state.document);
+            shell.publish(on_action(Action::Drag(doc_pos)));
+        }
+    }
+
+    /// Handle mouse events (clicks, drags, scroll wheel).
+    #[allow(clippy::too_many_arguments)]
+    fn handle_mouse(
+        &self,
+        widget_state: &mut WidgetState,
+        event: &Event,
+        bounds: Rectangle,
+        cursor_pos: mouse::Cursor,
+        on_action: &dyn Fn(Action) -> Message,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        let scroll_offset = widget_state.scroll_offset;
+        match event {
+            Event::Mouse(mouse::Event::ButtonPressed { button: mouse::Button::Left, .. }) => {
+                if let Some(position) = cursor_pos.position_in(bounds) {
+                    // Translate to content coordinates (account for padding and scroll).
+                    let content_pos = Point::new(
+                        position.x - self.padding.left,
+                        position.y - self.padding.top + scroll_offset,
+                    );
+
+                    let doc_pos = hit_test_content_point(
+                        content_pos,
+                        &widget_state.cache,
+                        &self.state.document,
+                    );
+
+                    widget_state.focus = Some(FocusState::now());
+                    widget_state.dragging = true;
+
+                    shell.publish(on_action(Action::Focus));
+                    shell.publish(on_action(Action::Click(doc_pos)));
+                    shell.capture_event();
+                } else if widget_state.focus.is_some() {
+                    // Click outside the editor: blur.
+                    widget_state.focus = None;
+                    widget_state.dragging = false;
+                    shell.publish(on_action(Action::Blur));
+                }
+            }
+            Event::Mouse(mouse::Event::CursorMoved { .. })
+                if widget_state.dragging
+                    && let Some(position) = cursor_pos.position() =>
+            {
+                self.handle_drag(
+                    widget_state, position, bounds, cursor_pos, on_action, shell,
+                );
+            }
+            Event::Mouse(mouse::Event::WheelScrolled { delta })
+                if cursor_pos.is_over(bounds) =>
+            {
+                let delta_y = match delta {
+                    mouse::ScrollDelta::Lines { y, .. } => -y * SCROLL_LINE_HEIGHT,
+                    mouse::ScrollDelta::Pixels { y, .. } => -y,
+                };
+
+                let total_height = widget_state.cache.total_height();
+                let viewport_height =
+                    bounds.height - self.padding.top - self.padding.bottom;
+                let max_scroll = (total_height - viewport_height).max(0.0);
+
+                widget_state.scroll_offset =
+                    (widget_state.scroll_offset + delta_y).clamp(0.0, max_scroll);
+
+                shell.capture_event();
+                shell.request_redraw();
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                widget_state.dragging = false;
+            }
+            _ => {}
+        }
+    }
+}
+
 // ── Drawing helper ──────────────────────────────────────
 
 impl<Message> RichTextEditor<'_, Message> {
@@ -221,7 +479,78 @@ impl<Message> RichTextEditor<'_, Message> {
         text_bounds: &Rectangle,
         cursor_visible: bool,
     ) {
-        // Draw each block.
+        self.draw_blocks(renderer, cache, text_bounds);
+        self.draw_selection(renderer, cache, text_bounds);
+        self.draw_cursor(renderer, cache, text_bounds, cursor_visible);
+    }
+
+    /// Draw a single list item block: marker + paragraph content.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_list_item(
+        &self,
+        renderer: &mut iced::Renderer,
+        paragraph: &IcedParagraph,
+        block_index: usize,
+        ordered: bool,
+        indent_level: u8,
+        block_origin: Point,
+        block_height: f32,
+        text_bounds: &Rectangle,
+    ) {
+        let indent =
+            render::LIST_MARKER_WIDTH + (indent_level as f32) * render::LIST_INDENT_PER_LEVEL;
+        let content_origin = Point::new(block_origin.x + indent, block_origin.y);
+        let content_bounds = Rectangle::new(
+            content_origin,
+            Size::new((text_bounds.width - indent).max(0.0), block_height),
+        );
+        // Count consecutive preceding ListItem blocks with the same
+        // ordered flag and indent_level to determine the item index.
+        let item_idx = {
+            let mut idx = 0usize;
+            for prev_i in (0..block_index).rev() {
+                if let Some(Block::ListItem {
+                    ordered: prev_ord,
+                    indent_level: prev_indent,
+                    ..
+                }) = self.state.document.block(prev_i)
+                {
+                    if *prev_ord == ordered && *prev_indent == indent_level {
+                        idx += 1;
+                    } else if *prev_indent < indent_level {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            idx
+        };
+        render::draw_list_marker(
+            renderer,
+            content_bounds,
+            ordered,
+            item_idx,
+            self.font,
+            self.text_color,
+            *text_bounds,
+        );
+        render::draw_paragraph(
+            renderer,
+            paragraph,
+            content_origin,
+            self.text_color,
+            *text_bounds,
+        );
+    }
+
+    /// Draw each document block (paragraphs, headings, lists, etc.).
+    fn draw_blocks(
+        &self,
+        renderer: &mut iced::Renderer,
+        cache: &ParagraphCache<IcedParagraph>,
+        text_bounds: &Rectangle,
+    ) {
         for (i, block) in self.state.document.blocks.iter().enumerate() {
             let Some(entry) = cache.get(i) else {
                 continue;
@@ -263,62 +592,9 @@ impl<Message> RichTextEditor<'_, Message> {
                 }
                 Block::ListItem { ordered, indent_level, .. } => {
                     if let Some(paragraph) = entry.paragraph() {
-                        let indent = render::LIST_MARKER_WIDTH
-                            + (*indent_level as f32) * render::LIST_INDENT_PER_LEVEL;
-                        let content_origin = Point::new(
-                            block_origin.x + indent,
-                            block_origin.y,
-                        );
-                        let content_bounds = Rectangle::new(
-                            content_origin,
-                            Size::new(
-                                (text_bounds.width - indent).max(0.0),
-                                entry.height(),
-                            ),
-                        );
-                        // Determine the item index for numbered lists by
-                        // counting consecutive preceding ListItem blocks
-                        // with the same `ordered` flag AND indent_level.
-                        let item_idx = {
-                            let mut idx = 0usize;
-                            for prev_i in (0..i).rev() {
-                                if let Some(Block::ListItem {
-                                    ordered: prev_ord,
-                                    indent_level: prev_indent,
-                                    ..
-                                }) = self.state.document.block(prev_i)
-                                {
-                                    if *prev_ord == *ordered
-                                        && *prev_indent == *indent_level
-                                    {
-                                        idx += 1;
-                                    } else if *prev_indent < *indent_level {
-                                        // Hit parent level — stop counting.
-                                        break;
-                                    }
-                                    // Skip items at deeper indent (nested
-                                    // sublists between siblings at our level).
-                                } else {
-                                    break;
-                                }
-                            }
-                            idx
-                        };
-                        render::draw_list_marker(
-                            renderer,
-                            content_bounds,
-                            *ordered,
-                            item_idx,
-                            self.font,
-                            self.text_color,
-                            *text_bounds,
-                        );
-                        render::draw_paragraph(
-                            renderer,
-                            paragraph,
-                            content_origin,
-                            self.text_color,
-                            *text_bounds,
+                        self.draw_list_item(
+                            renderer, paragraph, i, *ordered, *indent_level,
+                            block_origin, entry.height(), text_bounds,
                         );
                     }
                 }
@@ -376,134 +652,155 @@ impl<Message> RichTextEditor<'_, Message> {
                 }
             }
         }
+    }
 
-        // Draw selection highlights.
-        if !self.state.selection.is_collapsed() {
-            let sel_ranges = cursor::selection_block_ranges(self.state.selection);
+    /// Draw selection highlights for the current selection range.
+    fn draw_selection(
+        &self,
+        renderer: &mut iced::Renderer,
+        cache: &ParagraphCache<IcedParagraph>,
+        text_bounds: &Rectangle,
+    ) {
+        if self.state.selection.is_collapsed() {
+            return;
+        }
 
-            for (block_idx, kind) in &sel_ranges {
-                let Some(entry) = cache.get(*block_idx) else {
-                    continue;
-                };
+        let sel_ranges = cursor::selection_block_ranges(self.state.selection);
 
-                let block_y = text_bounds.y + entry.y_offset();
-                let content_x_off = self
-                    .state
-                    .document
-                    .block(*block_idx)
-                    .map(block_content_x_offset)
-                    .unwrap_or(0.0);
-                let para_origin_x = text_bounds.x + content_x_off;
+        for (block_idx, kind) in &sel_ranges {
+            let Some(entry) = cache.get(*block_idx) else {
+                continue;
+            };
 
-                let sel_rects: Vec<SelectionRect> = match (kind, entry.paragraph()) {
-                    (BlockSelectionKind::Full, _) => {
-                        vec![SelectionRect {
-                            x: text_bounds.x,
-                            y: block_y,
-                            width: text_bounds.width,
-                            height: entry.height(),
-                        }]
-                    }
-                    (
-                        BlockSelectionKind::Single {
-                            start_offset,
-                            end_offset,
-                        },
-                        Some(paragraph),
-                    ) => compute_selection_rects(
+            let block_y = text_bounds.y + entry.y_offset();
+            let content_x_off = self
+                .state
+                .document
+                .block(*block_idx)
+                .map(block_content_x_offset)
+                .unwrap_or(0.0);
+            let para_origin_x = text_bounds.x + content_x_off;
+
+            let sel_rects: Vec<SelectionRect> = match (kind, entry.paragraph()) {
+                (BlockSelectionKind::Full, _) => {
+                    vec![SelectionRect {
+                        x: text_bounds.x,
+                        y: block_y,
+                        width: text_bounds.width,
+                        height: entry.height(),
+                    }]
+                }
+                (
+                    BlockSelectionKind::Single {
+                        start_offset,
+                        end_offset,
+                    },
+                    Some(paragraph),
+                ) => compute_selection_rects(
+                    paragraph,
+                    *start_offset,
+                    *end_offset,
+                    para_origin_x,
+                    block_y,
+                    text_bounds.width,
+                ),
+                (BlockSelectionKind::First { start_offset }, Some(paragraph)) => {
+                    compute_selection_rects(
                         paragraph,
                         *start_offset,
+                        usize::MAX,
+                        para_origin_x,
+                        block_y,
+                        text_bounds.width,
+                    )
+                }
+                (BlockSelectionKind::Last { end_offset }, Some(paragraph)) => {
+                    compute_selection_rects(
+                        paragraph,
+                        0,
                         *end_offset,
                         para_origin_x,
                         block_y,
                         text_bounds.width,
-                    ),
-                    (BlockSelectionKind::First { start_offset }, Some(paragraph)) => {
-                        compute_selection_rects(
-                            paragraph,
-                            *start_offset,
-                            usize::MAX,
-                            para_origin_x,
-                            block_y,
-                            text_bounds.width,
-                        )
-                    }
-                    (BlockSelectionKind::Last { end_offset }, Some(paragraph)) => {
-                        compute_selection_rects(
-                            paragraph,
-                            0,
-                            *end_offset,
-                            para_origin_x,
-                            block_y,
-                            text_bounds.width,
-                        )
-                    }
-                    (_, None) => {
-                        vec![SelectionRect {
-                            x: text_bounds.x,
-                            y: block_y,
-                            width: text_bounds.width,
-                            height: entry.height(),
-                        }]
-                    }
-                };
-
-                for sel_rect in &sel_rects {
-                    renderer.fill_quad(
-                        renderer::Quad {
-                            bounds: Rectangle::new(
-                                Point::new(sel_rect.x, sel_rect.y),
-                                Size::new(sel_rect.width, sel_rect.height),
-                            ),
-                            ..Default::default()
-                        },
-                        self.selection_color,
-                    );
+                    )
                 }
-            }
-        }
+                (_, None) => {
+                    vec![SelectionRect {
+                        x: text_bounds.x,
+                        y: block_y,
+                        width: text_bounds.width,
+                        height: entry.height(),
+                    }]
+                }
+            };
 
-        // Draw cursor (blink visibility is determined by the caller).
-        if cursor_visible && self.state.selection.is_collapsed() {
-            let pos = self.state.selection.focus;
-            if let Some(entry) = cache.get(pos.block_index) {
-                let content_x_off = self
-                    .state
-                    .document
-                    .block(pos.block_index)
-                    .map(block_content_x_offset)
-                    .unwrap_or(0.0);
-
-                let para_origin_x = text_bounds.x + content_x_off;
-                let para_origin_y = text_bounds.y + entry.y_offset();
-
-                let (cursor_x, cursor_y, cursor_height) =
-                    if let Some(paragraph) = entry.paragraph() {
-                        let gp = grapheme_pixel_position(paragraph, pos.offset);
-                        let lh = paragraph_line_height_px(paragraph);
-                        (para_origin_x + gp.x, para_origin_y + gp.y, lh)
-                    } else {
-                        let lh = render::FONT_SIZE_BODY * render::LINE_HEIGHT_MULTIPLIER;
-                        (para_origin_x, para_origin_y, lh)
-                    };
-
-                // Draw the cursor directly. We're inside with_layer(bounds)
-                // which clips to the viewport, so no manual intersection
-                // check is needed. (The previous check against text_bounds
-                // used viewport-space coordinates inside a content-space
-                // translation, causing the cursor to disappear when scrolled.)
+            for sel_rect in &sel_rects {
                 renderer.fill_quad(
                     renderer::Quad {
                         bounds: Rectangle::new(
-                            Point::new(cursor_x, cursor_y),
-                            Size::new(CURSOR_WIDTH, cursor_height),
+                            Point::new(sel_rect.x, sel_rect.y),
+                            Size::new(sel_rect.width, sel_rect.height),
                         ),
                         ..Default::default()
                     },
-                    self.cursor_color,
+                    self.selection_color,
                 );
             }
         }
+    }
+
+    /// Draw the cursor caret (blink visibility is determined by the caller).
+    fn draw_cursor(
+        &self,
+        renderer: &mut iced::Renderer,
+        cache: &ParagraphCache<IcedParagraph>,
+        text_bounds: &Rectangle,
+        cursor_visible: bool,
+    ) {
+        if !cursor_visible || !self.state.selection.is_collapsed() {
+            return;
+        }
+
+        let pos = self.state.selection.focus;
+        let Some(entry) = cache.get(pos.block_index) else {
+            return;
+        };
+
+        let content_x_off = self
+            .state
+            .document
+            .block(pos.block_index)
+            .map(block_content_x_offset)
+            .unwrap_or(0.0);
+
+        let para_origin_x = text_bounds.x + content_x_off;
+        let para_origin_y = text_bounds.y + entry.y_offset();
+
+        let (cursor_x, cursor_y, cursor_height) =
+            if let Some(paragraph) = entry.paragraph() {
+                let gp = grapheme_pixel_position(paragraph, pos.offset);
+                let lh = paragraph_line_height_px(paragraph);
+                (para_origin_x + gp.x, para_origin_y + gp.y, lh)
+            } else {
+                let lh = render::FONT_SIZE_BODY * render::LINE_HEIGHT_MULTIPLIER;
+                (para_origin_x, para_origin_y, lh)
+            };
+
+        // Draw the cursor directly. We're inside with_layer(bounds)
+        // which clips to the viewport, so no manual intersection
+        // check is needed. (The previous check against text_bounds
+        // used viewport-space coordinates inside a content-space
+        // translation, causing the cursor to disappear when scrolled.)
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds: Rectangle::new(
+                    Point::new(cursor_x, cursor_y),
+                    Size::new(CURSOR_WIDTH, cursor_height),
+                ),
+                ..Default::default()
+            },
+            self.cursor_color,
+        );
     }
 }
 
@@ -617,238 +914,9 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
         let widget_state = tree.state.downcast_mut::<WidgetState>();
         let bounds = layout.bounds();
 
-        // Handle window focus/unfocus and redraw for cursor blink.
-        match event {
-            Event::Window(window::Event::Unfocused) => {
-                if let Some(focus) = &mut widget_state.focus {
-                    focus.is_window_focused = false;
-                }
-            }
-            Event::Window(window::Event::Focused) => {
-                if let Some(focus) = &mut widget_state.focus {
-                    focus.is_window_focused = true;
-                    focus.updated_at = Instant::now();
-                    shell.request_redraw();
-                }
-            }
-            Event::Window(window::Event::RedrawRequested(now)) => {
-                if let Some(focus) = &mut widget_state.focus
-                    && focus.is_window_focused
-                {
-                    focus.now = *now;
-
-                    let elapsed = (focus.now - focus.updated_at).as_millis()
-                        % FocusState::BLINK_INTERVAL_MILLIS;
-                    let millis_until_redraw =
-                        FocusState::BLINK_INTERVAL_MILLIS.saturating_sub(elapsed);
-
-                    shell.request_redraw_at(
-                        focus.now
-                            + Duration::from_millis(
-                                u64::try_from(millis_until_redraw).unwrap_or(500),
-                            ),
-                    );
-                }
-            }
-            _ => {}
-        }
-
-        // Handle keyboard events.
-        if let Event::Keyboard(keyboard::Event::KeyPressed {
-            key,
-            modifiers,
-            text,
-            ..
-        }) = event
-            && widget_state.focus.is_some()
-        {
-                let text_str = text.as_deref();
-                let key_action = input::map_key_event(key, *modifiers, text_str);
-
-                match key_action {
-                    KeyAction::Edit(edit_action) => {
-                        shell.publish(on_action(Action::Edit(edit_action)));
-                        shell.capture_event();
-                    }
-                    KeyAction::Move(move_action) => {
-                        shell.publish(on_action(Action::Move(move_action)));
-                        shell.capture_event();
-                    }
-                    KeyAction::Select(move_action) => {
-                        shell.publish(on_action(Action::Select(move_action)));
-                        shell.capture_event();
-                    }
-                    KeyAction::SelectAll => {
-                        shell.publish(on_action(Action::SelectAll));
-                        shell.capture_event();
-                    }
-                    KeyAction::Copy => {
-                        let text = self.state.selection_text();
-                        if !text.is_empty() {
-                            clipboard.write(iced::advanced::clipboard::Kind::Standard, text);
-                        }
-                        // Emit Action::Copy so EditorState captures the structured slice.
-                        shell.publish(on_action(Action::Copy));
-                        shell.capture_event();
-                    }
-                    KeyAction::Cut => {
-                        let text = self.state.selection_text();
-                        if !text.is_empty() {
-                            clipboard.write(iced::advanced::clipboard::Kind::Standard, text.clone());
-                            // Emit Action::Cut so EditorState captures the structured
-                            // slice and then deletes the selection.
-                            shell.publish(on_action(Action::Cut));
-                        }
-                        shell.capture_event();
-                    }
-                    KeyAction::Paste => {
-                        if let Some(contents) =
-                            clipboard.read(iced::advanced::clipboard::Kind::Standard)
-                        {
-                            shell.publish(on_action(Action::Paste(contents)));
-                        }
-                        shell.capture_event();
-                    }
-                    KeyAction::Undo => {
-                        shell.publish(on_action(Action::Undo));
-                        shell.capture_event();
-                    }
-                    KeyAction::Redo => {
-                        shell.publish(on_action(Action::Redo));
-                        shell.capture_event();
-                    }
-                    KeyAction::None => {}
-                }
-
-                // Reset blink on any handled key.
-                if let Some(focus) = &mut widget_state.focus {
-                    focus.updated_at = Instant::now();
-                }
-        }
-
-        // Handle mouse events.
-        let scroll_offset = widget_state.scroll_offset;
-        match event {
-            Event::Mouse(mouse::Event::ButtonPressed { button: mouse::Button::Left, .. }) => {
-                if let Some(position) = cursor_pos.position_in(bounds) {
-                    // Translate to content coordinates (account for padding and scroll).
-                    let content_pos = Point::new(
-                        position.x - self.padding.left,
-                        position.y - self.padding.top + scroll_offset,
-                    );
-
-                    let doc_pos = hit_test_content_point(
-                        content_pos,
-                        &widget_state.cache,
-                        &self.state.document,
-                    );
-
-                    widget_state.focus = Some(FocusState::now());
-                    widget_state.dragging = true;
-
-                    shell.publish(on_action(Action::Focus));
-                    shell.publish(on_action(Action::Click(doc_pos)));
-                    shell.capture_event();
-                } else if widget_state.focus.is_some() {
-                    // Click outside the editor: blur.
-                    widget_state.focus = None;
-                    widget_state.dragging = false;
-                    shell.publish(on_action(Action::Blur));
-                }
-            }
-            Event::Mouse(mouse::Event::CursorMoved { .. })
-                if widget_state.dragging
-                    && let Some(position) = cursor_pos.position() =>
-            {
-                if position.y < bounds.y {
-                    // Cursor is above the viewport — scroll up.
-                    let overshoot = bounds.y - position.y;
-                    let scroll_amount =
-                        (overshoot * DRAG_SCROLL_SPEED).min(DRAG_SCROLL_MAX);
-                    widget_state.scroll_offset =
-                        (widget_state.scroll_offset - scroll_amount).max(0.0);
-
-                    let content_pos = Point::new(
-                        position.x - bounds.x - self.padding.left,
-                        0.0,
-                    );
-                    let doc_pos = hit_test_content_point(
-                        content_pos,
-                        &widget_state.cache,
-                        &self.state.document,
-                    );
-                    shell.publish(on_action(Action::Drag(doc_pos)));
-                    shell.request_redraw();
-                    shell.capture_event();
-                } else if position.y > bounds.y + bounds.height {
-                    // Cursor is below the viewport — scroll down.
-                    let overshoot =
-                        position.y - (bounds.y + bounds.height);
-                    let scroll_amount =
-                        (overshoot * DRAG_SCROLL_SPEED).min(DRAG_SCROLL_MAX);
-                    let viewport_height = bounds.height
-                        - self.padding.top
-                        - self.padding.bottom;
-                    let total_height = widget_state.cache.total_height();
-                    let max_scroll =
-                        (total_height - viewport_height).max(0.0);
-                    widget_state.scroll_offset =
-                        (widget_state.scroll_offset + scroll_amount)
-                            .min(max_scroll);
-
-                    let content_pos = Point::new(
-                        position.x - bounds.x - self.padding.left,
-                        widget_state.scroll_offset + viewport_height,
-                    );
-                    let doc_pos = hit_test_content_point(
-                        content_pos,
-                        &widget_state.cache,
-                        &self.state.document,
-                    );
-                    shell.publish(on_action(Action::Drag(doc_pos)));
-                    shell.request_redraw();
-                    shell.capture_event();
-                } else if let Some(rel_pos) =
-                    cursor_pos.position_in(bounds)
-                {
-                    // Normal drag within bounds.
-                    let content_pos = Point::new(
-                        rel_pos.x - self.padding.left,
-                        rel_pos.y - self.padding.top
-                            + widget_state.scroll_offset,
-                    );
-                    let doc_pos = hit_test_content_point(
-                        content_pos,
-                        &widget_state.cache,
-                        &self.state.document,
-                    );
-                    shell.publish(on_action(Action::Drag(doc_pos)));
-                }
-            }
-            Event::Mouse(mouse::Event::WheelScrolled { delta })
-                if cursor_pos.is_over(bounds) =>
-            {
-                let delta_y = match delta {
-                    mouse::ScrollDelta::Lines { y, .. } => -y * SCROLL_LINE_HEIGHT,
-                    mouse::ScrollDelta::Pixels { y, .. } => -y,
-                };
-
-                let total_height = widget_state.cache.total_height();
-                let viewport_height =
-                    bounds.height - self.padding.top - self.padding.bottom;
-                let max_scroll = (total_height - viewport_height).max(0.0);
-
-                widget_state.scroll_offset =
-                    (widget_state.scroll_offset + delta_y).clamp(0.0, max_scroll);
-
-                shell.capture_event();
-                shell.request_redraw();
-            }
-            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                widget_state.dragging = false;
-            }
-            _ => {}
-        }
+        Self::handle_window_events(widget_state, event, shell);
+        self.handle_keyboard(widget_state, event, on_action, clipboard, shell);
+        self.handle_mouse(widget_state, event, bounds, cursor_pos, on_action, shell);
     }
 
     fn draw(

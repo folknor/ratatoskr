@@ -469,9 +469,13 @@ fn build_deleted_content(doc: &Document, start: DocPosition, end: DocPosition) -
 
         // Tail of start block (from start.offset to end of block).
         if let Some(start_block) = doc.block(start.block_index) {
-            let runs = start_block.runs().unwrap_or(&[]);
-            let tail_runs = extract_deleted_runs(runs, start.offset, start_block.char_len());
-            blocks.push(Block::Paragraph { runs: tail_runs });
+            if let Some(runs) = start_block.runs() {
+                let tail_runs = extract_deleted_runs(runs, start.offset, start_block.char_len());
+                blocks.push(Block::Paragraph { runs: tail_runs });
+            } else {
+                // Non-inline block (Image, HR, BlockQuote) — capture whole block.
+                blocks.push(start_block.clone());
+            }
         }
 
         // Middle blocks (fully deleted).
@@ -483,9 +487,13 @@ fn build_deleted_content(doc: &Document, start: DocPosition, end: DocPosition) -
 
         // Head of end block (from 0 to end.offset).
         if let Some(end_block) = doc.block(end.block_index) {
-            let runs = end_block.runs().unwrap_or(&[]);
-            let head_runs = extract_deleted_runs(runs, 0, end.offset);
-            blocks.push(Block::Paragraph { runs: head_runs });
+            if let Some(runs) = end_block.runs() {
+                let head_runs = extract_deleted_runs(runs, 0, end.offset);
+                blocks.push(Block::Paragraph { runs: head_runs });
+            } else {
+                // Non-inline block — capture whole block.
+                blocks.push(end_block.clone());
+            }
         }
 
         DeletedContent { blocks }
@@ -998,6 +1006,54 @@ mod tests {
         let ops = resolve(&doc, sel, EditAction::DeleteForward, InlineStyle::empty());
         apply_ops(&mut doc, &ops);
         assert_eq!(block_text(&doc, 0), " world");
+    }
+
+    // ── Image embed protection ──────────────────────────
+
+    #[test]
+    fn backspace_before_image_removes_image() {
+        // Block 0: paragraph, Block 1: image.
+        // Cursor at start of block 1 → backspace should remove the image.
+        let mut doc = Document::from_blocks(vec![
+            Block::paragraph("hello"),
+            Block::Image {
+                src: "img.png".into(),
+                alt: String::new(),
+                width: None,
+                height: None,
+            },
+            Block::paragraph("world"),
+        ]);
+        // Cursor at block 2, offset 0 → previous block is Image.
+        let sel = DocSelection::caret(DocPosition::new(2, 0));
+        let ops = resolve(&doc, sel, EditAction::DeleteBackward, InlineStyle::empty());
+        apply_ops(&mut doc, &ops);
+        assert_eq!(doc.block_count(), 2);
+        assert_eq!(block_text(&doc, 0), "hello");
+        assert_eq!(block_text(&doc, 1), "world");
+    }
+
+    #[test]
+    fn delete_forward_after_image_removes_image() {
+        // Block 0: paragraph, Block 1: image, Block 2: paragraph.
+        // Cursor at end of block 0 → delete forward should remove the image.
+        let mut doc = Document::from_blocks(vec![
+            Block::paragraph("hello"),
+            Block::Image {
+                src: "img.png".into(),
+                alt: String::new(),
+                width: None,
+                height: None,
+            },
+            Block::paragraph("world"),
+        ]);
+        // Cursor at end of block 0 → next block is Image.
+        let sel = DocSelection::caret(DocPosition::new(0, 5));
+        let ops = resolve(&doc, sel, EditAction::DeleteForward, InlineStyle::empty());
+        apply_ops(&mut doc, &ops);
+        assert_eq!(doc.block_count(), 2);
+        assert_eq!(block_text(&doc, 0), "hello");
+        assert_eq!(block_text(&doc, 1), "world");
     }
 
     // ── Delete selection ────────────────────────────────

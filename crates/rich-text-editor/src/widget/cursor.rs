@@ -20,9 +20,6 @@ use crate::document::{DocPosition, DocSelection};
 /// Width of the cursor caret in pixels.
 pub const CURSOR_WIDTH: f32 = 1.5;
 
-/// Blink interval in seconds (500ms on, 500ms off).
-pub const BLINK_INTERVAL: f32 = 0.5;
-
 /// Alpha value for selection highlight rectangles.
 pub const SELECTION_ALPHA: f32 = 0.3;
 
@@ -71,14 +68,15 @@ pub struct SelectionRect {
 
 // ── Cursor state ───────────────────────────────────────
 
-/// Visual cursor state: blink timing, focus, and saved x-coordinate for
+/// Visual cursor state: focus tracking and saved x-coordinate for
 /// vertical movement.
+///
+/// Cursor blink timing is handled by [`super::FocusState`] in the widget
+/// tree, not here. This struct only tracks logical focus, the saved
+/// x-coordinate / column for vertical movement, and provides
+/// `reset_blink()` as a semantic marker for callers.
 #[derive(Debug, Clone)]
 pub struct CursorState {
-    /// Accumulated time in the current blink phase (seconds).
-    blink_timer: f32,
-    /// Whether the cursor is currently visible in the blink cycle.
-    visible: bool,
     /// Whether the editor has focus.
     focused: bool,
     /// Saved x-coordinate for vertical cursor movement.
@@ -94,35 +92,22 @@ pub struct CursorState {
 }
 
 impl CursorState {
-    /// Create a new cursor state (unfocused, not visible).
+    /// Create a new cursor state (unfocused).
     pub fn new() -> Self {
         Self {
-            blink_timer: 0.0,
-            visible: true,
             focused: false,
             target_x: None,
             target_column: None,
         }
     }
 
-    /// Advance the blink timer by `dt` seconds. Toggles visibility each
-    /// `BLINK_INTERVAL`.
-    pub fn tick(&mut self, dt: f32) {
-        if !self.focused {
-            return;
-        }
-        self.blink_timer += dt;
-        while self.blink_timer >= BLINK_INTERVAL {
-            self.blink_timer -= BLINK_INTERVAL;
-            self.visible = !self.visible;
-        }
-    }
-
-    /// Reset the blink cycle: make the cursor visible immediately.
-    /// Call this on any edit, cursor movement, or focus gain.
+    /// Semantic marker: the blink cycle should reset.
+    ///
+    /// Call this on any edit, cursor movement, or focus gain. Actual blink
+    /// timing is managed by `FocusState` in the widget tree.
     pub fn reset_blink(&mut self) {
-        self.blink_timer = 0.0;
-        self.visible = true;
+        // Blink timing is handled by FocusState; this is kept as a
+        // call-site marker so callers can signal "cursor just moved."
     }
 
     /// Mark the editor as focused. Resets the blink cycle.
@@ -131,15 +116,9 @@ impl CursorState {
         self.reset_blink();
     }
 
-    /// Mark the editor as unfocused. The cursor should not render.
+    /// Mark the editor as unfocused.
     pub fn unfocus(&mut self) {
         self.focused = false;
-        self.visible = false;
-    }
-
-    /// Whether the cursor should be drawn right now.
-    pub fn is_visible(&self) -> bool {
-        self.focused && self.visible
     }
 
     /// Whether the editor currently has focus.
@@ -540,59 +519,14 @@ mod tests {
     // ── CursorState tests ──────────────────────────────
 
     #[test]
-    fn cursor_starts_visible_when_focused() {
+    fn cursor_focus_unfocus() {
         let mut cursor = CursorState::new();
+        assert!(!cursor.is_focused());
+
         cursor.focus();
-        assert!(cursor.is_visible());
-    }
+        assert!(cursor.is_focused());
 
-    #[test]
-    fn cursor_blinks_after_interval() {
-        let mut cursor = CursorState::new();
-        cursor.focus();
-        assert!(cursor.is_visible());
-
-        cursor.tick(BLINK_INTERVAL);
-        assert!(!cursor.is_visible());
-
-        cursor.tick(BLINK_INTERVAL);
-        assert!(cursor.is_visible());
-    }
-
-    #[test]
-    fn cursor_reset_blink_makes_visible() {
-        let mut cursor = CursorState::new();
-        cursor.focus();
-        cursor.tick(BLINK_INTERVAL); // now invisible
-        assert!(!cursor.is_visible());
-
-        cursor.reset_blink();
-        assert!(cursor.is_visible());
-    }
-
-    #[test]
-    fn cursor_unfocused_never_visible() {
-        let mut cursor = CursorState::new();
-        assert!(!cursor.is_visible());
-        cursor.tick(0.1);
-        assert!(!cursor.is_visible());
-    }
-
-    #[test]
-    fn cursor_unfocus_hides() {
-        let mut cursor = CursorState::new();
-        cursor.focus();
-        assert!(cursor.is_visible());
         cursor.unfocus();
-        assert!(!cursor.is_visible());
-    }
-
-    #[test]
-    fn tick_does_nothing_when_unfocused() {
-        let mut cursor = CursorState::new();
-        // Not focused, tick should not change state
-        cursor.tick(10.0);
-        assert!(!cursor.is_visible());
         assert!(!cursor.is_focused());
     }
 

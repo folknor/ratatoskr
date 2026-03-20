@@ -366,12 +366,15 @@ impl<P: Paragraph<Font = Font>> CacheEntry<P> {
 /// paragraph and just have their y-offsets recomputed.
 pub struct ParagraphCache<P: Paragraph<Font = Font>> {
     entries: Vec<CacheEntry<P>>,
+    /// Cached total height from the last `layout()` call.
+    last_layout_height: f32,
 }
 
 impl<P: Paragraph<Font = Font>> Default for ParagraphCache<P> {
     fn default() -> Self {
         Self {
             entries: Vec::new(),
+            last_layout_height: 0.0,
         }
     }
 }
@@ -464,6 +467,7 @@ impl<P: Paragraph<Font = Font>> ParagraphCache<P> {
         link_color: Color,
     ) -> f32 {
         self.resize(blocks.len());
+        self.mark_all_dirty();
 
         let mut y = 0.0f32;
 
@@ -487,6 +491,7 @@ impl<P: Paragraph<Font = Font>> ParagraphCache<P> {
             y += entry.height + block_spacing(block);
         }
 
+        self.last_layout_height = y;
         y
     }
 
@@ -495,10 +500,7 @@ impl<P: Paragraph<Font = Font>> ParagraphCache<P> {
     /// This is the value returned by the last [`layout`] call. If no layout
     /// has been performed, returns 0.
     pub fn total_height(&self) -> f32 {
-        self.entries
-            .last()
-            .map(|e| e.y_offset + e.height)
-            .unwrap_or(0.0)
+        self.last_layout_height
     }
 
     /// Find the block index at a given y-coordinate (relative to the editor top).

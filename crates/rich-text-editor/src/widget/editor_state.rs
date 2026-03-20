@@ -207,17 +207,17 @@ impl EditorState {
                 // plain text matches what came from the system clipboard.
                 // If so, paste with structure preservation; otherwise fall
                 // back to plain-text insertion.
-                let use_structured = self
+                let structured_slice = self
                     .internal_clipboard
                     .as_ref()
-                    .is_some_and(|ic| ic.plain_text == text);
-                if use_structured {
-                    let slice = self
-                        .internal_clipboard
-                        .as_ref()
-                        .expect("checked above")
-                        .slice
-                        .clone();
+                    .and_then(|ic| {
+                        if ic.plain_text == text {
+                            Some(ic.slice.clone())
+                        } else {
+                            None
+                        }
+                    });
+                if let Some(slice) = structured_slice {
                     self.paste_slice(&slice);
                 } else {
                     self.apply_action(EditAction::InsertText(text));
@@ -609,9 +609,11 @@ impl EditorState {
             return;
         };
 
-        // Apply inverse ops in reverse order.
+        // Apply inverse ops in reverse order. Use `invert_with_doc` so
+        // that InsertText captures the actual styled runs from the document
+        // (the text is still present before applying the inverse).
         for op in group.ops.iter().rev() {
-            op.invert().apply(&mut self.document);
+            op.invert_with_doc(&self.document).apply(&mut self.document);
         }
 
         normalize(&mut self.document);

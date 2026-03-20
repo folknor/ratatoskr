@@ -217,54 +217,6 @@ fn node_to_blocks(node: &Handle, blocks: &mut Vec<Block>) {
             let tag = name.local.as_ref();
 
             match tag {
-                "p" => {
-                    if tree_has_img(&borrow.children) {
-                        collect_blocks_with_inline_images(
-                            &borrow.children,
-                            blocks,
-                            |runs| Block::Paragraph { runs },
-                        );
-                    } else {
-                        let runs = collect_element_runs(node, &borrow.children);
-                        blocks.push(Block::Paragraph { runs });
-                    }
-                }
-                "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
-                    let level = match tag {
-                        "h1" => HeadingLevel::H1,
-                        "h2" => HeadingLevel::H2,
-                        // H4-H6 map to H3 per spec
-                        _ => HeadingLevel::H3,
-                    };
-                    let has_img = tree_has_img(&borrow.children);
-                    if has_img {
-                        collect_blocks_with_inline_images(
-                            &borrow.children,
-                            blocks,
-                            |runs| Block::Heading { level, runs },
-                        );
-                    } else {
-                        let runs = collect_element_runs(node, &borrow.children);
-                        blocks.push(Block::Heading { level, runs });
-                    }
-                }
-                "ul" | "ol" => {
-                    let ordered = tag == "ol";
-                    drop(borrow);
-                    parse_list_to_items(node, ordered, 0, blocks);
-                }
-                "blockquote" => {
-                    let mut inner_blocks = Vec::new();
-                    for child in &borrow.children {
-                        node_to_blocks(child, &mut inner_blocks);
-                    }
-                    if inner_blocks.is_empty() {
-                        inner_blocks.push(Block::empty_paragraph());
-                    }
-                    blocks.push(Block::BlockQuote {
-                        blocks: inner_blocks.into_iter().map(Arc::new).collect(),
-                    });
-                }
                 "hr" => {
                     blocks.push(Block::HorizontalRule);
                 }
@@ -286,96 +238,184 @@ fn node_to_blocks(node: &Handle, blocks: &mut Vec<Block>) {
                     // A <br> at block level creates an empty paragraph.
                     blocks.push(Block::empty_paragraph());
                 }
-                "div" => {
-                    // <div> is a block container -- recurse into children.
-                    // If children contain only inline content, wrap in paragraph.
-                    let has_block_children = borrow.children.iter().any(|c| {
-                        let cb = c.borrow();
-                        if let NodeData::Element { ref name, .. } = cb.data {
-                            is_block_element(name.local.as_ref())
-                        } else {
-                            false
-                        }
-                    });
-
-                    if has_block_children {
-                        for child in &borrow.children {
-                            node_to_blocks(child, blocks);
-                        }
-                    } else {
-                        // All inline children -- wrap in a paragraph.
-                        let runs = collect_element_runs(node, &borrow.children);
-                        blocks.push(Block::Paragraph { runs });
-                    }
-                }
-                // Tables flatten to text paragraphs.
-                "table" | "thead" | "tbody" | "tr" => {
-                    for child in &borrow.children {
-                        node_to_blocks(child, blocks);
-                    }
-                }
-                "td" | "th" => {
-                    if tree_has_img(&borrow.children) {
-                        collect_blocks_with_inline_images(
-                            &borrow.children,
-                            blocks,
-                            |runs| Block::Paragraph { runs },
-                        );
-                    } else {
-                        let runs = collect_element_runs(node, &borrow.children);
-                        if !runs_are_empty(&runs) {
-                            blocks.push(Block::Paragraph { runs });
-                        }
-                    }
-                }
-                "pre" => {
-                    // Preserve text as-is (no whitespace collapsing).
-                    let mut text = String::new();
-                    collect_pre_text(node, &mut text);
-                    blocks.push(Block::Paragraph {
-                        runs: vec![StyledRun::plain(text)],
-                    });
-                }
-                // li outside a list context (shouldn't happen from our output)
-                "li" => {
-                    for child in &borrow.children {
-                        node_to_blocks(child, blocks);
-                    }
-                }
-                // Transparent wrappers from the html5ever fragment parser.
-                "html" | "head" | "body" => {
-                    for child in &borrow.children {
-                        node_to_blocks(child, blocks);
-                    }
+                "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
+                | "td" | "th" | "pre" => {
+                    parse_inline_element_to_blocks(tag, node, &borrow, blocks);
                 }
                 _ => {
-                    // Unknown element. If block-level, recurse. If inline, wrap
-                    // in paragraph.
-                    if is_block_element(tag) {
-                        for child in &borrow.children {
-                            node_to_blocks(child, blocks);
-                        }
-                    } else {
-                        // Inline element at block level: collect as runs in a paragraph.
-                        let ctx = StyleContext::new();
-                        let mut runs = Vec::new();
-                        // Drop borrow before calling collect_inline_runs
-                        // which needs to borrow the node.
-                        drop(borrow);
-                        collect_inline_runs(node, &ctx, &mut runs);
-                        trim_runs(&mut runs);
-                        if runs.is_empty() {
-                            runs.push(StyledRun::plain(String::new()));
-                        }
-                        if !runs_are_empty(&runs) {
-                            blocks.push(Block::Paragraph { runs });
-                        }
-                    }
+                    // Container/structural elements and unknown tags.
+                    // Some arms need to re-borrow node, so own the tag
+                    // before dropping the borrow.
+                    let tag = tag.to_owned();
+                    drop(borrow);
+                    parse_container_to_blocks(&tag, node, blocks);
                 }
             }
         }
         // Comments, doctypes, PIs: skip
         _ => {}
+    }
+}
+
+/// Handle inline/paragraph-like elements: `<p>`, headings, `<td>`/`<th>`, `<pre>`.
+fn parse_inline_element_to_blocks(
+    tag: &str,
+    node: &Handle,
+    borrow: &std::cell::Ref<'_, dom::Node>,
+    blocks: &mut Vec<Block>,
+) {
+    match tag {
+        "p" => {
+            if tree_has_img(&borrow.children) {
+                collect_blocks_with_inline_images(
+                    &borrow.children,
+                    blocks,
+                    |runs| Block::Paragraph { runs },
+                );
+            } else {
+                let runs = collect_element_runs(node, &borrow.children);
+                blocks.push(Block::Paragraph { runs });
+            }
+        }
+        "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
+            let level = match tag {
+                "h1" => HeadingLevel::H1,
+                "h2" => HeadingLevel::H2,
+                // H4-H6 map to H3 per spec
+                _ => HeadingLevel::H3,
+            };
+            let has_img = tree_has_img(&borrow.children);
+            if has_img {
+                collect_blocks_with_inline_images(
+                    &borrow.children,
+                    blocks,
+                    |runs| Block::Heading { level, runs },
+                );
+            } else {
+                let runs = collect_element_runs(node, &borrow.children);
+                blocks.push(Block::Heading { level, runs });
+            }
+        }
+        "td" | "th" => {
+            if tree_has_img(&borrow.children) {
+                collect_blocks_with_inline_images(
+                    &borrow.children,
+                    blocks,
+                    |runs| Block::Paragraph { runs },
+                );
+            } else {
+                let runs = collect_element_runs(node, &borrow.children);
+                if !runs_are_empty(&runs) {
+                    blocks.push(Block::Paragraph { runs });
+                }
+            }
+        }
+        "pre" => {
+            // Preserve text as-is (no whitespace collapsing).
+            let mut text = String::new();
+            collect_pre_text(node, &mut text);
+            blocks.push(Block::Paragraph {
+                runs: vec![StyledRun::plain(text)],
+            });
+        }
+        _ => {}
+    }
+}
+
+/// Handle container/structural elements: lists, blockquote, div, tables,
+/// transparent wrappers, and unknown tags.
+///
+/// Called after the caller has dropped its borrow on `node`, so this
+/// function re-borrows as needed.
+fn parse_container_to_blocks(
+    tag: &str,
+    node: &Handle,
+    blocks: &mut Vec<Block>,
+) {
+    match tag {
+        "ul" | "ol" => {
+            let ordered = tag == "ol";
+            parse_list_to_items(node, ordered, 0, blocks);
+        }
+        "blockquote" => {
+            let borrow = node.borrow();
+            let mut inner_blocks = Vec::new();
+            for child in &borrow.children {
+                node_to_blocks(child, &mut inner_blocks);
+            }
+            if inner_blocks.is_empty() {
+                inner_blocks.push(Block::empty_paragraph());
+            }
+            blocks.push(Block::BlockQuote {
+                blocks: inner_blocks.into_iter().map(Arc::new).collect(),
+            });
+        }
+        "div" => {
+            let borrow = node.borrow();
+            // <div> is a block container -- recurse into children.
+            // If children contain only inline content, wrap in paragraph.
+            let has_block_children = borrow.children.iter().any(|c| {
+                let cb = c.borrow();
+                if let NodeData::Element { ref name, .. } = cb.data {
+                    is_block_element(name.local.as_ref())
+                } else {
+                    false
+                }
+            });
+
+            if has_block_children {
+                for child in &borrow.children {
+                    node_to_blocks(child, blocks);
+                }
+            } else {
+                // All inline children -- wrap in a paragraph.
+                let runs = collect_element_runs(node, &borrow.children);
+                blocks.push(Block::Paragraph { runs });
+            }
+        }
+        // Tables flatten to text paragraphs.
+        "table" | "thead" | "tbody" | "tr" => {
+            let borrow = node.borrow();
+            for child in &borrow.children {
+                node_to_blocks(child, blocks);
+            }
+        }
+        // li outside a list context (shouldn't happen from our output)
+        "li" => {
+            let borrow = node.borrow();
+            for child in &borrow.children {
+                node_to_blocks(child, blocks);
+            }
+        }
+        // Transparent wrappers from the html5ever fragment parser.
+        "html" | "head" | "body" => {
+            let borrow = node.borrow();
+            for child in &borrow.children {
+                node_to_blocks(child, blocks);
+            }
+        }
+        _ => {
+            // Unknown element. If block-level, recurse. If inline, wrap
+            // in paragraph.
+            if is_block_element(tag) {
+                let borrow = node.borrow();
+                for child in &borrow.children {
+                    node_to_blocks(child, blocks);
+                }
+            } else {
+                // Inline element at block level: collect as runs in a paragraph.
+                let ctx = StyleContext::new();
+                let mut runs = Vec::new();
+                collect_inline_runs(node, &ctx, &mut runs);
+                trim_runs(&mut runs);
+                if runs.is_empty() {
+                    runs.push(StyledRun::plain(String::new()));
+                }
+                if !runs_are_empty(&runs) {
+                    blocks.push(Block::Paragraph { runs });
+                }
+            }
+        }
     }
 }
 

@@ -14,7 +14,10 @@ pub fn to_html(doc: &Document) -> String {
     let mut buf = String::new();
     let mut i = 0;
     while i < doc.blocks.len() {
-        let block = doc.block(i).expect("block index in range");
+        let Some(block) = doc.block(i) else {
+            i += 1;
+            continue;
+        };
         if let Block::ListItem {
             ordered,
             indent_level,
@@ -168,8 +171,20 @@ fn serialize_block(block: &Block, buf: &mut String) {
 }
 
 fn serialize_child_blocks(blocks: &[Arc<Block>], buf: &mut String) {
-    for block in blocks {
-        serialize_block(block, buf);
+    let mut i = 0;
+    while i < blocks.len() {
+        let block = blocks[i].as_ref();
+        if let Block::ListItem {
+            ordered,
+            indent_level,
+            ..
+        } = block
+        {
+            i = serialize_list_group(blocks, i, *ordered, *indent_level, buf);
+        } else {
+            serialize_block(block, buf);
+            i += 1;
+        }
     }
 }
 
@@ -473,6 +488,20 @@ mod tests {
             )],
         }]);
         assert_eq!(to_html(&doc), "<p><u><s>deleted</s></u></p>");
+    }
+
+    #[test]
+    fn blockquote_with_list_items_groups_correctly() {
+        let doc = Document::from_blocks(vec![Block::BlockQuote {
+            blocks: vec![
+                Arc::new(Block::list_item("item one", false)),
+                Arc::new(Block::list_item("item two", false)),
+            ],
+        }]);
+        assert_eq!(
+            to_html(&doc),
+            "<blockquote><ul><li>item one</li><li>item two</li></ul></blockquote>"
+        );
     }
 
     #[test]
