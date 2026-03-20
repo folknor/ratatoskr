@@ -314,3 +314,6 @@ pub const RADIO_LABEL_SPACING: f32 = SPACE_SM;
 
 /// Width of the grip handle slot in editable lists
 pub const GRIP_SLOT_WIDTH: f32 = 16.0;
+
+/// Space between scrollbar and content (embeds scrollbar instead of overlaying)
+pub const SCROLLBAR_SPACING: f32 = SPACE_XXXS;

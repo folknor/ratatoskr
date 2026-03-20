@@ -560,7 +560,7 @@ pub fn view(state: &SettingsState) -> Element<'_, SettingsMessage> {
             container(content)
                 .padding(PAD_SETTINGS_CONTENT)
                 .align_x(Alignment::Center)
-        ).height(Length::Fill)
+        ).spacing(SCROLLBAR_SPACING).height(Length::Fill)
     )
     .width(Length::Fill)
     .height(Length::Fill)
@@ -581,7 +581,7 @@ pub fn view(state: &SettingsState) -> Element<'_, SettingsMessage> {
                             container(icon::arrow_left().size(ICON_XL).style(text::base))
                                 .align_y(Alignment::Center),
                             text("Back").size(TEXT_LG).style(text::base)
-                                .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::TEXT }),
+                                .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::text() }),
                         ]
                         .spacing(SPACE_XS)
                         .align_y(Alignment::Center),
@@ -596,7 +596,7 @@ pub fn view(state: &SettingsState) -> Element<'_, SettingsMessage> {
                     container(overlay_content)
                         .padding(PAD_SETTINGS_CONTENT)
                         .align_x(Alignment::Center)
-                ).height(Length::Fill),
+                ).spacing(SCROLLBAR_SPACING).height(Length::Fill),
             ]
         )
         .width(Length::Fill)
@@ -667,7 +667,7 @@ fn tab_nav(active: Tab) -> Element<'static, SettingsMessage> {
         ));
     }
 
-    container(scrollable(col).height(Length::Fill))
+    container(scrollable(col).spacing(SCROLLBAR_SPACING).height(Length::Fill))
         .padding(PAD_SIDEBAR)
         .height(Length::Fill)
         .style(theme::sidebar_container)
@@ -1095,7 +1095,7 @@ fn create_filter_overlay<'a>() -> Element<'a, SettingsMessage> {
         text("Create Filter")
             .size(TEXT_HEADING)
             .style(text::base)
-            .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::TEXT }),
+            .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::text() }),
     );
 
     col = col.push(section("Conditions", vec![
@@ -1379,7 +1379,7 @@ fn section_inner<'a>(
         let title_text: Element<'a, SettingsMessage> = text(title)
             .size(TEXT_XL)
             .style(text::base)
-            .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::TEXT })
+            .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::text() })
             .into();
 
         let header_row: Element<'a, SettingsMessage> = if let Some(help_cfg) = help {
@@ -1838,7 +1838,7 @@ fn editable_list<'a>(
             row![
                 icon::plus().size(ICON_MD).style(text::base),
                 text(add_label).size(TEXT_LG).style(text::base)
-                    .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::TEXT }),
+                    .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::text() }),
             ]
             .spacing(SPACE_XS)
             .align_y(Alignment::Center),

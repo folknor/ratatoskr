@@ -10,7 +10,7 @@ This is the standards-based mechanism (RFC 8098 / RFC 3798). The header is a *re
 - Some prompt the recipient ("Alice requested a read receipt. Send one?")
 - Some auto-respond based on the recipient's settings
 
-There is no privacy concern for the sender or recipient. The recipient is always in control. This is not a tracking pixel — it's an explicit, visible protocol feature.
+The recipient is always in control — their client decides whether to respond. This is not a tracking pixel; it's an explicit, visible protocol feature. That said, some users and organizations treat read receipts as a privacy-sensitive social signal even in standards-based form. The product stance is that requesting is acceptable because the recipient retains full control, but we should not frame it as having zero privacy implications.
 
 ## Incoming: TBD
 

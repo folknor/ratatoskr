@@ -15,7 +15,17 @@ From the calendar spec's window limits:
 - Pop-outs are not full app instances — they share the same process, database connections, and state
 - The mail window is the true main window. Closing it closes everything — calendar pop-out, compose windows, message view windows. The app exits.
 - Closing the calendar pop-out or any message/compose window only closes that window. No cascade.
-- **Session restore:** On launch, the app restores the full window state from the previous session — main window (position, size, mode, scroll positions, selections), calendar pop-out (if it was open, with position, size, view, date), all message view windows (position, size, which message), and all compose windows (position, size, draft state). The user picks up exactly where they left off.
+- **Session restore:** On launch, the app restores the full window state from the previous session — main window (position, size, mode, scroll positions, selections), calendar pop-out (if it was open, with position, size, view, date), all message view windows (position, size, which message), and all compose windows (position, size, draft state). The user picks up exactly where they left off. Restoration is best-effort — if a message was deleted, a draft was already sent from another device, or an attachment path no longer exists, the window opens in a degraded state (error banner for missing messages, read-only "already sent" notice for sent drafts, missing-file indicator on attachments) rather than silently failing or refusing to open.
+
+### State Ownership
+
+Pop-out windows share process and data but each window owns its own local state. The boundaries:
+
+**Shared state** (canonical, lives in core/db): message content, thread metadata, draft records, contact data, account configuration, attachment files, label state. Changes propagate to all windows — archiving a thread from one window updates it everywhere.
+
+**Window-local state** (per-window, not persisted beyond session restore): editor selection and cursor position, scroll position, rendering mode override, unsaved compose edits (between auto-saves), drag state, window geometry, confirmation dialog state, pending style in the editor.
+
+**Compose ownership rule**: the draft record in the database is the canonical state. The compose window's in-memory state is a working copy that auto-saves back periodically. If the same draft is opened in two windows (e.g., session restore race), the second window should detect the conflict and offer to close or take ownership rather than silently forking the draft.
 
 ## Message View Window
 
@@ -86,7 +96,7 @@ Action buttons are in the top-right corner of the header area, on the same row a
 - **Archive** — archives the thread
 - **Delete** — moves to trash
 - **Print** — prints the message via the OS print dialog
-- **Save As** — saves the message to disk via file picker. Formats: `.eml` (RFC 5322, full message with headers and MIME), `.pdf` (rendered), `.txt` (plain text body only)
+- **Save As** — saves the message to disk via file picker. Formats: `.eml` (RFC 5322, full message with headers and MIME), `.pdf` (rendered), `.txt` (plain text body only). Note: `.eml` and `.txt` are straightforward serialization. `.pdf` is substantially harder — it requires rendering the message HTML faithfully to a paginated PDF, which is a separate rendering pipeline from the screen display. PDF export should be treated as a later-phase feature that does not block the initial pop-out implementation.
 
 Thread-level actions (star, labels) are not shown — the pop-out is a single-message viewing surface.
 
@@ -98,7 +108,7 @@ A toggle in the header area (alongside the action buttons, or below them) lets t
 
 - **Plain Text** — strips all formatting, shows the `text/plain` part
 - **Simple HTML** — basic formatting (bold, italic, lists, links) but strips remote content, heavy styling, and scripts. This is the sanitized output.
-- **Original HTML** — renders the full HTML as sent, including remote images and original styles
+- **Original HTML** — renders the full HTML as sent, including remote images and original styles. This mode is subject to the app's remote-content and tracking-pixel controls (see `docs/roadmap/tracking-blocking.md`). If the user has remote content blocked globally, switching to Original HTML shows a banner offering to load remote content for this message rather than silently fetching it. This is a content-trust decision, not just a visual toggle.
 - **Source** — shows the raw email source (headers + MIME body, monospaced)
 
 The default mode is a system-wide setting in Settings. The per-message toggle overrides it for that window only (not persisted).
@@ -219,7 +229,7 @@ Attachments are transparently compressed via the `squeeze` crate before sending.
 3. **Warnings** — if the running total approaches or exceeds the limit, a warning is shown on the attachment bar. If a single file's non-compressible floor exceeds the limit, a specific warning explains it can never fit.
 4. **Background compression** — files that can benefit from compression are compressed in the background. The attachment size display updates when compression completes, showing only the compressed size.
 
-Compression is transparent — the user doesn't need to configure it. The attachment they see is the original; the compressed version is substituted at send time.
+Compression is transparent — the user doesn't need to configure it. The attachment they see is the original; the compressed version is substituted at send time. Filenames are preserved (the compressed file keeps the original name). For images, compression is lossy (mozjpeg/oxipng) — the visual appearance may differ slightly from the original, but the difference is sub-perceptual at squeeze's quality targets. If an image is inserted inline in the body, the inline preview shows the original; the sent version uses the compressed asset. This is an acceptable divergence because the quality difference is imperceptible in practice.
 
 ### Actions
 
@@ -261,8 +271,8 @@ Patterns from the [iced ecosystem survey](../iced-ecosystem-survey.md) that appl
 | Requirement | Primary Source | How It Applies |
 |---|---|---|
 | Session restore (positions, sizes) | shadcn-rs `auto_save_id` + rustcast TOML config | `SessionState` struct (serde) with `Vec<WindowState>`; shadcn-rs's auto-save-by-ID concept |
-| Rich text compose (undo) | cedilla patch-based undo | `dissimilar` crate circular buffer for draft history |
-| Rich text compose (editor) | cedilla custom TextEditor | Fork iced's `text_editor` to add styled runs |
+| Rich text compose (undo) | Slate operation invertibility + ProseMirror step mapping | Operation-based undo with `EditOp::invert()` and `PosMap` cursor mapping (see `docs/editor/architecture.md`) |
+| Rich text compose (editor) | Custom architecture (ProseMirror + Slate + fleather hybrid) | Block-tree document model with `Paragraph::with_spans` rendering, built from scratch (see `docs/editor/architecture.md`) |
 | HTML rendering in message view | cedilla/frostmark | DOM-to-widget pipeline for sanitized HTML |
 | DnD attachments (inline vs attachment zones) | iced_drop + shadcn-rs file-drop-zone + bloom clipboard | iced_drop for two-zone overlay; iced's native `FilesHovered`/`FilesDropped` for OS drops; bloom's clipboard fallback |
 | Contact autocomplete | shadcn-rs command palette + raffi query routing + pikeru MouseArea | Searchable dropdown; enum dispatch for contacts/groups/recent; right-click on pills |
@@ -273,7 +283,7 @@ Patterns from the [iced ecosystem survey](../iced-ecosystem-survey.md) that appl
 ### Gaps
 
 - **Multi-window management**: No surveyed project uses iced multi-window. Window lifecycle, per-window message routing, and cascade-on-main-close are entirely custom. This is the largest gap for this spec.
-- **WYSIWYG HTML compose**: Confirmed as unsolved. cedilla's editor fork + frostmark pipeline are the closest building blocks but fall far short of rich text editing.
+- **WYSIWYG HTML compose**: Confirmed as unsolved in the iced ecosystem. A custom editor architecture has been designed — see `docs/editor/architecture.md`.
 - **Token/pill input widget**: No surveyed project implements chip/tag input fields. Must be built as a custom `advanced::Widget`.
 - **OS print dialog integration**: Platform-specific code needed with no iced precedent.
 - **PDF export from rendered email**: cedilla uses server-side Gotenberg; a local solution is needed.

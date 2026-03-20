@@ -41,7 +41,7 @@ pub fn view<'a>(
             let label_colors: &[(Color,)] = &[];
             list = list.push(widgets::thread_card(thread, i, selected_thread == Some(i), label_colors));
         }
-        scrollable(list).height(Length::Fill).into()
+        scrollable(list).spacing(SCROLLBAR_SPACING).height(Length::Fill).into()
     };
 
     container(

@@ -14,6 +14,8 @@ The backend infrastructure is complete — provider sync (Graph, Google People A
 
 There are no address books. Contacts exist in a single flat pool. Account/source is tracked internally for sync purposes, but the user sees one unified contact list. Groups handle organization.
 
+This flat-pool model is the right user-facing simplification, but it pushes real complexity inward. The core contact domain must handle: deduplication across sources (same email from Exchange and Google), edit routing (which provider gets the write?), read-only vs writable contacts (GAL entries can't be edited), local override precedence (user's display name override survives sync), and group membership across mixed sources. These are core/db concerns, not UI concerns — the UI stays simple precisely because the domain layer absorbs this complexity.
+
 ## Autocomplete
 
 Autocomplete appears in two places: the compose recipient field (To/Cc/Bcc) and the calendar event attendee field. The behavior is identical in both.
@@ -77,6 +79,8 @@ When selected, a contact group is added as a **single token** representing the g
 
 The user cannot remove individual members from a group token in the compose field. To modify group membership, they must use the contact management interface. This keeps the compose field simple — a group is an atomic unit.
 
+**Group source semantics:** Groups may originate from different sources — created locally, imported from a spreadsheet, or synced from a provider (Exchange distribution lists, Google contact groups). The UI treats all groups uniformly: same cards, same editor, same tokens. The difference is in write behavior: local and imported groups are always writable; provider-backed groups push edits to the provider on save, which may fail if the backend is read-only or the user lacks permissions. The group editor shows the source (e.g., "Synced from Work Account" or "Local") as secondary text on the group card, but does not otherwise distinguish them in the UI.
+
 **Bcc suggestion (compose only):** When a contact group is added to the To or Cc field, a banner appears suggesting the user move it to Bcc (to avoid exposing all member addresses to each other). The banner is dismissible and not blocking — it's a nudge, not a gate.
 
 **Group creation suggestion (compose only):** When a paste tokenizes into 10+ addresses, a dismissible banner suggests saving them as a contact group. Accepting opens the group creation flow pre-populated with those addresses.
@@ -94,7 +98,7 @@ In the reading pane, sender and recipient pills (From, To, Cc) are not the same 
 - **Groups** — add/remove group memberships. This field works identically to the compose autocomplete fields (type to search, token-based selection) but only matches contact groups. **Hidden entirely if no groups exist** — no empty field, no "create group" affordance here. Group creation happens in the contact management interface.
 - **Notes** — small free-text field
 
-Every field saves immediately on edit — no Save/Cancel buttons. Changes sync back to the provider where supported.
+For local contacts, fields save immediately on edit — no Save/Cancel buttons. For synced contacts, edits are held locally until the user clicks an explicit Save button (which enables after any field changes). This avoids firing provider API writes on every keystroke and gives the user a chance to review before committing a sync. If the provider rejects the write on save, the error is shown and the local edits remain so the user can retry or discard.
 
 ### Matching
 
@@ -161,7 +165,7 @@ Each contact card shows all available information at a glance. Empty fields are 
 - **Company** — below the phone (if present)
 - **Notes** — below the company (if present)
 - **Groups** — colored pills showing group memberships (if any)
-- **Account pills** — colored pills at the bottom showing which account(s) the contact was synced from
+- **Account pills** — colored pills at the bottom showing which account(s) the contact was synced from. This is the one place where contact provenance is visible. Autocomplete stays source-agnostic, but the management surface shows where a contact lives so the user understands why some contacts are editable and others may be read-only (e.g., GAL-sourced directory entries).
 
 ### Group Cards
 
@@ -176,7 +180,7 @@ Each group card shows:
 
 Clicking a contact card slides in an editor that covers the entire settings UI (same slide-in pattern used elsewhere in settings). The editor contains the same fields as the inline contact editing popover (display name, email, email 2, phone, groups, notes) plus any additional fields (company). All fields save immediately on edit.
 
-For synced contacts, edits (except display name) are pushed back to the provider via its API. Display name is always a local-only override. If the provider rejects a write (e.g., read-only GAL/directory entries), the error is shown to the user.
+For local contacts, fields save immediately on edit. For synced contacts, edits are held until the user clicks an explicit Save button (enabled after any change). On save, edits (except display name) are pushed back to the provider via its API. Display name is always a local-only override. If the provider rejects a write (e.g., read-only GAL/directory entries), the error is shown and the local edits remain for retry or discard.
 
 A back button (← Back to Contacts) at the top returns to the contact list.
 
@@ -222,7 +226,7 @@ Clicking a group card slides in a group editor that covers the entire settings U
 └──────────────────────────────────────────────────────────┘
 ```
 
-Clicking a member tile removes them from the group. All changes (adding, removing, renaming) save immediately.
+Clicking a member tile removes them from the group. For local groups, all changes (adding, removing, renaming) save immediately. For synced/provider-backed groups, changes are held until the user clicks an explicit Save button (enabled after any change). On save, changes are pushed to the provider. If the provider rejects the write, the error is shown and edits remain for retry or discard.
 
 ### Creating Contacts and Groups
 

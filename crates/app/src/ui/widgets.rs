@@ -12,10 +12,10 @@ use crate::Message;
 // Wraps any content (icon, avatar, dot) in a fixed-size
 // centered container so all list items align their labels.
 
-pub fn leading_slot<'a>(
-    content: impl Into<Element<'a, Message>>,
+pub fn leading_slot<'a, M: 'a>(
+    content: impl Into<Element<'a, M>>,
     size: f32,
-) -> Element<'a, Message> {
+) -> Element<'a, M> {
     container(content)
         .width(Length::Fixed(size))
         .height(Length::Fixed(size))
@@ -25,7 +25,7 @@ pub fn leading_slot<'a>(
 
 // ── Avatar ──────────────────────────────────────────────
 
-pub fn avatar_circle<'a>(name: &str, size: f32) -> Element<'a, Message> {
+pub fn avatar_circle<'a, M: 'a>(name: &str, size: f32) -> Element<'a, M> {
     let color = theme::avatar_color(name);
     let letter = theme::initial(name);
 
@@ -39,7 +39,7 @@ pub fn avatar_circle<'a>(name: &str, size: f32) -> Element<'a, Message> {
             text(letter)
                 .size(size * 0.45)
                 .color(theme::ON_AVATAR)
-                .font(iced::Font { weight: iced::font::Weight::Bold, ..font::TEXT }),
+                .font(iced::Font { weight: iced::font::Weight::Bold, ..font::text() }),
         )
         .center(Length::Fill),
     ]
@@ -48,7 +48,7 @@ pub fn avatar_circle<'a>(name: &str, size: f32) -> Element<'a, Message> {
     .into()
 }
 
-pub fn color_dot<'a>(color: Color) -> Element<'a, Message> {
+pub fn color_dot<'a, M: 'a>(color: Color) -> Element<'a, M> {
     let dot = Canvas::new(DotPainter { color })
         .width(DOT_SIZE)
         .height(DOT_SIZE);
@@ -154,10 +154,11 @@ pub struct NavItem<'a> {
     pub unread: i64,
 }
 
-pub fn nav_group<'a>(
+pub fn nav_group<'a, M: Clone + 'a>(
     items: &[NavItem<'a>],
     selected_label: &'a Option<String>,
-) -> Element<'a, Message> {
+    on_select: impl Fn(Option<String>) -> M,
+) -> Element<'a, M> {
     let mut col = column![].spacing(SPACE_XXS);
     for item in items {
         let is_active = match selected_label {
@@ -165,9 +166,9 @@ pub fn nav_group<'a>(
             None => item.id == "INBOX",
         };
         let on_press = if item.id == "INBOX" {
-            Message::SelectLabel(None)
+            on_select(None)
         } else {
-            Message::SelectLabel(Some(item.id.to_string()))
+            on_select(Some(item.id.to_string()))
         };
         col = col.push(nav_button(
             None,
@@ -181,13 +182,13 @@ pub fn nav_group<'a>(
     col.into()
 }
 
-pub fn label_nav_item<'a>(
+pub fn label_nav_item<'a, M: Clone + 'a>(
     name: &'a str,
     _id: &'a str,
     color: Color,
     active: bool,
-    on_press: Message,
-) -> Element<'a, Message> {
+    on_press: M,
+) -> Element<'a, M> {
     let lbl_style: fn(&Theme) -> text::Style = if active {
         text::primary
     } else {
@@ -212,11 +213,11 @@ pub fn label_nav_item<'a>(
 
 // ── Dividers & section breaks ───────────────────────────
 
-pub fn divider<'a>() -> Element<'a, Message> {
+pub fn divider<'a, M: 'a>() -> Element<'a, M> {
     rule::horizontal(1).style(theme::divider_rule).into()
 }
 
-pub fn section_break<'a>() -> Element<'a, Message> {
+pub fn section_break<'a, M: 'a>() -> Element<'a, M> {
     column![
         Space::new().height(SPACE_XXS),
         divider(),
@@ -227,12 +228,12 @@ pub fn section_break<'a>() -> Element<'a, Message> {
 
 // ── Collapsible section ─────────────────────────────────
 
-pub fn collapsible_section<'a>(
+pub fn collapsible_section<'a, M: Clone + 'a>(
     title: &'a str,
     expanded: bool,
-    on_toggle: Message,
-    children: Vec<Element<'a, Message>>,
-) -> Element<'a, Message> {
+    on_toggle: M,
+    children: Vec<Element<'a, M>>,
+) -> Element<'a, M> {
     let chevron = if expanded {
         icon::chevron_down()
     } else {
@@ -281,7 +282,7 @@ pub enum DropdownIcon<'a> {
 }
 
 impl DropdownIcon<'_> {
-    fn into_element<'a>(self, size: f32) -> Element<'a, Message> {
+    fn into_element<'a, M: 'a>(self, size: f32) -> Element<'a, M> {
         match self {
             DropdownIcon::Avatar(name) => avatar_circle(name, size),
             DropdownIcon::Icon(codepoint) => icon::to_icon(codepoint)
@@ -293,22 +294,22 @@ impl DropdownIcon<'_> {
 }
 
 /// One entry in a dropdown menu.
-pub struct DropdownEntry<'a> {
+pub struct DropdownEntry<'a, M> {
     pub icon: DropdownIcon<'a>,
     pub label: &'a str,
     pub selected: bool,
-    pub on_press: Message,
+    pub on_press: M,
 }
 
 /// A complete dropdown: closed trigger + optional open menu.
 /// Both trigger and items share the same two-slot layout.
-pub fn dropdown<'a>(
+pub fn dropdown<'a, M: Clone + 'a>(
     trigger_icon: DropdownIcon<'a>,
     trigger_label: &'a str,
     open: bool,
-    on_toggle: Message,
-    items: Vec<DropdownEntry<'a>>,
-) -> Element<'a, Message> {
+    on_toggle: M,
+    items: Vec<DropdownEntry<'a, M>>,
+) -> Element<'a, M> {
     // trigger_button
     let trigger = button(
         row![
@@ -338,7 +339,7 @@ pub fn dropdown<'a>(
         return trigger.into();
     }
 
-    let menu_items: Vec<Element<'a, Message>> = items
+    let menu_items: Vec<Element<'a, M>> = items
         .into_iter()
         .map(|entry| {
             // item_button
@@ -467,7 +468,7 @@ pub fn select<'a, M: Clone + 'a>(
 
 // ── Compose button ──────────────────────────────────────
 
-pub fn compose_button<'a>() -> Element<'a, Message> {
+pub fn compose_button<'a, M: Clone + 'a>(on_press: M) -> Element<'a, M> {
     button(
         container(
             row![
@@ -482,7 +483,7 @@ pub fn compose_button<'a>() -> Element<'a, Message> {
         .center_x(Length::Fill)
         .center_y(Length::Fill),
     )
-    .on_press(Message::Compose)
+    .on_press(on_press)
     .padding(PAD_BUTTON)
     .style(theme::primary_button)
     .width(Length::Fill)
@@ -491,7 +492,7 @@ pub fn compose_button<'a>() -> Element<'a, Message> {
 
 // ── Settings button ─────────────────────────────────────
 
-pub fn settings_button<'a>() -> Element<'a, Message> {
+pub fn settings_button<'a, M: Clone + 'a>(on_press: M) -> Element<'a, M> {
     button(
         container(
             row![
@@ -505,7 +506,7 @@ pub fn settings_button<'a>() -> Element<'a, Message> {
         )
         .center_x(Length::Fill),
     )
-    .on_press(Message::ToggleSettings)
+    .on_press(on_press)
     .style(theme::secondary_button)
     .padding(PAD_BUTTON)
     .width(Length::Fill)
@@ -655,7 +656,7 @@ struct CirclePainter {
     size: f32,
 }
 
-impl canvas::Program<Message> for CirclePainter {
+impl<M> canvas::Program<M> for CirclePainter {
     type State = ();
 
     fn draw(
@@ -724,9 +725,9 @@ pub fn thread_card<'a>(
 
     // Sender: semibold if unread, normal if read
     let sender_font = if thread.is_read {
-        font::TEXT
+        font::text()
     } else {
-        font::TEXT_SEMIBOLD
+        font::text_semibold()
     };
 
     // Subject: accent if unread, muted if read; always normal weight
@@ -764,7 +765,7 @@ pub fn thread_card<'a>(
             text(subject)
                 .size(TEXT_MD)
                 .style(subject_style)
-                .font(font::TEXT)
+                .font(font::text())
                 .wrapping(text::Wrapping::None),
         )
         .width(Length::Fill),
@@ -909,7 +910,7 @@ pub fn expanded_message_card<'a>(
                 container(
                     text(sender)
                         .size(TEXT_LG)
-                        .font(font::TEXT_SEMIBOLD)
+                        .font(font::text_semibold())
                         .style(text::base),
                 )
                 .align_y(Alignment::Center),
@@ -987,7 +988,7 @@ pub fn collapsed_message_row<'a>(
         container(
             text(sender)
                 .size(TEXT_SM)
-                .font(font::TEXT_SEMIBOLD)
+                .font(font::text_semibold())
                 .style(text::base),
         )
         .align_y(Alignment::Center),
@@ -1198,7 +1199,7 @@ struct DotPainter {
     color: Color,
 }
 
-impl canvas::Program<Message> for DotPainter {
+impl<M> canvas::Program<M> for DotPainter {
     type State = ();
 
     fn draw(

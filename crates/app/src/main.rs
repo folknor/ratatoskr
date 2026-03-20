@@ -1,4 +1,5 @@
 mod appearance;
+mod component;
 mod db;
 mod display;
 mod font;
@@ -6,10 +7,12 @@ mod icon;
 mod ui;
 mod window_state;
 
-use db::{Account, DateDisplay, Db, Label, Thread, ThreadAttachment, ThreadMessage};
+use component::Component;
+use db::{DateDisplay, Db, Label, Thread, ThreadAttachment, ThreadMessage};
 use iced::widget::{container, mouse_area, row};
 use iced::{Element, Length, Point, Size, Task, Theme};
 use ui::layout::{RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH};
+use ui::sidebar::{Sidebar, SidebarEvent, SidebarMessage};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -29,6 +32,20 @@ fn main() -> iced::Result {
     let detected_scale = display::detect_default_scale();
     let _ = DEFAULT_SCALE.set(detected_scale);
 
+    // Detect system UI font before launching the app. The detection is async
+    // (D-Bus on Linux), so we block briefly on a throwaway tokio runtime.
+    let system_font_family = {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok();
+        rt.and_then(|rt| {
+            let fonts = rt.block_on(ratatoskr_system_fonts::SystemFonts::detect());
+            fonts.ui.map(|f| f.family)
+        })
+    };
+    font::set_system_ui_font(system_font_family);
+
     let window = window_state::WindowState::load(&app_data_dir);
     let _ = APP_DATA_DIR.set(app_data_dir);
 
@@ -37,7 +54,7 @@ fn main() -> iced::Result {
         .theme(App::theme)
         .scale_factor(|app| app.settings.scale)
         .subscription(App::subscription)
-        .default_font(font::TEXT)
+        .default_font(font::text())
         .window(window.to_window_settings());
 
     for f in font::load() {
@@ -59,22 +76,16 @@ const DIVIDER_WIDTH: f32 = 2.0;
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    AccountsLoaded(Result<Vec<Account>, String>),
-    SelectAccount(usize),
-    SelectAllAccounts,
-    CycleAccount,
-    LabelsLoaded(Result<Vec<Label>, String>),
-    SelectLabel(Option<String>),
-    ThreadsLoaded(Result<Vec<Thread>, String>),
+    Sidebar(SidebarMessage),
+    AccountsLoaded(u64, Result<Vec<db::Account>, String>),
+    LabelsLoaded(u64, Result<Vec<Label>, String>),
+    ThreadsLoaded(u64, Result<Vec<Thread>, String>),
     SelectThread(usize),
     Compose,
     Noop,
     ToggleSettings,
     Settings(ui::settings::SettingsMessage),
     AppearanceChanged(appearance::Mode),
-    ToggleScopeDropdown,
-    ToggleLabelsSection,
-    ToggleSmartFoldersSection,
     DividerDragStart(Divider),
     DividerDragMove(Point),
     DividerDragEnd,
@@ -83,9 +94,8 @@ pub enum Message {
     WindowResized(Size),
     WindowMoved(Point),
     ToggleRightSidebar,
-    /// thread_id is included so stale responses can be discarded.
-    ThreadMessagesLoaded(String, Result<Vec<ThreadMessage>, String>),
-    ThreadAttachmentsLoaded(String, Result<Vec<ThreadAttachment>, String>),
+    ThreadMessagesLoaded(u64, Result<Vec<ThreadMessage>, String>),
+    ThreadAttachmentsLoaded(u64, Result<Vec<ThreadAttachment>, String>),
     ToggleMessageExpanded(usize),
     ToggleAllMessages,
     ToggleAttachmentsCollapsed,
@@ -95,17 +105,11 @@ pub enum Message {
 
 struct App {
     db: Arc<Db>,
-    accounts: Vec<Account>,
-    labels: Vec<Label>,
+    sidebar: Sidebar,
     threads: Vec<Thread>,
-    selected_account: Option<usize>,
-    selected_label: Option<String>,
     selected_thread: Option<usize>,
     status: String,
     mode: appearance::Mode,
-    scope_dropdown_open: bool,
-    labels_expanded: bool,
-    smart_folders_expanded: bool,
     sidebar_width: f32,
     thread_list_width: f32,
     dragging: Option<Divider>,
@@ -119,6 +123,10 @@ struct App {
     show_settings: bool,
     settings: ui::settings::SettingsState,
     window: window_state::WindowState,
+    /// Incremented on every navigation load (accounts, labels, threads).
+    nav_generation: u64,
+    /// Incremented on every thread detail load (messages, attachments).
+    thread_generation: u64,
 }
 
 impl App {
@@ -129,17 +137,11 @@ impl App {
         let window = window_state::WindowState::load(data_dir);
         let app = Self {
             db,
-            accounts: Vec::new(),
-            labels: Vec::new(),
+            sidebar: Sidebar::new(),
             threads: Vec::new(),
-            selected_account: None,
-            selected_label: None,
             selected_thread: None,
             status: "Loading...".to_string(),
             mode: appearance::Mode::Dark,
-            scope_dropdown_open: false,
-            labels_expanded: true,
-            smart_folders_expanded: true,
             sidebar_width: window.sidebar_width,
             thread_list_width: window.thread_list_width,
             dragging: None,
@@ -155,8 +157,14 @@ impl App {
                 *DEFAULT_SCALE.get().unwrap_or(&1.0),
             ),
             window,
+            nav_generation: 1,
+            thread_generation: 0,
         };
-        (app, Task::perform(load_accounts(db_ref), Message::AccountsLoaded))
+        let load_gen = app.nav_generation;
+        (app, Task::perform(
+            async move { (load_gen, load_accounts(db_ref).await) },
+            |(g, result)| Message::AccountsLoaded(g, result),
+        ))
     }
 
     fn theme(&self) -> Theme {
@@ -202,157 +210,47 @@ impl App {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::Sidebar(msg) => self.handle_sidebar(msg),
             Message::AppearanceChanged(mode) => {
                 self.mode = mode;
                 Task::none()
             }
-            Message::AccountsLoaded(Ok(accounts)) => {
-                self.accounts = accounts;
-                if !self.accounts.is_empty() {
-                    self.selected_account = Some(0);
-                    let db = Arc::clone(&self.db);
-                    let id = self.accounts[0].id.clone();
-                    self.status = format!("Loaded {} accounts", self.accounts.len());
-                    return Task::batch([
-                        Task::perform(
-                            load_labels(Arc::clone(&db), id.clone()),
-                            Message::LabelsLoaded,
-                        ),
-                        Task::perform(
-                            load_threads(db, id, None),
-                            Message::ThreadsLoaded,
-                        ),
-                    ]);
+            Message::AccountsLoaded(g, _) if g != self.nav_generation => Task::none(),
+            Message::AccountsLoaded(_, Ok(accounts)) => {
+                self.sidebar.accounts = accounts;
+                if !self.sidebar.accounts.is_empty() {
+                    self.sidebar.selected_account = Some(0);
+                    let id = self.sidebar.accounts[0].id.clone();
+                    self.status = format!("Loaded {} accounts", self.sidebar.accounts.len());
+                    return self.load_labels_and_threads(&id);
                 }
                 self.status = "No accounts found".to_string();
                 Task::none()
             }
-            Message::AccountsLoaded(Err(e)) => {
+            Message::AccountsLoaded(_, Err(e)) => {
                 self.status = format!("Error: {e}");
                 Task::none()
             }
-            Message::SelectAllAccounts => {
-                self.selected_account = None;
-                self.selected_label = None;
-                self.selected_thread = None;
-                self.scope_dropdown_open = false;
-                self.threads.clear();
-                self.labels.clear();
+            Message::LabelsLoaded(g, _) if g != self.nav_generation => Task::none(),
+            Message::LabelsLoaded(_, Ok(labels)) => {
+                self.sidebar.labels = labels;
                 Task::none()
             }
-            Message::SelectAccount(idx) => {
-                self.selected_account = Some(idx);
-                self.selected_label = None;
-                self.selected_thread = None;
-                self.scope_dropdown_open = false;
-                if let Some(account) = self.accounts.get(idx) {
-                    let db = Arc::clone(&self.db);
-                    let id = account.id.clone();
-                    Task::batch([
-                        Task::perform(
-                            load_labels(Arc::clone(&db), id.clone()),
-                            Message::LabelsLoaded,
-                        ),
-                        Task::perform(
-                            load_threads(db, id, None),
-                            Message::ThreadsLoaded,
-                        ),
-                    ])
-                } else {
-                    Task::none()
-                }
-            }
-            Message::CycleAccount => {
-                if self.accounts.len() > 1 {
-                    let next = match self.selected_account {
-                        Some(idx) => (idx + 1) % self.accounts.len(),
-                        None => 0,
-                    };
-                    self.update(Message::SelectAccount(next))
-                } else {
-                    Task::none()
-                }
-            }
-            Message::LabelsLoaded(Ok(labels)) => {
-                self.labels = labels;
-                Task::none()
-            }
-            Message::LabelsLoaded(Err(e)) => {
+            Message::LabelsLoaded(_, Err(e)) => {
                 self.status = format!("Labels error: {e}");
                 Task::none()
             }
-            Message::SelectLabel(label_id) => {
-                self.selected_label = label_id.clone();
-                self.selected_thread = None;
-                if let Some(idx) = self.selected_account
-                    && let Some(account) = self.accounts.get(idx)
-                {
-                    let db = Arc::clone(&self.db);
-                    let id = account.id.clone();
-                    return Task::perform(
-                        load_threads(db, id, label_id),
-                        Message::ThreadsLoaded,
-                    );
-                }
-                Task::none()
-            }
-            Message::ThreadsLoaded(Ok(threads)) => {
+            Message::ThreadsLoaded(g, _) if g != self.nav_generation => Task::none(),
+            Message::ThreadsLoaded(_, Ok(threads)) => {
                 self.status = format!("{} threads", threads.len());
                 self.threads = threads;
                 Task::none()
             }
-            Message::ThreadsLoaded(Err(e)) => {
+            Message::ThreadsLoaded(_, Err(e)) => {
                 self.status = format!("Threads error: {e}");
                 Task::none()
             }
-            Message::SelectThread(idx) => {
-                self.selected_thread = Some(idx);
-                // Clear previous thread's data immediately to avoid
-                // rendering stale messages under the new thread's header
-                self.thread_messages.clear();
-                self.thread_attachments.clear();
-                self.message_expanded.clear();
-                // Restore attachment collapse state from cache (scoped by account+thread)
-                self.attachments_collapsed = self.threads.get(idx)
-                    .map(|t| {
-                        let key = format!("{}:{}", t.account_id, t.id);
-                        self.attachment_collapse_cache.get(&key).copied().unwrap_or(false)
-                    })
-                    .unwrap_or(false);
-                if let Some(thread) = self.threads.get(idx) {
-                    let db = Arc::clone(&self.db);
-                    let account_id = thread.account_id.clone();
-                    let thread_id = thread.id.clone();
-                    let db2 = Arc::clone(&self.db);
-                    let account_id2 = account_id.clone();
-                    let thread_id2 = thread_id.clone();
-                    let tid = thread_id.clone();
-                    let tid2 = thread_id.clone();
-                    return Task::batch([
-                        Task::perform(
-                            async move { db.get_thread_messages(account_id, thread_id).await },
-                            move |result| Message::ThreadMessagesLoaded(tid.clone(), result),
-                        ),
-                        Task::perform(
-                            async move { db2.get_thread_attachments(account_id2, thread_id2).await },
-                            move |result| Message::ThreadAttachmentsLoaded(tid2.clone(), result),
-                        ),
-                    ]);
-                }
-                Task::none()
-            }
-            Message::ToggleScopeDropdown => {
-                self.scope_dropdown_open = !self.scope_dropdown_open;
-                Task::none()
-            }
-            Message::ToggleLabelsSection => {
-                self.labels_expanded = !self.labels_expanded;
-                Task::none()
-            }
-            Message::ToggleSmartFoldersSection => {
-                self.smart_folders_expanded = !self.smart_folders_expanded;
-                Task::none()
-            }
+            Message::SelectThread(idx) => self.handle_select_thread(idx),
             Message::DividerDragStart(divider) => {
                 self.dragging = Some(divider);
                 Task::none()
@@ -400,7 +298,6 @@ impl App {
             }
             Message::WindowResized(size) => {
                 self.window.set_size(size);
-                // Auto-collapse right sidebar below threshold
                 if size.width < RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH && self.right_sidebar_open {
                     self.right_sidebar_open = false;
                 }
@@ -418,38 +315,9 @@ impl App {
                 self.window.save(data_dir);
                 iced::window::close(id)
             }
-            Message::ThreadMessagesLoaded(thread_id, Ok(messages)) => {
-                // Discard stale response
-                let current_thread_id = self.selected_thread
-                    .and_then(|i| self.threads.get(i))
-                    .map(|t| t.id.as_str());
-                if current_thread_id != Some(thread_id.as_str()) {
-                    return Task::none();
-                }
-
-                let len = messages.len();
-                let mut expanded = vec![false; len];
-
-                for (i, msg) in messages.iter().enumerate() {
-                    let is_most_recent = i == 0;
-                    let is_initial = i == len - 1;
-                    let is_unread = !msg.is_read;
-
-                    if is_unread {
-                        expanded[i] = true;
-                        continue;
-                    }
-                    if is_most_recent {
-                        expanded[i] = true;
-                        continue;
-                    }
-                    if is_initial {
-                        expanded[i] = true;
-                        continue;
-                    }
-                }
-
-                self.message_expanded = expanded;
+            Message::ThreadMessagesLoaded(g, _) if g != self.thread_generation => Task::none(),
+            Message::ThreadMessagesLoaded(_, Ok(messages)) => {
+                self.apply_message_expansion(&messages);
                 self.thread_messages = messages;
                 Task::none()
             }
@@ -457,13 +325,8 @@ impl App {
                 self.status = format!("Messages error: {e}");
                 Task::none()
             }
-            Message::ThreadAttachmentsLoaded(thread_id, Ok(attachments)) => {
-                let current_thread_id = self.selected_thread
-                    .and_then(|i| self.threads.get(i))
-                    .map(|t| t.id.as_str());
-                if current_thread_id != Some(thread_id.as_str()) {
-                    return Task::none();
-                }
+            Message::ThreadAttachmentsLoaded(g, _) if g != self.thread_generation => Task::none(),
+            Message::ThreadAttachmentsLoaded(_, Ok(attachments)) => {
                 self.thread_attachments = attachments;
                 Task::none()
             }
@@ -510,17 +373,7 @@ impl App {
             .selected_thread
             .and_then(|idx| self.threads.get(idx));
 
-        let sidebar_model = ui::sidebar::SidebarModel {
-            accounts: &self.accounts,
-            selected_account: self.selected_account,
-            labels: &self.labels,
-            selected_label: &self.selected_label,
-            scope_dropdown_open: self.scope_dropdown_open,
-            labels_expanded: self.labels_expanded,
-            smart_folders_expanded: self.smart_folders_expanded,
-        };
-
-        let sidebar = container(ui::sidebar::view(&sidebar_model))
+        let sidebar = container(self.sidebar.view().map(Message::Sidebar))
             .width(self.sidebar_width)
             .height(Length::Fill);
 
@@ -544,13 +397,17 @@ impl App {
         .interaction(iced::mouse::Interaction::ResizingHorizontally);
 
         let folder_name = self
-            .selected_label
+            .sidebar.selected_label
             .as_ref()
-            .and_then(|lid| self.labels.iter().find(|l| l.id == *lid).map(|l| l.name.as_str()))
+            .and_then(|lid| {
+                self.sidebar.labels.iter()
+                    .find(|l| l.id == *lid)
+                    .map(|l| l.name.as_str())
+            })
             .unwrap_or("Inbox");
         let scope_name = self
-            .selected_account
-            .and_then(|idx| self.accounts.get(idx))
+            .sidebar.selected_account
+            .and_then(|idx| self.sidebar.accounts.get(idx))
             .and_then(|a| a.display_name.as_deref().or(Some(a.email.as_str())))
             .unwrap_or("All");
 
@@ -611,7 +468,153 @@ impl App {
     }
 }
 
-async fn load_accounts(db: Arc<Db>) -> Result<Vec<Account>, String> {
+// ── Sidebar event handling ─────────────────────────────
+
+impl App {
+    fn handle_sidebar(&mut self, msg: SidebarMessage) -> Task<Message> {
+        let (task, event) = self.sidebar.update(msg);
+        let mut tasks = vec![task.map(Message::Sidebar)];
+        if let Some(evt) = event {
+            tasks.push(self.handle_sidebar_event(evt));
+        }
+        Task::batch(tasks)
+    }
+
+    fn handle_sidebar_event(&mut self, event: SidebarEvent) -> Task<Message> {
+        match event {
+            SidebarEvent::AccountSelected(idx) => {
+                self.selected_thread = None;
+                self.nav_generation += 1;
+                self.thread_generation += 1;
+                if let Some(account) = self.sidebar.accounts.get(idx) {
+                    let id = account.id.clone();
+                    return self.load_labels_and_threads(&id);
+                }
+                Task::none()
+            }
+            SidebarEvent::AllAccountsSelected => {
+                self.selected_thread = None;
+                self.threads.clear();
+                self.sidebar.labels.clear();
+                Task::none()
+            }
+            SidebarEvent::CycleAccount => {
+                // Already handled inside sidebar.update() — no extra work needed
+                Task::none()
+            }
+            SidebarEvent::LabelSelected(label_id) => {
+                self.selected_thread = None;
+                self.nav_generation += 1;
+                self.thread_generation += 1;
+                if let Some(idx) = self.sidebar.selected_account
+                    && let Some(account) = self.sidebar.accounts.get(idx)
+                {
+                    let db = Arc::clone(&self.db);
+                    let id = account.id.clone();
+                    let load_gen = self.nav_generation;
+                    return Task::perform(
+                        async move {
+                            let r = load_threads(db, id, label_id).await;
+                            (load_gen, r)
+                        },
+                        |(g, result)| Message::ThreadsLoaded(g, result),
+                    );
+                }
+                Task::none()
+            }
+            SidebarEvent::Compose => Task::none(),
+            SidebarEvent::ToggleSettings => {
+                self.show_settings = !self.show_settings;
+                Task::none()
+            }
+        }
+    }
+}
+
+// ── Helper methods ─────────────────────────────────────
+
+impl App {
+    fn load_labels_and_threads(&mut self, account_id: &str) -> Task<Message> {
+        self.nav_generation += 1;
+        let db = Arc::clone(&self.db);
+        let db2 = Arc::clone(&self.db);
+        let id = account_id.to_string();
+        let id2 = id.clone();
+        let load_gen = self.nav_generation;
+        Task::batch([
+            Task::perform(
+                async move {
+                    let r = load_labels(db, id).await;
+                    (load_gen, r)
+                },
+                |(g, result)| Message::LabelsLoaded(g, result),
+            ),
+            Task::perform(
+                async move {
+                    let r = load_threads(db2, id2, None).await;
+                    (load_gen, r)
+                },
+                |(g, result)| Message::ThreadsLoaded(g, result),
+            ),
+        ])
+    }
+
+    fn handle_select_thread(&mut self, idx: usize) -> Task<Message> {
+        self.selected_thread = Some(idx);
+        self.thread_messages.clear();
+        self.thread_attachments.clear();
+        self.message_expanded.clear();
+        self.thread_generation += 1;
+        // Restore attachment collapse state from cache
+        self.attachments_collapsed = self.threads.get(idx)
+            .map(|t| {
+                let key = format!("{}:{}", t.account_id, t.id);
+                self.attachment_collapse_cache.get(&key).copied().unwrap_or(false)
+            })
+            .unwrap_or(false);
+        if let Some(thread) = self.threads.get(idx) {
+            let db = Arc::clone(&self.db);
+            let account_id = thread.account_id.clone();
+            let thread_id = thread.id.clone();
+            let db2 = Arc::clone(&self.db);
+            let account_id2 = account_id.clone();
+            let thread_id2 = thread_id.clone();
+            let load_gen = self.thread_generation;
+            return Task::batch([
+                Task::perform(
+                    async move {
+                        let r = db.get_thread_messages(account_id, thread_id).await;
+                        (load_gen, r)
+                    },
+                    |(g, result)| Message::ThreadMessagesLoaded(g, result),
+                ),
+                Task::perform(
+                    async move {
+                        let r = db2.get_thread_attachments(account_id2, thread_id2).await;
+                        (load_gen, r)
+                    },
+                    |(g, result)| Message::ThreadAttachmentsLoaded(g, result),
+                ),
+            ]);
+        }
+        Task::none()
+    }
+
+    fn apply_message_expansion(&mut self, messages: &[ThreadMessage]) {
+        let len = messages.len();
+        let mut expanded = vec![false; len];
+
+        for (i, msg) in messages.iter().enumerate() {
+            if !msg.is_read || i == 0 || i == len - 1 {
+                expanded[i] = true;
+            }
+        }
+
+        self.message_expanded = expanded;
+    }
+}
+
+async fn load_accounts(db: Arc<Db>) -> Result<Vec<db::Account>, String> {
     db.get_accounts().await
 }
 

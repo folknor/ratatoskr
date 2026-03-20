@@ -41,7 +41,7 @@ When the user submits, discovery runs. A spinner or progress indicator replaces 
 
 Discovery returns a ranked list of protocol options (Gmail API, Microsoft Graph, JMAP, IMAP). The best match is auto-selected.
 
-**Happy path (single clear result):** The user never sees the discovery result. The flow proceeds directly to authentication.
+**Happy path (single high-confidence result):** The user never sees the discovery result. The flow proceeds directly to authentication. "High confidence" means the discovery backend returned exactly one option with a confidence level above its auto-proceed threshold — e.g., a domain in the hardcoded registry (gmail.com → Gmail API), or a well-known JMAP endpoint that responded successfully. If there is any ambiguity — multiple viable protocols, a registry match contradicted by live probing, or a confidence score below the threshold — the flow falls through to the multiple-options step. It is better to show a simple choice than to silently pick the wrong provider.
 
 **Multiple options:** A card list appears showing the available protocols, ranked by confidence. The top option is highlighted. Each card shows:
 
@@ -57,7 +57,7 @@ The user selects one and continues.
 - For JMAP: session URL
 - Auth method (OAuth / Password)
 
-This manual form is the escape hatch. It should be functional but is not the primary path.
+This manual form is the escape hatch. It should be functional but is not the primary path. Implementation should keep this form capable but restrained — it needs to support the real cases (corporate IMAP, self-hosted JMAP, unusual SMTP configurations) without becoming a dumping ground for every obscure provider quirk. If a provider needs special handling beyond what the form offers, that belongs in the discovery registry or provider crate, not in more form fields.
 
 ### Step 3: Authentication
 
@@ -114,7 +114,32 @@ The "Accept self-signed certificates" checkbox is for corporate environments wit
 
 Some providers require app-specific passwords (e.g., Gmail with 2FA but no OAuth, Yahoo). When discovery detects this, a help link is shown below the password field pointing to the provider's app-password setup page (these URLs are in the discovery registry).
 
-### Step 4: Success
+### Step 4: Account Identity
+
+After successful authentication, the modal shows a final setup step where the user names and colors their account:
+
+```
+┌──────────────────────────────────────────────────┐
+│                                                  │
+│  alice@corp.com                                  │
+│                                                  │
+│  Account name                                    │
+│  [Corp                                        ]  │
+│                                                  │
+│  Pick a color                                    │
+│  [🔴][🟠][🟡][🟢][🔵][🟣][⚫][🟤] ...          │
+│                                                  │
+│  [Done]                                          │
+│                                                  │
+└──────────────────────────────────────────────────┘
+```
+
+- **Account name** — pre-filled from the email domain (e.g., "corp.com" → "Corp"). Editable. Used in the sidebar dropdown, compose From selector, and anywhere accounts are identified by name.
+- **Color** — a palette grid (the same 25-color palette from `crates/label-colors/`). Colors already assigned to other accounts are shown dimmed with a checkmark but remain selectable (no hard restriction, just a hint). The first unassigned color is pre-selected. The user must confirm a color — there is no "skip" that leaves it auto-assigned without the user seeing it.
+
+This step is intentionally lightweight — two fields, one click. It ensures the user has consciously chosen how their account appears across the app.
+
+### Step 5: Success
 
 The account is created, tokens are encrypted and stored, and sync begins. The modal closes. For first launch, the user sees their inbox populating. For subsequent account additions, the new account appears in the account list.
 
@@ -129,7 +154,7 @@ Account management lives in Settings. It shows a list of configured accounts, ea
 ```
 ┌──────────────────────────────────────────────────────┐
 │ 🔵 alice@corp.com                                    │
-│ Microsoft 365 · Last synced: 2 minutes ago           │
+│ Microsoft 365 · Last synced: 2 minutes ago    ● OK    │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -137,6 +162,7 @@ Account management lives in Settings. It shows a list of configured accounts, ea
 - **Email address** — prominent
 - **Provider name** — e.g., "Gmail", "Microsoft 365", "IMAP (imap.corp.com)"
 - **Last sync time** — relative timestamp
+- **Health indicator** — a status dot or badge summarizing the account's current state: healthy (syncing normally), warning (token expiring soon, intermittent failures), error (auth failed, persistent connection failure), or disabled (user-paused). This gives users a reason to visit account management proactively, not just when the status bar alerts them. The health state is derived from the same signals that drive status bar warnings.
 
 ### Account Actions
 
@@ -144,10 +170,10 @@ Clicking an account card slides in an editor (same pattern as contact management
 
 - **Account name** — editable, a user-chosen label for the account (e.g., "Work", "Personal"). Used in the account dropdown, contact pills, From selector in compose, and anywhere accounts are visually distinguished. Auto-generated from the email domain on account creation (e.g., "corp.com" → "Corp").
 - **Display name** — editable, used as the sender name in outgoing email
-- **Account color** — editable, used in contact pills, calendar indicators, and anywhere accounts are visually distinguished. Assigned automatically from the label color palette on account creation, but user-configurable.
+- **Account color** — editable, used in contact pills, calendar indicators, the sidebar account dropdown, the compose From selector, and anywhere accounts are visually distinguished. Chosen by the user during account setup (see § Step 4), changeable here. Account color is a first-class element of the product's information architecture, not decoration — it is the primary visual mechanism for distinguishing accounts across the entire app. The color palette and rendering should be treated as shared infrastructure (see `crates/label-colors/`) rather than reimplemented per-surface.
 - **Re-authenticate** — triggers the OAuth flow again (for expired/revoked tokens) or password re-entry for IMAP
 - **CalDAV settings** — for IMAP/JMAP accounts that use CalDAV for calendar. Shows CalDAV URL, username, and lets the user configure the connection if auto-discovery didn't find it.
-- **Delete account** — removes the account and all its data (labels, threads, messages, attachments, cached files). Prompts for confirmation with a clear warning about data deletion. The deletion cascades through all related tables.
+- **Delete account** — removes the account and all its data (labels, threads, messages, attachments, cached files). Prompts for confirmation with a clear warning about data deletion. The deletion cascades through all related tables. Edge cases: if the deleted account is the last remaining account, the app returns to the first-launch state (empty window with the Add Account modal). If the account is currently selected in the sidebar, the selector reverts to "All Accounts." Any compose windows drafting from the deleted account show an error and prevent sending (the user must change the From account or discard). Any message view pop-outs for messages from the deleted account close with a brief notice. Active sync tasks for the account are cancelled.
 
 ### Adding Another Account
 
@@ -180,7 +206,7 @@ Attempting to add an account with an email address that's already configured sho
 
 ## Open Questions
 
-1. ~~**Account colors**~~ **Resolved.** Assigned automatically from the label color palette in order of account creation. User-configurable in the account editor.
+1. ~~**Account colors**~~ **Resolved.** Chosen by the user during account setup from the 25-color label palette. First unassigned color is pre-selected; already-used colors are dimmed but selectable. Changeable later in the account editor.
 
 2. ~~**Account reordering**~~ **Resolved.** Users can reorder accounts in the settings account list (drag to reorder). The order is reflected in the sidebar account dropdown.
 

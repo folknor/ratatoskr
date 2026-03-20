@@ -1,6 +1,12 @@
-# Main Layout: iced Implementation Spec
+# Main Layout: iced Implementation Spec (Prototype Phase)
 
-UI-only spec for the crates/app main layout work defined by `docs/main-layout/problem-statement.md`. All work is in `crates/app/`. No backend changes.
+UI-only spec for the initial crates/app main layout work defined by `docs/main-layout/problem-statement.md`. All work is in `crates/app/`. No backend changes.
+
+**Scope note:** This document is a historical implementation plan for the early iced prototype. It captures the first concrete translation of the main-layout problem statement into widget-level code, and Phases 1, 2, and 4 are complete. However, the product surface has since grown significantly — the calendar, search, sidebar, pinned searches, pop-out windows, and command palette specs now define much richer behavior for the areas this document scaffolded.
+
+**What remains reusable:** Widget-level layout translation (thread card structure, message card structure, attachment cards), app-shell state mechanics (stale async response handling, window-state persistence, panel auto-collapse, per-message expansion state), and the practical iced patterns throughout.
+
+**What is stale:** The app-local DB shim (`src/db.rs` queries) used here was a prototype expedient — the long-term data path should come from `crates/core/` query surfaces (e.g., `get_thread_detail()`). The right sidebar scaffolds (calendar placeholder, pinned items placeholder) are now defined by their own specs. Phase 3 interaction flow should be driven by the command palette integration, not built ad hoc. This document should not be treated as the current main-layout UI plan.
 
 ## Implementation Status
 

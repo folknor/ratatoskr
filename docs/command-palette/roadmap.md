@@ -41,8 +41,8 @@ This slice adds the typed input model and resolver trait. The four parameterized
 
 ### What remains (future slices)
 
-- `CommandArgs` enum and the execution endpoint that consumes it
-- Real `CommandInputResolver` implementation in the app crate, querying `DbState` for folders, labels, accounts, templates
+- **`CommandArgs` enum and the execution endpoint that consumes it** — this is now the most critical missing piece. The typed execution contract is what makes the command system real rather than just searchable metadata. The problem statement (§ Parameterized command execution contract) defines the full payload shape. Without this, the palette can find commands but cannot execute parameterized ones.
+- **Real `CommandInputResolver` implementation** in the app crate, querying `DbState` for folders, labels, accounts, templates
 - UI changes to honor `input_mode`
 
 ### Ownership boundary

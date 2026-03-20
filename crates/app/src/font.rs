@@ -1,35 +1,74 @@
 use std::borrow::Cow;
+use std::sync::OnceLock;
 
 use iced::font::{Style, Weight};
 use iced::widget::text::LineHeight;
 use iced::Pixels;
 
+// ── Runtime font family ─────────────────────────────────
+
+/// The detected UI font family name, or "Inter" as the bundled fallback.
+static UI_FONT_FAMILY: OnceLock<&'static str> = OnceLock::new();
+
+/// Set the UI font family detected from the system.
+///
+/// Must be called once before the iced app starts. If never called (or called
+/// with `None`), the bundled Inter font is used.
+pub fn set_system_ui_font(family: Option<String>) {
+    let name: &'static str = match family {
+        Some(f) if f != "Inter" => Box::leak(f.into_boxed_str()),
+        _ => "Inter",
+    };
+    let _ = UI_FONT_FAMILY.set(name);
+}
+
+fn ui_family() -> &'static str {
+    UI_FONT_FAMILY.get().copied().unwrap_or("Inter")
+}
+
 // ── Font constants ───────────────────────────────────────
 
 pub const ICON: iced::Font = iced::Font::new("lucide");
 
-pub const TEXT: iced::Font = iced::Font::new("Inter");
-pub const TEXT_BOLD: iced::Font = iced::Font {
-    weight: Weight::Bold,
-    ..iced::Font::new("Inter")
-};
-pub const TEXT_ITALIC: iced::Font = iced::Font {
-    style: Style::Italic,
-    ..iced::Font::new("Inter")
-};
-pub const TEXT_BOLD_ITALIC: iced::Font = iced::Font {
-    weight: Weight::Bold,
-    style: Style::Italic,
-    ..iced::Font::new("Inter")
-};
-pub const TEXT_SEMIBOLD: iced::Font = iced::Font {
-    weight: Weight::Semibold,
-    ..iced::Font::new("Inter")
-};
-pub const TEXT_LIGHT: iced::Font = iced::Font {
-    weight: Weight::Light,
-    ..iced::Font::new("Inter")
-};
+pub fn text() -> iced::Font {
+    iced::Font::new(ui_family())
+}
+
+pub fn text_bold() -> iced::Font {
+    iced::Font {
+        weight: Weight::Bold,
+        ..iced::Font::new(ui_family())
+    }
+}
+
+pub fn text_italic() -> iced::Font {
+    iced::Font {
+        style: Style::Italic,
+        ..iced::Font::new(ui_family())
+    }
+}
+
+pub fn text_bold_italic() -> iced::Font {
+    iced::Font {
+        weight: Weight::Bold,
+        style: Style::Italic,
+        ..iced::Font::new(ui_family())
+    }
+}
+
+pub fn text_semibold() -> iced::Font {
+    iced::Font {
+        weight: Weight::Semibold,
+        ..iced::Font::new(ui_family())
+    }
+}
+
+pub fn text_light() -> iced::Font {
+    iced::Font {
+        weight: Weight::Light,
+        ..iced::Font::new(ui_family())
+    }
+}
 
 // ── Sizes ────────────────────────────────────────────────
 

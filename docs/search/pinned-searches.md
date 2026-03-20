@@ -131,6 +131,8 @@ The pinned searches section is part of the sidebar's scrollable area. If the use
 
 No cap on the number of pinned searches. If the sidebar fills up, that's a signal to the user to curate their list. This is intentional — it promotes engagement with the feature and encourages dismissing searches that are no longer relevant.
 
+**Auto-creation risk:** Users who search heavily (the target audience) may accumulate pinned searches faster than they curate them, making the feature feel like clutter rather than support. The current design accepts this tradeoff. If post-launch data shows the list grows unmanageably, the first mitigation is auto-expiry: pinned searches older than N days (e.g., 14) that haven't been clicked since creation are silently removed. This preserves the zero-friction creation model while preventing indefinite accumulation. A harder intervention — requiring an explicit "pin" action — is a last resort because it undermines the feature's core value of automatic parking.
+
 ## Search Bar Interaction
 
 When a pinned search is active (selected in the sidebar):
@@ -189,10 +191,7 @@ Thread metadata is not stored — it's fetched live from the threads table when 
 
 ## Open Questions
 
-1. **Entry display format**: the sidebar is 180px wide — query strings truncate badly. Alternative under consideration: use date+time as the primary label (e.g., "Mar 19, 14:32") instead of the query string. The full query is accessible in the search bar when clicked. Options:
-   - **Date+time only** — compact, scannable, but anonymous (can't tell searches apart without clicking)
-   - **Date+time primary, truncated query as muted subtitle** — more context, two lines per entry
-   - **Query string only** — current spec, but truncation at 180px makes most queries unreadable
+1. ~~**Entry display format**~~ **Resolved: date+time primary, truncated query as subtitle.** Each pinned search entry shows two lines: the date+time as the primary label (e.g., "Mar 19, 14:32") in normal text, and the query string as a muted subtitle truncated with ellipsis. Date+time only is too anonymous — users can't distinguish entries without clicking. Query only is unreadable at 180px. The two-line format gives enough context to scan while keeping entries compact. The full query is always accessible in the search bar when clicked.
 
 ## Ecosystem Patterns
 

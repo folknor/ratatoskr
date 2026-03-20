@@ -133,7 +133,7 @@ fn thread_view<'a>(
 
     msg_col = msg_col.push(Space::new().height(SPACE_MD));
 
-    col = col.push(scrollable(msg_col).height(Length::Fill));
+    col = col.push(scrollable(msg_col).spacing(SCROLLBAR_SPACING).height(Length::Fill));
 
     col.into()
 }
@@ -187,7 +187,7 @@ fn attachment_group<'a>(
             container(
                 text(format!("Attachments ({})", deduped.len()))
                     .size(TEXT_MD)
-                    .font(font::TEXT_SEMIBOLD)
+                    .font(font::text_semibold())
                     .style(text::base),
             )
             .align_y(Alignment::Center),

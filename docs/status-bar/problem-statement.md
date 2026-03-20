@@ -80,11 +80,11 @@ These fade out automatically after the display duration.
 
 When multiple content types compete for the status bar:
 
-1. **Warnings** — always shown, they indicate something is broken
-2. **Sync progress** — shown when no warnings are active
-3. **Transient confirmations** — shown when nothing else is active
+1. **Warnings** — always win, they indicate something is broken. Never preempted.
+2. **Sync progress** — the steady-state default when no warnings are active. May be briefly preempted by confirmations (see below).
+3. **Transient confirmations** — lowest priority, shown when nothing else is active.
 
-If a transient confirmation arrives while sync progress is showing, the confirmation briefly interrupts the progress (~3 seconds), then progress resumes.
+**Confirmation preemption rule:** If a transient confirmation arrives while sync progress is showing, the confirmation briefly interrupts the progress (~3 seconds), then progress resumes. This is an exception to the strict priority order — confirmations are lower priority than sync, but a brief interruption is acceptable because the user just performed an action and deserves immediate feedback. Warnings are never preempted by anything.
 
 ## Interaction
 

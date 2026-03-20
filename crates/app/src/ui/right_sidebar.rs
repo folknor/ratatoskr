@@ -19,7 +19,7 @@ pub fn view<'a>(open: bool) -> Element<'a, Message> {
     .spacing(0)
     .width(Length::Fill);
 
-    container(scrollable(content).height(Length::Fill))
+    container(scrollable(content).spacing(SCROLLBAR_SPACING).height(Length::Fill))
         .width(RIGHT_SIDEBAR_WIDTH)
         .height(Length::Fill)
         .style(theme::sidebar_container)

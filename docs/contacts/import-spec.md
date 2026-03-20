@@ -71,19 +71,30 @@ The importer displays a table preview of the first ~20 rows. Each column has a d
 └─────────────────────────────────────────────────────────────┘
 ```
 
-- Rows without a valid email in the mapped email column are skipped (with a count shown)
+- Rows without a valid email in the mapped email column are skipped (with a count shown). The preview highlights problem rows — skipped rows are shown in a muted/strikethrough style with a reason indicator (no email, invalid email, etc.) rather than silently hidden. This lets the user catch mapping errors before importing: if most rows are skipped, the email column is probably mapped wrong.
 - An account selector determines where imported contacts are created (same options as contact creation: provider accounts + "Local")
-- If a "Group" column is mapped, contacts are automatically added to groups matching the group column value (groups are created if they don't exist)
+- If a "Group" column is mapped, contacts are automatically added to groups matching the group column value (groups are created if they don't exist). A single cell may contain multiple groups separated by semicolons, commas, or pipes (e.g., "Engineering; Project X"). The importer splits on these delimiters and trims whitespace. If the delimiter is ambiguous (e.g., a group name contains a comma), the preview table shows the parsed group names so the user can verify before importing.
 
 ### Step 3: Import
 
 The import runs. A summary shows: N contacts imported, N groups created, N rows skipped, N duplicates (matched by email).
 
-**Duplicate handling:** If an imported email matches an existing contact, the existing contact is not overwritten. The duplicate is skipped and reported in the summary.
+**Duplicate handling:** If an imported email matches an existing contact, the default behavior is to skip the duplicate and report it in the summary. A toggle on the preview screen — "Update existing contacts with imported data" — changes this to a merge: imported fields overwrite existing fields where the imported value is non-empty, but existing fields not present in the import are preserved. The toggle defaults to off (skip). The summary distinguishes between skipped duplicates and updated contacts.
 
 ### vCard Import
 
 vCard files skip the column mapping step entirely — the format is structured. The flow is: file selection → preview (list of contacts to be imported) → account selector → import.
+
+## Data Cleaning
+
+The importer applies minimal automatic cleanup to imported values:
+
+- **Whitespace** — leading/trailing whitespace is trimmed from all fields
+- **Email normalization** — lowercased, whitespace stripped
+- **Phone numbers** — no formatting changes. Phone formats vary too widely by locale to normalize safely. Store as-is.
+- **Names** — no case correction. "ALICE SMITH" stays as-is; the user can fix it in the contact editor. Guessing at name capitalization is error-prone across cultures.
+
+The principle is: clean what is unambiguously wrong (stray whitespace, mixed-case emails) and leave everything else to the user. The importer is not a data cleaning tool — it is a data ingestion tool.
 
 ## Crate Design
 

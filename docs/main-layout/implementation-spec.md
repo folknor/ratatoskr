@@ -1,6 +1,8 @@
-# Main Layout: Backend Implementation Spec
+# Main Layout: Backend Implementation Spec (Phase 1)
 
-Backend prerequisites for the main layout UI per `docs/main-layout/problem-statement.md`. All work is in `crates/core/` (the `ratatoskr-core` crate). No UI work.
+Backend prerequisites for the initial main layout UI per `docs/main-layout/problem-statement.md`. All work is in `crates/core/` (the `ratatoskr-core` crate). No UI work.
+
+**Scope note:** This document covers four specific early backend slices (label colors, thread detail, attachment collapse, focused region) that were prerequisites for the initial reading pane and conversation view. It is not the full backend spec for the main layout — the broader product surface (sidebar navigation, search pipeline, command dispatch, pinned searches, multi-window, calendar mode) implies a much larger backend/query surface documented in their respective specs. Treat this as a phase-specific implementation record, not the living authority for all main-layout backend needs.
 
 ## Implementation Status
 
@@ -11,7 +13,7 @@ Backend prerequisites for the main layout UI per `docs/main-layout/problem-state
 | Slice 3: Attachment Collapse Persistence | ✅ Complete | `286bc92` |
 | Slice 4: FocusedRegion on CommandContext | ✅ Complete | `286bc92` |
 | Phase 3: Auto-Advance | ⏳ Not started | Deferred until Phase 3 UI work begins |
-| Tauri command wrappers | ⏳ Not started | Not needed until iced replaces the React frontend |
+| ~~Tauri command wrappers~~ | N/A | Tauri/React frontend permanently removed; iced calls core directly |
 
 ### Deviations from spec
 
@@ -339,49 +341,13 @@ FROM threads
 WHERE account_id = ?1 AND id = ?2
 ```
 
-### Tauri command wrapper
+### Connection access
 
-Neither `DbState` nor `BodyStoreState` exposes a `conn()` accessor — both only have `async with_conn(closure)` which runs the closure on `spawn_blocking` internally. The thread detail function needs both connections simultaneously, so nesting `with_conn` calls would be awkward.
+Neither `DbState` nor `BodyStoreState` originally exposed a `conn()` accessor — both only had `async with_conn(closure)` which runs the closure on `spawn_blocking` internally. The thread detail function needs both connections simultaneously, so nesting `with_conn` calls would be awkward.
 
-**Recommended approach:** Add a `pub fn conn(&self) -> Arc<Mutex<Connection>>` accessor to both `DbState` and `BodyStoreState`. Both structs already hold `conn: Arc<Mutex<Connection>>` — the accessor just clones the Arc. This is a general-purpose addition useful for any function that needs synchronous multi-database access (the iced frontend will need this pattern extensively).
+**Implemented:** `pub fn conn(&self) -> Arc<Mutex<Connection>>` accessors were added to both `DbState` and `BodyStoreState`. Both structs already hold `conn: Arc<Mutex<Connection>>` — the accessor just clones the Arc. This is used extensively by the iced frontend for synchronous multi-database access.
 
-```rust
-// In core/src/db/mod.rs
-impl DbState {
-    pub fn conn(&self) -> Arc<Mutex<Connection>> {
-        Arc::clone(&self.conn)
-    }
-}
-
-// In core/src/body_store/mod.rs
-impl BodyStoreState {
-    pub fn conn(&self) -> Arc<Mutex<Connection>> {
-        Arc::clone(&self.conn)
-    }
-}
-```
-
-Then the Tauri command:
-
-```rust
-#[tauri::command]
-pub async fn get_thread_detail(
-    account_id: String,
-    thread_id: String,
-    db: State<'_, DbState>,
-    body_store: State<'_, BodyStoreState>,
-) -> Result<ThreadDetail, String> {
-    let db_conn = db.conn();
-    let body_conn = body_store.conn();
-    tokio::task::spawn_blocking(move || {
-        let db_guard = db_conn.lock().map_err(|e| e.to_string())?;
-        let body_guard = body_conn.lock().map_err(|e| e.to_string())?;
-        thread_detail::get_thread_detail(&db_guard, &body_guard, &account_id, &thread_id)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-```
+*Note: The Tauri command wrappers originally specified here are no longer relevant — the Tauri/React frontend has been permanently removed in favor of iced. The iced app calls core functions directly via the `conn()` accessors.*
 
 ### Why synchronous?
 
@@ -435,26 +401,7 @@ VALUES (?1, ?2, ?3)
 ON CONFLICT(account_id, thread_id) DO UPDATE SET attachments_collapsed = ?3
 ```
 
-### Tauri commands
-
-When the iced app needs these as standalone operations (outside `get_thread_detail`):
-
-```rust
-#[tauri::command]
-pub async fn get_attachments_collapsed(
-    account_id: String,
-    thread_id: String,
-    db: State<'_, DbState>,
-) -> Result<bool, String>
-
-#[tauri::command]
-pub async fn set_attachments_collapsed(
-    account_id: String,
-    thread_id: String,
-    collapsed: bool,
-    db: State<'_, DbState>,
-) -> Result<(), String>
-```
+*Note: Tauri command wrappers originally specified here are no longer relevant — the iced app calls these core functions directly.*
 
 ### Integration with `get_thread_detail`
 

@@ -18,83 +18,24 @@ These patterns appeared across 6-8+ specs and should be adopted as foundational 
 
 - [ ] **Generational load tracking**
 
-  Add a `load_generation: u64` counter pattern for all async-load-then-display paths. This is the single most impactful pattern from the ecosystem survey — it appeared as critical or high-priority in 8 separate specs.
+  Pattern established. Two generation counters implemented in `crates/app/src/main.rs`: `nav_generation` (accounts/labels/threads) and `thread_generation` (messages/attachments). All 5 current async load paths tagged; stale results discarded via guard arms.
 
-  **The problem**: When the user navigates rapidly (clicking through threads with j/k, typing in search, switching account scope), multiple async tasks are in flight simultaneously. Without generation tracking, a slow response from request N can arrive after request N+1's response, overwriting the correct current state with stale data. The current thread detail loading uses a thread_id comparison check, but this fails when the user re-selects the same thread while a load is in-flight (IDs match but the result is stale).
-
-  **The pattern**:
-  ```rust
-  // In App state:
-  load_generation: u64,
-
-  // On every new request (SelectThread, search keystroke, scope switch, etc.):
-  self.load_generation += 1;
-  let gen = self.load_generation;
-  Task::perform(async move { (gen, do_async_work().await) }, Message::Loaded)
-
-  // In the Loaded handler:
-  Message::Loaded((gen, data)) => {
-      if gen != self.load_generation { return Task::none(); } // stale, discard
-      // ... apply data to state
-  }
-  ```
-
-  **Where to apply** (each site needs its own generation counter or a per-domain counter map):
-  - Thread detail loading (`SelectThread` → `ThreadMessagesLoaded`) — `docs/main-layout/iced-implementation-spec.md`
+  **Remaining sites** (apply the same pattern as these features are built):
   - Search result queries (incremental typing) — `docs/search/implementation-spec.md`, `docs/search/problem-statement.md`
   - Sidebar navigation state (`get_navigation_state()` on scope switch) — `docs/sidebar/problem-statement.md`
   - Pinned search thread metadata loading — `docs/search/pinned-searches.md`
   - Command palette option resolution (`CommandInputResolver::get_options()`) — `docs/command-palette/roadmap.md`
-  - Status bar sync progress (per-account, needs a `HashMap<AccountId, u64>` rather than single counter) — `docs/status-bar/problem-statement.md`
+  - Status bar sync progress (per-account, needs `HashMap<AccountId, u64>`) — `docs/status-bar/problem-statement.md`
   - Attachment/body store loading — `docs/main-layout/problem-statement.md`
   - Calendar event loading on date navigation — `docs/calendar/problem-statement.md`
-
-  **Edge case**: For the status bar, bloom's single-counter pattern needs extension to a per-account generation map, since multiple accounts sync concurrently and each has independent progress. Use `HashMap<String, u64>` keyed by account_id.
-
-  **Interaction with other items**: The Component trait (below) affects where generation counters live. If the thread list is a Component, its generation counter lives in the component's state, not `App`. The subscription orchestration pattern determines how async results are delivered back (via `Task::perform` vs `subscription::channel`).
-
-  **Reference**: bloom `research/bloom/src/app.rs` line 157 (counter field), line 161 (increment + tag in update), result check in the Loaded handler.
 
 ---
 
 - [ ] **Component trait for panel isolation**
 
-  Define a `Component` trait in `crates/app/` that each major panel implements. This is the most important architectural decision for the iced app — without it, the `Message` enum will grow to 50-100+ variants as features land, making `update()` an unmaintainable monolith.
+  Trait defined in `crates/app/src/component.rs` with `Message`/`Event` associated types, `update()` returning `(Task, Option<Event>)`, and `view()`. Sidebar extracted as first component (`crates/app/src/ui/sidebar.rs`): owns accounts/labels/selection state, emits `SidebarEvent` variants. App dispatches via `Message::Sidebar(SidebarMessage)` and routes events. Shared widget functions genericized to work with any message type.
 
-  **The problem**: Every panel's interactions (sidebar navigation, thread list selection, reading pane actions, compose editor, calendar, command palette, status bar, settings) currently share a single flat `Message` enum and a single `update()` function. Adding a feature like calendar or compose means adding 10-20 new message variants to the same enum. At scale this becomes a classic "god object" — every change to any panel touches the same function, and the type system can't enforce which messages belong to which panel.
-
-  **The pattern** (from trebuchet `research/trebuchet/src/app.rs` lines 95-132):
-  ```rust
-  pub trait Component {
-      type Message;
-      type Event;
-
-      fn update(&mut self, message: Self::Message) -> (Task<Self::Message>, Option<Self::Event>);
-      fn view(&self) -> Element<'_, Self::Message>;
-      fn subscription(&self) -> Subscription<Self::Message>;
-  }
-  ```
-
-  Each panel implements `Component` with its own `Message` type. The panel's `update()` handles internal state transitions and optionally emits an `Event` for cross-panel communication. The top-level `App` holds all components and dispatches:
-
-  ```rust
-  // Top-level App::update():
-  AppMessage::ThreadList(msg) => {
-      let (task, event) = self.thread_list.update(msg);
-      if let Some(evt) = event {
-          match evt {
-              ThreadListEvent::ThreadSelected(id) => {
-                  // trigger reading pane load, with generation tracking
-              }
-              ThreadListEvent::BulkAction(action) => { ... }
-          }
-      }
-      task.map(AppMessage::ThreadList)
-  }
-  ```
-
-  **Panels to componentize**:
-  - **Sidebar** — emits `ScopeChanged(AccountScope)`, `NavigatedTo(FolderDestination)`, `LabelSelected(label_id)`
+  **Remaining panels to componentize**:
   - **Thread list** — emits `ThreadSelected(thread_id)`, `BulkAction(action)`, `SearchExecuted(query)`
   - **Reading pane** — emits `Reply(thread_id)`, `Archive(thread_id)`, `LabelToggled(thread_id, label_id)`
   - **Compose** — emits `Sent(draft_id)`, `DraftSaved(draft_id)`, `Discarded`
@@ -102,14 +43,6 @@ These patterns appeared across 6-8+ specs and should be adopted as foundational 
   - **Command palette** — emits `CommandExecuted(CommandId, CommandArgs)`, `Dismissed`
   - **Status bar** — emits `RequestReauth(account_id)`, `WarningClicked(account_id)`
   - **Settings** — emits `SettingsChanged(diff)`, `AccountReauthRequested(account_id)`
-
-  **Cross-panel coupling**: Ratatoskr's panels are not fully independent — thread selection in the sidebar/thread list drives content in the reading pane, keyboard shortcuts in the reading pane trigger actions that update the thread list. The Component trait handles this via the `Event` type: the sidebar emits an event, `App::update()` routes it to the reading pane. This is one level of indirection, not the N-level nesting of a flat message enum.
-
-  **Where referenced**: `docs/calendar/problem-statement.md`, `docs/main-layout/problem-statement.md`, `docs/sidebar/problem-statement.md`, `docs/status-bar/problem-statement.md`, `docs/search/problem-statement.md`, `docs/command-palette/problem-statement.md`, `docs/pop-out-windows/problem-statement.md`, `docs/contacts/problem-statement.md`.
-
-  **Interaction with other items**: Generation counters move into each component's state. The subscription orchestration pattern means each component provides `subscription()` and `App` batches them. The config shadow lives in the settings component or in whichever component owns the edit flow.
-
-  **Reference**: trebuchet `research/trebuchet/src/app.rs` lines 95-132 (trait definition, dispatch loop). Also Lumin's `Module` trait at `research/Lumin/src/module.rs` for an alternative take (trait with `run()` for activation).
 
 ---
 
@@ -311,29 +244,24 @@ These patterns appeared across 6-8+ specs and should be adopted as foundational 
 
   **Reference**: bloom `research/bloom/src/app.rs` lines 38 (`editing_config` field), 196 (clone on settings open), 402 (commit/discard on save/cancel). Also rustcast's TOML config with `#[serde(default)]` at `research/rustcast/src/config.rs` for the serialization pattern.
 
-- [ ] **Make sidebar fixed-width (not resizable)** — The sidebar should be a fixed width, not draggable. Remove the sidebar resize divider and any sidebar width persistence from `WindowState`. The sidebar width is a constant in `layout.rs`, not a user preference.
+- [ ] **Make sidebar fixed-width (not resizable)** *(Deferred until later)* — The sidebar should be a fixed width, not draggable. Remove the sidebar resize divider and any sidebar width persistence from `WindowState`. The sidebar width is a constant in `layout.rs`, not a user preference.
 
 - [ ] **Per-pane minimum resize limits** — PaneGrid currently uses a uniform `min_size(120)` for all panes. Should have per-pane minimums (e.g., sidebar can't go below 150px, thread list below 200px, contact sidebar below 180px). Requires clamping ratios in the `PaneResized` handler since PaneGrid only supports a single global minimum. Decide on actual values after visual testing.
-
-- [ ] **Animated toggler widget** — Port libcosmic's slerp-based toggle animation for smooth sliding pill togglers. Current iced built-in toggler snaps instantly. libcosmic's version (`research/libcosmic/src/widget/toggler.rs`) uses `anim::slerp()` with configurable duration (200ms default), interpolating knob position per-frame via `RedrawRequested`. ~150-200 LOC to port.
 
 - [ ] **`responsive` for adaptive layout** — Wrap PaneGrid in `iced::widget::responsive` to collapse panels at narrow window sizes (e.g., hide contact sidebar below 900px, stack sidebar over thread list below 600px).
 
 - [ ] **Keybinding display and edit UI** — Need to redo the Settings/Shortcuts UI. Take a look at https://nyaa.place/blog/libadwaita-1-8/
 
-- [ ] **UI freezes after ~20 minutes with settings open** — App hangs completely with no stdout/stderr. Prime suspect is the `mundy` subscription (`appearance.rs`) holding a D-Bus connection that may drop or block over time. Bisect by disabling subscriptions one-by-one to isolate.
-
 - [ ] **License display/multiline static text row** — Need to be able to click links and make text selectable/copyable in license display widgets. Needs its own base row type.
 
-- [ ] **Restore OS-based theme and 1.0 scale** — `SettingsState::default()` currently hardcodes `theme: "Light"` for development convenience. Revert to `theme: "System"` once UI prototyping is done, and persist user preferences to disk.
+- [ ] **Restore OS-based theme and 1.0 scale** *(Deferred until 1.0 release)* — `SettingsState::default()` currently hardcodes `theme: "Light"` for development convenience. Revert to `theme: "System"` once UI prototyping is done, and persist user preferences to disk.
 
-- [ ] **Wire up system font detection** — `crates/system-fonts/` is built and working (queries xdg-desktop-portal on Linux, SystemParametersInfo on Windows) but not wired into the app. Two phases:
-  1. **UI font**: On startup, call `SystemFonts::detect().await`. If a UI font is found and it's available on the system, apply it via iced's `font::set_defaults` task. Fall back to bundled Inter if detection fails or font isn't installed. This just confirms/overrides the default app font.
-  2. **Document font** (separate, later): The detected document font (e.g., TisaPro) should be used for email body text and other long-form content. This requires threading a separate font through the thread detail view and message body widgets. Not straightforward right now — email bodies are HTML processed by the sanitizer pipeline, not iced text widgets, so the document font may only apply once we have native body rendering. Add as a font setting in the settings UI too (let users override the detected system fonts).
+- [x] **Wire up system font detection (Phase 1 — UI font)** — Done. Synchronous detection before app launch via throwaway tokio runtime. Detected font family stored in `OnceLock`, font constants converted to functions (`font::text()`, `font::text_semibold()`, etc.). Falls back to bundled Inter if detection fails.
+- [ ] **Wire up system font detection (Phase 2 — Document font)** — The detected document font (e.g., TisaPro) should be used for email body text and other long-form content. This requires threading a separate font through the thread detail view and message body widgets. Not straightforward right now — email bodies are HTML processed by the sanitizer pipeline, not iced text widgets, so the document font may only apply once we have native body rendering. Add as a font setting in the settings UI too (let users override the detected system fonts).
 
 - [ ] **Thread list keyboard navigation** — Arrow Up/Down to move selection, PgUp/PgDn to jump by a page, Home/End to jump to first/last. Should scroll the selected thread into view automatically. Enter to open thread, Escape to deselect. Needs an iced keyboard event subscription in the app, gated on the thread list having focus.
 
-- [ ] **Scrollbars must shift layout, not overlay** — When a scrollbar appears (e.g., content grows beyond the viewport), it must push the content inward rather than overlaying existing UI elements. Overlay scrollbars cause text/buttons to be hidden behind the scrollbar track. Ensure all `scrollable` widgets use a mode that reserves space for the scrollbar or accounts for its width in the layout.
+- [x] **Scrollbars must shift layout, not overlay** — Done. Added `SCROLLBAR_SPACING` constant to `layout.rs` and applied `.spacing(SCROLLBAR_SPACING)` to all 7 scrollable instances (sidebar, thread list, reading pane, right sidebar, 3 settings scrollables). Uses iced's embedded scrollbar mode.
 
 - [ ] **Thread list pagination (revisit later)** — Currently loads all threads at once (LIMIT 1000). This is fast with the test dataset (1000 threads renders instantly). We attempted batched lazy loading (200 per page, `on_scroll` trigger, spacer for honest scrollbar) but reverted: (1) `on_scroll` fires on every pixel of scroll movement, causing a full `update()`/`view()` cycle per pixel which made scrolling sluggish; (2) the spacer approach for honest scrollbar sizing made the content area huge, worsening the `on_scroll` overhead; (3) without the spacer the scrollbar thumb jumps when batches load (content height changes suddenly). The DB layer already supports `LIMIT`/`OFFSET` (`db.get_threads` has the params, `count_threads` exists). Revisit when thread counts actually cause problems — likely needs iced-level virtual scrolling (only render visible rows) rather than application-level pagination, since the bottleneck is widget count in the scrollable, not query speed.
 
