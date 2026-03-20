@@ -100,6 +100,40 @@ pub enum SettingsMessage {
     SignatureEditorToggleDefault(bool),
     SignatureEditorToggleReplyDefault(bool),
     SignatureEditorSave,
+    // Contacts
+    ContactFilterChanged(String),
+    ContactsLoaded(Result<Vec<crate::db::ContactEntry>, String>),
+    ContactClick(String),
+    ContactEditorFieldChanged(ContactField, String),
+    ContactEditorSave,
+    ContactDelete(String),
+    ContactCreate,
+    ContactSaved(Result<(), String>),
+    ContactDeleted(Result<(), String>),
+    // Groups
+    GroupFilterChanged(String),
+    GroupsLoaded(Result<Vec<crate::db::GroupEntry>, String>),
+    GroupClick(String),
+    GroupCreate,
+    GroupDelete(String),
+    GroupSaved(Result<(), String>),
+    GroupDeleted(Result<(), String>),
+    GroupEditorNameChanged(String),
+    GroupEditorRemoveMember(String),
+    GroupEditorAddMember(String),
+    GroupEditorSave,
+    GroupEditorFilterChanged(String),
+}
+
+/// Which field in the contact editor changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContactField {
+    DisplayName,
+    Email,
+    Email2,
+    Phone,
+    Company,
+    Notes,
 }
 
 /// Events the settings component emits upward to the App.
@@ -112,6 +146,18 @@ pub enum SettingsEvent {
     SaveSignature(SignatureSaveRequest),
     /// Request the App to delete a signature by ID.
     DeleteSignature(String),
+    /// Request the App to save a contact.
+    SaveContact(crate::db::ContactEntry),
+    /// Request the App to delete a contact by ID.
+    DeleteContact(String),
+    /// Request the App to save a group.
+    SaveGroup(crate::db::GroupEntry, Vec<String>),
+    /// Request the App to delete a group by ID.
+    DeleteGroup(String),
+    /// Request the App to load contacts (with filter).
+    LoadContacts(String),
+    /// Request the App to load groups (with filter).
+    LoadGroups(String),
 }
 
 /// Overlays that slide in from the right, covering the settings content.
@@ -123,6 +169,14 @@ pub enum SettingsOverlay {
         /// None for new signature, Some for editing existing.
         signature_id: Option<String>,
         account_id: String,
+    },
+    EditContact {
+        /// None for new contact, Some for editing existing.
+        contact_id: Option<String>,
+    },
+    EditGroup {
+        /// None for new group, Some for editing existing.
+        group_id: Option<String>,
     },
 }
 
@@ -249,6 +303,27 @@ pub struct SignatureEditorState {
     pub is_reply_default: bool,
 }
 
+/// Editing state for the contact editor overlay.
+#[derive(Debug, Clone)]
+pub struct ContactEditorState {
+    pub contact_id: Option<String>,
+    pub display_name: String,
+    pub email: String,
+    pub email2: String,
+    pub phone: String,
+    pub company: String,
+    pub notes: String,
+}
+
+/// Editing state for the group editor overlay.
+#[derive(Debug, Clone)]
+pub struct GroupEditorState {
+    pub group_id: Option<String>,
+    pub name: String,
+    pub members: Vec<String>,
+    pub filter: String,
+}
+
 pub struct Settings {
     pub active_tab: Tab,
     pub open_select: Option<SelectField>,
@@ -308,6 +383,14 @@ pub struct Settings {
     // Signatures
     pub signatures: Vec<SignatureEntry>,
     pub signature_editor: Option<SignatureEditorState>,
+    // Contacts management
+    pub contact_filter: String,
+    pub contacts: Vec<crate::db::ContactEntry>,
+    pub contact_editor: Option<ContactEditorState>,
+    // Groups management
+    pub group_filter: String,
+    pub groups: Vec<crate::db::GroupEntry>,
+    pub group_editor: Option<GroupEditorState>,
 }
 
 /// An account card in the settings list.
@@ -413,6 +496,12 @@ impl Default for Settings {
             managed_accounts: Vec::new(),
             signatures: Vec::new(),
             signature_editor: None,
+            contact_filter: String::new(),
+            contacts: Vec::new(),
+            contact_editor: None,
+            group_filter: String::new(),
+            groups: Vec::new(),
+            group_editor: None,
         }
     }
 }
@@ -456,6 +545,32 @@ impl Component for Settings {
             }
             SettingsMessage::ListDragMove(list_id, point) => {
                 return (self.handle_drag_move(list_id, point), None);
+            }
+            SettingsMessage::SelectTab(Tab::People) => {
+                self.active_tab = Tab::People;
+                self.pinned_help = None;
+                // LoadContacts handler in main.rs also loads groups.
+                return (Task::none(), Some(SettingsEvent::LoadContacts(self.contact_filter.clone())));
+            }
+            SettingsMessage::ContactEditorSave => {
+                return self.handle_contact_save();
+            }
+            SettingsMessage::ContactDelete(id) => {
+                return self.handle_contact_delete(id);
+            }
+            SettingsMessage::GroupEditorSave => {
+                return self.handle_group_save();
+            }
+            SettingsMessage::GroupDelete(id) => {
+                return self.handle_group_delete(id);
+            }
+            SettingsMessage::ContactFilterChanged(v) => {
+                self.contact_filter = v.clone();
+                return (Task::none(), Some(SettingsEvent::LoadContacts(v)));
+            }
+            SettingsMessage::GroupFilterChanged(v) => {
+                self.group_filter = v.clone();
+                return (Task::none(), Some(SettingsEvent::LoadGroups(v)));
             }
             _ => self.handle_simple_message(message),
         }
@@ -646,7 +761,67 @@ impl Settings {
                 self.overlay = None;
                 self.overlay_anim.go_mut(false, Instant::now());
                 self.signature_editor = None;
+                self.contact_editor = None;
+                self.group_editor = None;
             }
+            SettingsMessage::ContactsLoaded(Ok(contacts)) => {
+                self.contacts = contacts;
+            }
+            SettingsMessage::ContactsLoaded(Err(_)) => {}
+            SettingsMessage::GroupsLoaded(Ok(groups)) => {
+                self.groups = groups;
+            }
+            SettingsMessage::GroupsLoaded(Err(_)) => {}
+            SettingsMessage::ContactClick(id) => {
+                self.open_contact_editor(&id);
+            }
+            SettingsMessage::ContactCreate => {
+                self.open_new_contact_editor();
+            }
+            SettingsMessage::ContactEditorFieldChanged(field, value) => {
+                if let Some(ref mut editor) = self.contact_editor {
+                    match field {
+                        ContactField::DisplayName => editor.display_name = value,
+                        ContactField::Email => editor.email = value,
+                        ContactField::Email2 => editor.email2 = value,
+                        ContactField::Phone => editor.phone = value,
+                        ContactField::Company => editor.company = value,
+                        ContactField::Notes => editor.notes = value,
+                    }
+                }
+            }
+            SettingsMessage::ContactSaved(Ok(())) | SettingsMessage::ContactDeleted(Ok(())) => {}
+            SettingsMessage::ContactSaved(Err(_)) | SettingsMessage::ContactDeleted(Err(_)) => {}
+            SettingsMessage::GroupClick(id) => {
+                self.open_group_editor(&id);
+            }
+            SettingsMessage::GroupCreate => {
+                self.open_new_group_editor();
+            }
+            SettingsMessage::GroupEditorNameChanged(v) => {
+                if let Some(ref mut editor) = self.group_editor {
+                    editor.name = v;
+                }
+            }
+            SettingsMessage::GroupEditorRemoveMember(email) => {
+                if let Some(ref mut editor) = self.group_editor {
+                    editor.members.retain(|m| m != &email);
+                }
+            }
+            SettingsMessage::GroupEditorAddMember(email) => {
+                if let Some(ref mut editor) = self.group_editor {
+                    if !editor.members.contains(&email) {
+                        editor.members.push(email);
+                    }
+                }
+            }
+            SettingsMessage::GroupEditorFilterChanged(v) => {
+                if let Some(ref mut editor) = self.group_editor {
+                    editor.filter = v;
+                }
+            }
+            SettingsMessage::GroupSaved(Ok(())) | SettingsMessage::GroupDeleted(Ok(())) => {}
+            SettingsMessage::GroupSaved(Err(_)) | SettingsMessage::GroupDeleted(Err(_)) => {}
             _ => {} // Already handled in update() or handle_simple_message()
         }
     }
@@ -735,6 +910,126 @@ impl Settings {
         (Task::none(), Some(SettingsEvent::SaveSignature(request)))
     }
 
+    fn open_contact_editor(&mut self, contact_id: &str) {
+        if let Some(contact) = self.contacts.iter().find(|c| c.id == contact_id) {
+            self.contact_editor = Some(ContactEditorState {
+                contact_id: Some(contact.id.clone()),
+                display_name: contact.display_name.clone().unwrap_or_default(),
+                email: contact.email.clone(),
+                email2: contact.email2.clone().unwrap_or_default(),
+                phone: contact.phone.clone().unwrap_or_default(),
+                company: contact.company.clone().unwrap_or_default(),
+                notes: contact.notes.clone().unwrap_or_default(),
+            });
+            self.overlay = Some(SettingsOverlay::EditContact {
+                contact_id: Some(contact.id.clone()),
+            });
+            self.overlay_anim.go_mut(true, Instant::now());
+        }
+    }
+
+    fn open_new_contact_editor(&mut self) {
+        self.contact_editor = Some(ContactEditorState {
+            contact_id: None,
+            display_name: String::new(),
+            email: String::new(),
+            email2: String::new(),
+            phone: String::new(),
+            company: String::new(),
+            notes: String::new(),
+        });
+        self.overlay = Some(SettingsOverlay::EditContact { contact_id: None });
+        self.overlay_anim.go_mut(true, Instant::now());
+    }
+
+    fn handle_contact_save(&mut self) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
+        let Some(ref editor) = self.contact_editor else {
+            return (Task::none(), None);
+        };
+        let email = editor.email.trim().to_string();
+        if email.is_empty() {
+            return (Task::none(), None);
+        }
+        let entry = crate::db::ContactEntry {
+            id: editor.contact_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            email,
+            display_name: non_empty(editor.display_name.trim()),
+            email2: non_empty(editor.email2.trim()),
+            phone: non_empty(editor.phone.trim()),
+            company: non_empty(editor.company.trim()),
+            notes: non_empty(editor.notes.trim()),
+            account_id: None,
+            account_color: None,
+            groups: Vec::new(),
+        };
+        self.overlay = None;
+        self.overlay_anim.go_mut(false, Instant::now());
+        self.contact_editor = None;
+        (Task::none(), Some(SettingsEvent::SaveContact(entry)))
+    }
+
+    fn handle_contact_delete(&mut self, id: String) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
+        self.overlay = None;
+        self.overlay_anim.go_mut(false, Instant::now());
+        self.contact_editor = None;
+        (Task::none(), Some(SettingsEvent::DeleteContact(id)))
+    }
+
+    fn open_group_editor(&mut self, group_id: &str) {
+        if let Some(group) = self.groups.iter().find(|g| g.id == group_id) {
+            self.group_editor = Some(GroupEditorState {
+                group_id: Some(group.id.clone()),
+                name: group.name.clone(),
+                members: Vec::new(), // will be populated from DB via App
+                filter: String::new(),
+            });
+            self.overlay = Some(SettingsOverlay::EditGroup {
+                group_id: Some(group.id.clone()),
+            });
+            self.overlay_anim.go_mut(true, Instant::now());
+        }
+    }
+
+    fn open_new_group_editor(&mut self) {
+        self.group_editor = Some(GroupEditorState {
+            group_id: None,
+            name: String::new(),
+            members: Vec::new(),
+            filter: String::new(),
+        });
+        self.overlay = Some(SettingsOverlay::EditGroup { group_id: None });
+        self.overlay_anim.go_mut(true, Instant::now());
+    }
+
+    fn handle_group_save(&mut self) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
+        let Some(ref editor) = self.group_editor else {
+            return (Task::none(), None);
+        };
+        let name = editor.name.trim().to_string();
+        if name.is_empty() {
+            return (Task::none(), None);
+        }
+        let group = crate::db::GroupEntry {
+            id: editor.group_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            name,
+            member_count: editor.members.len() as i64,
+            created_at: 0,
+            updated_at: 0,
+        };
+        let members = editor.members.clone();
+        self.overlay = None;
+        self.overlay_anim.go_mut(false, Instant::now());
+        self.group_editor = None;
+        (Task::none(), Some(SettingsEvent::SaveGroup(group, members)))
+    }
+
+    fn handle_group_delete(&mut self, id: String) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
+        self.overlay = None;
+        self.overlay_anim.go_mut(false, Instant::now());
+        self.group_editor = None;
+        (Task::none(), Some(SettingsEvent::DeleteGroup(id)))
+    }
+
     fn list_items_mut(&mut self, list_id: &str) -> &mut Vec<EditableItem> {
         match list_id {
             "labels" => &mut self.demo_labels,
@@ -755,7 +1050,7 @@ fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
         Tab::Notifications => notifications_tab(state),
         Tab::Composing => composing_tab(state),
         Tab::MailRules => mail_rules_tab(state),
-        Tab::People => people_tab(),
+        Tab::People => people_tab(state),
         Tab::Shortcuts => shortcuts_tab(),
         Tab::Ai => ai_tab(state),
         Tab::About => about_tab(),
@@ -780,6 +1075,8 @@ fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
         let overlay_content = match state.overlay {
             Some(SettingsOverlay::CreateFilter) => create_filter_overlay(),
             Some(SettingsOverlay::EditSignature { .. }) => signature_editor_overlay(state),
+            Some(SettingsOverlay::EditContact { .. }) => contact_editor_overlay(state),
+            Some(SettingsOverlay::EditGroup { .. }) => group_editor_overlay(state),
             None => column![].into(), // closing animation
         };
 
@@ -1574,14 +1871,452 @@ fn signature_editor_overlay(state: &Settings) -> Element<'_, SettingsMessage> {
 
 // ── People tab ───────────────────────────────────────────
 
-fn people_tab<'a>() -> Element<'a, SettingsMessage> {
+fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(SETTINGS_CONTENT_MAX_WIDTH);
 
-    col = col.push(section("Contacts", vec![coming_soon_row("Contact management")]));
-    col = col.push(section("Groups", vec![coming_soon_row("Group management")]));
-    col = col.push(section("Subscriptions", vec![coming_soon_row("Subscription management")]));
+    // ── Contacts section ──
+    let mut contact_items: Vec<Element<'_, SettingsMessage>> = Vec::new();
+
+    // Filter input
+    contact_items.push(contact_filter_row(&state.contact_filter));
+
+    // Contact cards
+    for contact in &state.contacts {
+        contact_items.push(contact_card(contact));
+    }
+
+    // New Contact button
+    contact_items.push(people_add_button("New Contact", SettingsMessage::ContactCreate));
+
+    col = col.push(section("Contacts", contact_items));
+
+    // ── Groups section ──
+    let mut group_items: Vec<Element<'_, SettingsMessage>> = Vec::new();
+
+    // Filter input
+    group_items.push(group_filter_row(&state.group_filter));
+
+    // Group cards
+    for group in &state.groups {
+        group_items.push(group_card(group));
+    }
+
+    // New Group button
+    group_items.push(people_add_button("New Group", SettingsMessage::GroupCreate));
+
+    col = col.push(section("Groups", group_items));
 
     col.into()
+}
+
+fn contact_filter_row(filter: &str) -> Element<'_, SettingsMessage> {
+    let filter_owned = filter.to_string();
+    container(
+        text_input("Filter contacts...", &filter_owned)
+            .on_input(SettingsMessage::ContactFilterChanged)
+            .size(TEXT_LG)
+            .padding(PAD_INPUT)
+            .style(theme::TextInputClass::Settings.style())
+            .width(Length::Fill),
+    )
+    .padding(PAD_SETTINGS_ROW)
+    .width(Length::Fill)
+    .into()
+}
+
+fn group_filter_row(filter: &str) -> Element<'_, SettingsMessage> {
+    let filter_owned = filter.to_string();
+    container(
+        text_input("Filter groups...", &filter_owned)
+            .on_input(SettingsMessage::GroupFilterChanged)
+            .size(TEXT_LG)
+            .padding(PAD_INPUT)
+            .style(theme::TextInputClass::Settings.style())
+            .width(Length::Fill),
+    )
+    .padding(PAD_SETTINGS_ROW)
+    .width(Length::Fill)
+    .into()
+}
+
+fn contact_card(contact: &crate::db::ContactEntry) -> Element<'_, SettingsMessage> {
+    let name = contact.display_name.as_deref().unwrap_or("(no name)");
+    let id = contact.id.clone();
+
+    let mut left_col = column![].spacing(SPACE_XXXS);
+    left_col = left_col.push(text(name).size(TEXT_LG).style(text::base));
+
+    if let Some(ref phone) = contact.phone {
+        left_col = left_col.push(
+            text(format!("Phone: {phone}")).size(TEXT_SM).style(text::secondary),
+        );
+    }
+    if let Some(ref company) = contact.company {
+        left_col = left_col.push(
+            text(format!("Company: {company}")).size(TEXT_SM).style(text::secondary),
+        );
+    }
+    if let Some(ref notes) = contact.notes {
+        left_col = left_col.push(
+            text(format!("Notes: {notes}")).size(TEXT_SM).style(text::secondary),
+        );
+    }
+
+    // Group pills
+    if !contact.groups.is_empty() {
+        let group_text = contact.groups.join(", ");
+        left_col = left_col.push(
+            text(format!("Groups: {group_text}")).size(TEXT_XS).style(text::primary),
+        );
+    }
+
+    let mut right_col = column![].spacing(SPACE_XXXS).align_x(Alignment::End);
+    right_col = right_col.push(text(&contact.email).size(TEXT_SM).style(text::secondary));
+    if let Some(ref email2) = contact.email2 {
+        right_col = right_col.push(text(email2).size(TEXT_SM).style(text::secondary));
+    }
+
+    let content = row![
+        left_col.width(Length::Fill),
+        right_col,
+    ]
+    .spacing(SPACE_SM)
+    .align_y(Alignment::Center);
+
+    button(
+        container(content)
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill)
+            .align_y(Alignment::Center),
+    )
+    .on_press(SettingsMessage::ContactClick(id))
+    .padding(0)
+    .style(theme::ButtonClass::Action.style())
+    .width(Length::Fill)
+    .into()
+}
+
+fn group_card(group: &crate::db::GroupEntry) -> Element<'_, SettingsMessage> {
+    let id = group.id.clone();
+    let member_label = if group.member_count == 1 {
+        "1 member".to_string()
+    } else {
+        format!("{} members", group.member_count)
+    };
+
+    let content = row![
+        column![
+            text(&group.name).size(TEXT_LG).style(text::base),
+        ]
+        .width(Length::Fill),
+        text(member_label).size(TEXT_SM).style(text::secondary),
+    ]
+    .spacing(SPACE_SM)
+    .align_y(Alignment::Center);
+
+    button(
+        container(content)
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill)
+            .height(SETTINGS_ROW_HEIGHT)
+            .align_y(Alignment::Center),
+    )
+    .on_press(SettingsMessage::GroupClick(id))
+    .padding(0)
+    .style(theme::ButtonClass::Action.style())
+    .width(Length::Fill)
+    .into()
+}
+
+fn people_add_button(label: &str, on_press: SettingsMessage) -> Element<'_, SettingsMessage> {
+    button(
+        container(
+            row![
+                icon::plus().size(ICON_MD).style(text::base),
+                text(label)
+                    .size(TEXT_LG)
+                    .style(text::base)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..crate::font::text()
+                    }),
+            ]
+            .spacing(SPACE_XS)
+            .align_y(Alignment::Center),
+        )
+        .center_x(Length::Fill)
+        .align_y(Alignment::Center),
+    )
+    .on_press(on_press)
+    .padding(PAD_SETTINGS_ROW)
+    .style(theme::ButtonClass::Action.style())
+    .width(Length::Fill)
+    .height(SETTINGS_ROW_HEIGHT)
+    .into()
+}
+
+// ── Contact editor overlay ──────────────────────────────
+
+fn contact_editor_overlay(state: &Settings) -> Element<'_, SettingsMessage> {
+    let Some(ref editor) = state.contact_editor else {
+        return column![].into();
+    };
+
+    let is_new = editor.contact_id.is_none();
+    let title = if is_new { "New Contact" } else { "Edit Contact" };
+
+    let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(SETTINGS_CONTENT_MAX_WIDTH);
+
+    col = col.push(
+        text(title)
+            .size(TEXT_HEADING)
+            .style(text::base)
+            .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::text() }),
+    );
+
+    col = col.push(contact_editor_fields(editor));
+    col = col.push(contact_editor_buttons(editor));
+
+    col.into()
+}
+
+fn contact_editor_fields(editor: &ContactEditorState) -> Element<'_, SettingsMessage> {
+    let fields = vec![
+        contact_field_input("Display name", "Name", &editor.display_name, ContactField::DisplayName),
+        contact_field_input("Email", "email@example.com", &editor.email, ContactField::Email),
+        contact_field_input("Email 2", "Optional second email", &editor.email2, ContactField::Email2),
+        contact_field_input("Phone", "Optional phone number", &editor.phone, ContactField::Phone),
+        contact_field_input("Company", "Optional company", &editor.company, ContactField::Company),
+        contact_field_input("Notes", "Optional notes", &editor.notes, ContactField::Notes),
+    ];
+    section("Details", fields)
+}
+
+fn contact_field_input<'a>(
+    label: &'a str,
+    placeholder: &'a str,
+    value: &'a str,
+    field: ContactField,
+) -> Element<'a, SettingsMessage> {
+    container(
+        column![
+            text(label).size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
+            Space::new().height(SPACE_XXXS),
+            text_input(placeholder, value)
+                .on_input(move |v| SettingsMessage::ContactEditorFieldChanged(field.clone(), v))
+                .size(TEXT_LG)
+                .padding(PAD_INPUT)
+                .style(theme::TextInputClass::Settings.style())
+                .width(Length::Fill),
+        ],
+    )
+    .padding(PAD_SETTINGS_ROW)
+    .width(Length::Fill)
+    .into()
+}
+
+fn contact_editor_buttons(editor: &ContactEditorState) -> Element<'_, SettingsMessage> {
+    let mut btn_row = row![].spacing(SPACE_SM).align_y(Alignment::Center);
+
+    if let Some(ref id) = editor.contact_id {
+        btn_row = btn_row.push(
+            button(text("Delete").size(TEXT_LG).style(text::danger))
+                .on_press(SettingsMessage::ContactDelete(id.clone()))
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Action.style()),
+        );
+    }
+
+    btn_row = btn_row.push(Space::new().width(Length::Fill));
+
+    let can_save = !editor.email.trim().is_empty();
+    let mut save_btn = button(
+        container(text("Save").size(TEXT_LG)).center_x(Length::Fill),
+    )
+    .padding(PAD_BUTTON)
+    .style(theme::ButtonClass::Primary.style())
+    .width(Length::Fixed(100.0));
+    if can_save {
+        save_btn = save_btn.on_press(SettingsMessage::ContactEditorSave);
+    }
+    btn_row = btn_row.push(save_btn);
+
+    btn_row.into()
+}
+
+// ── Group editor overlay ────────────────────────────────
+
+fn group_editor_overlay(state: &Settings) -> Element<'_, SettingsMessage> {
+    let Some(ref editor) = state.group_editor else {
+        return column![].into();
+    };
+
+    let is_new = editor.group_id.is_none();
+    let title = if is_new { "New Group" } else { "Edit Group" };
+
+    let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(SETTINGS_CONTENT_MAX_WIDTH);
+
+    col = col.push(
+        text(title)
+            .size(TEXT_HEADING)
+            .style(text::base)
+            .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::text() }),
+    );
+
+    // Group name
+    col = col.push(section("Name", vec![
+        container(
+            text_input("Group name", &editor.name)
+                .on_input(SettingsMessage::GroupEditorNameChanged)
+                .size(TEXT_LG)
+                .padding(PAD_INPUT)
+                .style(theme::TextInputClass::Settings.style())
+                .width(Length::Fill),
+        )
+        .padding(PAD_SETTINGS_ROW)
+        .width(Length::Fill)
+        .into(),
+    ]));
+
+    // Members section
+    col = col.push(group_member_section(editor, state));
+
+    // Action buttons
+    col = col.push(group_editor_buttons(editor));
+
+    col.into()
+}
+
+fn group_member_section<'a>(
+    editor: &'a GroupEditorState,
+    state: &'a Settings,
+) -> Element<'a, SettingsMessage> {
+    let mut member_items: Vec<Element<'a, SettingsMessage>> = Vec::new();
+
+    // Add member filter
+    member_items.push(
+        container(
+            text_input("Add member by email...", &editor.filter)
+                .on_input(SettingsMessage::GroupEditorFilterChanged)
+                .on_submit(SettingsMessage::GroupEditorAddMember(editor.filter.clone()))
+                .size(TEXT_LG)
+                .padding(PAD_INPUT)
+                .style(theme::TextInputClass::Settings.style())
+                .width(Length::Fill),
+        )
+        .padding(PAD_SETTINGS_ROW)
+        .width(Length::Fill)
+        .into(),
+    );
+
+    // Show matching contacts (not already members)
+    let filter_lower = editor.filter.to_lowercase();
+    if !filter_lower.is_empty() {
+        for contact in &state.contacts {
+            let dominated = contact.email.to_lowercase().contains(&filter_lower)
+                || contact.display_name.as_deref().unwrap_or("").to_lowercase().contains(&filter_lower);
+            if dominated && !editor.members.contains(&contact.email) {
+                let email = contact.email.clone();
+                let label = contact.display_name.as_deref().unwrap_or(&contact.email);
+                member_items.push(
+                    button(
+                        container(
+                            row![
+                                icon::plus().size(ICON_SM).style(text::primary),
+                                text(label).size(TEXT_MD).style(text::base),
+                                Space::new().width(Length::Fill),
+                                text(&contact.email).size(TEXT_SM).style(text::secondary),
+                            ]
+                            .spacing(SPACE_XS)
+                            .align_y(Alignment::Center),
+                        )
+                        .padding(PAD_SETTINGS_ROW)
+                        .width(Length::Fill),
+                    )
+                    .on_press(SettingsMessage::GroupEditorAddMember(email))
+                    .padding(0)
+                    .style(theme::ButtonClass::Action.style())
+                    .width(Length::Fill)
+                    .into(),
+                );
+            }
+        }
+    }
+
+    // Current members as removable tiles
+    for email in &editor.members {
+        let email_clone = email.clone();
+        member_items.push(
+            button(
+                container(
+                    row![
+                        text(email).size(TEXT_MD).style(text::base),
+                        Space::new().width(Length::Fill),
+                        icon::trash().size(ICON_SM).style(text::danger),
+                    ]
+                    .spacing(SPACE_XS)
+                    .align_y(Alignment::Center),
+                )
+                .padding(PAD_SETTINGS_ROW)
+                .width(Length::Fill),
+            )
+            .on_press(SettingsMessage::GroupEditorRemoveMember(email_clone))
+            .padding(0)
+            .style(theme::ButtonClass::Action.style())
+            .width(Length::Fill)
+            .into(),
+        );
+    }
+
+    // Build the section manually because the title is a dynamic String.
+    let title_text = text(format!("Members ({})", editor.members.len()))
+        .size(TEXT_XL)
+        .style(text::base)
+        .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::text() });
+
+    let mut items_col = column![].width(Length::Fill).padding(1);
+    for (i, item) in member_items.into_iter().enumerate() {
+        if i > 0 {
+            items_col = items_col.push(
+                iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()),
+            );
+        }
+        items_col = items_col.push(item);
+    }
+    let section_box = container(items_col)
+        .width(Length::Fill)
+        .style(theme::ContainerClass::SettingsSection.style());
+
+    column![title_text, section_box].spacing(SPACE_XS).into()
+}
+
+fn group_editor_buttons(editor: &GroupEditorState) -> Element<'_, SettingsMessage> {
+    let mut btn_row = row![].spacing(SPACE_SM).align_y(Alignment::Center);
+
+    if let Some(ref id) = editor.group_id {
+        btn_row = btn_row.push(
+            button(text("Delete").size(TEXT_LG).style(text::danger))
+                .on_press(SettingsMessage::GroupDelete(id.clone()))
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Action.style()),
+        );
+    }
+
+    btn_row = btn_row.push(Space::new().width(Length::Fill));
+
+    let can_save = !editor.name.trim().is_empty();
+    let mut save_btn = button(
+        container(text("Save").size(TEXT_LG)).center_x(Length::Fill),
+    )
+    .padding(PAD_BUTTON)
+    .style(theme::ButtonClass::Primary.style())
+    .width(Length::Fixed(100.0));
+    if can_save {
+        save_btn = save_btn.on_press(SettingsMessage::GroupEditorSave);
+    }
+    btn_row = btn_row.push(save_btn);
+
+    btn_row.into()
 }
 
 // ── Shortcuts tab ────────────────────────────────────────
@@ -1907,6 +2642,11 @@ fn format_last_sync(last_sync_at: Option<i64>) -> String {
             }
         }
     }
+}
+
+/// Convert empty strings to `None`.
+fn non_empty(s: &str) -> Option<String> {
+    if s.is_empty() { None } else { Some(s.to_string()) }
 }
 
 // ── Shared setting widgets ──────────────────────────────

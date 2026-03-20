@@ -1557,6 +1557,72 @@ impl App {
                     },
                 )
             }
+            SettingsEvent::LoadContacts(filter) => {
+                let db = Arc::clone(&self.db);
+                let db2 = Arc::clone(&self.db);
+                let group_filter = self.settings.group_filter.clone();
+                Task::batch([
+                    Task::perform(
+                        async move { db.get_contacts_for_settings(filter).await },
+                        |result| Message::Settings(SettingsMessage::ContactsLoaded(result)),
+                    ),
+                    Task::perform(
+                        async move { db2.get_groups_for_settings(group_filter).await },
+                        |result| Message::Settings(SettingsMessage::GroupsLoaded(result)),
+                    ),
+                ])
+            }
+            SettingsEvent::LoadGroups(filter) => {
+                let db = Arc::clone(&self.db);
+                Task::perform(
+                    async move { db.get_groups_for_settings(filter).await },
+                    |result| Message::Settings(SettingsMessage::GroupsLoaded(result)),
+                )
+            }
+            SettingsEvent::SaveContact(entry) => {
+                let db = Arc::clone(&self.db);
+                let filter = self.settings.contact_filter.clone();
+                Task::perform(
+                    async move {
+                        db.save_contact(entry).await?;
+                        db.get_contacts_for_settings(filter).await
+                    },
+                    |result| Message::Settings(SettingsMessage::ContactsLoaded(result)),
+                )
+            }
+            SettingsEvent::DeleteContact(id) => {
+                let db = Arc::clone(&self.db);
+                let filter = self.settings.contact_filter.clone();
+                Task::perform(
+                    async move {
+                        db.delete_contact(id).await?;
+                        db.get_contacts_for_settings(filter).await
+                    },
+                    |result| Message::Settings(SettingsMessage::ContactsLoaded(result)),
+                )
+            }
+            SettingsEvent::SaveGroup(group, members) => {
+                let db = Arc::clone(&self.db);
+                let filter = self.settings.group_filter.clone();
+                Task::perform(
+                    async move {
+                        db.save_group(group, members).await?;
+                        db.get_groups_for_settings(filter).await
+                    },
+                    |result| Message::Settings(SettingsMessage::GroupsLoaded(result)),
+                )
+            }
+            SettingsEvent::DeleteGroup(id) => {
+                let db = Arc::clone(&self.db);
+                let filter = self.settings.group_filter.clone();
+                Task::perform(
+                    async move {
+                        db.delete_group(id).await?;
+                        db.get_groups_for_settings(filter).await
+                    },
+                    |result| Message::Settings(SettingsMessage::GroupsLoaded(result)),
+                )
+            }
         }
     }
 
