@@ -681,6 +681,11 @@ impl App {
     fn handle_palette(&mut self, msg: PaletteMessage) -> Task<Message> {
         match msg {
             PaletteMessage::Open => {
+                // Don't open palette when settings overlay is showing —
+                // the palette can't render there, creating a hidden-modal state.
+                if self.show_settings {
+                    return Task::none();
+                }
                 let ctx = command_dispatch::build_context(self);
                 let results = self.registry.query(&ctx, "");
                 self.palette.open = true;

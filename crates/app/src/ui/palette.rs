@@ -57,14 +57,14 @@ pub fn palette_card<'a, M: 'a + Clone>(
     );
 
     let results_scrollable = scrollable(results_column)
-        .height(Length::Shrink);
+        .height(Length::Fill);
 
     let card_content = column![input, results_scrollable]
         .spacing(SPACE_XXS);
 
     container(card_content)
         .width(PALETTE_WIDTH)
-        .height(Length::Shrink)
+        .max_height(PALETTE_MAX_HEIGHT)
         .padding(SPACE_XS)
         .style(ContainerClass::PaletteCard.style())
         .into()
