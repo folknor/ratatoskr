@@ -358,3 +358,39 @@ pub const PAD_STATUS_BAR: Padding = Padding {
     bottom: 4.0,
     left: 12.0,
 };
+
+// ── Token input ─────────────────────────────────────────
+
+/// Token chip height.
+pub const TOKEN_HEIGHT: f32 = 24.0;
+/// Token chip border radius.
+pub const TOKEN_RADIUS: f32 = RADIUS_SM;
+/// Token chip internal padding.
+pub const PAD_TOKEN: Padding = Padding {
+    top: 2.0,
+    right: 8.0,
+    bottom: 2.0,
+    left: 8.0,
+};
+/// Spacing between tokens (horizontal).
+pub const TOKEN_SPACING: f32 = SPACE_XXS;
+/// Spacing between token rows (vertical).
+pub const TOKEN_ROW_SPACING: f32 = SPACE_XXS;
+/// Token input field internal padding.
+pub const PAD_TOKEN_INPUT: Padding = Padding {
+    top: 4.0,
+    right: 8.0,
+    bottom: 4.0,
+    left: 8.0,
+};
+/// Minimum width for the text input portion before wrapping.
+pub const TOKEN_TEXT_MIN_WIDTH: f32 = 120.0;
+/// Group icon size on group tokens.
+pub const TOKEN_GROUP_ICON_SIZE: f32 = ICON_XS;
+
+// ── Autocomplete dropdown ───────────────────────────────
+
+/// Maximum height of the autocomplete dropdown.
+pub const AUTOCOMPLETE_MAX_HEIGHT: f32 = 300.0;
+/// Height of each autocomplete suggestion row.
+pub const AUTOCOMPLETE_ROW_HEIGHT: f32 = 32.0;

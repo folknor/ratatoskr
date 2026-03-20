@@ -532,6 +532,81 @@ fn label_name_to_option_item(
     }
 }
 
+// ── Contact search types ─────────────────────────────────────
+
+/// A contact result from the autocomplete search.
+#[derive(Debug, Clone)]
+pub struct ContactMatch {
+    pub email: String,
+    pub display_name: Option<String>,
+}
+
+/// Search contacts and seen addresses for autocomplete.
+///
+/// Searches the `contacts` table and `seen_addresses` table using LIKE
+/// matching. Deduplicates by email (contacts take priority over seen
+/// addresses). Returns up to `limit` results ordered by relevance.
+pub fn search_contacts_for_autocomplete(
+    conn: &Connection,
+    query: &str,
+    limit: i64,
+) -> Result<Vec<ContactMatch>, String> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+    let pattern = format!("%{trimmed}%");
+    let mut results = Vec::new();
+    let mut seen_emails: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // Search contacts table first (higher priority)
+    let contacts_sql = "SELECT email, display_name FROM contacts
+                        WHERE email LIKE ?1 OR display_name LIKE ?1
+                        ORDER BY display_name ASC
+                        LIMIT ?2";
+    if let Ok(mut stmt) = conn.prepare(contacts_sql) {
+        if let Ok(rows) = stmt.query_map(params![&pattern, limit], |row| {
+            Ok(ContactMatch {
+                email: row.get("email")?,
+                display_name: row.get("display_name")?,
+            })
+        }) {
+            for row in rows.flatten() {
+                let key = row.email.to_lowercase();
+                if seen_emails.insert(key) {
+                    results.push(row);
+                }
+            }
+        }
+    }
+
+    // Search seen_addresses table (lower priority, fills remaining slots)
+    let remaining = limit - results.len() as i64;
+    if remaining > 0 {
+        let seen_sql = "SELECT email, display_name FROM seen_addresses
+                        WHERE email LIKE ?1 OR display_name LIKE ?1
+                        ORDER BY last_seen_at DESC
+                        LIMIT ?2";
+        if let Ok(mut stmt) = conn.prepare(seen_sql) {
+            if let Ok(rows) = stmt.query_map(params![&pattern, remaining], |row| {
+                Ok(ContactMatch {
+                    email: row.get("email")?,
+                    display_name: row.get("display_name")?,
+                })
+            }) {
+                for row in rows.flatten() {
+                    let key = row.email.to_lowercase();
+                    if seen_emails.insert(key) {
+                        results.push(row);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(results)
+}
+
 fn row_to_thread(row: &Row<'_>) -> rusqlite::Result<Thread> {
     Ok(Thread {
         id: row.get("id")?,

@@ -9,6 +9,7 @@ pub mod settings;
 pub mod sidebar;
 pub mod theme;
 pub mod thread_list;
+pub mod token_input;
 pub mod undoable;
 pub mod undoable_text_input;
 pub mod status_bar;
