@@ -64,7 +64,7 @@ use iced::keyboard;
 use iced::mouse;
 use iced::time::{Duration, Instant};
 use iced::window;
-use iced::{Color, Element, Event, Font, Length, Padding, Point, Rectangle, Size};
+use iced::{Color, Element, Event, Font, Length, Padding, Point, Rectangle, Size, Vector};
 
 /// The paragraph type used by the iced Renderer.
 type IcedParagraph = <iced::Renderer as TextRenderer>::Paragraph;
@@ -784,6 +784,9 @@ struct WidgetState {
     _last_click: Option<Click>,
     /// Whether a drag is active.
     dragging: bool,
+    /// Vertical scroll offset in pixels. 0.0 means the top of the document
+    /// is aligned with the top of the viewport.
+    scroll_offset: f32,
 }
 
 /// Focus timing state for cursor blink.
@@ -912,6 +915,232 @@ impl<'a, Message> RichTextEditor<'a, Message> {
     }
 }
 
+// ── Drawing helper ──────────────────────────────────────
+
+impl<Message> RichTextEditor<'_, Message> {
+    /// Draw all document content (blocks, selection, cursor) into the
+    /// current renderer context. Called from `draw()` inside a layer +
+    /// translation so scrolling and clipping are already applied.
+    fn draw_content(
+        &self,
+        renderer: &mut iced::Renderer,
+        cache: &ParagraphCache<IcedParagraph>,
+        text_bounds: &Rectangle,
+        cursor_visible: bool,
+    ) {
+        // Draw each block.
+        for (i, block) in self.state.document.blocks.iter().enumerate() {
+            let Some(entry) = cache.get(i) else {
+                continue;
+            };
+
+            let block_origin = Point::new(
+                text_bounds.x,
+                text_bounds.y + entry.y_offset(),
+            );
+
+            match block.as_ref() {
+                Block::HorizontalRule => {
+                    let hr_bounds = Rectangle::new(
+                        block_origin,
+                        Size::new(text_bounds.width, entry.height()),
+                    );
+                    render::draw_horizontal_rule(renderer, hr_bounds, self.text_color);
+                }
+                Block::BlockQuote { .. } => {
+                    let bq_bounds = Rectangle::new(
+                        block_origin,
+                        Size::new(text_bounds.width, entry.height()),
+                    );
+                    render::draw_blockquote_border(renderer, bq_bounds, self.text_color);
+
+                    for child in entry.child_paragraphs() {
+                        let para_origin = Point::new(
+                            block_origin.x + render::BLOCKQUOTE_INDENT,
+                            block_origin.y + child.local_y_offset,
+                        );
+                        render::draw_paragraph(
+                            renderer,
+                            &child.paragraph,
+                            para_origin,
+                            self.text_color,
+                            *text_bounds,
+                        );
+                    }
+                }
+                Block::List { ordered, .. } => {
+                    for (item_idx, child) in entry.child_paragraphs().iter().enumerate() {
+                        let content_bounds = Rectangle::new(
+                            Point::new(
+                                block_origin.x + render::LIST_MARKER_WIDTH,
+                                block_origin.y + child.local_y_offset,
+                            ),
+                            Size::new(
+                                (text_bounds.width - render::LIST_MARKER_WIDTH).max(0.0),
+                                child.height,
+                            ),
+                        );
+                        render::draw_list_marker(
+                            renderer,
+                            content_bounds,
+                            *ordered,
+                            item_idx,
+                            self.font,
+                            self.text_color,
+                            *text_bounds,
+                        );
+                        render::draw_paragraph(
+                            renderer,
+                            &child.paragraph,
+                            content_bounds.position(),
+                            self.text_color,
+                            *text_bounds,
+                        );
+                    }
+                }
+                Block::Paragraph { .. } | Block::Heading { .. } => {
+                    if let Some(paragraph) = entry.paragraph() {
+                        render::draw_paragraph(
+                            renderer,
+                            paragraph,
+                            block_origin,
+                            self.text_color,
+                            *text_bounds,
+                        );
+                    }
+                }
+            }
+        }
+
+        // Draw selection highlights.
+        if !self.state.selection.is_collapsed() {
+            let sel_ranges = cursor::selection_block_ranges(self.state.selection);
+
+            for (block_idx, kind) in &sel_ranges {
+                let Some(entry) = cache.get(*block_idx) else {
+                    continue;
+                };
+
+                let block_y = text_bounds.y + entry.y_offset();
+                let content_x_off = self
+                    .state
+                    .document
+                    .block(*block_idx)
+                    .map(block_content_x_offset)
+                    .unwrap_or(0.0);
+                let para_origin_x = text_bounds.x + content_x_off;
+
+                let sel_rects: Vec<SelectionRect> = match (kind, entry.paragraph()) {
+                    (BlockSelectionKind::Full, _) => {
+                        vec![SelectionRect {
+                            x: text_bounds.x,
+                            y: block_y,
+                            width: text_bounds.width,
+                            height: entry.height(),
+                        }]
+                    }
+                    (
+                        BlockSelectionKind::Single {
+                            start_offset,
+                            end_offset,
+                        },
+                        Some(paragraph),
+                    ) => compute_selection_rects(
+                        paragraph,
+                        *start_offset,
+                        *end_offset,
+                        para_origin_x,
+                        block_y,
+                        text_bounds.width,
+                    ),
+                    (BlockSelectionKind::First { start_offset }, Some(paragraph)) => {
+                        compute_selection_rects(
+                            paragraph,
+                            *start_offset,
+                            usize::MAX,
+                            para_origin_x,
+                            block_y,
+                            text_bounds.width,
+                        )
+                    }
+                    (BlockSelectionKind::Last { end_offset }, Some(paragraph)) => {
+                        compute_selection_rects(
+                            paragraph,
+                            0,
+                            *end_offset,
+                            para_origin_x,
+                            block_y,
+                            text_bounds.width,
+                        )
+                    }
+                    (_, None) => {
+                        vec![SelectionRect {
+                            x: text_bounds.x,
+                            y: block_y,
+                            width: text_bounds.width,
+                            height: entry.height(),
+                        }]
+                    }
+                };
+
+                for sel_rect in &sel_rects {
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds: Rectangle::new(
+                                Point::new(sel_rect.x, sel_rect.y),
+                                Size::new(sel_rect.width, sel_rect.height),
+                            ),
+                            ..Default::default()
+                        },
+                        self.selection_color,
+                    );
+                }
+            }
+        }
+
+        // Draw cursor (blink visibility is determined by the caller).
+        if cursor_visible && self.state.selection.is_collapsed() {
+            let pos = self.state.selection.focus;
+            if let Some(entry) = cache.get(pos.block_index) {
+                let content_x_off = self
+                    .state
+                    .document
+                    .block(pos.block_index)
+                    .map(block_content_x_offset)
+                    .unwrap_or(0.0);
+
+                let para_origin_x = text_bounds.x + content_x_off;
+                let para_origin_y = text_bounds.y + entry.y_offset();
+
+                let (cursor_x, cursor_y, cursor_height) =
+                    if let Some(paragraph) = entry.paragraph() {
+                        let gp = grapheme_pixel_position(paragraph, pos.offset);
+                        let lh = paragraph_line_height_px(paragraph);
+                        (para_origin_x + gp.x, para_origin_y + gp.y, lh)
+                    } else {
+                        let lh = render::FONT_SIZE_BODY * render::LINE_HEIGHT_MULTIPLIER;
+                        (para_origin_x, para_origin_y, lh)
+                    };
+
+                let cursor_rect = Rectangle::new(
+                    Point::new(cursor_x, cursor_y),
+                    Size::new(CURSOR_WIDTH, cursor_height),
+                );
+
+                if let Some(clipped) = text_bounds.intersection(&cursor_rect) {
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds: clipped,
+                            ..Default::default()
+                        },
+                        self.cursor_color,
+                    );
+                }
+            }
+        }
+    }
+}
+
 // ── Widget trait implementation ─────────────────────────
 
 impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_, Message> {
@@ -925,6 +1154,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
             focus: None,
             _last_click: None,
             dragging: false,
+            scroll_offset: 0.0,
         })
     }
 
@@ -959,7 +1189,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
 
         let content_height = total_height + self.padding.top + self.padding.bottom;
 
-        match self.height {
+        let node = match self.height {
             Length::Fill | Length::FillPortion(_) | Length::Fixed(_) => {
                 layout::Node::new(limits.max())
             }
@@ -969,7 +1199,36 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
                     .max();
                 layout::Node::new(size)
             }
+        };
+
+        // Clamp scroll offset to valid range after layout.
+        let viewport_height = node.size().height - self.padding.top - self.padding.bottom;
+        let max_scroll = (total_height - viewport_height).max(0.0);
+        widget_state.scroll_offset = widget_state.scroll_offset.clamp(0.0, max_scroll);
+
+        // Auto-scroll to keep the cursor visible after edits/moves.
+        if self.state.cursor.is_focused() {
+            let focus_pos = self.state.selection.focus;
+            if let Some(entry) = cache.get(focus_pos.block_index) {
+                // Estimate cursor y in content coordinates (relative to
+                // content top, before padding).
+                let cursor_y = entry.y_offset();
+                let cursor_height = if let Some(para) = entry.paragraph() {
+                    paragraph_line_height_px(para)
+                } else {
+                    render::FONT_SIZE_BODY * render::LINE_HEIGHT_MULTIPLIER
+                };
+                ensure_cursor_visible(
+                    &mut widget_state.scroll_offset,
+                    cursor_y,
+                    cursor_height,
+                    viewport_height,
+                    total_height,
+                );
+            }
         }
+
+        node
     }
 
     fn update(
@@ -1100,13 +1359,14 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
         }
 
         // Handle mouse events.
+        let scroll_offset = widget_state.scroll_offset;
         match event {
             Event::Mouse(mouse::Event::ButtonPressed { button: mouse::Button::Left, .. }) => {
                 if let Some(position) = cursor_pos.position_in(bounds) {
-                    // Translate to content coordinates (account for padding).
+                    // Translate to content coordinates (account for padding and scroll).
                     let content_pos = Point::new(
                         position.x - self.padding.left,
-                        position.y - self.padding.top,
+                        position.y - self.padding.top + scroll_offset,
                     );
 
                     let doc_pos = hit_test_content_point(
@@ -1134,7 +1394,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
                 {
                     let content_pos = Point::new(
                         position.x - self.padding.left,
-                        position.y - self.padding.top,
+                        position.y - self.padding.top + scroll_offset,
                     );
                     let doc_pos = hit_test_content_point(
                         content_pos,
@@ -1143,6 +1403,25 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
                     );
                     shell.publish(on_action(Action::Drag(doc_pos)));
                 }
+            }
+            Event::Mouse(mouse::Event::WheelScrolled { delta })
+                if cursor_pos.is_over(bounds) =>
+            {
+                let delta_y = match delta {
+                    mouse::ScrollDelta::Lines { y, .. } => -y * SCROLL_LINE_HEIGHT,
+                    mouse::ScrollDelta::Pixels { y, .. } => -y,
+                };
+
+                let total_height = widget_state.cache.total_height();
+                let viewport_height =
+                    bounds.height - self.padding.top - self.padding.bottom;
+                let max_scroll = (total_height - viewport_height).max(0.0);
+
+                widget_state.scroll_offset =
+                    (widget_state.scroll_offset + delta_y).clamp(0.0, max_scroll);
+
+                shell.capture_event();
+                shell.request_redraw();
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 widget_state.dragging = false;
@@ -1165,227 +1444,23 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
         let bounds = layout.bounds();
         let text_bounds = bounds.shrink(self.padding);
         let cache = &widget_state.cache;
+        let scroll_offset = widget_state.scroll_offset;
 
-        // Draw each block.
-        for (i, block) in self.state.document.blocks.iter().enumerate() {
-            let Some(entry) = cache.get(i) else {
-                continue;
-            };
+        let cursor_visible = widget_state
+            .focus
+            .as_ref()
+            .is_some_and(FocusState::is_cursor_visible);
 
-            let block_origin = Point::new(
-                text_bounds.x,
-                text_bounds.y + entry.y_offset(),
+        // Clip to the widget bounds and translate by -scroll_offset so
+        // content scrolls upward as scroll_offset increases.
+        renderer.with_layer(bounds, |renderer| {
+            renderer.with_translation(
+                Vector::new(0.0, -scroll_offset),
+                |renderer| {
+                    self.draw_content(renderer, cache, &text_bounds, cursor_visible);
+                },
             );
-
-            match block.as_ref() {
-                Block::HorizontalRule => {
-                    let hr_bounds = Rectangle::new(
-                        block_origin,
-                        Size::new(text_bounds.width, entry.height()),
-                    );
-                    render::draw_horizontal_rule(renderer, hr_bounds, self.text_color);
-                }
-                Block::BlockQuote { .. } => {
-                    let bq_bounds = Rectangle::new(
-                        block_origin,
-                        Size::new(text_bounds.width, entry.height()),
-                    );
-                    render::draw_blockquote_border(renderer, bq_bounds, self.text_color);
-
-                    for child in entry.child_paragraphs() {
-                        let para_origin = Point::new(
-                            block_origin.x + render::BLOCKQUOTE_INDENT,
-                            block_origin.y + child.local_y_offset,
-                        );
-                        render::draw_paragraph(
-                            renderer,
-                            &child.paragraph,
-                            para_origin,
-                            self.text_color,
-                            text_bounds,
-                        );
-                    }
-                }
-                Block::List { ordered, .. } => {
-                    for (item_idx, child) in entry.child_paragraphs().iter().enumerate() {
-                        let content_bounds = Rectangle::new(
-                            Point::new(
-                                block_origin.x + render::LIST_MARKER_WIDTH,
-                                block_origin.y + child.local_y_offset,
-                            ),
-                            Size::new(
-                                (text_bounds.width - render::LIST_MARKER_WIDTH).max(0.0),
-                                child.height,
-                            ),
-                        );
-                        render::draw_list_marker(
-                            renderer,
-                            content_bounds,
-                            *ordered,
-                            item_idx,
-                            self.font,
-                            self.text_color,
-                            text_bounds,
-                        );
-                        render::draw_paragraph(
-                            renderer,
-                            &child.paragraph,
-                            content_bounds.position(),
-                            self.text_color,
-                            text_bounds,
-                        );
-                    }
-                }
-                Block::Paragraph { .. } | Block::Heading { .. } => {
-                    if let Some(paragraph) = entry.paragraph() {
-                        render::draw_paragraph(
-                            renderer,
-                            paragraph,
-                            block_origin,
-                            self.text_color,
-                            text_bounds,
-                        );
-                    }
-                }
-            }
-        }
-
-        // Draw selection highlights.
-        if !self.state.selection.is_collapsed() {
-            let sel_ranges = cursor::selection_block_ranges(self.state.selection);
-
-            for (block_idx, kind) in &sel_ranges {
-                let Some(entry) = cache.get(*block_idx) else {
-                    continue;
-                };
-
-                let block_y = text_bounds.y + entry.y_offset();
-                let content_x_off = self
-                    .state
-                    .document
-                    .block(*block_idx)
-                    .map(block_content_x_offset)
-                    .unwrap_or(0.0);
-                let para_origin_x = text_bounds.x + content_x_off;
-
-                // For blocks with a paragraph, compute per-line selection rects.
-                // For blocks without (e.g. HorizontalRule), fall back to full-block.
-                let sel_rects: Vec<SelectionRect> = match (kind, entry.paragraph()) {
-                    (BlockSelectionKind::Full, _) => {
-                        vec![SelectionRect {
-                            x: text_bounds.x,
-                            y: block_y,
-                            width: text_bounds.width,
-                            height: entry.height(),
-                        }]
-                    }
-                    (
-                        BlockSelectionKind::Single {
-                            start_offset,
-                            end_offset,
-                        },
-                        Some(paragraph),
-                    ) => compute_selection_rects(
-                        paragraph,
-                        *start_offset,
-                        *end_offset,
-                        para_origin_x,
-                        block_y,
-                        text_bounds.width,
-                    ),
-                    (BlockSelectionKind::First { start_offset }, Some(paragraph)) => {
-                        compute_selection_rects(
-                            paragraph,
-                            *start_offset,
-                            usize::MAX,
-                            para_origin_x,
-                            block_y,
-                            text_bounds.width,
-                        )
-                    }
-                    (BlockSelectionKind::Last { end_offset }, Some(paragraph)) => {
-                        compute_selection_rects(
-                            paragraph,
-                            0,
-                            *end_offset,
-                            para_origin_x,
-                            block_y,
-                            text_bounds.width,
-                        )
-                    }
-                    // No paragraph — fall back to full-block highlight.
-                    (_, None) => {
-                        vec![SelectionRect {
-                            x: text_bounds.x,
-                            y: block_y,
-                            width: text_bounds.width,
-                            height: entry.height(),
-                        }]
-                    }
-                };
-
-                for sel_rect in &sel_rects {
-                    renderer.fill_quad(
-                        renderer::Quad {
-                            bounds: Rectangle::new(
-                                Point::new(sel_rect.x, sel_rect.y),
-                                Size::new(sel_rect.width, sel_rect.height),
-                            ),
-                            ..Default::default()
-                        },
-                        self.selection_color,
-                    );
-                }
-            }
-        }
-
-        // Draw cursor.
-        if let Some(focus) = &widget_state.focus
-            && focus.is_cursor_visible()
-            && self.state.selection.is_collapsed()
-        {
-            let pos = self.state.selection.focus;
-            if let Some(entry) = cache.get(pos.block_index) {
-                // Compute the paragraph origin for this block type (accounting
-                // for list/blockquote indentation).
-                let content_x_off = self
-                    .state
-                    .document
-                    .block(pos.block_index)
-                    .map(block_content_x_offset)
-                    .unwrap_or(0.0);
-
-                let para_origin_x = text_bounds.x + content_x_off;
-                let para_origin_y = text_bounds.y + entry.y_offset();
-
-                let (cursor_x, cursor_y, cursor_height) =
-                    if let Some(paragraph) = entry.paragraph() {
-                        let gp = grapheme_pixel_position(paragraph, pos.offset);
-                        let lh = paragraph_line_height_px(paragraph);
-                        (para_origin_x + gp.x, para_origin_y + gp.y, lh)
-                    } else {
-                        // No paragraph (e.g. HorizontalRule) — fall back to
-                        // block origin with a default line height.
-                        let lh = render::FONT_SIZE_BODY * render::LINE_HEIGHT_MULTIPLIER;
-                        (para_origin_x, para_origin_y, lh)
-                    };
-
-                let cursor_rect = Rectangle::new(
-                    Point::new(cursor_x, cursor_y),
-                    Size::new(CURSOR_WIDTH, cursor_height),
-                );
-
-                if let Some(clipped) = text_bounds.intersection(&cursor_rect) {
-                    renderer.fill_quad(
-                        renderer::Quad {
-                            bounds: clipped,
-                            ..Default::default()
-                        },
-                        self.cursor_color,
-                    );
-                }
-            }
-        }
+        });
     }
 
     fn mouse_interaction(
@@ -1667,6 +1742,37 @@ fn compute_selection_rects(
     }
 
     rects
+}
+
+// ── Auto-scroll helper ───────────────────────────────────
+
+/// Scrolling line height used for mouse wheel (px per line).
+const SCROLL_LINE_HEIGHT: f32 = 20.0;
+
+/// Ensure the cursor (at `cursor_y` with `cursor_height`) is visible within
+/// the viewport defined by `scroll_offset` and `viewport_height`.
+///
+/// Adjusts `scroll_offset` so the cursor is fully visible, scrolling up or
+/// down as needed. Also clamps to `[0, max_scroll]`.
+fn ensure_cursor_visible(
+    scroll_offset: &mut f32,
+    cursor_y: f32,
+    cursor_height: f32,
+    viewport_height: f32,
+    total_content_height: f32,
+) {
+    let max_scroll = (total_content_height - viewport_height).max(0.0);
+
+    // Cursor is above the viewport — scroll up.
+    if cursor_y < *scroll_offset {
+        *scroll_offset = cursor_y;
+    }
+    // Cursor bottom is below the viewport — scroll down.
+    if cursor_y + cursor_height > *scroll_offset + viewport_height {
+        *scroll_offset = cursor_y + cursor_height - viewport_height;
+    }
+
+    *scroll_offset = scroll_offset.clamp(0.0, max_scroll);
 }
 
 // ── Hit testing helper ───────────────────────────────────
@@ -2593,5 +2699,56 @@ mod tests {
         state.selection = DocSelection::caret(DocPosition::new(0, 3));
         state.perform(Action::Copy);
         assert!(state.internal_clipboard.is_none());
+    }
+
+    // ── Scroll helpers ──────────────────────────────────────
+
+    #[test]
+    fn ensure_cursor_visible_no_op_when_in_view() {
+        let mut offset = 50.0;
+        ensure_cursor_visible(&mut offset, 60.0, 20.0, 200.0, 500.0);
+        assert!((offset - 50.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn ensure_cursor_visible_scrolls_up() {
+        let mut offset = 100.0;
+        // Cursor is at y=80, above viewport start (100).
+        ensure_cursor_visible(&mut offset, 80.0, 20.0, 200.0, 500.0);
+        assert!((offset - 80.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn ensure_cursor_visible_scrolls_down() {
+        let mut offset = 0.0;
+        // Cursor at y=250, height=20, viewport=200. Bottom = 270 > 200.
+        ensure_cursor_visible(&mut offset, 250.0, 20.0, 200.0, 500.0);
+        // Should scroll so cursor bottom is at viewport bottom: 270 - 200 = 70.
+        assert!((offset - 70.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn ensure_cursor_visible_clamps_to_zero() {
+        let mut offset = 50.0;
+        // Cursor at y=0 — should scroll to 0.
+        ensure_cursor_visible(&mut offset, 0.0, 20.0, 200.0, 500.0);
+        assert!(offset.abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn ensure_cursor_visible_clamps_to_max() {
+        let mut offset = 0.0;
+        // Cursor at y=490, total=500, viewport=200. Max scroll = 300.
+        // Needed: 490 + 20 - 200 = 310, but max = 300.
+        ensure_cursor_visible(&mut offset, 490.0, 20.0, 200.0, 500.0);
+        assert!((offset - 300.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn ensure_cursor_visible_no_scroll_when_content_fits() {
+        let mut offset = 0.0;
+        // Total content (100) fits within viewport (200) — max_scroll = 0.
+        ensure_cursor_visible(&mut offset, 50.0, 20.0, 200.0, 100.0);
+        assert!(offset.abs() < f32::EPSILON);
     }
 }
