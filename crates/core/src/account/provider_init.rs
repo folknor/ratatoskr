@@ -206,10 +206,14 @@ pub fn finalize_graph_profile(
     email: &str,
     display_name: &str,
 ) -> Result<(), String> {
+    // Re-derive account_name from the finalized email, since the email
+    // known at insert time may differ from the real one returned by Graph.
+    let account_name = derive_account_name(email);
     conn.execute(
-        "UPDATE accounts SET email = ?1, display_name = ?2, updated_at = unixepoch() \
-         WHERE id = ?3",
-        rusqlite::params![email, display_name, account_id],
+        "UPDATE accounts SET email = ?1, display_name = ?2, account_name = ?3, \
+         updated_at = unixepoch() \
+         WHERE id = ?4",
+        rusqlite::params![email, display_name, account_name, account_id],
     )
     .map_err(|e| format!("Failed to finalize Graph account profile: {e}"))?;
     Ok(())
