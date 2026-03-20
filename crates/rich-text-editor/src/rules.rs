@@ -501,16 +501,13 @@ fn resolve_split_block(doc: &Document, selection: DocSelection) -> Vec<EditOp> {
         return ops;
     };
 
-    // Rule 2: auto-exit block.
-    // If the current block is empty AND is a paragraph that's inside what we'd consider
-    // a "continuation" context (e.g., the block itself is an empty paragraph and the user
-    // just pressed Enter on an already-empty line), we could do auto-exit.
-    // However, since our document model is flat (lists are single Block::List nodes,
-    // not individual inline blocks), auto-exit only applies at the top level when the
-    // block is an empty paragraph following a list/blockquote.
-    // For now, auto-exit is a no-op at the flat block level. It would apply inside
-    // list item editing (which uses nested blocks). We'll implement it for the common
-    // case: converting an empty heading to a paragraph.
+    // Rule 2: auto-exit block (double-Enter to exit list/blockquote).
+    // Currently deferred: our document model treats List and BlockQuote as opaque
+    // top-level blocks (not individually editable items). Auto-exit requires list
+    // items to be individually editable, which needs the per-item paragraph cache
+    // work. When that lands, add a check here: if the cursor is in an empty list
+    // item (last item in the list) and the user presses Enter, remove that item
+    // and insert a new paragraph after the list.
 
     // Rule 3: heading reset on split at end.
     if let Block::Heading { level, .. } = block
@@ -539,14 +536,24 @@ fn resolve_split_block(doc: &Document, selection: DocSelection) -> Vec<EditOp> {
 ///
 /// Rules:
 /// 1. With selection: produce `ToggleInlineStyle` op.
-/// 2. Without selection (collapsed caret): return empty Vec to signal "toggle pending style."
+/// 2. Without selection (collapsed caret) inside a link: format the whole contiguous link.
+/// 3. Without selection, not inside a link: return empty Vec to signal "toggle pending style."
 fn resolve_toggle_style(
-    _doc: &Document,
+    doc: &Document,
     selection: DocSelection,
     style: InlineStyle,
 ) -> Vec<EditOp> {
     if selection.is_collapsed() {
-        // Empty Vec signals "toggle pending style" to the caller.
+        // Rule 2: if cursor is inside a link, format the whole link span.
+        if let Some((link_start, link_end)) = find_link_boundaries(doc, selection.focus) {
+            return vec![EditOp::ToggleInlineStyle {
+                start: link_start,
+                end: link_end,
+                style_bit: style,
+            }];
+        }
+
+        // Rule 3: empty Vec signals "toggle pending style" to the caller.
         return vec![];
     }
 
@@ -567,6 +574,60 @@ fn resolve_toggle_style(
 }
 
 // ── Helpers ─────────────────────────────────────────────
+
+/// Find the boundaries of the contiguous link span containing `pos`.
+///
+/// If the cursor is inside a run that has a link, this walks backward and forward
+/// through adjacent runs with the same link href to find the full contiguous span.
+/// Returns `Some((start, end))` as `DocPosition`s, or `None` if the cursor is not
+/// inside a link.
+fn find_link_boundaries(doc: &Document, pos: DocPosition) -> Option<(DocPosition, DocPosition)> {
+    let block = doc.block(pos.block_index)?;
+    let runs = block.runs()?;
+
+    if runs.is_empty() {
+        return None;
+    }
+
+    let (run_idx, _offset_in_run) = block.resolve_offset(pos.offset)?;
+    let run = &runs[run_idx];
+    let href = run.link.as_ref()?;
+
+    // Walk backward to find the first run with the same link href.
+    let mut start_run_idx = run_idx;
+    while start_run_idx > 0 {
+        if runs[start_run_idx - 1].link.as_ref() == Some(href) {
+            start_run_idx -= 1;
+        } else {
+            break;
+        }
+    }
+
+    // Walk forward to find the last run with the same link href.
+    let mut end_run_idx = run_idx;
+    while end_run_idx + 1 < runs.len() {
+        if runs[end_run_idx + 1].link.as_ref() == Some(href) {
+            end_run_idx += 1;
+        } else {
+            break;
+        }
+    }
+
+    // Compute the start offset: sum of char_len for all runs before start_run_idx.
+    let start_offset: usize = runs[..start_run_idx].iter().map(StyledRun::char_len).sum();
+
+    // Compute the end offset: start_offset + sum of char_len for runs in the link span.
+    let end_offset: usize = start_offset
+        + runs[start_run_idx..=end_run_idx]
+            .iter()
+            .map(StyledRun::char_len)
+            .sum::<usize>();
+
+    Some((
+        DocPosition::new(pos.block_index, start_offset),
+        DocPosition::new(pos.block_index, end_offset),
+    ))
+}
 
 /// Extract runs covering `[start_offset..end_offset)` from a run list.
 /// Returns at least one run (possibly empty) for valid DeletedContent.
@@ -1505,6 +1566,134 @@ mod tests {
                 !run.style.contains(InlineStyle::BOLD),
                 "after undo, no run should be bold",
             );
+        }
+    }
+
+    // ── Link formatting at caret ────────────────────────
+
+    #[test]
+    fn toggle_italic_inside_bold_link_formats_whole_link() {
+        // Cursor inside a bold link: toggle italic should format the whole link.
+        let doc = Document::from_blocks(vec![Block::Paragraph {
+            runs: vec![
+                StyledRun::plain("before "),
+                StyledRun::linked("click here", InlineStyle::BOLD, "https://example.com"),
+                StyledRun::plain(" after"),
+            ],
+        }]);
+        // Cursor at offset 10 (inside "click here", which starts at offset 7).
+        let sel = DocSelection::caret(DocPosition::new(0, 10));
+        let ops = resolve(
+            &doc,
+            sel,
+            EditAction::ToggleInlineStyle(InlineStyle::ITALIC),
+            InlineStyle::empty(),
+        );
+        assert_eq!(ops.len(), 1);
+        if let EditOp::ToggleInlineStyle { start, end, style_bit } = &ops[0] {
+            assert_eq!(*start, DocPosition::new(0, 7));
+            assert_eq!(*end, DocPosition::new(0, 17));
+            assert_eq!(*style_bit, InlineStyle::ITALIC);
+        } else {
+            panic!("expected ToggleInlineStyle op");
+        }
+    }
+
+    #[test]
+    fn toggle_bold_inside_plain_link_formats_whole_link() {
+        let doc = Document::from_blocks(vec![Block::Paragraph {
+            runs: vec![
+                StyledRun::linked("my link", InlineStyle::empty(), "https://example.com"),
+            ],
+        }]);
+        let sel = DocSelection::caret(DocPosition::new(0, 3));
+        let ops = resolve(
+            &doc,
+            sel,
+            EditAction::ToggleInlineStyle(InlineStyle::BOLD),
+            InlineStyle::empty(),
+        );
+        assert_eq!(ops.len(), 1);
+        if let EditOp::ToggleInlineStyle { start, end, style_bit } = &ops[0] {
+            assert_eq!(*start, DocPosition::new(0, 0));
+            assert_eq!(*end, DocPosition::new(0, 7));
+            assert_eq!(*style_bit, InlineStyle::BOLD);
+        } else {
+            panic!("expected ToggleInlineStyle op");
+        }
+    }
+
+    #[test]
+    fn toggle_bold_not_inside_link_returns_empty() {
+        let doc = Document::from_blocks(vec![Block::Paragraph {
+            runs: vec![
+                StyledRun::plain("plain text"),
+                StyledRun::linked("link", InlineStyle::empty(), "https://example.com"),
+            ],
+        }]);
+        // Cursor at offset 5, inside the plain text (not the link).
+        let sel = DocSelection::caret(DocPosition::new(0, 5));
+        let ops = resolve(
+            &doc,
+            sel,
+            EditAction::ToggleInlineStyle(InlineStyle::BOLD),
+            InlineStyle::empty(),
+        );
+        assert!(ops.is_empty(), "should return empty vec for pending style");
+    }
+
+    #[test]
+    fn toggle_at_link_edge_formats_whole_link() {
+        // Cursor at offset 0 of a link that starts at offset 0.
+        let doc = Document::from_blocks(vec![Block::Paragraph {
+            runs: vec![
+                StyledRun::linked("link text", InlineStyle::empty(), "https://example.com"),
+                StyledRun::plain(" after"),
+            ],
+        }]);
+        let sel = DocSelection::caret(DocPosition::new(0, 0));
+        let ops = resolve(
+            &doc,
+            sel,
+            EditAction::ToggleInlineStyle(InlineStyle::BOLD),
+            InlineStyle::empty(),
+        );
+        assert_eq!(ops.len(), 1);
+        if let EditOp::ToggleInlineStyle { start, end, .. } = &ops[0] {
+            assert_eq!(*start, DocPosition::new(0, 0));
+            assert_eq!(*end, DocPosition::new(0, 9));
+        } else {
+            panic!("expected ToggleInlineStyle op");
+        }
+    }
+
+    #[test]
+    fn toggle_spans_multiple_adjacent_link_runs_same_href() {
+        // Multiple adjacent runs with the same link href but different styles.
+        let doc = Document::from_blocks(vec![Block::Paragraph {
+            runs: vec![
+                StyledRun::plain("pre "),
+                StyledRun::linked("bold", InlineStyle::BOLD, "https://example.com"),
+                StyledRun::linked(" part", InlineStyle::empty(), "https://example.com"),
+                StyledRun::plain(" post"),
+            ],
+        }]);
+        // Cursor at offset 6 (inside "bold", which starts at offset 4).
+        let sel = DocSelection::caret(DocPosition::new(0, 6));
+        let ops = resolve(
+            &doc,
+            sel,
+            EditAction::ToggleInlineStyle(InlineStyle::ITALIC),
+            InlineStyle::empty(),
+        );
+        assert_eq!(ops.len(), 1);
+        if let EditOp::ToggleInlineStyle { start, end, style_bit } = &ops[0] {
+            // Should span the whole contiguous link: "bold part" = offsets 4..13.
+            assert_eq!(*start, DocPosition::new(0, 4));
+            assert_eq!(*end, DocPosition::new(0, 13));
+            assert_eq!(*style_bit, InlineStyle::ITALIC);
+        } else {
+            panic!("expected ToggleInlineStyle op");
         }
     }
 }

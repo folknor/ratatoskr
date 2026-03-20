@@ -190,6 +190,7 @@ impl EditorState {
         self.selection = sel;
         self.cursor.reset_blink();
         self.cursor.clear_target_x();
+        self.cursor.clear_target_column();
     }
 
     /// Whether the editor currently has focus.
@@ -302,6 +303,7 @@ impl EditorState {
         // Reset blink on edit.
         self.cursor.reset_blink();
         self.cursor.clear_target_x();
+        self.cursor.clear_target_column();
     }
 
     /// Update the cursor position after applying ops.
@@ -406,14 +408,32 @@ impl EditorState {
             MoveAction::DocumentEnd => input::document_end(doc),
             MoveAction::Up | MoveAction::Down => {
                 // Vertical movement requires paragraph layout info which is
-                // renderer-specific. For now, move to start/end of adjacent block.
+                // renderer-specific. Without renderer access we approximate
+                // column preservation using a saved character offset
+                // (`target_column`). On the first vertical move the current
+                // offset is remembered; subsequent vertical moves use that
+                // remembered offset so that traversing a short block and then
+                // a long block returns to the original column.
+                let desired_offset = self
+                    .cursor
+                    .target_column()
+                    .unwrap_or(focus.offset);
+
+                // Save target_column on first vertical move.
+                if self.cursor.target_column().is_none() {
+                    self.cursor.set_target_column(focus.offset);
+                }
+
                 match move_action {
                     MoveAction::Up => {
                         if focus.block_index > 0 {
                             let prev_len = doc
                                 .block(focus.block_index - 1)
                                 .map_or(0, Block::char_len);
-                            DocPosition::new(focus.block_index - 1, prev_len.min(focus.offset))
+                            DocPosition::new(
+                                focus.block_index - 1,
+                                prev_len.min(desired_offset),
+                            )
                         } else {
                             DocPosition::new(0, 0)
                         }
@@ -423,7 +443,10 @@ impl EditorState {
                             let next_len = doc
                                 .block(focus.block_index + 1)
                                 .map_or(0, Block::char_len);
-                            DocPosition::new(focus.block_index + 1, next_len.min(focus.offset))
+                            DocPosition::new(
+                                focus.block_index + 1,
+                                next_len.min(desired_offset),
+                            )
                         } else {
                             doc.end_position()
                         }
@@ -441,9 +464,10 @@ impl EditorState {
 
         self.cursor.reset_blink();
 
-        // Clear target_x on horizontal movement, preserve on vertical.
+        // Clear target_x and target_column on horizontal movement, preserve on vertical.
         if !matches!(move_action, MoveAction::Up | MoveAction::Down) {
             self.cursor.clear_target_x();
+            self.cursor.clear_target_column();
         }
     }
 
@@ -944,42 +968,83 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
                     continue;
                 };
 
-                // Compute selection rectangle for this block.
-                // For the initial implementation, highlight the entire block height.
                 let block_y = text_bounds.y + entry.y_offset();
-                let block_height = entry.height();
+                let content_x_off = self
+                    .state
+                    .document
+                    .block(*block_idx)
+                    .map(block_content_x_offset)
+                    .unwrap_or(0.0);
+                let para_origin_x = text_bounds.x + content_x_off;
 
-                let sel_rect = match kind {
-                    BlockSelectionKind::Full => SelectionRect {
-                        x: text_bounds.x,
-                        y: block_y,
-                        width: text_bounds.width,
-                        height: block_height,
-                    },
-                    BlockSelectionKind::Single { .. }
-                    | BlockSelectionKind::First { .. }
-                    | BlockSelectionKind::Last { .. } => {
-                        // Full-line highlight for now; proper per-character
-                        // selection requires Paragraph::grapheme_position.
-                        SelectionRect {
+                // For blocks with a paragraph, compute per-line selection rects.
+                // For blocks without (e.g. HorizontalRule), fall back to full-block.
+                let sel_rects: Vec<SelectionRect> = match (kind, entry.paragraph()) {
+                    (BlockSelectionKind::Full, _) => {
+                        vec![SelectionRect {
                             x: text_bounds.x,
                             y: block_y,
                             width: text_bounds.width,
-                            height: block_height,
-                        }
+                            height: entry.height(),
+                        }]
+                    }
+                    (
+                        BlockSelectionKind::Single {
+                            start_offset,
+                            end_offset,
+                        },
+                        Some(paragraph),
+                    ) => compute_selection_rects(
+                        paragraph,
+                        *start_offset,
+                        *end_offset,
+                        para_origin_x,
+                        block_y,
+                        text_bounds.width,
+                    ),
+                    (BlockSelectionKind::First { start_offset }, Some(paragraph)) => {
+                        compute_selection_rects(
+                            paragraph,
+                            *start_offset,
+                            usize::MAX,
+                            para_origin_x,
+                            block_y,
+                            text_bounds.width,
+                        )
+                    }
+                    (BlockSelectionKind::Last { end_offset }, Some(paragraph)) => {
+                        compute_selection_rects(
+                            paragraph,
+                            0,
+                            *end_offset,
+                            para_origin_x,
+                            block_y,
+                            text_bounds.width,
+                        )
+                    }
+                    // No paragraph — fall back to full-block highlight.
+                    (_, None) => {
+                        vec![SelectionRect {
+                            x: text_bounds.x,
+                            y: block_y,
+                            width: text_bounds.width,
+                            height: entry.height(),
+                        }]
                     }
                 };
 
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: Rectangle::new(
-                            Point::new(sel_rect.x, sel_rect.y),
-                            Size::new(sel_rect.width, sel_rect.height),
-                        ),
-                        ..Default::default()
-                    },
-                    self.selection_color,
-                );
+                for sel_rect in &sel_rects {
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds: Rectangle::new(
+                                Point::new(sel_rect.x, sel_rect.y),
+                                Size::new(sel_rect.width, sel_rect.height),
+                            ),
+                            ..Default::default()
+                        },
+                        self.selection_color,
+                    );
+                }
             }
         }
 
@@ -990,11 +1055,29 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
         {
             let pos = self.state.selection.focus;
             if let Some(entry) = cache.get(pos.block_index) {
-                let cursor_x = text_bounds.x;
-                let cursor_y = text_bounds.y + entry.y_offset();
-                // Use a default line height. Proper implementation would use
-                // Paragraph::grapheme_position for exact placement.
-                let cursor_height = entry.height().max(render::FONT_SIZE_BODY * 1.4);
+                // Compute the paragraph origin for this block type (accounting
+                // for list/blockquote indentation).
+                let content_x_off = self
+                    .state
+                    .document
+                    .block(pos.block_index)
+                    .map(block_content_x_offset)
+                    .unwrap_or(0.0);
+
+                let para_origin_x = text_bounds.x + content_x_off;
+                let para_origin_y = text_bounds.y + entry.y_offset();
+
+                let (cursor_x, cursor_y, cursor_height) =
+                    if let Some(paragraph) = entry.paragraph() {
+                        let gp = grapheme_pixel_position(paragraph, pos.offset);
+                        let lh = paragraph_line_height_px(paragraph);
+                        (para_origin_x + gp.x, para_origin_y + gp.y, lh)
+                    } else {
+                        // No paragraph (e.g. HorizontalRule) — fall back to
+                        // block origin with a default line height.
+                        let lh = render::FONT_SIZE_BODY * render::LINE_HEIGHT_MULTIPLIER;
+                        (para_origin_x, para_origin_y, lh)
+                    };
 
                 let cursor_rect = Rectangle::new(
                     Point::new(cursor_x, cursor_y),
@@ -1036,6 +1119,190 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
     }
 }
 
+// ── Block content x-offset helper ────────────────────────
+
+/// Returns the horizontal content offset for a block type. List and blockquote
+/// blocks indent their paragraph content.
+fn block_content_x_offset(block: &Block) -> f32 {
+    match block {
+        Block::List { .. } => render::LIST_MARKER_WIDTH,
+        Block::BlockQuote { .. } => render::BLOCKQUOTE_INDENT,
+        _ => 0.0,
+    }
+}
+
+// ── Paragraph line mapping helpers ──────────────────────
+
+/// Information about a visual line within a paragraph.
+struct LineInfo {
+    /// The visual line index.
+    line: usize,
+    /// The character offset at the start of this line (relative to block start).
+    start_offset: usize,
+}
+
+/// Compute the absolute line height in pixels for a paragraph.
+fn paragraph_line_height_px(paragraph: &IcedParagraph) -> f32 {
+    let font_size: f32 = paragraph.size().0;
+    font_size * render::LINE_HEIGHT_MULTIPLIER
+}
+
+/// Estimate the number of visual lines in a paragraph.
+fn paragraph_line_count(paragraph: &IcedParagraph) -> usize {
+    let line_height_px = paragraph_line_height_px(paragraph);
+    if line_height_px <= 0.0 {
+        return 1;
+    }
+    let total_height = paragraph.min_bounds().height;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let count = (total_height / line_height_px).ceil() as usize;
+    count.max(1)
+}
+
+/// Build a list of `(line_index, start_char_offset)` pairs for all visual lines
+/// in a paragraph. Uses `hit_test` at the left edge of each line to discover
+/// line-start offsets.
+fn build_line_starts(paragraph: &IcedParagraph) -> Vec<(usize, usize)> {
+    let line_count = paragraph_line_count(paragraph);
+    let line_height_px = paragraph_line_height_px(paragraph);
+
+    let mut line_starts: Vec<(usize, usize)> = Vec::with_capacity(line_count);
+    line_starts.push((0, 0));
+
+    for line_idx in 1..line_count {
+        let probe_y = line_idx as f32 * line_height_px;
+        let probe = Point::new(0.0, probe_y);
+        if let Some(hit) = paragraph.hit_test(probe) {
+            let offset = hit.cursor();
+            // Only add if this line starts at a different offset than the previous.
+            if line_starts.last().is_some_and(|&(_, prev)| prev != offset) {
+                line_starts.push((line_idx, offset));
+            }
+        }
+    }
+
+    line_starts
+}
+
+/// Find which visual line a character offset falls on within a paragraph.
+/// Returns the line index and the character offset at the start of that line.
+fn find_line_for_offset(
+    paragraph: &IcedParagraph,
+    char_offset: usize,
+) -> LineInfo {
+    let line_starts = build_line_starts(paragraph);
+
+    // Find the last line whose start_offset <= char_offset.
+    let mut best = LineInfo {
+        line: 0,
+        start_offset: 0,
+    };
+    for &(line_idx, start) in &line_starts {
+        if start <= char_offset {
+            best = LineInfo {
+                line: line_idx,
+                start_offset: start,
+            };
+        } else {
+            break;
+        }
+    }
+
+    best
+}
+
+/// Compute the pixel position of a character offset within a paragraph.
+/// Returns a point relative to the paragraph origin, or `(0, 0)` as fallback.
+fn grapheme_pixel_position(
+    paragraph: &IcedParagraph,
+    char_offset: usize,
+) -> Point {
+    let line_info = find_line_for_offset(paragraph, char_offset);
+    let within_line = char_offset.saturating_sub(line_info.start_offset);
+
+    paragraph
+        .grapheme_position(line_info.line, within_line)
+        .unwrap_or(Point::ORIGIN)
+}
+
+// ── Selection rectangle computation ─────────────────────
+
+/// Compute per-line selection rectangles for a partial selection within a block.
+///
+/// `start_offset` and `end_offset` are character offsets within the block.
+/// `para_origin_x` / `para_origin_y` are the absolute pixel positions of the
+/// paragraph origin. `available_width` is the full text area width.
+///
+/// Returns a list of `SelectionRect`s, one per visual line that intersects the
+/// selection range.
+fn compute_selection_rects(
+    paragraph: &IcedParagraph,
+    start_offset: usize,
+    end_offset: usize,
+    para_origin_x: f32,
+    para_origin_y: f32,
+    available_width: f32,
+) -> Vec<SelectionRect> {
+    let line_height_px = paragraph_line_height_px(paragraph);
+    let line_starts = build_line_starts(paragraph);
+    let line_count = line_starts.len();
+    let mut rects = Vec::new();
+
+    for (i, &(line_idx, line_start)) in line_starts.iter().enumerate() {
+        // Determine the character range for this line.
+        let line_end = if i + 1 < line_count {
+            line_starts[i + 1].1
+        } else {
+            usize::MAX // last line extends to end of block
+        };
+
+        // Skip lines that don't overlap the selection.
+        if line_start >= end_offset || line_end <= start_offset {
+            continue;
+        }
+
+        let line_y = para_origin_y + line_idx as f32 * line_height_px;
+
+        // Determine x-coordinates for this line's selection portion.
+        let sel_start_in_line = start_offset.max(line_start);
+        let sel_end_in_line = end_offset.min(line_end);
+
+        let x_start = if sel_start_in_line <= line_start {
+            // Selection starts at or before this line — use left edge.
+            para_origin_x
+        } else {
+            let within_line = sel_start_in_line.saturating_sub(line_start);
+            let pos = paragraph
+                .grapheme_position(line_idx, within_line)
+                .unwrap_or(Point::ORIGIN);
+            para_origin_x + pos.x
+        };
+
+        let x_end = if sel_end_in_line >= line_end && i + 1 < line_count {
+            // Selection extends to or past the end of this line — use right edge.
+            para_origin_x + available_width
+        } else {
+            let within_line = sel_end_in_line.saturating_sub(line_start);
+            let pos = paragraph
+                .grapheme_position(line_idx, within_line)
+                .unwrap_or(Point::ORIGIN);
+            para_origin_x + pos.x
+        };
+
+        let width = (x_end - x_start).max(0.0);
+        if width > 0.0 {
+            rects.push(SelectionRect {
+                x: x_start,
+                y: line_y,
+                width,
+                height: line_height_px,
+            });
+        }
+    }
+
+    rects
+}
+
 // ── Hit testing helper ───────────────────────────────────
 
 /// Convert a pixel position (relative to the content origin, after padding) to a
@@ -1063,15 +1330,9 @@ fn hit_test_content_point(
         return DocPosition::new(block_index, 0);
     };
 
-    // Compute the content x-offset for the block type (some blocks indent
-    // their paragraphs, e.g. lists and blockquotes).
     let content_x_offset = document
         .block(block_index)
-        .map(|block| match block {
-            Block::List { .. } => render::LIST_MARKER_WIDTH,
-            Block::BlockQuote { .. } => render::BLOCKQUOTE_INDENT,
-            _ => 0.0,
-        })
+        .map(block_content_x_offset)
         .unwrap_or(0.0);
 
     // Translate into paragraph-local coordinates.
@@ -1140,8 +1401,7 @@ mod tests {
     fn to_html_round_trips() {
         let state = EditorState::from_html("<p>hello</p><p>world</p>");
         let html = state.to_html();
-        assert!(html.contains("hello"));
-        assert!(html.contains("world"));
+        assert_eq!(html, "<p>hello</p><p>world</p>");
     }
 
     // ── EditorState::selection_text ──────────────────────
@@ -1501,6 +1761,84 @@ mod tests {
         state.selection = DocSelection::caret(DocPosition::new(1, 3));
         state.perform(Action::Move(MoveAction::Down));
         assert_eq!(state.selection.focus.block_index, 2);
+    }
+
+    #[test]
+    fn vertical_move_preserves_offset_through_short_block() {
+        // Three blocks: long (15 chars), short (2 chars), long (20 chars).
+        // Start at offset 10 in block 0, move down through block 1 (short)
+        // to block 2. The offset should recover to 10 in block 2.
+        let mut state = EditorState::from_document(Document::from_blocks(vec![
+            Block::paragraph("abcdefghijklmno"),      // len 15
+            Block::paragraph("xy"),                    // len 2
+            Block::paragraph("12345678901234567890"),  // len 20
+        ]));
+        state.selection = DocSelection::caret(DocPosition::new(0, 10));
+
+        // Move down to block 1 — offset clamped to 2
+        state.perform(Action::Move(MoveAction::Down));
+        assert_eq!(state.selection.focus, DocPosition::new(1, 2));
+
+        // Move down to block 2 — offset should recover to 10 (the saved target)
+        state.perform(Action::Move(MoveAction::Down));
+        assert_eq!(state.selection.focus, DocPosition::new(2, 10));
+    }
+
+    #[test]
+    fn vertical_move_preserves_offset_through_short_block_upward() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![
+            Block::paragraph("12345678901234567890"), // len 20
+            Block::paragraph("ab"),                   // len 2
+            Block::paragraph("abcdefghijklmno"),      // len 15
+        ]));
+        state.selection = DocSelection::caret(DocPosition::new(2, 12));
+
+        // Move up to block 1 — clamped to 2
+        state.perform(Action::Move(MoveAction::Up));
+        assert_eq!(state.selection.focus, DocPosition::new(1, 2));
+
+        // Move up to block 0 — offset recovers to 12
+        state.perform(Action::Move(MoveAction::Up));
+        assert_eq!(state.selection.focus, DocPosition::new(0, 12));
+    }
+
+    #[test]
+    fn horizontal_move_clears_target_column() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![
+            Block::paragraph("abcdefghij"), // len 10
+            Block::paragraph("xy"),          // len 2
+            Block::paragraph("abcdefghij"), // len 10
+        ]));
+        state.selection = DocSelection::caret(DocPosition::new(0, 8));
+
+        // Move down — saves target_column = 8, lands at (1, 2)
+        state.perform(Action::Move(MoveAction::Down));
+        assert_eq!(state.selection.focus, DocPosition::new(1, 2));
+
+        // Horizontal move clears target_column
+        state.perform(Action::Move(MoveAction::Left));
+        assert_eq!(state.selection.focus, DocPosition::new(1, 1));
+
+        // Move down again — target_column is now 1 (the current offset)
+        state.perform(Action::Move(MoveAction::Down));
+        assert_eq!(state.selection.focus, DocPosition::new(2, 1));
+    }
+
+    #[test]
+    fn vertical_move_at_boundary_clamps_correctly() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![
+            Block::paragraph("abc"),
+        ]));
+        state.selection = DocSelection::caret(DocPosition::new(0, 2));
+
+        // Move up at top boundary — goes to (0, 0)
+        state.perform(Action::Move(MoveAction::Up));
+        assert_eq!(state.selection.focus, DocPosition::new(0, 0));
+
+        // Move down at bottom boundary — goes to end position
+        state.selection = DocSelection::caret(DocPosition::new(0, 2));
+        state.perform(Action::Move(MoveAction::Down));
+        assert_eq!(state.selection.focus, DocPosition::new(0, 3));
     }
 
     // ── EditorState::set_selection ───────────────────────

@@ -542,21 +542,33 @@ mod tests {
     // ── map_cursors infrastructure ──────────────────────
 
     #[test]
-    fn map_cursors_runs_without_panic() {
-        let mut stack = UndoStack::default();
-        stack.push(vec![insert_op(0, 0, "a")], caret(0, 0), caret(0, 1));
+    fn map_cursors_shifts_positions_through_insert() {
+        use crate::operations::PosMapEntry;
 
+        let mut stack = UndoStack::default();
+        stack.push(
+            vec![insert_op(0, 0, "a")],
+            caret(0, 8),
+            caret(0, 10),
+        );
+
+        // Simulate an insert of 3 chars at offset 2 in block 0.
         let pos_map = PosMap {
             block_index: 0,
-            entries: vec![],
+            entries: vec![PosMapEntry {
+                old_offset: 2,
+                old_len: 0,
+                new_len: 3,
+            }],
             structural: None,
         };
 
-        // Should not panic; PosMap::map is currently identity.
         stack.map_cursors(&pos_map);
 
-        let group = stack.undo().expect("undo");
-        assert_eq!(group.cursor_before, caret(0, 0));
+        let group = stack.undo().expect("should have undo group");
+        // Positions after the insert point (offset 2) should shift by +3.
+        assert_eq!(group.cursor_before, caret(0, 11));
+        assert_eq!(group.cursor_after, caret(0, 13));
     }
 
     // ── Multi-char insert text merging ──────────────────

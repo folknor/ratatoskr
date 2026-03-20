@@ -85,6 +85,12 @@ pub struct CursorState {
     /// When moving up/down, we want to maintain the same x position
     /// rather than snapping to wherever the character boundary falls.
     target_x: Option<f32>,
+    /// Saved character offset for vertical cursor movement without renderer
+    /// access. When moving up/down across blocks of different lengths, we
+    /// want to return to the original column when passing through a short
+    /// block. Set on the first vertical move and cleared on any horizontal
+    /// movement or edit.
+    target_column: Option<usize>,
 }
 
 impl CursorState {
@@ -95,6 +101,7 @@ impl CursorState {
             visible: true,
             focused: false,
             target_x: None,
+            target_column: None,
         }
     }
 
@@ -155,6 +162,22 @@ impl CursorState {
     /// edit that changes cursor position non-vertically).
     pub fn clear_target_x(&mut self) {
         self.target_x = None;
+    }
+
+    /// Get the saved target column (character offset) for vertical movement.
+    pub fn target_column(&self) -> Option<usize> {
+        self.target_column
+    }
+
+    /// Set the target column (call when starting a vertical movement
+    /// sequence without renderer access).
+    pub fn set_target_column(&mut self, col: usize) {
+        self.target_column = Some(col);
+    }
+
+    /// Clear the target column (call on any horizontal movement or edit).
+    pub fn clear_target_column(&mut self) {
+        self.target_column = None;
     }
 }
 
@@ -583,6 +606,18 @@ mod tests {
 
         cursor.clear_target_x();
         assert!(cursor.target_x().is_none());
+    }
+
+    #[test]
+    fn target_column_lifecycle() {
+        let mut cursor = CursorState::new();
+        assert!(cursor.target_column().is_none());
+
+        cursor.set_target_column(15);
+        assert_eq!(cursor.target_column(), Some(15));
+
+        cursor.clear_target_column();
+        assert!(cursor.target_column().is_none());
     }
 
     // ── DragState tests ────────────────────────────────

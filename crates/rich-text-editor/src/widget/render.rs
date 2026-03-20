@@ -26,7 +26,7 @@ pub const FONT_SIZE_H2: f32 = 16.0;
 pub const FONT_SIZE_H1: f32 = 18.0;
 
 /// Default line-height multiplier (relative).
-const LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
+pub const LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
 
 // ── Block spacing constants ─────────────────────────────
 
