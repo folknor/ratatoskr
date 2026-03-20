@@ -876,9 +876,11 @@ impl App {
                         self.calendar.selected_date = date;
                         self.calendar.mini_month_year = date.year();
                         self.calendar.mini_month_month = date.month();
+                        self.calendar.rebuild_view_data();
                     }
                     CalendarMessage::SetView(view) => {
                         self.calendar.active_view = view;
+                        self.calendar.rebuild_view_data();
                     }
                     CalendarMessage::PrevMonth => {
                         self.calendar.prev_month();

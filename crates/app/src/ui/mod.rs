@@ -2,6 +2,7 @@ pub mod add_account;
 pub mod animated_toggler;
 pub mod calendar;
 pub mod calendar_month;
+pub mod calendar_time_grid;
 pub mod emoji_picker;
 pub mod layout;
 pub mod palette;

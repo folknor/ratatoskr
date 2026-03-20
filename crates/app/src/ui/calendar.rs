@@ -2,16 +2,16 @@
 //!
 //! When the app is in Calendar mode, this module renders the two-panel
 //! calendar layout: a sidebar (mini-month, view switcher, calendar list)
-//! and a main content area (placeholder for now, month view coming via
-//! `calendar_month`).
+//! and a main content area dispatched by the active view.
 
 use chrono::{Datelike, Local, NaiveDate, Weekday};
 use iced::widget::{button, column, container, row, text, Space};
-use iced::{Alignment, Element, Length};
+use iced::{Element, Length};
 
+use super::calendar_month;
+use super::calendar_time_grid;
 use super::layout::*;
 use super::theme;
-use crate::icon;
 
 // ── Calendar view enum ─────────────────────────────────
 
@@ -48,17 +48,32 @@ pub struct CalendarState {
     pub mini_month_month: u32,
     /// Start-of-week preference.
     pub week_start: Weekday,
+    /// Cached month grid data for the month view (rebuilt on state change).
+    pub month_grid: calendar_month::MonthGridData,
+    /// Cached time grid config for day/work-week/week views.
+    pub time_grid_config: calendar_time_grid::TimeGridConfig,
 }
 
 impl CalendarState {
     pub fn new() -> Self {
         let today = Local::now().date_naive();
+        let month_grid = calendar_month::build_month_grid(
+            today.year(),
+            today.month(),
+            &[],
+            Weekday::Mon,
+            today,
+        );
+        let time_grid_config =
+            calendar_time_grid::build_day_view(today, &[], today);
         Self {
             selected_date: today,
             active_view: CalendarView::Month,
             mini_month_year: today.year(),
             mini_month_month: today.month(),
             week_start: Weekday::Mon,
+            month_grid,
+            time_grid_config,
         }
     }
 
@@ -70,6 +85,7 @@ impl CalendarState {
         } else {
             self.mini_month_month -= 1;
         }
+        self.rebuild_view_data();
     }
 
     /// Navigate the mini-month to the next month.
@@ -80,6 +96,7 @@ impl CalendarState {
         } else {
             self.mini_month_month += 1;
         }
+        self.rebuild_view_data();
     }
 
     /// Jump to today, updating both selected date and mini-month.
@@ -88,6 +105,44 @@ impl CalendarState {
         self.selected_date = today;
         self.mini_month_year = today.year();
         self.mini_month_month = today.month();
+        self.rebuild_view_data();
+    }
+
+    /// Rebuild cached view data after any state change.
+    pub fn rebuild_view_data(&mut self) {
+        let today = Local::now().date_naive();
+        let events: &[calendar_time_grid::TimeGridEvent] = &[];
+
+        self.month_grid = calendar_month::build_month_grid(
+            self.mini_month_year,
+            self.mini_month_month,
+            &[],
+            self.week_start,
+            today,
+        );
+
+        self.time_grid_config = match self.active_view {
+            CalendarView::Day => {
+                calendar_time_grid::build_day_view(self.selected_date, events, today)
+            }
+            CalendarView::WorkWeek => {
+                calendar_time_grid::build_work_week_view(
+                    self.selected_date,
+                    events,
+                    today,
+                )
+            }
+            CalendarView::Week => calendar_time_grid::build_week_view(
+                self.selected_date,
+                events,
+                today,
+                self.week_start,
+            ),
+            CalendarView::Month => {
+                // Keep existing config for non-grid views.
+                calendar_time_grid::build_day_view(self.selected_date, events, today)
+            }
+        };
     }
 }
 
@@ -214,36 +269,42 @@ fn view_switcher_row(active: CalendarView) -> Element<'static, CalendarMessage> 
     r.into()
 }
 
-/// Calendar main content area: placeholder for now.
+/// Calendar main content area: dispatches to the appropriate view.
 fn calendar_main_view<'a>(state: &'a CalendarState) -> Element<'a, CalendarMessage> {
-    let view_label = match state.active_view {
-        CalendarView::Day => "Day View",
-        CalendarView::WorkWeek => "Work Week View",
-        CalendarView::Week => "Week View",
-        CalendarView::Month => "Month View",
-    };
+    match state.active_view {
+        CalendarView::Month => calendar_main_month(state),
+        _ => calendar_main_time_grid(state),
+    }
+}
 
-    let date_str = state.selected_date.format("%B %d, %Y").to_string();
+/// Month view main content area.
+fn calendar_main_month<'a>(
+    state: &'a CalendarState,
+) -> Element<'a, CalendarMessage> {
+    container(
+        calendar_month::month_view(
+            &state.month_grid,
+            |d| CalendarMessage::SelectDate(d),
+            |id| CalendarMessage::EventClicked(id.to_string()),
+        ),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(theme::ContainerClass::Content.style())
+    .into()
+}
 
-    let placeholder = column![
-        text(view_label)
-            .size(TEXT_HEADING)
-            .style(text::primary),
-        text(date_str)
-            .size(TEXT_LG)
-            .style(text::secondary),
-        Space::new().height(SPACE_LG),
-        text("Calendar view coming soon")
-            .size(TEXT_MD)
-            .style(theme::TextClass::Muted.style()),
-    ]
-    .spacing(SPACE_XS)
-    .align_x(Alignment::Center);
-
-    container(placeholder)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .align_x(Alignment::Center)
-        .align_y(Alignment::Center)
-        .into()
+/// Day / Work Week / Week time grid main content area.
+fn calendar_main_time_grid<'a>(
+    state: &'a CalendarState,
+) -> Element<'a, CalendarMessage> {
+    container(calendar_time_grid::time_grid_view(
+        &state.time_grid_config,
+        |id| CalendarMessage::EventClicked(id.to_string()),
+        |date, _hour| CalendarMessage::SelectDate(date),
+    ))
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(theme::ContainerClass::Content.style())
+    .into()
 }

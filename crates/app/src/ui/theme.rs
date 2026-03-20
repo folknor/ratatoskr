@@ -258,6 +258,14 @@ pub enum ContainerClass {
     CalendarCellMuted,
     /// Mini-month selected date highlight.
     MiniMonthSelected,
+    /// Time grid hour label cell (left column).
+    TimeGridHourLabel,
+    /// Time grid cell border (very subtle).
+    TimeGridCell,
+    /// Today column header highlight in time grid.
+    TimeGridTodayHeader,
+    /// Current-time indicator line (red/accent).
+    TimeGridNowLine,
 }
 
 impl ContainerClass {
@@ -288,6 +296,10 @@ impl ContainerClass {
             Self::CalendarCellToday => style_calendar_cell_today_container,
             Self::CalendarCellMuted => style_calendar_cell_muted_container,
             Self::MiniMonthSelected => style_mini_month_selected_container,
+            Self::TimeGridHourLabel => style_time_grid_hour_label_container,
+            Self::TimeGridCell => style_time_grid_cell_container,
+            Self::TimeGridTodayHeader => style_time_grid_today_header_container,
+            Self::TimeGridNowLine => style_time_grid_now_line_container,
         }
     }
 }
@@ -1099,6 +1111,55 @@ fn style_mini_month_selected_container(theme: &Theme) -> container::Style {
             radius: RADIUS_SM.into(),
             ..Default::default()
         },
+        ..Default::default()
+    }
+}
+
+// ── Time grid container style implementations ────────
+
+fn style_time_grid_hour_label_container(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    container::Style {
+        background: Some(p.background.weakest.color.into()),
+        border: iced::Border {
+            color: p.background.strongest.color.scale_alpha(0.08),
+            width: 0.0,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn style_time_grid_cell_container(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    container::Style {
+        background: Some(p.background.weakest.color.into()),
+        border: iced::Border {
+            color: p.background.strongest.color.scale_alpha(0.08),
+            width: 1.0,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn style_time_grid_today_header_container(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    container::Style {
+        background: Some(p.primary.base.color.scale_alpha(0.08).into()),
+        border: iced::Border {
+            color: p.primary.base.color.scale_alpha(0.3),
+            width: 1.0,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn style_time_grid_now_line_container(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    container::Style {
+        background: Some(p.danger.base.color.into()),
         ..Default::default()
     }
 }

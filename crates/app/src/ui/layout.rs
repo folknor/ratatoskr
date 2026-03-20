@@ -399,6 +399,21 @@ pub const CALENDAR_EVENT_HEIGHT: f32 = 20.0;
 pub const CALENDAR_HEADER_HEIGHT: f32 = 28.0;
 /// Cell size (width and height) for the mini-month date grid.
 pub const MINI_MONTH_CELL_SIZE: f32 = 28.0;
+
+// ── Time grid (day/work-week/week views) ─────────────
+
+/// Width of the hour-label column on the left of the time grid.
+pub const TIME_GRID_HOUR_LABEL_WIDTH: f32 = 60.0;
+/// Vertical pixels per hour in the time grid.
+pub const TIME_GRID_PIXELS_PER_HOUR: f32 = 60.0;
+/// Minimum rendered height for very short events.
+pub const TIME_GRID_MIN_EVENT_HEIGHT: f32 = 20.0;
+/// Height of each day-column header (date + weekday label).
+pub const TIME_GRID_HEADER_HEIGHT: f32 = 48.0;
+/// Height of the all-day event bar above the time grid.
+pub const TIME_GRID_ALL_DAY_HEIGHT: f32 = 32.0;
+/// Thickness of the current-time indicator line.
+pub const TIME_GRID_NOW_LINE_WIDTH: f32 = 2.0;
 /// Group icon size on group tokens.
 pub const TOKEN_GROUP_ICON_SIZE: f32 = ICON_XS;
 
