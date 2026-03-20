@@ -2,7 +2,9 @@
 
 Implementation specification for wiring the command palette into the iced app's Elm architecture. This covers everything from the roadmap's Slice 6: palette overlay UI, keyboard dispatch, command-backed UI surfaces, and the supporting infrastructure that makes them work.
 
-**Preconditions:** Slices 1-3 are complete. The `ratatoskr-command-palette` crate provides `CommandRegistry`, `BindingTable`, `CommandContext`, `CommandInputResolver` trait, `InputSchema`/`ParamDef`/`InputMode`, and `search_options()`. All 55 commands are registered with fuzzy search, availability predicates, toggle labels, input schemas, and keybinding resolution. This spec is purely `crates/app/` work — no changes to the command palette crate are required except for `CommandArgs` (which could live in either crate; this spec places it in the palette crate for type-level guarantees).
+**Preconditions:** Slices 1-3 are complete. The `ratatoskr-command-palette` crate provides `CommandRegistry`, `BindingTable`, `CommandContext`, `CommandInputResolver` trait, `InputSchema`/`ParamDef`/`InputMode`, and `search_options()`. All 55 commands are registered with fuzzy search, availability predicates, toggle labels, input schemas, and keybinding resolution. This spec is primarily `crates/app/` work, with one required addition to the command palette crate: `CommandArgs` (placed there for type-level guarantees and compile-time exhaustive matching in the dispatch layer). It also adds `AppOpenPalette` to the `CommandId` enum.
+
+**App architecture prerequisites:** Several parts of this spec reference app-state accessors and component boundaries (`reading_pane.focused_message_id()`, `thread_list.selected_thread`, per-panel `Component` implementations) that may not exist in their final form yet. Where this spec references these, it is defining the target interface the app should expose — not assuming it already exists. Some of this work is app-state normalization that must happen alongside or slightly ahead of command integration.
 
 ## Table of Contents
 
@@ -131,14 +133,16 @@ struct App {
 | `composer_is_open` | New field on `App`, toggled when compose is opened/closed |
 | `focused_region` | New field on `App`, updated on panel click/focus events |
 
-**`ViewType` mapping.** The sidebar currently tracks selection via `selected_account` index and `selected_label` ID. A dedicated `current_view: ViewType` field should be added to `App` (or derived from sidebar state). The mapping:
+**`ViewType` mapping.** The sidebar currently tracks selection via `selected_account` index and `selected_label` ID. **The app should own an explicit `current_view: ViewType` field** on `App` rather than deriving view type heuristically from scattered sidebar fields. Heuristic derivation (e.g., "no label selected + account selected → Inbox") is fragile and will break as more navigation surfaces are added (search results, pinned searches, calendar mode). The `current_view` field should be set explicitly by navigation actions — clicking a sidebar item, executing a `NavigateTo` command, activating a search, etc. This is an app-state normalization that should happen as part of this integration work, not deferred.
 
-- No label selected, account selected → `ViewType::Inbox`
-- Label selected with known system ID → `ViewType::Starred`, `Sent`, `Drafts`, `Trash`, `Spam`
-- Label selected with user label ID → `ViewType::Label`
-- Smart folder selected → `ViewType::SmartFolder`
-- Settings open → `ViewType::Settings`
-- Tasks view → `ViewType::Tasks`
+The `ViewType` values:
+- `ViewType::Inbox`, `Starred`, `Sent`, `Drafts`, `Snoozed`, `Trash`, `Spam`, `AllMail` — universal folders
+- `ViewType::Label` — a user label/folder selected
+- `ViewType::SmartFolder` — a smart folder selected
+- `ViewType::Search` — active search results
+- `ViewType::PinnedSearch` — a pinned search active
+- `ViewType::Settings` — settings open
+- `ViewType::Tasks`, `Attachments` — palette-first destinations
 
 ### 1.3 `CommandId` → `Message` Dispatch
 
@@ -197,6 +201,7 @@ pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
         CommandId::EmailMoveToFolder
         | CommandId::EmailAddLabel
         | CommandId::EmailRemoveLabel
+        | CommandId::NavigateToLabel
         | CommandId::EmailSnooze => None,
 
         // Compose
@@ -249,6 +254,9 @@ pub fn dispatch_parameterized(id: CommandId, args: CommandArgs) -> Option<Messag
         }
         (CommandId::EmailSnooze, CommandArgs::Snooze { until }) => {
             Some(Message::EmailAction(EmailAction::Snooze { until }))
+        }
+        (CommandId::NavigateToLabel, CommandArgs::NavigateToLabel { label_id, account_id }) => {
+            Some(Message::NavigateTo(NavigationTarget::Label { label_id, account_id }))
         }
         _ => None,
     }
@@ -363,6 +371,13 @@ Message::ExecuteParameterized(id, args) => {
         None => Task::none(),
     }
 }
+// Note: The recursive self.update(msg) calls above are idiomatic in iced's
+// Elm architecture but require care. The dispatched message must not itself
+// produce another ExecuteCommand (which would recurse unboundedly). This is
+// safe because dispatch_command/dispatch_parameterized produce concrete
+// action messages (NavigateTo, EmailAction, etc.), not meta-commands.
+// If the update() function grows very large, consider extracting dispatch
+// into a separate method to keep the recursion shallow and auditable.
 ```
 
 ### 1.4 `CommandInputResolver` Implementation
@@ -406,6 +421,11 @@ impl CommandInputResolver for AppInputResolver {
             (CommandId::EmailRemoveLabel, 0) => {
                 self.get_label_options(ctx, true)
             }
+            (CommandId::NavigateToLabel, 0) => {
+                // Cross-account: all user labels from all accounts,
+                // with account name in path for disambiguation
+                self.get_all_label_options_cross_account(ctx)
+            }
             _ => Ok(vec![]),
         }
     }
@@ -425,7 +445,7 @@ impl CommandInputResolver for AppInputResolver {
 }
 ```
 
-**Option resolution methods.** Each queries the DB synchronously via `db.conn()` (the `Arc<Mutex<Connection>>` pattern from CLAUDE.md). Since the resolver is called from `update()` context (not `view()`), blocking briefly on the mutex is acceptable for the small result sets involved (tens to low hundreds of items).
+**Option resolution methods.** Each queries the DB via `db.conn()` (the `Arc<Mutex<Connection>>` pattern from CLAUDE.md). **Resolution must be async** — even though result sets are small (tens to low hundreds of items), the palette is a high-frequency UI path and mutex contention could cause jank. The palette's `Confirm` handler dispatches a `Task::perform` wrapping the resolver call, and the result arrives via `OptionsLoaded`. Each resolver call is tagged with a generation counter (`option_load_generation: u64` on `PaletteState`) to discard stale results if the user switches commands or types quickly between resolver calls.
 
 ```rust
 impl AppInputResolver {
@@ -541,6 +561,13 @@ pub enum PaletteStage {
         selected_index: usize,
     },
     /// Stage 2: picking an option for a parameterized command.
+    /// V1 constraint: this handles single-step parameterized commands only
+    /// (InputSchema::Single). The underlying command system supports
+    /// InputSchema::Sequence (multi-step), but the palette UI does not
+    /// implement sequential step navigation yet. All current parameterized
+    /// commands are Single. Sequence support is deferred until a command
+    /// actually needs it (e.g., ComposeWithTemplate which needs template
+    /// + account selection).
     OptionPick {
         command_id: CommandId,
         command_label: &'static str,
@@ -637,7 +664,8 @@ The palette's `update()` follows the `Component` trait pattern: `(Task<PaletteMe
   - Emit `PaletteEvent::ExecuteParameterized(id, args)`.
   - Close the palette.
 
-**`OptionsLoaded(id, result)`:**
+**`OptionsLoaded(id, generation, result)`:**
+- If `generation < self.option_load_generation`: discard (stale result from a previous command selection). This prevents displaying options for a command the user has already navigated away from.
 - On `Ok(items)`: populate `PaletteStage::OptionPick` with the items, apply the current query filter via `search_options()`.
 - On `Err(msg)`: show error in the palette UI (replace results area with error text). Do not close.
 
@@ -671,6 +699,14 @@ fn build_args(
             selected_item.id.parse::<i64>().ok().map(|ts| {
                 CommandArgs::Snooze { until: ts }
             })
+        }
+        CommandId::NavigateToLabel => {
+            // Cross-account: item.id is "account_id:label_id"
+            let (account_id, label_id) = selected_item.id
+                .split_once(':')
+                .map(|(a, l)| (a.to_string(), l.to_string()))
+                .unwrap_or_else(|| (String::new(), selected_item.id.clone()));
+            Some(CommandArgs::NavigateToLabel { label_id, account_id })
         }
         _ => None,
     }
