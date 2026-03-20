@@ -76,7 +76,13 @@ pub struct ThreadAttachment {
 // ── DB connection ───────────────────────────────────────────
 
 pub struct Db {
+    /// Read-only connection for sync data queries.
     conn: Arc<Mutex<Connection>>,
+    /// Writable connection for local state (account creation, pinned
+    /// searches, session restore, keybinding overrides, etc.).
+    /// This is the cross-cutting writable connection pattern from the
+    /// implementation plan — multiple features need local-state writes.
+    write_conn: Arc<Mutex<Connection>>,
 }
 
 impl Db {
@@ -99,9 +105,49 @@ impl Db {
         )
         .map_err(|e| format!("pragmas: {e}"))?;
 
+        // Writable connection — same DB, no query_only restriction.
+        let write_conn =
+            Connection::open(&db_path).map_err(|e| format!("open write db: {e}"))?;
+        write_conn
+            .execute_batch(
+                "PRAGMA journal_mode = WAL;
+                 PRAGMA busy_timeout = 15000;
+                 PRAGMA synchronous = NORMAL;
+                 PRAGMA foreign_keys = ON;
+                 PRAGMA temp_store = MEMORY;",
+            )
+            .map_err(|e| format!("write pragmas: {e}"))?;
+
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            write_conn: Arc::new(Mutex::new(write_conn)),
         })
+    }
+
+    /// Execute a closure on the writable connection. Use this for
+    /// account creation, local state writes, and any operation that
+    /// modifies the database.
+    pub async fn with_write_conn<F, T>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&Connection) -> Result<T, String> + Send + 'static,
+        T: Send + 'static,
+    {
+        let conn = Arc::clone(&self.write_conn);
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| format!("db write lock: {e}"))?;
+            f(&conn)
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
+    }
+
+    /// Synchronous access to the writable connection.
+    pub fn with_write_conn_sync<F, T>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&Connection) -> Result<T, String>,
+    {
+        let conn = self.write_conn.lock().map_err(|e| format!("db write lock: {e}"))?;
+        f(&conn)
     }
 
     pub async fn with_conn<F, T>(&self, f: F) -> Result<T, String>

@@ -3,10 +3,13 @@
 //! Phases 2-3 of the accounts implementation spec. The wizard handles
 //! first-launch onboarding and subsequent account additions.
 
+use std::sync::Arc;
+
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
 use iced::{Alignment, Element, Length, Task};
 
 use crate::component::Component;
+use crate::db::Db;
 use crate::font;
 use crate::icon;
 use crate::ui::layout::*;
@@ -181,18 +184,20 @@ pub struct AddAccountWizard {
     pub identity: AccountIdentity,
     /// Colors already assigned to existing accounts (hex strings).
     pub used_colors: Vec<String>,
+    /// DB handle for account creation (writable).
+    db: Arc<Db>,
 }
 
 impl AddAccountWizard {
-    pub fn new_first_launch() -> Self {
-        Self::new(true, Vec::new())
+    pub fn new_first_launch(db: Arc<Db>) -> Self {
+        Self::new(true, Vec::new(), db)
     }
 
-    pub fn new_add_account(used_colors: Vec<String>) -> Self {
-        Self::new(false, used_colors)
+    pub fn new_add_account(used_colors: Vec<String>, db: Arc<Db>) -> Self {
+        Self::new(false, used_colors, db)
     }
 
-    fn new(is_first_launch: bool, used_colors: Vec<String>) -> Self {
+    fn new(is_first_launch: bool, used_colors: Vec<String>, db: Arc<Db>) -> Self {
         let presets = ratatoskr_label_colors::category_colors::all_presets();
         let first_unused = presets
             .iter()
@@ -213,6 +218,7 @@ impl AddAccountWizard {
                 selected_color_index: Some(first_unused),
             },
             used_colors,
+            db,
         }
     }
 
@@ -387,16 +393,59 @@ impl AddAccountWizard {
         let account_name = self.identity.name.trim().to_string();
         let email = self.email.clone();
         let auth = self.auth_state.clone();
+        let db = Arc::clone(&self.db);
 
-        // TODO: Wire to real db_create_account via DbState (requires write
-        // access — the app's Db uses query_only=ON, so this needs the core
-        // crate's DbState instead). For now, simulate success.
         let task = Task::perform(
             async move {
-                // Placeholder: real account creation would use DbState here
-                let _ = (email, account_name, color, auth);
-                let fake_id = format!("acct-{generation}");
-                (generation, Ok(fake_id))
+                let account_id = uuid::Uuid::new_v4().to_string();
+                let aid = account_id.clone();
+                db.with_write_conn(move |conn| {
+                    // Determine SMTP credentials
+                    let (smtp_user, smtp_pass) = if auth.use_separate_smtp_credentials {
+                        (auth.smtp_username.clone(), auth.smtp_password.clone())
+                    } else {
+                        (auth.username.clone(), auth.password.clone())
+                    };
+
+                    conn.execute(
+                        "INSERT INTO accounts (
+                            id, email, display_name, provider, auth_method,
+                            imap_host, imap_port, imap_security,
+                            imap_username, imap_password,
+                            smtp_host, smtp_port, smtp_security,
+                            smtp_username, smtp_password,
+                            accept_invalid_certs,
+                            account_name, account_color
+                        ) VALUES (
+                            ?1, ?2, NULL, 'imap', 'password',
+                            ?3, ?4, ?5, ?6, ?7,
+                            ?8, ?9, ?10, ?11, ?12,
+                            ?13, ?14, ?15
+                        )",
+                        rusqlite::params![
+                            aid,
+                            email,
+                            auth.imap_host,
+                            auth.imap_port,
+                            auth.imap_security.to_db_string(),
+                            auth.username,
+                            auth.password,
+                            auth.smtp_host,
+                            auth.smtp_port,
+                            auth.smtp_security.to_db_string(),
+                            smtp_user,
+                            smtp_pass,
+                            if auth.accept_invalid_certs { 1 } else { 0 },
+                            account_name,
+                            color,
+                        ],
+                    )
+                    .map_err(|e| format!("Failed to create account: {e}"))?;
+                    Ok(aid)
+                })
+                .await
+                .map(|id| (generation, Ok(id)))
+                .unwrap_or_else(|e| (generation, Err(e)))
             },
             |(g, result): (u64, Result<String, String>)| {
                 AddAccountMessage::AccountCreated(g, result)

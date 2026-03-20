@@ -485,7 +485,7 @@ impl App {
                     .filter_map(|a| a.account_color.clone())
                     .collect();
                 self.add_account_wizard =
-                    Some(AddAccountWizard::new_add_account(used_colors));
+                    Some(AddAccountWizard::new_add_account(used_colors, Arc::clone(&self.db)));
                 Task::none()
             }
         }
@@ -1057,7 +1057,7 @@ impl App {
                     .filter_map(|a| a.account_color.clone())
                     .collect();
                 self.add_account_wizard =
-                    Some(AddAccountWizard::new_add_account(used_colors));
+                    Some(AddAccountWizard::new_add_account(used_colors, Arc::clone(&self.db)));
                 self.show_settings = false;
                 Task::none()
             }
@@ -1189,7 +1189,9 @@ impl App {
         self.sidebar.accounts = accounts;
         if self.sidebar.accounts.is_empty() {
             self.no_accounts = true;
-            self.add_account_wizard = Some(AddAccountWizard::new_first_launch());
+            self.add_account_wizard = Some(AddAccountWizard::new_first_launch(
+                Arc::clone(&self.db),
+            ));
             self.status = "Welcome".to_string();
             return Task::none();
         }
