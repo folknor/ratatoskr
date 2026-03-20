@@ -1,5 +1,5 @@
 # TODO
-.
+
 
 ## Inline Image Store Eviction
 
@@ -17,40 +17,43 @@
 
 These patterns appeared across 6-8+ specs and should be adopted as foundational infrastructure before feature work builds on top of them. Full rationale in `docs/iced-ecosystem-cross-reference.md`.
 
-- [ ] **Generational load tracking**
+- [ ] **Generational load tracking** *(verified 2026-03-21)*
 
-  Pattern established. Two generation counters implemented in `crates/app/src/main.rs`: `nav_generation` (accounts/labels/threads) and `thread_generation` (messages/attachments). All 5 current async load paths tagged; stale results discarded via guard arms.
+  Pattern established and well-applied. Three generation counters in `crates/app/src/main.rs`: `nav_generation` (accounts/labels/threads/pinned searches), `thread_generation` (messages/attachments), `search_generation` (search results). All stale results discarded via `g != self.xxx_generation` guard arms. Palette uses its own `option_load_generation` on `PaletteState`. Sidebar navigation uses `nav_generation` correctly on scope switch. Pinned search loads use `nav_generation`.
 
   **Remaining sites** (apply the same pattern as these features are built):
-  - Search result queries (incremental typing) — `docs/search/implementation-spec.md`, `docs/search/problem-statement.md`
-  - Sidebar navigation state (`get_navigation_state()` on scope switch) — `docs/sidebar/problem-statement.md`
-  - Pinned search thread metadata loading — `docs/search/pinned-searches.md`
-  - Command palette option resolution (`CommandInputResolver::get_options()`) — `docs/command-palette/roadmap.md`
-  - Status bar sync progress (per-account, needs `HashMap<AccountId, u64>`) — `docs/status-bar/problem-statement.md`
+  - Status bar sync progress (per-account — no generation tracking; stale progress could persist if sync task dies) — `docs/status-bar/problem-statement.md`
+  - Signature loading (currently synchronous, no generation tracking) — `docs/signatures/implementation-spec.md`
+  - Pop-out window data loads (no per-window generation counter; window ID provides implicit staleness but no interleave protection)
   - Attachment/body store loading — `docs/main-layout/problem-statement.md`
   - Calendar event loading on date navigation — `docs/calendar/problem-statement.md`
 
 ---
 
-- [ ] **Component trait for panel isolation**
+- [ ] **Component trait for panel isolation** *(verified 2026-03-21)*
 
-  Trait defined in `crates/app/src/component.rs` with `Message`/`Event` associated types, `update()`, `view()`, and `subscription()` (default `Subscription::none()`). Extracted components: sidebar, thread list, reading pane, settings. App dispatches via `Message::Sidebar(...)`, `Message::ThreadList(...)`, `Message::ReadingPane(...)`, `Message::Settings(...)` and routes events. Shared widget functions genericized to work with any message type.
+  Trait defined in `crates/app/src/component.rs` with `Message`/`Event` associated types, `update()`, `view()`, and `subscription()` (default `Subscription::none()`). Six components extracted: Sidebar, ThreadList, ReadingPane, Settings, StatusBar, AddAccountWizard. All follow the standard pattern: internal messages stay in `update()`, outward signals emit as events to the parent `App`.
 
   **Remaining panels to componentize** (as these features are built):
-  - **Compose** — emits `Sent(draft_id)`, `DraftSaved(draft_id)`, `Discarded`
-  - **Calendar** — emits `EventSelected(event_id)`, `DateNavigated(date)`
-  - **Command palette** — emits `CommandExecuted(CommandId, CommandArgs)`, `Dismissed`
-  - **Status bar** — emits `RequestReauth(account_id)`, `WarningClicked(account_id)`
+  - **Compose** — currently uses free functions (`update_compose`), not `Component` trait
+  - **Calendar** — state lives on `App` directly, rendered via free functions
+  - **Command palette** — `PaletteState` managed directly by App, no `PaletteEvent` type. May be intentional (tight coupling to registry/resolver)
+  - **Pop-out windows** — use free functions (`view_message_window`, `view_compose_window`), inconsistent with main window components
+  - **Right sidebar** — stateless view function (appropriate given no interaction)
 
 ---
 
-- [ ] **Token-to-Catalog bridge for theming**
+- [ ] **Token-to-Catalog bridge for theming** *(verified 2026-03-21)*
 
-  Style migration complete. 8 class enums defined in `theme.rs`: `ButtonClass`, `ContainerClass`, `TextClass`, `RuleClass`, `TextInputClass`, `SliderClass`, `RadioClass`, `TogglerClass`, `PickListClass`. All ~30 style functions centralized behind enum dispatch with `.style()` methods returning the appropriate fn pointer or closure. ~80 call sites across all view files migrated from inline closures to named classes. Color utilities (`mix()`, `ON_AVATAR`, etc.) preserved.
+  Style migration complete. 8+ class enums defined in `theme.rs`: `ButtonClass` (14 variants), `ContainerClass` (28 variants), `TextClass` (5 variants), `RuleClass`, `TextInputClass`, `SliderClass`, `RadioClass`, `TogglerClass`, `PickListClass`. All style functions centralized behind enum dispatch with `.style()` methods. A grep for `.style(|` across `crates/app/src/ui/` returns zero matches — all inline closures eliminated.
+
+  **Known exceptions** (not violations — architecturally correct):
+  - Rich text editor passes colors via builder methods (standalone widget, not themed via Catalog)
+  - Token input widget draws directly via `renderer.fill_quad()` (custom `advanced::Widget`)
+  - Two inline closures in palette: `palette_result_row` and `option_result_row` use `|_theme| text::Style { color: None }` — should be a `TextClass` variant
 
   **Future enhancements** (optional, evaluate as needed):
   - **Token registry** (from shadcn-rs): `ThemeTokenRegistry` (BTreeMap) separating token definition from consumption. Useful if user-customizable themes beyond the 6-seed system are needed.
-  - **Phantom-type variants** (from iced-plus): Compile-time safe button variants like `Button<Primary, Medium, Message>`. May be over-engineering — evaluate if the variant space grows significantly.
 
 ---
 
@@ -81,16 +84,16 @@ These patterns appeared across 6-8+ specs and should be adopted as foundational 
 
 ---
 
-- [ ] **Subscription orchestration pattern**
+- [ ] **Subscription orchestration pattern** *(verified 2026-03-21)*
 
-  Infrastructure established. `Component` trait has `subscription()` with default `Subscription::none()`. `App::subscription()` batches all component subscriptions alongside app-level ones (mundy appearance, window events, settings animation). All 4 components currently return `Subscription::none()`.
+  Infrastructure well-established. `App::subscription()` batches all component subscriptions alongside app-level ones (mundy appearance, window resize/close/move). Active conditional subscriptions: global keyboard listener (`iced::event::listen_with`), pending chord timeout (1s timer), search debounce (50ms poll), settings overlay animation, status bar cycling (3s timer, conditional on active content). Status bar `subscription()` is correctly conditional — only ticks when cycling or expiry is needed.
 
   **Remaining work** (as these features are built):
-  - Sync pipeline events (4 providers) — use `subscription::channel` with `tokio::select!` to multiplex
-  - Keyboard capture for shortcuts — `subscription::events_with` for raw key interception
-  - Timer ticks (status bar cycling at 3s, auto-save at 30s, search debounce at 150ms)
+  - Sync pipeline events (4 providers) — `IcedProgressReporter` + `subscription::channel` not implemented. Status bar has the API but receives no data
+  - Compose auto-save timer (30s) — not implemented in pop-out compose
   - File system watches (draft changes, attachment modifications)
   - Provider push notifications (IMAP IDLE, JMAP push, Graph webhooks, Gmail watch)
+  - GAL polling refresh (hourly, for contacts)
 
 ---
 
@@ -245,9 +248,9 @@ Deferred items from code review. Grouped by feature area.
 
 - [ ] **Flags emoji category** — Most emoji pickers include country/flag emoji. Not included in the static table.
 
-## Spec-vs-Code Audit (2026-03-20)
+## Spec-vs-Code Audit (2026-03-20, updated 2026-03-21)
 
-Gaps found comparing current code against implementation specs. Grouped by feature.
+Gaps found comparing current code against implementation specs. Grouped by feature. Full per-feature audit reports in `docs/<feature>/discrepancies.md`.
 
 ### Command Palette
 
@@ -319,6 +322,16 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 
 - [ ] **Phases 2-4 not started** — Smart folder CRUD via command palette, typeahead suggestions, "Search here" scoped search.
 
+- [ ] **Smart folder migration (Slice 6) not started** — `execute_smart_folder_query` still uses its own direct path, not the unified pipeline. Old token system (`__LAST_7_DAYS__`) still active despite parser handling relative offsets natively.
+
+- [ ] **Tantivy-only path drops multi from/to values** — `build_tantivy_params()` uses `parsed.from.first().cloned()`, discarding additional `from:`/`to:` values. Breaks OR semantics when Tantivy-only path taken. SQL builder handles multi-value correctly.
+
+- [ ] **`SearchParams.label` is dead** — `#[allow(dead_code)]`, passed but ignored by Tantivy internally.
+
+- [ ] **`delete_all_pinned_searches` not implemented** — Spec's "Clear all" action not available.
+
+- [ ] **Duplicate `group_by_thread()`** — Public in both `crates/search/src/lib.rs` and private in `crates/core/src/search_pipeline.rs`. Different type signatures, neither calls the other.
+
 ### Contacts Autocomplete
 
 **Spec:** `docs/contacts/autocomplete-implementation-spec.md`
@@ -359,11 +372,84 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 
 - [ ] **Signatures loaded synchronously on UI thread** — `load_signatures_into_settings()` runs in accounts-loaded handler. Spec says async via `Task::perform` on tab selection.
 
+### Rich Text Editor
+
+**Spec:** `docs/editor/architecture.md`
+
+- [ ] **Architecture doc has stale claims** — Doc says `draw_list_marker()` "is not wired into the runtime draw path yet" but it IS called at `widget/mod.rs:529`. Doc says 428 tests, actual count is 652. Doc shows `html_parse.rs` as single file but it's a module directory (`mod.rs` + `dom.rs`). Doc omits `editor_state.rs` from crate structure.
+- [ ] **`_last_click` dead code** — `WidgetState._last_click: Option<Click>` initialized to `None`, never read. Double/triple click not implemented.
+- [ ] **`prepare_move_up/down` unused at runtime** — Public functions in `widget/cursor.rs`, tested, but never called from the widget's `update()`. Simpler adjacent-block fallback used instead.
+- [ ] **`SetBlockAttrs` operation still missing** — Documented as deferred for alignment/indentation. Still absent.
+
+### Main Layout
+
+**Specs:** `docs/main-layout/problem-statement.md`, `docs/main-layout/implementation-spec.md`, `docs/main-layout/iced-implementation-spec.md`
+
+- [ ] **App-local DB shim used instead of core's `get_thread_detail()`** — App uses raw SQL in `crates/app/src/db/connection.rs` for thread messages, attachments, accounts, labels. Core's `get_thread_detail()` is complete but never wired. Consequences: no body text from BodyStore (uses snippet), no message ownership detection, no quote-stripped collapsed summaries, no resolved label colors, attachment collapse not persisted to SQLite.
+- [ ] **Calendar and pinned search CRUD bypass core** — Raw SQL in `connection.rs` for `create/update/delete_calendar_event`, pinned search table creation, contact table alterations. App-level schema management.
+- [ ] **Phase 3 interaction flow entirely deferred** — Keyboard shortcuts (j/k, Enter, Escape), auto-advance after archive/trash, multi-select (Shift/Ctrl+click), inline reply composer, context-dependent shortcut dispatch via `FocusedRegion`.
+- [ ] **No real message body rendering** — Bodies shown as snippet text. No HTML rendering pipeline (no iced_webview, litehtml, or DOM-to-widget).
+- [ ] **No scroll virtualization** — Thread list renders all cards in `column![]` inside `scrollable`. Fixed `THREAD_CARD_HEIGHT` exists for future virtualization.
+- [ ] **Right sidebar still placeholder** — Shows static "Calendar placeholder", "No pinned items" text. Calendar built as separate full-page mode instead.
+- [ ] **Search context line missing scope indicator** — Shows `"{n} results"` but no "All" scope-widening link.
+
+### Pop-Out Message View (expanded)
+
+**Specs:** `docs/pop-out-windows/problem-statement.md`, `docs/pop-out-windows/message-view-implementation-spec.md`
+
+- [ ] **Phase 1 (multi-window architecture) is complete** — Daemon migration, window registry, view/title routing, cascade close, Escape handling all match spec.
+- [ ] **Phase 2 (message view) mostly complete but missing fields** — `cc_addresses`, `raw_source`, `rendering_mode`, `scroll_offset`, `error_banner`, position tracking, `overflow_menu_open`, `remote_content_loaded` all absent from `MessageViewState`.
+- [ ] **Phases 3-6 not started** — Rendering modes (plain/HTML/source), overflow menu (archive/delete/print/save), session restore, Save As (.eml/.txt).
+- [ ] **Compose window is a UI shell** — No sending (stub), no draft persistence, no auto-save subscription, no attachments, no rich text (uses `text_editor`), no formatting toolbar, no discard confirmation, no signature insertion.
+- [ ] **Status bar incorrectly appears in pop-out windows** — Problem statement says it should not.
+- [ ] **Body/attachment loads bypass core** — `Db::load_message_body()` and `Db::load_message_attachments()` are raw SQL in app crate.
+
+### Status Bar
+
+**Specs:** `docs/status-bar/problem-statement.md`, `docs/status-bar/implementation-spec.md`
+
+- [ ] **Scaffold is complete and faithful** — Component trait, types, priority state machine, subscription, view, theme tokens, layout constants all correct. `BTreeMap` for warnings is an improvement over spec's `HashMap`.
+- [ ] **All three data pipelines unwired** — `report_sync_progress()`, `set_warning()`, `show_confirmation()` exist as public methods but are never called. Status bar permanently shows idle. No `IcedProgressReporter`, no `SyncEvent` type.
+- [ ] **Idle state collapses to zero height** — Spec explicitly says fixed 28px container. Code uses `Space::new().width(0).height(0)`. Causes layout shift on transition.
+- [ ] **Settings toggle disconnected** — `sync_status_bar: bool` exists in UI but is never read.
+- [ ] **Status bar appears in pop-out windows** — Problem statement says it should not.
+- [ ] **`ResolvedContent::Warning` missing `account_id`** — Re-derives from `warnings` map via cycle index. Subtle race possible (spec embeds `account_id` directly).
+
+### Sidebar (additional findings)
+
+**Specs:** `docs/sidebar/implementation-spec.md`
+
+- [ ] **Phases 1A-1E all complete and clean** — No core CRUD bypass, proper componentization, named style classes, generational tracking. Best cross-cutting compliance of any feature.
+- [ ] **Pinned search date format diverges** — Uses absolute ("Mar 19, 14:32") vs spec's relative ("2 hours ago"). Intentional.
+- [ ] **`SidebarEvent::CycleAccount` unreachable** — `CycleAccount` handler recursively calls `SelectAccount`, which emits `AccountSelected` before `CycleAccount` return. Parent handler is dead code.
+- [ ] **`NavigationTarget` enum still deferred** — `selected_label: Option<String>` remains the flat marker for universal folders, smart folders, and account labels.
+- [ ] **Mixed drafts list view** — Count path handles local+server drafts, but list path only returns server-synced drafts.
+
 ### Cross-Cutting
 
 - [ ] **Core CRUD bypassed in multiple places** — Accounts and signatures both write raw SQL in the app crate instead of using core functions. Core CRUD is dead code, and logic like transactional default-clearing is skipped.
 
-- [ ] **Dead code accumulation** — `NavigateToLabel` args variant, `SidebarEvent::CycleAccount`, Spam/All Mail sidebar filter, core CRUD functions for accounts and signatures.
+- [ ] **Dead code accumulation** *(verified 2026-03-21, expanded)*:
+  - `NavigateToLabel` — `CommandId` and `CommandArgs` variants exist but never registered, dispatched, or resolved. `Db::get_all_labels_cross_account()` unreachable.
+  - `SidebarEvent::CycleAccount` — unreachable due to recursive update pattern
+  - `SidebarMessage::Noop` — no emission found
+  - Spam/All Mail sidebar filter code — `SIDEBAR_UNIVERSAL_FOLDERS` doesn't include them
+  - Core CRUD functions for accounts (`db_create_account` etc.) and signatures (`db_insert/update/delete_signature`) — bypassed by app-level raw SQL
+  - `ContactSearchResult`, `ContactSearchKind`, `RecipientField` in `token_input.rs` — never imported
+  - `search_contacts_for_autocomplete` in app db — never called
+  - `AUTOCOMPLETE_MAX_HEIGHT`, `AUTOCOMPLETE_ROW_HEIGHT` layout constants — no dropdown exists
+  - `recency_score` on `CommandMatch` — computed but never used in sorting
+  - `PALETTE_TOP_OFFSET` layout constant — inline `[80, 0, 0, 0]` used instead
+  - `registry` parameter in `palette_card()` — immediately discarded with `let _ = registry`
+  - `NavNext`/`NavPrev` command dispatch — stub to `NavigateTo(Inbox)`, not real navigation
+  - `PendingChord::started` — `#[allow(dead_code)]`, stored but never read
+  - `SearchState.index`, `SearchState.schema`, `SearchParams.label` — all `#[allow(dead_code)]`
+  - `SearchState::search()` simple method — only `search_with_filters()` used
+  - `resolve_query_tokens` — still active but should be deprecated (parser handles offsets natively)
+  - Status bar public methods (`report_sync_progress`, `set_warning`, `show_confirmation`, etc.) — defined but never called
+  - `sync_status_bar` settings toggle — UI exists but value never read
+  - `_last_click` in editor `WidgetState` — initialized to `None`, never used
+  - `prepare_move_up/down` in editor — tested but never called from widget
 
 ## UI Specs Needed
 
