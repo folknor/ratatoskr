@@ -885,6 +885,10 @@ impl App {
                     AppMode::Calendar => AppMode::Mail,
                 };
                 self.sidebar.in_calendar_mode = self.app_mode == AppMode::Calendar;
+                // Reload events when entering calendar mode
+                if self.app_mode == AppMode::Calendar {
+                    return self.reload_calendar_events();
+                }
                 Task::none()
             }
             Message::SetCalendarView(view) => {
@@ -1147,7 +1151,7 @@ impl App {
                 match result {
                     Ok(()) => {
                         self.calendar.overlay = CalendarOverlay::None;
-                        self.calendar.rebuild_view_data();
+                        return self.reload_calendar_events();
                     }
                     Err(e) => {
                         self.status = format!("Save failed: {e}");
@@ -1170,8 +1174,18 @@ impl App {
             }
             CalendarMessage::EventDeleted(result) => {
                 match result {
-                    Ok(()) => self.calendar.rebuild_view_data(),
+                    Ok(()) => return self.reload_calendar_events(),
                     Err(e) => self.status = format!("Delete failed: {e}"),
+                }
+                Task::none()
+            }
+            CalendarMessage::EventsLoaded(result) => {
+                match result {
+                    Ok(events) => {
+                        self.calendar.events = events;
+                        self.calendar.rebuild_view_data();
+                    }
+                    Err(e) => self.status = format!("Load events error: {e}"),
                 }
                 Task::none()
             }
@@ -1253,9 +1267,18 @@ impl App {
                 |r| Message::Calendar(CalendarMessage::EventSaved(r)),
             )
         } else {
+            // Use the first account as default for new events.
+            // Provider sync will use the correct account later.
+            let account_id = self
+                .sidebar
+                .accounts
+                .first()
+                .map(|a| a.id.clone())
+                .unwrap_or_default();
             Task::perform(
                 async move {
                     db.create_calendar_event(
+                        account_id,
                         event.title,
                         event.description,
                         event.location,
@@ -1270,6 +1293,15 @@ impl App {
                 |r| Message::Calendar(CalendarMessage::EventSaved(r)),
             )
         }
+    }
+
+    /// Reload calendar events from DB and rebuild views.
+    fn reload_calendar_events(&self) -> Task<Message> {
+        let db = Arc::clone(&self.db);
+        Task::perform(
+            async move { db.load_calendar_events_for_view().await },
+            |r| Message::Calendar(CalendarMessage::EventsLoaded(r)),
+        )
     }
 }
 

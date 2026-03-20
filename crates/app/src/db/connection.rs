@@ -440,9 +440,11 @@ impl Db {
     }
 
     /// Create a new calendar event. Returns the new event's id.
+    /// `account_id` must be a real account ID (not empty).
     #[allow(clippy::too_many_arguments)]
     pub async fn create_calendar_event(
         &self,
+        account_id: String,
         title: String,
         description: String,
         location: String,
@@ -458,9 +460,10 @@ impl Db {
                     (id, account_id, google_event_id, summary, description,
                      location, start_time, end_time, is_all_day, status,
                      calendar_id)
-                 VALUES (?1, '', ?1, ?2, ?3, ?4, ?5, ?6, ?7, 'confirmed', ?8)",
+                 VALUES (?1, ?2, ?1, ?3, ?4, ?5, ?6, ?7, ?8, 'confirmed', ?9)",
                 params![
                     id,
+                    account_id,
                     title,
                     description,
                     location,
@@ -509,6 +512,43 @@ impl Db {
             )
             .map_err(|e| e.to_string())?;
             Ok(())
+        })
+        .await
+    }
+
+    /// Load all calendar events as TimeGridEvent for view rendering.
+    pub async fn load_calendar_events_for_view(
+        &self,
+    ) -> Result<Vec<crate::ui::calendar_time_grid::TimeGridEvent>, String> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT e.id, e.summary, e.start_time, e.end_time,
+                            e.is_all_day, COALESCE(c.color, '#3498db') AS color,
+                            c.display_name AS calendar_name
+                     FROM calendar_events e
+                     LEFT JOIN calendars c
+                       ON c.account_id = e.account_id AND c.id = e.calendar_id
+                     ORDER BY e.start_time ASC",
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok(crate::ui::calendar_time_grid::TimeGridEvent {
+                        id: row.get::<_, String>("id")?,
+                        title: row.get::<_, Option<String>>("summary")?
+                            .unwrap_or_default(),
+                        start_time: row.get("start_time")?,
+                        end_time: row.get("end_time")?,
+                        all_day: row.get::<_, i64>("is_all_day")? != 0,
+                        color: row.get::<_, Option<String>>("color")?
+                            .unwrap_or_else(|| "#3498db".to_string()),
+                        calendar_name: row.get("calendar_name")?,
+                    })
+                })
+                .map_err(|e| e.to_string())?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())
         })
         .await
     }

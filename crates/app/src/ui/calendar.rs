@@ -83,7 +83,12 @@ pub struct CalendarEventData {
 impl CalendarEventData {
     /// Build a blank event pre-filled with the given date/hour.
     pub fn new_at(date: NaiveDate, hour: u32) -> Self {
-        let end_hour = (hour + 1).min(23);
+        // If starting at 23, end at 23:59 (can't wrap to next day in V1).
+        let (end_hour, end_minute) = if hour >= 23 {
+            (23, 59)
+        } else {
+            (hour + 1, 0)
+        };
         Self {
             id: None,
             title: String::new(),
@@ -91,7 +96,7 @@ impl CalendarEventData {
             start_hour: hour,
             start_minute: 0,
             end_hour,
-            end_minute: 0,
+            end_minute,
             all_day: false,
             location: String::new(),
             description: String::new(),
@@ -121,6 +126,8 @@ pub struct CalendarState {
     pub time_grid_config: calendar_time_grid::TimeGridConfig,
     /// Current overlay (detail view, editor, delete confirm, or none).
     pub overlay: CalendarOverlay,
+    /// Cached events from the DB. Reloaded after CRUD operations.
+    pub events: Vec<calendar_time_grid::TimeGridEvent>,
 }
 
 impl CalendarState {
@@ -145,6 +152,7 @@ impl CalendarState {
             month_grid,
             time_grid_config,
             overlay: CalendarOverlay::None,
+            events: Vec::new(),
         }
     }
 
@@ -179,15 +187,29 @@ impl CalendarState {
         self.rebuild_view_data();
     }
 
-    /// Rebuild cached view data after any state change.
+    /// Rebuild cached view data from `self.events`.
+    /// Call after any state change (date, view, events loaded).
     pub fn rebuild_view_data(&mut self) {
+        let events = &self.events;
         let today = Local::now().date_naive();
-        let events: &[calendar_time_grid::TimeGridEvent] = &[];
+
+        // Convert to month events for the month grid.
+        let month_events: Vec<calendar_month::MonthEvent> = events
+            .iter()
+            .map(|e| calendar_month::MonthEvent {
+                id: e.id.clone(),
+                title: e.title.clone(),
+                start_time: e.start_time,
+                end_time: e.end_time,
+                all_day: e.all_day,
+                color: e.color.clone(),
+            })
+            .collect();
 
         self.month_grid = calendar_month::build_month_grid(
             self.mini_month_year,
             self.mini_month_month,
-            &[],
+            &month_events,
             self.week_start,
             today,
         );
@@ -268,6 +290,8 @@ pub enum CalendarMessage {
     CreateEvent,
     /// Event detail was loaded from DB after clicking an event.
     EventLoaded(Result<CalendarEventData, String>),
+    /// Calendar events loaded from DB for view rendering.
+    EventsLoaded(Result<Vec<calendar_time_grid::TimeGridEvent>, String>),
 }
 
 // ── View ───────────────────────────────────────────────

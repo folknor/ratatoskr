@@ -14,6 +14,7 @@ use super::theme;
 // ── Data types ──────────────────────────────────────────
 
 /// An event to render on the time grid.
+#[derive(Debug, Clone)]
 pub struct TimeGridEvent {
     pub id: String,
     pub title: String,
