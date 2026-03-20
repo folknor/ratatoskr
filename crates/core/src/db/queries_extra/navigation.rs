@@ -218,13 +218,22 @@ fn build_account_labels(
                 .copied()
                 .unwrap_or(0);
 
+            // If parent is a system folder (INBOX, SENT, etc.), treat as
+            // root — system folders are rendered in the universal section,
+            // not in the label tree. Without this, children of system
+            // folders become orphans in the tree and get promoted to
+            // depth-0 by the orphan recovery path.
+            let parent_id = label.parent_label_id.filter(|pid| {
+                !system_ids.contains(&pid.as_str())
+            });
+
             NavigationFolder {
                 id: label.id,
                 name: label.name,
                 folder_kind: FolderKind::AccountLabel,
                 unread_count,
                 account_id: Some(label.account_id),
-                parent_id: label.parent_label_id,
+                parent_id,
                 label_semantics: Some(semantics.clone()),
             }
         })
