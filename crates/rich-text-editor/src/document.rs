@@ -718,6 +718,8 @@ pub fn isolate_runs(runs: &mut Vec<StyledRun>, start: usize, end: usize) -> Rang
 /// occurs; the existing boundary index is returned.
 ///
 /// After this call, `offset` corresponds to the start of `runs[returned_index]`.
+///
+/// Public alias: [`split_runs_at_char_offset`].
 fn split_runs_at(runs: &mut Vec<StyledRun>, offset: usize) -> usize {
     let mut pos = 0;
     for i in 0..runs.len() {
@@ -737,6 +739,13 @@ fn split_runs_at(runs: &mut Vec<StyledRun>, offset: usize) -> usize {
     }
     // offset == total length → past the end
     runs.len()
+}
+
+/// Public wrapper for [`split_runs_at`]. Splits a run list at a character
+/// offset, returning the run index where the split falls. Used by the paste
+/// path to splice runs into a block.
+pub fn split_runs_at_char_offset(runs: &mut Vec<StyledRun>, offset: usize) -> usize {
+    split_runs_at(runs, offset)
 }
 
 // ── Tests ───────────────────────────────────────────────

@@ -37,7 +37,7 @@ pub mod input;
 pub mod render;
 
 use crate::document::{
-    Block, DocPosition, DocSelection, DocSlice, Document, InlineStyle, StyledRun, isolate_runs,
+    Block, DocPosition, DocSelection, DocSlice, Document, InlineStyle, StyledRun,
 };
 use crate::html_parse::from_html;
 use crate::html_serialize::to_html;
@@ -436,55 +436,35 @@ impl EditorState {
     fn paste_inline_runs(
         &mut self,
         pos: DocPosition,
-        block: &Block,
+        source_block: &Block,
         ops: &mut Vec<EditOp>,
     ) {
-        let Some(runs) = block.runs() else {
+        let Some(paste_runs) = source_block.runs() else {
             return;
         };
-
-        let mut current_offset = pos.offset;
-
-        for run in runs {
-            if run.text.is_empty() {
-                continue;
-            }
-
-            let char_count = run.text.chars().count();
-            let insert_pos = DocPosition::new(pos.block_index, current_offset);
-
-            // Insert the text (inherits the style of the run at the insertion point).
-            let insert_op = EditOp::InsertText {
-                position: insert_pos,
-                text: run.text.clone(),
-            };
-            insert_op.apply(&mut self.document);
-            ops.push(insert_op);
-
-            // Determine the inherited style and toggle any differing bits.
-            let inherited = run_style_at_for_paste(&self.document, insert_pos);
-            let insert_end =
-                DocPosition::new(pos.block_index, current_offset + char_count);
-            let diff = run.style.symmetric_difference(inherited);
-            if !diff.is_empty() {
-                for bit in diff.iter() {
-                    let toggle_op = EditOp::ToggleInlineStyle {
-                        start: insert_pos,
-                        end: insert_end,
-                        style_bit: bit,
-                    };
-                    toggle_op.apply(&mut self.document);
-                    ops.push(toggle_op);
-                }
-            }
-
-            // Restore link metadata if needed.
-            self.repair_link_on_paste(pos.block_index, current_offset, char_count, &run.link);
-
-            current_offset += char_count;
+        let paste_runs: Vec<StyledRun> = paste_runs
+            .iter()
+            .filter(|r| !r.text.is_empty())
+            .cloned()
+            .collect();
+        if paste_runs.is_empty() {
+            return;
         }
 
-        self.selection = DocSelection::caret(DocPosition::new(pos.block_index, current_offset));
+        // Block-swap strategy: clone the target block, splice in the pasted
+        // runs (with correct styles AND links), then swap via RemoveBlock +
+        // InsertBlock. Both ops are recorded, so redo replays correctly.
+        splice_runs_into_block(
+            &mut self.document,
+            pos.block_index,
+            pos.offset,
+            &paste_runs,
+            ops,
+        );
+
+        let total_chars: usize = paste_runs.iter().map(StyledRun::char_len).sum();
+        self.selection =
+            DocSelection::caret(DocPosition::new(pos.block_index, pos.offset + total_chars));
     }
 
     /// Paste a multi-block slice at `pos`.
@@ -567,134 +547,36 @@ impl EditorState {
         self.selection = DocSelection::caret(DocPosition::new(cursor_block, cursor_offset));
     }
 
-    /// Append styled runs to the end of a block, preserving their formatting.
+    /// Append styled runs to the end of a block, preserving formatting + links.
+    ///
+    /// Uses the block-swap strategy (RemoveBlock + InsertBlock) so all changes
+    /// are captured as ops and survive redo.
     fn append_runs_to_block(
         &mut self,
         block_idx: usize,
         runs: &[StyledRun],
         ops: &mut Vec<EditOp>,
     ) {
-        let mut offset = self
-            .document
-            .block(block_idx)
-            .map_or(0, Block::char_len);
-
-        for run in runs {
-            if run.text.is_empty() {
-                continue;
-            }
-            let char_count = run.text.chars().count();
-            let insert_pos = DocPosition::new(block_idx, offset);
-
-            let insert_op = EditOp::InsertText {
-                position: insert_pos,
-                text: run.text.clone(),
-            };
-            insert_op.apply(&mut self.document);
-            ops.push(insert_op);
-
-            // Toggle style bits that differ from what was inherited.
-            let inherited = run_style_at_for_paste(&self.document, insert_pos);
-            let diff = run.style.symmetric_difference(inherited);
-            if !diff.is_empty() {
-                let end = DocPosition::new(block_idx, offset + char_count);
-                for bit in diff.iter() {
-                    let toggle_op = EditOp::ToggleInlineStyle {
-                        start: insert_pos,
-                        end,
-                        style_bit: bit,
-                    };
-                    toggle_op.apply(&mut self.document);
-                    ops.push(toggle_op);
-                }
-            }
-
-            // Restore link metadata if needed.
-            self.repair_link_on_paste(block_idx, offset, char_count, &run.link);
-
-            offset += char_count;
+        let non_empty: Vec<StyledRun> = runs.iter().filter(|r| !r.is_empty()).cloned().collect();
+        if non_empty.is_empty() {
+            return;
         }
+        let offset = self.document.block(block_idx).map_or(0, Block::char_len);
+        splice_runs_into_block(&mut self.document, block_idx, offset, &non_empty, ops);
     }
 
-    /// Prepend styled runs to the start of a block, preserving their formatting.
+    /// Prepend styled runs to the start of a block, preserving formatting + links.
     fn prepend_runs_to_block(
         &mut self,
         block_idx: usize,
         runs: &[StyledRun],
         ops: &mut Vec<EditOp>,
     ) {
-        let mut offset = 0;
-
-        for run in runs {
-            if run.text.is_empty() {
-                continue;
-            }
-            let char_count = run.text.chars().count();
-            let insert_pos = DocPosition::new(block_idx, offset);
-
-            let insert_op = EditOp::InsertText {
-                position: insert_pos,
-                text: run.text.clone(),
-            };
-            insert_op.apply(&mut self.document);
-            ops.push(insert_op);
-
-            // Toggle style bits that differ from what was inherited.
-            let inherited = run_style_at_for_paste(&self.document, insert_pos);
-            let diff = run.style.symmetric_difference(inherited);
-            if !diff.is_empty() {
-                let end = DocPosition::new(block_idx, offset + char_count);
-                for bit in diff.iter() {
-                    let toggle_op = EditOp::ToggleInlineStyle {
-                        start: insert_pos,
-                        end,
-                        style_bit: bit,
-                    };
-                    toggle_op.apply(&mut self.document);
-                    ops.push(toggle_op);
-                }
-            }
-
-            // Restore link metadata if needed.
-            self.repair_link_on_paste(block_idx, offset, char_count, &run.link);
-
-            offset += char_count;
-        }
-    }
-
-    /// Repair link metadata on a freshly pasted run range.
-    ///
-    /// `InsertText` inherits the containing run's link, which may differ from the
-    /// pasted run's intended link. This isolates the inserted range and sets the
-    /// link directly. Safe for undo because `DeleteRange` captures full run
-    /// structure via `DeletedContent`.
-    fn repair_link_on_paste(
-        &mut self,
-        block_idx: usize,
-        start_offset: usize,
-        char_count: usize,
-        desired_link: &Option<String>,
-    ) {
-        let Some(block) = self.document.block(block_idx) else {
+        let non_empty: Vec<StyledRun> = runs.iter().filter(|r| !r.is_empty()).cloned().collect();
+        if non_empty.is_empty() {
             return;
-        };
-        let inherited_link = block
-            .resolve_offset(start_offset)
-            .and_then(|(ri, _)| {
-                block
-                    .runs()
-                    .and_then(|runs| runs.get(ri).and_then(|r| r.link.clone()))
-            });
-        if *desired_link != inherited_link {
-            let mut block_clone = block.clone();
-            if let Some(runs) = block_clone.runs_mut() {
-                let range = isolate_runs(runs, start_offset, start_offset + char_count);
-                for r in &mut runs[range] {
-                    r.link.clone_from(desired_link);
-                }
-            }
-            self.document.replace_block(block_idx, block_clone);
         }
+        splice_runs_into_block(&mut self.document, block_idx, 0, &non_empty, ops);
     }
 
     /// Update the cursor position after applying ops.
@@ -1534,28 +1416,70 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
 /// position. Mirrors the logic in `operations::insert_text_into_runs`: the
 /// inserted text lands in whichever run contains the offset, so the
 /// inherited style is that run's style.
-fn run_style_at_for_paste(doc: &Document, pos: DocPosition) -> InlineStyle {
-    let Some(block) = doc.block(pos.block_index) else {
-        return InlineStyle::empty();
+/// Splice styled runs (with links) into a block at `offset` using the
+/// block-swap strategy: RemoveBlock + InsertBlock. Both ops are recorded,
+/// so redo replays correctly — no side-channel mutations needed.
+fn splice_runs_into_block(
+    doc: &mut Document,
+    block_idx: usize,
+    offset: usize,
+    runs: &[StyledRun],
+    ops: &mut Vec<EditOp>,
+) {
+    let Some(original) = doc.block(block_idx) else {
+        return;
     };
-    let Some(runs) = block.runs() else {
-        return InlineStyle::empty();
-    };
-    if runs.is_empty() {
-        return InlineStyle::empty();
-    }
+    let original = original.clone();
 
-    let mut char_pos = 0;
-    for run in runs {
-        let run_len = run.char_len();
-        if pos.offset >= char_pos && pos.offset <= char_pos + run_len {
-            return run.style;
+    // Build the new block by splicing the pasted runs into the original.
+    let mut new_block = original.clone();
+    if let Some(existing_runs) = new_block.runs_mut() {
+        // Split existing runs at the insertion offset.
+        let split_idx = crate::document::split_runs_at_char_offset(existing_runs, offset);
+
+        // Insert the pasted runs at the split point.
+        for (insert_idx, run) in (split_idx..).zip(runs.iter()) {
+            existing_runs.insert(insert_idx, run.clone());
         }
-        char_pos += run_len;
     }
 
-    // Past the end: use last run's style.
-    runs.last().map_or(InlineStyle::empty(), |r| r.style)
+    // Emit RemoveBlock + InsertBlock (the block-swap pattern).
+    let remove_op = EditOp::RemoveBlock {
+        index: block_idx,
+        saved: original,
+    };
+    // RemoveBlock won't remove the last block, so handle that edge case.
+    // If the document has only one block, we replace instead.
+    if doc.block_count() <= 1 {
+        // Can't use RemoveBlock; use replace_block directly and record
+        // as InsertBlock at 0 + RemoveBlock at 1 (after insert).
+        let insert_op = EditOp::InsertBlock {
+            index: block_idx,
+            block: new_block.clone(),
+        };
+        insert_op.apply(doc);
+        ops.push(insert_op);
+
+        // Now remove the old block (which shifted to block_idx + 1).
+        if doc.block_count() > 1 {
+            let remove_old = EditOp::RemoveBlock {
+                index: block_idx + 1,
+                saved: doc.block(block_idx + 1).cloned().unwrap_or_else(Block::empty_paragraph),
+            };
+            remove_old.apply(doc);
+            ops.push(remove_old);
+        }
+    } else {
+        remove_op.apply(doc);
+        ops.push(remove_op);
+
+        let insert_op = EditOp::InsertBlock {
+            index: block_idx,
+            block: new_block,
+        };
+        insert_op.apply(doc);
+        ops.push(insert_op);
+    }
 }
 
 // ── Block content x-offset helper ────────────────────────

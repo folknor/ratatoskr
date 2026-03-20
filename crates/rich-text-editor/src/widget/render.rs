@@ -186,82 +186,123 @@ pub fn build_spans_for_block<'a>(
         .collect()
 }
 
-/// Build spans for a block, handling container blocks by flattening their
-/// content into text. Unlike [`build_spans_for_block`], this never returns
-/// empty for valid blocks — container blocks (List, BlockQuote) are
-/// recursively flattened into their inline text with newline separators.
+/// Build spans for a block, handling container blocks by recursively
+/// collecting styled spans from their children. Unlike [`build_spans_for_block`],
+/// this never returns empty for valid blocks — container blocks (List,
+/// BlockQuote) produce spans that preserve inline formatting and links.
 pub fn build_spans_for_any_block(
     block: &Block,
     base_font: Font,
     text_color: Color,
     link_color: Color,
-) -> Vec<Span<'_, String, Font>> {
+) -> Vec<Span<'static, String, Font>> {
     // Try the normal path first (works for Paragraph, Heading).
-    let spans = build_spans_for_block(block, base_font, text_color, link_color);
-    if !spans.is_empty() {
-        return spans;
+    if let Some(runs) = block.runs() {
+        let font_size = block_font_size(block);
+        return runs
+            .iter()
+            .map(|run| owned_run_to_span(run, base_font, font_size, text_color, link_color))
+            .collect();
     }
 
-    // For container blocks, flatten to text.
-    let text = block.flattened_text();
-    if text.is_empty() {
-        // Use the block's own text extraction for containers.
-        let flat = flatten_container_text(block);
-        if flat.is_empty() {
-            return Vec::new();
-        }
-        return vec![Span::new(flat)
-            .font(base_font)
-            .size(FONT_SIZE_BODY)
-            .color(text_color)];
-    }
-
-    vec![Span::new(text)
-        .font(base_font)
-        .size(FONT_SIZE_BODY)
-        .color(text_color)]
+    // For container blocks, recursively collect spans from children.
+    let mut spans = Vec::new();
+    collect_container_spans(block, base_font, text_color, link_color, &mut spans, false);
+    spans
 }
 
-/// Recursively extract text from a container block.
-fn flatten_container_text(block: &Block) -> String {
+/// Recursively collect styled spans from a container block's children,
+/// preserving inline formatting and links.
+fn collect_container_spans(
+    block: &Block,
+    base_font: Font,
+    text_color: Color,
+    link_color: Color,
+    spans: &mut Vec<Span<'static, String, Font>>,
+    needs_separator: bool,
+) {
+    if needs_separator && !spans.is_empty() {
+        spans.push(
+            Span::new("\n".to_owned())
+                .font(base_font)
+                .size(FONT_SIZE_BODY)
+                .color(text_color),
+        );
+    }
+
     match block {
+        Block::Paragraph { runs } | Block::Heading { runs, .. } => {
+            let font_size = block_font_size(block);
+            for run in runs {
+                spans.push(owned_run_to_span(run, base_font, font_size, text_color, link_color));
+            }
+        }
         Block::List { items, ordered } => {
-            let mut buf = String::new();
             for (i, item) in items.iter().enumerate() {
                 if i > 0 {
-                    buf.push('\n');
+                    spans.push(
+                        Span::new("\n".to_owned())
+                            .font(base_font)
+                            .size(FONT_SIZE_BODY)
+                            .color(text_color),
+                    );
                 }
-                if *ordered {
-                    buf.push_str(&(i + 1).to_string());
-                    buf.push_str(". ");
+                // Add bullet/number marker.
+                let marker = if *ordered {
+                    format!("{}. ", i + 1)
                 } else {
-                    buf.push_str("\u{2022} ");
-                }
-                for child in &item.blocks {
-                    buf.push_str(&child_block_text(child));
+                    "\u{2022} ".to_owned()
+                };
+                spans.push(
+                    Span::new(marker)
+                        .font(base_font)
+                        .size(FONT_SIZE_BODY)
+                        .color(text_color),
+                );
+                for (j, child) in item.blocks.iter().enumerate() {
+                    collect_container_spans(child, base_font, text_color, link_color, spans, j > 0);
                 }
             }
-            buf
         }
         Block::BlockQuote { blocks } => {
-            let mut buf = String::new();
             for (i, child) in blocks.iter().enumerate() {
-                if i > 0 {
-                    buf.push('\n');
-                }
-                buf.push_str(&child_block_text(child));
+                collect_container_spans(child, base_font, text_color, link_color, spans, i > 0);
             }
-            buf
         }
-        _ => block.flattened_text(),
+        Block::HorizontalRule => {}
     }
 }
 
-fn child_block_text(block: &Block) -> String {
-    match block {
-        Block::Paragraph { .. } | Block::Heading { .. } => block.flattened_text(),
-        _ => flatten_container_text(block),
+/// Like [`run_to_span`] but returns an owned Span (for container block flattening
+/// where we can't borrow from the block).
+fn owned_run_to_span(
+    run: &StyledRun,
+    base_font: Font,
+    font_size: f32,
+    text_color: Color,
+    link_color: Color,
+) -> Span<'static, String, Font> {
+    let font = font_for_style(base_font, run.style);
+    let underline = run.style.contains(InlineStyle::UNDERLINE) || run.link.is_some();
+    let strikethrough = run.style.contains(InlineStyle::STRIKETHROUGH);
+    let color = if run.link.is_some() {
+        link_color
+    } else {
+        text_color
+    };
+
+    let mut span = Span::new(run.text.clone())
+        .font(font)
+        .size(font_size)
+        .color(color)
+        .underline(underline)
+        .strikethrough(strikethrough);
+
+    if let Some(href) = &run.link {
+        span = span.link(href.clone());
     }
+
+    span
 }
 
 // ── Paragraph cache ─────────────────────────────────────
