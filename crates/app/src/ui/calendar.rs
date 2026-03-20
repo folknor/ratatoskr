@@ -41,6 +41,8 @@ impl CalendarView {
 pub struct CalendarState {
     /// The currently selected/focused date.
     pub selected_date: NaiveDate,
+    /// The selected time slot hour (for event creation pre-fill).
+    pub selected_hour: Option<u32>,
     /// The active view (day/work-week/week/month).
     pub active_view: CalendarView,
     /// Which month is displayed in the mini-month sidebar.
@@ -68,6 +70,7 @@ impl CalendarState {
             calendar_time_grid::build_day_view(today, &[], today);
         Self {
             selected_date: today,
+            selected_hour: None,
             active_view: CalendarView::Month,
             mini_month_year: today.year(),
             mini_month_month: today.month(),
@@ -152,6 +155,8 @@ impl CalendarState {
 pub enum CalendarMessage {
     /// A date was clicked in the mini-month or main view.
     SelectDate(NaiveDate),
+    /// A time slot was clicked in day/week views (for event creation pre-fill).
+    SelectSlot(NaiveDate, u32),
     /// Switch the active calendar view.
     SetView(CalendarView),
     /// Navigate mini-month backward.
@@ -301,7 +306,7 @@ fn calendar_main_time_grid<'a>(
     container(calendar_time_grid::time_grid_view(
         &state.time_grid_config,
         |id| CalendarMessage::EventClicked(id.to_string()),
-        |date, _hour| CalendarMessage::SelectDate(date),
+        |date, hour| CalendarMessage::SelectSlot(date, hour),
     ))
     .width(Length::Fill)
     .height(Length::Fill)

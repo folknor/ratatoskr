@@ -398,8 +398,32 @@ fn build_day_column<'a, M: 'a + Clone>(
         on_event_click,
     );
 
-    // Use a stack: slots underneath, events on top.
-    let stack = iced::widget::stack![slots, events_layer]
+    // Build now-line for today's column.
+    let now_line: Element<'a, M> = if day.is_today {
+        let now = chrono::Local::now();
+        let now_minutes = now.time().hour() as f32 * 60.0 + now.time().minute() as f32;
+        let grid_start_m = config.hour_start as f32 * 60.0;
+        let grid_end_m = config.hour_end as f32 * 60.0;
+        if now_minutes >= grid_start_m && now_minutes <= grid_end_m {
+            let top = (now_minutes - grid_start_m) / 60.0 * config.pixels_per_hour;
+            column![
+                Space::new().height(top),
+                container(Space::new())
+                    .width(Length::Fill)
+                    .height(TIME_GRID_NOW_LINE_WIDTH)
+                    .style(theme::ContainerClass::TimeGridNowLine.style()),
+            ]
+            .width(Length::Fill)
+            .into()
+        } else {
+            Space::new().width(0).height(0).into()
+        }
+    } else {
+        Space::new().width(0).height(0).into()
+    };
+
+    // Use a stack: slots underneath, events on top, now-line on top of everything.
+    let stack = iced::widget::stack![slots, events_layer, now_line]
         .width(Length::Fill)
         .height(grid_height);
 
@@ -673,8 +697,12 @@ fn event_minutes(
     config: &TimeGridConfig,
     column_date: NaiveDate,
 ) -> (f32, f32) {
-    let start_dt = chrono::DateTime::from_timestamp(event.start_time, 0);
-    let end_dt = chrono::DateTime::from_timestamp(event.end_time, 0);
+    // Convert UTC timestamps to local time for display.
+    // The spec says "Display in local time everywhere."
+    let start_dt = chrono::DateTime::from_timestamp(event.start_time, 0)
+        .map(|dt| dt.with_timezone(&chrono::Local));
+    let end_dt = chrono::DateTime::from_timestamp(event.end_time, 0)
+        .map(|dt| dt.with_timezone(&chrono::Local));
     let grid_start = config.hour_start as f32 * 60.0;
     let grid_end = config.hour_end as f32 * 60.0;
 
@@ -711,10 +739,12 @@ fn events_for_date(events: &[TimeGridEvent], date: NaiveDate) -> Vec<TimeGridEve
     events
         .iter()
         .filter(|e| {
+            // Use local time for date filtering — an event at 23:00 local
+            // should appear on the correct local day, not the UTC day.
             let start = chrono::DateTime::from_timestamp(e.start_time, 0)
-                .map(|dt| dt.date_naive());
+                .map(|dt| dt.with_timezone(&chrono::Local).date_naive());
             let end = chrono::DateTime::from_timestamp(e.end_time, 0)
-                .map(|dt| dt.date_naive());
+                .map(|dt| dt.with_timezone(&chrono::Local).date_naive());
             match (start, end) {
                 (Some(s), Some(e_date)) => date >= s && date <= e_date,
                 (Some(s), None) => date == s,

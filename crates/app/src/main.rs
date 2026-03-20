@@ -891,6 +891,12 @@ impl App {
                     CalendarMessage::Today => {
                         self.calendar.go_to_today();
                     }
+                    CalendarMessage::SelectSlot(date, hour) => {
+                        self.calendar.selected_date = date;
+                        self.calendar.selected_hour = Some(hour);
+                        self.calendar.rebuild_view_data();
+                        // TODO: use selected_hour for event creation pre-fill
+                    }
                     CalendarMessage::EventClicked(_event_id) => {
                         // TODO: open event detail popover
                     }
