@@ -45,8 +45,7 @@ use crate::rules::{self, EditAction};
 use crate::undo::UndoStack;
 
 use cursor::{
-    BlockLayout, BlockSelectionKind, CursorState, DragState, SelectionRect, CURSOR_WIDTH,
-    SELECTION_ALPHA,
+    BlockSelectionKind, CursorState, DragState, SelectionRect, CURSOR_WIDTH, SELECTION_ALPHA,
 };
 use input::{KeyAction, MoveAction};
 use render::ParagraphCache;
@@ -55,6 +54,7 @@ use iced::advanced::layout;
 use iced::advanced::mouse::click::Click;
 use iced::advanced::renderer;
 use iced::advanced::renderer::Renderer as _;
+use iced::advanced::text::Paragraph as _;
 use iced::advanced::text::Renderer as TextRenderer;
 use iced::advanced::widget::{self, Widget};
 use iced::advanced::{Clipboard, Shell};
@@ -93,10 +93,10 @@ pub enum Action {
     Cut,
     /// Paste text from the clipboard.
     Paste(String),
-    /// A click at a pixel position (relative to the widget origin).
-    Click(Point),
-    /// A drag to a pixel position (extends selection).
-    Drag(Point),
+    /// A click at a document position (resolved by the widget via hit testing).
+    Click(DocPosition),
+    /// A drag to a document position (extends selection).
+    Drag(DocPosition),
     /// A link was clicked.
     LinkClicked(String),
     /// The editor gained focus.
@@ -126,9 +126,6 @@ pub struct EditorState {
     cursor: CursorState,
     /// Active mouse drag state.
     drag: Option<DragState>,
-    /// Block layouts computed during the last layout pass. Stored here so
-    /// that `perform` can do hit-testing for click/drag actions.
-    block_layouts: Vec<BlockLayout>,
 }
 
 impl EditorState {
@@ -141,7 +138,6 @@ impl EditorState {
             pending_style: InlineStyle::empty(),
             cursor: CursorState::new(),
             drag: None,
-            block_layouts: Vec::new(),
         }
     }
 
@@ -154,7 +150,6 @@ impl EditorState {
             pending_style: InlineStyle::empty(),
             cursor: CursorState::new(),
             drag: None,
-            block_layouts: Vec::new(),
         }
     }
 
@@ -226,11 +221,11 @@ impl EditorState {
             Action::Paste(text) => {
                 self.apply_action(EditAction::InsertText(text));
             }
-            Action::Click(point) => {
-                self.handle_click(point);
+            Action::Click(doc_pos) => {
+                self.handle_click(doc_pos);
             }
-            Action::Drag(point) => {
-                self.handle_drag(point);
+            Action::Drag(doc_pos) => {
+                self.handle_drag(doc_pos);
             }
             Action::LinkClicked(_) => {
                 // The app handles this in its update() method.
@@ -452,47 +447,24 @@ impl EditorState {
         }
     }
 
-    /// Handle a click at a pixel position by hit-testing block layouts.
-    fn handle_click(&mut self, point: Point) {
+    /// Handle a click at a resolved document position.
+    fn handle_click(&mut self, doc_pos: DocPosition) {
         self.cursor.focus();
         self.cursor.reset_blink();
 
-        let doc_pos = self.hit_test_point(point);
+        let doc_pos = self.document.clamp_position(doc_pos);
         self.selection = DocSelection::caret(doc_pos);
         self.drag = Some(DragState::start(doc_pos));
         self.pending_style = InlineStyle::empty();
     }
 
-    /// Handle a drag to a pixel position by extending the selection.
-    fn handle_drag(&mut self, point: Point) {
-        let doc_pos = self.hit_test_point(point);
+    /// Handle a drag to a resolved document position by extending the selection.
+    fn handle_drag(&mut self, doc_pos: DocPosition) {
+        let doc_pos = self.document.clamp_position(doc_pos);
         if let Some(drag) = &self.drag {
             self.selection = DocSelection::range(drag.anchor, doc_pos);
         }
         self.cursor.reset_blink();
-    }
-
-    /// Hit-test a pixel point against block layouts.
-    ///
-    /// Returns the document position closest to the point. If there are no
-    /// block layouts (before first layout), returns position zero.
-    fn hit_test_point(&self, point: Point) -> DocPosition {
-        if let Some((block_index, _local)) =
-            cursor::hit_test(point, &self.block_layouts)
-        {
-            // Without a renderer-level Paragraph::hit_test, we place the
-            // cursor at the start of the clicked block. A proper
-            // implementation would call Paragraph::hit_test to find the
-            // exact character offset from the x position.
-            DocPosition::new(block_index, 0)
-        } else {
-            DocPosition::zero()
-        }
-    }
-
-    /// Update block layouts from the paragraph cache (called during widget layout).
-    pub fn update_block_layouts(&mut self, layouts: Vec<BlockLayout>) {
-        self.block_layouts = layouts;
     }
 }
 
@@ -836,11 +808,17 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
                         position.y - self.padding.top,
                     );
 
+                    let doc_pos = hit_test_content_point(
+                        content_pos,
+                        &widget_state.cache,
+                        &self.state.document,
+                    );
+
                     widget_state.focus = Some(FocusState::now());
                     widget_state.dragging = true;
 
                     shell.publish(on_action(Action::Focus));
-                    shell.publish(on_action(Action::Click(content_pos)));
+                    shell.publish(on_action(Action::Click(doc_pos)));
                     shell.capture_event();
                 } else if widget_state.focus.is_some() {
                     // Click outside the editor: blur.
@@ -857,7 +835,12 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
                         position.x - self.padding.left,
                         position.y - self.padding.top,
                     );
-                    shell.publish(on_action(Action::Drag(content_pos)));
+                    let doc_pos = hit_test_content_point(
+                        content_pos,
+                        &widget_state.cache,
+                        &self.state.document,
+                    );
+                    shell.publish(on_action(Action::Drag(doc_pos)));
                 }
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
@@ -1051,6 +1034,58 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
             mouse::Interaction::default()
         }
     }
+}
+
+// ── Hit testing helper ───────────────────────────────────
+
+/// Convert a pixel position (relative to the content origin, after padding) to a
+/// `DocPosition` by hit-testing the paragraph cache.
+///
+/// Finds which block the point falls in via `ParagraphCache::block_at_y`, then
+/// calls `Paragraph::hit_test` on that block's cached paragraph to get the
+/// character offset within the block.
+fn hit_test_content_point(
+    content_pos: Point,
+    cache: &ParagraphCache<IcedParagraph>,
+    document: &Document,
+) -> DocPosition {
+    // Find the block at the click y-coordinate.
+    let Some(block_index) = cache.block_at_y(content_pos.y) else {
+        return DocPosition::zero();
+    };
+
+    let Some(entry) = cache.get(block_index) else {
+        return DocPosition::new(block_index, 0);
+    };
+
+    let Some(paragraph) = entry.paragraph() else {
+        // No paragraph (e.g. HorizontalRule) — place cursor at start of block.
+        return DocPosition::new(block_index, 0);
+    };
+
+    // Compute the content x-offset for the block type (some blocks indent
+    // their paragraphs, e.g. lists and blockquotes).
+    let content_x_offset = document
+        .block(block_index)
+        .map(|block| match block {
+            Block::List { .. } => render::LIST_MARKER_WIDTH,
+            Block::BlockQuote { .. } => render::BLOCKQUOTE_INDENT,
+            _ => 0.0,
+        })
+        .unwrap_or(0.0);
+
+    // Translate into paragraph-local coordinates.
+    let local_point = Point::new(
+        content_pos.x - content_x_offset,
+        content_pos.y - entry.y_offset(),
+    );
+
+    let char_offset = paragraph
+        .hit_test(local_point)
+        .map(iced::advanced::text::Hit::cursor)
+        .unwrap_or(0);
+
+    DocPosition::new(block_index, char_offset)
 }
 
 // ── Into<Element> ───────────────────────────────────────
@@ -1571,5 +1606,27 @@ mod tests {
         let state = EditorState::default();
         assert_eq!(state.document.block_count(), 1);
         assert!(state.selection.is_collapsed());
+    }
+
+    // ── Pending style applied to inserted text ──────────
+
+    #[test]
+    fn pending_bold_applied_to_inserted_text() {
+        let mut state = EditorState::new();
+        // Toggle bold at caret (sets pending style).
+        state.apply_action(EditAction::ToggleInlineStyle(InlineStyle::BOLD));
+        assert!(state.pending_style.contains(InlineStyle::BOLD));
+
+        // Type 'x' — should be bold.
+        state.apply_action(EditAction::InsertText("x".into()));
+        assert!(state.pending_style.is_empty(), "pending style should be cleared after insert");
+
+        let runs = state.document.block(0).and_then(Block::runs).expect("runs");
+        // The 'x' run should be bold.
+        let bold_runs: Vec<_> = runs.iter().filter(|r| !r.is_empty()).collect();
+        assert!(
+            bold_runs.iter().all(|r| r.style.contains(InlineStyle::BOLD)),
+            "all non-empty runs should be bold, got: {bold_runs:?}",
+        );
     }
 }

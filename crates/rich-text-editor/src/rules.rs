@@ -90,49 +90,33 @@ fn resolve_insert(
         resolve_style_at(doc, insert_pos)
     };
 
-    // Build the styled insert: if the style differs from the run at the insertion
-    // point, we need to split the run and insert a new styled run. However, the
-    // low-level InsertText op inserts into whatever run contains the offset and
-    // inherits that run's style. For the rules engine, we produce InsertText ops
-    // and rely on the caller to handle style application.
-    //
-    // The simplest correct approach: if the desired style matches the run at the
-    // insertion point, just InsertText. If not, we need to insert a differently-styled
-    // run. We do this by inserting an empty-text run with the right style at the
-    // insertion point (via isolate + insert), then inserting text into it.
-    //
-    // Actually, the InsertText op just inserts raw text into the existing run.
-    // Style-aware insertion is the rules engine's job: we produce the text insertion
-    // and the caller applies it. The operations layer then inherits the run's style.
-    //
-    // For now, InsertText is sufficient — the text inherits the run's style. If we
-    // need a different style, we need a more complex sequence. But the current
-    // InsertText op always inherits the containing run's style, which IS the right
-    // behavior for "preserve inline style on insert". The pending style override
-    // needs special handling at the caller level (the editor state sets the run style
-    // before inserting, or we use a styled insert op).
-    //
-    // Given the current architecture where InsertText inherits the run's style,
-    // and the style resolution is handled by the rules engine returning style info,
-    // the simplest approach is: just return InsertText. The caller (editor state)
-    // is responsible for ensuring the run at the insertion point has the right style
-    // (by pre-splitting if needed). The `style` computed here is informational for
-    // the caller.
-    //
-    // However, looking at the task description more carefully: the rules engine
-    // should produce EditOps that, when applied, produce the right result. So if
-    // the style at the cursor differs from the desired style, we need additional ops.
-    //
-    // For the initial implementation, InsertText inherits the run's style which is
-    // the common case. Pending style and link boundary are edge cases that the
-    // caller handles by pre-modifying the run structure.
-
-    let _ = style; // Style resolution is available for the caller; InsertText inherits from run.
+    // The InsertText op inserts text into the run at the insertion point,
+    // inheriting that run's style. If the desired style differs (e.g., pending
+    // bold into plain text), we emit ToggleInlineStyle ops after the insert to
+    // fix up the style bits on the newly inserted range.
+    let run_style = run_style_at(doc, insert_pos);
 
     ops.push(EditOp::InsertText {
         position: insert_pos,
         text: text.to_owned(),
     });
+
+    // Emit ToggleInlineStyle for each bit that differs between the desired
+    // style and the inherited run style. The toggle range covers exactly
+    // the inserted text.
+    let diff = style.symmetric_difference(run_style);
+    if !diff.is_empty() {
+        let char_count = text.chars().count();
+        let insert_end = DocPosition::new(insert_pos.block_index, insert_pos.offset + char_count);
+
+        for bit in diff.iter() {
+            ops.push(EditOp::ToggleInlineStyle {
+                start: insert_pos,
+                end: insert_end,
+                style_bit: bit,
+            });
+        }
+    }
 
     ops
 }
@@ -188,6 +172,38 @@ fn resolve_style_at(doc: &Document, pos: DocPosition) -> InlineStyle {
     // For InlineStyle bits (bold/italic/etc), still inherit them.
 
     run.style
+}
+
+/// Get the style of the run at a given position — the style that `InsertText`
+/// will inherit when inserting at this offset.
+///
+/// This mirrors the logic in `insert_text_into_runs` (operations.rs): the text
+/// is inserted into whichever run contains the offset, so the inherited style
+/// is that run's style.
+fn run_style_at(doc: &Document, pos: DocPosition) -> InlineStyle {
+    let Some(block) = doc.block(pos.block_index) else {
+        return InlineStyle::empty();
+    };
+    let Some(runs) = block.runs() else {
+        return InlineStyle::empty();
+    };
+
+    if runs.is_empty() {
+        return InlineStyle::empty();
+    }
+
+    // Walk runs the same way insert_text_into_runs does.
+    let mut char_pos = 0;
+    for run in runs {
+        let run_len = run.char_len();
+        if pos.offset >= char_pos && pos.offset <= char_pos + run_len {
+            return run.style;
+        }
+        char_pos += run_len;
+    }
+
+    // Past the end — last run's style.
+    runs.last().map_or(InlineStyle::empty(), |r| r.style)
 }
 
 // ── Delete backward (Backspace) ─────────────────────────
@@ -1375,5 +1391,120 @@ mod tests {
             apply_ops(&mut doc, &ops);
         }
         assert_eq!(block_text(&doc, 0), "hello");
+    }
+
+    // ── Pending style insertion ──────────────────────────
+
+    #[test]
+    fn insert_with_pending_bold_into_plain_text() {
+        let mut doc = Document::from_blocks(vec![Block::paragraph("hello")]);
+        let sel = DocSelection::caret(DocPosition::new(0, 5));
+        let ops = resolve(
+            &doc,
+            sel,
+            EditAction::InsertText("x".into()),
+            InlineStyle::BOLD,
+        );
+        apply_ops(&mut doc, &ops);
+        assert_eq!(block_text(&doc, 0), "hellox");
+        // The 'x' should be bold.
+        let runs = doc.block(0).and_then(Block::runs).expect("runs");
+        // Find the run containing 'x' (last char).
+        let mut pos = 0;
+        for run in runs {
+            let rlen = run.char_len();
+            let rend = pos + rlen;
+            if rend > 5 && pos <= 5 {
+                // This run covers offset 5 (the 'x').
+                assert!(
+                    run.style.contains(InlineStyle::BOLD),
+                    "inserted 'x' should be bold, but run '{}' has style {:?}",
+                    run.text,
+                    run.style,
+                );
+            }
+            pos = rend;
+        }
+    }
+
+    #[test]
+    fn insert_with_pending_italic_into_bold_text() {
+        let mut doc = Document::from_blocks(vec![Block::Paragraph {
+            runs: vec![StyledRun::styled("hello", InlineStyle::BOLD)],
+        }]);
+        let sel = DocSelection::caret(DocPosition::new(0, 5));
+        let ops = resolve(
+            &doc,
+            sel,
+            EditAction::InsertText("x".into()),
+            InlineStyle::BOLD | InlineStyle::ITALIC,
+        );
+        apply_ops(&mut doc, &ops);
+        assert_eq!(block_text(&doc, 0), "hellox");
+        // The 'x' should be bold + italic.
+        let runs = doc.block(0).and_then(Block::runs).expect("runs");
+        let mut pos = 0;
+        for run in runs {
+            let rlen = run.char_len();
+            let rend = pos + rlen;
+            if rend > 5 && pos <= 5 {
+                assert!(
+                    run.style.contains(InlineStyle::BOLD | InlineStyle::ITALIC),
+                    "inserted 'x' should be bold+italic, but run '{}' has style {:?}",
+                    run.text,
+                    run.style,
+                );
+            }
+            pos = rend;
+        }
+    }
+
+    #[test]
+    fn insert_without_pending_style_inherits_run_style() {
+        let mut doc = Document::from_blocks(vec![Block::Paragraph {
+            runs: vec![StyledRun::styled("hello", InlineStyle::BOLD)],
+        }]);
+        let sel = DocSelection::caret(DocPosition::new(0, 3));
+        let ops = resolve(
+            &doc,
+            sel,
+            EditAction::InsertText("X".into()),
+            InlineStyle::empty(),
+        );
+        apply_ops(&mut doc, &ops);
+        assert_eq!(block_text(&doc, 0), "helXlo");
+        // The 'X' should inherit bold from the run.
+        let runs = doc.block(0).and_then(Block::runs).expect("runs");
+        assert_eq!(runs.len(), 1, "should still be a single bold run");
+        assert_eq!(runs[0].style, InlineStyle::BOLD);
+        assert_eq!(runs[0].text, "helXlo");
+    }
+
+    #[test]
+    fn insert_pending_bold_undoes_correctly() {
+        let mut doc = Document::from_blocks(vec![Block::paragraph("hello")]);
+        let sel = DocSelection::caret(DocPosition::new(0, 5));
+        let ops = resolve(
+            &doc,
+            sel,
+            EditAction::InsertText("x".into()),
+            InlineStyle::BOLD,
+        );
+        apply_ops(&mut doc, &ops);
+        assert_eq!(block_text(&doc, 0), "hellox");
+
+        // Undo: apply ops in reverse order, each inverted.
+        for op in ops.iter().rev() {
+            op.invert().apply(&mut doc);
+        }
+        assert_eq!(block_text(&doc, 0), "hello");
+        // Original text should be plain.
+        let runs = doc.block(0).and_then(Block::runs).expect("runs");
+        for run in runs {
+            assert!(
+                !run.style.contains(InlineStyle::BOLD),
+                "after undo, no run should be bold",
+            );
+        }
     }
 }

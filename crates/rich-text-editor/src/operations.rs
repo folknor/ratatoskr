@@ -44,10 +44,18 @@ pub struct PosMapEntry {
 /// Block-level structural changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StructuralChange {
-    /// A block was split at `block_index`, creating a new block at `block_index + 1`.
-    Split { block_index: usize },
+    /// A block was split at `block_index` at char offset `split_offset`,
+    /// creating a new block at `block_index + 1`.
+    Split {
+        block_index: usize,
+        split_offset: usize,
+    },
     /// Block at `block_index` was merged into `block_index - 1`.
-    Merge { block_index: usize },
+    /// `merge_offset` is the char length of block `block_index - 1` before the merge.
+    Merge {
+        block_index: usize,
+        merge_offset: usize,
+    },
     /// A block was inserted at `block_index`.
     Insert { block_index: usize },
     /// A block was removed at `block_index`.
@@ -55,9 +63,11 @@ pub enum StructuralChange {
     /// Multiple blocks were removed/merged in a cross-block delete.
     /// `start_block` is the first affected block, `removed_count` is how many
     /// blocks after it were removed (merged into `start_block`).
+    /// `start_offset` is the char offset within `start_block` where deletion began.
     CrossBlockDelete {
         start_block: usize,
         removed_count: usize,
+        start_offset: usize,
     },
 }
 
@@ -155,17 +165,29 @@ impl PosMap {
         match self.structural {
             None => pos,
 
-            Some(StructuralChange::Split { block_index }) => {
-                if pos.block_index > block_index {
+            Some(StructuralChange::Split {
+                block_index,
+                split_offset,
+            }) => {
+                if pos.block_index == block_index && pos.offset > split_offset {
+                    // Position is in the split block, after the split point:
+                    // remap to the new block with adjusted offset.
+                    DocPosition::new(block_index + 1, pos.offset - split_offset)
+                } else if pos.block_index > block_index {
                     DocPosition::new(pos.block_index + 1, pos.offset)
                 } else {
                     pos
                 }
             }
 
-            Some(StructuralChange::Merge { block_index }) => {
+            Some(StructuralChange::Merge {
+                block_index,
+                merge_offset,
+            }) => {
                 if pos.block_index == block_index {
-                    DocPosition::new(block_index - 1, pos.offset)
+                    // Position is in the merged-away block: remap to prev block
+                    // with offset shifted past the surviving block's content.
+                    DocPosition::new(block_index - 1, pos.offset + merge_offset)
                 } else if pos.block_index > block_index {
                     DocPosition::new(pos.block_index - 1, pos.offset)
                 } else {
@@ -194,10 +216,12 @@ impl PosMap {
             Some(StructuralChange::CrossBlockDelete {
                 start_block,
                 removed_count,
+                start_offset,
             }) => {
                 let end_block = start_block + removed_count;
                 if pos.block_index > start_block && pos.block_index <= end_block {
-                    DocPosition::new(start_block, pos.offset)
+                    // Position is in a deleted block: collapse to the deletion point.
+                    DocPosition::new(start_block, start_offset)
                 } else if pos.block_index > end_block {
                     DocPosition::new(pos.block_index - removed_count, pos.offset)
                 } else {
@@ -397,13 +421,10 @@ fn apply_delete_range(
 ) -> PosMap {
     assert!(start <= end, "DeleteRange: start > end");
 
-    // Sentinel: start == end with multi-block deleted content means "reconstruct"
-    // (this is the inverse of a cross-block delete).
-    if start == end {
-        if deleted.blocks.len() > 1 {
-            return apply_restore_deleted(doc, start, deleted);
-        }
-        return PosMap::identity();
+    // Sentinel: start == end with deleted content means "reconstruct"
+    // (this is the inverse of a delete — both single-block and cross-block).
+    if start == end && !deleted.blocks.is_empty() {
+        return apply_restore_deleted(doc, start, deleted);
     }
 
     if start.block_index == end.block_index {
@@ -491,6 +512,7 @@ fn apply_cross_block_delete(doc: &mut Document, start: DocPosition, end: DocPosi
             Some(StructuralChange::CrossBlockDelete {
                 start_block: start.block_index,
                 removed_count: blocks_to_remove,
+                start_offset: start.offset,
             })
         } else {
             None
@@ -498,13 +520,15 @@ fn apply_cross_block_delete(doc: &mut Document, start: DocPosition, end: DocPosi
     }
 }
 
-/// Reconstruct deleted content (inverse of a cross-block delete).
+/// Reconstruct deleted content (inverse of a delete).
 ///
-/// After the original delete, the document has one merged block at
-/// `position.block_index` (start head + end tail). The `deleted.blocks` contain:
+/// **Single-block**: `deleted.blocks` has exactly 1 entry containing the deleted
+/// runs. We re-insert those runs at `position.offset` within the existing block.
+///
+/// **Cross-block**: the document has one merged block at `position.block_index`
+/// (start head + end tail). The `deleted.blocks` contain:
 /// [0] = tail of original start block, [middle] = full middle blocks,
 /// [last] = head of original end block.
-///
 /// We split the merged block at `position.offset`, reconstruct the original blocks,
 /// and insert them.
 fn apply_restore_deleted(
@@ -512,6 +536,35 @@ fn apply_restore_deleted(
     position: DocPosition,
     deleted: &DeletedContent,
 ) -> PosMap {
+    let deleted_count = deleted.blocks.len();
+
+    // Single-block restore: just re-insert the deleted text.
+    if deleted_count == 1 {
+        let text = deleted.blocks[0].flattened_text();
+        let char_count = text.chars().count();
+
+        let block = doc
+            .block(position.block_index)
+            .expect("RestoreDeleted: block out of bounds")
+            .clone();
+        let mut block = block;
+        if let Some(runs) = block.runs_mut() {
+            insert_text_into_runs(runs, position.offset, &text);
+        }
+        doc.replace_block(position.block_index, block);
+
+        return PosMap {
+            block_index: position.block_index,
+            entries: vec![PosMapEntry {
+                old_offset: position.offset,
+                old_len: 0,
+                new_len: char_count,
+            }],
+            structural: None,
+        };
+    }
+
+    // Cross-block restore.
     let merged_block = doc
         .block(position.block_index)
         .expect("RestoreDeleted: block out of bounds")
@@ -521,7 +574,6 @@ fn apply_restore_deleted(
     let head_runs = extract_runs_up_to(merged_runs, position.offset);
     let tail_runs = extract_runs_from_offset(merged_runs, position.offset);
 
-    let deleted_count = deleted.blocks.len();
     let mut new_blocks: Vec<Block> = Vec::with_capacity(deleted_count + 1);
 
     // Restored start block: head + deleted[0]'s runs.
@@ -594,6 +646,7 @@ fn apply_split_block(doc: &mut Document, position: DocPosition) -> PosMap {
         entries: Vec::new(),
         structural: Some(StructuralChange::Split {
             block_index: position.block_index,
+            split_offset: position.offset,
         }),
     }
 }
@@ -700,7 +753,10 @@ fn apply_merge_blocks(doc: &mut Document, block_index: usize, _merge_offset: usi
             old_len: 0,
             new_len: 0,
         }],
-        structural: Some(StructuralChange::Merge { block_index }),
+        structural: Some(StructuralChange::Merge {
+            block_index,
+            merge_offset: prev_char_len,
+        }),
     }
 }
 
@@ -898,29 +954,17 @@ fn apply_remove_block(doc: &mut Document, index: usize) -> PosMap {
 
 /// Invert a `DeleteRange`.
 ///
-/// Single-block: inverse is `InsertText` with the deleted text.
-/// Cross-block: inverse is a `DeleteRange` with `start == end` (sentinel) and the
-/// deleted content carrying the blocks to reconstruct. `apply_delete_range` detects
-/// this pattern and dispatches to `apply_restore_deleted`.
+/// Always produces a sentinel `DeleteRange` with `start == end` and the original
+/// deleted content. `apply_delete_range` detects this pattern and dispatches to
+/// `apply_restore_deleted`, which faithfully reconstructs the original run structure
+/// (preserving styles and links) for both single-block and cross-block deletes.
 fn invert_delete_range(start: DocPosition, _end: DocPosition, deleted: &DeletedContent) -> EditOp {
-    if deleted.blocks.len() <= 1 {
-        let text = deleted
-            .blocks
-            .first()
-            .map_or_else(String::new, Block::flattened_text);
-        EditOp::InsertText {
-            position: start,
-            text,
-        }
-    } else {
-        // Cross-block: sentinel (start == start) triggers reconstruction in apply.
-        EditOp::DeleteRange {
-            start,
-            end: start,
-            deleted: DeletedContent {
-                blocks: deleted.blocks.clone(),
-            },
-        }
+    EditOp::DeleteRange {
+        start,
+        end: start,
+        deleted: DeletedContent {
+            blocks: deleted.blocks.clone(),
+        },
     }
 }
 
@@ -1669,18 +1713,47 @@ mod tests {
 
     #[test]
     fn posmap_split() {
+        // Split block 1 at offset 5: "helloworld" -> "hello" | "world"
         let pm = PosMap {
             block_index: 1,
             entries: Vec::new(),
-            structural: Some(StructuralChange::Split { block_index: 1 }),
+            structural: Some(StructuralChange::Split {
+                block_index: 1,
+                split_offset: 5,
+            }),
         };
+        // Block 0: unchanged
         assert_eq!(pm.map(DocPosition::new(0, 5)), DocPosition::new(0, 5));
+        // Block 1, offset 3 (before split): unchanged
         assert_eq!(pm.map(DocPosition::new(1, 3)), DocPosition::new(1, 3));
+        // Block 1, offset 5 (at split point): stays in block 1
+        assert_eq!(pm.map(DocPosition::new(1, 5)), DocPosition::new(1, 5));
+        // Block 1, offset 8 (after split): remapped to new block 2, offset 3
+        assert_eq!(pm.map(DocPosition::new(1, 8)), DocPosition::new(2, 3));
+        // Block 2: shifted to block 3
         assert_eq!(pm.map(DocPosition::new(2, 0)), DocPosition::new(3, 0));
     }
 
     #[test]
+    fn posmap_split_at_zero() {
+        // Split block 0 at offset 0: everything moves to block 1
+        let pm = PosMap {
+            block_index: 0,
+            entries: Vec::new(),
+            structural: Some(StructuralChange::Split {
+                block_index: 0,
+                split_offset: 0,
+            }),
+        };
+        // Offset 0 stays (not > 0)
+        assert_eq!(pm.map(DocPosition::new(0, 0)), DocPosition::new(0, 0));
+        // Offset 3 moves to new block
+        assert_eq!(pm.map(DocPosition::new(0, 3)), DocPosition::new(1, 3));
+    }
+
+    #[test]
     fn posmap_merge() {
+        // Merge block 1 into block 0. Block 0 had length 5.
         let pm = PosMap {
             block_index: 0,
             entries: vec![PosMapEntry {
@@ -1688,11 +1761,36 @@ mod tests {
                 old_len: 0,
                 new_len: 0,
             }],
-            structural: Some(StructuralChange::Merge { block_index: 1 }),
+            structural: Some(StructuralChange::Merge {
+                block_index: 1,
+                merge_offset: 5,
+            }),
         };
+        // Block 0 position: unchanged
         assert_eq!(pm.map(DocPosition::new(0, 3)), DocPosition::new(0, 3));
-        assert_eq!(pm.map(DocPosition::new(1, 2)), DocPosition::new(0, 2));
+        // Block 1, offset 2: remapped to block 0, offset 2 + 5 = 7
+        assert_eq!(pm.map(DocPosition::new(1, 2)), DocPosition::new(0, 7));
+        // Block 2: shifted down to block 1
         assert_eq!(pm.map(DocPosition::new(2, 0)), DocPosition::new(1, 0));
+    }
+
+    #[test]
+    fn posmap_merge_empty_prev() {
+        // Merge block 1 into block 0, where block 0 was empty (length 0).
+        let pm = PosMap {
+            block_index: 0,
+            entries: vec![PosMapEntry {
+                old_offset: 0,
+                old_len: 0,
+                new_len: 0,
+            }],
+            structural: Some(StructuralChange::Merge {
+                block_index: 1,
+                merge_offset: 0,
+            }),
+        };
+        // Block 1, offset 3: remapped to block 0, offset 3 + 0 = 3
+        assert_eq!(pm.map(DocPosition::new(1, 3)), DocPosition::new(0, 3));
     }
 
     #[test]
@@ -1720,6 +1818,7 @@ mod tests {
 
     #[test]
     fn posmap_cross_block_delete() {
+        // Delete from (0, 3) spanning 2 blocks removed.
         let pm = PosMap {
             block_index: 0,
             entries: vec![PosMapEntry {
@@ -1730,12 +1829,43 @@ mod tests {
             structural: Some(StructuralChange::CrossBlockDelete {
                 start_block: 0,
                 removed_count: 2,
+                start_offset: 3,
             }),
         };
+        // Before deletion point in start block: unchanged
         assert_eq!(pm.map(DocPosition::new(0, 2)), DocPosition::new(0, 2));
-        assert_eq!(pm.map(DocPosition::new(1, 5)), DocPosition::new(0, 5));
-        assert_eq!(pm.map(DocPosition::new(2, 5)), DocPosition::new(0, 5));
+        // Position in deleted block 1: collapses to deletion point (0, 3)
+        assert_eq!(pm.map(DocPosition::new(1, 5)), DocPosition::new(0, 3));
+        // Position in deleted block 2: collapses to deletion point (0, 3)
+        assert_eq!(pm.map(DocPosition::new(2, 5)), DocPosition::new(0, 3));
+        // Block 3 (after deleted range): shifted down by removed_count
         assert_eq!(pm.map(DocPosition::new(3, 1)), DocPosition::new(1, 1));
+    }
+
+    #[test]
+    fn posmap_cross_block_delete_mid_document() {
+        // Delete from (1, 2) spanning 1 block removed (block 2 merged into block 1).
+        let pm = PosMap {
+            block_index: 1,
+            entries: vec![PosMapEntry {
+                old_offset: 2,
+                old_len: 0,
+                new_len: 0,
+            }],
+            structural: Some(StructuralChange::CrossBlockDelete {
+                start_block: 1,
+                removed_count: 1,
+                start_offset: 2,
+            }),
+        };
+        // Block 0: unchanged
+        assert_eq!(pm.map(DocPosition::new(0, 5)), DocPosition::new(0, 5));
+        // Block 1, before deletion: unchanged
+        assert_eq!(pm.map(DocPosition::new(1, 1)), DocPosition::new(1, 1));
+        // Block 2 (deleted): collapses to (1, 2)
+        assert_eq!(pm.map(DocPosition::new(2, 7)), DocPosition::new(1, 2));
+        // Block 3: shifted down
+        assert_eq!(pm.map(DocPosition::new(3, 0)), DocPosition::new(2, 0));
     }
 
     // ── Round-trip tests ────────────────────────────────
