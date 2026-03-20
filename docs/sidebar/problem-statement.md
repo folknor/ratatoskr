@@ -327,3 +327,24 @@ Remove action-related code from the sidebar once the command palette handles tho
 Once phase 1 is in users' hands, evaluate whether the dropdown is sufficient or whether a different form factor (icon rail, vertical tabs, chips) better serves the 3+ account use case. This is informed by real usage patterns — how often users switch scope, whether they stay scoped or return to "All", whether they miss the visual account indicator.
 
 This phase is pure UI polish with no backend or data model changes.
+
+## Ecosystem Patterns
+
+Cross-reference with the [iced ecosystem survey](../iced-ecosystem-cross-reference.md). This section maps sidebar requirements to surveyed project patterns and identifies gaps.
+
+### Requirements → Survey Matches
+
+| Requirement | Primary Source | How It Applies |
+|---|---|---|
+| Panel architecture | trebuchet Component trait | Sidebar as Component with `(Task, ComponentEvent)` return — isolates sidebar state/view/subscription from the top-level app |
+| Live unread counts | pikeru subscriptions | Subscribe to DB changes; re-query `get_navigation_state()` on change events |
+| Stale navigation state | bloom generational tracking | Tag navigation queries with a generation counter; discard results on rapid scope switching to prevent displaying counts from a previous scope |
+| Resizable width | shadcn-rs resizable panels | `auto_save_id` persistence, min/max constraints (relevant when dimensions work begins) |
+| Token-based styling | shadcn-rs + iced-plus | Nav items, unread badges, section headers styled from centralized token palette via Token-to-Catalog bridge |
+| Drag-and-drop (future) | iced_drop | Thread-to-label filing; pinned search reorder. Wrap items in `Droppable`, sidebar labels as drop zones |
+| MRU label ranking | raffi MruEntry | Surface frequently-accessed labels higher in the list using per-label recency/count tracking (design decision, not yet in spec) |
+| Scope selector popover | shadcn-rs overlay positioning | Auto-flip positioning for the scope dropdown; focus management for keyboard accessibility |
+
+### Gaps
+
+- **Hierarchical tree view for Exchange/IMAP/JMAP folders**: This is the sidebar's most significant ecosystem gap. No surveyed project provides a collapsible tree view widget for iced. shadcn-rs mentions a `tree-viewer` in its feature list but it is not detailed in the survey — needs further inspection to determine if it is usable. Without an ecosystem solution, the tree view for nested folder hierarchies (Exchange folder trees, IMAP LSUB hierarchies, JMAP nested mailboxes) must be built as a custom widget or composed from nested `column`/`button` primitives with manual indent and expand/collapse state. This gap is unique to the sidebar among all Ratatoskr specs — other specs that mention tree rendering (e.g., pinned searches) defer to this one.

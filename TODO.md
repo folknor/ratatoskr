@@ -10,25 +10,27 @@
 
 ## Iced App
 
-- [ ] **Investigate iced ecosystem projects** — Review these repos for patterns, widget implementations, and architecture ideas:
-  - https://github.com/hecrj/iced_fontello — Icon font integration for iced
-  - https://github.com/hecrj/iced_palace — Hecrj's iced showcase/playground
-  - https://github.com/pop-os/cosmic-edit — COSMIC text editor (large real-world iced app)
-  - https://github.com/pop-os/iced/blob/master/widget/src/markdown.rs — COSMIC fork's markdown widget
-  - `research/cedilla` — https://github.com/mariinkys/cedilla
-  - `research/rustcast` — https://github.com/unsecretised/rustcast
-  - `research/raffi` — https://github.com/chmouel/raffi
-  - `research/pikeru` — https://github.com/dvhar/pikeru
-  - `research/shadcn-rs` — https://github.com/FerrisMind/shadcn-rs
-  - `research/iced_drop` — https://github.com/jhannyj/iced_drop
-  - `research/verglas` — https://github.com/kardwen/verglas
-  - `research/feu` — https://github.com/kyoheiu/feu
-  - `research/iced-plus` — https://github.com/neul-labs/iced-plus
-  - `research/trebuchet` — https://github.com/rafaelzimmermann/trebuchet
-  - `research/rustcast-cross` — https://github.com/rustcast-cross/rustcast-cross
-  - `research/iconflow` — https://github.com/FerrisMind/iconflow
-  - `research/Lumin` — https://github.com/Kn4ughty/Lumin
-  - `research/bloom` — https://github.com/nnmarcoo/bloom
+- [x] **Investigate iced ecosystem projects** — Done. See `research/iced-ecosystem-survey.md` (14 repos analyzed), `docs/iced-ecosystem-cross-reference.md` (cross-referenced against all 17 specs), and `## Ecosystem Patterns` sections appended to each doc in `docs/`.
+
+## Cross-Cutting Architecture (from ecosystem survey)
+
+These patterns appeared across 6-8+ specs and should be adopted as foundational infrastructure before feature work builds on top of them. Full rationale in `docs/iced-ecosystem-cross-reference.md`.
+
+- [ ] **Generational load tracking** — Add a `load_generation: u64` counter pattern for all async-load-then-display paths. Increment on every new request (thread selection, search keystroke, scope switch, pinned search click), tag the spawned `Task` with the current generation, discard results in `update()` if the generation has moved on. Prevents stale data from overwriting current state during rapid navigation. Affected: thread detail, search results, sidebar nav state, attachment loading, body store queries, command palette option resolution, status bar sync progress. Reference: bloom (`research/bloom/src/app.rs` line 157).
+
+- [ ] **Component trait for panel isolation** — Define a `Component` trait in `crates/app/` that each major panel implements (`update()`, `view()`, `subscription()`, returning `(Task, ComponentEvent)` tuples). Panels: sidebar, thread list, reading pane, compose, calendar, command palette, status bar, settings. This eliminates the nested `Message` enum problem — each panel owns its own message type and emits typed `ComponentEvent`s that the top-level `App::update()` dispatches. Without this, the `Message` enum will grow unboundedly as features land. Reference: trebuchet (`research/trebuchet/src/app.rs` lines 95-132).
+
+- [ ] **Token-to-Catalog bridge for theming** — Create an `AppTheme` newtype wrapping iced's `Theme` that implements all widget `Catalog` traits (`button::Catalog`, `container::Catalog`, etc.), pulling colors from `theme.palette()` via the existing seed system. This lets widgets use `.class(ButtonClass::Primary)` instead of inline style closures, and ensures all email-specific semantic styles (starred card tint, unread subject color, label dot colors, muted text) flow through one adapter. The existing ~30 style functions in `theme.rs` become methods on `AppTheme`. Reference: iced-plus (`research/iced-plus/iced_plus_theme/src/theme.rs`), shadcn-rs (`research/shadcn-rs/crates/iced-shadcn/src/tokens.rs`).
+
+- [ ] **Vendor iced_drop for drag-and-drop** — Add `research/iced_drop` (623 lines, zero deps beyond iced) as a vendored crate or workspace dependency. Needed by: thread reordering, label drag-to-file, account reordering in settings, compose token DnD between To/Cc/Bcc, group editor member DnD, calendar event dragging, attachment drag zones. The `Operation` trait pattern for widget tree traversal is also useful beyond DnD (finding focused widgets, swapping state between panels). Reference: iced_drop (`research/iced_drop/src/widget/operation/drop.rs`).
+
+- [ ] **Subscription orchestration pattern** — Establish a standard pattern for `Subscription::batch()` combining all background event streams: sync pipeline events, keyboard/hotkey capture, timer ticks (status bar cycling, auto-save, debounce), file system watches, and OS appearance changes. Each subsystem provides a `fn subscription() -> Subscription<Message>` that the top-level `App::subscription()` batches. Use `subscription::channel` with `tokio::select!` for subsystems that multiplex multiple async sources (e.g., sync across 4 providers simultaneously). Reference: pikeru (`research/pikeru/`), rustcast (`research/rustcast/src/app/tile/elm.rs` lines 158-237).
+
+- [ ] **DOM-to-widget pipeline for HTML email rendering** — Evaluate cedilla's frostmark approach as a third option alongside CEF and litehtml: parse sanitized HTML with html5ever, walk the DOM tree with a visitor pattern, emit iced `Element`s (paragraph → `text()`, image → `image()`, link → styled `button`, table → nested `row()`/`column()`). This could handle simple/medium-complexity emails (text, images, links, basic formatting) natively in iced without an external renderer. Complex HTML (CSS-heavy marketing emails) would still need CEF/litehtml fallback. Prototype against a representative sample from the test corpus to determine the complexity threshold. Reference: cedilla/frostmark (`research/cedilla/`), with image caching pattern from `MarkdownPreview` (HashMap<String, image::Handle>).
+
+- [ ] **Patch-based undo/redo for compose editor** — When the compose editor lands, use the `dissimilar` crate for compact diff-based undo history instead of storing full text snapshots. Maintain a ~100-patch circular buffer. This matters for large HTML email drafts where full-snapshot undo would be expensive. Also applicable to any future inline-editing surface (contact notes, calendar event descriptions). Reference: cedilla (`research/cedilla/src/editor.rs`, `EditorState::push_history`).
+
+- [ ] **Config shadow pattern for settings/edit flows** — Any UI that edits persistent state (account settings, preferences, contact editor, calendar event editor) should clone the real state into an `editing_*` shadow on open. The user edits the shadow; commit writes it back, cancel discards it. This prevents partial saves, enables live preview, and makes "has anything changed?" detection trivial (compare shadow to original). Reference: bloom (`research/bloom/src/app.rs` lines 38, 196, 402).
 
 - [ ] **Make sidebar fixed-width (not resizable)** — The sidebar should be a fixed width, not draggable. Remove the sidebar resize divider and any sidebar width persistence from `WindowState`. The sidebar width is a constant in `layout.rs`, not a user preference.
 

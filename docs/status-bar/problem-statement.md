@@ -93,3 +93,22 @@ The status bar is not interactive except for warning messages, which are clickab
 ## Visual Style
 
 Minimal — same background as the app chrome, slightly smaller text than the main UI. Warning messages use a warning color for the icon/text. Sync progress uses a muted/secondary text color. The bar should be visually quiet when everything is healthy.
+
+## Ecosystem Patterns
+
+How requirements from this spec map to patterns found in the [iced ecosystem survey](../iced-ecosystem-survey.md).
+
+### Requirements → Survey Matches
+
+| Requirement | Primary Source | How It Applies |
+|---|---|---|
+| Cycling timer + concurrent sync | pikeru subscriptions + rustcast `Subscription::batch()` | Multiplex timer ticks, sync events, and confirmation expiry in one subscription |
+| Encapsulated panel | trebuchet Component trait | StatusBar component with own state, view, subscription; emits `RequestReauth(account_id)` upward |
+| Visual styling | shadcn-rs + iced-plus tokens | Tokens for muted text, warning color, chrome background |
+| Clickable warnings + cursor change | bloom custom Widget + pikeru MouseArea | Custom `Widget` with conditional `mouse_interaction()` returning Pointer for warnings |
+| Priority content switching | rustcast Page enum | `StatusContent` enum (Idle/SyncProgress/Warning/Confirmation) with automatic priority resolution |
+| Stale sync state | bloom generational tracking | Per-account generation map (extended from bloom's single counter) |
+
+### Gaps
+
+- **Priority-based preemption logic** (warnings interrupt sync, confirmations briefly interrupt then yield back): Bespoke state machine, no survey precedent

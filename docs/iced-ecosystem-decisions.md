@@ -142,3 +142,56 @@ Six systems were studied to inform our approach:
 - **When to add iced_palace?** When we implement proper text truncation in the thread list.
 - **Will we need to fork iced ourselves?** Halloy covers our needs for now. If we need patches they don't carry (e.g., specific email-related widget behavior), we'd fork from theirs, not upstream.
 - **CEF vs litehtml for email body rendering?** Still needs testing against real email corpus.
+
+## Ecosystem Patterns
+
+Cross-reference of how decisions in this document map to surveyed iced ecosystem projects, what patterns remain uncovered, and where significant gaps exist. Derived from the [ecosystem cross-reference](iced-ecosystem-cross-reference.md).
+
+### Decision-to-Survey Matches
+
+| Decision | Primary Source | How It Applies |
+|---|---|---|
+| Theme system (6-seed) | shadcn-rs tokens + iced-plus Token-to-Catalog bridge + bloom styling helpers | Token registry separates tokens from consumption; `AppTheme` wraps tokens and implements Catalog traits; `tint()`/`with_alpha()` helpers fill email-specific gaps |
+| Spacing/layout (geometric scale) | iced-plus Spacing/Breakpoints + shadcn-rs Spacing enum | Validates enum approach; Ratatoskr's role-based naming is more specific (novel in ecosystem) |
+| iced_fontello (don't adopt) | verglas `define_icons!` macro | Could enhance existing `icon.rs` with typed icon functions and IDE autocomplete |
+| libcosmic (reference only) | cedilla validates approach | Patterns portable (frostmark, undo); widget code tied to libcosmic fork |
+| CEF vs litehtml (open question) | cedilla/frostmark | DOM-to-widget pipeline is a **third option**: pure iced rendering of sanitized HTML for simple/medium emails |
+
+### Survey Patterns Not Covered by Decisions
+
+These patterns appear repeatedly across spec cross-references but have no corresponding decision in this document:
+
+1. **Generational load tracking** (bloom) — No decision covers async resource management. Used by: accounts, calendar, main layout, search, pinned searches, sidebar, status bar, command palette.
+2. **Subscription orchestration** (pikeru, rustcast) — No decision covers subscription architecture. Used by: calendar, main layout, search, status bar, accounts, pop-out windows.
+3. **Component trait** (trebuchet) — No decision addresses message architecture or the nested enum problem. Used by: calendar, main layout, sidebar, status bar, search, command palette, pop-out windows, contacts.
+4. **Patch-based undo** (cedilla) — No decision covers compose editor undo strategy.
+5. **iced_drop for DnD** (Tier 1) — No decision covers drag-and-drop. Used by: calendar, contacts, accounts, sidebar, main layout, pop-out windows.
+
+### Cross-Cutting Gaps
+
+Requirements that appear across multiple specs with no solution in the surveyed ecosystem:
+
+| Gap | Affected Specs |
+|---|---|
+| **Scroll virtualization** | Main layout, search, contacts |
+| **Multi-window management** | Pop-out windows, calendar |
+| **WYSIWYG HTML compose** | Pop-out windows, contacts |
+| **Token/pill input widget** | Contacts, pop-out windows |
+| **Animated panel transitions** | Accounts, contacts |
+| **Hierarchical tree view** | Sidebar |
+| **OS print dialog integration** | Pop-out windows |
+
+### Cross-Cutting Strengths
+
+Patterns that appear as solutions across many specs and should be prioritized for adoption:
+
+| Pattern | Source | Used By |
+|---|---|---|
+| **Generational load tracking** | bloom | Accounts, calendar, main layout, search, pinned searches, sidebar, status bar, cmd palette |
+| **Component trait** | trebuchet | Calendar, main layout, sidebar, status bar, search, cmd palette, pop-out, contacts |
+| **Token-based theming + Catalog bridge** | shadcn-rs + iced-plus | All UI specs |
+| **Subscription orchestration** | pikeru + rustcast | Calendar, main layout, search, status bar, accounts, pop-out |
+| **Overlay positioning** | shadcn-rs | Accounts, calendar, cmd palette, contacts, search, sidebar |
+| **Drag-and-drop** | iced_drop | Calendar, contacts, accounts, sidebar, main layout, pop-out |
+| **Query routing dispatch** | raffi | Cmd palette, search, contacts |
+| **Config shadowing** | bloom | Accounts, calendar, contacts, pop-out, pinned searches |

@@ -465,3 +465,25 @@ Redesign the query parser and unify both search engines behind a single `search(
 - **Parser redesign**: The current smart folder parser handles a subset of the target operator syntax. It needs a redesign to support all new operators, OR semantics, relative dates, and `has:` expansion — see Phase 1 and `docs/search/implementation-spec.md` Slice 1.
 - **Command palette**: "Save as Smart Folder" and smart folder management commands need to be registered. The command palette infrastructure (Slices 1-2) already supports this pattern.
 - **Thread list component**: Search results must render using the same thread card component as folder views. This is a UI concern for the iced prototype, not a backend issue.
+
+## Ecosystem Patterns
+
+How iced ecosystem survey patterns map to the requirements in this document. See `docs/iced-ecosystem-cross-reference.md` for full context on each source project.
+
+### Requirements → Survey Matches
+
+| Requirement | Primary Source | How It Applies |
+|---|---|---|
+| Operator typeahead mode switching | raffi `route_query()` | Enum dispatch: `from:` → Contact, `label:` → Label, `after:` → DatePreset |
+| Stale query cancellation | bloom generational tracking | **Critical**: Increment generation per keystroke, discard stale results |
+| Typeahead popup positioning | shadcn-rs overlay positioning | Anchored below search bar with auto-flip |
+| Search bar as component | trebuchet Component trait | Encapsulate query state, typeahead state; emit `SearchExecuted(query)` events |
+| Right-click "Search here" | pikeru custom MouseArea | Right-click on sidebar labels/folders |
+| Concurrent search pipeline | pikeru subscriptions | `subscription::channel` for off-main-thread queries |
+| Declarative keybindings (`/`, Escape) | cedilla key bindings | HashMap<KeyCombo, SearchAction> |
+| Search result thread list | shadcn-rs data table | Sort/filter patterns; dual sorting (relevance vs date) |
+
+### Gaps
+
+- **Per-token routing within a single query**: raffi routes entire queries; search needs cursor-local token routing (e.g., typeahead must know which operator the cursor is inside, not just the overall query shape)
+- **Intra-widget anchoring for typeahead**: Overlay positioning relative to cursor position within search bar, not just anchored to the widget's bounding box

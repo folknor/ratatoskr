@@ -579,3 +579,33 @@ This document introduces several categories of persisted and non-persisted UI st
 - **Message body rendering**: The conversation view needs rendered email bodies. This is a separate technical challenge (HTML email in iced via iced_webview_v2 or litehtml). Phase 2 can proceed with snippet-only rendering while body rendering is developed in parallel.
 - **Command palette iced integration**: Keyboard shortcuts and action dispatch depend on the palette's iced integration (see `docs/command-palette/roadmap.md`, "Future: Iced Integration"). Phase 1-2 can use direct message dispatch; palette integration lands in Phase 3.
 - **Compose window**: The inline reply composer (Phase 3) is a simplified version of the full compose window. Full compose is a separate feature with its own design considerations (rich text editing, attachments, signature management).
+
+## Ecosystem Patterns
+
+How requirements in this spec map to patterns found in the [iced ecosystem survey](../iced-ecosystem-survey.md). See also the full [cross-reference](../iced-ecosystem-cross-reference.md).
+
+### Requirements to Survey Matches
+
+| Requirement | Primary Source | How It Applies |
+|---|---|---|
+| Three/four-panel resizable layout | shadcn-rs resizable panels | `auto_save_id` persistence, min/max constraints, percentage sizing |
+| Rapid thread switching staleness | bloom generational tracking | Tag each `get_thread_detail()` call with generation counter; discard stale responses when user navigates faster than data loads |
+| Multi-select (Shift+click, Ctrl+click) | pikeru custom MouseArea | Granular modifier-key detection on click events enables range and toggle selection |
+| Panel architecture | trebuchet Component trait | Each panel (sidebar, thread list, reading pane, right sidebar) as Component with `(Task, ComponentEvent)` return, preventing Message enum explosion |
+| Background sync/search/loading | pikeru + rustcast subscriptions | `subscription::channel` + `Subscription::batch()` for concurrent background tasks without blocking the UI thread |
+| Token-based theming | shadcn-rs + iced-plus | Centralized palette with Token-to-Catalog bridge for automatic styling of thread cards, message cards, and action buttons |
+| Settings (panel widths, preferences) | bloom config shadow | Shadow config for live preview with commit/cancel semantics |
+| Keyboard shortcuts | feu + cedilla | Raw interception via `subscription::events_with` before widget processing; declarative HashMap bindings for shortcut registration |
+| Typeahead popups (search bar) | shadcn-rs overlay positioning | Anchored overlay with auto-flip; adapt for left-aligned placement below the search input |
+| Auto-collapse right sidebar | iced-plus Breakpoints + ShowOn | Gate right sidebar visibility by window width breakpoint (~1200px threshold) |
+| Avatar/attachment loading | Lumin async batching + bloom generational | Batch `Task::perform` for avatar images; discard stale results on rapid thread navigation |
+| HTML email body rendering | cedilla/frostmark | DOM-to-widget pipeline: html5ever parse, visitor pattern, iced widget tree — a third option alongside CEF and litehtml |
+| Drag to label (future) | iced_drop | Wrap thread cards in `Droppable`, sidebar labels as drop zones; `Operation` trait for hit testing |
+
+### Gaps
+
+These requirements have no solution in the surveyed iced ecosystem and will require custom implementation:
+
+- **Scroll virtualization**: No iced ecosystem project implements virtualized scrolling. The thread list needs to handle 1000+ fixed-height cards efficiently. The fixed `THREAD_CARD_HEIGHT` design enables a future virtualization layer, but the implementation is entirely custom.
+- **Inline reply composer**: No surveyed project embeds a text editor inside a scrollable content list. The reply composer appearing below a specific message card, within the scrollable conversation view, is a novel layout challenge.
+- **Pop-out windows**: No surveyed project demonstrates multi-window iced with shared state. Double-click-to-pop-out on message cards and the compose pop-out button both depend on this unsolved pattern.

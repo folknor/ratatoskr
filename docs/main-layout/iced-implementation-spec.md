@@ -1336,3 +1336,25 @@ All new constants use the existing spacing/type/icon scales:
 - `PAD_RIGHT_SIDEBAR` = `Padding::new(12.0)` (matches `PAD_PANEL_HEADER` scale)
 - `STARRED_BG_ALPHA` = 0.12 (consistent with existing alpha usage in `chip_button`)
 - `RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH` = 1200.0 (window width threshold for auto-collapse)
+
+---
+
+## Ecosystem Patterns
+
+Patterns from the [iced ecosystem survey](../iced-ecosystem-survey.md) that apply to this spec, adapted from the [cross-reference](../iced-ecosystem-cross-reference.md).
+
+### Requirements → Survey Matches
+
+| Requirement | Primary Source | How It Applies |
+|---|---|---|
+| Resizable panels (sidebar, thread list) | shadcn-rs resizable panels | `auto_save_id` could replace manual persistence; min/max constraints more robust than `sanitize()` clamp |
+| Starred thread card golden tint | rustcast `tint()`/`with_alpha()` | Validates spec's existing `mix()` helper approach |
+| Stale thread detail responses | bloom generational tracking | Replace thread_id staleness check with `load_generation` counter for robustness (handles re-selecting same thread) |
+| Phase 3 keyboard shortcuts | raffi query routing + trebuchet Component trait + cedilla key bindings + feu raw keyboard | Component trait is highest-impact — prevents Message enum explosion |
+| Data table selection model | shadcn-rs data table | `selected_indices: HashSet`, `anchor_index` for shift-range, `active_index` for keyboard nav |
+| Attachment collapse toggle | bloom config shadow | HashMap cache is correct for interim; bloom pattern informs SQLite migration |
+
+### Gaps
+
+- **Thread list virtualization**: No surveyed project implements virtualized scrolling for iced (fixed `THREAD_CARD_HEIGHT` enables future virtualization)
+- **Auto-collapse right sidebar below 1200px**: One-directional collapse policy is custom; shadcn-rs panels don't encode this

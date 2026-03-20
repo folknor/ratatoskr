@@ -404,3 +404,19 @@ Slice 3 (Tantivy cross-account) ✅
 ```
 
 Slices 1-4 are complete. Slice 5 is trivial wiring. Slice 6 depends on 4.
+
+## Ecosystem Patterns
+
+Patterns from the [iced ecosystem survey](../iced-ecosystem-survey.md) that apply to the search pipeline. The backend slices (1-4) are largely framework-agnostic, so the survey's value concentrates on Slice 5 (app integration) and Slice 6 (smart folder migration).
+
+| Slice | Pattern (Source) | How It Applies |
+|---|---|---|
+| Slice 4 (3-way router) | Enum dispatch (raffi `route_query()`) | Validates the `(has_free_text, has_operators)` match approach; consider a `SearchMode` enum if routing modes grow beyond 3 |
+| Slice 5 (app integration) | Generational load tracking (bloom) | **Critical**: Add a `search_generation: u64` counter to the app state. Increment on every keystroke or search submission. Tag each search `Task` with its generation and discard results whose generation is stale. Without this, incremental typing produces flickering or wrong results. |
+| Slice 5 (app integration) | Subscription orchestration (pikeru) | Consider parallelizing SQL and Tantivy queries in the combined path using `subscription::channel` for off-main-thread execution |
+| Slice 5 (results display) | Data table patterns (shadcn-rs) | Sort/filter patterns for the search result list; dual sorting (relevance vs date) maps to shadcn-rs column sort model |
+| Slice 6 (smart folders) | Module trait (Lumin) | If search backends proliferate beyond SQL+Tantivy, formalize with a trait registry rather than hardcoded match arms |
+
+### Most impactful finding
+
+Bloom's **generational load tracking** is the single most impactful pattern for this spec. The implementation spec treats Slice 5 app integration as "trivial wiring," but without stale-result cancellation the search UX will break during incremental typing. The pattern is simple: a monotonically increasing `u64` counter in the app state, incremented before each search dispatch and checked when results arrive. Any result tagged with a generation older than current is silently dropped. This same pattern appears across nearly every spec in the codebase (calendar, main layout, sidebar, command palette, pinned searches, status bar, contacts) and should be treated as a foundational primitive rather than a per-feature afterthought.

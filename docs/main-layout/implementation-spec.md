@@ -598,6 +598,20 @@ Slice 1 and Slice 3 can be done in parallel. Slice 2 depends on both. Slice 4 is
 
 Build order: **Slice 1 + Slice 3 + Slice 4 in parallel**, then **Slice 2**.
 
+## Ecosystem Patterns
+
+This is a backend-only spec, so overlap with the [iced ecosystem survey](../iced-ecosystem-cross-reference.md) is limited to how backend data will be consumed by the iced frontend. No changes to the backend spec are warranted based on the survey, but the following patterns inform how the iced app layer will integrate with these backend slices.
+
+| Spec Slice | Survey Pattern | Action |
+|---|---|---|
+| Slice 2 (`get_thread_detail`) | bloom generational load tracking | Implement generation counter in iced app's thread selection handler to discard stale detail responses when the user navigates rapidly |
+| Slice 4 (`FocusedRegion`) | trebuchet Component trait + raffi query routing | Structure panel system around Component trait; filter commands by `focused_region` for context-dependent shortcuts |
+| Slice 1 (label colors) | shadcn-rs/iced-plus theming | Register 25 presets as named tokens; build `hex_to_iced_color()` utility for the theme's Token-to-Catalog bridge |
+| Slice 3+2 (attachments) | shadcn-rs resizable panels | Auto-save resizable panels for the attachment panel's collapse/expand state |
+| Auto-advance | pikeru subscriptions | Multiplex provider mutation and local DB update channels so the UI can react to completed actions |
+
+The backend slices themselves (SQL queries, color hashing, `CommandContext` fields) are framework-agnostic and require no ecosystem-specific patterns. The survey patterns listed above apply at the iced app layer when wiring these backend functions into the UI.
+
 ## Phase 3 Backend: What's Already Done vs What's Missing
 
 The main-layout Phase 3 (Interaction Flow) requires email mutations and compose/send — these **already exist** in the backend:

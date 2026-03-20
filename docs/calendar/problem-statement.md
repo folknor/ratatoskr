@@ -617,3 +617,34 @@ The minimum viable calendar for enterprise adoption:
 - **iced custom widgets**: The week view time grid with positioned event blocks, drag handles, and overlap layout is a custom widget — it does not map to iced's built-in layout primitives.
 - **Command palette integration**: Calendar actions (create event, navigate to date, switch view) need to be registered in the command palette alongside email actions.
 - **Pop-out window**: iced multi-window support (`iced::window::open`). Already used for the message pop-out spec in main-layout.
+
+## Ecosystem Patterns
+
+Patterns from the [iced ecosystem survey](../iced-ecosystem-survey.md) that apply to calendar implementation, and gaps where no surveyed project provides guidance.
+
+### Requirements → Survey Matches
+
+| Requirement | Primary Source | How It Applies |
+|---|---|---|
+| Drag-and-drop events | iced_drop | Wrap event blocks in `Droppable`, time slots as drop zones. `Operation` trait for hit testing |
+| Custom time grid widget | bloom custom Widget | `advanced::Widget` trait impls (Timeline, Histogram) show pattern for absolute positioning, drag state, custom draw |
+| Stale load cancellation | bloom generational tracking | `load_generation` counter prevents displaying events from a previous date when navigating rapidly |
+| Event popover/modal | shadcn-rs overlay positioning | `place_overlay_centered()` for viewport-aware placement; focus/keyboard modules for Escape-to-close |
+| Resizable sidebar+main | shadcn-rs resizable panels | Draggable splitters with auto-save, percentage sizing, min/max constraints |
+| Mode switching (mail↔calendar) | rustcast Page enum + trebuchet Component | Both states always in model; view renders active one. Component trait keeps subscriptions alive for both |
+| Month view grid | pikeru responsive grid | Dynamic row calculation from viewport; RefCell measurement caching |
+| Command palette integration | raffi query routing + cedilla key bindings | Enum dispatch for calendar commands; HashMap-based shortcut lookup |
+| Mouse interaction | pikeru custom MouseArea | Click vs double-click, drag start/move/end, edge-hover for resize cursors |
+| Theme tokens for calendar colors | shadcn-rs + iced-plus | Token registry defines how colors are applied; actual values from provider sync |
+| Settings with cancel | bloom config shadow | Shadow event data during edit; commit on save, discard on cancel |
+| Sync subscriptions | pikeru + rustcast | `subscription::channel` + `Subscription::batch()` for concurrent provider sync |
+
+### Gaps
+
+- **Overlapping event layout algorithm** (interval graph coloring): Algorithmic, not an iced pattern. Must implement column-packing for side-by-side overlapping events in day/week views.
+- **Recurring event expansion** (RRULE): Domain-specific (`rrule` crate). No survey precedent for rendering expanded recurrence instances.
+- **Multi-day spanning bars in month view**: Specific layout challenge — horizontal bars that span across date cells — not addressed by any surveyed project.
+- **Time picker with timezone**: Complex form widget (date picker + time picker + timezone selector with expansion states) with no survey precedent.
+- **Mini month calendar widget**: No surveyed project includes a month grid date picker. Must build as a custom widget.
+- **Pop-out window**: No surveyed project uses iced multi-window. Window lifecycle, per-window routing, and shared state are entirely custom.
+- **Continuous drag position mapping** (pixel offset → time): iced_drop handles discrete drop zones, not continuous position-to-value mapping needed for drag-to-resize and drag-to-move on the time grid.

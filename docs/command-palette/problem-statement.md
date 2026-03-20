@@ -403,3 +403,26 @@ The full design of undo tokens, stack depth, expiration, and multi-step undo is 
 1. **Palette visibility vs bindability**: Resolved. Every registered command is palette-searchable. There is no keyboard-only tier. Navigation commands like `nav.next` / `nav.prev` (j/k) appear in the palette — they're low-frequency palette searches but they need to be discoverable and their keybindings visible. This may be revisited post-V1 if the palette becomes noisy, but for now the rule is: no command exists without showing in the palette.
 
 2. **Scope of "single source of truth"**: Resolved. The registry is the app's entire action layer, not just the palette's backend. Context menus, toolbars, right-click menus, the "Search here" sidebar action, reading pane action buttons — any UI surface that triggers or displays a command consumes the registry's metadata (label, icon, enabled state, keybinding hint). This is a consequence of the overview's requirement that "every user-initiated action... must be a registered command."
+
+## Ecosystem Patterns
+
+Cross-reference of this spec's requirements against the [iced ecosystem survey](../iced-ecosystem-survey.md). See the [full cross-reference](../iced-ecosystem-cross-reference.md) for broader context.
+
+### Requirements to Survey Matches
+
+| Requirement | Primary Source | How It Applies |
+|---|---|---|
+| Overlay widget | shadcn-rs command palette + overlay positioning | `place_overlay_centered()` for placement; focus trapping; props-builder for `CommandMatch` descriptors |
+| Stage-1 vs stage-2 search routing | raffi `route_query()` | Enum dispatch: stage-1 queries `CommandRegistry::query()`, stage-2 queries `CommandInputResolver::get_options()` |
+| MRU/recency ranking | raffi `MruEntry` | `HashMap<CommandId, MruEntry>` with count+timestamp, persisted to disk |
+| Keyboard subscription batching | rustcast `Subscription::batch()` | Batches hotkeys, keyboard, and palette-internal subscriptions |
+| Raw keyboard interception | feu `subscription::events_with` | Intercept KeyPressed before widget processing; modal keybinds without text input interference |
+| Panel-aware dispatch | trebuchet Component trait | Each panel returns `(Task, ComponentEvent)`; `FocusedRegion` routes keyboard to correct component |
+| Binding registration | cedilla declarative key bindings | Macro + HashMap lookup decoupling menu structure from handlers |
+| Stale option resolution | bloom generational tracking | Cancel stale `CommandInputResolver::get_options()` results when user switches commands |
+
+### Gaps
+
+- **Two-key chord sequences** (`g then i`): No surveyed project handles pending chord state with timeouts. The `BindingTable` two-key sequence support is entirely custom.
+- **User-customizable keybindings with conflict detection**: Beyond anything in the survey. The override map, conflict reporting, and per-platform defaults are original to Ratatoskr.
+- **The core registry architecture** (`CommandId` enum, `CommandContext` predicates, `CommandInputResolver` trait, typed `CommandArgs`): No analogues in the surveyed ecosystem. The separation of static registry from live resolver, the three-tier command model, and the typed execution payload are all original designs.

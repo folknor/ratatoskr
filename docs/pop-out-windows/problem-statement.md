@@ -256,3 +256,29 @@ Drafts are visible in the thread list when viewing the Drafts folder. Clicking a
    This is a blocking technical decision.
 
 3. **Spell check** — OS-level spell check integration, or custom? Defer to implementation.
+
+## Ecosystem Patterns
+
+Patterns from the [iced ecosystem survey](../iced-ecosystem-survey.md) that apply to pop-out windows.
+
+### Requirements → Survey Matches
+
+| Requirement | Primary Source | How It Applies |
+|---|---|---|
+| Session restore (positions, sizes) | shadcn-rs `auto_save_id` + rustcast TOML config | `SessionState` struct (serde) with `Vec<WindowState>`; shadcn-rs's auto-save-by-ID concept |
+| Rich text compose (undo) | cedilla patch-based undo | `dissimilar` crate circular buffer for draft history |
+| Rich text compose (editor) | cedilla custom TextEditor | Fork iced's `text_editor` to add styled runs |
+| HTML rendering in message view | cedilla/frostmark | DOM-to-widget pipeline for sanitized HTML |
+| DnD attachments (inline vs attachment zones) | iced_drop + shadcn-rs file-drop-zone + bloom clipboard | iced_drop for two-zone overlay; iced's native `FilesHovered`/`FilesDropped` for OS drops; bloom's clipboard fallback |
+| Contact autocomplete | shadcn-rs command palette + raffi query routing + pikeru MouseArea | Searchable dropdown; enum dispatch for contacts/groups/recent; right-click on pills |
+| Rendering mode toggle | trebuchet Component + bloom config shadow | Mode as Component; system default in config, per-window override in local state |
+| Keyboard shortcuts per window type | cedilla key bindings + feu raw keyboard + trebuchet Component | Per-window-type `handle_key_event()`; subscription for Escape capture |
+| Auto-save drafts | pikeru subscriptions + cedilla undo + bloom generational | `iced::time::every(30s)` subscription; undo history as change detector |
+
+### Gaps
+
+- **Multi-window management**: No surveyed project uses iced multi-window. Window lifecycle, per-window message routing, and cascade-on-main-close are entirely custom. This is the largest gap for this spec.
+- **WYSIWYG HTML compose**: Confirmed as unsolved. cedilla's editor fork + frostmark pipeline are the closest building blocks but fall far short of rich text editing.
+- **Token/pill input widget**: No surveyed project implements chip/tag input fields. Must be built as a custom `advanced::Widget`.
+- **OS print dialog integration**: Platform-specific code needed with no iced precedent.
+- **PDF export from rendered email**: cedilla uses server-side Gotenberg; a local solution is needed.

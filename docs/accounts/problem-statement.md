@@ -185,3 +185,27 @@ Attempting to add an account with an email address that's already configured sho
 2. ~~**Account reordering**~~ **Resolved.** Users can reorder accounts in the settings account list (drag to reorder). The order is reflected in the sidebar account dropdown.
 
 3. ~~**Default send-from account**~~ **Resolved.** See `docs/sidebar/problem-statement.md` § Default sender account for compose. Resolution order: explicit selection → thread context → last manually selected sender → current scope → first account.
+
+## Ecosystem Patterns
+
+Patterns from the [iced ecosystem survey](../iced-ecosystem-cross-reference.md) that apply to this spec.
+
+### Requirements → Survey Matches
+
+| Requirement | Primary Source | How It Applies |
+|---|---|---|
+| First-launch centered modal | shadcn-rs overlays | `place_overlay_centered()` handles viewport-aware placement; dialog component manages focus trapping and Escape-to-close |
+| Multi-step wizard (email→discovery→auth→inbox) | trebuchet Component trait + rustcast Page enum | Model as `AddAccountStep` enum. Each variant holds its own state. trebuchet's `(Task, ComponentEvent)` tuples handle async transitions (discovery) cleanly |
+| Async discovery with 15s timeout | bloom generational tracking + pikeru subscriptions | Tag discovery task with generation counter; use `tokio::select!` over discovery future and timeout |
+| Protocol selection cards | iced-plus props-builder + shadcn-rs data table | Build `SelectionCard` with fluent API; use phantom-type variants for card styles |
+| IMAP/SMTP password form | shadcn-rs input/select/checkbox | Props-builder keeps multi-field form readable; security dropdown maps to `select` component |
+| Account settings with editor slide-in | bloom config+editing_config | Clone account settings into shadow on click; edit shadow; commit on save, discard on cancel |
+| Account reordering via drag | iced_drop | Wrap cards in `Droppable`, use `Operation` trait for tree traversal, chained ops for swap |
+| Account color picker | pikeru responsive grid + shadcn-rs tokens | Render 25-color palette as grid; highlight selected; auto-assign next unused on creation |
+| Account selector dropdown | shadcn-rs overlay positioning | Dropdown as overlay widget with auto-flip positioning |
+| Error states in status bar | pikeru subscriptions + iced-plus platform | Subscription watches account health; emits `TokenExpired`/`ConnectionFailed` messages |
+
+### Gaps
+
+- **Animated panel transitions** (slide-in editor): No surveyed project demonstrates animated transitions in iced.
+- **OAuth browser handoff**: Purely backend (already in ratatoskr-core); no iced-specific pattern needed.

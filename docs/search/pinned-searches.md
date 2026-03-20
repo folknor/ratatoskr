@@ -193,3 +193,23 @@ Thread metadata is not stored — it's fetched live from the threads table when 
    - **Date+time only** — compact, scannable, but anonymous (can't tell searches apart without clicking)
    - **Date+time primary, truncated query as muted subtitle** — more context, two lines per entry
    - **Query string only** — current spec, but truncation at 180px makes most queries unreadable
+
+## Ecosystem Patterns
+
+How requirements in this spec map to patterns from the [iced ecosystem survey](../iced-ecosystem-survey.md).
+
+### Requirements to Survey Matches
+
+| Requirement | Primary Source | How It Applies |
+|---|---|---|
+| Card/chip styling | shadcn-rs + iced-plus tokens | Token palette for elevation, active state, text colors |
+| Race on rapid navigation | bloom generational tracking | Generational counter for thread metadata queries — prevents stale results when the user clicks through pinned searches quickly |
+| Edit-in-place state machine | bloom config shadow | Config shadowing inspires the approach: shadow query/results during edit, commit on execute, discard on Escape. Custom `navigated_away` flag needed beyond what bloom provides |
+| Command palette integration | raffi query routing + trebuchet Component | Context-sensitive commands ("Save as Smart Folder" available only when a pinned search is active); Component events for the graduation-to-smart-folder flow |
+| Escape key state restoration | feu raw keyboard | Raw keyboard interception to capture Escape before widget processing; actual restoration logic (return to previous folder view) is custom state management |
+| Thread list with fixed ID set | shadcn-rs data table | Data table patterns for rendering the stored thread list (query is a simple `WHERE thread_id IN (...)`) |
+
+### Gaps
+
+- **Relative timestamps** ("Just now", "2 hours ago", "3 days ago"): No surveyed project implements human-friendly relative time formatting. Use `chrono-humanize` crate.
+- **Tree rendering for hierarchical folders**: Noted as a broader sidebar gap — relevant here if pinned searches ever need nested grouping, but not a blocker for the current flat-list design.

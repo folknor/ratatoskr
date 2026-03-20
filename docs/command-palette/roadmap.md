@@ -214,3 +214,26 @@ Slice 1 (registry) ✅
 ```
 
 Slice 5 can be worked in parallel with anything. Slice 4's ranking infrastructure can be built in parallel, but recency tracking becomes useful only after slice 6. Slice 6 is incremental and can begin as soon as slices 1-3 are done. Slice 2's remaining work (real resolver, CommandArgs, execution dispatch) is needed before the palette UI in slice 6 can use parameterized commands. Slice 3's remaining work (iced event wiring, override persistence, query() integration) lands as part of slice 6's keyboard dispatch integration.
+
+## Ecosystem Patterns
+
+How patterns from the [iced ecosystem survey](../iced-ecosystem-survey.md) map to each roadmap slice. Sourced from the [cross-reference](../iced-ecosystem-cross-reference.md).
+
+### Requirements to Survey Matches
+
+| Roadmap Slice | Primary Source | How It Applies |
+|---|---|---|
+| Slice 4 (Ranking) | raffi MRU | `MruEntry` data model (count + timestamp, persisted to disk) for per-command recency tracking |
+| Slice 5 (Undo) | cedilla patch history | Circular buffer concept (bounded queue, oldest evicted), but domain differs: action-compensation vs text-diff |
+| Slice 6 (Palette UI) | shadcn-rs overlay + raffi query routing | Overlay placement math via `place_overlay_centered()`; prefix-based mode switching between command search and option picking |
+| Slice 6 (Keyboard dispatch) | feu/cedilla keyboard subscriptions | `subscription::events_with` for global key capture before widget processing; HashMap-based shortcut lookup |
+| Slice 6 (App architecture) | trebuchet Component trait | Palette as Component emitting `CommandSelected(CommandId)` and `Dismissed` events via `(Task, ComponentEvent)` tuples |
+| Slice 6 (Event wiring) | rustcast `Subscription::batch()` | Combines keyboard, palette-internal, and timer subscriptions into a single batched subscription |
+| Slice 6 (Resolver races) | bloom generational tracking | Guards against stale async option results from `CommandInputResolver::get_options()` when user switches commands rapidly |
+
+### Gaps
+
+- **Slices 1-3 (already complete)**: Backend-only, framework-agnostic -- no survey matches needed
+- **Two-chord pending indicator with timeout**: No surveyed project handles pending chord state with timeouts or displays a transient chord indicator
+- **User-customizable keybindings with conflict detection**: Beyond anything in the survey; the `BindingTable` architecture is original to Ratatoskr
+- **The core registry architecture** (`CommandId` enum, `CommandContext` predicates, `CommandInputResolver` trait, typed `CommandArgs`): Original to Ratatoskr, no analogues in surveyed projects

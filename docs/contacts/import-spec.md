@@ -97,3 +97,25 @@ vCard files skip the column mapping step entirely — the format is structured. 
 - vCard parsing (reuse or depend on existing CardDAV parser)
 
 The UI for the import wizard lives in the app crate. The import crate provides the data; the app provides the interaction.
+
+## Ecosystem Patterns
+
+How patterns from the [iced ecosystem survey](../iced-ecosystem-survey.md) map to this spec's requirements.
+
+### Requirements to Survey Matches
+
+| Requirement | Primary Source | How It Applies |
+|---|---|---|
+| Preview data table | shadcn-rs `data_table` | Column renderers, row iteration; adapt for dynamic columns (unknown at compile time) |
+| File selection | shadcn-rs/pikeru (`rfd`) | `rfd::AsyncFileDialog` with format filter — solved problem |
+| Multi-step wizard | raffi query routing | `ImportStep` enum state machine: FileSelect → SheetSelect → Preview → Importing → Summary |
+| Column mapping dropdowns | shadcn-rs/iced-plus props-builder | `ColumnRole` enum with iced `pick_list` per column header |
+| Import progress/cancel | bloom generational tracking + pikeru subscriptions | Tag import task with generation; stream row-by-row progress |
+| Account selector | bloom config shadow | Entire wizard state is transient editing state; only commits on "Import" |
+| Drag-and-drop file import | iced_drop + shadcn-rs file-drop-zone | Optional enhancement using OS-level drag events |
+
+### Gaps
+
+- **Encoding detection** (UTF-8, UTF-16, Windows-1252): Library crate concern (`chardetng`, `encoding_rs`) — no iced involvement
+- **vCard parsing**: Internal (existing CardDAV parser in `crates/core/src/carddav/parse.rs`)
+- **Duplicate handling**: Library crate concern — matching logic is entirely backend, no UI pattern needed

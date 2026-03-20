@@ -237,3 +237,29 @@ Delete is available in the slide-in editor for both contacts and groups. Deletin
 ### Importing Contacts
 
 An import button at the top of the contact management UI opens the contact import wizard. Supports CSV, XLSX, and vCard files with automatic encoding/delimiter/column detection and user-correctable column mapping. See `docs/contacts/import-spec.md` for the full specification.
+
+## Ecosystem Patterns
+
+How requirements in this spec map to patterns found in the [iced ecosystem survey](../iced-ecosystem-survey.md).
+
+### Requirements to Survey Matches
+
+| Requirement | Primary Source | How It Applies |
+|---|---|---|
+| DnD tokens between To/Cc/Bcc + list-to-grid DnD | iced_drop | Wrap tokens in `Droppable`; assign fields/grid as drop zones; chained ops for move |
+| Right-click context menu on tokens | pikeru custom MouseArea | Per-button press detection; emit `TokenRightClicked(id, position)` |
+| Popover positioning (inline edit, context menu) | shadcn-rs overlay positioning | `place_overlay_centered()` adapted for anchor-relative placement; focus management for popover fields |
+| Contact/group search + autocomplete | rustcast AppIndex prefix-search + raffi query routing | Rayon-parallel fuzzy filtering; enum dispatch for person vs group search |
+| Wrapping tile grid for group members | pikeru responsive grid | Viewport-aware column count; RefCell measurement caching |
+| Slide-in editor panel | bloom config shadow + trebuchet Component | State transition `List -> EditContact(id)`; Component trait for isolated update/view |
+| Contact avatar loading | Lumin async icon loading + bloom generational tracking | Batched `Task::perform` for photos; discard stale results on scroll |
+| Account selector dropdown | shadcn-rs select/props-builder | iced `pick_list` with consistent styling |
+| Confirmation dialogs | shadcn-rs dialog + overlay positioning | Centered overlay with focus trapping |
+| Card styling with labels | shadcn-rs + iced-plus token theming | Consistent spacing tokens; label color from existing palette |
+
+### Gaps
+
+- **Token-based input fields** (chip/tag input): No surveyed project implements this. Must build as custom `advanced::Widget`. Largest custom widget effort for contacts.
+- **Dismissible inline banners**: Simple conditional rendering, no survey reference.
+- **Immediate-save fields** (no Save/Cancel): Architecturally different from all surveyed projects, which use config shadowing with explicit commit/cancel.
+- **Autocomplete dropdown lifecycle** (disappear/reappear on new token): Careful state management needed; no direct precedent in any surveyed project.
