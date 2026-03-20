@@ -1006,18 +1006,42 @@ impl<Message> RichTextEditor<'_, Message> {
                         );
                     }
                 }
-                Block::List { ordered, .. } => {
-                    for (item_idx, child) in entry.child_paragraphs().iter().enumerate() {
+                Block::ListItem { ordered, .. } => {
+                    if let Some(paragraph) = entry.paragraph() {
+                        let content_origin = Point::new(
+                            block_origin.x + render::LIST_MARKER_WIDTH,
+                            block_origin.y,
+                        );
                         let content_bounds = Rectangle::new(
-                            Point::new(
-                                block_origin.x + render::LIST_MARKER_WIDTH,
-                                block_origin.y + child.local_y_offset,
-                            ),
+                            content_origin,
                             Size::new(
                                 (text_bounds.width - render::LIST_MARKER_WIDTH).max(0.0),
-                                child.height,
+                                entry.height(),
                             ),
                         );
+                        // Determine the item index for numbered lists by
+                        // counting consecutive preceding ListItem blocks
+                        // with the same `ordered` flag.
+                        let item_idx = {
+                            let mut idx = 0usize;
+                            for prev_i in (0..i).rev() {
+                                if let Some(b) = self.state.document.block(prev_i) {
+                                    if let Block::ListItem {
+                                        ordered: prev_ord, ..
+                                    } = b
+                                    {
+                                        if *prev_ord == *ordered {
+                                            idx += 1;
+                                        } else {
+                                            break;
+                                        }
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+                            idx
+                        };
                         render::draw_list_marker(
                             renderer,
                             content_bounds,
@@ -1029,8 +1053,8 @@ impl<Message> RichTextEditor<'_, Message> {
                         );
                         render::draw_paragraph(
                             renderer,
-                            &child.paragraph,
-                            content_bounds.position(),
+                            paragraph,
+                            content_origin,
                             self.text_color,
                             *text_bounds,
                         );
@@ -1470,13 +1494,66 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
                     shell.publish(on_action(Action::Blur));
                 }
             }
-            Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+            Event::Mouse(mouse::Event::CursorMoved { .. })
                 if widget_state.dragging
-                    && let Some(position) = cursor_pos.position_in(bounds)
-                {
+                    && let Some(position) = cursor_pos.position() =>
+            {
+                if position.y < bounds.y {
+                    // Cursor is above the viewport — scroll up.
+                    let overshoot = bounds.y - position.y;
+                    let scroll_amount =
+                        (overshoot * DRAG_SCROLL_SPEED).min(DRAG_SCROLL_MAX);
+                    widget_state.scroll_offset =
+                        (widget_state.scroll_offset - scroll_amount).max(0.0);
+
                     let content_pos = Point::new(
-                        position.x - self.padding.left,
-                        position.y - self.padding.top + scroll_offset,
+                        position.x - bounds.x - self.padding.left,
+                        0.0,
+                    );
+                    let doc_pos = hit_test_content_point(
+                        content_pos,
+                        &widget_state.cache,
+                        &self.state.document,
+                    );
+                    shell.publish(on_action(Action::Drag(doc_pos)));
+                    shell.request_redraw();
+                    shell.capture_event();
+                } else if position.y > bounds.y + bounds.height {
+                    // Cursor is below the viewport — scroll down.
+                    let overshoot =
+                        position.y - (bounds.y + bounds.height);
+                    let scroll_amount =
+                        (overshoot * DRAG_SCROLL_SPEED).min(DRAG_SCROLL_MAX);
+                    let viewport_height = bounds.height
+                        - self.padding.top
+                        - self.padding.bottom;
+                    let total_height = widget_state.cache.total_height();
+                    let max_scroll =
+                        (total_height - viewport_height).max(0.0);
+                    widget_state.scroll_offset =
+                        (widget_state.scroll_offset + scroll_amount)
+                            .min(max_scroll);
+
+                    let content_pos = Point::new(
+                        position.x - bounds.x - self.padding.left,
+                        widget_state.scroll_offset + viewport_height,
+                    );
+                    let doc_pos = hit_test_content_point(
+                        content_pos,
+                        &widget_state.cache,
+                        &self.state.document,
+                    );
+                    shell.publish(on_action(Action::Drag(doc_pos)));
+                    shell.request_redraw();
+                    shell.capture_event();
+                } else if let Some(rel_pos) =
+                    cursor_pos.position_in(bounds)
+                {
+                    // Normal drag within bounds.
+                    let content_pos = Point::new(
+                        rel_pos.x - self.padding.left,
+                        rel_pos.y - self.padding.top
+                            + widget_state.scroll_offset,
                     );
                     let doc_pos = hit_test_content_point(
                         content_pos,
@@ -1645,7 +1722,7 @@ fn splice_runs_into_block(
 /// blocks indent their paragraph content.
 fn block_content_x_offset(block: &Block) -> f32 {
     match block {
-        Block::List { .. } => render::LIST_MARKER_WIDTH,
+        Block::ListItem { .. } => render::LIST_MARKER_WIDTH,
         Block::BlockQuote { .. } => render::BLOCKQUOTE_INDENT,
         _ => 0.0,
     }
@@ -1830,6 +1907,13 @@ fn compute_selection_rects(
 
 /// Scrolling line height used for mouse wheel (px per line).
 const SCROLL_LINE_HEIGHT: f32 = 20.0;
+
+/// Drag auto-scroll: pixels scrolled per pixel of cursor overshoot beyond the
+/// viewport edge.
+const DRAG_SCROLL_SPEED: f32 = 2.0;
+
+/// Drag auto-scroll: maximum scroll distance per frame (pixels).
+const DRAG_SCROLL_MAX: f32 = 30.0;
 
 /// Ensure the cursor (at `cursor_y` with `cursor_height`) is visible within
 /// the viewport defined by `scroll_offset` and `viewport_height`.

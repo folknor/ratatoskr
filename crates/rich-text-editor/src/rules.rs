@@ -529,13 +529,19 @@ fn resolve_split_block(doc: &Document, selection: DocSelection) -> Vec<EditOp> {
         return ops;
     }
 
-    // Rule 2: auto-exit block (double-Enter to exit list/blockquote).
-    // Currently deferred: our document model treats List and BlockQuote as opaque
-    // top-level blocks (not individually editable items). Auto-exit requires list
-    // items to be individually editable, which needs the per-item paragraph cache
-    // work. When that lands, add a check here: if the cursor is in an empty list
-    // item (last item in the list) and the user presses Enter, remove that item
-    // and insert a new paragraph after the list.
+    // Rule 2: auto-exit list item. Enter on an empty ListItem converts it
+    // to a plain Paragraph (the "double-Enter to exit list" UX pattern).
+    if let Block::ListItem { runs, .. } = block {
+        let is_empty = runs.iter().all(|r| r.text.trim().is_empty());
+        if is_empty {
+            ops.push(EditOp::SetBlockType {
+                block_index: split_pos.block_index,
+                old: block.kind(),
+                new: BlockKind::Paragraph,
+            });
+            return ops;
+        }
+    }
 
     // Rule 3: heading reset on split at end.
     if let Block::Heading { level, .. } = block

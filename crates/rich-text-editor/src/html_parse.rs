@@ -18,7 +18,7 @@ use html5ever::{parse_fragment, Attribute, QualName};
 use markup5ever::{local_name, ns};
 
 use crate::document::{
-    Block, Document, HeadingLevel, InlineStyle, ListItem, StyledRun,
+    Block, Document, HeadingLevel, InlineStyle, StyledRun,
 };
 
 // ── DOM types (internal, for html5ever TreeSink) ────────
@@ -568,20 +568,8 @@ fn node_to_blocks(node: &Handle, blocks: &mut Vec<Block>) {
                 }
                 "ul" | "ol" => {
                     let ordered = tag == "ol";
-                    let mut items = Vec::new();
-                    for child in &borrow.children {
-                        let child_borrow = child.borrow();
-                        if let NodeData::Element { ref name, .. } = child_borrow.data
-                            && name.local.as_ref() == "li" {
-                                drop(child_borrow);
-                                items.push(parse_list_item(child));
-                            }
-                        // Skip non-li children (whitespace text nodes, etc.)
-                    }
-                    if items.is_empty() {
-                        items.push(ListItem::plain(""));
-                    }
-                    blocks.push(Block::List { ordered, items });
+                    drop(borrow);
+                    parse_list_to_items(node, ordered, 0, blocks);
                 }
                 "blockquote" => {
                     let mut inner_blocks = Vec::new();
@@ -709,37 +697,137 @@ fn node_to_blocks(node: &Handle, blocks: &mut Vec<Block>) {
     }
 }
 
-/// Parse a `<li>` element into a `ListItem`.
-fn parse_list_item(li_node: &Handle) -> ListItem {
+/// Parse a `<ul>`/`<ol>` element, flattening `<li>` children into
+/// `Block::ListItem` blocks with the given indent level.
+fn parse_list_to_items(
+    list_node: &Handle,
+    ordered: bool,
+    indent_level: u8,
+    blocks: &mut Vec<Block>,
+) {
+    let borrow = list_node.borrow();
+    let mut found_any = false;
+    for child in &borrow.children {
+        let child_borrow = child.borrow();
+        if let NodeData::Element { ref name, .. } = child_borrow.data
+            && name.local.as_ref() == "li"
+        {
+            drop(child_borrow);
+            parse_li_to_items(child, ordered, indent_level, blocks);
+            found_any = true;
+        }
+        // Skip non-li children (whitespace text nodes, etc.)
+    }
+    if !found_any {
+        blocks.push(Block::ListItem {
+            ordered,
+            indent_level,
+            runs: vec![StyledRun::plain(String::new())],
+        });
+    }
+}
+
+/// Parse a single `<li>` element into one or more `Block::ListItem` blocks.
+///
+/// Inline content becomes a single `ListItem`. Nested `<ul>`/`<ol>` elements
+/// recurse with `indent_level + 1`.
+fn parse_li_to_items(
+    li_node: &Handle,
+    ordered: bool,
+    indent_level: u8,
+    blocks: &mut Vec<Block>,
+) {
     let borrow = li_node.borrow();
-    let has_block_children = borrow.children.iter().any(|c| {
+
+    // Separate children into inline content and nested lists.
+    // Inline content before the first nested list becomes this item's runs.
+    // Nested lists recurse.
+    let has_nested_list = borrow.children.iter().any(|c| {
         let cb = c.borrow();
         if let NodeData::Element { ref name, .. } = cb.data {
-            is_block_element(name.local.as_ref())
-        } else {
-            false
+            let tag = name.local.as_ref();
+            return tag == "ul" || tag == "ol";
         }
+        false
     });
 
-    if has_block_children {
-        let mut blocks = Vec::new();
-        for child in &borrow.children {
-            node_to_blocks(child, &mut blocks);
-        }
-        if blocks.is_empty() {
-            blocks.push(Block::empty_paragraph());
-        }
-        ListItem {
-            blocks: blocks.into_iter().map(Arc::new).collect(),
-        }
-    } else {
-        // All inline content: wrap in a single paragraph.
+    if !has_nested_list {
+        // Simple case: all inline content.
         drop(borrow);
         let runs = collect_element_runs(li_node, &li_node.borrow().children);
-        ListItem {
-            blocks: vec![Arc::new(Block::Paragraph { runs })],
+        blocks.push(Block::ListItem {
+            ordered,
+            indent_level,
+            runs,
+        });
+        return;
+    }
+
+    // Mixed content: collect inline runs before each nested list,
+    // emit a ListItem for the inline parts, then recurse for nested lists.
+    let mut inline_children: Vec<Handle> = Vec::new();
+    let mut emitted_inline = false;
+
+    for child in &borrow.children {
+        let child_borrow = child.borrow();
+        let is_nested_list = if let NodeData::Element { ref name, .. } = child_borrow.data {
+            let tag = name.local.as_ref();
+            tag == "ul" || tag == "ol"
+        } else {
+            false
+        };
+
+        if is_nested_list {
+            // Flush pending inline children as a ListItem.
+            if !emitted_inline {
+                let runs = collect_inline_children(&inline_children);
+                blocks.push(Block::ListItem {
+                    ordered,
+                    indent_level,
+                    runs,
+                });
+                emitted_inline = true;
+            }
+            inline_children.clear();
+
+            // Determine ordering of the nested list.
+            let nested_ordered = if let NodeData::Element { ref name, .. } = child_borrow.data {
+                name.local.as_ref() == "ol"
+            } else {
+                false
+            };
+            drop(child_borrow);
+            parse_list_to_items(child, nested_ordered, indent_level + 1, blocks);
+        } else {
+            drop(child_borrow);
+            inline_children.push(Rc::clone(child));
         }
     }
+
+    // If we never emitted an inline item (no nested list was first child),
+    // emit whatever inline content we have.
+    if !emitted_inline {
+        let runs = collect_inline_children(&inline_children);
+        blocks.push(Block::ListItem {
+            ordered,
+            indent_level,
+            runs,
+        });
+    }
+}
+
+/// Collect inline runs from a list of child handles.
+fn collect_inline_children(children: &[Handle]) -> Vec<StyledRun> {
+    let ctx = StyleContext::new();
+    let mut runs = Vec::new();
+    for child in children {
+        collect_inline_runs(child, &ctx, &mut runs);
+    }
+    trim_runs(&mut runs);
+    if runs.is_empty() {
+        runs.push(StyledRun::plain(String::new()));
+    }
+    runs
 }
 
 /// Collect blocks from children that may contain `<img>` elements mixed with
@@ -1091,37 +1179,31 @@ mod tests {
     #[test]
     fn unordered_list() {
         let doc = from_html("<ul><li>one</li><li>two</li></ul>");
-        assert_eq!(doc.block_count(), 1);
-        let block = doc.block(0).expect("block");
-        if let Block::List { ordered, items } = block {
+        assert_eq!(doc.block_count(), 2);
+        if let Block::ListItem { ordered, runs, indent_level } = doc.block(0).expect("block") {
             assert!(!ordered);
-            assert_eq!(items.len(), 2);
-            assert_eq!(
-                items[0].blocks[0].flattened_text(),
-                "one"
-            );
-            assert_eq!(
-                items[1].blocks[0].flattened_text(),
-                "two"
-            );
+            assert_eq!(*indent_level, 0);
+            assert_eq!(runs[0].text, "one");
         } else {
-            panic!("expected List, got {block:?}");
+            panic!("expected ListItem");
+        }
+        if let Block::ListItem { ordered, runs, .. } = doc.block(1).expect("block") {
+            assert!(!ordered);
+            assert_eq!(runs[0].text, "two");
+        } else {
+            panic!("expected ListItem");
         }
     }
 
     #[test]
     fn ordered_list() {
         let doc = from_html("<ol><li>first</li></ol>");
-        let block = doc.block(0).expect("block");
-        if let Block::List { ordered, items } = block {
+        assert_eq!(doc.block_count(), 1);
+        if let Block::ListItem { ordered, runs, .. } = doc.block(0).expect("block") {
             assert!(ordered);
-            assert_eq!(items.len(), 1);
-            assert_eq!(
-                items[0].blocks[0].flattened_text(),
-                "first"
-            );
+            assert_eq!(runs[0].text, "first");
         } else {
-            panic!("expected List, got {block:?}");
+            panic!("expected ListItem");
         }
     }
 
@@ -1317,9 +1399,11 @@ mod tests {
     #[test]
     fn round_trip_list() {
         use crate::html_serialize::to_html;
-        let html = "<ul><li><p>one</p></li><li><p>two</p></li></ul>";
+        // Parse a list, serialize it, parse again, serialize again — should be stable.
+        let html = "<ul><li>one</li><li>two</li></ul>";
         let doc = from_html(html);
-        assert_eq!(to_html(&doc), html);
+        let output = to_html(&doc);
+        assert_eq!(output, html);
     }
 
     #[test]
@@ -1351,7 +1435,7 @@ mod tests {
         use crate::html_serialize::to_html;
         let html = "<h1><strong>Welcome</strong></h1>\
                      <p>Some intro text.</p>\
-                     <ul><li><p>Point A</p></li><li><p>Point B</p></li></ul>\
+                     <ul><li>Point A</li><li>Point B</li></ul>\
                      <hr>\
                      <blockquote><p>A wise quote.</p></blockquote>";
         let doc = from_html(html);
@@ -1361,7 +1445,7 @@ mod tests {
     #[test]
     fn nested_list_round_trip() {
         use crate::html_serialize::to_html;
-        let html = "<ol><li><p>outer item</p><ul><li><p>nested-a</p></li><li><p>nested-b</p></li></ul></li><li><p>second outer</p></li></ol>";
+        let html = "<ol><li>outer item<ul><li>nested-a</li><li>nested-b</li></ul></li><li>second outer</li></ol>";
         let doc = from_html(html);
         assert_eq!(to_html(&doc), html);
     }
@@ -1470,24 +1554,42 @@ mod tests {
     #[test]
     fn list_item_with_nested_blocks() {
         let doc = from_html("<ul><li><p>text</p><ul><li>nested</li></ul></li></ul>");
-        let block = doc.block(0).expect("block");
-        if let Block::List { items, .. } = block {
-            assert_eq!(items.len(), 1);
-            assert_eq!(items[0].blocks.len(), 2);
-            assert_eq!(items[0].blocks[0].flattened_text(), "text");
-            if let Block::List {
-                items: inner_items, ..
-            } = items[0].blocks[1].as_ref()
-            {
-                assert_eq!(
-                    inner_items[0].blocks[0].flattened_text(),
-                    "nested"
-                );
-            } else {
-                panic!("expected nested list");
-            }
+        // Flattened model: first item at indent 0, nested item at indent 1.
+        assert_eq!(doc.block_count(), 2);
+        if let Block::ListItem { indent_level, runs, .. } = doc.block(0).expect("block") {
+            assert_eq!(*indent_level, 0);
+            assert_eq!(runs[0].text, "text");
         } else {
-            panic!("expected List");
+            panic!("expected ListItem at indent 0");
+        }
+        if let Block::ListItem { indent_level, runs, .. } = doc.block(1).expect("block") {
+            assert_eq!(*indent_level, 1);
+            assert_eq!(runs[0].text, "nested");
+        } else {
+            panic!("expected ListItem at indent 1");
+        }
+    }
+
+    #[test]
+    fn html_parse_nested_list_indent_levels() {
+        let doc = from_html("<ul><li>a</li><li>b<ol><li>b1</li><li>b2</li></ol></li><li>c</li></ul>");
+        // Should produce: a(0), b(0), b1(1), b2(1), c(0)
+        assert_eq!(doc.block_count(), 5);
+        let expected = [
+            ("a", 0u8, false),
+            ("b", 0, false),
+            ("b1", 1, true),
+            ("b2", 1, true),
+            ("c", 0, false),
+        ];
+        for (i, (text, indent, ordered)) in expected.iter().enumerate() {
+            if let Block::ListItem { indent_level, runs, ordered: o } = doc.block(i).expect("block") {
+                assert_eq!(runs[0].text, *text, "block {i} text");
+                assert_eq!(*indent_level, *indent, "block {i} indent");
+                assert_eq!(*o, *ordered, "block {i} ordered");
+            } else {
+                panic!("block {i}: expected ListItem");
+            }
         }
     }
 }

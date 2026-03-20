@@ -2,17 +2,94 @@
 //!
 //! Recursive walk of the document tree. Consistent nesting order for inline
 //! styles: `<a><strong><em><u><s>text</s></u></em></strong></a>`
+//!
+//! Consecutive `ListItem` blocks with matching `ordered` flags are grouped
+//! into a single `<ul>`/`<ol>`, with nesting determined by `indent_level`.
 
-use crate::document::{Block, Document, InlineStyle, ListItem, StyledRun};
+use crate::document::{Block, Document, InlineStyle, StyledRun};
 use std::sync::Arc;
 
 /// Serialize a document to HTML.
 pub fn to_html(doc: &Document) -> String {
     let mut buf = String::new();
-    for block in &doc.blocks {
-        serialize_block(block, &mut buf);
+    let mut i = 0;
+    while i < doc.blocks.len() {
+        let block = doc.block(i).expect("block index in range");
+        if let Block::ListItem {
+            ordered,
+            indent_level,
+            ..
+        } = block
+        {
+            i = serialize_list_group(&doc.blocks, i, *ordered, *indent_level, &mut buf);
+        } else {
+            serialize_block(block, &mut buf);
+            i += 1;
+        }
     }
     buf
+}
+
+/// Serialize a group of consecutive `ListItem` blocks starting at `start`,
+/// wrapping them in the appropriate `<ul>`/`<ol>` tags. Returns the index
+/// of the first block after the group.
+fn serialize_list_group(
+    blocks: &[Arc<Block>],
+    start: usize,
+    ordered: bool,
+    base_indent: u8,
+    buf: &mut String,
+) -> usize {
+    let tag = if ordered { "ol" } else { "ul" };
+    buf.push('<');
+    buf.push_str(tag);
+    buf.push('>');
+
+    let mut i = start;
+    while i < blocks.len() {
+        let block = blocks[i].as_ref();
+        match block {
+            Block::ListItem {
+                ordered: item_ordered,
+                indent_level,
+                runs,
+            } if *item_ordered == ordered && *indent_level == base_indent => {
+                buf.push_str("<li>");
+                serialize_runs(runs, buf);
+
+                // Check if the next block is a deeper-indented list item.
+                if i + 1 < blocks.len()
+                    && let Block::ListItem {
+                        indent_level: next_indent,
+                        ordered: next_ordered,
+                        ..
+                    } = blocks[i + 1].as_ref()
+                    && *next_indent > base_indent
+                {
+                    i = serialize_list_group(
+                        blocks,
+                        i + 1,
+                        *next_ordered,
+                        *next_indent,
+                        buf,
+                    );
+                    buf.push_str("</li>");
+                    continue;
+                }
+
+                buf.push_str("</li>");
+                i += 1;
+            }
+            // A list item at a shallower indent or different ordered flag
+            // ends this group.
+            _ => break,
+        }
+    }
+
+    buf.push_str("</");
+    buf.push_str(tag);
+    buf.push('>');
+    i
 }
 
 fn serialize_block(block: &Block, buf: &mut String) {
@@ -32,17 +109,26 @@ fn serialize_block(block: &Block, buf: &mut String) {
             buf.push(char::from(b'0' + n));
             buf.push('>');
         }
-        Block::List { ordered, items } => {
-            let tag = if *ordered { "ol" } else { "ul" };
-            buf.push('<');
-            buf.push_str(tag);
-            buf.push('>');
-            for item in items {
-                serialize_list_item(item, buf);
+        Block::ListItem { .. } => {
+            // ListItem blocks are handled by serialize_list_group via to_html.
+            // If we reach here (e.g. from serialize_child_blocks in a
+            // blockquote), wrap in a minimal list.
+            //
+            // This shouldn't normally happen in our own output, but handle
+            // gracefully.
+            if let Block::ListItem {
+                ordered, runs, ..
+            } = block
+            {
+                let tag = if *ordered { "ol" } else { "ul" };
+                buf.push('<');
+                buf.push_str(tag);
+                buf.push_str("><li>");
+                serialize_runs(runs, buf);
+                buf.push_str("</li></");
+                buf.push_str(tag);
+                buf.push('>');
             }
-            buf.push_str("</");
-            buf.push_str(tag);
-            buf.push('>');
         }
         Block::BlockQuote { blocks } => {
             buf.push_str("<blockquote>");
@@ -79,12 +165,6 @@ fn serialize_block(block: &Block, buf: &mut String) {
             buf.push('>');
         }
     }
-}
-
-fn serialize_list_item(item: &ListItem, buf: &mut String) {
-    buf.push_str("<li>");
-    serialize_child_blocks(&item.blocks, buf);
-    buf.push_str("</li>");
 }
 
 fn serialize_child_blocks(blocks: &[Arc<Block>], buf: &mut String) {
@@ -173,8 +253,6 @@ mod tests {
     #[test]
     fn empty_document() {
         let doc = Document::new();
-        // Document::new() creates a single empty paragraph with one empty run.
-        // Empty runs are skipped, so we get <p></p>.
         assert_eq!(to_html(&doc), "<p></p>");
     }
 
@@ -253,53 +331,40 @@ mod tests {
 
     #[test]
     fn unordered_list() {
-        let doc = Document::from_blocks(vec![Block::List {
-            ordered: false,
-            items: vec![
-                ListItem::plain("Alpha"),
-                ListItem::plain("Beta"),
-                ListItem::plain("Gamma"),
-            ],
-        }]);
+        let doc = Document::from_blocks(vec![
+            Block::list_item("Alpha", false),
+            Block::list_item("Beta", false),
+            Block::list_item("Gamma", false),
+        ]);
         assert_eq!(
             to_html(&doc),
-            "<ul><li><p>Alpha</p></li><li><p>Beta</p></li><li><p>Gamma</p></li></ul>"
+            "<ul><li>Alpha</li><li>Beta</li><li>Gamma</li></ul>"
         );
     }
 
     #[test]
     fn ordered_list() {
-        let doc = Document::from_blocks(vec![Block::List {
-            ordered: true,
-            items: vec![ListItem::plain("First"), ListItem::plain("Second")],
-        }]);
+        let doc = Document::from_blocks(vec![
+            Block::list_item("First", true),
+            Block::list_item("Second", true),
+        ]);
         assert_eq!(
             to_html(&doc),
-            "<ol><li><p>First</p></li><li><p>Second</p></li></ol>"
+            "<ol><li>First</li><li>Second</li></ol>"
         );
     }
 
     #[test]
     fn nested_list() {
-        let inner_list = Block::List {
-            ordered: false,
-            items: vec![ListItem::plain("nested-a"), ListItem::plain("nested-b")],
-        };
-        let doc = Document::from_blocks(vec![Block::List {
-            ordered: true,
-            items: vec![
-                ListItem {
-                    blocks: vec![
-                        Arc::new(Block::paragraph("outer item")),
-                        Arc::new(inner_list),
-                    ],
-                },
-                ListItem::plain("second outer"),
-            ],
-        }]);
+        let doc = Document::from_blocks(vec![
+            Block::list_item("outer item", true),
+            Block::list_item_with_indent("nested-a", false, 1),
+            Block::list_item_with_indent("nested-b", false, 1),
+            Block::list_item("second outer", true),
+        ]);
         assert_eq!(
             to_html(&doc),
-            "<ol><li><p>outer item</p><ul><li><p>nested-a</p></li><li><p>nested-b</p></li></ul></li><li><p>second outer</p></li></ol>"
+            "<ol><li>outer item<ul><li>nested-a</li><li>nested-b</li></ul></li><li>second outer</li></ol>"
         );
     }
 
@@ -382,10 +447,8 @@ mod tests {
                 runs: vec![StyledRun::styled("Welcome", InlineStyle::BOLD)],
             },
             Block::paragraph("Some intro text."),
-            Block::List {
-                ordered: false,
-                items: vec![ListItem::plain("Point A"), ListItem::plain("Point B")],
-            },
+            Block::list_item("Point A", false),
+            Block::list_item("Point B", false),
             Block::HorizontalRule,
             Block::BlockQuote {
                 blocks: vec![Arc::new(Block::paragraph("A wise quote."))],
@@ -395,7 +458,7 @@ mod tests {
             to_html(&doc),
             "<h1><strong>Welcome</strong></h1>\
              <p>Some intro text.</p>\
-             <ul><li><p>Point A</p></li><li><p>Point B</p></li></ul>\
+             <ul><li>Point A</li><li>Point B</li></ul>\
              <hr>\
              <blockquote><p>A wise quote.</p></blockquote>"
         );
@@ -470,6 +533,37 @@ mod tests {
         assert_eq!(
             to_html(&doc),
             "<img src=\"https://example.com/img?a=1&amp;b=2\" alt=\"A &quot;quoted&quot; image\">"
+        );
+    }
+
+    #[test]
+    fn list_item_has_runs_and_char_len() {
+        let item = Block::list_item("hello", false);
+        assert!(item.runs().is_some());
+        assert_eq!(item.char_len(), 5);
+        assert!(item.is_inline_block());
+        assert!(!item.is_container());
+    }
+
+    #[test]
+    fn consecutive_list_items_produce_ul_wrapper() {
+        let doc = Document::from_blocks(vec![
+            Block::list_item("one", false),
+            Block::list_item("two", false),
+        ]);
+        assert_eq!(to_html(&doc), "<ul><li>one</li><li>two</li></ul>");
+    }
+
+    #[test]
+    fn mixed_indent_levels_produce_nested_lists() {
+        let doc = Document::from_blocks(vec![
+            Block::list_item("top", true),
+            Block::list_item_with_indent("nested", true, 1),
+            Block::list_item("top2", true),
+        ]);
+        assert_eq!(
+            to_html(&doc),
+            "<ol><li>top<ol><li>nested</li></ol></li><li>top2</li></ol>"
         );
     }
 }

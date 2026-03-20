@@ -81,7 +81,7 @@ pub fn block_font_size(block: &Block) -> f32 {
     match block {
         Block::Heading { level, .. } => heading_font_size(*level),
         Block::Paragraph { .. } => FONT_SIZE_BODY,
-        Block::List { .. } => FONT_SIZE_BODY,
+        Block::ListItem { .. } => FONT_SIZE_BODY,
         Block::BlockQuote { .. } => FONT_SIZE_BODY,
         Block::HorizontalRule => FONT_SIZE_BODY,
         Block::Image { .. } => FONT_SIZE_BODY,
@@ -102,7 +102,7 @@ pub fn block_spacing(block: &Block) -> f32 {
     match block {
         Block::Paragraph { .. } => SPACING_PARAGRAPH,
         Block::Heading { .. } => SPACING_HEADING,
-        Block::List { .. } => SPACING_LIST,
+        Block::ListItem { .. } => SPACING_LIST,
         Block::BlockQuote { .. } => SPACING_BLOCKQUOTE,
         Block::HorizontalRule => SPACING_HR,
         Block::Image { .. } => SPACING_PARAGRAPH,
@@ -240,37 +240,12 @@ fn collect_container_spans(
     }
 
     match block {
-        Block::Paragraph { runs } | Block::Heading { runs, .. } => {
+        Block::Paragraph { runs }
+        | Block::Heading { runs, .. }
+        | Block::ListItem { runs, .. } => {
             let font_size = block_font_size(block);
             for run in runs {
                 spans.push(owned_run_to_span(run, base_font, font_size, text_color, link_color));
-            }
-        }
-        Block::List { items, ordered } => {
-            for (i, item) in items.iter().enumerate() {
-                if i > 0 {
-                    spans.push(
-                        Span::new("\n".to_owned())
-                            .font(base_font)
-                            .size(FONT_SIZE_BODY)
-                            .color(text_color),
-                    );
-                }
-                // Add bullet/number marker.
-                let marker = if *ordered {
-                    format!("{}. ", i + 1)
-                } else {
-                    "\u{2022} ".to_owned()
-                };
-                spans.push(
-                    Span::new(marker)
-                        .font(base_font)
-                        .size(FONT_SIZE_BODY)
-                        .color(text_color),
-                );
-                for (j, child) in item.blocks.iter().enumerate() {
-                    collect_container_spans(child, base_font, text_color, link_color, spans, j > 0);
-                }
             }
         }
         Block::BlockQuote { blocks } => {
@@ -571,13 +546,18 @@ fn layout_block<P: Paragraph<Font = Font>>(
     link_color: Color,
 ) -> f32 {
     match block {
-        Block::Paragraph { .. } | Block::Heading { .. } => {
+        Block::Paragraph { .. } | Block::Heading { .. } | Block::ListItem { .. } => {
+            let content_width = if matches!(block, Block::ListItem { .. }) {
+                (available_width - LIST_MARKER_WIDTH).max(0.0)
+            } else {
+                available_width
+            };
             let spans = build_spans_for_block(block, base_font, text_color, link_color);
             let font_size = block_font_size(block);
 
             let paragraph = build_paragraph::<P>(
                 &spans,
-                available_width,
+                content_width,
                 base_font,
                 font_size,
             );
@@ -620,48 +600,6 @@ fn layout_block<P: Paragraph<Font = Font>>(
             entry.paragraph = Some(paragraph);
             entry.child_paragraphs.clear();
             block_height
-        }
-        Block::List { items, .. } => {
-            // Lay out each list item's first block as a separate paragraph,
-            // storing them as child_paragraphs for per-item rendering.
-            let content_width = (available_width - LIST_MARKER_WIDTH).max(0.0);
-            let mut children = Vec::with_capacity(items.len());
-            let mut y = 0.0f32;
-
-            for (item_idx, item) in items.iter().enumerate() {
-                // Lay out ALL blocks in the item, not just the first.
-                // This handles multi-paragraph list items and nested lists.
-                for item_block in &item.blocks {
-                    let item_spans = build_spans_for_any_block(
-                        item_block.as_ref(),
-                        base_font,
-                        text_color,
-                        link_color,
-                    );
-                    let item_font_size = block_font_size(item_block.as_ref());
-                    let item_para = build_paragraph::<P>(
-                        &item_spans,
-                        content_width,
-                        base_font,
-                        item_font_size,
-                    );
-                    let h = item_para.min_bounds().height;
-                    children.push(ChildParagraph {
-                        paragraph: item_para,
-                        local_y_offset: y,
-                        height: h,
-                    });
-                    y += h;
-                }
-
-                if item_idx + 1 < items.len() {
-                    y += SPACING_LIST_ITEM;
-                }
-            }
-
-            entry.paragraph = None;
-            entry.child_paragraphs = children;
-            y
         }
         Block::BlockQuote { blocks: bq_children } => {
             // Lay out each child block as a separate paragraph within a
@@ -905,11 +843,8 @@ mod tests {
     }
 
     #[test]
-    fn block_font_size_list() {
-        let block = Block::List {
-            ordered: false,
-            items: vec![crate::document::ListItem::plain("item")],
-        };
+    fn block_font_size_list_item() {
+        let block = Block::list_item("item", false);
         assert!((block_font_size(&block) - FONT_SIZE_BODY).abs() < f32::EPSILON);
     }
 

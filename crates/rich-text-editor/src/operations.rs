@@ -674,6 +674,25 @@ fn split_block_at(block: &Block, offset: usize) -> (Block, Block) {
                 },
             )
         }
+        Block::ListItem {
+            ordered,
+            indent_level,
+            runs,
+        } => {
+            let (left, right) = split_runs_at_offset(runs, offset);
+            (
+                Block::ListItem {
+                    ordered: *ordered,
+                    indent_level: *indent_level,
+                    runs: left,
+                },
+                Block::ListItem {
+                    ordered: *ordered,
+                    indent_level: *indent_level,
+                    runs: right,
+                },
+            )
+        }
         _ => (block.clone(), Block::empty_paragraph()),
     }
 }
@@ -775,6 +794,15 @@ fn merge_two_blocks(first: &Block, second: &Block) -> Block {
     match first {
         Block::Heading { level, .. } => Block::Heading {
             level: *level,
+            runs: merged,
+        },
+        Block::ListItem {
+            ordered,
+            indent_level,
+            ..
+        } => Block::ListItem {
+            ordered: *ordered,
+            indent_level: *indent_level,
             runs: merged,
         },
         _ => Block::Paragraph { runs: merged },
@@ -908,11 +936,10 @@ fn apply_set_block_type(doc: &mut Document, block_index: usize, new: BlockKind) 
             level,
             runs: new_runs,
         },
-        BlockKind::List(ordered) => Block::List {
+        BlockKind::ListItem { ordered } => Block::ListItem {
             ordered,
-            items: vec![crate::document::ListItem::from_paragraph(Block::Paragraph {
-                runs: new_runs,
-            })],
+            indent_level: 0,
+            runs: new_runs,
         },
         BlockKind::BlockQuote => Block::BlockQuote {
             blocks: vec![Arc::new(Block::Paragraph { runs: new_runs })],

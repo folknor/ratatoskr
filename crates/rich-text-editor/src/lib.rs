@@ -25,7 +25,7 @@ pub mod widget;
 
 pub use document::{
     Block, BlockKind, DocPosition, DocSelection, DocSlice, Document, HeadingLevel, InlineStyle,
-    ListItem, StyledRun,
+    StyledRun,
 };
 pub use normalize::normalize;
 pub use operations::{EditOp, PosMap};

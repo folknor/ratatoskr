@@ -17,7 +17,7 @@
 
 use std::sync::Arc;
 
-use crate::document::{Block, Document, ListItem, StyledRun};
+use crate::document::{Block, Document, StyledRun};
 
 /// Safety valve multiplier (from Slate). Max iterations = dirty_count × this.
 const SAFETY_MULTIPLIER: usize = 42;
@@ -92,10 +92,15 @@ fn normalize_block(block: Block) -> Block {
             level,
             runs: normalize_runs(runs),
         },
-        Block::List { ordered, items } => {
-            let items = items.into_iter().map(normalize_list_item).collect();
-            Block::List { ordered, items }
-        }
+        Block::ListItem {
+            ordered,
+            indent_level,
+            runs,
+        } => Block::ListItem {
+            ordered,
+            indent_level,
+            runs: normalize_runs(runs),
+        },
         Block::BlockQuote { blocks } => {
             let blocks = normalize_child_blocks(blocks);
             Block::BlockQuote { blocks }
@@ -143,27 +148,6 @@ fn normalize_runs(runs: Vec<StyledRun>) -> Vec<StyledRun> {
     merged
 }
 
-/// Normalize a list item: ensure it has at least one block, and normalize
-/// each child block recursively.
-fn normalize_list_item(mut item: ListItem) -> ListItem {
-    // Ensure at least one block.
-    if item.blocks.is_empty() {
-        item.blocks.push(Arc::new(Block::empty_paragraph()));
-    }
-
-    // Normalize each child block.
-    item.blocks = item
-        .blocks
-        .into_iter()
-        .map(|arc_block| {
-            let block = (*arc_block).clone();
-            Arc::new(normalize_block(block))
-        })
-        .collect();
-
-    item
-}
-
 /// Normalize child blocks of a container (BlockQuote): ensure at least one
 /// block, and normalize each recursively.
 fn normalize_child_blocks(mut blocks: Vec<Arc<Block>>) -> Vec<Arc<Block>> {
@@ -186,7 +170,7 @@ fn normalize_child_blocks(mut blocks: Vec<Arc<Block>>) -> Vec<Arc<Block>> {
 mod tests {
     use std::sync::Arc;
 
-    use crate::document::{Block, Document, HeadingLevel, InlineStyle, ListItem, StyledRun};
+    use crate::document::{Block, Document, HeadingLevel, InlineStyle, StyledRun};
 
     use super::{normalize, normalize_blocks};
 
@@ -354,51 +338,38 @@ mod tests {
         assert!(runs[0].is_empty());
     }
 
-    // ── Empty list items get a paragraph ────────────────
+    // ── List items get runs normalized ────────────────
 
     #[test]
-    fn empty_list_item_gets_paragraph() {
+    fn empty_list_item_gets_empty_run() {
         let mut doc = Document {
-            blocks: vec![Arc::new(Block::List {
+            blocks: vec![Arc::new(Block::ListItem {
                 ordered: false,
-                items: vec![ListItem { blocks: vec![] }],
+                indent_level: 0,
+                runs: vec![],
             })],
         };
         normalize(&mut doc);
 
-        if let Block::List { items, .. } = &*doc.blocks[0] {
-            assert_eq!(items.len(), 1);
-            assert_eq!(items[0].blocks.len(), 1);
-            assert!(items[0].blocks[0].is_inline_block());
-        } else {
-            panic!("expected List block");
-        }
+        let runs = doc.blocks[0].runs().expect("should have runs");
+        assert_eq!(runs.len(), 1);
+        assert!(runs[0].is_empty());
     }
 
     #[test]
-    fn list_item_children_are_normalized() {
+    fn list_item_runs_are_normalized() {
         let mut doc = Document {
-            blocks: vec![Arc::new(Block::List {
+            blocks: vec![Arc::new(Block::ListItem {
                 ordered: true,
-                items: vec![ListItem {
-                    blocks: vec![Arc::new(Block::Paragraph {
-                        runs: vec![
-                            StyledRun::plain("a"),
-                            StyledRun::plain("b"),
-                        ],
-                    })],
-                }],
+                indent_level: 0,
+                runs: vec![StyledRun::plain("a"), StyledRun::plain("b")],
             })],
         };
         normalize(&mut doc);
 
-        if let Block::List { items, .. } = &*doc.blocks[0] {
-            let runs = items[0].blocks[0].runs().expect("should have runs");
-            assert_eq!(runs.len(), 1);
-            assert_eq!(runs[0].text, "ab");
-        } else {
-            panic!("expected List block");
-        }
+        let runs = doc.blocks[0].runs().expect("should have runs");
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].text, "ab");
     }
 
     // ── Empty blockquotes get a paragraph ───────────────
@@ -610,19 +581,18 @@ mod tests {
                         StyledRun::plain(""),
                     ],
                 }),
-                // List with an empty item and a non-empty item.
-                Arc::new(Block::List {
+                // List items with runs to normalize.
+                Arc::new(Block::ListItem {
                     ordered: false,
-                    items: vec![
-                        ListItem { blocks: vec![] },
-                        ListItem {
-                            blocks: vec![Arc::new(Block::Paragraph {
-                                runs: vec![
-                                    StyledRun::plain("item"),
-                                    StyledRun::plain(" text"),
-                                ],
-                            })],
-                        },
+                    indent_level: 0,
+                    runs: vec![],
+                }),
+                Arc::new(Block::ListItem {
+                    ordered: false,
+                    indent_level: 0,
+                    runs: vec![
+                        StyledRun::plain("item"),
+                        StyledRun::plain(" text"),
                     ],
                 }),
                 // Empty blockquote.
@@ -645,20 +615,18 @@ mod tests {
         assert_eq!(runs1[0].text, "title");
         assert_eq!(runs1[0].style, InlineStyle::BOLD);
 
-        // List: first item got a paragraph, second item's runs merged.
-        if let Block::List { items, .. } = &*doc.blocks[2] {
-            assert_eq!(items[0].blocks.len(), 1);
-            assert!(items[0].blocks[0].is_inline_block());
+        // ListItem (empty): got an empty run.
+        let runs2 = doc.blocks[2].runs().expect("runs");
+        assert_eq!(runs2.len(), 1);
+        assert!(runs2[0].is_empty());
 
-            let item1_runs = items[1].blocks[0].runs().expect("runs");
-            assert_eq!(item1_runs.len(), 1);
-            assert_eq!(item1_runs[0].text, "item text");
-        } else {
-            panic!("expected List");
-        }
+        // ListItem (non-empty): runs merged.
+        let runs3 = doc.blocks[3].runs().expect("runs");
+        assert_eq!(runs3.len(), 1);
+        assert_eq!(runs3[0].text, "item text");
 
         // BlockQuote: got a paragraph.
-        if let Block::BlockQuote { blocks } = &*doc.blocks[3] {
+        if let Block::BlockQuote { blocks } = &*doc.blocks[4] {
             assert_eq!(blocks.len(), 1);
             assert!(blocks[0].is_inline_block());
         } else {
@@ -666,71 +634,32 @@ mod tests {
         }
 
         // HorizontalRule: unchanged.
-        assert!(matches!(&*doc.blocks[4], Block::HorizontalRule));
+        assert!(matches!(&*doc.blocks[5], Block::HorizontalRule));
     }
 
-    // ── Nested blockquote in list item ──────────────────
+    // ── List item runs merge with indent preserved ──────
 
     #[test]
-    fn nested_blockquote_in_list_item() {
+    fn list_item_preserves_indent() {
         let mut doc = Document {
-            blocks: vec![Arc::new(Block::List {
+            blocks: vec![Arc::new(Block::ListItem {
                 ordered: true,
-                items: vec![ListItem {
-                    blocks: vec![Arc::new(Block::BlockQuote { blocks: vec![] })],
-                }],
+                indent_level: 2,
+                runs: vec![StyledRun::plain("a"), StyledRun::plain("b")],
             })],
         };
 
         normalize(&mut doc);
 
-        if let Block::List { items, .. } = &*doc.blocks[0] {
-            if let Block::BlockQuote { blocks } = &*items[0].blocks[0] {
-                assert_eq!(blocks.len(), 1);
-                assert!(blocks[0].is_inline_block());
-            } else {
-                panic!("expected BlockQuote inside ListItem");
-            }
+        if let Block::ListItem {
+            indent_level, runs, ..
+        } = &*doc.blocks[0]
+        {
+            assert_eq!(*indent_level, 2);
+            assert_eq!(runs.len(), 1);
+            assert_eq!(runs[0].text, "ab");
         } else {
-            panic!("expected List");
-        }
-    }
-
-    // ── Nested list inside list item ────────────────────
-
-    #[test]
-    fn nested_list_in_list_item() {
-        let mut doc = Document {
-            blocks: vec![Arc::new(Block::List {
-                ordered: false,
-                items: vec![ListItem {
-                    blocks: vec![
-                        Arc::new(Block::paragraph("outer")),
-                        Arc::new(Block::List {
-                            ordered: true,
-                            items: vec![ListItem { blocks: vec![] }],
-                        }),
-                    ],
-                }],
-            })],
-        };
-
-        normalize(&mut doc);
-
-        if let Block::List { items, .. } = &*doc.blocks[0] {
-            assert_eq!(items[0].blocks.len(), 2);
-            // Nested list's empty item should have gotten a paragraph.
-            if let Block::List {
-                items: inner_items, ..
-            } = &*items[0].blocks[1]
-            {
-                assert_eq!(inner_items[0].blocks.len(), 1);
-                assert!(inner_items[0].blocks[0].is_inline_block());
-            } else {
-                panic!("expected nested List");
-            }
-        } else {
-            panic!("expected List");
+            panic!("expected ListItem");
         }
     }
 
