@@ -44,6 +44,8 @@ pub struct DbAccount {
     pub oauth_client_id: Option<String>,
     pub oauth_client_secret: Option<String>,
     pub imap_username: Option<String>,
+    pub smtp_username: Option<String>,
+    pub smtp_password: Option<String>,
     pub caldav_url: Option<String>,
     pub caldav_username: Option<String>,
     pub caldav_password: Option<String>,

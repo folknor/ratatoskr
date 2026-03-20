@@ -37,6 +37,8 @@ impl_from_row!(DbAccount {
     oauth_client_id,
     oauth_client_secret,
     imap_username,
+    smtp_username,
+    smtp_password,
     caldav_url,
     caldav_username,
     caldav_password,

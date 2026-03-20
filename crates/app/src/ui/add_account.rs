@@ -400,11 +400,15 @@ impl AddAccountWizard {
                 let account_id = uuid::Uuid::new_v4().to_string();
                 let aid = account_id.clone();
                 db.with_write_conn(move |conn| {
-                    // Determine SMTP credentials
+                    // SMTP credentials: separate if the user toggled the
+                    // checkbox, otherwise same as IMAP.
                     let (smtp_user, smtp_pass) = if auth.use_separate_smtp_credentials {
-                        (auth.smtp_username.clone(), auth.smtp_password.clone())
+                        (
+                            Some(auth.smtp_username.clone()),
+                            Some(auth.smtp_password.clone()),
+                        )
                     } else {
-                        (auth.username.clone(), auth.password.clone())
+                        (None, None)
                     };
 
                     conn.execute(

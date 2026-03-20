@@ -1329,6 +1329,14 @@ static MIGRATIONS: &[Migration] = &[
         description: "Add parent_label_id for folder hierarchy support",
         sql: "ALTER TABLE labels ADD COLUMN parent_label_id TEXT;",
     },
+    Migration {
+        version: 62,
+        description: "Add SMTP credential columns for separate SMTP auth",
+        sql: r#"
+            ALTER TABLE accounts ADD COLUMN smtp_username TEXT;
+            ALTER TABLE accounts ADD COLUMN smtp_password TEXT;
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -1568,6 +1576,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) AS max_ver FROM _migrations", [], |row| row.get("max_ver"))
             .expect("query");
-        assert_eq!(max_ver, 61);
+        assert_eq!(max_ver, 62);
     }
 }
