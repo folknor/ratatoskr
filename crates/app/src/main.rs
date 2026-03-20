@@ -1198,34 +1198,13 @@ impl App {
                 EventField::Title(s) => event.title = s,
                 EventField::Location(s) => event.location = s,
                 EventField::Description(s) => event.description = s,
-                EventField::StartHour(s) => {
-                    if let Ok(h) = s.parse::<u32>() {
-                        if h < 24 {
-                            event.start_hour = h;
-                        }
-                    }
-                }
-                EventField::StartMinute(s) => {
-                    if let Ok(m) = s.parse::<u32>() {
-                        if m < 60 {
-                            event.start_minute = m;
-                        }
-                    }
-                }
-                EventField::EndHour(s) => {
-                    if let Ok(h) = s.parse::<u32>() {
-                        if h < 24 {
-                            event.end_hour = h;
-                        }
-                    }
-                }
-                EventField::EndMinute(s) => {
-                    if let Ok(m) = s.parse::<u32>() {
-                        if m < 60 {
-                            event.end_minute = m;
-                        }
-                    }
-                }
+                // Store raw strings — parsed to integers only on save.
+                // This avoids fighting the user on intermediate keystrokes
+                // (e.g., typing "12" wouldn't work if parsed per-keystroke).
+                EventField::StartHour(s) => event.start_hour = s,
+                EventField::StartMinute(s) => event.start_minute = s,
+                EventField::EndHour(s) => event.end_hour = s,
+                EventField::EndMinute(s) => event.end_minute = s,
                 EventField::AllDay(b) => event.all_day = b,
             }
         }
@@ -1240,13 +1219,13 @@ impl App {
         let db = Arc::clone(&self.db);
         let start_ts = calendar_data_to_timestamp(
             event.start_date,
-            event.start_hour,
-            event.start_minute,
+            event.start_hour_u32(),
+            event.start_minute_u32(),
         );
         let end_ts = calendar_data_to_timestamp(
             event.start_date,
-            event.end_hour,
-            event.end_minute,
+            event.end_hour_u32(),
+            event.end_minute_u32(),
         );
 
         if let Some(id) = event.id.clone() {
@@ -1328,10 +1307,10 @@ fn db_event_to_calendar_data(ev: &db::CalendarEvent) -> CalendarEventData {
         id: Some(ev.id.clone()),
         title: ev.summary.clone().unwrap_or_default(),
         start_date: date,
-        start_hour: sh,
-        start_minute: sm,
-        end_hour: eh,
-        end_minute: em,
+        start_hour: format!("{sh}"),
+        start_minute: format!("{sm:02}"),
+        end_hour: format!("{eh}"),
+        end_minute: format!("{em:02}"),
         all_day: ev.is_all_day,
         location: ev.location.clone().unwrap_or_default(),
         description: ev.description.clone().unwrap_or_default(),

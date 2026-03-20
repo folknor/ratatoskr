@@ -1,5 +1,19 @@
 # TODO
 
+## Outdated dependencies
+
+rusqlite           0.32.1 → 0.39.0            minor
+css-inline         0.14.5 → 0.20.0            minor
+tokio-tungstenite  0.26.2 → 0.29.0            minor
+mundy              0.1.10 → 0.2.2             minor
+toml               0.8.23 → 1.0.7+spec-1.1.0  MAJOR
+libheif-rs          1.1.0 → 2.7.0             MAJOR
+lopdf              0.39.0 → 0.40.0            minor
+zip                 2.4.2 → 8.3.0             MAJOR
+html5ever          0.35.0 → 0.39.0            minor
+markup5ever        0.35.0 → 0.39.0            minor
+
+Have to be careful with toml. Should use the non-spec version probably.
 
 ## Inline Image Store Eviction
 
@@ -8,10 +22,6 @@
   **What's missing**:
   1. **Settings UI**: No user-facing control for inline image store size. The 128 MB cap is hardcoded in Rust.
   2. **Scheduled eviction**: No periodic sweep to catch edge cases (e.g., if `MAX_INLINE_STORE_BYTES` is lowered in a future update).
-
-## Iced App
-
-- [x] **Investigate iced ecosystem projects** — Done. See `research/iced-ecosystem-survey.md` (14 repos analyzed), `docs/iced-ecosystem-cross-reference.md` (cross-referenced against all 17 specs), and `## Ecosystem Patterns` sections appended to each doc in `docs/`.
 
 ## Cross-Cutting Architecture (from ecosystem survey)
 
@@ -397,7 +407,6 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 
 **Specs:** `docs/pop-out-windows/problem-statement.md`, `docs/pop-out-windows/message-view-implementation-spec.md`
 
-- [ ] **Phase 1 (multi-window architecture) is complete** — Daemon migration, window registry, view/title routing, cascade close, Escape handling all match spec.
 - [ ] **Phase 2 (message view) mostly complete but missing fields** — `cc_addresses`, `raw_source`, `rendering_mode`, `scroll_offset`, `error_banner`, position tracking, `overflow_menu_open`, `remote_content_loaded` all absent from `MessageViewState`.
 - [ ] **Phases 3-6 not started** — Rendering modes (plain/HTML/source), overflow menu (archive/delete/print/save), session restore, Save As (.eml/.txt).
 - [ ] **Compose window is a UI shell** — No sending (stub), no draft persistence, no auto-save subscription, no attachments, no rich text (uses `text_editor`), no formatting toolbar, no discard confirmation, no signature insertion.
@@ -408,7 +417,6 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 
 **Specs:** `docs/status-bar/problem-statement.md`, `docs/status-bar/implementation-spec.md`
 
-- [ ] **Scaffold is complete and faithful** — Component trait, types, priority state machine, subscription, view, theme tokens, layout constants all correct. `BTreeMap` for warnings is an improvement over spec's `HashMap`.
 - [ ] **All three data pipelines unwired** — `report_sync_progress()`, `set_warning()`, `show_confirmation()` exist as public methods but are never called. Status bar permanently shows idle. No `IcedProgressReporter`, no `SyncEvent` type.
 - [ ] **Idle state collapses to zero height** — Spec explicitly says fixed 28px container. Code uses `Space::new().width(0).height(0)`. Causes layout shift on transition.
 - [ ] **Settings toggle disconnected** — `sync_status_bar: bool` exists in UI but is never read.
@@ -419,7 +427,6 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 
 **Specs:** `docs/sidebar/implementation-spec.md`
 
-- [ ] **Phases 1A-1E all complete and clean** — No core CRUD bypass, proper componentization, named style classes, generational tracking. Best cross-cutting compliance of any feature.
 - [ ] **Pinned search date format diverges** — Uses absolute ("Mar 19, 14:32") vs spec's relative ("2 hours ago"). Intentional.
 - [ ] **`SidebarEvent::CycleAccount` unreachable** — `CycleAccount` handler recursively calls `SelectAccount`, which emits `AccountSelected` before `CycleAccount` return. Parent handler is dead code.
 - [ ] **`NavigationTarget` enum still deferred** — `selected_label: Option<String>` remains the flat marker for universal folders, smart folders, and account labels.

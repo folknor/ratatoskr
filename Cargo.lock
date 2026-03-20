@@ -224,13 +224,19 @@ dependencies = [
  "chrono",
  "dirs",
  "display-info",
- "iced",
+ "dissimilar",
+ "iced 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
  "mundy",
+ "ratatoskr-command-palette",
+ "ratatoskr-core",
+ "ratatoskr-label-colors",
+ "ratatoskr-system-fonts",
  "rusqlite",
  "serde",
  "serde_json",
  "tokio",
  "toml",
+ "uuid",
 ]
 
 [[package]]
@@ -1448,6 +1454,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dissimilar"
+version = "1.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aeda16ab4059c5fd2a83f2b9c9e9c981327b18aa8e3b313f7e6563799d4f093e"
+
+[[package]]
 name = "dlib"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1800,9 +1812,9 @@ dependencies = [
 
 [[package]]
 name = "font-types"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1e4d2d0cf79d38430cc9dc9aadec84774bff2e1ba30ae2bf6c16cfce9385a23"
+checksum = "73829a7b5c91198af28a99159b7ae4afbb252fb906159ff7f189f3a2ceaa3df2"
 dependencies = [
  "bytemuck",
 ]
@@ -2527,16 +2539,46 @@ dependencies = [
 [[package]]
 name = "iced"
 version = "0.15.0-dev"
+dependencies = [
+ "iced_core 0.15.0-dev",
+ "iced_debug 0.15.0-dev",
+ "iced_futures 0.15.0-dev",
+ "iced_renderer 0.15.0-dev",
+ "iced_runtime 0.15.0-dev",
+ "iced_widget 0.15.0-dev",
+ "iced_winit 0.15.0-dev",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "iced"
+version = "0.15.0-dev"
 source = "git+https://github.com/folknor/iced?branch=sluggrs#d713109bf994e54f91885203367150ac743d7a4c"
 dependencies = [
- "iced_core",
- "iced_debug",
- "iced_futures",
- "iced_renderer",
- "iced_runtime",
- "iced_widget",
- "iced_winit",
+ "iced_core 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
+ "iced_debug 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
+ "iced_futures 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
+ "iced_renderer 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
+ "iced_runtime 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
+ "iced_widget 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
+ "iced_winit 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "iced_core"
+version = "0.15.0-dev"
+dependencies = [
+ "bitflags 2.11.0",
+ "bytes",
+ "glam",
+ "lilt",
+ "log",
+ "num-traits",
+ "rustc-hash 2.1.1",
+ "smol_str 0.2.2",
+ "thiserror 2.0.18",
+ "web-time",
 ]
 
 [[package]]
@@ -2559,11 +2601,33 @@ dependencies = [
 [[package]]
 name = "iced_debug"
 version = "0.15.0-dev"
+dependencies = [
+ "iced_core 0.15.0-dev",
+ "iced_futures 0.15.0-dev",
+ "log",
+]
+
+[[package]]
+name = "iced_debug"
+version = "0.15.0-dev"
 source = "git+https://github.com/folknor/iced?branch=sluggrs#d713109bf994e54f91885203367150ac743d7a4c"
 dependencies = [
- "iced_core",
- "iced_futures",
+ "iced_core 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
+ "iced_futures 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
  "log",
+]
+
+[[package]]
+name = "iced_futures"
+version = "0.15.0-dev"
+dependencies = [
+ "futures",
+ "iced_core 0.15.0-dev",
+ "log",
+ "rustc-hash 2.1.1",
+ "tokio",
+ "wasm-bindgen-futures",
+ "wasmtimer",
 ]
 
 [[package]]
@@ -2572,12 +2636,29 @@ version = "0.15.0-dev"
 source = "git+https://github.com/folknor/iced?branch=sluggrs#d713109bf994e54f91885203367150ac743d7a4c"
 dependencies = [
  "futures",
- "iced_core",
+ "iced_core 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
  "log",
  "rustc-hash 2.1.1",
  "tokio",
  "wasm-bindgen-futures",
  "wasmtimer",
+]
+
+[[package]]
+name = "iced_graphics"
+version = "0.15.0-dev"
+dependencies = [
+ "bitflags 2.11.0",
+ "bytemuck",
+ "cosmic-text",
+ "half",
+ "iced_core 0.15.0-dev",
+ "iced_futures 0.15.0-dev",
+ "log",
+ "raw-window-handle",
+ "rustc-hash 2.1.1",
+ "thiserror 2.0.18",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -2589,8 +2670,8 @@ dependencies = [
  "bytemuck",
  "cosmic-text",
  "half",
- "iced_core",
- "iced_futures",
+ "iced_core 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
+ "iced_futures 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
  "log",
  "lyon_path",
  "raw-window-handle",
@@ -2602,10 +2683,29 @@ dependencies = [
 [[package]]
 name = "iced_program"
 version = "0.15.0-dev"
+dependencies = [
+ "iced_graphics 0.15.0-dev",
+ "iced_runtime 0.15.0-dev",
+]
+
+[[package]]
+name = "iced_program"
+version = "0.15.0-dev"
 source = "git+https://github.com/folknor/iced?branch=sluggrs#d713109bf994e54f91885203367150ac743d7a4c"
 dependencies = [
- "iced_graphics",
- "iced_runtime",
+ "iced_graphics 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
+ "iced_runtime 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
+]
+
+[[package]]
+name = "iced_renderer"
+version = "0.15.0-dev"
+dependencies = [
+ "iced_graphics 0.15.0-dev",
+ "iced_tiny_skia 0.15.0-dev",
+ "iced_wgpu 0.15.0-dev",
+ "log",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -2613,10 +2713,21 @@ name = "iced_renderer"
 version = "0.15.0-dev"
 source = "git+https://github.com/folknor/iced?branch=sluggrs#d713109bf994e54f91885203367150ac743d7a4c"
 dependencies = [
- "iced_graphics",
- "iced_tiny_skia",
- "iced_wgpu",
+ "iced_graphics 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
+ "iced_tiny_skia 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
+ "iced_wgpu 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
  "log",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "iced_runtime"
+version = "0.15.0-dev"
+dependencies = [
+ "bytes",
+ "iced_core 0.15.0-dev",
+ "iced_futures 0.15.0-dev",
+ "raw-window-handle",
  "thiserror 2.0.18",
 ]
 
@@ -2626,10 +2737,25 @@ version = "0.15.0-dev"
 source = "git+https://github.com/folknor/iced?branch=sluggrs#d713109bf994e54f91885203367150ac743d7a4c"
 dependencies = [
  "bytes",
- "iced_core",
- "iced_futures",
+ "iced_core 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
+ "iced_futures 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
  "raw-window-handle",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "iced_tiny_skia"
+version = "0.15.0-dev"
+dependencies = [
+ "bytemuck",
+ "cosmic-text",
+ "iced_debug 0.15.0-dev",
+ "iced_graphics 0.15.0-dev",
+ "kurbo 0.10.4",
+ "log",
+ "rustc-hash 2.1.1",
+ "softbuffer",
+ "tiny-skia 0.11.4",
 ]
 
 [[package]]
@@ -2639,13 +2765,32 @@ source = "git+https://github.com/folknor/iced?branch=sluggrs#d713109bf994e54f918
 dependencies = [
  "bytemuck",
  "cosmic-text",
- "iced_debug",
- "iced_graphics",
+ "iced_debug 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
+ "iced_graphics 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
  "kurbo 0.10.4",
  "log",
  "rustc-hash 2.1.1",
  "softbuffer",
  "tiny-skia 0.11.4",
+]
+
+[[package]]
+name = "iced_wgpu"
+version = "0.15.0-dev"
+dependencies = [
+ "bitflags 2.11.0",
+ "bytemuck",
+ "cryoglyph",
+ "futures",
+ "glam",
+ "guillotiere",
+ "iced_debug 0.15.0-dev",
+ "iced_graphics 0.15.0-dev",
+ "log",
+ "rustc-hash 2.1.1",
+ "sluggrs 0.1.0",
+ "thiserror 2.0.18",
+ "wgpu",
 ]
 
 [[package]]
@@ -2659,12 +2804,12 @@ dependencies = [
  "futures",
  "glam",
  "guillotiere",
- "iced_debug",
- "iced_graphics",
+ "iced_debug 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
+ "iced_graphics 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
  "log",
  "lyon",
  "rustc-hash 2.1.1",
- "sluggrs",
+ "sluggrs 0.1.0 (git+https://github.com/folknor/sluggrs.git?rev=b7bf831)",
  "thiserror 2.0.18",
  "wgpu",
 ]
@@ -2672,9 +2817,22 @@ dependencies = [
 [[package]]
 name = "iced_widget"
 version = "0.15.0-dev"
+dependencies = [
+ "iced_renderer 0.15.0-dev",
+ "log",
+ "num-traits",
+ "ouroboros",
+ "rustc-hash 2.1.1",
+ "thiserror 2.0.18",
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "iced_widget"
+version = "0.15.0-dev"
 source = "git+https://github.com/folknor/iced?branch=sluggrs#d713109bf994e54f91885203367150ac743d7a4c"
 dependencies = [
- "iced_renderer",
+ "iced_renderer 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
  "log",
  "num-traits",
  "ouroboros",
@@ -2686,10 +2844,27 @@ dependencies = [
 [[package]]
 name = "iced_winit"
 version = "0.15.0-dev"
+dependencies = [
+ "iced_debug 0.15.0-dev",
+ "iced_program 0.15.0-dev",
+ "log",
+ "objc2 0.5.2",
+ "rustc-hash 2.1.1",
+ "thiserror 2.0.18",
+ "tracing",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "window_clipboard",
+ "winit",
+]
+
+[[package]]
+name = "iced_winit"
+version = "0.15.0-dev"
 source = "git+https://github.com/folknor/iced?branch=sluggrs#d713109bf994e54f91885203367150ac743d7a4c"
 dependencies = [
- "iced_debug",
- "iced_program",
+ "iced_debug 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
+ "iced_program 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
  "log",
  "objc2 0.5.2",
  "rustc-hash 2.1.1",
@@ -2947,9 +3122,9 @@ dependencies = [
 
 [[package]]
 name = "itoa"
-version = "1.0.17"
+version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
+checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jiff"
@@ -3494,6 +3669,17 @@ dependencies = [
  "string_cache",
  "string_cache_codegen",
  "tendril",
+]
+
+[[package]]
+name = "markup5ever"
+version = "0.16.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e4cd8c02f18a011991a039855480c64d74291c5792fcc160d55d77dc4de4a39"
+dependencies = [
+ "log",
+ "tendril",
+ "web_atoms",
 ]
 
 [[package]]
@@ -5340,6 +5526,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ratatoskr-rich-text-editor"
+version = "0.1.0"
+dependencies = [
+ "bitflags 2.11.0",
+ "html5ever 0.35.0",
+ "iced 0.15.0-dev",
+ "markup5ever 0.16.2",
+]
+
+[[package]]
 name = "ratatoskr-search"
 version = "0.1.0"
 dependencies = [
@@ -5511,7 +5707,7 @@ checksum = "7b634fabf032fab15307ffd272149b622260f55974d9fad689292a5d33df02e5"
 dependencies = [
  "bytemuck",
  "core_maths",
- "font-types 0.11.0",
+ "font-types 0.11.1",
 ]
 
 [[package]]
@@ -5820,9 +6016,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.9"
+version = "0.103.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7df23109aa6c1567d1c575b9952556388da57401e4ace1d15f79eedad0d8f53"
+checksum = "df33b2b81ac578cabaf06b89b0631153a3f416b0a886e8a7a1707fb51abbd1ef"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -6187,6 +6383,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bdd58c3c93c3d278ca835519292445cb4b0d4dc59ccfdf7ceadaab3f8aeb4038"
 dependencies = [
  "version_check",
+]
+
+[[package]]
+name = "sluggrs"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "cosmic-text",
+ "log",
+ "skrifa 0.40.0",
+ "wgpu",
 ]
 
 [[package]]
@@ -8778,18 +8985,18 @@ checksum = "6df3dc4292935e51816d896edcd52aa30bc297907c26167fec31e2b0c6a32524"
 
 [[package]]
 name = "zerocopy"
-version = "0.8.42"
+version = "0.8.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2578b716f8a7a858b7f02d5bd870c14bf4ddbbcf3a4c05414ba6503640505e3"
+checksum = "efbb2a062be311f2ba113ce66f697a4dc589f85e78a4aea276200804cea0ed87"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.42"
+version = "0.8.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e6cc098ea4d3bd6246687de65af3f920c430e236bee1e3bf2e441463f08a02f"
+checksum = "0e8bc7269b54418e7aeeef514aa68f8690b8c0489a06b0136e5f57c4c5ccab89"
 dependencies = [
  "proc-macro2",
  "quote",

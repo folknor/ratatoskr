@@ -460,7 +460,7 @@ impl Db {
                     (id, account_id, google_event_id, summary, description,
                      location, start_time, end_time, is_all_day, status,
                      calendar_id)
-                 VALUES (?1, ?2, ?1, ?3, ?4, ?5, ?6, ?7, ?8, 'confirmed', ?9)",
+                 VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, ?8, 'confirmed', ?9)",
                 params![
                     id,
                     account_id,

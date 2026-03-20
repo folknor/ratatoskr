@@ -64,16 +64,20 @@ pub enum CalendarOverlay {
 /// Data for a calendar event in the UI layer.
 ///
 /// Used for both detail display and editor form state.
+/// Time fields are stored as raw strings during editing to avoid
+/// fighting the user on intermediate keystroke states (e.g., typing
+/// "12" would be parsed as "1" then "2" if parsed per-keystroke).
+/// Parsed to integers only on save.
 #[derive(Debug, Clone)]
 pub struct CalendarEventData {
     /// DB row id. `None` for new events that haven't been saved.
     pub id: Option<String>,
     pub title: String,
     pub start_date: NaiveDate,
-    pub start_hour: u32,
-    pub start_minute: u32,
-    pub end_hour: u32,
-    pub end_minute: u32,
+    pub start_hour: String,
+    pub start_minute: String,
+    pub end_hour: String,
+    pub end_minute: String,
     pub all_day: bool,
     pub location: String,
     pub description: String,
@@ -85,16 +89,16 @@ impl CalendarEventData {
     pub fn new_at(date: NaiveDate, hour: u32) -> Self {
         // If starting at 23, end at 23:59 (can't wrap to next day in V1).
         let (end_hour, end_minute) = if hour >= 23 {
-            (23, 59)
+            ("23".to_string(), "59".to_string())
         } else {
-            (hour + 1, 0)
+            (format!("{}", hour + 1), "00".to_string())
         };
         Self {
             id: None,
             title: String::new(),
             start_date: date,
-            start_hour: hour,
-            start_minute: 0,
+            start_hour: format!("{hour}"),
+            start_minute: "00".to_string(),
             end_hour,
             end_minute,
             all_day: false,
@@ -102,6 +106,26 @@ impl CalendarEventData {
             description: String::new(),
             calendar_id: None,
         }
+    }
+
+    /// Parse start hour as u32 (defaults to 0 on invalid input).
+    pub fn start_hour_u32(&self) -> u32 {
+        self.start_hour.parse().unwrap_or(0).min(23)
+    }
+
+    /// Parse start minute as u32 (defaults to 0 on invalid input).
+    pub fn start_minute_u32(&self) -> u32 {
+        self.start_minute.parse().unwrap_or(0).min(59)
+    }
+
+    /// Parse end hour as u32 (defaults to 0 on invalid input).
+    pub fn end_hour_u32(&self) -> u32 {
+        self.end_hour.parse().unwrap_or(0).min(23)
+    }
+
+    /// Parse end minute as u32 (defaults to 0 on invalid input).
+    pub fn end_minute_u32(&self) -> u32 {
+        self.end_minute.parse().unwrap_or(0).min(59)
     }
 }
 
@@ -561,25 +585,25 @@ fn form_field<'a>(
 
 /// Time input row with start and end hour:minute text inputs.
 fn time_input_row(event: &CalendarEventData) -> Element<'_, CalendarMessage> {
-    let start_h = text_input("HH", &format!("{}", event.start_hour))
+    let start_h = text_input("HH", &event.start_hour)
         .on_input(|s| CalendarMessage::EventFieldChanged(EventField::StartHour(s)))
         .padding(PAD_INPUT)
         .width(Length::Fixed(48.0))
         .size(TEXT_MD);
 
-    let start_m = text_input("MM", &format!("{:02}", event.start_minute))
+    let start_m = text_input("MM", &event.start_minute)
         .on_input(|s| CalendarMessage::EventFieldChanged(EventField::StartMinute(s)))
         .padding(PAD_INPUT)
         .width(Length::Fixed(48.0))
         .size(TEXT_MD);
 
-    let end_h = text_input("HH", &format!("{}", event.end_hour))
+    let end_h = text_input("HH", &event.end_hour)
         .on_input(|s| CalendarMessage::EventFieldChanged(EventField::EndHour(s)))
         .padding(PAD_INPUT)
         .width(Length::Fixed(48.0))
         .size(TEXT_MD);
 
-    let end_m = text_input("MM", &format!("{:02}", event.end_minute))
+    let end_m = text_input("MM", &event.end_minute)
         .on_input(|s| CalendarMessage::EventFieldChanged(EventField::EndMinute(s)))
         .padding(PAD_INPUT)
         .width(Length::Fixed(48.0))
@@ -789,7 +813,10 @@ fn format_event_time_range(event: &CalendarEventData) -> String {
     }
     format!(
         "{:02}:{:02} \u{2013} {:02}:{:02}",
-        event.start_hour, event.start_minute, event.end_hour, event.end_minute,
+        event.start_hour_u32(),
+        event.start_minute_u32(),
+        event.end_hour_u32(),
+        event.end_minute_u32(),
     )
 }
 
