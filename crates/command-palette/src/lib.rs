@@ -1,3 +1,4 @@
+mod args;
 mod context;
 mod descriptor;
 mod id;
@@ -6,6 +7,7 @@ mod keybinding;
 mod registry;
 mod resolver;
 
+pub use args::CommandArgs;
 pub use context::{CommandContext, FocusedRegion, ProviderKind, ViewType};
 pub use descriptor::{CommandDescriptor, CommandMatch};
 pub use id::CommandId;

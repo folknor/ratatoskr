@@ -69,6 +69,7 @@ pub enum CommandId {
     AppAskAi,
     AppHelp,
     AppSyncFolder,
+    AppOpenPalette,
 }
 
 const TABLE: &[(CommandId, &str)] = &[
@@ -127,6 +128,7 @@ const TABLE: &[(CommandId, &str)] = &[
     (CommandId::AppAskAi, "app.askAi"),
     (CommandId::AppHelp, "app.help"),
     (CommandId::AppSyncFolder, "app.syncFolder"),
+    (CommandId::AppOpenPalette, "app.openPalette"),
 ];
 
 impl CommandId {
@@ -208,6 +210,7 @@ const ALL_IDS: &[CommandId] = &[
     CommandId::AppAskAi,
     CommandId::AppHelp,
     CommandId::AppSyncFolder,
+    CommandId::AppOpenPalette,
 ];
 
 #[cfg(test)]

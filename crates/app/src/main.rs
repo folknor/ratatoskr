@@ -1,4 +1,5 @@
 mod appearance;
+mod command_dispatch;
 mod component;
 mod db;
 mod display;
@@ -7,10 +8,18 @@ mod icon;
 mod ui;
 mod window_state;
 
+use command_dispatch::{
+    ComposeAction, EmailAction, KeyEventMessage, NavigationTarget, PaletteMessage,
+    ReadingPanePosition, TaskAction,
+};
 use component::Component;
 use db::{Db, Label, Thread};
 use iced::widget::{container, mouse_area, row};
 use iced::{Element, Length, Point, Size, Task, Theme};
+use ratatoskr_command_palette::{
+    BindingTable, Chord, CommandArgs, CommandId, CommandRegistry, FocusedRegion, ResolveResult,
+    current_platform,
+};
 use ui::layout::{RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH};
 use ui::reading_pane::{ReadingPane, ReadingPaneMessage};
 use ui::settings::{Settings, SettingsEvent, SettingsMessage};
@@ -22,6 +31,9 @@ use std::sync::Arc;
 static DB: std::sync::OnceLock<Arc<Db>> = std::sync::OnceLock::new();
 static APP_DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 static DEFAULT_SCALE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+
+/// How long to wait for the second chord of a sequence.
+const CHORD_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1000);
 
 fn main() -> iced::Result {
     let app_data_dir = dirs::data_dir()
@@ -77,15 +89,29 @@ pub enum Divider {
 /// Drag handle width in logical pixels.
 const DIVIDER_WIDTH: f32 = 2.0;
 
+/// Pending chord state for two-key sequence bindings.
+struct PendingChord {
+    first: Chord,
+    #[allow(dead_code)]
+    started: iced::time::Instant,
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
+    // Existing component messages
     Sidebar(SidebarMessage),
     ThreadList(ThreadListMessage),
     ReadingPane(ReadingPaneMessage),
     Settings(SettingsMessage),
+
+    // Existing data loading
     AccountsLoaded(u64, Result<Vec<db::Account>, String>),
     LabelsLoaded(u64, Result<Vec<Label>, String>),
     ThreadsLoaded(u64, Result<Vec<Thread>, String>),
+    ThreadMessagesLoaded(u64, Result<Vec<db::ThreadMessage>, String>),
+    ThreadAttachmentsLoaded(u64, Result<Vec<db::ThreadAttachment>, String>),
+
+    // Existing UI
     Compose,
     Noop,
     ToggleSettings,
@@ -98,10 +124,27 @@ pub enum Message {
     WindowResized(Size),
     WindowMoved(Point),
     ToggleRightSidebar,
-    ThreadMessagesLoaded(u64, Result<Vec<db::ThreadMessage>, String>),
-    ThreadAttachmentsLoaded(u64, Result<Vec<db::ThreadAttachment>, String>),
     SetDateDisplay(db::DateDisplay),
     WindowCloseRequested(iced::window::Id),
+
+    // Command system (Slice 6a)
+    KeyEvent(KeyEventMessage),
+    ExecuteCommand(CommandId),
+    ExecuteParameterized(CommandId, CommandArgs),
+    NavigateTo(NavigationTarget),
+    Escape,
+    EmailAction(EmailAction),
+    ComposeAction(ComposeAction),
+    TaskAction(TaskAction),
+    SetTheme(String),
+    ToggleSidebar,
+    FocusSearch,
+    ShowHelp,
+    SyncCurrentFolder,
+    SetReadingPanePosition(ReadingPanePosition),
+
+    // Palette placeholder (Slice 6b)
+    Palette(PaletteMessage),
 }
 
 struct App {
@@ -123,6 +166,18 @@ struct App {
     nav_generation: u64,
     /// Incremented on every thread detail load (messages, attachments).
     thread_generation: u64,
+
+    // Command palette infrastructure
+    registry: CommandRegistry,
+    binding_table: BindingTable,
+    /// Which panel currently has focus. Updated on click/tab.
+    focused_region: Option<FocusedRegion>,
+    /// Network connectivity state.
+    is_online: bool,
+    /// Whether the compose window/panel is open.
+    composer_is_open: bool,
+    /// Pending chord for two-key sequence bindings.
+    pending_chord: Option<PendingChord>,
 }
 
 impl App {
@@ -131,6 +186,10 @@ impl App {
         let db_ref = Arc::clone(&db);
         let data_dir = APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
         let window = window_state::WindowState::load(data_dir);
+
+        let registry = CommandRegistry::new();
+        let binding_table = BindingTable::new(&registry, current_platform());
+
         let app = Self {
             db,
             sidebar: Sidebar::new(),
@@ -150,6 +209,12 @@ impl App {
             window,
             nav_generation: 1,
             thread_generation: 0,
+            registry,
+            binding_table,
+            focused_region: None,
+            is_online: true,
+            composer_is_open: false,
+            pending_chord: None,
         };
         let load_gen = app.nav_generation;
         (app, Task::perform(
@@ -166,7 +231,7 @@ impl App {
                 let idx = self.settings.selected_theme.unwrap_or(0);
                 ui::theme::theme_by_index(idx)
             }
-            // System — follow OS
+            // System -- follow OS
             _ => match self.mode {
                 appearance::Mode::Light => Theme::custom(String::from("Light"), iced::theme::palette::Seed::LIGHT),
                 _ => Theme::custom(String::from("Dark"), iced::theme::palette::Seed::DARK),
@@ -187,12 +252,34 @@ impl App {
                     None
                 }
             }),
+            // Global keyboard dispatch
+            iced::event::listen_with(|event, status, _id| {
+                if let iced::Event::Keyboard(
+                    iced::keyboard::Event::KeyPressed { key, modifiers, .. }
+                ) = &event {
+                    Some(Message::KeyEvent(KeyEventMessage::KeyPressed {
+                        key: key.clone(),
+                        modifiers: *modifiers,
+                        status,
+                    }))
+                } else {
+                    None
+                }
+            }),
             // Component subscriptions
             self.sidebar.subscription().map(Message::Sidebar),
             self.thread_list.subscription().map(Message::ThreadList),
             self.reading_pane.subscription().map(Message::ReadingPane),
             self.settings.subscription().map(Message::Settings),
         ];
+
+        // Pending chord timeout
+        if self.pending_chord.is_some() {
+            subs.push(
+                iced::time::every(CHORD_TIMEOUT)
+                    .map(|_| Message::KeyEvent(KeyEventMessage::PendingChordTimeout)),
+            );
+        }
 
         // Drive overlay slide animation
         if self.settings.overlay_anim.is_animating(iced::time::Instant::now()) {
@@ -301,6 +388,67 @@ impl App {
                 Task::none()
             }
             Message::Compose | Message::Noop => Task::none(),
+
+            // Command system
+            Message::KeyEvent(msg) => self.handle_key_event(msg),
+            Message::ExecuteCommand(id) => self.handle_execute_command(id),
+            Message::ExecuteParameterized(id, args) => {
+                self.handle_execute_parameterized(id, args)
+            }
+            Message::NavigateTo(_target) => {
+                // Stub: navigation targets will be wired as sidebar
+                // selection and view state are normalized.
+                Task::none()
+            }
+            Message::Escape => {
+                // Close settings overlay, deselect thread, etc.
+                if self.show_settings {
+                    self.show_settings = false;
+                }
+                Task::none()
+            }
+            Message::EmailAction(_action) => {
+                // Stub: email actions will be wired to core when
+                // the action backend is implemented.
+                Task::none()
+            }
+            Message::ComposeAction(_action) => {
+                // Stub: compose actions not yet implemented.
+                Task::none()
+            }
+            Message::TaskAction(_action) => {
+                // Stub: task actions not yet implemented.
+                Task::none()
+            }
+            Message::SetTheme(theme) => {
+                self.settings.theme = theme;
+                Task::none()
+            }
+            Message::ToggleSidebar => {
+                // Stub: sidebar toggle not yet implemented.
+                Task::none()
+            }
+            Message::FocusSearch => {
+                // Stub: search focus not yet implemented.
+                Task::none()
+            }
+            Message::ShowHelp => {
+                // Stub: help overlay not yet implemented.
+                Task::none()
+            }
+            Message::SyncCurrentFolder => {
+                // Stub: sync not yet implemented.
+                Task::none()
+            }
+            Message::SetReadingPanePosition(_pos) => {
+                // Stub: reading pane position not yet implemented.
+                Task::none()
+            }
+            Message::Palette(PaletteMessage::Open) => {
+                // Stub: palette UI is Slice 6b.
+                Task::none()
+            }
+            Message::Palette(PaletteMessage::Close) => Task::none(),
         }
     }
 
@@ -339,6 +487,92 @@ impl App {
                 .into()
         } else {
             layout.into()
+        }
+    }
+}
+
+// ── Key event handling ─────────────────────────────────
+
+impl App {
+    fn handle_key_event(&mut self, msg: KeyEventMessage) -> Task<Message> {
+        match msg {
+            KeyEventMessage::KeyPressed {
+                key,
+                modifiers,
+                status,
+            } => self.handle_key_pressed(key, modifiers, status),
+            KeyEventMessage::PendingChordTimeout => {
+                self.pending_chord = None;
+                Task::none()
+            }
+        }
+    }
+
+    fn handle_key_pressed(
+        &mut self,
+        key: iced::keyboard::Key,
+        modifiers: iced::keyboard::Modifiers,
+        status: iced::event::Status,
+    ) -> Task<Message> {
+        // 1. If a text input or other widget captured the event, skip
+        //    (unless it's a modifier-chord like Ctrl+K)
+        if status == iced::event::Status::Captured
+            && !command_dispatch::has_command_modifier(&modifiers)
+        {
+            return Task::none();
+        }
+
+        // 2. Convert iced key to command-palette Chord
+        let Some(chord) = command_dispatch::iced_key_to_chord(&key, &modifiers) else {
+            return Task::none();
+        };
+
+        // 3. If we're in pending chord state, resolve the sequence
+        if let Some(pending) = self.pending_chord.take() {
+            if let Some(id) = self.binding_table.resolve_sequence(
+                &pending.first, &chord,
+            ) {
+                return self.update(Message::ExecuteCommand(id));
+            }
+            // Second chord didn't match any sequence -- discard
+            return Task::none();
+        }
+
+        // 4. Resolve single chord
+        match self.binding_table.resolve_chord(&chord) {
+            ResolveResult::Command(id) => self.update(Message::ExecuteCommand(id)),
+            ResolveResult::Pending => {
+                self.pending_chord = Some(PendingChord {
+                    first: chord,
+                    started: iced::time::Instant::now(),
+                });
+                Task::none()
+            }
+            ResolveResult::NoMatch => Task::none(),
+        }
+    }
+}
+
+// ── Command execution ──────────────────────────────────
+
+impl App {
+    fn handle_execute_command(&mut self, id: CommandId) -> Task<Message> {
+        self.registry.usage.record_usage(id);
+        match command_dispatch::dispatch_command(id, self) {
+            Some(msg) => self.update(msg),
+            None => Task::none(),
+        }
+    }
+
+    fn handle_execute_parameterized(
+        &mut self,
+        id: CommandId,
+        args: CommandArgs,
+    ) -> Task<Message> {
+        self.registry.usage.record_usage(id);
+        match command_dispatch::dispatch_parameterized(id, args) {
+            Some(msg) => self.update(msg),
+            None => Task::none(),
         }
     }
 }

@@ -665,6 +665,14 @@ fn register_app(out: &mut Vec<CommandDescriptor>) {
         Some(KeyBinding::named(NamedKey::F5)),
         |ctx| ctx.active_account_id.is_some(),
     ));
+    out.push(desc_kw(
+        CommandId::AppOpenPalette,
+        "Command Palette",
+        "App",
+        Some(KeyBinding::cmd_or_ctrl('k')),
+        always,
+        &["palette", "commands"],
+    ));
 }
 
 #[cfg(test)]
