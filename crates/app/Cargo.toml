@@ -23,6 +23,8 @@ iced = { git = "https://github.com/folknor/iced", branch = "sluggrs", default-fe
     "wgpu", "tokio", "lazy", "advanced", "canvas", "web-colors", "wayland", "x11",
 ] }
 dirs = "6"
+dissimilar.workspace = true
+ratatoskr-system-fonts = { path = "../system-fonts" }
 toml = "0.8"
 mundy = { version = "0.1.9", default-features = false, features = ["color-scheme", "tokio", "log"] }
 display-info = "0.5"

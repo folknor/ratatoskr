@@ -10,6 +10,8 @@ use crate::ui::animated_toggler::animated_toggler;
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
+use crate::ui::undoable::UndoableText;
+use crate::ui::undoable_text_input::undoable_text_input;
 use crate::ui::widgets;
 
 // ── Messages ────────────────────────────────────────────
@@ -75,6 +77,8 @@ pub enum SettingsMessage {
     // Input/info rows
     FocusInput(String),
     CopyToClipboard(String),
+    UndoInput(InputField),
+    RedoInput(InputField),
     Noop,
     // Help tooltips
     HelpHover(String),
@@ -172,6 +176,14 @@ impl Tab {
 
 // ── State ───────────────────────────────────────────────
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputField {
+    VipEmail,
+    AiApiKey,
+    OllamaUrl,
+    OllamaModel,
+}
+
 pub struct Settings {
     pub active_tab: Tab,
     pub open_select: Option<SelectField>,
@@ -197,14 +209,14 @@ pub struct Settings {
     pub notifications_enabled: bool,
     pub smart_notifications: bool,
     pub notify_categories: Vec<String>,
-    pub vip_email_input: String,
+    pub vip_email_input: UndoableText,
     pub vip_senders: Vec<String>,
     // AI
     pub ai_provider: String,
-    pub ai_api_key: String,
+    pub ai_api_key: UndoableText,
     pub ai_model: String,
-    pub ai_ollama_url: String,
-    pub ai_ollama_model: String,
+    pub ai_ollama_url: UndoableText,
+    pub ai_ollama_model: UndoableText,
     pub ai_enabled: bool,
     pub ai_auto_categorize: bool,
     pub ai_auto_summarize: bool,
@@ -282,13 +294,13 @@ impl Default for Settings {
             notifications_enabled: true,
             smart_notifications: true,
             notify_categories: vec!["Primary".into()],
-            vip_email_input: String::new(),
+            vip_email_input: UndoableText::new(),
             vip_senders: Vec::new(),
             ai_provider: "Claude".into(),
-            ai_api_key: String::new(),
+            ai_api_key: UndoableText::new(),
             ai_model: "claude-sonnet-4-6".into(),
-            ai_ollama_url: "http://localhost:11434".into(),
-            ai_ollama_model: "llama3.2".into(),
+            ai_ollama_url: UndoableText::with_initial("http://localhost:11434"),
+            ai_ollama_model: UndoableText::with_initial("llama3.2"),
             ai_enabled: true,
             ai_auto_categorize: true,
             ai_auto_summarize: true,
@@ -368,6 +380,8 @@ impl Settings {
             | SettingsMessage::CheckForUpdates
             | SettingsMessage::OpenGithub
             | SettingsMessage::OverlayAnimTick(_) => {}
+            SettingsMessage::UndoInput(field) => { self.undo_field(field); }
+            SettingsMessage::RedoInput(field) => { self.redo_field(field); }
             SettingsMessage::HelpHover(id) => self.hovered_help = Some(id),
             SettingsMessage::HelpUnhover(id) => {
                 if self.hovered_help.as_ref() == Some(&id) {
@@ -424,12 +438,12 @@ impl Settings {
                     self.notify_categories.push(cat);
                 }
             }
-            SettingsMessage::VipEmailChanged(v) => self.vip_email_input = v,
+            SettingsMessage::VipEmailChanged(v) => self.vip_email_input.set_text(v),
             SettingsMessage::AddVipSender => {
-                let email = self.vip_email_input.trim().to_string();
+                let email = self.vip_email_input.text().trim().to_string();
                 if !email.is_empty() && !self.vip_senders.contains(&email) {
                     self.vip_senders.push(email);
-                    self.vip_email_input.clear();
+                    self.vip_email_input.set_text(String::new());
                 }
             }
             SettingsMessage::RemoveVipSender(email) => self.vip_senders.retain(|e| e != &email),
@@ -444,9 +458,9 @@ impl Settings {
             SettingsMessage::ToggleAiAutoArchivePromotions(v) => self.ai_auto_archive_promotions = v,
             SettingsMessage::ToggleAiAutoArchiveSocial(v) => self.ai_auto_archive_social = v,
             SettingsMessage::ToggleAiAutoArchiveNewsletters(v) => self.ai_auto_archive_newsletters = v,
-            SettingsMessage::AiApiKeyChanged(v) => self.ai_api_key = v,
-            SettingsMessage::OllamaUrlChanged(v) => self.ai_ollama_url = v,
-            SettingsMessage::OllamaModelChanged(v) => self.ai_ollama_model = v,
+            SettingsMessage::AiApiKeyChanged(v) => self.ai_api_key.set_text(v),
+            SettingsMessage::OllamaUrlChanged(v) => self.ai_ollama_url.set_text(v),
+            SettingsMessage::OllamaModelChanged(v) => self.ai_ollama_model.set_text(v),
             SettingsMessage::SaveAiSettings => self.ai_key_saved = true,
             SettingsMessage::ListGripPress(list_id, index) => {
                 self.drag_state = Some(DragState {
@@ -519,6 +533,24 @@ impl Settings {
             if let Some(ref mut drag) = self.drag_state { drag.dragging_index = target; }
         }
         Task::none()
+    }
+
+    fn undo_field(&mut self, field: InputField) {
+        match field {
+            InputField::VipEmail => { self.vip_email_input.undo(); }
+            InputField::AiApiKey => { self.ai_api_key.undo(); }
+            InputField::OllamaUrl => { self.ai_ollama_url.undo(); }
+            InputField::OllamaModel => { self.ai_ollama_model.undo(); }
+        }
+    }
+
+    fn redo_field(&mut self, field: InputField) {
+        match field {
+            InputField::VipEmail => { self.vip_email_input.redo(); }
+            InputField::AiApiKey => { self.ai_api_key.redo(); }
+            InputField::OllamaUrl => { self.ai_ollama_url.redo(); }
+            InputField::OllamaModel => { self.ai_ollama_model.redo(); }
+        }
     }
 
     fn list_items_mut(&mut self, list_id: &str) -> &mut Vec<EditableItem> {
@@ -1033,9 +1065,11 @@ fn notifications_tab(state: &Settings) -> Element<'_, SettingsMessage> {
         vip_col = vip_col.push(
             container(
                 row![
-                    text_input("email@example.com", &state.vip_email_input)
+                    undoable_text_input("email@example.com", state.vip_email_input.text())
                         .on_input(SettingsMessage::VipEmailChanged)
                         .on_submit(SettingsMessage::AddVipSender)
+                        .on_undo(SettingsMessage::UndoInput(InputField::VipEmail))
+                        .on_redo(SettingsMessage::RedoInput(InputField::VipEmail))
                         .size(TEXT_LG)
                         .padding(PAD_INPUT)
                         .style(theme::TextInputClass::Settings.style())
@@ -1186,8 +1220,8 @@ fn ai_tab(state: &Settings) -> Element<'_, SettingsMessage> {
 
     if state.ai_provider == "Ollama" {
         col = col.push(section("Local Server", vec![
-            input_row("ollama-url", "Server URL", "http://localhost:11434", &state.ai_ollama_url, SettingsMessage::OllamaUrlChanged),
-            input_row("ollama-model", "Model Name", "e.g. llama3.2", &state.ai_ollama_model, SettingsMessage::OllamaModelChanged),
+            input_row("ollama-url", "Server URL", "http://localhost:11434", state.ai_ollama_url.text(), SettingsMessage::OllamaUrlChanged, InputField::OllamaUrl),
+            input_row("ollama-model", "Model Name", "e.g. llama3.2", state.ai_ollama_model.text(), SettingsMessage::OllamaModelChanged, InputField::OllamaModel),
         ]));
     } else {
         let key_label = match state.ai_provider.as_str() {
@@ -1210,8 +1244,10 @@ fn ai_tab(state: &Settings) -> Element<'_, SettingsMessage> {
                     text(key_label).size(TEXT_LG).style(text::base),
                     Space::new().height(SPACE_XXS),
                     row![
-                        text_input("", &state.ai_api_key)
+                        undoable_text_input("", state.ai_api_key.text())
                             .on_input(SettingsMessage::AiApiKeyChanged)
+                            .on_undo(SettingsMessage::UndoInput(InputField::AiApiKey))
+                            .on_redo(SettingsMessage::RedoInput(InputField::AiApiKey))
                             .secure(true)
                             .size(TEXT_LG)
                             .padding(PAD_INPUT)
@@ -1559,6 +1595,7 @@ fn input_row(
     placeholder: &str,
     value: &str,
     on_input: impl Fn(String) -> SettingsMessage + 'static,
+    field: InputField,
 ) -> Element<'static, SettingsMessage> {
     let id_owned = id.to_string();
     let label_owned = label.to_string();
@@ -1570,9 +1607,11 @@ fn input_row(
                 row![
                     column![
                         text(label_owned).size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
-                        text_input(&placeholder_owned, &value_owned)
+                        undoable_text_input(&placeholder_owned, &value_owned)
                             .id(id_owned.clone())
                             .on_input(on_input)
+                            .on_undo(SettingsMessage::UndoInput(field))
+                            .on_redo(SettingsMessage::RedoInput(field))
                             .size(TEXT_LG)
                             .padding(0)
                             .style(theme::TextInputClass::Inline.style()),

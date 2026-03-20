@@ -99,6 +99,9 @@ base64 = "0.22"
 # XML
 quick-xml = "0.37"
 
+# Text diffing (for undo/redo)
+dissimilar = "1"
+
 # Optimized release profile
 [profile.release]
 lto = "fat"
