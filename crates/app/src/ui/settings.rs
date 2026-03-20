@@ -91,6 +91,15 @@ pub enum SettingsMessage {
     OverlayAnimTick(Instant),
     // Accounts tab
     AddAccountFromSettings,
+    // Signatures
+    SignatureEdit(String),                     // signature_id — open editor overlay
+    SignatureCreate(String),                   // account_id — open editor for new sig
+    SignatureDelete(String),                   // signature_id
+    SignatureEditorNameChanged(String),
+    SignatureEditorBodyChanged(String),
+    SignatureEditorToggleDefault(bool),
+    SignatureEditorToggleReplyDefault(bool),
+    SignatureEditorSave,
 }
 
 /// Events the settings component emits upward to the App.
@@ -99,13 +108,22 @@ pub enum SettingsEvent {
     Closed,
     DateDisplayChanged(DateDisplay),
     OpenAddAccountWizard,
+    /// Request the App to save a signature (insert or update) via core CRUD.
+    SaveSignature(SignatureSaveRequest),
+    /// Request the App to delete a signature by ID.
+    DeleteSignature(String),
 }
 
 /// Overlays that slide in from the right, covering the settings content.
 /// One level deep — no stacking.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SettingsOverlay {
     CreateFilter,
+    EditSignature {
+        /// None for new signature, Some for editing existing.
+        signature_id: Option<String>,
+        account_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -189,6 +207,46 @@ pub enum InputField {
     AiApiKey,
     OllamaUrl,
     OllamaModel,
+    SignatureName,
+    SignatureBody,
+}
+
+// ── Signature types ──────────────────────────────────────
+
+/// A signature entry for display in the settings list.
+/// Mirrors the relevant fields of `DbSignature` without depending on the db crate.
+#[derive(Debug, Clone)]
+pub struct SignatureEntry {
+    pub id: String,
+    pub account_id: String,
+    pub name: String,
+    pub body_html: String,
+    pub body_text: Option<String>,
+    pub is_default: bool,
+    pub is_reply_default: bool,
+}
+
+/// Request to save a signature, emitted upward to the App for DB persistence.
+#[derive(Debug, Clone)]
+pub struct SignatureSaveRequest {
+    pub id: Option<String>,
+    pub account_id: String,
+    pub name: String,
+    pub body_html: String,
+    pub is_default: bool,
+    pub is_reply_default: bool,
+}
+
+/// Editing state for the signature editor overlay.
+#[derive(Debug, Clone)]
+pub struct SignatureEditorState {
+    /// The signature being edited (None = new).
+    pub signature_id: Option<String>,
+    pub account_id: String,
+    pub name: UndoableText,
+    pub body: UndoableText,
+    pub is_default: bool,
+    pub is_reply_default: bool,
 }
 
 pub struct Settings {
@@ -247,6 +305,9 @@ pub struct Settings {
     pub demo_filters: Vec<EditableItem>,
     // Accounts tab
     pub managed_accounts: Vec<ManagedAccount>,
+    // Signatures
+    pub signatures: Vec<SignatureEntry>,
+    pub signature_editor: Option<SignatureEditorState>,
 }
 
 /// An account card in the settings list.
@@ -350,6 +411,8 @@ impl Default for Settings {
                 EditableItem { label: "Star from VIPs".into(), enabled: Some(true) },
             ],
             managed_accounts: Vec::new(),
+            signatures: Vec::new(),
+            signature_editor: None,
         }
     }
 }
@@ -384,6 +447,12 @@ impl Component for Settings {
             }
             SettingsMessage::AddAccountFromSettings => {
                 return (Task::none(), Some(SettingsEvent::OpenAddAccountWizard));
+            }
+            SettingsMessage::SignatureEditorSave => {
+                return self.handle_signature_save();
+            }
+            SettingsMessage::SignatureDelete(id) => {
+                return (Task::none(), Some(SettingsEvent::DeleteSignature(id)));
             }
             SettingsMessage::ListDragMove(list_id, point) => {
                 return (self.handle_drag_move(list_id, point), None);
@@ -517,6 +586,58 @@ impl Settings {
                 }
             }
             SettingsMessage::ListMenu(_, _) => {}
+            SettingsMessage::SignatureEdit(sig_id) => {
+                if let Some(sig) = self.signatures.iter().find(|s| s.id == sig_id) {
+                    self.signature_editor = Some(SignatureEditorState {
+                        signature_id: Some(sig.id.clone()),
+                        account_id: sig.account_id.clone(),
+                        name: UndoableText::with_initial(&sig.name),
+                        body: UndoableText::with_initial(&sig.body_html),
+                        is_default: sig.is_default,
+                        is_reply_default: sig.is_reply_default,
+                    });
+                    self.overlay = Some(SettingsOverlay::EditSignature {
+                        signature_id: Some(sig.id.clone()),
+                        account_id: sig.account_id.clone(),
+                    });
+                    self.overlay_anim.go_mut(true, Instant::now());
+                }
+            }
+            SettingsMessage::SignatureCreate(account_id) => {
+                self.signature_editor = Some(SignatureEditorState {
+                    signature_id: None,
+                    account_id: account_id.clone(),
+                    name: UndoableText::new(),
+                    body: UndoableText::new(),
+                    is_default: false,
+                    is_reply_default: false,
+                });
+                self.overlay = Some(SettingsOverlay::EditSignature {
+                    signature_id: None,
+                    account_id,
+                });
+                self.overlay_anim.go_mut(true, Instant::now());
+            }
+            SettingsMessage::SignatureEditorNameChanged(v) => {
+                if let Some(ref mut editor) = self.signature_editor {
+                    editor.name.set_text(v);
+                }
+            }
+            SettingsMessage::SignatureEditorBodyChanged(v) => {
+                if let Some(ref mut editor) = self.signature_editor {
+                    editor.body.set_text(v);
+                }
+            }
+            SettingsMessage::SignatureEditorToggleDefault(v) => {
+                if let Some(ref mut editor) = self.signature_editor {
+                    editor.is_default = v;
+                }
+            }
+            SettingsMessage::SignatureEditorToggleReplyDefault(v) => {
+                if let Some(ref mut editor) = self.signature_editor {
+                    editor.is_reply_default = v;
+                }
+            }
             SettingsMessage::OpenOverlay(overlay) => {
                 self.overlay = Some(overlay);
                 self.overlay_anim.go_mut(true, Instant::now());
@@ -524,6 +645,7 @@ impl Settings {
             SettingsMessage::CloseOverlay => {
                 self.overlay = None;
                 self.overlay_anim.go_mut(false, Instant::now());
+                self.signature_editor = None;
             }
             _ => {} // Already handled in update() or handle_simple_message()
         }
@@ -566,6 +688,12 @@ impl Settings {
             InputField::AiApiKey => { self.ai_api_key.undo(); }
             InputField::OllamaUrl => { self.ai_ollama_url.undo(); }
             InputField::OllamaModel => { self.ai_ollama_model.undo(); }
+            InputField::SignatureName => {
+                if let Some(ref mut editor) = self.signature_editor { editor.name.undo(); }
+            }
+            InputField::SignatureBody => {
+                if let Some(ref mut editor) = self.signature_editor { editor.body.undo(); }
+            }
         }
     }
 
@@ -575,7 +703,36 @@ impl Settings {
             InputField::AiApiKey => { self.ai_api_key.redo(); }
             InputField::OllamaUrl => { self.ai_ollama_url.redo(); }
             InputField::OllamaModel => { self.ai_ollama_model.redo(); }
+            InputField::SignatureName => {
+                if let Some(ref mut editor) = self.signature_editor { editor.name.redo(); }
+            }
+            InputField::SignatureBody => {
+                if let Some(ref mut editor) = self.signature_editor { editor.body.redo(); }
+            }
         }
+    }
+
+    fn handle_signature_save(&mut self) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
+        let Some(ref editor) = self.signature_editor else {
+            return (Task::none(), None);
+        };
+        let name = editor.name.text().trim().to_string();
+        if name.is_empty() {
+            return (Task::none(), None);
+        }
+        let request = SignatureSaveRequest {
+            id: editor.signature_id.clone(),
+            account_id: editor.account_id.clone(),
+            name,
+            body_html: editor.body.text().to_string(),
+            is_default: editor.is_default,
+            is_reply_default: editor.is_reply_default,
+        };
+        // Close overlay
+        self.overlay = None;
+        self.overlay_anim.go_mut(false, Instant::now());
+        self.signature_editor = None;
+        (Task::none(), Some(SettingsEvent::SaveSignature(request)))
     }
 
     fn list_items_mut(&mut self, list_id: &str) -> &mut Vec<EditableItem> {
@@ -622,6 +779,7 @@ fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
     let main_content: Element<'_, SettingsMessage> = if show_overlay {
         let overlay_content = match state.overlay {
             Some(SettingsOverlay::CreateFilter) => create_filter_overlay(),
+            Some(SettingsOverlay::EditSignature { .. }) => signature_editor_overlay(state),
             None => column![].into(), // closing animation
         };
 
@@ -1016,9 +1174,7 @@ fn composing_tab(state: &Settings) -> Element<'_, SettingsMessage> {
         ), SettingsMessage::ToggleSelect(SelectField::MarkAsRead)),
     ]));
 
-    col = col.push(section("Signatures", vec![
-        coming_soon_row("Signature management"),
-    ]));
+    col = col.push(signature_list_section(state));
 
     col = col.push(section("Templates", vec![
         coming_soon_row("Template management"),
@@ -1160,6 +1316,258 @@ fn create_filter_overlay<'a>() -> Element<'a, SettingsMessage> {
     col = col.push(section("Actions", vec![
         coming_soon_row("Filter actions"),
     ]));
+
+    col.into()
+}
+
+// ── Signature list section ───────────────────────────────
+
+fn signature_list_section(state: &Settings) -> Element<'_, SettingsMessage> {
+    if state.signatures.is_empty() && state.managed_accounts.is_empty() {
+        return section("Signatures", vec![
+            coming_soon_row("No accounts configured"),
+        ]);
+    }
+
+    // Group signatures by account_id
+    let mut items: Vec<Element<'_, SettingsMessage>> = Vec::new();
+
+    for account in &state.managed_accounts {
+        let account_sigs: Vec<&SignatureEntry> = state
+            .signatures
+            .iter()
+            .filter(|s| s.account_id == account.id)
+            .collect();
+
+        // Account header row
+        let account_name = account
+            .account_name
+            .as_deref()
+            .or(account.display_name.as_deref())
+            .unwrap_or(&account.email);
+
+        let mut header_row = row![].spacing(SPACE_SM).align_y(Alignment::Center);
+        if let Some(ref hex) = account.account_color {
+            let color = crate::ui::theme::hex_to_color(hex);
+            header_row = header_row.push(widgets::color_dot::<SettingsMessage>(color));
+        }
+        header_row = header_row.push(
+            text(account_name).size(TEXT_SM).style(text::secondary)
+                .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::text() }),
+        );
+
+        items.push(
+            container(header_row)
+                .padding(PAD_SETTINGS_ROW)
+                .width(Length::Fill)
+                .into(),
+        );
+
+        // Signature rows for this account
+        for sig in &account_sigs {
+            items.push(signature_row(sig));
+        }
+
+        // Add Signature button for this account
+        let aid = account.id.clone();
+        items.push(
+            button(
+                container(
+                    row![
+                        icon::plus().size(ICON_MD).style(text::base),
+                        text("Add Signature").size(TEXT_LG).style(text::base)
+                            .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::text() }),
+                    ]
+                    .spacing(SPACE_XS)
+                    .align_y(Alignment::Center),
+                )
+                .center_x(Length::Fill)
+                .align_y(Alignment::Center),
+            )
+            .on_press(SettingsMessage::SignatureCreate(aid))
+            .padding(PAD_SETTINGS_ROW)
+            .style(theme::ButtonClass::Action.style())
+            .width(Length::Fill)
+            .height(SETTINGS_ROW_HEIGHT)
+            .into(),
+        );
+    }
+
+    section("Signatures", items)
+}
+
+fn signature_row<'a>(sig: &'a SignatureEntry) -> Element<'a, SettingsMessage> {
+    let sig_id = sig.id.clone();
+
+    let mut label_parts = column![
+        text(&sig.name).size(TEXT_LG).style(text::base),
+    ]
+    .spacing(SPACE_XXXS);
+
+    // Show a preview snippet of the body (plain text, first 60 chars)
+    let preview = sig.body_text.as_deref().unwrap_or(&sig.body_html);
+    let snippet: String = preview.chars().take(60).collect();
+    if !snippet.is_empty() {
+        label_parts = label_parts.push(
+            text(snippet).size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
+        );
+    }
+
+    let mut content = row![].spacing(SPACE_SM).align_y(Alignment::Center);
+    content = content.push(
+        container(label_parts).align_y(Alignment::Center).width(Length::Fill),
+    );
+
+    // Default / Reply default badges
+    if sig.is_default {
+        content = content.push(
+            container(
+                text("Default").size(TEXT_XS).style(text::secondary),
+            )
+            .padding(PAD_BADGE)
+            .style(theme::ContainerClass::KeyBadge.style()),
+        );
+    }
+    if sig.is_reply_default {
+        content = content.push(
+            container(
+                text("Reply default").size(TEXT_XS).style(text::secondary),
+            )
+            .padding(PAD_BADGE)
+            .style(theme::ContainerClass::KeyBadge.style()),
+        );
+    }
+
+    // Remove button
+    let del_id = sig.id.clone();
+    content = content.push(
+        button(
+            container(icon::x().size(ICON_MD).style(text::secondary))
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
+        )
+        .on_press(SettingsMessage::SignatureDelete(del_id))
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::BareIcon.style()),
+    );
+
+    button(
+        container(content)
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill)
+            .height(SETTINGS_TOGGLE_ROW_HEIGHT)
+            .align_y(Alignment::Center),
+    )
+    .on_press(SettingsMessage::SignatureEdit(sig_id))
+    .padding(0)
+    .style(theme::ButtonClass::Action.style())
+    .width(Length::Fill)
+    .into()
+}
+
+// ── Signature editor overlay ────────────────────────────
+
+fn signature_editor_overlay(state: &Settings) -> Element<'_, SettingsMessage> {
+    let Some(ref editor) = state.signature_editor else {
+        return column![].into();
+    };
+
+    let is_new = editor.signature_id.is_none();
+    let title = if is_new { "New Signature" } else { "Edit Signature" };
+
+    let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(SETTINGS_CONTENT_MAX_WIDTH);
+
+    col = col.push(
+        text(title)
+            .size(TEXT_HEADING)
+            .style(text::base)
+            .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::text() }),
+    );
+
+    // Name field
+    col = col.push(section("Name", vec![
+        container(
+            undoable_text_input("Signature name", editor.name.text())
+                .id("sig-name")
+                .on_input(SettingsMessage::SignatureEditorNameChanged)
+                .on_undo(SettingsMessage::UndoInput(InputField::SignatureName))
+                .on_redo(SettingsMessage::RedoInput(InputField::SignatureName))
+                .size(TEXT_LG)
+                .padding(PAD_INPUT)
+                .style(theme::TextInputClass::Settings.style())
+                .width(Length::Fill),
+        )
+        .padding(PAD_SETTINGS_ROW)
+        .width(Length::Fill)
+        .into(),
+    ]));
+
+    // Default checkboxes
+    col = col.push(section("Defaults", vec![
+        toggle_row(
+            "Default for new messages",
+            "Use this signature when composing new emails",
+            editor.is_default,
+            SettingsMessage::SignatureEditorToggleDefault,
+        ),
+        toggle_row(
+            "Default for replies & forwards",
+            "Use this signature when replying or forwarding",
+            editor.is_reply_default,
+            SettingsMessage::SignatureEditorToggleReplyDefault,
+        ),
+    ]));
+
+    // Body field — plain text for V1
+    col = col.push(section("Content", vec![
+        container(
+            column![
+                text("Signature body (HTML)").size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
+                Space::new().height(SPACE_XXS),
+                undoable_text_input("Enter signature content...", editor.body.text())
+                    .id("sig-body")
+                    .on_input(SettingsMessage::SignatureEditorBodyChanged)
+                    .on_undo(SettingsMessage::UndoInput(InputField::SignatureBody))
+                    .on_redo(SettingsMessage::RedoInput(InputField::SignatureBody))
+                    .size(TEXT_LG)
+                    .padding(PAD_INPUT)
+                    .style(theme::TextInputClass::Settings.style())
+                    .width(Length::Fill),
+            ]
+        )
+        .padding(PAD_SETTINGS_ROW)
+        .width(Length::Fill)
+        .into(),
+    ]));
+
+    // Action buttons
+    let mut btn_row = row![].spacing(SPACE_SM).align_y(Alignment::Center);
+
+    if !is_new {
+        let del_id = editor.signature_id.clone().unwrap_or_default();
+        btn_row = btn_row.push(
+            button(text("Delete").size(TEXT_LG).style(text::danger))
+                .on_press(SettingsMessage::SignatureDelete(del_id))
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Action.style()),
+        );
+    }
+
+    btn_row = btn_row.push(Space::new().width(Length::Fill));
+
+    let can_save = !editor.name.text().trim().is_empty();
+    let mut save_btn = button(
+        container(text("Save").size(TEXT_LG)).center_x(Length::Fill),
+    )
+    .padding(PAD_BUTTON)
+    .style(theme::ButtonClass::Primary.style())
+    .width(Length::Fixed(100.0));
+    if can_save {
+        save_btn = save_btn.on_press(SettingsMessage::SignatureEditorSave);
+    }
+    btn_row = btn_row.push(save_btn);
+
+    col = col.push(btn_row);
 
     col.into()
 }
