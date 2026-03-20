@@ -1,4 +1,7 @@
-use iced::widget::{button, canvas, column, container, row, rule, text, tooltip, Canvas, Space};
+use iced::widget::{
+    button, canvas, column, container, row, rule, scrollable, text, text_input, tooltip, Canvas,
+    Space,
+};
 use iced::{mouse, Alignment, Color, Element, Length, Rectangle, Renderer, Theme};
 
 use ratatoskr_command_palette::{BindingTable, CommandContext, CommandId, CommandRegistry};
@@ -1344,4 +1347,116 @@ impl<M> canvas::Program<M> for DotPainter {
         frame.fill(&circle, self.color);
         vec![frame.into_geometry()]
     }
+}
+
+// ── Emoji picker ────────────────────────────────────────
+
+use super::emoji_picker::{EmojiCategory, EmojiEntry, EMOJI_TABLE};
+
+/// Builds the emoji picker widget. The caller owns visibility state and positioning.
+///
+/// - `search_query`: current text in the search field
+/// - `selected_category`: which category tab is active
+/// - `on_select`: called with the emoji string when a user clicks one
+/// - `on_category_changed`: called when the user clicks a category tab
+/// - `on_search_changed`: called when the search input text changes
+pub fn emoji_picker<'a, M: 'a + Clone>(
+    search_query: &str,
+    selected_category: EmojiCategory,
+    on_select: impl Fn(&'static str) -> M + 'a,
+    on_category_changed: impl Fn(EmojiCategory) -> M + 'a,
+    on_search_changed: impl Fn(String) -> M + 'a,
+) -> Element<'a, M> {
+    // Filter emoji by search query or selected category.
+    let filtered: Vec<&EmojiEntry> = if search_query.is_empty() {
+        EMOJI_TABLE
+            .iter()
+            .filter(|e| e.category == selected_category)
+            .collect()
+    } else {
+        let query = search_query.to_lowercase();
+        EMOJI_TABLE
+            .iter()
+            .filter(|e| e.name.contains(&query))
+            .collect()
+    };
+
+    // Search bar
+    let search = text_input("Search emoji...", search_query)
+        .on_input(on_search_changed)
+        .padding(PAD_INPUT)
+        .size(TEXT_MD)
+        .style(theme::TextInputClass::Settings.style());
+
+    // Category tabs
+    let mut tab_row = row![].spacing(SPACE_XXXS).align_y(Alignment::Center);
+    for &cat in EmojiCategory::ALL {
+        let is_active = cat == selected_category;
+        let tab = button(
+            container(text(cat.tab_emoji()).size(TEXT_TITLE))
+                .width(EMOJI_BUTTON_SIZE)
+                .height(EMOJI_BUTTON_SIZE)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
+        )
+        .on_press(on_category_changed(cat))
+        .style(theme::ButtonClass::Chip { active: is_active }.style());
+        tab_row = tab_row.push(tab);
+    }
+
+    // Emoji grid — build rows of EMOJI_GRID_COLUMNS items.
+    let mut grid_col = column![].spacing(SPACE_XXXS);
+    let mut current_row = row![].spacing(SPACE_XXXS);
+    let mut col_idx = 0;
+
+    for entry in &filtered {
+        let emoji_btn = button(
+            container(text(entry.emoji).size(TEXT_TITLE))
+                .width(EMOJI_BUTTON_SIZE)
+                .height(EMOJI_BUTTON_SIZE)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
+        )
+        .on_press(on_select(entry.emoji))
+        .style(theme::ButtonClass::BareIcon.style());
+
+        current_row = current_row.push(emoji_btn);
+        col_idx += 1;
+
+        if col_idx >= EMOJI_GRID_COLUMNS {
+            grid_col = grid_col.push(current_row);
+            current_row = row![].spacing(SPACE_XXXS);
+            col_idx = 0;
+        }
+    }
+
+    // Push trailing partial row if any.
+    if col_idx > 0 {
+        for _ in col_idx..EMOJI_GRID_COLUMNS {
+            current_row = current_row
+                .push(Space::new().width(EMOJI_BUTTON_SIZE).height(EMOJI_BUTTON_SIZE));
+        }
+        grid_col = grid_col.push(current_row);
+    }
+
+    let grid_scrollable = scrollable(
+        container(grid_col).padding([SPACE_XXS, 0.0]),
+    )
+    .spacing(SCROLLBAR_SPACING)
+    .height(Length::Fill);
+
+    // Assemble
+    container(
+        column![
+            search,
+            tab_row,
+            grid_scrollable,
+        ]
+        .spacing(SPACE_XS),
+    )
+    .padding(SPACE_XS)
+    .width(EMOJI_PICKER_WIDTH)
+    .height(EMOJI_PICKER_MAX_HEIGHT)
+    .style(theme::ContainerClass::SelectMenu.style())
+    .into()
 }

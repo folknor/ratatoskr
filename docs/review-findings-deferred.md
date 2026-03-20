@@ -61,3 +61,15 @@ delete are immediate and irreversible.
 `load_contacts_filtered()` calls `load_contact_groups()` per contact.
 200 contacts = 201 queries. Minor at current scale, but should be
 a single JOIN query eventually.
+
+---
+
+## b15cd89 — Emoji picker widget
+
+### Finding 2: Missing features from TODO spec
+TODO.md says the picker needs "recent/frequent section, skin tone
+selection." Neither is implemented.
+
+### Finding 5: Missing Flags category
+Most emoji pickers include country/flag emoji. Not included in the
+static table.
