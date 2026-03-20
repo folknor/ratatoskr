@@ -400,3 +400,11 @@ pub const MESSAGE_VIEW_DEFAULT_WIDTH: f32 = 800.0;
 pub const MESSAGE_VIEW_DEFAULT_HEIGHT: f32 = 600.0;
 pub const MESSAGE_VIEW_MIN_WIDTH: f32 = 480.0;
 pub const MESSAGE_VIEW_MIN_HEIGHT: f32 = 320.0;
+
+// ── Compose pop-out window ─────────────────────────────
+pub const COMPOSE_DEFAULT_WIDTH: f32 = 720.0;
+pub const COMPOSE_DEFAULT_HEIGHT: f32 = 560.0;
+pub const COMPOSE_MIN_WIDTH: f32 = 480.0;
+pub const COMPOSE_MIN_HEIGHT: f32 = 360.0;
+/// Width of the label column (From, To, Cc, Bcc, Subject) in compose.
+pub const COMPOSE_LABEL_WIDTH: f32 = 52.0;

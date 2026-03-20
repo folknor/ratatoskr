@@ -1,0 +1,610 @@
+use iced::widget::{button, column, container, pick_list, row, text, text_input, Space};
+use iced::{Alignment, Element, Length};
+
+use crate::db;
+use crate::font;
+use crate::icon;
+use crate::ui::layout::*;
+use crate::ui::theme;
+use crate::ui::token_input::{self, TokenId, TokenInputMessage, TokenInputValue};
+use crate::ui::widgets;
+use crate::Message;
+
+use super::PopOutMessage;
+
+// ── Data types ──────────────────────────────────────────
+
+/// How the compose window was opened.
+#[derive(Debug, Clone)]
+pub enum ComposeMode {
+    New,
+    Reply { original_subject: String },
+    ReplyAll { original_subject: String },
+    Forward { original_subject: String },
+}
+
+/// Account info for the From dropdown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountInfo {
+    pub id: String,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub account_name: Option<String>,
+}
+
+impl std::fmt::Display for AccountInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(ref name) = self.display_name {
+            write!(f, "{name} <{}>", self.email)
+        } else {
+            write!(f, "{}", self.email)
+        }
+    }
+}
+
+// ── Messages ────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub enum ComposeMessage {
+    SubjectChanged(String),
+    BodyChanged(iced::widget::text_editor::Action),
+    FromAccountChanged(AccountInfo),
+    ToggleCc,
+    ToggleBcc,
+    ToTokenInput(TokenInputMessage),
+    CcTokenInput(TokenInputMessage),
+    BccTokenInput(TokenInputMessage),
+    Send,
+    Discard,
+}
+
+// ── State ───────────────────────────────────────────────
+
+/// Per-window state for a compose pop-out.
+pub struct ComposeState {
+    // Recipients
+    pub to: TokenInputValue,
+    pub cc: TokenInputValue,
+    pub bcc: TokenInputValue,
+    pub show_cc: bool,
+    pub show_bcc: bool,
+    pub selected_to_token: Option<TokenId>,
+    pub selected_cc_token: Option<TokenId>,
+    pub selected_bcc_token: Option<TokenId>,
+
+    // From account
+    pub from_account: Option<AccountInfo>,
+    pub from_accounts: Vec<AccountInfo>,
+
+    // Subject
+    pub subject: String,
+
+    // Body (plain text for V1)
+    pub body: iced::widget::text_editor::Content,
+
+    // Compose mode
+    pub mode: ComposeMode,
+
+    // Reply context
+    pub reply_thread_id: Option<String>,
+    pub reply_message_id: Option<String>,
+
+    // Status message (e.g. "Send not yet wired")
+    pub status: Option<String>,
+}
+
+impl ComposeState {
+    pub fn new(accounts: &[db::Account]) -> Self {
+        let from_accounts = accounts_to_info(accounts);
+        let from_account = from_accounts.first().cloned();
+        Self {
+            to: TokenInputValue::new(),
+            cc: TokenInputValue::new(),
+            bcc: TokenInputValue::new(),
+            show_cc: false,
+            show_bcc: false,
+            selected_to_token: None,
+            selected_cc_token: None,
+            selected_bcc_token: None,
+            from_account,
+            from_accounts,
+            subject: String::new(),
+            body: iced::widget::text_editor::Content::new(),
+            mode: ComposeMode::New,
+            reply_thread_id: None,
+            reply_message_id: None,
+            status: None,
+        }
+    }
+
+    pub fn new_reply(
+        accounts: &[db::Account],
+        mode: ComposeMode,
+        to_email: Option<&str>,
+        to_name: Option<&str>,
+        cc_emails: Option<&str>,
+        quoted_body: Option<&str>,
+        thread_id: Option<&str>,
+        message_id: Option<&str>,
+    ) -> Self {
+        let mut state = Self::new(accounts);
+        state.mode = mode.clone();
+
+        // Set subject
+        state.subject = match &mode {
+            ComposeMode::New => String::new(),
+            ComposeMode::Reply { original_subject }
+            | ComposeMode::ReplyAll { original_subject } => {
+                if original_subject.starts_with("Re: ") {
+                    original_subject.clone()
+                } else {
+                    format!("Re: {original_subject}")
+                }
+            }
+            ComposeMode::Forward { original_subject } => {
+                if original_subject.starts_with("Fwd: ") {
+                    original_subject.clone()
+                } else {
+                    format!("Fwd: {original_subject}")
+                }
+            }
+        };
+
+        // Add To recipient
+        if let Some(email) = to_email {
+            let label = to_name
+                .filter(|n| !n.is_empty())
+                .unwrap_or(email);
+            let id = state.to.next_token_id();
+            state.to.tokens.push(token_input::Token {
+                id,
+                email: email.to_string(),
+                label: label.to_string(),
+                is_group: false,
+                group_id: None,
+            });
+        }
+
+        // Add Cc recipients for ReplyAll
+        if let ComposeMode::ReplyAll { .. } = &state.mode {
+            if let Some(cc_str) = cc_emails {
+                for addr in cc_str.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                    let id = state.cc.next_token_id();
+                    state.cc.tokens.push(token_input::Token {
+                        id,
+                        email: addr.to_string(),
+                        label: addr.to_string(),
+                        is_group: false,
+                        group_id: None,
+                    });
+                }
+                if !state.cc.tokens.is_empty() {
+                    state.show_cc = true;
+                }
+            }
+        }
+
+        // Set quoted body
+        if let Some(body) = quoted_body {
+            let quoted = body
+                .lines()
+                .map(|line| format!("> {line}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let full_body = format!("\n\n{quoted}");
+            state.body = iced::widget::text_editor::Content::with_text(&full_body);
+        }
+
+        state.reply_thread_id = thread_id.map(String::from);
+        state.reply_message_id = message_id.map(String::from);
+
+        state
+    }
+
+    /// Window title based on compose mode.
+    pub fn window_title(&self) -> String {
+        match &self.mode {
+            ComposeMode::New => "New Message".to_string(),
+            ComposeMode::Reply { original_subject } => {
+                if original_subject.starts_with("Re: ") {
+                    original_subject.clone()
+                } else {
+                    format!("Re: {original_subject}")
+                }
+            }
+            ComposeMode::ReplyAll { original_subject } => {
+                if original_subject.starts_with("Re: ") {
+                    original_subject.clone()
+                } else {
+                    format!("Re: {original_subject}")
+                }
+            }
+            ComposeMode::Forward { original_subject } => {
+                if original_subject.starts_with("Fwd: ") {
+                    original_subject.clone()
+                } else {
+                    format!("Fwd: {original_subject}")
+                }
+            }
+        }
+    }
+}
+
+// ── Update ──────────────────────────────────────────────
+
+pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
+    match msg {
+        ComposeMessage::SubjectChanged(s) => state.subject = s,
+        ComposeMessage::BodyChanged(action) => state.body.perform(action),
+        ComposeMessage::FromAccountChanged(account) => {
+            state.from_account = Some(account);
+        }
+        ComposeMessage::ToggleCc => state.show_cc = true,
+        ComposeMessage::ToggleBcc => state.show_bcc = true,
+        ComposeMessage::ToTokenInput(msg) => {
+            handle_token_input_message(&mut state.to, msg, &mut state.selected_to_token);
+        }
+        ComposeMessage::CcTokenInput(msg) => {
+            handle_token_input_message(&mut state.cc, msg, &mut state.selected_cc_token);
+        }
+        ComposeMessage::BccTokenInput(msg) => {
+            handle_token_input_message(&mut state.bcc, msg, &mut state.selected_bcc_token);
+        }
+        ComposeMessage::Send => {
+            // V1: validate and show stub status
+            let has_recipients = !state.to.tokens.is_empty()
+                || !state.cc.tokens.is_empty()
+                || !state.bcc.tokens.is_empty();
+            if !has_recipients {
+                state.status = Some("Add at least one recipient".to_string());
+                return;
+            }
+            state.status = Some("Send not yet wired".to_string());
+        }
+        ComposeMessage::Discard => {
+            // Handled by the caller (close window)
+        }
+    }
+}
+
+fn handle_token_input_message(
+    value: &mut TokenInputValue,
+    msg: TokenInputMessage,
+    selected: &mut Option<TokenId>,
+) {
+    match msg {
+        TokenInputMessage::TextChanged(text) => value.text = text,
+        TokenInputMessage::RemoveToken(id) => {
+            value.tokens.retain(|t| t.id != id);
+            *selected = None;
+        }
+        TokenInputMessage::TokenizeText(text) => {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                let id = value.next_token_id();
+                let label = trimmed.to_string();
+                value.tokens.push(token_input::Token {
+                    id,
+                    email: label.clone(),
+                    label,
+                    is_group: false,
+                    group_id: None,
+                });
+            }
+            value.text.clear();
+        }
+        TokenInputMessage::SelectToken(id) => *selected = Some(id),
+        TokenInputMessage::DeselectTokens => *selected = None,
+        TokenInputMessage::BackspaceAtStart => {
+            if let Some(last) = value.tokens.last() {
+                *selected = Some(last.id);
+            }
+        }
+        TokenInputMessage::Focused | TokenInputMessage::Blurred => {}
+        TokenInputMessage::Paste(content) => {
+            // Split pasted text by commas/semicolons and tokenize
+            for part in content.split([',', ';', '\n']) {
+                let trimmed = part.trim();
+                if !trimmed.is_empty() {
+                    let id = value.next_token_id();
+                    value.tokens.push(token_input::Token {
+                        id,
+                        email: trimmed.to_string(),
+                        label: trimmed.to_string(),
+                        is_group: false,
+                        group_id: None,
+                    });
+                }
+            }
+            value.text.clear();
+        }
+    }
+}
+
+// ── View ────────────────────────────────────────────────
+
+pub fn view_compose_window<'a>(
+    window_id: iced::window::Id,
+    state: &'a ComposeState,
+) -> Element<'a, Message> {
+    let header = compose_header(window_id, state);
+    let body = compose_body(window_id, state);
+    let footer = compose_footer(window_id, state);
+
+    let content = column![header, widgets::divider(), body, widgets::divider(), footer]
+        .spacing(SPACE_0);
+
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(theme::ContainerClass::Content.style())
+        .into()
+}
+
+fn compose_header<'a>(
+    window_id: iced::window::Id,
+    state: &'a ComposeState,
+) -> Element<'a, Message> {
+    let mut fields = column![].spacing(SPACE_XS);
+
+    // From row + Cc/Bcc toggle buttons
+    let from_row = build_from_row(window_id, state);
+    fields = fields.push(from_row);
+
+    // To field
+    fields = fields.push(build_to_row(window_id, state));
+
+    // Cc field (if shown)
+    if state.show_cc {
+        fields = fields.push(build_cc_row(window_id, state));
+    }
+
+    // Bcc field (if shown)
+    if state.show_bcc {
+        fields = fields.push(build_bcc_row(window_id, state));
+    }
+
+    // Subject
+    let subject_input = text_input("Subject", &state.subject)
+        .on_input(move |s| {
+            Message::PopOut(
+                window_id,
+                PopOutMessage::Compose(ComposeMessage::SubjectChanged(s)),
+            )
+        })
+        .size(TEXT_LG)
+        .padding(PAD_INPUT);
+
+    let subject_row = row![
+        container(
+            text("Subject")
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style())
+        )
+        .width(COMPOSE_LABEL_WIDTH)
+        .align_y(Alignment::Center),
+        subject_input,
+    ]
+    .spacing(SPACE_XS)
+    .align_y(Alignment::Center);
+    fields = fields.push(subject_row);
+
+    // Status message
+    if let Some(ref status) = state.status {
+        fields = fields.push(
+            text(status.as_str())
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        );
+    }
+
+    container(fields)
+        .padding(PAD_CONTENT)
+        .width(Length::Fill)
+        .into()
+}
+
+fn build_from_row<'a>(
+    window_id: iced::window::Id,
+    state: &'a ComposeState,
+) -> Element<'a, Message> {
+    let from_picker = pick_list(
+        state.from_account.clone(),
+        state.from_accounts.clone(),
+        |a: &AccountInfo| a.to_string(),
+    )
+    .on_select(move |account: AccountInfo| {
+        Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::FromAccountChanged(account)),
+        )
+    })
+    .text_size(TEXT_MD)
+    .padding(PAD_INPUT)
+    .width(Length::Fill)
+    .style(theme::PickListClass::Ghost.style());
+
+    let from_label = container(
+        text("From")
+            .size(TEXT_SM)
+            .style(theme::TextClass::Tertiary.style()),
+    )
+    .width(COMPOSE_LABEL_WIDTH)
+    .align_y(Alignment::Center);
+
+    let mut from_row = row![from_label, from_picker]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center)
+        .width(Length::Fill);
+
+    // Cc/Bcc toggle buttons
+    if !state.show_cc {
+        from_row = from_row.push(
+            button(text("Cc").size(TEXT_SM))
+                .style(button::text)
+                .on_press(Message::PopOut(
+                    window_id,
+                    PopOutMessage::Compose(ComposeMessage::ToggleCc),
+                ))
+                .padding(PAD_INPUT),
+        );
+    }
+    if !state.show_bcc {
+        from_row = from_row.push(
+            button(text("Bcc").size(TEXT_SM))
+                .style(button::text)
+                .on_press(Message::PopOut(
+                    window_id,
+                    PopOutMessage::Compose(ComposeMessage::ToggleBcc),
+                ))
+                .padding(PAD_INPUT),
+        );
+    }
+
+    from_row.into()
+}
+
+fn build_to_row<'a>(
+    window_id: iced::window::Id,
+    state: &'a ComposeState,
+) -> Element<'a, Message> {
+    build_recipient_row_inner(
+        "To", &state.to, state.selected_to_token, window_id,
+        "Add recipients...",
+        ComposeMessage::ToTokenInput,
+    )
+}
+
+fn build_cc_row<'a>(
+    window_id: iced::window::Id,
+    state: &'a ComposeState,
+) -> Element<'a, Message> {
+    build_recipient_row_inner(
+        "Cc", &state.cc, state.selected_cc_token, window_id,
+        "Add Cc...",
+        ComposeMessage::CcTokenInput,
+    )
+}
+
+fn build_bcc_row<'a>(
+    window_id: iced::window::Id,
+    state: &'a ComposeState,
+) -> Element<'a, Message> {
+    build_recipient_row_inner(
+        "Bcc", &state.bcc, state.selected_bcc_token, window_id,
+        "Add Bcc...",
+        ComposeMessage::BccTokenInput,
+    )
+}
+
+fn build_recipient_row_inner<'a>(
+    label: &'a str,
+    value: &'a TokenInputValue,
+    selected: Option<TokenId>,
+    window_id: iced::window::Id,
+    placeholder: &'a str,
+    wrap: fn(TokenInputMessage) -> ComposeMessage,
+) -> Element<'a, Message> {
+    let field = token_input::token_input_field(
+        &value.tokens,
+        &value.text,
+        placeholder,
+        selected,
+        move |msg| Message::PopOut(window_id, PopOutMessage::Compose(wrap(msg))),
+    );
+
+    row![
+        container(
+            text(label)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style())
+        )
+        .width(COMPOSE_LABEL_WIDTH)
+        .align_y(Alignment::Center),
+        field,
+    ]
+    .spacing(SPACE_XS)
+    .align_y(Alignment::Start)
+    .into()
+}
+
+fn compose_body<'a>(
+    window_id: iced::window::Id,
+    state: &'a ComposeState,
+) -> Element<'a, Message> {
+    let editor = iced::widget::text_editor(&state.body)
+        .on_action(move |action| {
+            Message::PopOut(
+                window_id,
+                PopOutMessage::Compose(ComposeMessage::BodyChanged(action)),
+            )
+        })
+        .height(Length::Fill)
+        .padding(SPACE_XS)
+        .font(font::text())
+        .size(TEXT_LG);
+
+    container(editor)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+fn compose_footer<'a>(
+    window_id: iced::window::Id,
+    state: &'a ComposeState,
+) -> Element<'a, Message> {
+    let _ = state; // state reserved for future validation indicators
+
+    let discard_btn = button(
+        row![
+            icon::trash().size(ICON_SM),
+            text("Discard").size(TEXT_MD),
+        ]
+        .spacing(SPACE_XXS)
+        .align_y(Alignment::Center),
+    )
+    .style(button::text)
+    .on_press(Message::PopOut(
+        window_id,
+        PopOutMessage::Compose(ComposeMessage::Discard),
+    ))
+    .padding(PAD_BUTTON);
+
+    let send_btn = button(
+        row![
+            icon::send().size(ICON_SM),
+            text("Send").size(TEXT_MD).font(font::text_semibold()),
+        ]
+        .spacing(SPACE_XXS)
+        .align_y(Alignment::Center),
+    )
+    .style(button::primary)
+    .on_press(Message::PopOut(
+        window_id,
+        PopOutMessage::Compose(ComposeMessage::Send),
+    ))
+    .padding(PAD_BUTTON);
+
+    let footer_row = row![discard_btn, Space::new().width(Length::Fill), send_btn]
+        .align_y(Alignment::Center);
+
+    container(footer_row)
+        .padding(PAD_CONTENT)
+        .width(Length::Fill)
+        .into()
+}
+
+// ── Helpers ─────────────────────────────────────────────
+
+fn accounts_to_info(accounts: &[db::Account]) -> Vec<AccountInfo> {
+    accounts
+        .iter()
+        .map(|a| AccountInfo {
+            id: a.id.clone(),
+            email: a.email.clone(),
+            display_name: a.display_name.clone(),
+            account_name: a.account_name.clone(),
+        })
+        .collect()
+}

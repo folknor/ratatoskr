@@ -19,6 +19,7 @@ use db::{Db, Thread};
 use iced::widget::{column, container, mouse_area, row, stack};
 use iced::{Element, Length, Point, Size, Task, Theme};
 use pop_out::{PopOutMessage, PopOutWindow};
+use pop_out::compose::{ComposeMessage, ComposeMode, ComposeState};
 use pop_out::message_view::{MessageViewMessage, MessageViewState};
 use ui::palette::PaletteState;
 use ratatoskr_command_palette::{
@@ -31,6 +32,7 @@ use ratatoskr_core::db::queries_extra::navigation::{
 use ratatoskr_core::db::queries_extra::get_threads_scoped;
 use ratatoskr_core::db::types::{AccountScope, DbThread};
 use ui::layout::{
+    COMPOSE_DEFAULT_HEIGHT, COMPOSE_DEFAULT_WIDTH, COMPOSE_MIN_HEIGHT, COMPOSE_MIN_WIDTH,
     MESSAGE_VIEW_DEFAULT_HEIGHT, MESSAGE_VIEW_DEFAULT_WIDTH, MESSAGE_VIEW_MIN_HEIGHT,
     MESSAGE_VIEW_MIN_WIDTH, RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH,
     THREAD_LIST_MIN_WIDTH,
@@ -340,14 +342,15 @@ impl App {
         if window_id == self.main_window_id {
             return "Ratatoskr".to_string();
         }
-        if let Some(PopOutWindow::MessageView(state)) =
-            self.pop_out_windows.get(&window_id)
-        {
-            let subject = state.subject.as_deref().unwrap_or("(no subject)");
-            let sender = state.from_address.as_deref().unwrap_or("unknown");
-            return format!("{subject} \u{2014} {sender}");
+        match self.pop_out_windows.get(&window_id) {
+            Some(PopOutWindow::MessageView(state)) => {
+                let subject = state.subject.as_deref().unwrap_or("(no subject)");
+                let sender = state.from_address.as_deref().unwrap_or("unknown");
+                format!("{subject} \u{2014} {sender}")
+            }
+            Some(PopOutWindow::Compose(state)) => state.window_title(),
+            None => "Ratatoskr".to_string(),
         }
-        "Ratatoskr".to_string()
     }
 
     /// Theme callback for daemon (receives window ID, ignored).
@@ -548,7 +551,8 @@ impl App {
                 self.reading_pane.date_display = display;
                 Task::none()
             }
-            Message::Compose | Message::Noop => Task::none(),
+            Message::Compose => self.open_compose_window(ComposeMode::New),
+            Message::Noop => Task::none(),
 
             // Command system
             Message::KeyEvent(msg) => self.handle_key_event(msg),
@@ -582,9 +586,8 @@ impl App {
                 // the action backend is implemented.
                 Task::none()
             }
-            Message::ComposeAction(_action) => {
-                // Stub: compose actions not yet implemented.
-                Task::none()
+            Message::ComposeAction(action) => {
+                self.handle_compose_action(action)
             }
             Message::TaskAction(_action) => {
                 // Stub: task actions not yet implemented.
@@ -870,6 +873,9 @@ impl App {
             return match pop_out {
                 PopOutWindow::MessageView(state) => {
                     pop_out::message_view::view_message_window(window_id, state)
+                }
+                PopOutWindow::Compose(state) => {
+                    pop_out::compose::view_compose_window(window_id, state)
                 }
             };
         }
@@ -2008,11 +2014,48 @@ impl App {
         let Some(window) = self.pop_out_windows.get_mut(&window_id) else {
             return Task::none();
         };
-        match (window, pop_out_msg) {
+        match (window, &pop_out_msg) {
+            (
+                PopOutWindow::MessageView(_),
+                PopOutMessage::MessageView(
+                    MessageViewMessage::Reply
+                    | MessageViewMessage::ReplyAll
+                    | MessageViewMessage::Forward,
+                ),
+            ) => {
+                let mv_msg = match pop_out_msg {
+                    PopOutMessage::MessageView(m) => m,
+                    _ => return Task::none(),
+                };
+                self.open_compose_from_message_view(window_id, mv_msg)
+            }
             (
                 PopOutWindow::MessageView(state),
-                PopOutMessage::MessageView(msg),
-            ) => handle_message_view_update(state, msg),
+                PopOutMessage::MessageView(_),
+            ) => {
+                let PopOutMessage::MessageView(msg) = pop_out_msg else {
+                    return Task::none();
+                };
+                handle_message_view_update(state, msg)
+            }
+            (
+                PopOutWindow::Compose(_),
+                PopOutMessage::Compose(ComposeMessage::Discard),
+            ) => {
+                self.pop_out_windows.remove(&window_id);
+                iced::window::close(window_id)
+            }
+            (
+                PopOutWindow::Compose(state),
+                PopOutMessage::Compose(_),
+            ) => {
+                let PopOutMessage::Compose(msg) = pop_out_msg else {
+                    return Task::none();
+                };
+                pop_out::compose::update_compose(state, msg);
+                Task::none()
+            }
+            _ => Task::none(),
         }
     }
 
@@ -2082,6 +2125,139 @@ impl App {
                 },
             ),
         ])
+    }
+
+    fn open_compose_window(&mut self, mode: ComposeMode) -> Task<Message> {
+        let state = ComposeState::new(&self.sidebar.accounts);
+        self.open_compose_window_with_state(state, mode)
+    }
+
+    fn open_compose_window_with_state(
+        &mut self,
+        mut state: ComposeState,
+        mode: ComposeMode,
+    ) -> Task<Message> {
+        state.mode = mode;
+        // Re-derive subject from mode
+        state.subject = match &state.mode {
+            ComposeMode::New => String::new(),
+            ComposeMode::Reply { original_subject }
+            | ComposeMode::ReplyAll { original_subject } => {
+                if original_subject.starts_with("Re: ") {
+                    original_subject.clone()
+                } else {
+                    format!("Re: {original_subject}")
+                }
+            }
+            ComposeMode::Forward { original_subject } => {
+                if original_subject.starts_with("Fwd: ") {
+                    original_subject.clone()
+                } else {
+                    format!("Fwd: {original_subject}")
+                }
+            }
+        };
+
+        let settings = iced::window::Settings {
+            size: Size::new(COMPOSE_DEFAULT_WIDTH, COMPOSE_DEFAULT_HEIGHT),
+            min_size: Some(Size::new(COMPOSE_MIN_WIDTH, COMPOSE_MIN_HEIGHT)),
+            exit_on_close_request: false,
+            ..Default::default()
+        };
+
+        let (window_id, open_task) = iced::window::open(settings);
+        self.pop_out_windows
+            .insert(window_id, PopOutWindow::Compose(state));
+        self.composer_is_open = true;
+
+        open_task.discard()
+    }
+
+    fn open_compose_from_message_view(
+        &mut self,
+        window_id: iced::window::Id,
+        action: MessageViewMessage,
+    ) -> Task<Message> {
+        let Some(PopOutWindow::MessageView(mv)) =
+            self.pop_out_windows.get(&window_id)
+        else {
+            return Task::none();
+        };
+
+        let subject = mv.subject.clone().unwrap_or_default();
+        let mode = match action {
+            MessageViewMessage::Reply => ComposeMode::Reply {
+                original_subject: subject,
+            },
+            MessageViewMessage::ReplyAll => ComposeMode::ReplyAll {
+                original_subject: subject,
+            },
+            MessageViewMessage::Forward => ComposeMode::Forward {
+                original_subject: subject,
+            },
+            _ => return Task::none(),
+        };
+
+        let state = ComposeState::new_reply(
+            &self.sidebar.accounts,
+            mode.clone(),
+            mv.from_address.as_deref(),
+            mv.from_name.as_deref(),
+            mv.to_addresses.as_deref(),
+            mv.body_text.as_deref().or(mv.snippet.as_deref()),
+            Some(&mv.thread_id),
+            Some(&mv.message_id),
+        );
+
+        self.open_compose_window_with_state(state, mode)
+    }
+
+    fn handle_compose_action(
+        &mut self,
+        action: ComposeAction,
+    ) -> Task<Message> {
+        // Get reply context from the currently selected thread/message
+        let selected_thread = self
+            .thread_list
+            .selected_thread
+            .and_then(|idx| self.thread_list.threads.get(idx));
+        let last_message = self.reading_pane.thread_messages.first();
+
+        let subject = selected_thread
+            .and_then(|t| t.subject.clone())
+            .unwrap_or_default();
+
+        let mode = match action {
+            ComposeAction::Reply => ComposeMode::Reply {
+                original_subject: subject,
+            },
+            ComposeAction::ReplyAll => ComposeMode::ReplyAll {
+                original_subject: subject,
+            },
+            ComposeAction::Forward => ComposeMode::Forward {
+                original_subject: subject,
+            },
+        };
+
+        let to_email = last_message.and_then(|m| m.from_address.as_deref());
+        let to_name = last_message.and_then(|m| m.from_name.as_deref());
+        let cc_emails = last_message.and_then(|m| m.to_addresses.as_deref());
+        let thread_id = selected_thread.map(|t| t.id.as_str());
+        let message_id = last_message.map(|m| m.id.as_str());
+        let snippet = last_message.and_then(|m| m.snippet.as_deref());
+
+        let state = ComposeState::new_reply(
+            &self.sidebar.accounts,
+            mode.clone(),
+            to_email,
+            to_name,
+            cc_emails,
+            snippet,
+            thread_id,
+            message_id,
+        );
+
+        self.open_compose_window_with_state(state, mode)
     }
 }
 
