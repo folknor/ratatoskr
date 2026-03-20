@@ -11,6 +11,7 @@
 //! **Feature-gated** (`widget` feature, default on): `widget` module depends
 //! on iced for rendering, input handling, and cursor management.
 
+pub mod compose;
 pub mod document;
 pub mod html_parse;
 pub mod html_serialize;
