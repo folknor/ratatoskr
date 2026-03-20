@@ -237,6 +237,12 @@ pub enum ContainerClass {
     DraggingRow,
     /// Status bar background.
     StatusBar,
+    /// Palette backdrop (semi-transparent overlay).
+    PaletteBackdrop,
+    /// Palette card (elevated container with shadow).
+    PaletteCard,
+    /// Palette selected result row.
+    PaletteSelectedRow,
 }
 
 impl ContainerClass {
@@ -259,6 +265,9 @@ impl ContainerClass {
             Self::KeyBadge => style_key_badge_container,
             Self::DraggingRow => style_dragging_row_container,
             Self::StatusBar => style_status_bar_container,
+            Self::PaletteBackdrop => style_palette_backdrop_container,
+            Self::PaletteCard => style_palette_card_container,
+            Self::PaletteSelectedRow => style_palette_selected_row_container,
         }
     }
 }
@@ -925,6 +934,43 @@ fn style_status_bar_container(theme: &Theme) -> container::Style {
             width: 1.0,
             radius: 0.0.into(),
         },
+        ..Default::default()
+    }
+}
+
+// ── Palette style implementations ────────────────────────
+
+fn style_palette_backdrop_container(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    container::Style {
+        background: Some(Color { a: 0.5, ..p.background.base.color }.into()),
+        ..Default::default()
+    }
+}
+
+fn style_palette_card_container(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    container::Style {
+        background: Some(p.background.weak.color.into()),
+        border: iced::Border {
+            radius: RADIUS_LG.into(),
+            width: 1.0,
+            color: p.background.strong.color,
+        },
+        shadow: iced::Shadow {
+            color: Color { a: 0.3, ..Color::BLACK },
+            offset: iced::Vector::new(0.0, 4.0),
+            blur_radius: 16.0,
+        },
+        ..Default::default()
+    }
+}
+
+fn style_palette_selected_row_container(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    container::Style {
+        background: Some(p.primary.weak.color.into()),
+        border: border::rounded(RADIUS_SM),
         ..Default::default()
     }
 }

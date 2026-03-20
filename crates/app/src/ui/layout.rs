@@ -318,6 +318,21 @@ pub const GRIP_SLOT_WIDTH: f32 = 16.0;
 /// Space between scrollbar and content (embeds scrollbar instead of overlaying)
 pub const SCROLLBAR_SPACING: f32 = SPACE_XXXS;
 
+// ── Palette overlay ─────────────────────────────────────
+
+/// Palette card width.
+pub const PALETTE_WIDTH: f32 = 600.0;
+/// Palette card max height.
+pub const PALETTE_MAX_HEIGHT: f32 = 400.0;
+/// Palette vertical offset from top of window.
+pub const PALETTE_TOP_OFFSET: f32 = 80.0;
+/// Individual result row height.
+pub const PALETTE_RESULT_HEIGHT: f32 = 36.0;
+/// Category badge column width.
+pub const PALETTE_CATEGORY_WIDTH: f32 = 80.0;
+/// Keybinding hint column width.
+pub const PALETTE_KEYBINDING_WIDTH: f32 = 100.0;
+
 // ── Status bar ──────────────────────────────────────────
 
 /// Status bar fixed height (one line of text + padding).

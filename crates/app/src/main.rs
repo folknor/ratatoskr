@@ -14,8 +14,9 @@ use command_dispatch::{
 };
 use component::Component;
 use db::{Db, Thread};
-use iced::widget::{column, container, mouse_area, row};
+use iced::widget::{column, container, mouse_area, row, stack};
 use iced::{Element, Length, Point, Size, Task, Theme};
+use ui::palette::PaletteState;
 use ratatoskr_command_palette::{
     BindingTable, Chord, CommandArgs, CommandId, CommandRegistry, FocusedRegion, ResolveResult,
     current_platform,
@@ -186,6 +187,8 @@ struct App {
     composer_is_open: bool,
     /// Pending chord for two-key sequence bindings.
     pending_chord: Option<PendingChord>,
+    /// Command palette overlay state.
+    palette: PaletteState,
 }
 
 impl App {
@@ -224,6 +227,7 @@ impl App {
             is_online: true,
             composer_is_open: false,
             pending_chord: None,
+            palette: PaletteState::new(),
         };
         let load_gen = app.nav_generation;
         (app, Task::perform(
@@ -455,11 +459,7 @@ impl App {
                 // Stub: reading pane position not yet implemented.
                 Task::none()
             }
-            Message::Palette(PaletteMessage::Open) => {
-                // Stub: palette UI is Slice 6b.
-                Task::none()
-            }
-            Message::Palette(PaletteMessage::Close) => Task::none(),
+            Message::Palette(msg) => self.handle_palette(msg),
         }
     }
 
@@ -499,7 +499,7 @@ impl App {
         let full_layout = column![layout, status_bar];
 
         // Wrap in a mouse_area to track drag movement across the full window
-        if self.dragging.is_some() {
+        let main_layout: Element<'_, Message> = if self.dragging.is_some() {
             mouse_area(full_layout)
                 .on_move(Message::DividerDragMove)
                 .on_release(Message::DividerDragEnd)
@@ -507,6 +507,39 @@ impl App {
                 .into()
         } else {
             full_layout.into()
+        };
+
+        // Palette overlay
+        if self.palette.is_open() {
+            let backdrop = mouse_area(
+                container("")
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .style(ui::theme::ContainerClass::PaletteBackdrop.style()),
+            )
+            .on_press(Message::Palette(PaletteMessage::Close));
+
+            let palette_widget = ui::palette::palette_card(
+                &self.palette,
+                &self.registry,
+                |q| Message::Palette(PaletteMessage::QueryChanged(q)),
+                Message::Palette(PaletteMessage::Confirm),
+                |idx| Message::Palette(PaletteMessage::ClickResult(idx)),
+            );
+
+            let palette_positioned = container(palette_widget)
+                .width(Length::Fill)
+                .padding(iced::Padding {
+                    top: ui::layout::PALETTE_TOP_OFFSET,
+                    right: 0.0,
+                    bottom: 0.0,
+                    left: 0.0,
+                })
+                .align_x(iced::Alignment::Center);
+
+            stack![main_layout, backdrop, palette_positioned].into()
+        } else {
+            main_layout
         }
     }
 }
@@ -534,7 +567,12 @@ impl App {
         modifiers: iced::keyboard::Modifiers,
         status: iced::event::Status,
     ) -> Task<Message> {
-        // 1. If a text input or other widget captured the event, skip
+        // 1. If palette is open, route to palette-specific handler
+        if self.palette.is_open() {
+            return self.handle_palette_key(&key);
+        }
+
+        // 2. If a text input or other widget captured the event, skip
         //    (unless it's a modifier-chord like Ctrl+K)
         if status == iced::event::Status::Captured
             && !command_dispatch::has_command_modifier(&modifiers)
@@ -569,6 +607,26 @@ impl App {
     fn is_command_available(&self, id: CommandId) -> bool {
         let ctx = command_dispatch::build_context(self);
         self.registry.get(id).is_some_and(|desc| (desc.is_available)(&ctx))
+    }
+
+    /// When the palette is open, intercept Escape/ArrowUp/ArrowDown/Enter.
+    /// All other keys flow to the text_input naturally.
+    fn handle_palette_key(&mut self, key: &iced::keyboard::Key) -> Task<Message> {
+        match key {
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
+                self.update(Message::Palette(PaletteMessage::Close))
+            }
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => {
+                self.update(Message::Palette(PaletteMessage::SelectNext))
+            }
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => {
+                self.update(Message::Palette(PaletteMessage::SelectPrev))
+            }
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
+                self.update(Message::Palette(PaletteMessage::Confirm))
+            }
+            _ => Task::none(),
+        }
     }
 
     /// Try to resolve a single chord, checking availability before dispatch.
@@ -613,6 +671,87 @@ impl App {
         match command_dispatch::dispatch_parameterized(id, args) {
             Some(msg) => self.update(msg),
             None => Task::none(),
+        }
+    }
+}
+
+// ── Palette handling ───────────────────────────────────
+
+impl App {
+    fn handle_palette(&mut self, msg: PaletteMessage) -> Task<Message> {
+        match msg {
+            PaletteMessage::Open => {
+                let ctx = command_dispatch::build_context(self);
+                let results = self.registry.query(&ctx, "");
+                self.palette.open = true;
+                self.palette.query.clear();
+                self.palette.results = results;
+                self.palette.selected_index = 0;
+                iced::widget::operation::focus::<Message>("palette-input".to_string())
+            }
+            PaletteMessage::Close => {
+                self.palette.open = false;
+                self.palette.query.clear();
+                self.palette.results.clear();
+                self.palette.selected_index = 0;
+                Task::none()
+            }
+            PaletteMessage::QueryChanged(query) => {
+                let ctx = command_dispatch::build_context(self);
+                self.palette.results = self.registry.query(&ctx, &query);
+                self.palette.query = query;
+                self.palette.selected_index = 0;
+                Task::none()
+            }
+            PaletteMessage::SelectNext => {
+                if !self.palette.results.is_empty() {
+                    self.palette.selected_index = (self.palette.selected_index + 1)
+                        .min(self.palette.results.len() - 1);
+                }
+                Task::none()
+            }
+            PaletteMessage::SelectPrev => {
+                self.palette.selected_index = self.palette.selected_index.saturating_sub(1);
+                Task::none()
+            }
+            PaletteMessage::Confirm => self.palette_confirm(),
+            PaletteMessage::ClickResult(idx) => {
+                if idx < self.palette.results.len() {
+                    self.palette.selected_index = idx;
+                    self.palette_confirm()
+                } else {
+                    Task::none()
+                }
+            }
+        }
+    }
+
+    fn palette_confirm(&mut self) -> Task<Message> {
+        let Some(result) = self.palette.results.get(self.palette.selected_index) else {
+            return Task::none();
+        };
+        if !result.available {
+            return Task::none();
+        }
+        let id = result.id;
+        let input_mode = result.input_mode;
+
+        match input_mode {
+            ratatoskr_command_palette::InputMode::Direct => {
+                self.palette.open = false;
+                self.palette.query.clear();
+                self.palette.results.clear();
+                self.palette.selected_index = 0;
+                self.update(Message::ExecuteCommand(id))
+            }
+            ratatoskr_command_palette::InputMode::Parameterized { .. } => {
+                // Stage 2 is next slice — close palette for now.
+                self.palette.open = false;
+                self.palette.query.clear();
+                self.palette.results.clear();
+                self.palette.selected_index = 0;
+                Task::none()
+            }
         }
     }
 }

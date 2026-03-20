@@ -1,6 +1,7 @@
 pub mod animated_toggler;
 pub mod right_sidebar;
 pub mod layout;
+pub mod palette;
 pub mod popover;
 pub mod reading_pane;
 pub mod settings;

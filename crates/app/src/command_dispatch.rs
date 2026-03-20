@@ -64,8 +64,20 @@ pub enum ReadingPanePosition {
 
 #[derive(Debug, Clone)]
 pub enum PaletteMessage {
+    /// Open the palette (triggered by Ctrl+K or palette button).
     Open,
+    /// Close the palette (Escape, click outside, or command executed).
     Close,
+    /// Text input changed in the search field.
+    QueryChanged(String),
+    /// Arrow down: select next result.
+    SelectNext,
+    /// Arrow up: select previous result.
+    SelectPrev,
+    /// Enter pressed: execute the currently selected command.
+    Confirm,
+    /// Mouse click on a result row.
+    ClickResult(usize),
 }
 
 #[derive(Debug, Clone)]
