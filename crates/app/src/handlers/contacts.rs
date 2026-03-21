@@ -2,9 +2,13 @@ use std::sync::Arc;
 
 use iced::Task;
 
-use crate::db::ContactEntry;
+use crate::db::{ContactEntry, Db};
+use crate::pop_out::compose::{ComposeMessage, ComposeState};
+use crate::pop_out::PopOutMessage;
 use crate::ui::settings::SettingsMessage;
 use crate::{App, Message};
+
+// ── Settings-panel contact/group CRUD ──────────────────
 
 impl App {
     pub(crate) fn handle_load_contacts(&self, filter: String) -> Task<Message> {
@@ -91,4 +95,50 @@ impl App {
             move |result| Message::Settings(SettingsMessage::GroupMembersLoaded(gid.clone(), result)),
         )
     }
+}
+
+// ── Compose autocomplete ───────────────────────────────
+
+/// Dispatch an autocomplete search for the active compose field.
+pub fn dispatch_autocomplete_search(
+    db: &Arc<Db>,
+    window_id: iced::window::Id,
+    state: &mut ComposeState,
+) -> Task<Message> {
+    let query = state.autocomplete.query.clone();
+    if query.trim().is_empty() {
+        state.autocomplete.results.clear();
+        state.autocomplete.highlighted = None;
+        return Task::none();
+    }
+
+    state.autocomplete.search_generation += 1;
+    let generation = state.autocomplete.search_generation;
+    let db = Arc::clone(db);
+
+    Task::perform(
+        async move { db.search_autocomplete(query, 10).await },
+        move |results| {
+            Message::PopOut(
+                window_id,
+                PopOutMessage::Compose(
+                    ComposeMessage::AutocompleteResults(generation, results),
+                ),
+            )
+        },
+    )
+}
+
+/// Check if a compose message should trigger an autocomplete search.
+pub fn should_trigger_autocomplete(msg: &ComposeMessage) -> bool {
+    matches!(
+        msg,
+        ComposeMessage::ToTokenInput(
+            crate::ui::token_input::TokenInputMessage::TextChanged(_)
+        ) | ComposeMessage::CcTokenInput(
+            crate::ui::token_input::TokenInputMessage::TextChanged(_)
+        ) | ComposeMessage::BccTokenInput(
+            crate::ui::token_input::TokenInputMessage::TextChanged(_)
+        )
+    )
 }

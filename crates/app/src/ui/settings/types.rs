@@ -111,7 +111,10 @@ pub enum SettingsMessage {
     ContactClick(String),
     ContactEditorFieldChanged(ContactField, String),
     ContactEditorSave,
+    ContactEditorAccountChanged(Option<String>),
     ContactDelete(String),
+    ContactConfirmDelete(String),
+    ContactCancelDelete,
     ContactCreate,
     ContactSaved(Result<(), String>),
     ContactDeleted(Result<(), String>),
@@ -121,6 +124,8 @@ pub enum SettingsMessage {
     GroupClick(String),
     GroupCreate,
     GroupDelete(String),
+    GroupConfirmDelete(String),
+    GroupCancelDelete,
     GroupSaved(Result<(), String>),
     GroupDeleted(Result<(), String>),
     GroupEditorNameChanged(String),
@@ -411,10 +416,14 @@ pub struct Settings {
     pub contact_filter: String,
     pub contacts: Vec<crate::db::ContactEntry>,
     pub contact_editor: Option<ContactEditorState>,
+    /// Pending contact delete ID awaiting confirmation.
+    pub confirm_delete_contact: Option<String>,
     // Groups management
     pub group_filter: String,
     pub groups: Vec<crate::db::GroupEntry>,
     pub group_editor: Option<GroupEditorState>,
+    /// Pending group delete ID awaiting confirmation.
+    pub confirm_delete_group: Option<String>,
 }
 
 /// An account card in the settings list.
@@ -578,9 +587,11 @@ impl Default for Settings {
             contact_filter: String::new(),
             contacts: Vec::new(),
             contact_editor: None,
+            confirm_delete_contact: None,
             group_filter: String::new(),
             groups: Vec::new(),
             group_editor: None,
+            confirm_delete_group: None,
         }
     }
 }

@@ -15,6 +15,7 @@ pub mod status_bar;
 pub mod theme;
 pub mod thread_list;
 pub mod token_input;
+pub mod token_input_parse;
 pub mod undoable;
 pub mod undoable_text_input;
 pub mod widgets;
