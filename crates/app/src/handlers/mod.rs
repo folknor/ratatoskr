@@ -8,7 +8,7 @@
 
 mod accounts;
 mod calendar;
-mod commands;
+pub(crate) mod commands;
 mod contacts;
 mod keyboard;
 mod palette;

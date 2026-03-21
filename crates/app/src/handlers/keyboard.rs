@@ -79,10 +79,11 @@ impl App {
 
     /// When the palette is open, intercept Escape/ArrowUp/ArrowDown/Enter.
     fn handle_palette_key(&mut self, key: &iced::keyboard::Key) -> Task<Message> {
-        use crate::command_dispatch::PaletteMessage;
+        use crate::ui::palette::PaletteMessage;
+        let default_ctx = ratatoskr_command_palette::CommandContext::default();
         match key {
             iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
-                self.update(Message::Palette(PaletteMessage::Close))
+                self.update(Message::Palette(PaletteMessage::Close(default_ctx)))
             }
             iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => {
                 self.update(Message::Palette(PaletteMessage::SelectNext))
@@ -91,7 +92,7 @@ impl App {
                 self.update(Message::Palette(PaletteMessage::SelectPrev))
             }
             iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
-                self.update(Message::Palette(PaletteMessage::Confirm))
+                self.update(Message::Palette(PaletteMessage::Confirm(default_ctx)))
             }
             _ => Task::none(),
         }

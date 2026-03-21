@@ -37,6 +37,8 @@ pub struct Thread {
     pub has_attachments: bool,
     pub from_name: Option<String>,
     pub from_address: Option<String>,
+    /// Whether this is a local-only draft (not yet synced to server).
+    pub is_local_draft: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -114,5 +116,6 @@ pub(crate) fn row_to_thread(row: &Row<'_>) -> rusqlite::Result<Thread> {
         has_attachments: row.get::<_, i64>("has_attachments")? != 0,
         from_name: row.get("from_name")?,
         from_address: row.get("from_address")?,
+        is_local_draft: false,
     })
 }

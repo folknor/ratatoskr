@@ -1,4 +1,4 @@
-use ratatoskr_command_palette::{CommandArgs, CommandContext, CommandId, OptionItem, ViewType};
+use ratatoskr_command_palette::{CommandArgs, CommandContext, CommandId, ViewType};
 
 use crate::App;
 use crate::Message;
@@ -62,28 +62,7 @@ pub enum ReadingPanePosition {
     Hidden,
 }
 
-#[derive(Debug, Clone)]
-pub enum PaletteMessage {
-    /// Open the palette (triggered by Ctrl+K or palette button).
-    Open,
-    /// Close the palette (Escape, click outside, or command executed).
-    Close,
-    /// Text input changed in the search field.
-    QueryChanged(String),
-    /// Arrow down: select next result.
-    SelectNext,
-    /// Arrow up: select previous result.
-    SelectPrev,
-    /// Enter pressed: execute the currently selected command.
-    Confirm,
-    /// Mouse click on a result row.
-    ClickResult(usize),
-    /// Stage 2: option list loaded from resolver.
-    /// The `u64` is the generation counter to discard stale results.
-    OptionsLoaded(u64, CommandId, Result<Vec<OptionItem>, String>),
-    /// Mouse click on a stage 2 option row.
-    ClickOption(usize),
-}
+// PaletteMessage is defined in `ui::palette` as part of the Palette component.
 
 #[derive(Debug, Clone)]
 pub enum KeyEventMessage {
@@ -425,7 +404,11 @@ fn dispatch_other(id: CommandId) -> Option<Message> {
         CommandId::AppAskAi => None,
         CommandId::AppHelp => Some(Message::ShowHelp),
         CommandId::AppSyncFolder => Some(Message::SyncCurrentFolder),
-        CommandId::AppOpenPalette => Some(Message::Palette(PaletteMessage::Open)),
+        CommandId::AppOpenPalette => Some(Message::Palette(
+            crate::ui::palette::PaletteMessage::Open(
+                ratatoskr_command_palette::CommandContext::default(),
+            ),
+        )),
         _ => None,
     }
 }
