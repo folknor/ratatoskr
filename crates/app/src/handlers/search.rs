@@ -389,7 +389,8 @@ fn execute_search_sql_fallback(
             .prepare(
                 "SELECT t.id, t.account_id, t.subject, t.snippet,
                         t.last_message_at, t.message_count,
-                        t.is_read, t.is_starred, t.has_attachments,
+                        t.is_read, t.is_starred, t.is_pinned, t.is_muted,
+                        t.has_attachments,
                         t.from_name, t.from_address
                  FROM threads t
                  WHERE t.subject LIKE ?1 OR t.snippet LIKE ?1
@@ -409,9 +410,11 @@ fn execute_search_sql_fallback(
                     message_count: row.get(5)?,
                     is_read: row.get(6)?,
                     is_starred: row.get(7)?,
-                    has_attachments: row.get(8)?,
-                    from_name: row.get(9)?,
-                    from_address: row.get(10)?,
+                    is_pinned: row.get(8)?,
+                    is_muted: row.get(9)?,
+                    has_attachments: row.get(10)?,
+                    from_name: row.get(11)?,
+                    from_address: row.get(12)?,
                 })
             })
             .map_err(|e| format!("search query: {e}"))?;
@@ -436,6 +439,8 @@ fn unified_result_to_thread(
         message_count: r.message_count.unwrap_or(1),
         is_read: r.is_read,
         is_starred: r.is_starred,
+        is_pinned: false,
+        is_muted: false,
         has_attachments: false,
         from_name: r.from_name,
         from_address: r.from_address,

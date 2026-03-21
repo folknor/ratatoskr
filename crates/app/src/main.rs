@@ -286,6 +286,10 @@ struct App {
 
     no_accounts: bool,
     add_account_wizard: Option<AddAccountWizard>,
+
+    /// The current navigation target, set by `Message::NavigateTo`.
+    /// Used for view type derivation and thread state context.
+    navigation_target: Option<NavigationTarget>,
 }
 
 impl App {
@@ -346,6 +350,7 @@ impl App {
             expiry_ran: false,
             no_accounts: false,
             add_account_wizard: None,
+            navigation_target: None,
         };
         let load_gen = app.nav_generation;
         (app, Task::batch([
@@ -598,7 +603,7 @@ impl App {
             Message::ExecuteParameterized(id, args) => {
                 self.handle_execute_parameterized(id, args)
             }
-            Message::NavigateTo(_target) => Task::none(),
+            Message::NavigateTo(target) => self.handle_navigate_to(target),
             Message::Escape => {
                 if !matches!(self.calendar.overlay, CalendarOverlay::None) {
                     self.calendar.overlay = CalendarOverlay::None;
@@ -880,6 +885,7 @@ impl App {
             SidebarEvent::AccountSelected(_idx) => {
                 self.clear_search_state();
                 self.clear_pinned_search_context();
+                self.navigation_target = None;
                 self.thread_list.selected_thread = None;
                 self.nav_generation += 1;
                 self.thread_generation += 1;
@@ -889,6 +895,7 @@ impl App {
             SidebarEvent::AllAccountsSelected => {
                 self.clear_search_state();
                 self.clear_pinned_search_context();
+                self.navigation_target = None;
                 self.thread_list.selected_thread = None;
                 self.nav_generation += 1;
                 self.thread_generation += 1;
@@ -899,6 +906,7 @@ impl App {
             SidebarEvent::LabelSelected(label_id) => {
                 self.clear_search_state();
                 self.clear_pinned_search_context();
+                self.navigation_target = None;
                 self.update_thread_list_context_from_sidebar();
                 self.handle_label_selected(label_id)
             }
@@ -1595,6 +1603,8 @@ fn db_thread_to_app_thread(t: DbThread) -> Thread {
         message_count: t.message_count,
         is_read: t.is_read,
         is_starred: t.is_starred,
+        is_pinned: t.is_pinned,
+        is_muted: t.is_muted,
         has_attachments: t.has_attachments,
         from_name: t.from_name,
         from_address: t.from_address,

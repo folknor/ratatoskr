@@ -5,7 +5,7 @@ use crate::Message;
 
 // ── Supporting enums ────────────────────────────────────
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NavigationTarget {
     Inbox,
     Starred,
@@ -13,6 +13,7 @@ pub enum NavigationTarget {
     Drafts,
     Snoozed,
     Trash,
+    Spam,
     AllMail,
     Primary,
     Updates,
@@ -21,7 +22,41 @@ pub enum NavigationTarget {
     Newsletters,
     Tasks,
     Attachments,
+    SmartFolder { id: String },
     Label { label_id: String, account_id: String },
+    Search { query: String },
+    PinnedSearch { id: i64 },
+}
+
+impl NavigationTarget {
+    /// Map a `NavigationTarget` to the sidebar `selected_label` string.
+    ///
+    /// Universal folders map to well-known IDs (INBOX, STARRED, etc.).
+    /// Smart folders use their ID directly.
+    /// Labels use `label_id`.
+    /// Search and PinnedSearch return `None` (they don't select a sidebar label).
+    pub fn to_label_id(&self) -> Option<String> {
+        match self {
+            Self::Inbox => Some("INBOX".to_string()),
+            Self::Starred => Some("STARRED".to_string()),
+            Self::Sent => Some("SENT".to_string()),
+            Self::Drafts => Some("DRAFT".to_string()),
+            Self::Snoozed => Some("SNOOZED".to_string()),
+            Self::Trash => Some("TRASH".to_string()),
+            Self::Spam => Some("SPAM".to_string()),
+            Self::AllMail => Some("ALL_MAIL".to_string()),
+            Self::Primary => Some("CATEGORY_PRIMARY".to_string()),
+            Self::Updates => Some("CATEGORY_UPDATES".to_string()),
+            Self::Promotions => Some("CATEGORY_PROMOTIONS".to_string()),
+            Self::Social => Some("CATEGORY_SOCIAL".to_string()),
+            Self::Newsletters => Some("CATEGORY_NEWSLETTERS".to_string()),
+            Self::Tasks => Some("TASKS".to_string()),
+            Self::Attachments => Some("ATTACHMENTS".to_string()),
+            Self::SmartFolder { id } => Some(id.clone()),
+            Self::Label { label_id, .. } => Some(label_id.clone()),
+            Self::Search { .. } | Self::PinnedSearch { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -161,9 +196,46 @@ fn current_view_and_label(app: &App) -> (ViewType, Option<String>) {
         return (ViewType::Search, None);
     }
 
+    // Derive from navigation target if set
+    if let Some(target) = &app.navigation_target {
+        return view_type_from_target(app, target);
+    }
+
     match &app.sidebar.selected_label {
         Some(label_id) => view_type_from_label(app, label_id),
         None => (ViewType::Inbox, None),
+    }
+}
+
+/// Map a `NavigationTarget` to `ViewType` and optional label ID.
+fn view_type_from_target(
+    _app: &App,
+    target: &NavigationTarget,
+) -> (ViewType, Option<String>) {
+    match target {
+        NavigationTarget::Inbox => (ViewType::Inbox, None),
+        NavigationTarget::Starred => (ViewType::Starred, None),
+        NavigationTarget::Sent => (ViewType::Sent, None),
+        NavigationTarget::Drafts => (ViewType::Drafts, None),
+        NavigationTarget::Snoozed => (ViewType::Snoozed, None),
+        NavigationTarget::Trash => (ViewType::Trash, None),
+        NavigationTarget::Spam => (ViewType::Spam, None),
+        NavigationTarget::AllMail => (ViewType::AllMail, None),
+        NavigationTarget::Primary
+        | NavigationTarget::Updates
+        | NavigationTarget::Promotions
+        | NavigationTarget::Social
+        | NavigationTarget::Newsletters => (ViewType::Category, None),
+        NavigationTarget::Tasks => (ViewType::Tasks, None),
+        NavigationTarget::Attachments => (ViewType::Attachments, None),
+        NavigationTarget::SmartFolder { id } => {
+            (ViewType::SmartFolder, Some(id.clone()))
+        }
+        NavigationTarget::Label { label_id, .. } => {
+            (ViewType::Label, Some(label_id.clone()))
+        }
+        NavigationTarget::Search { .. } => (ViewType::Search, None),
+        NavigationTarget::PinnedSearch { .. } => (ViewType::PinnedSearch, None),
     }
 }
 
@@ -263,10 +335,9 @@ struct ThreadState {
 
 /// Populate thread state flags from the selected thread and current view.
 ///
-/// The `Thread` struct currently only exposes `is_read` and `is_starred`.
-/// `is_muted`, `is_pinned`, and `is_draft` are not on the app-layer Thread
-/// type yet. We derive `in_trash` and `in_spam` from the current view
-/// context (if viewing Trash/Spam, the selected thread is in that folder).
+/// `is_muted` and `is_pinned` are read from the app-layer `Thread` struct.
+/// `in_trash`, `in_spam`, and `is_draft` are derived from the current
+/// navigation context (sidebar label or `NavigationTarget`).
 fn selected_thread_state(app: &App) -> ThreadState {
     let thread = app
         .thread_list
@@ -275,19 +346,30 @@ fn selected_thread_state(app: &App) -> ThreadState {
 
     match thread {
         Some(t) => {
-            // Derive trash/spam from current view context
-            let current_label = app.sidebar.selected_label.as_deref();
-            let in_trash = Some(current_label == Some("TRASH"));
-            let in_spam = Some(current_label == Some("SPAM"));
+            // Derive trash/spam/draft from navigation target if available,
+            // otherwise fall back to sidebar selected_label.
+            let (in_trash, in_spam, is_draft) =
+                if let Some(target) = &app.navigation_target {
+                    (
+                        Some(matches!(target, NavigationTarget::Trash)),
+                        Some(matches!(target, NavigationTarget::Spam)),
+                        Some(matches!(target, NavigationTarget::Drafts)),
+                    )
+                } else {
+                    let current_label = app.sidebar.selected_label.as_deref();
+                    (
+                        Some(current_label == Some("TRASH")),
+                        Some(current_label == Some("SPAM")),
+                        Some(current_label == Some("DRAFT")),
+                    )
+                };
 
             ThreadState {
                 is_read: Some(t.is_read),
                 is_starred: Some(t.is_starred),
-                // These fields are not yet on the app Thread type.
-                // They will be populated once the Thread struct is extended.
-                is_muted: None,
-                is_pinned: None,
-                is_draft: Some(current_label == Some("DRAFT")),
+                is_muted: Some(t.is_muted),
+                is_pinned: Some(t.is_pinned),
+                is_draft,
                 in_trash,
                 in_spam,
             }

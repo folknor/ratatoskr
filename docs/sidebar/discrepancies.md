@@ -123,9 +123,9 @@ The `CycleAccount` variant remains in `SidebarEvent` for API compatibility with 
 
 Problem statement open question #6: scope does not survive app restart. `selected_account` is in-memory state, resets to `None` (All Accounts) on launch. This is documented as deferred.
 
-### 2. NavigationTarget enum
+### 2. NavigationTarget enum -- IMPLEMENTED
 
-Spec 1A transitional note acknowledges that `selected_label: Option<String>` is semantically muddy -- universal folders, smart folders, and account labels all share one `Option<String>`. The spec defers this to a future `NavigationTarget` enum. Still deferred; `selected_label` remains the flat marker.
+`NavigationTarget` enum is now defined in `command_dispatch.rs` with variants for all universal folders (Inbox, Starred, Sent, Drafts, Snoozed, Trash, Spam, AllMail), categories (Primary, Updates, Promotions, Social, Newsletters), Tasks, Attachments, SmartFolder, Label, Search, and PinnedSearch. `Message::NavigateTo(NavigationTarget)` is wired to `handle_navigate_to()` in `handlers/navigation.rs`, which updates sidebar selection, clears search/pinned search context, and loads threads. The `App` struct tracks `navigation_target: Option<NavigationTarget>` for view type derivation. The sidebar's `selected_label: Option<String>` is kept in sync via `NavigationTarget::to_label_id()` for backward compatibility with sidebar highlight logic.
 
 ### 3. Mixed drafts list view
 
