@@ -1,8 +1,13 @@
 use iced::Task;
 
 use crate::command_dispatch::{self, EmailAction};
+<<<<<<< HEAD
 use crate::{APP_DATA_DIR, App, Message};
 use ratatoskr_command_palette::{CommandArgs, CommandId, KeyBinding, OptionItem};
+=======
+use crate::{App, Message};
+use ratatoskr_command_palette::{CommandArgs, CommandId, OptionItem};
+>>>>>>> worktree-agent-aaad930b
 
 impl App {
     /// Save keybinding overrides to disk. Call this after any mutation
@@ -95,6 +100,57 @@ impl App {
             Some(msg) => self.update(msg),
             None => Task::none(),
         }
+    }
+
+    pub(crate) fn handle_email_action(
+        &mut self,
+        action: EmailAction,
+    ) -> Task<Message> {
+        let selection_count = self.thread_list.selection_count();
+
+        let confirmation = match &action {
+            EmailAction::Archive => Some("Archived"),
+            EmailAction::Trash => Some("Moved to Trash"),
+            EmailAction::PermanentDelete => Some("Permanently deleted"),
+            EmailAction::ToggleSpam => Some("Spam status toggled"),
+            EmailAction::ToggleRead => Some("Read status toggled"),
+            EmailAction::ToggleStar => Some("Star toggled"),
+            EmailAction::TogglePin => Some("Pin toggled"),
+            EmailAction::ToggleMute => Some("Mute toggled"),
+            EmailAction::Unsubscribe => Some("Unsubscribed"),
+            EmailAction::MoveToFolder { .. } => Some("Moved to folder"),
+            EmailAction::AddLabel { .. } => Some("Label applied"),
+            EmailAction::RemoveLabel { .. } => Some("Label removed"),
+            EmailAction::Snooze { .. } => Some("Snoozed"),
+        };
+        if let Some(msg) = confirmation {
+            let display = if selection_count > 1 {
+                format!("{msg} ({selection_count} threads)")
+            } else {
+                msg.to_string()
+            };
+            self.status_bar.show_confirmation(display);
+        }
+
+        // Destructive actions remove the thread from the current view
+        // — trigger auto-advance.
+        let removes_from_view = matches!(
+            action,
+            EmailAction::Archive
+                | EmailAction::Trash
+                | EmailAction::PermanentDelete
+                | EmailAction::ToggleSpam
+                | EmailAction::MoveToFolder { .. }
+                | EmailAction::Snooze { .. }
+        );
+
+        if removes_from_view {
+            return self.handle_thread_list(
+                crate::ui::thread_list::ThreadListMessage::AutoAdvance,
+            );
+        }
+
+        Task::none()
     }
 }
 

@@ -1,47 +1,23 @@
-use iced::widget::{
-    button, column, container, row, scrollable, stack, text, text_input, Space,
-};
+use std::collections::HashSet;
+
+use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
 use iced::{Color, Element, Length, Task};
-use ratatoskr_smart_folder::{CursorContext, analyze_cursor_context};
 
 use crate::component::Component;
 use crate::db::Thread;
 use crate::ui::layout::*;
 use crate::ui::theme;
-use crate::ui::undoable_text_input::undoable_text_input;
 use crate::ui::widgets;
 
-// ── Typeahead types ────────────────────────────────────
+// ── Auto-advance direction ─────────────────────────────
 
-/// State for the operator typeahead popup.
-#[derive(Debug, Clone, Default)]
-pub struct TypeaheadState {
-    /// Whether the popup is visible.
-    pub visible: bool,
-    /// The operator context that triggered the popup.
-    pub context: Option<CursorContext>,
-    /// Matching items from the data source.
-    pub items: Vec<TypeaheadItem>,
-    /// Currently highlighted item index.
-    pub selected: usize,
-}
-
-/// A single item in the typeahead suggestion list.
-#[derive(Debug, Clone)]
-pub struct TypeaheadItem {
-    /// Display label (e.g., "Alice Smith").
-    pub label: String,
-    /// Secondary text (e.g., "asmith@corp.com").
-    pub detail: Option<String>,
-    /// The value to insert into the query when selected.
-    pub insert_value: String,
-}
-
-/// Direction for keyboard navigation in the typeahead popup.
-#[derive(Debug, Clone)]
-pub enum TypeaheadDirection {
-    Up,
-    Down,
+/// Which direction to advance after an email action removes the current thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoAdvanceDirection {
+    /// Select the next thread (below) after action.
+    Next,
+    /// Select the previous thread (above) after action.
+    Previous,
 }
 
 // ── Messages & Events ──────────────────────────────────
@@ -49,14 +25,18 @@ pub enum TypeaheadDirection {
 #[derive(Debug, Clone)]
 pub enum ThreadListMessage {
     SelectThread(usize),
+    /// Ctrl+click: toggle a thread in/out of multi-selection.
+    ToggleThread(usize),
+    /// Shift+click: range-select from last selected to this index.
+    RangeSelectThread(usize),
+    /// Select all threads (Ctrl+A).
+    SelectAll,
+    /// Clear multi-selection.
+    SelectNone,
     /// The search bar text changed.
     SearchInput(String),
     /// The user pressed Enter in the search bar.
     SearchSubmit,
-    /// Undo the last search bar edit.
-    SearchUndo,
-    /// Redo a previously undone search bar edit.
-    SearchRedo,
     /// Move selection up by one.
     SelectPrevious,
     /// Move selection down by one.
@@ -71,14 +51,8 @@ pub enum ThreadListMessage {
     Deselect,
     /// Widen search scope to "All" accounts.
     WidenSearchScope,
-    /// User selected a typeahead suggestion by index.
-    TypeaheadSelect(usize),
-    /// User dismissed the typeahead popup.
-    TypeaheadDismiss,
-    /// Arrow key navigation within typeahead.
-    TypeaheadNavigate(TypeaheadDirection),
-    /// Typeahead items loaded from async data source.
-    TypeaheadItemsLoaded(Vec<TypeaheadItem>),
+    /// Auto-advance after an email action removed the actioned thread(s).
+    AutoAdvance,
 }
 
 /// Events the thread list emits upward to the App.
@@ -91,17 +65,17 @@ pub enum ThreadListEvent {
     SearchExecute,
     /// Thread deselected.
     ThreadDeselected,
-    /// Undo search bar text.
-    SearchUndo,
-    /// Redo search bar text.
-    SearchRedo,
     /// User clicked "All" to widen search scope.
     WidenSearchScope,
-    /// Typeahead needs suggestions for an operator value.
-    TypeaheadQuery {
-        operator: String,
-        partial_value: String,
+    /// Multi-selection changed — App may want to update action availability.
+    MultiSelectionChanged(usize),
+    /// Auto-advance selected a new thread after action.
+    AutoAdvance {
+        /// The index that was auto-selected (None if list is now empty).
+        new_index: Option<usize>,
     },
+    /// Batch action: apply email action to all selected thread indices.
+    BatchAction(Vec<usize>),
 }
 
 // ── Thread list mode ───────────────────────────────────
@@ -120,14 +94,18 @@ pub enum ThreadListMode {
 pub struct ThreadList {
     pub threads: Vec<Thread>,
     pub selected_thread: Option<usize>,
+    /// Multi-selection set (indices into `threads`). Empty when single-select.
+    pub selected_threads: HashSet<usize>,
+    /// The last index that was clicked/toggled, used as anchor for shift-click range select.
+    pub last_selected_anchor: Option<usize>,
     pub folder_name: String,
     pub scope_name: String,
     /// Current display mode (folder view vs search results).
     pub mode: ThreadListMode,
     /// The search query string, set by App before view() is called.
     pub search_query: String,
-    /// Operator typeahead popup state.
-    pub typeahead: TypeaheadState,
+    /// Direction to auto-advance after an email action removes a thread.
+    pub auto_advance_direction: AutoAdvanceDirection,
 }
 
 impl ThreadList {
@@ -135,16 +113,21 @@ impl ThreadList {
         Self {
             threads: Vec::new(),
             selected_thread: None,
+            selected_threads: HashSet::new(),
+            last_selected_anchor: None,
             folder_name: "Inbox".to_string(),
             scope_name: "All".to_string(),
             mode: ThreadListMode::Folder,
             search_query: String::new(),
-            typeahead: TypeaheadState::default(),
+            auto_advance_direction: AutoAdvanceDirection::Next,
         }
     }
 
     pub fn set_threads(&mut self, threads: Vec<Thread>) {
         self.threads = threads;
+        // Clear multi-selection when thread list changes — stale indices.
+        self.selected_threads.clear();
+        self.last_selected_anchor = None;
     }
 
     pub fn set_context(&mut self, folder_name: String, scope_name: String) {
@@ -152,45 +135,55 @@ impl ThreadList {
         self.scope_name = scope_name;
     }
 
-    /// Move selection to the next thread (down), wrapping if needed.
+    /// Clear multi-selection state, keeping only single selection.
+    pub fn clear_multi_select(&mut self) {
+        self.selected_threads.clear();
+    }
+
+    /// Number of selected threads (multi-select or single).
+    pub fn selection_count(&self) -> usize {
+        if self.selected_threads.is_empty() {
+            if self.selected_thread.is_some() { 1 } else { 0 }
+        } else {
+            self.selected_threads.len()
+        }
+    }
+
+    /// Returns all selected indices (multi-select or single).
+    pub fn selected_indices(&self) -> Vec<usize> {
+        if self.selected_threads.is_empty() {
+            self.selected_thread.into_iter().collect()
+        } else {
+            let mut indices: Vec<usize> =
+                self.selected_threads.iter().copied().collect();
+            indices.sort_unstable();
+            indices
+        }
+    }
+
+    /// Whether a thread at the given index is selected (single or multi).
+    fn is_selected(&self, idx: usize) -> bool {
+        if self.selected_threads.is_empty() {
+            self.selected_thread == Some(idx)
+        } else {
+            self.selected_threads.contains(&idx)
+        }
+    }
+
+    /// Move selection to the next thread (down).
     fn select_next(&mut self) -> Option<ThreadListEvent> {
         if self.threads.is_empty() {
             return None;
         }
+        self.clear_multi_select();
         let next = match self.selected_thread {
             Some(i) if i + 1 < self.threads.len() => i + 1,
             Some(_) => return None, // already at end
             None => 0,
         };
         self.selected_thread = Some(next);
+        self.last_selected_anchor = Some(next);
         Some(ThreadListEvent::ThreadSelected(next))
-    }
-
-    /// Accept the currently highlighted typeahead item and insert it
-    /// into the search query.
-    fn accept_typeahead_selection(
-        &mut self,
-    ) -> (Task<ThreadListMessage>, Option<ThreadListEvent>) {
-        let idx = self.typeahead.selected;
-        let Some(item) = self.typeahead.items.get(idx) else {
-            self.typeahead.visible = false;
-            return (Task::none(), None);
-        };
-        let Some(ref ctx) = self.typeahead.context else {
-            self.typeahead.visible = false;
-            return (Task::none(), None);
-        };
-
-        let new_query = apply_typeahead_selection(&self.search_query, ctx, item);
-        self.typeahead.visible = false;
-        self.typeahead.items.clear();
-        self.typeahead.context = None;
-        self.search_query.clone_from(&new_query);
-
-        (
-            Task::none(),
-            Some(ThreadListEvent::SearchQueryChanged(new_query)),
-        )
     }
 
     /// Move selection to the previous thread (up).
@@ -198,13 +191,50 @@ impl ThreadList {
         if self.threads.is_empty() {
             return None;
         }
+        self.clear_multi_select();
         let prev = match self.selected_thread {
             Some(0) => return None, // already at start
             Some(i) => i - 1,
             None => 0,
         };
         self.selected_thread = Some(prev);
+        self.last_selected_anchor = Some(prev);
         Some(ThreadListEvent::ThreadSelected(prev))
+    }
+
+    /// Auto-advance: select the next (or previous) thread after the current
+    /// selection was removed by an email action.
+    fn auto_advance(&mut self) -> Option<ThreadListEvent> {
+        if self.threads.is_empty() {
+            self.selected_thread = None;
+            self.clear_multi_select();
+            return Some(ThreadListEvent::AutoAdvance { new_index: None });
+        }
+
+        let prev_idx = self.selected_thread.unwrap_or(0);
+        let new_idx = match self.auto_advance_direction {
+            AutoAdvanceDirection::Next => {
+                if prev_idx < self.threads.len() {
+                    prev_idx
+                } else {
+                    self.threads.len().saturating_sub(1)
+                }
+            }
+            AutoAdvanceDirection::Previous => {
+                if prev_idx > 0 {
+                    prev_idx.saturating_sub(1)
+                } else {
+                    0
+                }
+            }
+        };
+
+        self.selected_thread = Some(new_idx);
+        self.clear_multi_select();
+        self.last_selected_anchor = Some(new_idx);
+        Some(ThreadListEvent::AutoAdvance {
+            new_index: Some(new_idx),
+        })
     }
 }
 
@@ -220,103 +250,83 @@ impl Component for ThreadList {
     ) -> (Task<ThreadListMessage>, Option<ThreadListEvent>) {
         match message {
             ThreadListMessage::SelectThread(idx) => {
+                // Plain click: clear multi-select, select single.
+                self.clear_multi_select();
                 self.selected_thread = Some(idx);
+                self.last_selected_anchor = Some(idx);
                 (Task::none(), Some(ThreadListEvent::ThreadSelected(idx)))
             }
-            ThreadListMessage::SearchInput(query) => {
-                // Analyze cursor context for typeahead.
-                // The cursor is at the end of the new query string
-                // (text_input on_input gives the full value after edit).
-                let cursor_pos = query.len();
-                let ctx = analyze_cursor_context(&query, cursor_pos);
-                let event = match &ctx {
-                    CursorContext::InsideOperator {
-                        operator,
-                        partial_value,
-                        ..
-                    } => {
-                        self.typeahead.context = Some(ctx.clone());
-                        self.typeahead.selected = 0;
-
-                        // For static operators, populate items immediately.
-                        // For dynamic operators, emit an event to query the DB.
-                        match operator.as_str() {
-                            "has" => {
-                                self.typeahead.items =
-                                    static_typeahead_items(HAS_PRESETS, partial_value);
-                                self.typeahead.visible = !self.typeahead.items.is_empty();
-                                None
-                            }
-                            "is" => {
-                                self.typeahead.items =
-                                    static_typeahead_items(IS_PRESETS, partial_value);
-                                self.typeahead.visible = !self.typeahead.items.is_empty();
-                                None
-                            }
-                            "in" => {
-                                self.typeahead.items =
-                                    static_typeahead_items(IN_PRESETS, partial_value);
-                                self.typeahead.visible = !self.typeahead.items.is_empty();
-                                None
-                            }
-                            "before" | "after" => {
-                                self.typeahead.items =
-                                    date_typeahead_items(partial_value);
-                                self.typeahead.visible = !self.typeahead.items.is_empty();
-                                None
-                            }
-                            "from" | "to" | "label" | "folder" | "account" => {
-                                // Dynamic: emit event so App can query the DB.
-                                self.typeahead.visible = false;
-                                Some(ThreadListEvent::TypeaheadQuery {
-                                    operator: operator.clone(),
-                                    partial_value: partial_value.clone(),
-                                })
-                            }
-                            _ => {
-                                self.typeahead.visible = false;
-                                self.typeahead.items.clear();
-                                None
-                            }
-                        }
+            ThreadListMessage::ToggleThread(idx) => {
+                // Ctrl+click: toggle individual thread in/out.
+                if self.selected_threads.is_empty() {
+                    // Entering multi-select: seed with current selection.
+                    if let Some(prev) = self.selected_thread {
+                        self.selected_threads.insert(prev);
                     }
-                    CursorContext::FreeText => {
-                        self.typeahead.visible = false;
-                        self.typeahead.items.clear();
-                        self.typeahead.context = None;
-                        None
-                    }
-                };
-
-                // Always propagate the query change.
-                let search_event = ThreadListEvent::SearchQueryChanged(query);
-                // If we have a typeahead event, batch both; otherwise just search.
-                if let Some(ta_event) = event {
-                    // We can only return one event from update(). The search
-                    // query changed event is critical, so return that.
-                    // Typeahead query event will be emitted via the App's
-                    // handle_search_query_changed which re-analyzes.
-                    // Actually, we need both. Let's prioritize the search change
-                    // and have the App's handler trigger typeahead loading.
-                    _ = ta_event;
-                    (Task::none(), Some(search_event))
-                } else {
-                    (Task::none(), Some(search_event))
                 }
+                if self.selected_threads.contains(&idx) {
+                    self.selected_threads.remove(&idx);
+                } else {
+                    self.selected_threads.insert(idx);
+                }
+                self.last_selected_anchor = Some(idx);
+                self.selected_thread = Some(idx);
+                let count = self.selected_threads.len();
+                (
+                    Task::none(),
+                    Some(ThreadListEvent::MultiSelectionChanged(count)),
+                )
+            }
+            ThreadListMessage::RangeSelectThread(idx) => {
+                // Shift+click: range select from anchor to idx.
+                let anchor = self.last_selected_anchor.unwrap_or(0);
+                let (start, end) = if anchor <= idx {
+                    (anchor, idx)
+                } else {
+                    (idx, anchor)
+                };
+                if self.selected_threads.is_empty() {
+                    if let Some(prev) = self.selected_thread {
+                        self.selected_threads.insert(prev);
+                    }
+                }
+                for i in start..=end {
+                    self.selected_threads.insert(i);
+                }
+                self.selected_thread = Some(idx);
+                let count = self.selected_threads.len();
+                (
+                    Task::none(),
+                    Some(ThreadListEvent::MultiSelectionChanged(count)),
+                )
+            }
+            ThreadListMessage::SelectAll => {
+                if self.threads.is_empty() {
+                    return (Task::none(), None);
+                }
+                self.selected_threads = (0..self.threads.len()).collect();
+                let count = self.selected_threads.len();
+                (
+                    Task::none(),
+                    Some(ThreadListEvent::MultiSelectionChanged(count)),
+                )
+            }
+            ThreadListMessage::SelectNone => {
+                self.clear_multi_select();
+                (
+                    Task::none(),
+                    Some(ThreadListEvent::MultiSelectionChanged(0)),
+                )
+            }
+            ThreadListMessage::AutoAdvance => {
+                let event = self.auto_advance();
+                (Task::none(), event)
+            }
+            ThreadListMessage::SearchInput(query) => {
+                (Task::none(), Some(ThreadListEvent::SearchQueryChanged(query)))
             }
             ThreadListMessage::SearchSubmit => {
-                // Accept typeahead selection if popup is visible.
-                if self.typeahead.visible && !self.typeahead.items.is_empty() {
-                    return self.accept_typeahead_selection();
-                }
-                self.typeahead.visible = false;
                 (Task::none(), Some(ThreadListEvent::SearchExecute))
-            }
-            ThreadListMessage::SearchUndo => {
-                (Task::none(), Some(ThreadListEvent::SearchUndo))
-            }
-            ThreadListMessage::SearchRedo => {
-                (Task::none(), Some(ThreadListEvent::SearchRedo))
             }
             ThreadListMessage::SelectNext => {
                 let event = self.select_next();
@@ -330,15 +340,19 @@ impl Component for ThreadList {
                 if self.threads.is_empty() {
                     return (Task::none(), None);
                 }
+                self.clear_multi_select();
                 self.selected_thread = Some(0);
+                self.last_selected_anchor = Some(0);
                 (Task::none(), Some(ThreadListEvent::ThreadSelected(0)))
             }
             ThreadListMessage::SelectLast => {
                 if self.threads.is_empty() {
                     return (Task::none(), None);
                 }
+                self.clear_multi_select();
                 let last = self.threads.len() - 1;
                 self.selected_thread = Some(last);
+                self.last_selected_anchor = Some(last);
                 (Task::none(), Some(ThreadListEvent::ThreadSelected(last)))
             }
             ThreadListMessage::ActivateSelected => {
@@ -349,60 +363,26 @@ impl Component for ThreadList {
                 }
             }
             ThreadListMessage::Deselect => {
-                if self.typeahead.visible {
-                    self.typeahead.visible = false;
-                    return (Task::none(), None);
-                }
                 self.selected_thread = None;
+                self.clear_multi_select();
                 (Task::none(), Some(ThreadListEvent::ThreadDeselected))
             }
             ThreadListMessage::WidenSearchScope => {
                 (Task::none(), Some(ThreadListEvent::WidenSearchScope))
             }
-            ThreadListMessage::TypeaheadSelect(idx) => {
-                self.typeahead.selected = idx;
-                self.accept_typeahead_selection()
-            }
-            ThreadListMessage::TypeaheadDismiss => {
-                self.typeahead.visible = false;
-                (Task::none(), None)
-            }
-            ThreadListMessage::TypeaheadNavigate(direction) => {
-                if !self.typeahead.visible || self.typeahead.items.is_empty() {
-                    return (Task::none(), None);
-                }
-                match direction {
-                    TypeaheadDirection::Up => {
-                        self.typeahead.selected =
-                            self.typeahead.selected.saturating_sub(1);
-                    }
-                    TypeaheadDirection::Down => {
-                        let max = self.typeahead.items.len().saturating_sub(1);
-                        self.typeahead.selected =
-                            (self.typeahead.selected + 1).min(max);
-                    }
-                }
-                (Task::none(), None)
-            }
-            ThreadListMessage::TypeaheadItemsLoaded(items) => {
-                self.typeahead.items = items;
-                self.typeahead.selected = 0;
-                self.typeahead.visible = !self.typeahead.items.is_empty();
-                (Task::none(), None)
-            }
         }
     }
 
     fn view(&self) -> Element<'_, ThreadListMessage> {
+        let selection_count = self.selection_count();
         let header = thread_list_header(
             &self.folder_name,
             &self.scope_name,
             &self.search_query,
             &self.mode,
             self.threads.len(),
+            selection_count,
         );
-
-        let typeahead_overlay = typeahead_popup(&self.typeahead);
 
         let body: Element<'_, ThreadListMessage> = if self.threads.is_empty() {
             let (title, subtitle) = match self.mode {
@@ -411,28 +391,18 @@ impl Component for ThreadList {
             };
             widgets::empty_placeholder(title, subtitle)
         } else {
-            thread_list_body(&self.threads, self.selected_thread)
+            thread_list_body(self)
         };
 
-        // Stack the typeahead popup over the body, anchored below the header.
-        let content = column![
-            header,
-            stack![
-                body,
-                // Typeahead floats at the top of this stack region.
-                container(typeahead_overlay)
-                    .width(Length::Fill)
-                    .padding([0.0, SPACE_SM]),
-            ]
-        ]
-        .spacing(0)
-        .width(Length::Fill);
-
-        container(content)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(theme::ContainerClass::Base.style())
-            .into()
+        container(
+            column![header, body]
+                .spacing(0)
+                .width(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(theme::ContainerClass::Base.style())
+        .into()
     }
 }
 
@@ -444,49 +414,72 @@ fn thread_list_header<'a>(
     search_query: &'a str,
     mode: &ThreadListMode,
     thread_count: usize,
+    selection_count: usize,
 ) -> Element<'a, ThreadListMessage> {
-    let search_input = undoable_text_input("Search...", search_query)
+    let search_input = text_input("Search...", search_query)
         .id("search-bar")
         .on_input(ThreadListMessage::SearchInput)
         .on_submit(ThreadListMessage::SearchSubmit)
-        .on_undo(ThreadListMessage::SearchUndo)
-        .on_redo(ThreadListMessage::SearchRedo)
         .size(TEXT_MD)
         .padding(PAD_INPUT);
 
-    let context_row: Element<'a, ThreadListMessage> = match mode {
-        ThreadListMode::Folder => row![
-            text(folder_name)
+    let context_row: Element<'a, ThreadListMessage> = if selection_count > 1 {
+        // Multi-selection: show count and deselect link.
+        let count_text = text(format!("{selection_count} selected"))
+            .size(TEXT_SM)
+            .style(theme::TextClass::Accent.style());
+
+        let deselect_link = button(
+            text("Deselect")
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
+        )
+        .on_press(ThreadListMessage::SelectNone)
+        .padding(0)
+        .style(theme::ButtonClass::Ghost.style());
+
+        row![
+            count_text,
             Space::new().width(Length::Fill),
-            text(scope_name)
-                .size(TEXT_SM)
-                .style(theme::TextClass::Tertiary.style()),
+            deselect_link,
         ]
         .align_y(iced::Alignment::Center)
-        .into(),
-        ThreadListMode::Search => {
-            let results_text = text(format!("{thread_count} results"))
-                .size(TEXT_SM)
-                .style(theme::TextClass::Tertiary.style());
-
-            let all_link = button(
-                text("All")
+        .into()
+    } else {
+        match mode {
+            ThreadListMode::Folder => row![
+                text(folder_name)
                     .size(TEXT_SM)
-                    .style(theme::TextClass::Accent.style()),
-            )
-            .on_press(ThreadListMessage::WidenSearchScope)
-            .padding(0)
-            .style(theme::ButtonClass::Ghost.style());
-
-            row![
-                results_text,
+                    .style(theme::TextClass::Tertiary.style()),
                 Space::new().width(Length::Fill),
-                all_link,
+                text(scope_name)
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::Tertiary.style()),
             ]
             .align_y(iced::Alignment::Center)
-            .into()
+            .into(),
+            ThreadListMode::Search => {
+                let results_text = text(format!("{thread_count} results"))
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::Tertiary.style());
+
+                let all_link = button(
+                    text("All")
+                        .size(TEXT_SM)
+                        .style(theme::TextClass::Accent.style()),
+                )
+                .on_press(ThreadListMessage::WidenSearchScope)
+                .padding(0)
+                .style(theme::ButtonClass::Ghost.style());
+
+                row![
+                    results_text,
+                    Space::new().width(Length::Fill),
+                    all_link,
+                ]
+                .align_y(iced::Alignment::Center)
+                .into()
+            }
         }
     };
 
@@ -497,17 +490,14 @@ fn thread_list_header<'a>(
     .into()
 }
 
-fn thread_list_body<'a>(
-    threads: &'a [Thread],
-    selected_thread: Option<usize>,
-) -> Element<'a, ThreadListMessage> {
+fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
     let mut list = column![].spacing(0);
-    for (i, thread) in threads.iter().enumerate() {
+    for (i, thread) in state.threads.iter().enumerate() {
         let label_colors: &[(Color,)] = &[];
         list = list.push(widgets::thread_card(
             thread,
             i,
-            selected_thread == Some(i),
+            state.is_selected(i),
             label_colors,
             ThreadListMessage::SelectThread,
         ));
@@ -516,181 +506,4 @@ fn thread_list_body<'a>(
         .spacing(SCROLLBAR_SPACING)
         .height(Length::Fill)
         .into()
-}
-
-// ── Typeahead popup ────────────────────────────────────
-
-fn typeahead_popup(state: &TypeaheadState) -> Element<'_, ThreadListMessage> {
-    if !state.visible || state.items.is_empty() {
-        return Space::new().width(0).height(0).into();
-    }
-
-    let mut list = column![].spacing(0);
-    for (i, item) in state.items.iter().enumerate() {
-        let is_selected = i == state.selected;
-        let item_row = typeahead_item_view(item, is_selected);
-        list = list.push(
-            button(item_row)
-                .on_press(ThreadListMessage::TypeaheadSelect(i))
-                .style(
-                    theme::ButtonClass::Dropdown {
-                        selected: is_selected,
-                    }
-                    .style(),
-                )
-                .width(Length::Fill)
-                .padding(PAD_DROPDOWN),
-        );
-    }
-
-    // "Keep as text" option at the bottom.
-    let keep_text = button(
-        text("Keep as text")
-            .size(TEXT_SM)
-            .style(theme::TextClass::Tertiary.style()),
-    )
-    .on_press(ThreadListMessage::TypeaheadDismiss)
-    .style(theme::ButtonClass::Ghost.style())
-    .width(Length::Fill)
-    .padding(PAD_DROPDOWN);
-
-    container(column![list, keep_text].spacing(0))
-        .style(theme::ContainerClass::Elevated.style())
-        .width(Length::Fill)
-        .max_height(TYPEAHEAD_MAX_HEIGHT)
-        .into()
-}
-
-fn typeahead_item_view<'a>(
-    item: &'a TypeaheadItem,
-    _is_selected: bool,
-) -> Element<'a, ThreadListMessage> {
-    let label = text(&item.label).size(TEXT_MD);
-
-    if let Some(ref detail) = item.detail {
-        row![
-            label,
-            Space::new().width(Length::Fill),
-            text(detail)
-                .size(TEXT_SM)
-                .style(theme::TextClass::Tertiary.style()),
-        ]
-        .align_y(iced::Alignment::Center)
-        .spacing(SPACE_XS)
-        .into()
-    } else {
-        container(label)
-            .width(Length::Fill)
-            .align_y(iced::Alignment::Center)
-            .into()
-    }
-}
-
-// ── Typeahead selection insertion ──────────────────────
-
-/// Replace the partial operator value in the query with the selected item.
-fn apply_typeahead_selection(
-    query: &str,
-    context: &CursorContext,
-    item: &TypeaheadItem,
-) -> String {
-    if let CursorContext::InsideOperator {
-        value_start,
-        value_end,
-        ..
-    } = context
-    {
-        let value = if item.insert_value.contains(' ') {
-            format!("\"{}\" ", item.insert_value)
-        } else {
-            format!("{} ", item.insert_value)
-        };
-        format!("{}{}{}", &query[..*value_start], value, &query[*value_end..])
-    } else {
-        query.to_string()
-    }
-}
-
-// ── Static typeahead presets ───────────────────────────
-
-/// Preset label/value pairs for `has:` operator.
-const HAS_PRESETS: &[(&str, &str)] = &[
-    ("attachment", "attachment"),
-    ("image", "image"),
-    ("pdf", "pdf"),
-    ("document", "document"),
-    ("spreadsheet", "spreadsheet"),
-    ("archive", "archive"),
-    ("video", "video"),
-    ("audio", "audio"),
-    ("calendar", "calendar"),
-];
-
-/// Preset label/value pairs for `is:` operator.
-const IS_PRESETS: &[(&str, &str)] = &[
-    ("read", "read"),
-    ("unread", "unread"),
-    ("starred", "starred"),
-    ("snoozed", "snoozed"),
-    ("pinned", "pinned"),
-    ("muted", "muted"),
-    ("tagged", "tagged"),
-];
-
-/// Preset label/value pairs for `in:` operator.
-const IN_PRESETS: &[(&str, &str)] = &[
-    ("inbox", "inbox"),
-    ("sent", "sent"),
-    ("drafts", "drafts"),
-    ("trash", "trash"),
-    ("spam", "spam"),
-    ("starred", "starred"),
-    ("snoozed", "snoozed"),
-];
-
-/// Date presets for `before:` and `after:` operators.
-const DATE_PRESETS: &[(&str, &str)] = &[
-    ("Today", "0"),
-    ("Yesterday", "-1"),
-    ("Last 7 days", "-7"),
-    ("Last 30 days", "-30"),
-    ("Last 3 months", "-90"),
-    ("Last year", "-365"),
-];
-
-/// Filter static preset items by partial value match.
-fn static_typeahead_items(
-    presets: &[(&str, &str)],
-    partial: &str,
-) -> Vec<TypeaheadItem> {
-    let lower = partial.to_ascii_lowercase();
-    presets
-        .iter()
-        .filter(|(label, _)| {
-            lower.is_empty() || label.to_ascii_lowercase().contains(&lower)
-        })
-        .map(|(label, value)| TypeaheadItem {
-            label: (*label).to_owned(),
-            detail: None,
-            insert_value: (*value).to_owned(),
-        })
-        .collect()
-}
-
-/// Filter date presets by partial value match.
-fn date_typeahead_items(partial: &str) -> Vec<TypeaheadItem> {
-    let lower = partial.to_ascii_lowercase();
-    DATE_PRESETS
-        .iter()
-        .filter(|(label, value)| {
-            lower.is_empty()
-                || label.to_ascii_lowercase().contains(&lower)
-                || value.contains(&lower)
-        })
-        .map(|(label, value)| TypeaheadItem {
-            label: (*label).to_owned(),
-            detail: Some((*value).to_owned()),
-            insert_value: (*value).to_owned(),
-        })
-        .collect()
 }

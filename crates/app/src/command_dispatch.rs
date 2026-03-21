@@ -481,7 +481,11 @@ fn dispatch_email(id: CommandId) -> Option<Message> {
         CommandId::EmailMute => Some(Message::EmailAction(EmailAction::ToggleMute)),
         CommandId::EmailUnsubscribe => Some(Message::EmailAction(EmailAction::Unsubscribe)),
         // Stubbed — ThreadListMessage::SelectAll / SelectFromHere don't exist yet
-        CommandId::EmailSelectAll | CommandId::EmailSelectFromHere => None,
+        CommandId::EmailSelectAll => Some(Message::ThreadList(
+            crate::ui::thread_list::ThreadListMessage::SelectAll,
+        )),
+        // Stubbed — SelectFromHere not yet implemented
+        CommandId::EmailSelectFromHere => None,
         _ => None,
     }
 }
