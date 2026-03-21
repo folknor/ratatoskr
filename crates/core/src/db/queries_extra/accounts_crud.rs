@@ -145,6 +145,38 @@ pub async fn db_create_account(
         .await
 }
 
+/// Synchronous account update — callable from any `&Connection`.
+///
+/// This is the single source of truth for the update logic. Both the async
+/// `db_update_account` (via `DbState`) and the app crate's
+/// `Db::with_write_conn` use this function.
+pub fn update_account_sync(
+    conn: &Connection,
+    id: &str,
+    params: UpdateAccountParams,
+) -> Result<(), String> {
+    let mut sets: Vec<(&str, Box<dyn rusqlite::types::ToSql>)> = Vec::new();
+    if let Some(v) = params.account_name {
+        sets.push(("account_name", Box::new(v)));
+    }
+    if let Some(v) = params.display_name {
+        sets.push(("display_name", Box::new(v)));
+    }
+    if let Some(v) = params.account_color {
+        sets.push(("account_color", Box::new(v)));
+    }
+    if let Some(v) = params.caldav_url {
+        sets.push(("caldav_url", Box::new(v)));
+    }
+    if let Some(v) = params.caldav_username {
+        sets.push(("caldav_username", Box::new(v)));
+    }
+    if let Some(v) = params.caldav_password {
+        sets.push(("caldav_password", Box::new(v)));
+    }
+    dynamic_update(conn, "accounts", "id", id, sets)
+}
+
 /// Update an account's editable metadata fields. Only fields that are `Some`
 /// in `params` are changed.
 pub async fn db_update_account(
@@ -153,28 +185,7 @@ pub async fn db_update_account(
     params: UpdateAccountParams,
 ) -> Result<(), String> {
     log::info!("Updating account: id={id}");
-    db.with_conn(move |conn| {
-        let mut sets: Vec<(&str, Box<dyn rusqlite::types::ToSql>)> = Vec::new();
-        if let Some(v) = params.account_name {
-            sets.push(("account_name", Box::new(v)));
-        }
-        if let Some(v) = params.display_name {
-            sets.push(("display_name", Box::new(v)));
-        }
-        if let Some(v) = params.account_color {
-            sets.push(("account_color", Box::new(v)));
-        }
-        if let Some(v) = params.caldav_url {
-            sets.push(("caldav_url", Box::new(v)));
-        }
-        if let Some(v) = params.caldav_username {
-            sets.push(("caldav_username", Box::new(v)));
-        }
-        if let Some(v) = params.caldav_password {
-            sets.push(("caldav_password", Box::new(v)));
-        }
-        dynamic_update(conn, "accounts", "id", &id, sets)
-    })
+    db.with_conn(move |conn| update_account_sync(conn, &id, params))
     .await
     .map_err(|e| {
         log::error!("Failed to update account: {e}");

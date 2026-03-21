@@ -472,6 +472,9 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                     Some("Add at least one recipient".to_string());
                 return;
             }
+            // TODO: When send is implemented, call
+            // `status_bar.show_confirmation("Message sent".to_string())`
+            // on the success path (via a Message variant back to App).
             state.status = Some("Send not yet wired".to_string());
         }
         ComposeMessage::Discard => {

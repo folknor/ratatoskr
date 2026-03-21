@@ -1408,10 +1408,6 @@ impl App {
         )
     }
 
-    // TODO: Replace with core's `db_update_account()` once the app's `Db`
-    // type is unified with core's `DbState`, or once `dynamic_update` is
-    // made public. Core's async function requires `&DbState` which the app
-    // does not currently expose.
     fn handle_save_account_changes(
         &mut self,
         account_id: String,
@@ -1421,47 +1417,9 @@ impl App {
         Task::perform(
             async move {
                 db.with_write_conn(move |conn| {
-                    let mut sets: Vec<(&str, Box<dyn rusqlite::types::ToSql>)> =
-                        Vec::new();
-                    if let Some(v) = params.account_name {
-                        sets.push(("account_name", Box::new(v)));
-                    }
-                    if let Some(v) = params.display_name {
-                        sets.push(("display_name", Box::new(v)));
-                    }
-                    if let Some(v) = params.account_color {
-                        sets.push(("account_color", Box::new(v)));
-                    }
-                    if let Some(v) = params.caldav_url {
-                        sets.push(("caldav_url", Box::new(v)));
-                    }
-                    if let Some(v) = params.caldav_username {
-                        sets.push(("caldav_username", Box::new(v)));
-                    }
-                    if let Some(v) = params.caldav_password {
-                        sets.push(("caldav_password", Box::new(v)));
-                    }
-                    if sets.is_empty() {
-                        return Ok(());
-                    }
-                    let mut placeholders = Vec::new();
-                    let mut param_vals: Vec<Box<dyn rusqlite::types::ToSql>> =
-                        Vec::new();
-                    for (i, (col, val)) in sets.into_iter().enumerate() {
-                        placeholders.push(format!("{col} = ?{}", i + 1));
-                        param_vals.push(val);
-                    }
-                    let id_idx = param_vals.len() + 1;
-                    param_vals.push(Box::new(account_id));
-                    let sql = format!(
-                        "UPDATE accounts SET {} WHERE id = ?{id_idx}",
-                        placeholders.join(", ")
-                    );
-                    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                        param_vals.iter().map(AsRef::as_ref).collect();
-                    conn.execute(&sql, param_refs.as_slice())
-                        .map_err(|e| e.to_string())?;
-                    Ok(())
+                    ratatoskr_core::db::queries_extra::update_account_sync(
+                        &conn, &account_id, params,
+                    )
                 })
                 .await
             },
