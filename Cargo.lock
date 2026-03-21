@@ -229,6 +229,7 @@ dependencies = [
  "iced-drop",
  "mundy",
  "ratatoskr-command-palette",
+ "ratatoskr-contact-import",
  "ratatoskr-core",
  "ratatoskr-label-colors",
  "ratatoskr-rich-text-editor",
@@ -5282,6 +5283,14 @@ dependencies = [
  "nucleo-matcher",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "ratatoskr-contact-import"
+version = "0.1.0"
+dependencies = [
+ "calcard",
+ "encoding_rs",
 ]
 
 [[package]]
