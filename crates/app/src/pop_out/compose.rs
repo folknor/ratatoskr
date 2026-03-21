@@ -90,6 +90,18 @@ pub enum ComposeMessage {
     AutocompleteNavigate(i32),
     /// Dismiss the autocomplete dropdown.
     AutocompleteDismiss,
+    /// Attach files to the compose window.
+    AttachFiles,
+    /// Files have been attached (result from file picker).
+    FilesAttached(Vec<(String, std::path::PathBuf, u64)>),
+    /// Draft finalized and saved to DB — proceed with send.
+    SendFinalized(Result<(), String>),
+    /// Async send completed (Ok = provider message ID, Err = error).
+    SendCompleted(Result<String, String>),
+    /// Signature resolved from the database.
+    SignatureResolved(Option<(String, String, Option<String>)>),
+    /// Draft auto-save completed.
+    DraftSaved(Result<(), String>),
     /// Formatting toolbar actions (stubs for V1).
     FormatBold,
     FormatItalic,
@@ -156,7 +168,15 @@ pub struct ComposeState {
     pub reply_thread_id: Option<String>,
     pub reply_message_id: Option<String>,
 
-    // Status message (e.g. "Send not yet wired")
+    // Draft tracking
+    pub draft_id: String,
+    pub draft_dirty: bool,
+    pub active_signature_id: Option<String>,
+
+    // Send in-flight flag
+    pub sending: bool,
+
+    // Status message (e.g. "Sending...")
     pub status: Option<String>,
 
     // Discard confirmation
@@ -190,6 +210,10 @@ impl ComposeState {
             mode: ComposeMode::New,
             reply_thread_id: None,
             reply_message_id: None,
+            draft_id: uuid::Uuid::new_v4().to_string(),
+            draft_dirty: false,
+            active_signature_id: None,
+            sending: false,
             status: None,
             discard_confirm_open: false,
             autocomplete: AutocompleteState::new(),
@@ -295,8 +319,14 @@ impl ComposeState {
 
 pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
     match msg {
-        ComposeMessage::SubjectChanged(s) => state.subject = s,
-        ComposeMessage::BodyChanged(action) => state.body.perform(action),
+        ComposeMessage::SubjectChanged(s) => {
+            state.subject = s;
+            state.draft_dirty = true;
+        }
+        ComposeMessage::BodyChanged(action) => {
+            state.body.perform(action);
+            state.draft_dirty = true;
+        }
         ComposeMessage::FromAccountChanged(account) => {
             state.from_account = Some(account);
         }
@@ -324,19 +354,47 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             );
         }
         ComposeMessage::Send => {
-            // V1: validate and show stub status
-            let has_recipients = !state.to.tokens.is_empty()
-                || !state.cc.tokens.is_empty()
-                || !state.bcc.tokens.is_empty();
-            if !has_recipients {
-                state.status =
-                    Some("Add at least one recipient".to_string());
-                return;
-            }
-            state.status = Some("Send not yet wired".to_string());
+            // Handled by the caller (handle_compose_send in pop_out.rs)
         }
         ComposeMessage::Discard => {
             // Handled by the caller (close window)
+        }
+        ComposeMessage::AttachFiles | ComposeMessage::FilesAttached(_) => {
+            // Handled by the caller (pop_out.rs)
+        }
+        ComposeMessage::SendFinalized(Ok(())) => {
+            state.status = Some("Sending...".to_string());
+            state.sending = true;
+        }
+        ComposeMessage::SendFinalized(Err(e)) => {
+            state.status = Some(format!("Failed to queue: {e}"));
+            state.sending = false;
+        }
+        ComposeMessage::SendCompleted(Ok(_msg_id)) => {
+            state.status = Some("Message sent".to_string());
+            state.sending = false;
+            // Window close handled by the caller
+        }
+        ComposeMessage::SendCompleted(Err(e)) => {
+            state.status = Some(format!("Send failed: {e}"));
+            state.sending = false;
+        }
+        ComposeMessage::SignatureResolved(Some((html, sig_id, _))) => {
+            state.active_signature_id = Some(sig_id);
+            // Append signature to body if it's a new compose
+            let body_text = state.body.text();
+            let sig_plain = ratatoskr_core::db::queries_extra::html_to_plain_text(&html);
+            if !sig_plain.trim().is_empty() {
+                let new_body = format!("{body_text}\n\n-- \n{sig_plain}");
+                state.body = iced::widget::text_editor::Content::with_text(&new_body);
+            }
+        }
+        ComposeMessage::SignatureResolved(None) => {}
+        ComposeMessage::DraftSaved(Ok(())) => {
+            state.draft_dirty = false;
+        }
+        ComposeMessage::DraftSaved(Err(e)) => {
+            eprintln!("Draft auto-save failed: {e}");
         }
         ComposeMessage::ToggleDiscardConfirm => {
             state.discard_confirm_open = !state.discard_confirm_open;
@@ -783,20 +841,28 @@ fn compose_footer<'a>(
     ))
     .padding(PAD_BUTTON);
 
-    let send_btn = button(
+    let send_label = if state.sending {
+        "Sending..."
+    } else {
+        "Send"
+    };
+    let mut send_btn = button(
         row![
             icon::send().size(ICON_SM),
-            text("Send").size(TEXT_MD).font(font::text_semibold()),
+            text(send_label).size(TEXT_MD).font(font::text_semibold()),
         ]
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),
     )
     .style(theme::ButtonClass::Primary.style())
-    .on_press(Message::PopOut(
-        window_id,
-        PopOutMessage::Compose(ComposeMessage::Send),
-    ))
     .padding(PAD_BUTTON);
+
+    if !state.sending {
+        send_btn = send_btn.on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::Send),
+        ));
+    }
 
     let footer_row =
         row![discard_btn, Space::new().width(Length::Fill), send_btn]
@@ -858,6 +924,21 @@ fn discard_confirmation<'a>(
 }
 
 // ── Helpers ─────────────────────────────────────────────
+
+/// Convert token input recipients to a comma-separated email string.
+pub fn tokens_to_csv(value: &TokenInputValue) -> Option<String> {
+    if value.tokens.is_empty() {
+        return None;
+    }
+    Some(
+        value
+            .tokens
+            .iter()
+            .map(|t| t.email.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
+}
 
 fn accounts_to_info(accounts: &[db::Account]) -> Vec<AccountInfo> {
     accounts
