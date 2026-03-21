@@ -84,7 +84,9 @@ pub enum SettingsMessage {
     // Signatures
     SignatureEdit(String),                     // signature_id — open editor overlay
     SignatureCreate(String),                   // account_id — open editor for new sig
-    SignatureDelete(String),                   // signature_id
+    SignatureDelete(String),                   // signature_id — request delete (shows confirm)
+    SignatureDeleteConfirmed(String),          // signature_id — confirmed delete
+    SignatureDeleteCancelled,                  // cancel pending delete
     SignatureEditorNameChanged(String),
     SignatureEditorBodyChanged(String),
     SignatureEditorToggleDefault(bool),
@@ -381,6 +383,8 @@ pub struct Settings {
     // Signatures
     pub signatures: Vec<SignatureEntry>,
     pub signature_editor: Option<SignatureEditorState>,
+    /// Signature ID pending delete confirmation.
+    pub confirm_delete_signature: Option<String>,
     // Contacts management
     pub contact_filter: String,
     pub contacts: Vec<crate::db::ContactEntry>,
@@ -494,6 +498,7 @@ impl Default for Settings {
             managed_accounts: Vec::new(),
             signatures: Vec::new(),
             signature_editor: None,
+            confirm_delete_signature: None,
             contact_filter: String::new(),
             contacts: Vec::new(),
             contact_editor: None,

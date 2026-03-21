@@ -43,8 +43,41 @@ impl Component for Settings {
             SettingsMessage::SignatureEditorSave => {
                 return self.handle_signature_save();
             }
-            SettingsMessage::SignatureDelete(id) => {
+            SettingsMessage::SignatureDelete(ref id) => {
+                // Show confirmation instead of deleting immediately.
+                // If the editor isn't already open for this signature, open it.
+                let need_open = self.signature_editor.as_ref()
+                    .map_or(true, |e| e.signature_id.as_deref() != Some(id.as_str()));
+                if need_open {
+                    if let Some(sig) = self.signatures.iter().find(|s| s.id == *id) {
+                        self.signature_editor = Some(SignatureEditorState {
+                            signature_id: Some(sig.id.clone()),
+                            account_id: sig.account_id.clone(),
+                            name: UndoableText::with_initial(&sig.name),
+                            body: UndoableText::with_initial(&sig.body_html),
+                            is_default: sig.is_default,
+                            is_reply_default: sig.is_reply_default,
+                        });
+                        self.overlay = Some(SettingsOverlay::EditSignature {
+                            signature_id: Some(sig.id.clone()),
+                            account_id: sig.account_id.clone(),
+                        });
+                        self.overlay_anim.go_mut(true, Instant::now());
+                    }
+                }
+                self.confirm_delete_signature = Some(id.clone());
+                return (Task::none(), None);
+            }
+            SettingsMessage::SignatureDeleteConfirmed(id) => {
+                self.confirm_delete_signature = None;
+                self.overlay = None;
+                self.overlay_anim.go_mut(false, Instant::now());
+                self.signature_editor = None;
                 return (Task::none(), Some(SettingsEvent::DeleteSignature(id)));
+            }
+            SettingsMessage::SignatureDeleteCancelled => {
+                self.confirm_delete_signature = None;
+                return (Task::none(), None);
             }
             SettingsMessage::ListDragMove(list_id, point) => {
                 return (self.handle_drag_move(list_id, point), None);

@@ -375,8 +375,15 @@ impl_from_row!(DbSignature {
     account_id,
     name,
     body_html,
+    body_text,
     is_default,
+    is_reply_default,
     sort_order,
+    source,
+    server_id,
+    server_html_hash,
+    last_synced_at,
+    created_at,
 });
 
 // ── Send-As Alias ──────────────────────────────────────────

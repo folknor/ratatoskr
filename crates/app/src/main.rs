@@ -205,8 +205,10 @@ pub enum Message {
     OpenMessageView(usize),
 
     // Sync progress pipeline
-    /// A sync event from the IcedProgressReporter channel.
     SyncProgress(SyncEvent),
+
+    // Signature operations
+    SignatureOp(handlers::SignatureResult),
 }
 
 struct App {
@@ -666,9 +668,10 @@ impl App {
                 Task::none()
             }
             Message::ReloadSignatures => {
-                self.load_signatures_into_settings();
-                Task::none()
+                handlers::signatures::load_signatures_async(&self.db)
+                    .map(Message::SignatureOp)
             }
+            Message::SignatureOp(result) => self.handle_signature_op(result),
 
             // Pop-out windows — delegated to handlers/pop_out.rs
             Message::PopOut(window_id, pop_out_msg) => {
@@ -999,8 +1002,14 @@ impl App {
                 Task::none()
             }
             SettingsEvent::OpenAddAccountWizard => self.handle_open_add_account_wizard(),
-            SettingsEvent::SaveSignature(req) => self.handle_save_signature(req),
-            SettingsEvent::DeleteSignature(id) => self.handle_delete_signature(id),
+            SettingsEvent::SaveSignature(req) => {
+                handlers::signatures::handle_save_signature(&self.db, req)
+                    .map(Message::SignatureOp)
+            }
+            SettingsEvent::DeleteSignature(id) => {
+                handlers::signatures::handle_delete_signature(&self.db, id)
+                    .map(Message::SignatureOp)
+            }
             SettingsEvent::LoadContacts(filter) => self.handle_load_contacts(filter),
             SettingsEvent::LoadGroups(filter) => self.handle_load_groups(filter),
             SettingsEvent::SaveContact(entry) => self.handle_save_contact(entry),
@@ -1024,6 +1033,27 @@ impl App {
             tasks.push(self.handle_add_account_event(evt));
         }
         Task::batch(tasks)
+    }
+}
+
+// ── Signature result handler ────────────────────────────
+
+impl App {
+    fn handle_signature_op(&mut self, result: handlers::SignatureResult) -> Task<Message> {
+        match result {
+            handlers::SignatureResult::Loaded(Ok(sigs)) => {
+                self.settings.signatures = sigs;
+                Task::none()
+            }
+            handlers::SignatureResult::Loaded(Err(e)) => {
+                eprintln!("Failed to load signatures: {e}");
+                Task::none()
+            }
+            handlers::SignatureResult::Saved(_) | handlers::SignatureResult::Deleted(_) => {
+                handlers::signatures::load_signatures_async(&self.db)
+                    .map(Message::SignatureOp)
+            }
+        }
     }
 }
 
@@ -1133,10 +1163,11 @@ impl App {
                 last_sync_at: a.last_sync_at,
             })
             .collect();
-        self.load_signatures_into_settings();
         self.sidebar.selected_account = Some(0);
         self.status = format!("Loaded {} accounts", self.sidebar.accounts.len());
-        self.load_navigation_and_threads()
+        let sig_task = handlers::signatures::load_signatures_async(&self.db)
+            .map(Message::SignatureOp);
+        Task::batch([self.load_navigation_and_threads(), sig_task])
     }
 
     fn view_first_launch_modal<'a>(

@@ -707,7 +707,7 @@ fn signature_row<'a>(sig: &'a SignatureEntry) -> Element<'a, SettingsMessage> {
         );
     }
 
-    // Remove button
+    // Remove button — opens editor overlay with delete confirmation
     let del_id = sig.id.clone();
     content = content.push(
         button(
@@ -814,12 +814,35 @@ fn signature_editor_overlay(state: &Settings) -> Element<'_, SettingsMessage> {
 
     if !is_new {
         let del_id = editor.signature_id.clone().unwrap_or_default();
-        btn_row = btn_row.push(
-            button(text("Delete").size(TEXT_LG).style(text::danger))
-                .on_press(SettingsMessage::SignatureDelete(del_id))
-                .padding(PAD_BUTTON)
-                .style(theme::ButtonClass::Action.style()),
-        );
+        let is_confirming = state
+            .confirm_delete_signature
+            .as_deref() == Some(del_id.as_str());
+
+        if is_confirming {
+            // Show confirmation buttons.
+            btn_row = btn_row.push(
+                text("Delete this signature?").size(TEXT_LG).style(text::danger),
+            );
+            btn_row = btn_row.push(
+                button(text("Cancel").size(TEXT_LG).style(text::base))
+                    .on_press(SettingsMessage::SignatureDeleteCancelled)
+                    .padding(PAD_BUTTON)
+                    .style(theme::ButtonClass::Action.style()),
+            );
+            btn_row = btn_row.push(
+                button(text("Confirm").size(TEXT_LG).style(text::danger))
+                    .on_press(SettingsMessage::SignatureDeleteConfirmed(del_id))
+                    .padding(PAD_BUTTON)
+                    .style(theme::ButtonClass::Action.style()),
+            );
+        } else {
+            btn_row = btn_row.push(
+                button(text("Delete").size(TEXT_LG).style(text::danger))
+                    .on_press(SettingsMessage::SignatureDelete(del_id))
+                    .padding(PAD_BUTTON)
+                    .style(theme::ButtonClass::Action.style()),
+            );
+        }
     }
 
     btn_row = btn_row.push(Space::new().width(Length::Fill));
