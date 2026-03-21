@@ -235,6 +235,9 @@ pub enum Message {
 
     // Signature operations
     SignatureOp(handlers::SignatureResult),
+
+    // Keyboard modifier tracking (for Ctrl+click, Shift+click)
+    ModifiersChanged(iced::keyboard::Modifiers),
 }
 
 struct App {
@@ -286,6 +289,9 @@ struct App {
 
     no_accounts: bool,
     add_account_wizard: Option<AddAccountWizard>,
+
+    /// Currently held keyboard modifiers (for Ctrl+click, Shift+click).
+    current_modifiers: iced::keyboard::Modifiers,
 }
 
 impl App {
@@ -346,6 +352,7 @@ impl App {
             expiry_ran: false,
             no_accounts: false,
             add_account_wizard: None,
+            current_modifiers: iced::keyboard::Modifiers::empty(),
         };
         let load_gen = app.nav_generation;
         (app, Task::batch([
@@ -410,17 +417,23 @@ impl App {
                 }
             }),
             iced::event::listen_with(|event, status, id| {
-                if let iced::Event::Keyboard(
-                    iced::keyboard::Event::KeyPressed { key, modifiers, .. }
-                ) = &event {
-                    Some(Message::KeyEvent(KeyEventMessage::KeyPressed {
-                        key: key.clone(),
-                        modifiers: *modifiers,
-                        status,
-                        window_id: id,
-                    }))
-                } else {
-                    None
+                match &event {
+                    iced::Event::Keyboard(
+                        iced::keyboard::Event::KeyPressed { key, modifiers, .. }
+                    ) => {
+                        Some(Message::KeyEvent(KeyEventMessage::KeyPressed {
+                            key: key.clone(),
+                            modifiers: *modifiers,
+                            status,
+                            window_id: id,
+                        }))
+                    }
+                    iced::Event::Keyboard(
+                        iced::keyboard::Event::ModifiersChanged(modifiers)
+                    ) => {
+                        Some(Message::ModifiersChanged(*modifiers))
+                    }
+                    _ => None,
                 }
             }),
             self.sidebar.subscription().map(Message::Sidebar),
@@ -616,7 +629,7 @@ impl App {
                 }
                 Task::none()
             }
-            Message::EmailAction(_action) => Task::none(),
+            Message::EmailAction(action) => self.handle_email_action(action),
             Message::ComposeAction(action) => self.handle_compose_action(action),
             Message::TaskAction(_action) => Task::none(),
             Message::SetTheme(theme) => {
@@ -732,6 +745,10 @@ impl App {
             // Sync progress pipeline
             Message::SyncProgress(event) => {
                 self.handle_sync_event(event);
+                Task::none()
+            }
+            Message::ModifiersChanged(modifiers) => {
+                self.current_modifiers = modifiers;
                 Task::none()
             }
         }
@@ -937,7 +954,22 @@ impl App {
 
     fn handle_thread_list_event(&mut self, event: ThreadListEvent) -> Task<Message> {
         match event {
-            ThreadListEvent::ThreadSelected(idx) => self.handle_select_thread(idx),
+            ThreadListEvent::ThreadSelected(idx) => {
+                // Check modifier keys for multi-select behavior.
+                if self.current_modifiers.control() {
+                    return self.handle_thread_list(
+                        ThreadListMessage::ToggleThread(idx),
+                    );
+                }
+                if self.current_modifiers.shift() {
+                    return self.handle_thread_list(
+                        ThreadListMessage::RangeSelectThread(idx),
+                    );
+                }
+                // Plain click: clear multi-select, single-select.
+                self.thread_list.clear_multi_select();
+                self.handle_select_thread(idx)
+            }
             ThreadListEvent::SearchQueryChanged(query) => {
                 self.update(Message::SearchQueryChanged(query))
             }
@@ -955,6 +987,23 @@ impl App {
                 self.nav_generation += 1;
                 self.update_thread_list_context_from_sidebar();
                 self.update(Message::SearchExecute)
+            }
+            ThreadListEvent::MultiSelectionChanged(_count) => {
+                // Multi-selection changed — could update toolbar state.
+                Task::none()
+            }
+            ThreadListEvent::AutoAdvance { new_index } => {
+                if let Some(idx) = new_index {
+                    self.handle_select_thread(idx)
+                } else {
+                    self.reading_pane.set_thread(None);
+                    Task::none()
+                }
+            }
+            ThreadListEvent::BatchAction(_indices) => {
+                // Batch action placeholder — App dispatches individual
+                // actions for each selected thread.
+                Task::none()
             }
         }
     }
