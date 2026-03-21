@@ -99,6 +99,8 @@ pub enum TextClass {
     OnPrimary,
     /// Warning text/icon color (for status bar warnings).
     Warning,
+    /// Default text color (inherits from theme, no override).
+    Default,
 }
 
 impl TextClass {
@@ -109,6 +111,7 @@ impl TextClass {
             Self::Muted => style_text_muted,
             Self::OnPrimary => style_text_on_primary,
             Self::Warning => style_text_warning,
+            Self::Default => style_text_default,
         }
     }
 }
@@ -131,6 +134,10 @@ fn style_text_on_primary(theme: &Theme) -> text::Style {
 
 fn style_text_warning(theme: &Theme) -> text::Style {
     text::Style { color: Some(theme.palette().warning.base.color) }
+}
+
+fn style_text_default(_theme: &Theme) -> text::Style {
+    text::Style { color: None }
 }
 
 // ── ButtonClass ─────────────────────────────────────────
@@ -266,6 +273,8 @@ pub enum ContainerClass {
     TimeGridTodayHeader,
     /// Current-time indicator line (red/accent).
     TimeGridNowLine,
+    /// Floating chord indicator badge (bottom-right).
+    ChordIndicator,
 }
 
 impl ContainerClass {
@@ -300,6 +309,7 @@ impl ContainerClass {
             Self::TimeGridCell => style_time_grid_cell_container,
             Self::TimeGridTodayHeader => style_time_grid_today_header_container,
             Self::TimeGridNowLine => style_time_grid_now_line_container,
+            Self::ChordIndicator => style_chord_indicator_container,
         }
     }
 }
@@ -1160,6 +1170,22 @@ fn style_time_grid_now_line_container(theme: &Theme) -> container::Style {
     let p = theme.palette();
     container::Style {
         background: Some(p.danger.base.color.into()),
+        ..Default::default()
+    }
+}
+
+fn style_chord_indicator_container(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    container::Style {
+        background: Some(p.background.weak.color.into()),
+        border: border::rounded(RADIUS_SM)
+            .color(p.background.strongest.color.scale_alpha(0.3))
+            .width(1.0),
+        shadow: iced::Shadow {
+            color: Color { a: 0.15, ..Color::BLACK },
+            offset: iced::Vector::new(0.0, 2.0),
+            blur_radius: 4.0,
+        },
         ..Default::default()
     }
 }

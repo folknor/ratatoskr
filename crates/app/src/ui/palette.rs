@@ -1,7 +1,7 @@
 use iced::widget::{column, container, mouse_area, row, scrollable, text, text_input};
 use iced::{Element, Length};
 use ratatoskr_command_palette::{
-    CommandId, CommandMatch, CommandRegistry, InputMode, OptionItem, OptionMatch,
+    CommandId, CommandMatch, InputMode, OptionItem, OptionMatch,
 };
 
 use super::layout::*;
@@ -99,14 +99,11 @@ impl PaletteState {
 /// the palette card itself.
 pub fn palette_card<'a, M: 'a + Clone>(
     state: &'a PaletteState,
-    registry: &CommandRegistry,
     on_query_changed: impl Fn(String) -> M + 'a,
     on_confirm: M,
     on_click_result: impl Fn(usize) -> M + 'a,
     on_click_option: impl Fn(usize) -> M + 'a,
 ) -> Element<'a, M> {
-    let _ = registry; // Used for future enrichment; results are pre-queried
-
     match &state.stage {
         PaletteStage::CommandSearch => {
             build_command_search_card(state, on_query_changed, on_confirm, on_click_result)
@@ -137,6 +134,7 @@ fn build_command_search_card<'a, M: 'a + Clone>(
     );
 
     let results_scrollable = scrollable(results_column)
+        .id("palette-results")
         .height(Length::Fill);
 
     let card_content = column![input, results_scrollable]
@@ -176,6 +174,7 @@ fn build_option_pick_card<'a, M: 'a + Clone>(
     );
 
     let options_scrollable = scrollable(options_column)
+        .id("palette-results")
         .height(Length::Fill);
 
     let card_content = column![input, options_scrollable]
@@ -234,10 +233,10 @@ fn option_result_row<'a, M: 'a + Clone>(
     is_selected: bool,
     on_click: M,
 ) -> Element<'a, M> {
-    let label_style: fn(&iced::Theme) -> text::Style = if option.item.disabled {
+    let label_style: fn(&iced::Theme) -> iced::widget::text::Style = if option.item.disabled {
         TextClass::Tertiary.style()
     } else {
-        |_theme: &iced::Theme| text::Style { color: None }
+        TextClass::Default.style()
     };
 
     // Option label (fills remaining space)
@@ -305,8 +304,8 @@ fn palette_result_row<'a, M: 'a + Clone>(
         TextClass::Tertiary.style()
     };
 
-    let label_style: fn(&iced::Theme) -> text::Style = if available {
-        |_theme: &iced::Theme| text::Style { color: None }
+    let label_style: fn(&iced::Theme) -> iced::widget::text::Style = if available {
+        TextClass::Default.style()
     } else {
         TextClass::Tertiary.style()
     };
@@ -371,4 +370,99 @@ fn palette_result_row<'a, M: 'a + Clone>(
     mouse_area(row_container)
         .on_press(on_click)
         .into()
+}
+
+/// Compute a `scrollable::scroll_to` task to keep the selected item
+/// visible in the palette results scrollable.
+pub fn scroll_to_selected(selected_index: usize, total_items: usize) -> iced::Task<()> {
+    if total_items == 0 {
+        return iced::Task::none();
+    }
+    // Compute a fractional offset that puts the selected item in view.
+    // The scrollable ID is "palette-results".
+    let fraction = selected_index as f32 / total_items.max(1) as f32;
+    iced::widget::scrollable::scroll_to(
+        "palette-results".to_string(),
+        scrollable::AbsoluteOffset {
+            x: 0.0,
+            y: fraction * (total_items as f32 * PALETTE_RESULT_HEIGHT),
+        },
+    )
+}
+
+/// Build the pending chord indicator badge.
+///
+/// Shows the first key of a two-key sequence (e.g., "g...") as a small
+/// floating badge. Returns `None` if there is no pending chord.
+pub fn chord_indicator<'a, M: 'a>(
+    chord_display: &str,
+) -> Element<'a, M> {
+    let badge = container(
+        text(format!("{chord_display}..."))
+            .size(TEXT_SM)
+            .style(TextClass::Muted.style()),
+    )
+    .padding(PAD_BADGE)
+    .style(ContainerClass::ChordIndicator.style());
+
+    container(badge)
+        .width(Length::Fill)
+        .align_x(iced::Alignment::End)
+        .padding(SPACE_SM)
+        .into()
+}
+
+/// Build snooze preset options as `OptionItem`s for the DateTime picker.
+///
+/// These are hardcoded presets — a proper date/time picker is deferred.
+pub fn snooze_preset_options() -> Vec<OptionItem> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
+    vec![
+        snooze_option("1 hour", now_secs + 3600),
+        snooze_option("2 hours", now_secs + 7200),
+        snooze_option("4 hours", now_secs + 14400),
+        snooze_option("Tomorrow 9am", next_morning_9am(now_secs)),
+        snooze_option("Tomorrow 1pm", next_afternoon_1pm(now_secs)),
+        snooze_option("Next week", next_week_morning(now_secs)),
+    ]
+}
+
+fn snooze_option(label: &str, until: i64) -> OptionItem {
+    OptionItem {
+        id: until.to_string(),
+        label: label.to_string(),
+        path: None,
+        keywords: None,
+        disabled: false,
+    }
+}
+
+/// Compute unix timestamp for tomorrow at 9:00 AM local time.
+fn next_morning_9am(now_secs: i64) -> i64 {
+    // Approximate: add 1 day then round to 9am.
+    // This is intentionally simple — real timezone handling is deferred.
+    let day_secs: i64 = 86400;
+    let tomorrow_start = (now_secs / day_secs + 1) * day_secs;
+    tomorrow_start + 9 * 3600
+}
+
+/// Compute unix timestamp for tomorrow at 1:00 PM local time.
+fn next_afternoon_1pm(now_secs: i64) -> i64 {
+    let day_secs: i64 = 86400;
+    let tomorrow_start = (now_secs / day_secs + 1) * day_secs;
+    tomorrow_start + 13 * 3600
+}
+
+/// Compute unix timestamp for next Monday at 9:00 AM.
+fn next_week_morning(now_secs: i64) -> i64 {
+    let day_secs: i64 = 86400;
+    // Add 7 days then round to 9am
+    let next_week_start = (now_secs / day_secs + 7) * day_secs;
+    next_week_start + 9 * 3600
 }

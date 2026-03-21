@@ -1027,7 +1027,6 @@ impl App {
 
             let palette_widget = ui::palette::palette_card(
                 &self.palette,
-                &self.registry,
                 |q| Message::Palette(PaletteMessage::QueryChanged(q)),
                 Message::Palette(PaletteMessage::Confirm),
                 |idx| Message::Palette(PaletteMessage::ClickResult(idx)),
@@ -1045,6 +1044,15 @@ impl App {
                 .align_x(iced::Alignment::Center);
 
             stack![main_layout, backdrop, palette_positioned].into()
+        } else if let Some(ref pending) = self.pending_chord {
+            // Show pending chord indicator when waiting for second key
+            let chord_display = pending.first.display(current_platform());
+            let indicator = ui::palette::chord_indicator::<Message>(&chord_display);
+            let indicator_positioned = container(indicator)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(iced::Alignment::End);
+            stack![main_layout, indicator_positioned].into()
         } else {
             main_layout
         }
@@ -1553,11 +1561,24 @@ impl App {
                     self.palette.selected_index = (self.palette.selected_index + 1)
                         .min(len - 1);
                 }
-                Task::none()
+                ui::palette::scroll_to_selected(
+                    self.palette.selected_index,
+                    len,
+                )
+                .discard()
             }
             PaletteMessage::SelectPrev => {
+                let len = if self.palette.is_option_pick() {
+                    self.palette.option_matches.len()
+                } else {
+                    self.palette.results.len()
+                };
                 self.palette.selected_index = self.palette.selected_index.saturating_sub(1);
-                Task::none()
+                ui::palette::scroll_to_selected(
+                    self.palette.selected_index,
+                    len,
+                )
+                .discard()
             }
             PaletteMessage::Confirm => {
                 if self.palette.is_option_pick() {
@@ -1615,13 +1636,12 @@ impl App {
                     })
                     .unwrap_or("option");
 
-                // Skip DateTime commands for now (snooze picker is complex)
+                // DateTime commands use preset options instead of a full picker
                 if matches!(
                     schema.param_at(0),
                     Some(ratatoskr_command_palette::ParamDef::DateTime { .. })
                 ) {
-                    self.palette.close();
-                    return Task::none();
+                    return self.enter_snooze_stage2(id, param_label);
                 }
 
                 // Transition to stage 2
@@ -1719,6 +1739,30 @@ impl App {
 
         self.palette.close();
         self.update(Message::ExecuteParameterized(command_id, args))
+    }
+
+    /// Enter snooze stage 2 with preset time options instead of a full
+    /// DateTime picker. The options are generated locally (no resolver call).
+    fn enter_snooze_stage2(
+        &mut self,
+        id: CommandId,
+        param_label: &str,
+    ) -> Task<Message> {
+        self.palette.stage = ui::palette::PaletteStage::OptionPick;
+        self.palette.query.clear();
+        self.palette.selected_index = 0;
+        self.palette.stage2_command_id = Some(id);
+        self.palette.stage2_label = param_label.to_string();
+        self.palette.options_loading = false;
+
+        let items = ui::palette::snooze_preset_options();
+        self.palette.option_matches =
+            ratatoskr_command_palette::search_options(&items, "");
+        self.palette.option_items = items;
+
+        iced::widget::operation::focus::<Message>(
+            "palette-input".to_string(),
+        )
     }
 }
 
@@ -2795,8 +2839,28 @@ fn build_command_args(command_id: CommandId, item: &OptionItem) -> Option<Comman
                 .ok()
                 .map(|ts| CommandArgs::Snooze { until: ts })
         }
+        CommandId::NavigateToLabel => {
+            // The item.id is encoded as "account_id:label_id" for
+            // cross-account disambiguation.
+            let (account_id, label_id) = split_cross_account_id(&item.id)?;
+            Some(CommandArgs::NavigateToLabel {
+                label_id,
+                account_id,
+            })
+        }
         _ => None,
     }
+}
+
+/// Split a cross-account encoded ID ("account_id:label_id") into its parts.
+fn split_cross_account_id(encoded: &str) -> Option<(String, String)> {
+    let colon_pos = encoded.find(':')?;
+    let account_id = encoded[..colon_pos].to_string();
+    let label_id = encoded[colon_pos + 1..].to_string();
+    if account_id.is_empty() || label_id.is_empty() {
+        return None;
+    }
+    Some((account_id, label_id))
 }
 
 /// Execute search off the main thread via spawn_blocking.

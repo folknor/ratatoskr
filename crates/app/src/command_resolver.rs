@@ -70,6 +70,9 @@ impl CommandInputResolver for AppInputResolver {
                 self.db
                     .get_thread_labels_for_palette(account_id, thread_id)
             }
+            (CommandId::NavigateToLabel, 0) => {
+                self.db.get_all_labels_cross_account()
+            }
             _ => Ok(vec![]),
         }
     }
