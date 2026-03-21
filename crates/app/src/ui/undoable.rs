@@ -119,6 +119,21 @@ impl UndoableText {
         self.undo_stack.clear();
         self.redo_stack.clear();
     }
+
+    /// Reset to `new_text`, clearing all history. Use this for
+    /// programmatic resets (e.g. clearing the search bar, loading a
+    /// pinned search) where the previous undo stack is meaningless.
+    pub fn reset(&mut self, new_text: String) {
+        self.current = new_text;
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+    }
+
+    /// Returns `true` if the current text is empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.current.is_empty()
+    }
 }
 
 // ── UndoableList ────────────────────────────────────────

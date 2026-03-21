@@ -4,7 +4,7 @@ use chrono::{Datelike, NaiveDate, Timelike};
 use iced::Task;
 
 use crate::ui::calendar::{
-    CalendarEventData, CalendarMessage, CalendarOverlay, EventField,
+    CalendarEventData, CalendarMessage, CalendarOverlay, EventField, EventTextField,
 };
 use crate::{App, Message};
 
@@ -84,6 +84,7 @@ impl App {
                         (CalendarEventData::new_at(date, hour), true)
                     }
                 };
+                self.calendar.reset_editor_undo(&event);
                 self.calendar.overlay =
                     CalendarOverlay::EventEditor { event, is_new };
                 Task::none()
@@ -91,14 +92,24 @@ impl App {
             CalendarMessage::CreateEvent => {
                 let date = self.calendar.selected_date;
                 let hour = self.calendar.selected_hour.unwrap_or(9);
+                let event = CalendarEventData::new_at(date, hour);
+                self.calendar.reset_editor_undo(&event);
                 self.calendar.overlay = CalendarOverlay::EventEditor {
-                    event: CalendarEventData::new_at(date, hour),
+                    event,
                     is_new: true,
                 };
                 Task::none()
             }
             CalendarMessage::EventFieldChanged(field) => {
                 self.handle_event_field_changed(field);
+                Task::none()
+            }
+            CalendarMessage::EventFieldUndo(text_field) => {
+                self.handle_event_field_undo(text_field);
+                Task::none()
+            }
+            CalendarMessage::EventFieldRedo(text_field) => {
+                self.handle_event_field_redo(text_field);
                 Task::none()
             }
             CalendarMessage::SaveEvent => self.handle_save_event(),
@@ -150,14 +161,67 @@ impl App {
     fn handle_event_field_changed(&mut self, field: EventField) {
         if let CalendarOverlay::EventEditor { ref mut event, .. } = self.calendar.overlay {
             match field {
-                EventField::Title(s) => event.title = s,
-                EventField::Location(s) => event.location = s,
-                EventField::Description(s) => event.description = s,
+                EventField::Title(s) => {
+                    self.calendar.editor_undo_title.set_text(s.clone());
+                    event.title = s;
+                }
+                EventField::Location(s) => {
+                    self.calendar.editor_undo_location.set_text(s.clone());
+                    event.location = s;
+                }
+                EventField::Description(s) => {
+                    self.calendar.editor_undo_description.set_text(s.clone());
+                    event.description = s;
+                }
                 EventField::StartHour(s) => event.start_hour = s,
                 EventField::StartMinute(s) => event.start_minute = s,
                 EventField::EndHour(s) => event.end_hour = s,
                 EventField::EndMinute(s) => event.end_minute = s,
                 EventField::AllDay(b) => event.all_day = b,
+            }
+        }
+    }
+
+    fn handle_event_field_undo(&mut self, text_field: EventTextField) {
+        if let CalendarOverlay::EventEditor { ref mut event, .. } = self.calendar.overlay {
+            match text_field {
+                EventTextField::Title => {
+                    if let Some(t) = self.calendar.editor_undo_title.undo() {
+                        event.title = t.to_owned();
+                    }
+                }
+                EventTextField::Location => {
+                    if let Some(t) = self.calendar.editor_undo_location.undo() {
+                        event.location = t.to_owned();
+                    }
+                }
+                EventTextField::Description => {
+                    if let Some(t) = self.calendar.editor_undo_description.undo() {
+                        event.description = t.to_owned();
+                    }
+                }
+            }
+        }
+    }
+
+    fn handle_event_field_redo(&mut self, text_field: EventTextField) {
+        if let CalendarOverlay::EventEditor { ref mut event, .. } = self.calendar.overlay {
+            match text_field {
+                EventTextField::Title => {
+                    if let Some(t) = self.calendar.editor_undo_title.redo() {
+                        event.title = t.to_owned();
+                    }
+                }
+                EventTextField::Location => {
+                    if let Some(t) = self.calendar.editor_undo_location.redo() {
+                        event.location = t.to_owned();
+                    }
+                }
+                EventTextField::Description => {
+                    if let Some(t) = self.calendar.editor_undo_description.redo() {
+                        event.description = t.to_owned();
+                    }
+                }
             }
         }
     }

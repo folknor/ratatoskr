@@ -59,6 +59,7 @@ use ui::layout::{
     RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH,
 };
 use ui::add_account::{AddAccountMessage, AddAccountWizard};
+use ui::undoable::UndoableText;
 use ui::calendar::{
     CalendarMessage, CalendarOverlay, CalendarState, CalendarView,
 };
@@ -274,7 +275,7 @@ struct App {
 
     // Search state
     search_generation: u64,
-    search_query: String,
+    search_query: UndoableText,
     search_debounce_deadline: Option<iced::time::Instant>,
     pre_search_threads: Option<Vec<Thread>>,
 
@@ -337,7 +338,7 @@ impl App {
             palette: PaletteState::new(),
             resolver,
             search_generation: 0,
-            search_query: String::new(),
+            search_query: UndoableText::new(),
             search_debounce_deadline: None,
             pre_search_threads: None,
             pinned_searches: Vec::new(),
@@ -943,6 +944,22 @@ impl App {
             }
             ThreadListEvent::SearchExecute => {
                 self.update(Message::SearchExecute)
+            }
+            ThreadListEvent::SearchUndo => {
+                if let Some(text) = self.search_query.undo() {
+                    let query = text.to_owned();
+                    self.thread_list.search_query.clone_from(&query);
+                    self.apply_search_debounce();
+                }
+                Task::none()
+            }
+            ThreadListEvent::SearchRedo => {
+                if let Some(text) = self.search_query.redo() {
+                    let query = text.to_owned();
+                    self.thread_list.search_query.clone_from(&query);
+                    self.apply_search_debounce();
+                }
+                Task::none()
             }
             ThreadListEvent::ThreadDeselected => {
                 self.thread_list.selected_thread = None;

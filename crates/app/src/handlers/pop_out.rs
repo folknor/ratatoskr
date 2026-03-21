@@ -14,6 +14,7 @@ use iced::{Point, Size, Task};
 
 use crate::db::Db;
 use crate::pop_out::compose::{ComposeMessage, ComposeMode, ComposeState};
+use crate::ui::undoable::UndoableText;
 use crate::pop_out::message_view::{
     MessageViewMessage, MessageViewState, RenderingMode,
 };
@@ -226,7 +227,7 @@ impl App {
         mode: ComposeMode,
     ) -> Task<Message> {
         state.mode = mode;
-        state.subject = state.mode.prefixed_subject();
+        state.subject = UndoableText::with_initial(&state.mode.prefixed_subject());
 
         let settings = iced::window::Settings {
             size: Size::new(COMPOSE_DEFAULT_WIDTH, COMPOSE_DEFAULT_HEIGHT),
