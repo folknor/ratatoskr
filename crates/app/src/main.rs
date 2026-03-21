@@ -5,6 +5,7 @@ mod component;
 mod db;
 mod display;
 mod font;
+mod handlers;
 mod icon;
 mod pop_out;
 mod ui;
@@ -2517,8 +2518,13 @@ impl App {
                 let PopOutMessage::Compose(msg) = pop_out_msg else {
                     return Task::none();
                 };
+                let needs_search = handlers::contacts::should_trigger_autocomplete(&msg);
                 pop_out::compose::update_compose(state, msg);
-                Task::none()
+                if needs_search {
+                    handlers::contacts::dispatch_autocomplete_search(&self.db, window_id, state)
+                } else {
+                    Task::none()
+                }
             }
             _ => Task::none(),
         }

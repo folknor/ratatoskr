@@ -9,13 +9,21 @@ use super::connection::Db;
 pub struct ContactMatch {
     pub email: String,
     pub display_name: Option<String>,
+    /// Whether this is a group result.
+    pub is_group: bool,
+    /// Group ID (only set for group results).
+    pub group_id: Option<String>,
+    /// Member count (only set for group results).
+    pub member_count: Option<i64>,
 }
 
-/// Search contacts and seen addresses for autocomplete.
+/// Search contacts, seen addresses, and groups for autocomplete.
 ///
 /// Searches the `contacts` table and `seen_addresses` table using LIKE
-/// matching. Deduplicates by email (contacts take priority over seen
-/// addresses). Returns up to `limit` results ordered by relevance.
+/// matching, plus `contact_groups` by name. Deduplicates by email
+/// (contacts take priority over seen addresses). Results ranked by
+/// recency (last_contacted_at / last_seen_at) as spec requires.
+/// Returns up to `limit` results.
 pub fn search_contacts_for_autocomplete(
     conn: &Connection,
     query: &str,
@@ -27,21 +35,26 @@ pub fn search_contacts_for_autocomplete(
     }
     let pattern = format!("%{trimmed}%");
     let mut results = Vec::new();
-    let mut seen_emails: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut seen_emails: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
 
     // Search contacts table first (higher priority).
-    // Order by frequency DESC so frequently-contacted people rank higher,
-    // matching the product spec's "recency dominates" ranking model.
+    // Order by recency (last_contacted_at DESC), not frequency.
     let contacts_sql = "SELECT email, display_name FROM contacts
                         WHERE email LIKE ?1 OR display_name LIKE ?1
-                        ORDER BY frequency DESC, display_name ASC
+                        ORDER BY last_contacted_at DESC NULLS LAST,
+                                 display_name ASC
                         LIMIT ?2";
-    let mut stmt = conn.prepare(contacts_sql).map_err(|e| e.to_string())?;
+    let mut stmt =
+        conn.prepare(contacts_sql).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(params![&pattern, limit], |row| {
             Ok(ContactMatch {
                 email: row.get("email")?,
                 display_name: row.get("display_name")?,
+                is_group: false,
+                group_id: None,
+                member_count: None,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -53,33 +66,115 @@ pub fn search_contacts_for_autocomplete(
         }
     }
 
-    // Search seen_addresses table (lower priority, fills remaining slots).
+    // Search seen_addresses table (lower priority, fills remaining).
     // Order by last_seen_at DESC for recency.
     let remaining = limit - results.len() as i64;
     if remaining > 0 {
-        let seen_sql = "SELECT email, display_name FROM seen_addresses
-                        WHERE email LIKE ?1 OR display_name LIKE ?1
-                        ORDER BY last_seen_at DESC
-                        LIMIT ?2";
-        let mut seen_stmt = conn.prepare(seen_sql).map_err(|e| e.to_string())?;
-        let seen_rows = seen_stmt
-            .query_map(params![&pattern, remaining], |row| {
-                Ok(ContactMatch {
-                    email: row.get("email")?,
-                    display_name: row.get("display_name")?,
-                })
-            })
-            .map_err(|e| e.to_string())?;
-        for row in seen_rows {
-            let contact = row.map_err(|e| e.to_string())?;
-            let key = contact.email.to_lowercase();
-            if seen_emails.insert(key) {
-                results.push(contact);
-            }
-        }
+        search_seen_addresses(
+            conn,
+            &pattern,
+            remaining,
+            &mut seen_emails,
+            &mut results,
+        )?;
+    }
+
+    // Search contact groups by name.
+    let group_remaining = limit - results.len() as i64;
+    if group_remaining > 0 {
+        search_groups(conn, &pattern, group_remaining, &mut results)?;
     }
 
     Ok(results)
+}
+
+/// Search seen_addresses table for autocomplete matches.
+fn search_seen_addresses(
+    conn: &Connection,
+    pattern: &str,
+    limit: i64,
+    seen_emails: &mut std::collections::HashSet<String>,
+    results: &mut Vec<ContactMatch>,
+) -> Result<(), String> {
+    let seen_sql = "SELECT email, display_name FROM seen_addresses
+                    WHERE email LIKE ?1 OR display_name LIKE ?1
+                    ORDER BY last_seen_at DESC
+                    LIMIT ?2";
+    let mut seen_stmt =
+        conn.prepare(seen_sql).map_err(|e| e.to_string())?;
+    let seen_rows = seen_stmt
+        .query_map(params![pattern, limit], |row| {
+            Ok(ContactMatch {
+                email: row.get("email")?,
+                display_name: row.get("display_name")?,
+                is_group: false,
+                group_id: None,
+                member_count: None,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    for row in seen_rows {
+        let contact = row.map_err(|e| e.to_string())?;
+        let key = contact.email.to_lowercase();
+        if seen_emails.insert(key) {
+            results.push(contact);
+        }
+    }
+    Ok(())
+}
+
+/// Search contact groups by name for autocomplete.
+fn search_groups(
+    conn: &Connection,
+    pattern: &str,
+    limit: i64,
+    results: &mut Vec<ContactMatch>,
+) -> Result<(), String> {
+    let groups_sql =
+        "SELECT g.id, g.name,
+                (SELECT COUNT(*) FROM contact_group_members m
+                 WHERE m.group_id = g.id) AS member_count
+         FROM contact_groups g
+         WHERE g.name LIKE ?1
+         ORDER BY g.name ASC
+         LIMIT ?2";
+    let mut stmt =
+        conn.prepare(groups_sql).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![pattern, limit], |row| {
+            let id: String = row.get("id")?;
+            let name: String = row.get("name")?;
+            let count: i64 = row.get("member_count")?;
+            Ok(ContactMatch {
+                email: String::new(),
+                display_name: Some(name),
+                is_group: true,
+                group_id: Some(id),
+                member_count: Some(count),
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    for row in rows {
+        results.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(())
+}
+
+// ── Async autocomplete wrapper for Db ─────────────────────────
+
+impl Db {
+    /// Async wrapper for autocomplete search, suitable for
+    /// `Task::perform`.
+    pub async fn search_autocomplete(
+        &self,
+        query: String,
+        limit: i64,
+    ) -> Result<Vec<ContactMatch>, String> {
+        self.with_conn(move |conn| {
+            search_contacts_for_autocomplete(conn, &query, limit)
+        })
+        .await
+    }
 }
 
 // ── Contact management types ─────────────────────────────────
@@ -112,7 +207,8 @@ pub struct GroupEntry {
 // ── Contact management CRUD ──────────────────────────────────
 
 impl Db {
-    /// Load contacts for the settings management list, optionally filtered.
+    /// Load contacts for the settings management list, optionally
+    /// filtered.
     pub async fn get_contacts_for_settings(
         &self,
         filter: String,
@@ -128,10 +224,8 @@ impl Db {
         &self,
         filter: String,
     ) -> Result<Vec<GroupEntry>, String> {
-        self.with_conn(move |conn| {
-            load_groups_filtered(conn, &filter)
-        })
-        .await
+        self.with_conn(move |conn| load_groups_filtered(conn, &filter))
+            .await
     }
 
     /// Get member emails for a group.
@@ -201,6 +295,9 @@ impl Db {
     }
 }
 
+/// Load contacts with group memberships via a single JOIN query
+/// (replaces the N+1 pattern of calling load_contact_groups per
+/// contact).
 fn load_contacts_filtered(
     conn: &Connection,
     filter: &str,
@@ -208,32 +305,43 @@ fn load_contacts_filtered(
     let trimmed = filter.trim();
     let pattern = format!("%{trimmed}%");
 
-    // Always pass the pattern param; when no filter is active the WHERE clause
-    // is trivially true (empty pattern = '%') so the param is harmless.
+    // Single query that JOINs contacts with their group memberships.
     let sql = if trimmed.is_empty() {
         "SELECT c.id, c.email, c.display_name, c.email2, c.phone,
                 c.company, c.notes, c.account_id,
-                a.account_color
+                a.account_color,
+                GROUP_CONCAT(g.name, '||') AS group_names
          FROM contacts c
          LEFT JOIN accounts a ON a.id = c.account_id
+         LEFT JOIN contact_group_members m
+           ON m.member_type = 'email' AND m.member_value = c.email
+         LEFT JOIN contact_groups g ON g.id = m.group_id
          WHERE c.source != 'seen'
-         ORDER BY c.frequency DESC, c.display_name ASC
+         GROUP BY c.id
+         ORDER BY c.last_contacted_at DESC NULLS LAST,
+                  c.display_name ASC
          LIMIT 200"
     } else {
         "SELECT c.id, c.email, c.display_name, c.email2, c.phone,
                 c.company, c.notes, c.account_id,
-                a.account_color
+                a.account_color,
+                GROUP_CONCAT(g.name, '||') AS group_names
          FROM contacts c
          LEFT JOIN accounts a ON a.id = c.account_id
+         LEFT JOIN contact_group_members m
+           ON m.member_type = 'email' AND m.member_value = c.email
+         LEFT JOIN contact_groups g ON g.id = m.group_id
          WHERE c.source != 'seen'
            AND (c.email LIKE ?1
                 OR c.display_name LIKE ?1
                 OR c.company LIKE ?1)
-         ORDER BY c.frequency DESC, c.display_name ASC
+         GROUP BY c.id
+         ORDER BY c.last_contacted_at DESC NULLS LAST,
+                  c.display_name ASC
          LIMIT 200"
     };
 
-    let params: &[&dyn rusqlite::types::ToSql] = if trimmed.is_empty() {
+    let db_params: &[&dyn rusqlite::types::ToSql] = if trimmed.is_empty() {
         &[]
     } else {
         &[&pattern]
@@ -241,7 +349,15 @@ fn load_contacts_filtered(
 
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map(params, |row| {
+        .query_map(db_params, |row| {
+            let group_names: Option<String> = row.get("group_names")?;
+            let groups = group_names
+                .map(|s| {
+                    s.split("||")
+                        .map(String::from)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             Ok(ContactEntry {
                 id: row.get("id")?,
                 email: row.get("email")?,
@@ -252,39 +368,11 @@ fn load_contacts_filtered(
                 notes: row.get("notes")?,
                 account_id: row.get("account_id")?,
                 account_color: row.get("account_color")?,
-                groups: Vec::new(),
+                groups,
             })
         })
         .map_err(|e| e.to_string())?;
 
-    let mut contacts: Vec<ContactEntry> = Vec::new();
-    for row in rows {
-        contacts.push(row.map_err(|e| e.to_string())?);
-    }
-
-    // Load group memberships for each contact.
-    for contact in &mut contacts {
-        contact.groups = load_contact_groups(conn, &contact.email)?;
-    }
-    Ok(contacts)
-}
-
-fn load_contact_groups(
-    conn: &Connection,
-    email: &str,
-) -> Result<Vec<String>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT g.name FROM contact_groups g
-             INNER JOIN contact_group_members m
-               ON m.group_id = g.id
-             WHERE m.member_type = 'email' AND m.member_value = ?1
-             ORDER BY g.name ASC",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![email], |row| row.get::<_, String>(0))
-        .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
 }
@@ -313,7 +401,7 @@ fn load_groups_filtered(
          LIMIT 100"
     };
 
-    let params: &[&dyn rusqlite::types::ToSql] = if trimmed.is_empty() {
+    let db_params: &[&dyn rusqlite::types::ToSql] = if trimmed.is_empty() {
         &[]
     } else {
         &[&pattern]
@@ -321,7 +409,7 @@ fn load_groups_filtered(
 
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map(params, |row| {
+        .query_map(db_params, |row| {
             Ok(GroupEntry {
                 id: row.get("id")?,
                 name: row.get("name")?,
@@ -414,7 +502,8 @@ fn save_group_inner(
 
     let mut stmt = conn
         .prepare(
-            "INSERT INTO contact_group_members (group_id, member_type, member_value)
+            "INSERT INTO contact_group_members
+             (group_id, member_type, member_value)
              VALUES (?1, 'email', ?2)",
         )
         .map_err(|e| e.to_string())?;

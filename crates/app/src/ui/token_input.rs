@@ -16,7 +16,7 @@ use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::{Clipboard, Layout, Shell, Widget};
 use iced::keyboard;
 use iced::mouse;
-use iced::{border, Element, Event, Length, Rectangle, Size, Theme, Vector};
+use iced::{border, Element, Event, Length, Point, Rectangle, Size, Theme, Vector};
 
 use crate::font;
 use crate::ui::layout::*;
@@ -36,6 +36,8 @@ pub struct Token {
     pub is_group: bool,
     /// Group ID if this is a group token (for expand operations).
     pub group_id: Option<String>,
+    /// Member count for group tokens (displayed as suffix).
+    pub member_count: Option<i64>,
 }
 
 /// Opaque token identifier. Wraps a u64 counter, monotonically increasing
@@ -105,6 +107,12 @@ pub enum TokenInputMessage {
     Paste(String),
     /// Backspace was pressed at the start of the text input.
     BackspaceAtStart,
+    /// Right-click on a token — emit position for context menu.
+    TokenContextMenu(TokenId, Point),
+    /// Arrow key navigated to select a token by index.
+    ArrowSelectToken(TokenId),
+    /// Arrow right from last token — deselect and focus text.
+    ArrowToText,
 }
 
 // ── Widget state ────────────────────────────────────────
@@ -161,15 +169,20 @@ pub fn token_input_field<'a, M: Clone + 'a>(
 
 // ── Layout helpers ──────────────────────────────────────
 
-/// Estimate token chip width from label length.
-/// Uses a rough character-width heuristic since precise text measurement
-/// requires a paragraph. Adequate for layout — chips are visually padded.
-fn estimate_token_width(label: &str) -> f32 {
-    // Average character width at TEXT_MD (12px) with Inter is ~6.5px.
+/// Estimate token chip width from label text.
+///
+/// Uses character count (not byte count) for correct non-ASCII width.
+/// Group tokens include space for the people icon prefix.
+fn estimate_token_width(token: &Token) -> f32 {
     let avg_char_width = TEXT_MD * 0.54;
     #[allow(clippy::cast_precision_loss)]
-    let text_width = label.len() as f32 * avg_char_width;
-    text_width + PAD_TOKEN.left + PAD_TOKEN.right
+    let text_width = token.label.chars().count() as f32 * avg_char_width;
+    let icon_width = if token.is_group {
+        TOKEN_GROUP_ICON_SIZE + SPACE_XXS
+    } else {
+        0.0
+    };
+    text_width + icon_width + PAD_TOKEN.left + PAD_TOKEN.right
 }
 
 /// Compute the text area origin from the token bounds.
@@ -193,6 +206,44 @@ fn text_area_origin(
     } else {
         (PAD_TOKEN_INPUT.left, PAD_TOKEN_INPUT.top)
     }
+}
+
+// ── Group icon drawing ──────────────────────────────────
+
+/// Draw the people icon glyph for group tokens using the icon font.
+fn draw_group_icon(
+    renderer: &mut iced::Renderer,
+    position: Point,
+    color: iced::Color,
+    clip: Rectangle,
+) {
+    // Lucide "users" icon: U+E1A4
+    renderer.fill_text(
+        iced::advanced::text::Text {
+            content: "\u{e1a4}".to_string(),
+            bounds: Size::new(TOKEN_GROUP_ICON_SIZE, TOKEN_HEIGHT),
+            size: iced::Pixels(TOKEN_GROUP_ICON_SIZE),
+            line_height: iced::advanced::text::LineHeight::default(),
+            font: crate::font::ICON,
+            align_x: iced::advanced::text::Alignment::Left,
+            align_y: iced::alignment::Vertical::Center,
+            shaping: iced::advanced::text::Shaping::Advanced,
+            wrapping: iced::advanced::text::Wrapping::None,
+            ellipsis: iced::advanced::text::Ellipsis::None,
+            hint_factor: None,
+        },
+        position,
+        color,
+        clip,
+    );
+}
+
+// ── Arrow key helpers ───────────────────────────────────
+
+/// Find the index of the currently selected token.
+fn selected_index(tokens: &[Token], selected: Option<TokenId>) -> Option<usize> {
+    let sel = selected?;
+    tokens.iter().position(|t| t.id == sel)
 }
 
 // ── Widget implementation ───────────────────────────────
@@ -227,7 +278,7 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
 
         // Layout each token chip in a wrapping flow
         for token in self.tokens {
-            let chip_width = estimate_token_width(&token.label);
+            let chip_width = estimate_token_width(token);
             if x + chip_width > inner_width && x > 0.0 {
                 x = 0.0;
                 y += TOKEN_HEIGHT + TOKEN_ROW_SPACING;
@@ -333,13 +384,25 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
                 chip_bg,
             );
 
+            // Group icon prefix for group tokens
+            let label_x_offset = if token.is_group {
+                draw_group_icon(
+                    renderer,
+                    Point::new(abs.x + PAD_TOKEN.left, abs.y),
+                    text_color,
+                    abs,
+                );
+                TOKEN_GROUP_ICON_SIZE + SPACE_XXS
+            } else {
+                0.0
+            };
+
             // Chip label
-            let label = &token.label;
             renderer.fill_text(
                 iced::advanced::text::Text {
-                    content: label.to_string(),
+                    content: token.label.clone(),
                     bounds: Size::new(
-                        abs.width - PAD_TOKEN.left - PAD_TOKEN.right,
+                        abs.width - PAD_TOKEN.left - PAD_TOKEN.right - label_x_offset,
                         abs.height,
                     ),
                     size: iced::Pixels(TEXT_MD),
@@ -352,83 +415,14 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
                     ellipsis: iced::advanced::text::Ellipsis::None,
                     hint_factor: None,
                 },
-                iced::Point::new(abs.x + PAD_TOKEN.left, abs.y),
+                Point::new(abs.x + PAD_TOKEN.left + label_x_offset, abs.y),
                 text_color,
                 abs,
             );
         }
 
         // Text area: placeholder or current text
-        let (text_x, text_y) =
-            text_area_origin(&state.token_bounds, bounds.width);
-
-        let display_text =
-            if self.text.is_empty() && self.tokens.is_empty() {
-                self.placeholder
-            } else {
-                self.text
-            };
-
-        let text_color =
-            if self.text.is_empty() && self.tokens.is_empty() {
-                palette.background.base.text.scale_alpha(0.4)
-            } else {
-                palette.background.base.text
-            };
-
-        if !display_text.is_empty() {
-            let text_area_width =
-                bounds.width - text_x - PAD_TOKEN_INPUT.right;
-            renderer.fill_text(
-                iced::advanced::text::Text {
-                    content: display_text.to_string(),
-                    bounds: Size::new(text_area_width, TOKEN_HEIGHT),
-                    size: iced::Pixels(TEXT_MD),
-                    line_height: iced::advanced::text::LineHeight::default(),
-                    font: font::text(),
-                    align_x: iced::advanced::text::Alignment::Left,
-                    align_y: iced::alignment::Vertical::Center,
-                    shaping: iced::advanced::text::Shaping::Advanced,
-                    wrapping: iced::advanced::text::Wrapping::None,
-                    ellipsis: iced::advanced::text::Ellipsis::None,
-                    hint_factor: None,
-                },
-                iced::Point::new(bounds.x + text_x, bounds.y + text_y),
-                text_color,
-                Rectangle {
-                    x: bounds.x + text_x,
-                    y: bounds.y + text_y,
-                    width: text_area_width,
-                    height: TOKEN_HEIGHT,
-                },
-            );
-        }
-
-        // Text cursor when focused and no token selected
-        if state.is_focused && self.selected_token.is_none() {
-            #[allow(clippy::cast_precision_loss)]
-            let cursor_x = if self.text.is_empty() {
-                bounds.x + text_x
-            } else {
-                let text_width = self.text.len() as f32 * TEXT_MD * 0.54;
-                bounds.x + text_x + text_width
-            };
-            let cursor_y = bounds.y + text_y + 2.0;
-            let cursor_height = TOKEN_HEIGHT - 4.0;
-
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: cursor_x,
-                        y: cursor_y,
-                        width: 1.0,
-                        height: cursor_height,
-                    },
-                    ..renderer::Quad::default()
-                },
-                palette.background.base.text,
-            );
-        }
+        draw_text_area(self, state, renderer, &palette, bounds);
     }
 
     fn update(
@@ -446,15 +440,13 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
         let bounds = layout.bounds();
 
         match event {
-            // ── Mouse: left click ──────────────────────────
+            // ── Mouse: right click ──────────────────────
             Event::Mouse(mouse::Event::ButtonPressed {
-                button: mouse::Button::Left,
+                button: mouse::Button::Right,
                 ..
-            })
-            | Event::Touch(iced::touch::Event::FingerPressed { .. }) => {
+            }) => {
                 if let Some(pos) = cursor.position() {
                     if bounds.contains(pos) {
-                        // Hit-test tokens
                         for (i, token) in self.tokens.iter().enumerate() {
                             if let Some(chip) = state.token_bounds.get(i) {
                                 let abs = Rectangle {
@@ -464,17 +456,9 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
                                     height: chip.height,
                                 };
                                 if abs.contains(pos) {
-                                    // Focus the widget so keyboard events
-                                    // (Backspace/Delete) work on the selected token
-                                    if !state.is_focused {
-                                        state.is_focused = true;
-                                        shell.publish((self.on_message)(
-                                            TokenInputMessage::Focused,
-                                        ));
-                                    }
                                     shell.publish((self.on_message)(
-                                        TokenInputMessage::SelectToken(
-                                            token.id,
+                                        TokenInputMessage::TokenContextMenu(
+                                            token.id, pos,
                                         ),
                                     ));
                                     shell.capture_event();
@@ -482,29 +466,17 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
                                 }
                             }
                         }
-
-                        // Clicked in field, not on token — focus
-                        if !state.is_focused {
-                            state.is_focused = true;
-                            shell.publish((self.on_message)(
-                                TokenInputMessage::Focused,
-                            ));
-                        }
-                        shell.publish((self.on_message)(
-                            TokenInputMessage::DeselectTokens,
-                        ));
-                        shell.capture_event();
-                        return;
-                    }
-
-                    // Clicked outside — blur
-                    if state.is_focused {
-                        state.is_focused = false;
-                        shell.publish((self.on_message)(
-                            TokenInputMessage::Blurred,
-                        ));
                     }
                 }
+            }
+
+            // ── Mouse: left click ──────────────────────────
+            Event::Mouse(mouse::Event::ButtonPressed {
+                button: mouse::Button::Left,
+                ..
+            })
+            | Event::Touch(iced::touch::Event::FingerPressed { .. }) => {
+                handle_left_click(self, state, cursor, bounds, shell);
             }
 
             // ── Keyboard events (only when focused) ────────
@@ -513,134 +485,7 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
                 modifiers,
                 ..
             }) if state.is_focused => {
-                match key {
-                    // Paste: Ctrl+V / Cmd+V
-                    keyboard::Key::Character(c)
-                        if (c.as_str() == "v" || c.as_str() == "V")
-                            && modifiers.command() =>
-                    {
-                        if let Some(content) = clipboard.read(
-                            iced::advanced::clipboard::Kind::Standard,
-                        ) {
-                            shell.publish((self.on_message)(
-                                TokenInputMessage::Paste(content),
-                            ));
-                            shell.capture_event();
-                            return;
-                        }
-                    }
-
-                    // Backspace
-                    keyboard::Key::Named(
-                        keyboard::key::Named::Backspace,
-                    ) => {
-                        if self.text.is_empty() {
-                            if let Some(selected) = self.selected_token {
-                                shell.publish((self.on_message)(
-                                    TokenInputMessage::RemoveToken(selected),
-                                ));
-                                shell.capture_event();
-                                return;
-                            }
-                            if !self.tokens.is_empty() {
-                                shell.publish((self.on_message)(
-                                    TokenInputMessage::BackspaceAtStart,
-                                ));
-                                shell.capture_event();
-                                return;
-                            }
-                        } else {
-                            let mut new_text = self.text.to_string();
-                            new_text.pop();
-                            shell.publish((self.on_message)(
-                                TokenInputMessage::TextChanged(new_text),
-                            ));
-                            shell.capture_event();
-                            return;
-                        }
-                    }
-
-                    // Escape: blur
-                    keyboard::Key::Named(keyboard::key::Named::Escape) => {
-                        state.is_focused = false;
-                        shell.publish((self.on_message)(
-                            TokenInputMessage::Blurred,
-                        ));
-                        shell.capture_event();
-                        return;
-                    }
-
-                    // Enter / Tab: tokenize current text
-                    keyboard::Key::Named(
-                        keyboard::key::Named::Enter
-                        | keyboard::key::Named::Tab,
-                    ) => {
-                        if !self.text.is_empty() {
-                            let text = self.text.to_string();
-                            shell.publish((self.on_message)(
-                                TokenInputMessage::TokenizeText(text),
-                            ));
-                            shell.capture_event();
-                            return;
-                        }
-                    }
-
-                    // Comma / Semicolon: always tokenize
-                    keyboard::Key::Character(c)
-                        if !modifiers.command()
-                            && (c.as_str() == ","
-                                || c.as_str() == ";") =>
-                    {
-                        if !self.text.is_empty() {
-                            let text = self.text.to_string();
-                            shell.publish((self.on_message)(
-                                TokenInputMessage::TokenizeText(text),
-                            ));
-                        }
-                        shell.capture_event();
-                        return;
-                    }
-
-                    // Space: tokenize if looks like email, else append
-                    keyboard::Key::Named(keyboard::key::Named::Space)
-                        if !modifiers.command() =>
-                    {
-                        if !self.text.is_empty() && self.text.contains('@')
-                        {
-                            let text = self.text.to_string();
-                            shell.publish((self.on_message)(
-                                TokenInputMessage::TokenizeText(text),
-                            ));
-                        } else if !self.text.is_empty() {
-                            let new_text = format!("{} ", self.text);
-                            shell.publish((self.on_message)(
-                                TokenInputMessage::TextChanged(new_text),
-                            ));
-                        }
-                        shell.capture_event();
-                        return;
-                    }
-
-                    // Regular character input
-                    keyboard::Key::Character(c)
-                        if !modifiers.command() =>
-                    {
-                        if self.selected_token.is_some() {
-                            shell.publish((self.on_message)(
-                                TokenInputMessage::DeselectTokens,
-                            ));
-                        }
-                        let new_text =
-                            format!("{}{}", self.text, c.as_str());
-                        shell.publish((self.on_message)(
-                            TokenInputMessage::TextChanged(new_text),
-                        ));
-                        shell.capture_event();
-                        return;
-                    }
-
-                    _ => {}
-                }
+                handle_key_press(self, key, modifiers, clipboard, shell);
             }
 
             _ => {}
@@ -679,6 +524,359 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
     }
 }
 
+// ── Extracted event handlers (keep update() under 100 lines) ──
+
+fn handle_left_click<M: Clone>(
+    widget: &TokenInputWidget<'_, M>,
+    state: &mut TokenInputState,
+    cursor: mouse::Cursor,
+    bounds: Rectangle,
+    shell: &mut Shell<'_, M>,
+) {
+    let Some(pos) = cursor.position() else {
+        return;
+    };
+
+    if bounds.contains(pos) {
+        // Hit-test tokens
+        for (i, token) in widget.tokens.iter().enumerate() {
+            if let Some(chip) = state.token_bounds.get(i) {
+                let abs = Rectangle {
+                    x: bounds.x + chip.x,
+                    y: bounds.y + chip.y,
+                    width: chip.width,
+                    height: chip.height,
+                };
+                if abs.contains(pos) {
+                    if !state.is_focused {
+                        state.is_focused = true;
+                        shell.publish((widget.on_message)(
+                            TokenInputMessage::Focused,
+                        ));
+                    }
+                    shell.publish((widget.on_message)(
+                        TokenInputMessage::SelectToken(token.id),
+                    ));
+                    shell.capture_event();
+                    return;
+                }
+            }
+        }
+
+        // Clicked in field, not on token — focus
+        if !state.is_focused {
+            state.is_focused = true;
+            shell.publish((widget.on_message)(
+                TokenInputMessage::Focused,
+            ));
+        }
+        shell.publish((widget.on_message)(
+            TokenInputMessage::DeselectTokens,
+        ));
+        shell.capture_event();
+        return;
+    }
+
+    // Clicked outside — blur
+    if state.is_focused {
+        state.is_focused = false;
+        shell.publish((widget.on_message)(TokenInputMessage::Blurred));
+    }
+}
+
+fn handle_key_press<M: Clone>(
+    widget: &TokenInputWidget<'_, M>,
+    key: &keyboard::Key,
+    modifiers: &keyboard::Modifiers,
+    clipboard: &mut dyn Clipboard,
+    shell: &mut Shell<'_, M>,
+) {
+    match key {
+        // Paste: Ctrl+V / Cmd+V
+        keyboard::Key::Character(c)
+            if (c.as_str() == "v" || c.as_str() == "V")
+                && modifiers.command() =>
+        {
+            if let Some(content) =
+                clipboard.read(iced::advanced::clipboard::Kind::Standard)
+            {
+                shell.publish((widget.on_message)(
+                    TokenInputMessage::Paste(content),
+                ));
+                shell.capture_event();
+            }
+        }
+
+        // Delete key: remove selected token
+        keyboard::Key::Named(keyboard::key::Named::Delete) => {
+            if let Some(selected) = widget.selected_token {
+                shell.publish((widget.on_message)(
+                    TokenInputMessage::RemoveToken(selected),
+                ));
+                shell.capture_event();
+            }
+        }
+
+        // Backspace
+        keyboard::Key::Named(keyboard::key::Named::Backspace) => {
+            handle_backspace(widget, shell);
+        }
+
+        // Left arrow: navigate to previous token
+        keyboard::Key::Named(keyboard::key::Named::ArrowLeft) => {
+            handle_arrow_left(widget, shell);
+        }
+
+        // Right arrow: navigate to next token or text
+        keyboard::Key::Named(keyboard::key::Named::ArrowRight) => {
+            handle_arrow_right(widget, shell);
+        }
+
+        // Escape: blur
+        keyboard::Key::Named(keyboard::key::Named::Escape) => {
+            shell.publish((widget.on_message)(TokenInputMessage::Blurred));
+            shell.capture_event();
+        }
+
+        // Enter / Tab: tokenize current text
+        keyboard::Key::Named(
+            keyboard::key::Named::Enter | keyboard::key::Named::Tab,
+        ) => {
+            if !widget.text.is_empty() {
+                let text = widget.text.to_string();
+                shell.publish((widget.on_message)(
+                    TokenInputMessage::TokenizeText(text),
+                ));
+                shell.capture_event();
+            }
+        }
+
+        // Comma / Semicolon: always tokenize
+        keyboard::Key::Character(c)
+            if !modifiers.command()
+                && (c.as_str() == "," || c.as_str() == ";") =>
+        {
+            if !widget.text.is_empty() {
+                let text = widget.text.to_string();
+                shell.publish((widget.on_message)(
+                    TokenInputMessage::TokenizeText(text),
+                ));
+            }
+            shell.capture_event();
+        }
+
+        // Space: tokenize if looks like email, else append
+        keyboard::Key::Named(keyboard::key::Named::Space)
+            if !modifiers.command() =>
+        {
+            handle_space(widget, shell);
+        }
+
+        // Regular character input
+        keyboard::Key::Character(c) if !modifiers.command() => {
+            if widget.selected_token.is_some() {
+                shell.publish((widget.on_message)(
+                    TokenInputMessage::DeselectTokens,
+                ));
+            }
+            let new_text = format!("{}{}", widget.text, c.as_str());
+            shell.publish((widget.on_message)(
+                TokenInputMessage::TextChanged(new_text),
+            ));
+            shell.capture_event();
+        }
+
+        _ => {}
+    }
+}
+
+fn handle_backspace<M: Clone>(
+    widget: &TokenInputWidget<'_, M>,
+    shell: &mut Shell<'_, M>,
+) {
+    if widget.text.is_empty() {
+        if let Some(selected) = widget.selected_token {
+            shell.publish((widget.on_message)(
+                TokenInputMessage::RemoveToken(selected),
+            ));
+            shell.capture_event();
+            return;
+        }
+        if !widget.tokens.is_empty() {
+            shell.publish((widget.on_message)(
+                TokenInputMessage::BackspaceAtStart,
+            ));
+            shell.capture_event();
+        }
+    } else {
+        let mut new_text = widget.text.to_string();
+        new_text.pop();
+        shell.publish((widget.on_message)(
+            TokenInputMessage::TextChanged(new_text),
+        ));
+        shell.capture_event();
+    }
+}
+
+fn handle_arrow_left<M: Clone>(
+    widget: &TokenInputWidget<'_, M>,
+    shell: &mut Shell<'_, M>,
+) {
+    if widget.tokens.is_empty() {
+        return;
+    }
+
+    match selected_index(widget.tokens, widget.selected_token) {
+        Some(idx) if idx > 0 => {
+            // Move selection to previous token
+            shell.publish((widget.on_message)(
+                TokenInputMessage::ArrowSelectToken(
+                    widget.tokens[idx - 1].id,
+                ),
+            ));
+            shell.capture_event();
+        }
+        Some(_) => {
+            // Already at first token, do nothing
+            shell.capture_event();
+        }
+        None if widget.text.is_empty() => {
+            // At text position 0 with no text: select last token
+            if let Some(last) = widget.tokens.last() {
+                shell.publish((widget.on_message)(
+                    TokenInputMessage::ArrowSelectToken(last.id),
+                ));
+                shell.capture_event();
+            }
+        }
+        None => {}
+    }
+}
+
+fn handle_arrow_right<M: Clone>(
+    widget: &TokenInputWidget<'_, M>,
+    shell: &mut Shell<'_, M>,
+) {
+    if widget.tokens.is_empty() {
+        return;
+    }
+
+    if let Some(idx) = selected_index(widget.tokens, widget.selected_token) {
+        if idx + 1 < widget.tokens.len() {
+            // Move selection to next token
+            shell.publish((widget.on_message)(
+                TokenInputMessage::ArrowSelectToken(
+                    widget.tokens[idx + 1].id,
+                ),
+            ));
+        } else {
+            // At last token: deselect and focus text
+            shell.publish((widget.on_message)(
+                TokenInputMessage::ArrowToText,
+            ));
+        }
+        shell.capture_event();
+    }
+}
+
+fn handle_space<M: Clone>(
+    widget: &TokenInputWidget<'_, M>,
+    shell: &mut Shell<'_, M>,
+) {
+    if !widget.text.is_empty() && widget.text.contains('@') {
+        let text = widget.text.to_string();
+        shell.publish((widget.on_message)(
+            TokenInputMessage::TokenizeText(text),
+        ));
+    } else if !widget.text.is_empty() {
+        let new_text = format!("{} ", widget.text);
+        shell.publish((widget.on_message)(
+            TokenInputMessage::TextChanged(new_text),
+        ));
+    }
+    shell.capture_event();
+}
+
+fn draw_text_area(
+    widget: &TokenInputWidget<'_, impl Clone>,
+    state: &TokenInputState,
+    renderer: &mut iced::Renderer,
+    palette: &iced::theme::Palette,
+    bounds: Rectangle,
+) {
+    let (text_x, text_y) =
+        text_area_origin(&state.token_bounds, bounds.width);
+
+    let display_text =
+        if widget.text.is_empty() && widget.tokens.is_empty() {
+            widget.placeholder
+        } else {
+            widget.text
+        };
+
+    let text_color =
+        if widget.text.is_empty() && widget.tokens.is_empty() {
+            palette.background.base.text.scale_alpha(0.4)
+        } else {
+            palette.background.base.text
+        };
+
+    if !display_text.is_empty() {
+        let text_area_width =
+            bounds.width - text_x - PAD_TOKEN_INPUT.right;
+        renderer.fill_text(
+            iced::advanced::text::Text {
+                content: display_text.to_string(),
+                bounds: Size::new(text_area_width, TOKEN_HEIGHT),
+                size: iced::Pixels(TEXT_MD),
+                line_height: iced::advanced::text::LineHeight::default(),
+                font: font::text(),
+                align_x: iced::advanced::text::Alignment::Left,
+                align_y: iced::alignment::Vertical::Center,
+                shaping: iced::advanced::text::Shaping::Advanced,
+                wrapping: iced::advanced::text::Wrapping::None,
+                ellipsis: iced::advanced::text::Ellipsis::None,
+                hint_factor: None,
+            },
+            Point::new(bounds.x + text_x, bounds.y + text_y),
+            text_color,
+            Rectangle {
+                x: bounds.x + text_x,
+                y: bounds.y + text_y,
+                width: text_area_width,
+                height: TOKEN_HEIGHT,
+            },
+        );
+    }
+
+    // Text cursor when focused and no token selected
+    if state.is_focused && widget.selected_token.is_none() {
+        #[allow(clippy::cast_precision_loss)]
+        let cursor_x = if widget.text.is_empty() {
+            bounds.x + text_x
+        } else {
+            let text_width =
+                widget.text.chars().count() as f32 * TEXT_MD * 0.54;
+            bounds.x + text_x + text_width
+        };
+        let cursor_y = bounds.y + text_y + SPACE_XXXS;
+        let cursor_height = TOKEN_HEIGHT - SPACE_XXS;
+
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds: Rectangle {
+                    x: cursor_x,
+                    y: cursor_y,
+                    width: 1.0,
+                    height: cursor_height,
+                },
+                ..renderer::Quad::default()
+            },
+            palette.background.base.text,
+        );
+    }
+}
+
 impl<'a, M: Clone + 'a> From<TokenInputWidget<'a, M>> for Element<'a, M> {
     fn from(widget: TokenInputWidget<'a, M>) -> Self {
         Self::new(widget)
@@ -697,31 +895,4 @@ pub fn is_plausible_email(text: &str) -> bool {
         return false;
     };
     !local.is_empty() && domain.contains('.')
-}
-
-// ── Contact search result types ─────────────────────────
-
-/// A single result from unified contact search.
-#[derive(Debug, Clone)]
-pub struct ContactSearchResult {
-    /// The email address (None for group results).
-    pub email: Option<String>,
-    /// Display name, resolved from highest-priority source.
-    pub display_name: Option<String>,
-    /// Recency score for ranking (higher = more recent).
-    pub recency_score: f64,
-    /// The kind of result.
-    pub kind: ContactSearchKind,
-}
-
-/// The kind of contact search result.
-#[derive(Debug, Clone)]
-pub enum ContactSearchKind {
-    /// An individual contact.
-    Person,
-    /// A contact group.
-    Group {
-        group_id: String,
-        member_count: i64,
-    },
 }

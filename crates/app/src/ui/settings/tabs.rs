@@ -1054,10 +1054,64 @@ fn contact_editor_overlay(state: &Settings) -> Element<'_, SettingsMessage> {
             .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::text() }),
     );
 
+    // Account selector
+    col = col.push(contact_account_selector(editor, &state.managed_accounts));
+
     col = col.push(contact_editor_fields(editor));
-    col = col.push(contact_editor_buttons(editor));
+    col = col.push(contact_editor_buttons(editor, &state.confirm_delete_contact));
 
     col.into()
+}
+
+fn contact_account_selector<'a>(
+    editor: &'a ContactEditorState,
+    accounts: &'a [ManagedAccount],
+) -> Element<'a, SettingsMessage> {
+    let selected_id = editor.account_id.as_deref();
+
+    let mut btn_row = row![].spacing(SPACE_XS).align_y(Alignment::Center);
+
+    // "Local" option
+    let is_local = selected_id.is_none();
+    let local_style = if is_local {
+        theme::ButtonClass::Primary
+    } else {
+        theme::ButtonClass::Ghost
+    };
+    btn_row = btn_row.push(
+        button(text("Local").size(TEXT_SM))
+            .style(local_style.style())
+            .on_press(SettingsMessage::ContactEditorAccountChanged(None))
+            .padding(PAD_ICON_BTN),
+    );
+
+    // Account options
+    for account in accounts {
+        let is_selected = selected_id == Some(account.id.as_str());
+        let style = if is_selected {
+            theme::ButtonClass::Primary
+        } else {
+            theme::ButtonClass::Ghost
+        };
+        let aid = Some(account.id.clone());
+        btn_row = btn_row.push(
+            button(text(&account.email).size(TEXT_SM))
+                .style(style.style())
+                .on_press(SettingsMessage::ContactEditorAccountChanged(aid))
+                .padding(PAD_ICON_BTN),
+        );
+    }
+
+    container(
+        column![
+            text("Account").size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
+            Space::new().height(SPACE_XXXS),
+            btn_row,
+        ],
+    )
+    .padding(PAD_SETTINGS_ROW)
+    .width(Length::Fill)
+    .into()
 }
 
 fn contact_editor_fields(editor: &ContactEditorState) -> Element<'_, SettingsMessage> {
@@ -1095,16 +1149,36 @@ fn contact_field_input<'a>(
     .into()
 }
 
-fn contact_editor_buttons(editor: &ContactEditorState) -> Element<'_, SettingsMessage> {
+fn contact_editor_buttons<'a>(
+    editor: &'a ContactEditorState,
+    confirm_delete: &'a Option<String>,
+) -> Element<'a, SettingsMessage> {
     let mut btn_row = row![].spacing(SPACE_SM).align_y(Alignment::Center);
 
     if let Some(ref id) = editor.contact_id {
-        btn_row = btn_row.push(
-            button(text("Delete").size(TEXT_LG).style(text::danger))
-                .on_press(SettingsMessage::ContactDelete(id.clone()))
-                .padding(PAD_BUTTON)
-                .style(theme::ButtonClass::Action.style()),
-        );
+        // Show confirmation buttons if this contact is pending delete
+        let is_confirming = confirm_delete.as_deref() == Some(id.as_str());
+        if is_confirming {
+            btn_row = btn_row.push(
+                button(text("Confirm delete").size(TEXT_LG).style(text::danger))
+                    .on_press(SettingsMessage::ContactConfirmDelete(id.clone()))
+                    .padding(PAD_BUTTON)
+                    .style(theme::ButtonClass::Action.style()),
+            );
+            btn_row = btn_row.push(
+                button(text("Cancel").size(TEXT_LG))
+                    .on_press(SettingsMessage::ContactCancelDelete)
+                    .padding(PAD_BUTTON)
+                    .style(theme::ButtonClass::Ghost.style()),
+            );
+        } else {
+            btn_row = btn_row.push(
+                button(text("Delete").size(TEXT_LG).style(text::danger))
+                    .on_press(SettingsMessage::ContactDelete(id.clone()))
+                    .padding(PAD_BUTTON)
+                    .style(theme::ButtonClass::Action.style()),
+            );
+        }
     }
 
     btn_row = btn_row.push(Space::new().width(Length::Fill));
@@ -1162,7 +1236,7 @@ fn group_editor_overlay(state: &Settings) -> Element<'_, SettingsMessage> {
     col = col.push(group_member_section(editor, state));
 
     // Action buttons
-    col = col.push(group_editor_buttons(editor));
+    col = col.push(group_editor_buttons(editor, &state.confirm_delete_group));
 
     col.into()
 }
@@ -1270,16 +1344,35 @@ fn group_member_section<'a>(
     column![title_text, section_box].spacing(SPACE_XS).into()
 }
 
-fn group_editor_buttons(editor: &GroupEditorState) -> Element<'_, SettingsMessage> {
+fn group_editor_buttons<'a>(
+    editor: &'a GroupEditorState,
+    confirm_delete: &'a Option<String>,
+) -> Element<'a, SettingsMessage> {
     let mut btn_row = row![].spacing(SPACE_SM).align_y(Alignment::Center);
 
     if let Some(ref id) = editor.group_id {
-        btn_row = btn_row.push(
-            button(text("Delete").size(TEXT_LG).style(text::danger))
-                .on_press(SettingsMessage::GroupDelete(id.clone()))
-                .padding(PAD_BUTTON)
-                .style(theme::ButtonClass::Action.style()),
-        );
+        let is_confirming = confirm_delete.as_deref() == Some(id.as_str());
+        if is_confirming {
+            btn_row = btn_row.push(
+                button(text("Confirm delete").size(TEXT_LG).style(text::danger))
+                    .on_press(SettingsMessage::GroupConfirmDelete(id.clone()))
+                    .padding(PAD_BUTTON)
+                    .style(theme::ButtonClass::Action.style()),
+            );
+            btn_row = btn_row.push(
+                button(text("Cancel").size(TEXT_LG))
+                    .on_press(SettingsMessage::GroupCancelDelete)
+                    .padding(PAD_BUTTON)
+                    .style(theme::ButtonClass::Ghost.style()),
+            );
+        } else {
+            btn_row = btn_row.push(
+                button(text("Delete").size(TEXT_LG).style(text::danger))
+                    .on_press(SettingsMessage::GroupDelete(id.clone()))
+                    .padding(PAD_BUTTON)
+                    .style(theme::ButtonClass::Action.style()),
+            );
+        }
     }
 
     btn_row = btn_row.push(Space::new().width(Length::Fill));

@@ -59,13 +59,33 @@ impl Component for Settings {
                 return self.handle_contact_save();
             }
             SettingsMessage::ContactDelete(id) => {
+                // Show confirmation prompt instead of immediate delete
+                self.confirm_delete_contact = Some(id);
+                return (Task::none(), None);
+            }
+            SettingsMessage::ContactConfirmDelete(id) => {
+                self.confirm_delete_contact = None;
                 return self.handle_contact_delete(id);
+            }
+            SettingsMessage::ContactCancelDelete => {
+                self.confirm_delete_contact = None;
+                return (Task::none(), None);
             }
             SettingsMessage::GroupEditorSave => {
                 return self.handle_group_save();
             }
             SettingsMessage::GroupDelete(id) => {
+                // Show confirmation prompt instead of immediate delete
+                self.confirm_delete_group = Some(id);
+                return (Task::none(), None);
+            }
+            SettingsMessage::GroupConfirmDelete(id) => {
+                self.confirm_delete_group = None;
                 return self.handle_group_delete(id);
+            }
+            SettingsMessage::GroupCancelDelete => {
+                self.confirm_delete_group = None;
+                return (Task::none(), None);
             }
             SettingsMessage::ContactFilterChanged(v) => {
                 self.contact_filter = v.clone();
@@ -309,6 +329,11 @@ impl Settings {
                         ContactField::Company => editor.company = value,
                         ContactField::Notes => editor.notes = value,
                     }
+                }
+            }
+            SettingsMessage::ContactEditorAccountChanged(account_id) => {
+                if let Some(ref mut editor) = self.contact_editor {
+                    editor.account_id = account_id;
                 }
             }
             SettingsMessage::ContactSaved(Ok(())) | SettingsMessage::ContactDeleted(Ok(())) => {}
