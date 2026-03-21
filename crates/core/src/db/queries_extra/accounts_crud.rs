@@ -54,6 +54,7 @@ pub fn create_account_sync(
     conn: &Connection,
     params: CreateAccountParams,
 ) -> Result<String, String> {
+    log::info!("Creating account: email={}, provider={}", params.email, params.provider);
     let id = uuid::Uuid::new_v4().to_string();
     // Determine sort_order: one past the current maximum
     let max_sort: i64 = conn
@@ -111,8 +112,12 @@ pub fn create_account_sync(
             sort_order,
         ],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| {
+        log::error!("Failed to create account {}: {e}", params.email);
+        e.to_string()
+    })?;
 
+    log::info!("Account created: id={id}, email={}", params.email);
     Ok(id)
 }
 
@@ -147,6 +152,7 @@ pub async fn db_update_account(
     id: String,
     params: UpdateAccountParams,
 ) -> Result<(), String> {
+    log::info!("Updating account: id={id}");
     db.with_conn(move |conn| {
         let mut sets: Vec<(&str, Box<dyn rusqlite::types::ToSql>)> = Vec::new();
         if let Some(v) = params.account_name {
@@ -170,6 +176,10 @@ pub async fn db_update_account(
         dynamic_update(conn, "accounts", "id", &id, sets)
     })
     .await
+    .map_err(|e| {
+        log::error!("Failed to update account {id}: {e}");
+        e
+    })
 }
 
 /// Update only the account color.

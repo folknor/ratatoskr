@@ -162,6 +162,7 @@ pub async fn db_insert_signature(
     db: &DbState,
     p: InsertSignatureParams,
 ) -> Result<String, String> {
+    log::info!("Inserting signature: account_id={}, name={}", p.account_id, p.name);
     let id = uuid::Uuid::new_v4().to_string();
     let ret_id = id.clone();
     db.with_conn(move |conn| {
@@ -215,6 +216,7 @@ pub async fn db_update_signature(
     db: &DbState,
     p: UpdateSignatureParams,
 ) -> Result<(), String> {
+    log::info!("Updating signature: id={}", p.id);
     db.with_conn(move |conn| {
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
         let account_id = get_signature_account_id(&tx, &p.id)?;
@@ -260,9 +262,13 @@ pub async fn db_update_signature(
 }
 
 pub async fn db_delete_signature(db: &DbState, id: String) -> Result<(), String> {
+    log::info!("Deleting signature: id={id}");
     db.with_conn(move |conn| {
         conn.execute("DELETE FROM signatures WHERE id = ?1", params![id])
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                log::error!("Failed to delete signature {}: {e}", id);
+                e.to_string()
+            })?;
         Ok(())
     })
     .await
@@ -330,6 +336,9 @@ pub async fn db_resolve_signature_for_compose(
     from_email: Option<String>,
     is_reply: bool,
 ) -> Result<Option<DbSignature>, String> {
+    log::debug!(
+        "Resolving signature for compose: account_id={account_id}, from_email={from_email:?}, is_reply={is_reply}"
+    );
     db.with_conn(move |conn| {
         // 1. Check alias-level override.
         if let Some(ref email) = from_email {

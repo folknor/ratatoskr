@@ -28,8 +28,10 @@ pub fn load_encryption_key(app_data_dir: &Path) -> Result<[u8; 32], String> {
     let path = if key_path.exists() {
         key_path
     } else if legacy_path.exists() {
+        log::warn!("Using legacy key file velo.key — consider renaming to ratatoskr.key");
         legacy_path
     } else {
+        log::warn!("No encryption key file found at {}, falling back to zero-key", app_data_dir.display());
         return Err("No encryption key file found (ratatoskr.key)".to_string());
     };
 
@@ -59,7 +61,10 @@ pub fn load_encryption_key(app_data_dir: &Path) -> Result<[u8; 32], String> {
 pub fn decrypt_value(key: &[u8; 32], encrypted: &str) -> Result<String, String> {
     let (iv_part, ct_part) = encrypted
         .split_once(':')
-        .ok_or_else(|| "Invalid encrypted format: missing ':'".to_string())?;
+        .ok_or_else(|| {
+            log::error!("Decryption failed: invalid encrypted format (missing ':')");
+            "Invalid encrypted format: missing ':'".to_string()
+        })?;
 
     let iv_bytes = STANDARD
         .decode(iv_part)
@@ -81,7 +86,10 @@ pub fn decrypt_value(key: &[u8; 32], encrypted: &str) -> Result<String, String> 
 
     let plaintext = cipher
         .decrypt(nonce, ciphertext.as_ref())
-        .map_err(|e| format!("Decryption failed: {e}"))?;
+        .map_err(|e| {
+            log::error!("AES-256-GCM decryption failed: {e}");
+            format!("Decryption failed: {e}")
+        })?;
 
     String::from_utf8(plaintext).map_err(|e| format!("Decrypted value is not valid UTF-8: {e}"))
 }
@@ -99,7 +107,10 @@ pub fn encrypt_value(key: &[u8; 32], plaintext: &str) -> Result<String, String> 
 
     let ciphertext = cipher
         .encrypt(&nonce, plaintext.as_bytes())
-        .map_err(|e| format!("Encryption failed: {e}"))?;
+        .map_err(|e| {
+            log::error!("AES-256-GCM encryption failed: {e}");
+            format!("Encryption failed: {e}")
+        })?;
 
     Ok(format!(
         "{}:{}",

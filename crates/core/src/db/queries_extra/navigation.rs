@@ -74,13 +74,24 @@ pub fn get_navigation_state(
     conn: &Connection,
     scope: &AccountScope,
 ) -> Result<NavigationState, String> {
-    let mut folders = build_universal_folders(conn, scope)?;
-    folders.extend(build_smart_folders(conn, scope)?);
+    log::debug!("Building navigation state for scope={scope:?}");
+    let mut folders = build_universal_folders(conn, scope).map_err(|e| {
+        log::error!("Failed to build universal folders: {e}");
+        e
+    })?;
+    folders.extend(build_smart_folders(conn, scope).map_err(|e| {
+        log::error!("Failed to build smart folders: {e}");
+        e
+    })?);
 
     if let AccountScope::Single(account_id) = scope {
-        folders.extend(build_account_labels(conn, account_id)?);
+        folders.extend(build_account_labels(conn, account_id).map_err(|e| {
+            log::error!("Failed to build account labels for {account_id}: {e}");
+            e
+        })?);
     }
 
+    log::debug!("Navigation state built: {} folders", folders.len());
     Ok(NavigationState {
         scope: scope.clone(),
         folders,

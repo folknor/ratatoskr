@@ -12,3 +12,4 @@ workspace = true
 
 [dependencies]
 ratatoskr-db = { path = "../db" }
+log = "0.4"

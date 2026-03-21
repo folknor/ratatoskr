@@ -1523,8 +1523,13 @@ pub fn run_all(conn: &Connection) -> Result<(), String> {
     }
 
     // ── Run pending migrations ─────────────────────────────────
+    let pending_count = MIGRATIONS.iter().filter(|m| !applied.contains(&m.version)).count();
+    if pending_count == 0 {
+        log::info!("All migrations up to date, none pending");
+    }
     for m in MIGRATIONS {
         if applied.contains(&m.version) {
+            log::debug!("Migration v{} already applied, skipping", m.version);
             continue;
         }
 

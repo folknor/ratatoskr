@@ -14,3 +14,4 @@ workspace = true
 ratatoskr-db = { path = "../db" }
 rusqlite.workspace = true
 chrono.workspace = true
+log = "0.4"
