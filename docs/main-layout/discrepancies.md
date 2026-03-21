@@ -86,8 +86,10 @@ The problem statement and ecosystem survey reference `PaneGrid` and shadcn-rs re
 ### D3: Thread List Uses App-Local DB for Thread Loading (Partially)
 Thread listing uses *both* the app-local `Db::get_threads()` (raw SQL in `connection.rs`) **and** core's `get_threads_scoped()`. The import at line 32 of `main.rs` shows `get_threads_scoped` is used for the primary thread loading path, but the app-local `Db` still has its own `get_threads()` method with duplicated SQL.
 
-### D4: Calendar CRUD Bypasses Core
-`crates/app/src/db/connection.rs` contains raw SQL for calendar event CRUD (`create_calendar_event`, `update_calendar_event`, `delete_calendar_event`) including table creation (`CREATE TABLE IF NOT EXISTS pinned_searches`, `contact_groups`, column additions on `contacts`). These bypass `ratatoskr-core` entirely. While calendar and contacts are outside main-layout scope, the pattern establishes a precedent of app-level schema management that the specs discourage.
+### D4: RESOLVED — Calendar CRUD Bypasses Core
+~~`crates/app/src/db/connection.rs` contained raw SQL for calendar event CRUD and schema management.~~
+
+**Resolved.** Calendar CRUD now delegates to synchronous core functions (`create_calendar_event_sync`, `update_calendar_event_sync`, `delete_calendar_event_sync`, `get_calendar_event_sync`, `load_calendar_events_for_view_sync`) in `crates/core/src/db/queries_extra/calendars.rs`. Contact CRUD delegates to core's `contacts.rs` and `contact_groups.rs`. Schema creation for `pinned_searches`, `contact_groups`, and contact extended columns moved to core migration 64. App-level `connection.rs` no longer runs DDL.
 
 ### D5: RESOLVED — Search "All" Scope Indicator Added
 ~~The search context line showed only result count with no scope indicator.~~

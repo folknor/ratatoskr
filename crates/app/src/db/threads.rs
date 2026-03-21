@@ -240,60 +240,44 @@ impl Db {
         .await
     }
 
-    /// Load body text and HTML for a single message (used by pop-out windows).
+    /// Load body text and HTML for a single message via the body store
+    /// (used by pop-out windows).
     pub async fn load_message_body(
         &self,
-        account_id: String,
+        _account_id: String,
         message_id: String,
     ) -> Result<(Option<String>, Option<String>), String> {
-        self.with_conn(move |conn| {
-            let result = conn.query_row(
-                "SELECT body_text, body_html FROM messages
-                 WHERE account_id = ?1 AND id = ?2",
-                rusqlite::params![account_id, message_id],
-                |row| {
-                    Ok((
-                        row.get::<_, Option<String>>("body_text")?,
-                        row.get::<_, Option<String>>("body_html")?,
-                    ))
-                },
-            );
-            match result {
-                Ok(pair) => Ok(pair),
-                Err(rusqlite::Error::QueryReturnedNoRows) => Ok((None, None)),
-                Err(e) => Err(e.to_string()),
-            }
-        })
-        .await
+        let body_store = init_body_store()?;
+        let body = body_store.get(message_id).await?;
+        match body {
+            Some(b) => Ok((b.body_text, b.body_html)),
+            None => Ok((None, None)),
+        }
     }
 
-    /// Load attachments for a single message (used by pop-out windows).
+    /// Load attachments for a single message via core's query
+    /// (used by pop-out windows).
     pub async fn load_message_attachments(
         &self,
         account_id: String,
         message_id: String,
     ) -> Result<Vec<super::types::MessageViewAttachment>, String> {
         self.with_conn(move |conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, filename, mime_type, size
-                     FROM attachments
-                     WHERE account_id = ?1 AND message_id = ?2
-                     ORDER BY id ASC",
-                )
-                .map_err(|e| e.to_string())?;
-
-            stmt.query_map(rusqlite::params![account_id, message_id], |row| {
-                Ok(super::types::MessageViewAttachment {
-                    id: row.get("id")?,
-                    filename: row.get("filename")?,
-                    mime_type: row.get("mime_type")?,
-                    size: row.get("size")?,
+            let core_atts =
+                ratatoskr_core::db::queries::get_attachments_for_message(
+                    conn,
+                    account_id,
+                    message_id,
+                )?;
+            Ok(core_atts
+                .into_iter()
+                .map(|a| super::types::MessageViewAttachment {
+                    id: a.id,
+                    filename: a.filename,
+                    mime_type: a.mime_type,
+                    size: a.size,
                 })
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())
+                .collect())
         })
         .await
     }

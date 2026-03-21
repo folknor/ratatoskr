@@ -98,8 +98,8 @@ Audit date: 2026-03-21 (updated). Compared `problem-statement.md` and `message-v
 ### Compose signature insertion not implemented
 - No `assemble_compose_document` call, no signature insertion on From account change.
 
-### `Db::load_message_body()` uses raw SQL, not body store
-- The implementation queries `messages.snippet` directly instead of the body store (`BodyStoreState` in `crates/stores/`). This is a known prototype simplification per the spec.
+### `Db::load_message_body()` now uses body store
+- **Resolved.** `load_message_body()` now reads from `BodyStoreState` (zstd-compressed bodies in `bodies.db`) instead of querying the `messages` table directly.
 
 ### `Db::load_raw_source()` synthesizes from fields, not raw message
 - The raw source is built from individual fields (From, To, Cc, Subject, Date, snippet) rather than fetching the actual RFC 5322 raw message. The full implementation should query the raw message if cached locally.
@@ -133,7 +133,7 @@ Audit date: 2026-03-21 (updated). Compared `problem-statement.md` and `message-v
 **No pop-out-specific subscriptions exist.** Pop-out windows rely on global keyboard and window event subscriptions. The compose auto-save timer subscription (`iced::time::every(30s)`) is not implemented.
 
 ### f. Core CRUD Bypassed (Raw SQL)
-**Yes, raw SQL is used in the app crate's `Db` module.** `load_message_body()`, `load_message_attachments()`, and `load_raw_source()` run raw `SELECT` queries in `crates/app/src/db/connection.rs`. Per CLAUDE.md, these should eventually move to `crates/core/` and use `BodyStoreState`.
+**Largely resolved.** `load_message_body()` now uses `BodyStoreState::get()` from the body store. `load_message_attachments()` now delegates to `ratatoskr_core::db::queries::get_attachments_for_message()`. Only `load_raw_source()` still uses raw SQL (reads from the `messages` table `raw_source` column, which is the correct location for raw RFC 5322 data).
 
 ### g. Dead Code
 **Minimal.** The `body_html` field on `MessageViewState` is populated by `BodyLoaded` but only used as a fallback path (HTML rendering not yet implemented). The `scroll_offset` field is declared but not yet wired to the scrollable widget. These are forward-looking fields, not dead code.
