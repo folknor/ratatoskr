@@ -33,7 +33,7 @@ impl App {
     }
 
     /// Set the debounce deadline for search execution.
-    pub(crate) fn apply_search_debounce(&mut self) {
+    pub(crate) fn apply_search_debounce(&mut self) -> Task<Message> {
         if self.search_query.text().trim().is_empty() {
             self.search_debounce_deadline = None;
         } else {
@@ -47,6 +47,7 @@ impl App {
                 return typeahead_task;
             }
         }
+        Task::none()
     }
 
     pub(crate) fn handle_search_execute(&mut self) -> Task<Message> {
