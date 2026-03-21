@@ -95,7 +95,7 @@ pub fn load_signatures_async(
             let core_db = ratatoskr_core::db::DbState::from_arc(db.conn_arc());
             let db_sigs = ratatoskr_core::db::queries_extra::db_get_all_signatures(&core_db).await?;
             // Convert DbSignature to the app's SignatureEntry type.
-            let entries = db_sigs
+            let entries: Vec<SignatureEntry> = db_sigs
                 .into_iter()
                 .map(|s| SignatureEntry {
                     id: s.id,

@@ -5383,6 +5383,7 @@ dependencies = [
 name = "ratatoskr-label-colors"
 version = "0.1.0"
 dependencies = [
+ "log",
  "ratatoskr-db",
 ]
 
@@ -5427,6 +5428,7 @@ dependencies = [
 name = "ratatoskr-search"
 version = "0.1.0"
 dependencies = [
+ "log",
  "serde",
  "tantivy",
  "tempfile",
@@ -5449,6 +5451,7 @@ name = "ratatoskr-smart-folder"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "log",
  "ratatoskr-db",
  "rusqlite",
 ]
@@ -5458,6 +5461,7 @@ name = "ratatoskr-smtp"
 version = "0.1.0"
 dependencies = [
  "lettre",
+ "log",
  "mail-parser",
  "ratatoskr-provider-utils",
  "serde",
@@ -6445,6 +6449,7 @@ dependencies = [
  "clap",
  "image",
  "libheif-rs",
+ "log",
  "lopdf",
  "mozjpeg-rs",
  "oxipng",

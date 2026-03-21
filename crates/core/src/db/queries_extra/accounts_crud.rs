@@ -177,7 +177,7 @@ pub async fn db_update_account(
     })
     .await
     .map_err(|e| {
-        log::error!("Failed to update account {id}: {e}");
+        log::error!("Failed to update account: {e}");
         e
     })
 }
