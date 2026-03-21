@@ -1,4 +1,5 @@
 pub mod autodiscover;
+pub mod calendar_sync;
 pub mod ews;
 pub mod category_sync;
 pub mod client;
