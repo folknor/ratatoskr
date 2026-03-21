@@ -12,7 +12,5 @@ workspace = true
 
 [dependencies]
 serde.workspace = true
-nucleo-matcher = "0.3"
-
-[dev-dependencies]
 serde_json.workspace = true
+nucleo-matcher = "0.3"
