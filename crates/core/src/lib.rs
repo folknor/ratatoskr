@@ -2,6 +2,7 @@ pub mod account;
 pub use ratatoskr_stores::attachment_cache;
 pub mod bimi;
 pub use ratatoskr_stores::body_store;
+pub mod caldav;
 pub mod carddav;
 pub mod cloud_attachments;
 pub use ratatoskr_sync::categorization;
