@@ -458,3 +458,5 @@ pub const EMOJI_PICKER_MAX_HEIGHT: f32 = 350.0;
 pub const EMOJI_BUTTON_SIZE: f32 = 36.0;
 /// Number of columns in the emoji grid.
 pub const EMOJI_GRID_COLUMNS: usize = 8;
+/// Font size for emoji glyphs in the picker grid.
+pub const EMOJI_FONT_SIZE: f32 = 20.0;
