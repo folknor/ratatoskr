@@ -229,6 +229,7 @@ pub enum Message {
     // Pop-out windows
     PopOut(iced::window::Id, PopOutMessage),
     OpenMessageView(usize),
+    ComposeDraftTick,
 
     // Sync progress pipeline
     SyncProgress(SyncEvent),
@@ -447,6 +448,13 @@ impl App {
                             Message::Noop
                         }
                     }),
+            );
+        }
+
+        if self.composer_is_open && self.has_dirty_compose_drafts() {
+            subs.push(
+                iced::time::every(handlers::pop_out::DRAFT_AUTO_SAVE_INTERVAL)
+                    .map(|_| Message::ComposeDraftTick),
             );
         }
 
@@ -728,6 +736,7 @@ impl App {
             Message::OpenMessageView(message_index) => {
                 self.open_message_view_window(message_index)
             }
+            Message::ComposeDraftTick => self.auto_save_compose_drafts(),
 
             // Sync progress pipeline
             Message::SyncProgress(event) => {

@@ -1,5 +1,8 @@
-use iced::widget::{button, column, container, pick_list, row, text, text_input, Space};
+use iced::widget::{button, column, container, pick_list, row, scrollable, text, text_input, Space};
 use iced::{Alignment, Element, Length};
+
+use ratatoskr_rich_text_editor::widget::{Action as EditorAction, EditorState};
+use ratatoskr_rich_text_editor::{EditAction, InlineStyle};
 
 use crate::db::{self, ContactMatch};
 use crate::font;
@@ -45,6 +48,11 @@ impl ComposeMode {
             }
         }
     }
+
+    /// Whether this mode represents a reply or forward (vs. new compose).
+    pub fn is_reply(&self) -> bool {
+        !matches!(self, Self::New)
+    }
 }
 
 /// Account info for the From dropdown.
@@ -66,12 +74,23 @@ impl std::fmt::Display for AccountInfo {
     }
 }
 
+/// A tracked attachment in the compose window.
+#[derive(Debug, Clone)]
+pub struct ComposeAttachment {
+    /// Display name of the file.
+    pub name: String,
+    /// File path on disk.
+    pub path: std::path::PathBuf,
+    /// Size in bytes.
+    pub size: u64,
+}
+
 // ── Messages ────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub enum ComposeMessage {
     SubjectChanged(String),
-    BodyChanged(iced::widget::text_editor::Action),
+    EditorAction(EditorAction),
     FromAccountChanged(AccountInfo),
     ShowCc,
     ShowBcc,
@@ -90,7 +109,7 @@ pub enum ComposeMessage {
     AutocompleteNavigate(i32),
     /// Dismiss the autocomplete dropdown.
     AutocompleteDismiss,
-    /// Formatting toolbar actions (stubs for V1).
+    /// Formatting toolbar actions.
     FormatBold,
     FormatItalic,
     FormatUnderline,
@@ -98,6 +117,18 @@ pub enum ComposeMessage {
     FormatList,
     FormatBlockquote,
     FormatLink,
+    /// Signature resolved from DB after compose window opens.
+    SignatureResolved(Option<(String, String, Option<String>)>),
+    /// Attach files button pressed.
+    AttachFiles,
+    /// Files selected by the user (path list).
+    FilesAttached(Vec<(String, std::path::PathBuf, u64)>),
+    /// Remove an attachment by index.
+    RemoveAttachment(usize),
+    /// Draft auto-save completed.
+    DraftSaved(Result<(), String>),
+    /// Send finalization completed.
+    SendFinalized(Result<(), String>),
 }
 
 // ── Autocomplete state ──────────────────────────────────
@@ -146,8 +177,8 @@ pub struct ComposeState {
     // Subject
     pub subject: String,
 
-    // Body (plain text for V1 — rich text editor in a future iteration)
-    pub body: iced::widget::text_editor::Content,
+    // Rich text editor state
+    pub editor: EditorState,
 
     // Compose mode
     pub mode: ComposeMode,
@@ -156,7 +187,7 @@ pub struct ComposeState {
     pub reply_thread_id: Option<String>,
     pub reply_message_id: Option<String>,
 
-    // Status message (e.g. "Send not yet wired")
+    // Status message (e.g. "Sending..." or error)
     pub status: Option<String>,
 
     // Discard confirmation
@@ -164,6 +195,17 @@ pub struct ComposeState {
 
     // Autocomplete
     pub autocomplete: AutocompleteState,
+
+    // Signature tracking
+    pub signature_separator_index: Option<usize>,
+    pub active_signature_id: Option<String>,
+
+    // Attachments
+    pub attachments: Vec<ComposeAttachment>,
+
+    // Draft persistence
+    pub draft_id: String,
+    pub draft_dirty: bool,
 
     // Window geometry
     pub width: f32,
@@ -186,13 +228,18 @@ impl ComposeState {
             from_account,
             from_accounts,
             subject: String::new(),
-            body: iced::widget::text_editor::Content::new(),
+            editor: EditorState::new(),
             mode: ComposeMode::New,
             reply_thread_id: None,
             reply_message_id: None,
             status: None,
             discard_confirm_open: false,
             autocomplete: AutocompleteState::new(),
+            signature_separator_index: None,
+            active_signature_id: None,
+            attachments: Vec::new(),
+            draft_id: uuid::Uuid::new_v4().to_string(),
+            draft_dirty: false,
             width: COMPOSE_DEFAULT_WIDTH,
             height: COMPOSE_DEFAULT_HEIGHT,
         }
@@ -254,17 +301,22 @@ impl ComposeState {
             }
         }
 
-        // Set quoted body with attribution line
+        // Set quoted body — the initial document is just an empty paragraph.
+        // Signature will be assembled later via SignatureResolved.
+        // For now, set up a basic quoted document if there is quoted text.
         if let Some(body) = quoted_body {
             let attribution = build_attribution(to_name, to_email);
-            let quoted = body
-                .lines()
-                .map(|line| format!("> {line}"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            let full_body = format!("\n\n{attribution}\n{quoted}");
-            state.body =
-                iced::widget::text_editor::Content::with_text(&full_body);
+            let quoted_content = ratatoskr_rich_text_editor::compose::QuotedContent {
+                attribution,
+                body_html: format!("<p>{}</p>", html_escape(body)),
+            };
+            let assembly = ratatoskr_rich_text_editor::compose::assemble_compose_document(
+                None, None,
+                Some(quoted_content),
+            );
+            state.editor = EditorState::from_document(assembly.document);
+            state.signature_separator_index = assembly.signature_separator_index;
+            state.active_signature_id = assembly.active_signature_id;
         }
 
         state.reply_thread_id = thread_id.map(String::from);
@@ -283,11 +335,27 @@ impl ComposeState {
 
     /// Returns true if the compose body has user content beyond the
     /// initial quoted text / signature.
-    fn has_user_content(&self) -> bool {
-        // Simple heuristic: non-empty body text
-        let body_text = self.body.text();
-        let trimmed = body_text.trim();
-        !trimmed.is_empty() && !trimmed.starts_with('>')
+    pub fn has_user_content(&self) -> bool {
+        // Check if there is non-empty text in any block before the signature
+        let sig_end = self.signature_separator_index.unwrap_or(self.editor.document.block_count());
+        for i in 0..sig_end {
+            if let Some(block) = self.editor.document.block(i) {
+                let text = block.flattened_text();
+                if !text.trim().is_empty() {
+                    return true;
+                }
+            }
+        }
+        // Also check if there are recipients or subject
+        !self.to.tokens.is_empty()
+            || !self.cc.tokens.is_empty()
+            || !self.subject.is_empty()
+            || !self.attachments.is_empty()
+    }
+
+    /// Total attachment size in bytes.
+    pub fn total_attachment_size(&self) -> u64 {
+        self.attachments.iter().map(|a| a.size).sum()
     }
 }
 
@@ -295,10 +363,28 @@ impl ComposeState {
 
 pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
     match msg {
-        ComposeMessage::SubjectChanged(s) => state.subject = s,
-        ComposeMessage::BodyChanged(action) => state.body.perform(action),
+        ComposeMessage::SubjectChanged(s) => {
+            state.subject = s;
+            state.draft_dirty = true;
+        }
+        ComposeMessage::EditorAction(action) => {
+            // Check if this is a content-modifying action (for draft dirty tracking)
+            let is_content_action = matches!(
+                action,
+                EditorAction::Edit(_)
+                | EditorAction::Paste(_)
+                | EditorAction::Cut
+                | EditorAction::Undo
+                | EditorAction::Redo
+            );
+            state.editor.perform(action);
+            if is_content_action {
+                state.draft_dirty = true;
+            }
+        }
         ComposeMessage::FromAccountChanged(account) => {
             state.from_account = Some(account);
+            state.draft_dirty = true;
         }
         ComposeMessage::ShowCc => state.show_cc = true,
         ComposeMessage::ShowBcc => state.show_bcc = true,
@@ -308,6 +394,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                 msg,
                 &mut state.selected_to_token,
             );
+            state.draft_dirty = true;
         }
         ComposeMessage::CcTokenInput(msg) => {
             handle_token_input_message(
@@ -315,6 +402,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                 msg,
                 &mut state.selected_cc_token,
             );
+            state.draft_dirty = true;
         }
         ComposeMessage::BccTokenInput(msg) => {
             handle_token_input_message(
@@ -322,9 +410,10 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                 msg,
                 &mut state.selected_bcc_token,
             );
+            state.draft_dirty = true;
         }
         ComposeMessage::Send => {
-            // V1: validate and show stub status
+            // Validation happens in handler — this is a stub for direct update calls
             let has_recipients = !state.to.tokens.is_empty()
                 || !state.cc.tokens.is_empty()
                 || !state.bcc.tokens.is_empty();
@@ -333,7 +422,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                     Some("Add at least one recipient".to_string());
                 return;
             }
-            state.status = Some("Send not yet wired".to_string());
+            state.status = Some("Preparing message...".to_string());
         }
         ComposeMessage::Discard => {
             // Handled by the caller (close window)
@@ -396,17 +485,109 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             state.autocomplete.results.clear();
             state.autocomplete.highlighted = None;
         }
-        // Formatting toolbar stubs
-        ComposeMessage::FormatBold
-        | ComposeMessage::FormatItalic
-        | ComposeMessage::FormatUnderline
-        | ComposeMessage::FormatStrikethrough
-        | ComposeMessage::FormatList
-        | ComposeMessage::FormatBlockquote
-        | ComposeMessage::FormatLink => {
-            // V1 stub — rich text editor not yet wired
+        // Formatting toolbar — dispatch through editor
+        ComposeMessage::FormatBold => {
+            state.editor.perform(EditorAction::Edit(
+                EditAction::ToggleInlineStyle(InlineStyle::BOLD),
+            ));
+            state.draft_dirty = true;
+        }
+        ComposeMessage::FormatItalic => {
+            state.editor.perform(EditorAction::Edit(
+                EditAction::ToggleInlineStyle(InlineStyle::ITALIC),
+            ));
+            state.draft_dirty = true;
+        }
+        ComposeMessage::FormatUnderline => {
+            state.editor.perform(EditorAction::Edit(
+                EditAction::ToggleInlineStyle(InlineStyle::UNDERLINE),
+            ));
+            state.draft_dirty = true;
+        }
+        ComposeMessage::FormatStrikethrough => {
+            state.editor.perform(EditorAction::Edit(
+                EditAction::ToggleInlineStyle(InlineStyle::STRIKETHROUGH),
+            ));
+            state.draft_dirty = true;
+        }
+        ComposeMessage::FormatList | ComposeMessage::FormatBlockquote => {
+            // Block-type toggles are not yet exposed via EditAction.
+            // Stub for now — the editor supports these block types but
+            // the rules engine SetBlockType path needs a specific action.
+        }
+        ComposeMessage::FormatLink => {
+            // Link insertion needs a URL dialog — stub for now.
+        }
+        // Signature resolved from DB
+        ComposeMessage::SignatureResolved(Some((sig_html, sig_id, quoted_body_html))) => {
+            apply_signature(state, &sig_html, Some(sig_id), quoted_body_html.as_deref());
+        }
+        ComposeMessage::SignatureResolved(None) => {
+            // No signature found — leave editor as-is
+        }
+        // Attachments
+        ComposeMessage::AttachFiles => {
+            // Handled by the handler which opens a file dialog
+        }
+        ComposeMessage::FilesAttached(files) => {
+            for (name, path, size) in files {
+                state.attachments.push(ComposeAttachment { name, path, size });
+            }
+            state.draft_dirty = true;
+        }
+        ComposeMessage::RemoveAttachment(idx) => {
+            if idx < state.attachments.len() {
+                state.attachments.remove(idx);
+                state.draft_dirty = true;
+            }
+        }
+        // Draft save result
+        ComposeMessage::DraftSaved(Ok(())) => {
+            state.draft_dirty = false;
+        }
+        ComposeMessage::DraftSaved(Err(e)) => {
+            eprintln!("Draft save failed: {e}");
+        }
+        // Send finalization result
+        ComposeMessage::SendFinalized(Ok(())) => {
+            state.status = Some("Message saved as draft. Send not yet wired to provider.".to_string());
+        }
+        ComposeMessage::SendFinalized(Err(e)) => {
+            state.status = Some(format!("Send failed: {e}"));
         }
     }
+}
+
+/// Apply a resolved signature to the compose state's editor document.
+fn apply_signature(
+    state: &mut ComposeState,
+    sig_html: &str,
+    sig_id: Option<String>,
+    quoted_body_html: Option<&str>,
+) {
+    let quoted_content = quoted_body_html.map(|html| {
+        let attribution = build_attribution_from_state(state);
+        ratatoskr_rich_text_editor::compose::QuotedContent {
+            attribution,
+            body_html: html.to_string(),
+        }
+    });
+
+    let assembly = ratatoskr_rich_text_editor::compose::assemble_compose_document(
+        Some(sig_html),
+        sig_id,
+        quoted_content,
+    );
+
+    state.editor = EditorState::from_document(assembly.document);
+    state.signature_separator_index = assembly.signature_separator_index;
+    state.active_signature_id = assembly.active_signature_id;
+}
+
+fn build_attribution_from_state(state: &ComposeState) -> String {
+    let to_name = state.to.tokens.first().map(|t| t.label.as_str());
+    let to_email = state.to.tokens.first().map(|t| t.email.as_str());
+    build_attribution(to_name, to_email)
 }
 
 fn handle_token_input_message(
@@ -479,6 +660,7 @@ pub fn view_compose_window<'a>(
     let header = compose_header(window_id, state);
     let toolbar = formatting_toolbar(window_id);
     let body = compose_body(window_id, state);
+    let attachment_section = compose_attachments(window_id, state);
     let footer = compose_footer(window_id, state);
 
     let mut content = column![
@@ -487,10 +669,17 @@ pub fn view_compose_window<'a>(
         toolbar,
         widgets::divider(),
         body,
-        widgets::divider(),
-        footer
     ]
     .spacing(SPACE_0);
+
+    // Attachment section (if any)
+    if !state.attachments.is_empty() {
+        content = content.push(widgets::divider());
+        content = content.push(attachment_section);
+    }
+
+    content = content.push(widgets::divider());
+    content = content.push(footer);
 
     // Discard confirmation overlay
     if state.discard_confirm_open {
@@ -737,22 +926,66 @@ fn compose_body<'a>(
     window_id: iced::window::Id,
     state: &'a ComposeState,
 ) -> Element<'a, Message> {
-    let editor = iced::widget::text_editor(&state.body)
+    let editor = ratatoskr_rich_text_editor::rich_text_editor(&state.editor)
         .on_action(move |action| {
             Message::PopOut(
                 window_id,
-                PopOutMessage::Compose(ComposeMessage::BodyChanged(action)),
+                PopOutMessage::Compose(ComposeMessage::EditorAction(action)),
             )
         })
         .height(Length::Fill)
         .padding(SPACE_XS)
-        .font(font::text())
-        .size(TEXT_LG);
+        .font(font::text());
 
     container(editor)
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
+}
+
+// ── Attachments ─────────────────────────────────────────
+
+fn compose_attachments<'a>(
+    window_id: iced::window::Id,
+    state: &'a ComposeState,
+) -> Element<'a, Message> {
+    let mut attachment_list = column![].spacing(SPACE_XXS);
+
+    for (idx, att) in state.attachments.iter().enumerate() {
+        let size_str = format_file_size(att.size);
+        let att_row = row![
+            icon::paperclip().size(ICON_SM).style(text::secondary),
+            text(&att.name).size(TEXT_SM),
+            text(size_str).size(TEXT_XS).style(theme::TextClass::Tertiary.style()),
+            Space::new().width(Length::Fill),
+            button(icon::x().size(ICON_XS).style(text::secondary))
+                .on_press(Message::PopOut(
+                    window_id,
+                    PopOutMessage::Compose(ComposeMessage::RemoveAttachment(idx)),
+                ))
+                .padding(PAD_ICON_BTN)
+                .style(theme::ButtonClass::BareIcon.style()),
+        ]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center);
+        attachment_list = attachment_list.push(att_row);
+    }
+
+    // Total size
+    let total = format_file_size(state.total_attachment_size());
+    attachment_list = attachment_list.push(
+        text(format!("Total: {total}"))
+            .size(TEXT_XS)
+            .style(theme::TextClass::Tertiary.style()),
+    );
+
+    container(
+        scrollable(attachment_list)
+            .height(Length::Shrink),
+    )
+    .padding(PAD_CONTENT)
+    .width(Length::Fill)
+    .into()
 }
 
 // ── Footer ──────────────────────────────────────────────
@@ -783,6 +1016,22 @@ fn compose_footer<'a>(
     ))
     .padding(PAD_BUTTON);
 
+    // Attach button
+    let attach_btn = button(
+        row![
+            icon::paperclip().size(ICON_SM),
+            text("Attach").size(TEXT_MD),
+        ]
+        .spacing(SPACE_XXS)
+        .align_y(Alignment::Center),
+    )
+    .style(theme::ButtonClass::Ghost.style())
+    .on_press(Message::PopOut(
+        window_id,
+        PopOutMessage::Compose(ComposeMessage::AttachFiles),
+    ))
+    .padding(PAD_BUTTON);
+
     let send_btn = button(
         row![
             icon::send().size(ICON_SM),
@@ -798,9 +1047,14 @@ fn compose_footer<'a>(
     ))
     .padding(PAD_BUTTON);
 
-    let footer_row =
-        row![discard_btn, Space::new().width(Length::Fill), send_btn]
-            .align_y(Alignment::Center);
+    let footer_row = row![
+        discard_btn,
+        attach_btn,
+        Space::new().width(Length::Fill),
+        send_btn,
+    ]
+    .spacing(SPACE_XS)
+    .align_y(Alignment::Center);
 
     container(footer_row)
         .padding(PAD_CONTENT)
@@ -883,4 +1137,39 @@ fn build_attribution(name: Option<&str>, email: Option<&str>) -> String {
     // We omit the date here since we don't have it in the compose context.
     // The full implementation would include the original message date.
     format!("{sender} wrote:")
+}
+
+/// Simple HTML entity escaping for plain text being wrapped in <p> tags.
+fn html_escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+/// Format a file size in human-readable form.
+fn format_file_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
+}
+
+/// Collect recipient emails into a comma-separated string for draft storage.
+pub fn tokens_to_csv(value: &TokenInputValue) -> Option<String> {
+    if value.tokens.is_empty() {
+        None
+    } else {
+        Some(
+            value
+                .tokens
+                .iter()
+                .map(|t| t.email.as_str())
+                .collect::<Vec<_>>()
+                .join(","),
+        )
+    }
 }

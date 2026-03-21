@@ -12,7 +12,7 @@ mod commands;
 mod contacts;
 mod keyboard;
 mod palette;
-mod pop_out;
+pub(crate) mod pop_out;
 mod search;
 pub mod signatures;
 
