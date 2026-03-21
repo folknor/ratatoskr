@@ -29,6 +29,9 @@ pub struct PinnedSearch {
     pub query: String,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Cached thread IDs, loaded lazily on first click.
+    /// `None` = not yet loaded. `Some(ids)` = cached from last load.
+    pub thread_ids: Option<Vec<(String, String)>>,
 }
 
 // ── Pinned search CRUD ───────────────────────────────────────
@@ -192,6 +195,7 @@ impl Db {
                     query: row.get("query")?,
                     created_at: row.get("created_at")?,
                     updated_at: row.get("updated_at")?,
+                    thread_ids: None,
                 })
             })
             .map_err(|e| e.to_string())?
@@ -328,6 +332,26 @@ impl Db {
                 .map_err(|e| e.to_string())?;
             #[allow(clippy::cast_sign_loss)]
             Ok(deleted as u64)
+        })
+        .await
+    }
+
+    /// Creates a smart folder with the given name and query string.
+    /// Returns the generated row ID.
+    pub async fn create_smart_folder(
+        &self,
+        name: String,
+        query: String,
+    ) -> Result<i64, String> {
+        self.with_write_conn(move |conn| {
+            let id = uuid::Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO smart_folders (id, name, query, icon)
+                 VALUES (?1, ?2, ?3, 'search')",
+                params![id, name, query],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(conn.last_insert_rowid())
         })
         .await
     }

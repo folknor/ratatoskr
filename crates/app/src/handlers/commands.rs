@@ -89,6 +89,19 @@ pub(crate) fn build_command_args(command_id: CommandId, item: &OptionItem) -> Op
     }
 }
 
+/// Build `CommandArgs` from free text input for Text-param commands.
+pub(crate) fn build_command_args_from_text(
+    command_id: CommandId,
+    text: &str,
+) -> Option<CommandArgs> {
+    match command_id {
+        CommandId::SmartFolderSave => Some(CommandArgs::SmartFolderSave {
+            name: text.to_string(),
+        }),
+        _ => None,
+    }
+}
+
 /// Split a cross-account encoded ID ("account_id:label_id") into its parts.
 fn split_cross_account_id(encoded: &str) -> Option<(String, String)> {
     let colon_pos = encoded.find(':')?;

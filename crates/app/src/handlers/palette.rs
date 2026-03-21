@@ -149,6 +149,14 @@ impl App {
                     return self.enter_snooze_stage2(id, param_label);
                 }
 
+                // Text input commands don't need resolver — just show text field
+                if matches!(
+                    schema.param_at(0),
+                    Some(ratatoskr_command_palette::ParamDef::Text { .. })
+                ) {
+                    return self.enter_text_stage2(id, param_label);
+                }
+
                 // Transition to stage 2
                 self.palette.stage = PaletteStage::OptionPick;
                 self.palette.query.clear();
@@ -219,6 +227,25 @@ impl App {
         Task::none()
     }
 
+    fn enter_text_stage2(
+        &mut self,
+        id: CommandId,
+        param_label: &str,
+    ) -> Task<Message> {
+        self.palette.stage = PaletteStage::OptionPick;
+        self.palette.query.clear();
+        self.palette.selected_index = 0;
+        self.palette.stage2_command_id = Some(id);
+        self.palette.stage2_label = param_label.to_string();
+        self.palette.options_loading = false;
+        self.palette.option_items.clear();
+        self.palette.option_matches.clear();
+
+        iced::widget::operation::focus::<Message>(
+            "palette-input".to_string(),
+        )
+    }
+
     fn enter_snooze_stage2(
         &mut self,
         id: CommandId,
@@ -242,6 +269,16 @@ impl App {
     }
 
     fn palette_confirm_option(&mut self) -> Task<Message> {
+        let Some(command_id) = self.palette.stage2_command_id else {
+            return Task::none();
+        };
+
+        // Text input mode: use the palette query as the value directly
+        if let Some(args) = self.try_text_input_confirm(command_id) {
+            self.palette.close();
+            return self.update(Message::ExecuteParameterized(command_id, args));
+        }
+
         let Some(option_match) = self
             .palette
             .option_matches
@@ -253,15 +290,33 @@ impl App {
             return Task::none();
         }
 
-        let Some(command_id) = self.palette.stage2_command_id else {
-            return Task::none();
-        };
-
         let Some(args) = super::commands::build_command_args(command_id, &option_match.item) else {
             return Task::none();
         };
 
         self.palette.close();
         self.update(Message::ExecuteParameterized(command_id, args))
+    }
+
+    /// For Text-input parameterized commands, build args from the
+    /// palette query text directly (no option list needed).
+    fn try_text_input_confirm(
+        &self,
+        command_id: ratatoskr_command_palette::CommandId,
+    ) -> Option<ratatoskr_command_palette::CommandArgs> {
+        let query = self.palette.query.trim();
+        if query.is_empty() {
+            return None;
+        }
+
+        // Check if this command uses a Text param
+        let descriptor = self.registry.get(command_id)?;
+        let schema = descriptor.input_schema?;
+        let param = schema.param_at(0)?;
+        if !matches!(param, ratatoskr_command_palette::ParamDef::Text { .. }) {
+            return None;
+        }
+
+        super::commands::build_command_args_from_text(command_id, query)
     }
 }
