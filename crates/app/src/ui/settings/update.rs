@@ -133,6 +133,12 @@ impl Component for Settings {
             SettingsMessage::ListDragMove(list_id, point) => {
                 return (self.handle_drag_move(list_id, point), None);
             }
+            SettingsMessage::AccountDragMove(point) => {
+                return self.handle_account_drag_move(point);
+            }
+            SettingsMessage::AccountDragEnd => {
+                return self.handle_account_drag_end();
+            }
             SettingsMessage::SelectTab(Tab::People) => {
                 self.active_tab = Tab::People;
                 self.pinned_help = None;
@@ -401,6 +407,11 @@ impl Settings {
                     list_id, dragging_index: index, start_y: -1.0, is_dragging: false,
                 });
             }
+            SettingsMessage::AccountGripPress(index) => {
+                self.account_drag = Some(AccountDragState {
+                    dragging_index: index, start_y: -1.0, is_dragging: false,
+                });
+            }
             SettingsMessage::ListDragEnd(_) => self.drag_state = None,
             SettingsMessage::ListRowClick(list_id, index) => {
                 if self.drag_state.is_none() {
@@ -638,6 +649,72 @@ impl Settings {
             if let Some(ref mut drag) = self.drag_state { drag.dragging_index = target; }
         }
         Task::none()
+    }
+
+    fn handle_account_drag_move(
+        &mut self,
+        point: Point,
+    ) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
+        if self.account_drag.is_none() {
+            return (Task::none(), None);
+        }
+
+        if let Some(ref mut drag) = self.account_drag {
+            if drag.start_y < 0.0 {
+                drag.start_y = point.y;
+                return (Task::none(), None);
+            }
+        }
+
+        let Some(drag_ref) = self.account_drag.as_ref() else {
+            return (Task::none(), None);
+        };
+        let (from, start_y) = (drag_ref.dragging_index, drag_ref.start_y);
+
+        if !drag_ref.is_dragging {
+            if (point.y - start_y).abs() < DRAG_START_THRESHOLD {
+                return (Task::none(), None);
+            }
+            if let Some(ref mut drag) = self.account_drag {
+                drag.is_dragging = true;
+            }
+        }
+
+        let row_step = SETTINGS_TOGGLE_ROW_HEIGHT + 1.0;
+        let count = self.managed_accounts.len();
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let target =
+            ((point.y / row_step).max(0.0) as usize).min(count.saturating_sub(1));
+
+        if target != from {
+            self.managed_accounts.swap(from, target);
+            if let Some(ref mut drag) = self.account_drag {
+                drag.dragging_index = target;
+            }
+        }
+        (Task::none(), None)
+    }
+
+    fn handle_account_drag_end(
+        &mut self,
+    ) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
+        let was_dragging = self.account_drag.as_ref().is_some_and(|d| d.is_dragging);
+        self.account_drag = None;
+
+        if was_dragging {
+            // Emit reorder event with new sort orders based on list position.
+            let orders: Vec<(String, i64)> = self
+                .managed_accounts
+                .iter()
+                .enumerate()
+                .map(|(i, a)| {
+                    #[allow(clippy::cast_possible_wrap)]
+                    (a.id.clone(), i as i64)
+                })
+                .collect();
+            return (Task::none(), Some(SettingsEvent::ReorderAccounts(orders)));
+        }
+        (Task::none(), None)
     }
 
     fn undo_field(&mut self, field: InputField) {

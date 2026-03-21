@@ -6,9 +6,13 @@ use crate::font;
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
+<<<<<<< HEAD
 use crate::ui::token_input::{self, TokenId, TokenInputMessage, TokenInputValue};
 use crate::ui::undoable::UndoableText;
 use crate::ui::undoable_text_input::undoable_text_input;
+=======
+use crate::ui::token_input::{self, RecipientField, TokenId, TokenInputMessage, TokenInputValue};
+>>>>>>> worktree-agent-afd18fb2
 use crate::ui::widgets;
 use crate::Message;
 
@@ -94,6 +98,7 @@ pub enum ComposeMessage {
     AutocompleteNavigate(i32),
     /// Dismiss the autocomplete dropdown.
     AutocompleteDismiss,
+<<<<<<< HEAD
     /// Attach files to the compose window.
     AttachFiles,
     /// Files have been attached (result from file picker).
@@ -106,6 +111,10 @@ pub enum ComposeMessage {
     SignatureResolved(Option<(String, String, Option<String>)>),
     /// Draft auto-save completed.
     DraftSaved(Result<(), String>),
+=======
+    /// Move the currently selected token to a different recipient field.
+    MoveSelectedTokenToField(RecipientField),
+>>>>>>> worktree-agent-afd18fb2
     /// Formatting toolbar actions (stubs for V1).
     FormatBold,
     FormatItalic,
@@ -309,6 +318,19 @@ impl ComposeState {
         }
     }
 
+    /// Returns which field has a selected token, if any.
+    pub fn selected_token_field(&self) -> Option<RecipientField> {
+        if self.selected_to_token.is_some() {
+            Some(RecipientField::To)
+        } else if self.selected_cc_token.is_some() {
+            Some(RecipientField::Cc)
+        } else if self.selected_bcc_token.is_some() {
+            Some(RecipientField::Bcc)
+        } else {
+            None
+        }
+    }
+
     /// Returns true if the compose body has user content beyond the
     /// initial quoted text / signature.
     fn has_user_content(&self) -> bool {
@@ -358,6 +380,9 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                 msg,
                 &mut state.selected_bcc_token,
             );
+        }
+        ComposeMessage::MoveSelectedTokenToField(target_field) => {
+            move_selected_token(state, target_field);
         }
         ComposeMessage::Send => {
             // Handled by the caller (handle_compose_send in pop_out.rs)
@@ -534,6 +559,70 @@ fn handle_token_input_message(
     }
 }
 
+/// Move the currently selected token from its source field to the target field.
+fn move_selected_token(state: &mut ComposeState, target: RecipientField) {
+    // Find which field has a selected token and extract it.
+    let (token, source) = if let Some(token_id) = state.selected_to_token {
+        let pos = state.to.tokens.iter().position(|t| t.id == token_id);
+        if let Some(idx) = pos {
+            (state.to.tokens.remove(idx), RecipientField::To)
+        } else {
+            return;
+        }
+    } else if let Some(token_id) = state.selected_cc_token {
+        let pos = state.cc.tokens.iter().position(|t| t.id == token_id);
+        if let Some(idx) = pos {
+            (state.cc.tokens.remove(idx), RecipientField::Cc)
+        } else {
+            return;
+        }
+    } else if let Some(token_id) = state.selected_bcc_token {
+        let pos = state.bcc.tokens.iter().position(|t| t.id == token_id);
+        if let Some(idx) = pos {
+            (state.bcc.tokens.remove(idx), RecipientField::Bcc)
+        } else {
+            return;
+        }
+    } else {
+        return;
+    };
+
+    // Don't move to the same field.
+    if source == target {
+        return;
+    }
+
+    // Clear selection on source.
+    match source {
+        RecipientField::To => state.selected_to_token = None,
+        RecipientField::Cc => state.selected_cc_token = None,
+        RecipientField::Bcc => state.selected_bcc_token = None,
+    }
+
+    // Re-ID the token for the target field and insert.
+    let target_value = match target {
+        RecipientField::To => &mut state.to,
+        RecipientField::Cc => &mut state.cc,
+        RecipientField::Bcc => &mut state.bcc,
+    };
+    let new_id = target_value.next_token_id();
+    target_value.tokens.push(token_input::Token {
+        id: new_id,
+        email: token.email,
+        label: token.label,
+        is_group: token.is_group,
+        group_id: token.group_id,
+        member_count: token.member_count,
+    });
+
+    // Auto-show Cc/Bcc if moving a token there.
+    match target {
+        RecipientField::Cc => state.show_cc = true,
+        RecipientField::Bcc => state.show_bcc = true,
+        RecipientField::To => {}
+    }
+}
+
 // ── View ────────────────────────────────────────────────
 
 pub fn view_compose_window<'a>(
@@ -581,13 +670,13 @@ fn compose_header<'a>(
     // To field
     fields = fields.push(build_to_row(window_id, state));
 
-    // Cc field (if shown)
-    if state.show_cc {
+    // Show Cc/Bcc fields when visible, or when a token is selected in
+    // another field (as drop targets for cross-field token movement).
+    let has_selection = state.selected_token_field().is_some();
+    if state.show_cc || has_selection {
         fields = fields.push(build_cc_row(window_id, state));
     }
-
-    // Bcc field (if shown)
-    if state.show_bcc {
+    if state.show_bcc || has_selection {
         fields = fields.push(build_bcc_row(window_id, state));
     }
 
@@ -705,8 +794,10 @@ fn build_to_row<'a>(
 ) -> Element<'a, Message> {
     build_recipient_row_inner(
         "To",
+        RecipientField::To,
         &state.to,
         state.selected_to_token,
+        state.selected_token_field(),
         window_id,
         "Add recipients...",
         ComposeMessage::ToTokenInput,
@@ -719,8 +810,10 @@ fn build_cc_row<'a>(
 ) -> Element<'a, Message> {
     build_recipient_row_inner(
         "Cc",
+        RecipientField::Cc,
         &state.cc,
         state.selected_cc_token,
+        state.selected_token_field(),
         window_id,
         "Add Cc...",
         ComposeMessage::CcTokenInput,
@@ -733,18 +826,23 @@ fn build_bcc_row<'a>(
 ) -> Element<'a, Message> {
     build_recipient_row_inner(
         "Bcc",
+        RecipientField::Bcc,
         &state.bcc,
         state.selected_bcc_token,
+        state.selected_token_field(),
         window_id,
         "Add Bcc...",
         ComposeMessage::BccTokenInput,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_recipient_row_inner<'a>(
     label: &'a str,
+    this_field: RecipientField,
     value: &'a TokenInputValue,
     selected: Option<TokenId>,
+    drag_source: Option<RecipientField>,
     window_id: iced::window::Id,
     placeholder: &'a str,
     wrap: fn(TokenInputMessage) -> ComposeMessage,
@@ -757,19 +855,47 @@ fn build_recipient_row_inner<'a>(
         move |msg| Message::PopOut(window_id, PopOutMessage::Compose(wrap(msg))),
     );
 
-    row![
+    // When a token is selected in a *different* field, show the label as a
+    // drop-zone button so the user can click to move the token here.
+    let is_drop_target = drag_source.is_some_and(|src| src != this_field);
+
+    let label_element: Element<'a, Message> = if is_drop_target {
+        button(
+            row![
+                icon::arrow_right().size(ICON_XS).style(text::primary),
+                text(label)
+                    .size(TEXT_SM)
+                    .font(crate::font::text_semibold())
+                    .style(text::primary),
+            ]
+            .spacing(SPACE_XXXS)
+            .align_y(Alignment::Center),
+        )
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::MoveSelectedTokenToField(
+                this_field,
+            )),
+        ))
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::Ghost.style())
+        .width(COMPOSE_LABEL_WIDTH)
+        .into()
+    } else {
         container(
             text(label)
                 .size(TEXT_SM)
-                .style(theme::TextClass::Tertiary.style())
+                .style(theme::TextClass::Tertiary.style()),
         )
         .width(COMPOSE_LABEL_WIDTH)
-        .align_y(Alignment::Center),
-        field,
-    ]
-    .spacing(SPACE_XS)
-    .align_y(Alignment::Start)
-    .into()
+        .align_y(Alignment::Center)
+        .into()
+    };
+
+    row![label_element, field]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Start)
+        .into()
 }
 
 // ── Formatting toolbar ─────────────────────────────────
