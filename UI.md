@@ -2,6 +2,51 @@
 
 iced UI for the Ratatoskr email client (`crates/app/`). Uses iced 0.15-dev (Halloy's fork) against a seeded test database.
 
+## App module structure (`crates/app/src/`)
+
+`main.rs` is a thin dispatch layer (~1300 lines). All feature logic lives in handler modules.
+
+### Handler modules (`handlers/`)
+
+Each feature area has its own handler file with `impl App` blocks:
+
+| File | Owns | Key methods |
+|---|---|---|
+| `handlers/calendar.rs` | Calendar event CRUD, overlay state | `handle_calendar()`, `reload_calendar_events()` |
+| `handlers/keyboard.rs` | Key events, chord resolution | `handle_key_event()`, `try_resolve_single_chord()` |
+| `handlers/commands.rs` | Command execution dispatch | `handle_execute_command()`, `build_command_args()` |
+| `handlers/palette.rs` | Command palette UI state machine | `handle_palette()`, `palette_confirm()` |
+| `handlers/search.rs` | Search + pinned searches | `handle_search_execute()`, `handle_select_pinned_search()` |
+| `handlers/pop_out.rs` | Pop-out windows, compose | `handle_pop_out_message()`, `open_compose_window()` |
+| `handlers/signatures.rs` | Signature save/delete/load | `handle_save_signature()`, `load_signatures_into_settings()` |
+| `handlers/contacts.rs` | Contact/group CRUD dispatch | `handle_save_contact()`, `handle_load_groups()` |
+| `handlers/accounts.rs` | Account wizard events | `handle_add_account_event()` |
+
+**Adding new handler methods:** Create methods on `App` in the appropriate handler file. Private fields of `App` are accessible from handler modules (they're descendant modules of the crate root). Import types with `use crate::` paths.
+
+**Adding new `Message` variants:** Add to the `Message` enum in `main.rs`, add the dispatch arm in `update()`, and implement the handler method in the appropriate handler file.
+
+### DB modules (`db/`)
+
+| File | Owns |
+|---|---|
+| `db/connection.rs` | `Db` struct, `open()`, `with_conn`/`with_write_conn` helpers |
+| `db/accounts.rs` | `get_accounts()`, `get_labels()` |
+| `db/threads.rs` | Thread/message/attachment/body queries |
+| `db/calendar.rs` | Calendar event CRUD |
+| `db/contacts.rs` | Contact/group queries for settings |
+| `db/palette.rs` | Label/folder queries for command palette |
+| `db/pinned_searches.rs` | Pinned search CRUD |
+| `db/types.rs` | All DB types (`Thread`, `Account`, `ThreadMessage`, etc.) |
+
+### UI modules (`ui/`)
+
+Each component has its own file. Components implement the `Component` trait from `component.rs` with `type Message` and `type Event` associated types. Internal messages stay in `update()`, outward signals emit as events to the parent `App`.
+
+Components: `sidebar.rs`, `thread_list.rs`, `reading_pane.rs`, `status_bar.rs`, `settings/` (module), `add_account.rs`.
+
+Non-component UI: `calendar.rs`, `calendar_month.rs`, `calendar_time_grid.rs`, `palette.rs`, `right_sidebar.rs`, `theme.rs`, `layout.rs`, `widgets.rs`, `popover.rs`, `emoji_picker.rs`, `token_input.rs`.
+
 ## Gotchas
 
 **`Padding::from` with mixed types:** `Padding::from([0, CONSTANT])` won't compile if `CONSTANT` is `f32` — Rust infers the array as `[i32; 2]`. Always use `[0.0, CONSTANT]` to keep both elements `f32`.
