@@ -1,7 +1,7 @@
 use iced::widget::{button, column, container, pick_list, row, text, text_input, Space};
 use iced::{Alignment, Element, Length};
 
-use crate::db;
+use crate::db::{self, ContactMatch};
 use crate::font;
 use crate::icon;
 use crate::ui::layout::*;
@@ -82,6 +82,14 @@ pub enum ComposeMessage {
     Discard,
     /// Toggle discard confirmation dialog.
     ToggleDiscardConfirm,
+    /// Autocomplete results arrived from the database.
+    AutocompleteResults(u64, Result<Vec<ContactMatch>, String>),
+    /// User selected an autocomplete suggestion.
+    AutocompleteSelect(usize),
+    /// User navigated the autocomplete list (up/down).
+    AutocompleteNavigate(i32),
+    /// Dismiss the autocomplete dropdown.
+    AutocompleteDismiss,
     /// Formatting toolbar actions (stubs for V1).
     FormatBold,
     FormatItalic,
@@ -90,6 +98,31 @@ pub enum ComposeMessage {
     FormatList,
     FormatBlockquote,
     FormatLink,
+}
+
+// ── Autocomplete state ──────────────────────────────────
+
+/// State for the recipient autocomplete dropdown.
+pub struct AutocompleteState {
+    /// Current query being searched.
+    pub query: String,
+    /// Results from the most recent autocomplete search.
+    pub results: Vec<ContactMatch>,
+    /// Currently highlighted index in the results list.
+    pub highlighted: Option<usize>,
+    /// Generation counter to discard stale results.
+    pub search_generation: u64,
+}
+
+impl AutocompleteState {
+    pub fn new() -> Self {
+        Self {
+            query: String::new(),
+            results: Vec::new(),
+            highlighted: None,
+            search_generation: 0,
+        }
+    }
 }
 
 // ── State ───────────────────────────────────────────────
@@ -129,6 +162,9 @@ pub struct ComposeState {
     // Discard confirmation
     pub discard_confirm_open: bool,
 
+    // Autocomplete
+    pub autocomplete: AutocompleteState,
+
     // Window geometry
     pub width: f32,
     pub height: f32,
@@ -156,6 +192,7 @@ impl ComposeState {
             reply_message_id: None,
             status: None,
             discard_confirm_open: false,
+            autocomplete: AutocompleteState::new(),
             width: COMPOSE_DEFAULT_WIDTH,
             height: COMPOSE_DEFAULT_HEIGHT,
         }
@@ -190,6 +227,7 @@ impl ComposeState {
                     label: label.to_string(),
                     is_group: false,
                     group_id: None,
+                    member_count: None,
                 });
             }
         }
@@ -207,6 +245,7 @@ impl ComposeState {
                         label: addr.to_string(),
                         is_group: false,
                         group_id: None,
+                        member_count: None,
                     });
                 }
                 if !state.cc.tokens.is_empty() {
@@ -302,6 +341,61 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
         ComposeMessage::ToggleDiscardConfirm => {
             state.discard_confirm_open = !state.discard_confirm_open;
         }
+        // Autocomplete
+        ComposeMessage::AutocompleteResults(generation, Ok(results)) => {
+            if generation == state.autocomplete.search_generation {
+                state.autocomplete.results = results;
+                state.autocomplete.highlighted = if state.autocomplete.results.is_empty() {
+                    None
+                } else {
+                    Some(0)
+                };
+            }
+        }
+        ComposeMessage::AutocompleteResults(_, Err(_)) => {
+            state.autocomplete.results.clear();
+            state.autocomplete.highlighted = None;
+        }
+        ComposeMessage::AutocompleteSelect(idx) => {
+            if let Some(match_entry) = state.autocomplete.results.get(idx).cloned() {
+                let label = match_entry.display_name.as_deref()
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or(&match_entry.email)
+                    .to_string();
+                let id = state.to.next_token_id();
+                state.to.tokens.push(token_input::Token {
+                    id,
+                    email: match_entry.email,
+                    label,
+                    is_group: match_entry.is_group,
+                    group_id: match_entry.group_id,
+                    member_count: match_entry.member_count,
+                });
+                state.to.text.clear();
+                state.autocomplete.results.clear();
+                state.autocomplete.highlighted = None;
+                state.autocomplete.query.clear();
+            }
+        }
+        ComposeMessage::AutocompleteNavigate(delta) => {
+            if let Some(current) = state.autocomplete.highlighted {
+                let len = state.autocomplete.results.len();
+                if len > 0 {
+                    let new_idx = if delta > 0 {
+                        (current + 1).min(len - 1)
+                    } else if current > 0 {
+                        current - 1
+                    } else {
+                        0
+                    };
+                    state.autocomplete.highlighted = Some(new_idx);
+                }
+            }
+        }
+        ComposeMessage::AutocompleteDismiss => {
+            state.autocomplete.results.clear();
+            state.autocomplete.highlighted = None;
+        }
         // Formatting toolbar stubs
         ComposeMessage::FormatBold
         | ComposeMessage::FormatItalic
@@ -337,6 +431,7 @@ fn handle_token_input_message(
                     label,
                     is_group: false,
                     group_id: None,
+                    member_count: None,
                 });
             }
             value.text.clear();
@@ -363,6 +458,7 @@ fn handle_token_input_message(
                         label: trimmed.to_string(),
                         is_group: false,
                         group_id: None,
+                        member_count: None,
                     });
                 }
             }

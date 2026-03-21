@@ -11,7 +11,7 @@ use ratatoskr_core::body_store::BodyStoreState;
 use ratatoskr_core::db::queries_extra::thread_detail::{
     self, ThreadDetail, get_thread_detail,
 };
-use ratatoskr_core::db::queries_extra::thread_ui_state::set_attachments_collapsed;
+use ratatoskr_core::db::queries_extra::set_attachments_collapsed;
 
 use super::connection::Db;
 use super::types::{ThreadAttachment, ThreadMessage};
@@ -154,6 +154,174 @@ pub async fn persist_attachments_collapsed(
     })
     .await
     .map_err(|e| format!("spawn_blocking: {e}"))?
+}
+
+// ── Legacy per-message query methods (used by pop-out and main thread loading) ──
+
+impl Db {
+    /// Load messages for a thread (used by main window thread selection).
+    pub async fn get_thread_messages(
+        &self,
+        account_id: String,
+        thread_id: String,
+    ) -> Result<Vec<ThreadMessage>, String> {
+        self.with_conn(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT m.id, m.thread_id, m.account_id,
+                            m.from_name, m.from_address,
+                            m.to_addresses, m.cc_addresses,
+                            m.date, m.subject, m.snippet,
+                            m.is_read, m.is_starred
+                     FROM messages m
+                     WHERE m.account_id = ?1 AND m.thread_id = ?2
+                     ORDER BY m.date ASC",
+                )
+                .map_err(|e| e.to_string())?;
+
+            stmt.query_map(rusqlite::params![account_id, thread_id], |row| {
+                Ok(ThreadMessage {
+                    id: row.get("id")?,
+                    thread_id: row.get("thread_id")?,
+                    account_id: row.get("account_id")?,
+                    from_name: row.get("from_name")?,
+                    from_address: row.get("from_address")?,
+                    to_addresses: row.get("to_addresses")?,
+                    cc_addresses: row.get("cc_addresses")?,
+                    date: row.get("date")?,
+                    subject: row.get("subject")?,
+                    snippet: row.get("snippet")?,
+                    body_html: None,
+                    body_text: None,
+                    is_read: row.get::<_, i64>("is_read")? != 0,
+                    is_starred: row.get::<_, i64>("is_starred")? != 0,
+                    is_own_message: false,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+        })
+        .await
+    }
+
+    /// Load attachments for a thread (used by main window thread selection).
+    pub async fn get_thread_attachments(
+        &self,
+        account_id: String,
+        thread_id: String,
+    ) -> Result<Vec<super::types::ThreadAttachment>, String> {
+        self.with_conn(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT a.id, a.filename, a.mime_type, a.size,
+                            m.from_name, m.date
+                     FROM attachments a
+                     JOIN messages m ON m.id = a.message_id AND m.account_id = a.account_id
+                     WHERE a.account_id = ?1 AND m.thread_id = ?2
+                     ORDER BY m.date ASC, a.id ASC",
+                )
+                .map_err(|e| e.to_string())?;
+
+            stmt.query_map(rusqlite::params![account_id, thread_id], |row| {
+                Ok(super::types::ThreadAttachment {
+                    id: row.get("id")?,
+                    filename: row.get("filename")?,
+                    mime_type: row.get("mime_type")?,
+                    size: row.get("size")?,
+                    from_name: row.get("from_name")?,
+                    date: row.get("date")?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+        })
+        .await
+    }
+
+    /// Load body text and HTML for a single message (used by pop-out windows).
+    pub async fn load_message_body(
+        &self,
+        account_id: String,
+        message_id: String,
+    ) -> Result<(Option<String>, Option<String>), String> {
+        self.with_conn(move |conn| {
+            let result = conn.query_row(
+                "SELECT body_text, body_html FROM messages
+                 WHERE account_id = ?1 AND id = ?2",
+                rusqlite::params![account_id, message_id],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>("body_text")?,
+                        row.get::<_, Option<String>>("body_html")?,
+                    ))
+                },
+            );
+            match result {
+                Ok(pair) => Ok(pair),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Ok((None, None)),
+                Err(e) => Err(e.to_string()),
+            }
+        })
+        .await
+    }
+
+    /// Load attachments for a single message (used by pop-out windows).
+    pub async fn load_message_attachments(
+        &self,
+        account_id: String,
+        message_id: String,
+    ) -> Result<Vec<super::types::MessageViewAttachment>, String> {
+        self.with_conn(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, filename, mime_type, size
+                     FROM attachments
+                     WHERE account_id = ?1 AND message_id = ?2
+                     ORDER BY id ASC",
+                )
+                .map_err(|e| e.to_string())?;
+
+            stmt.query_map(rusqlite::params![account_id, message_id], |row| {
+                Ok(super::types::MessageViewAttachment {
+                    id: row.get("id")?,
+                    filename: row.get("filename")?,
+                    mime_type: row.get("mime_type")?,
+                    size: row.get("size")?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+        })
+        .await
+    }
+
+    /// Load raw email source for a message (used by pop-out Source view).
+    pub async fn load_raw_source(
+        &self,
+        account_id: String,
+        message_id: String,
+    ) -> Result<String, String> {
+        self.with_conn(move |conn| {
+            let result = conn.query_row(
+                "SELECT raw_source FROM messages
+                 WHERE account_id = ?1 AND id = ?2",
+                rusqlite::params![account_id, message_id],
+                |row| row.get::<_, Option<String>>(0),
+            );
+            match result {
+                Ok(Some(source)) => Ok(source),
+                Ok(None) => Ok("(no source available)".to_string()),
+                Err(rusqlite::Error::QueryReturnedNoRows) => {
+                    Err("Message not found".to_string())
+                }
+                Err(e) => Err(e.to_string()),
+            }
+        })
+        .await
+    }
 }
 
 /// Initialize the body store for loading message bodies.

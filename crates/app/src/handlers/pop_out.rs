@@ -102,7 +102,7 @@ fn handle_message_view_update(
     msg: MessageViewMessage,
 ) -> Task<Message> {
     match msg {
-        MessageViewMessage::BodyLoaded(gen, _) if !state.is_current_generation(gen) => {
+        MessageViewMessage::BodyLoaded(generation, _) if !state.is_current_generation(generation) => {
             Task::none() // Stale load — ignore
         }
         MessageViewMessage::BodyLoaded(_, Ok((body_text, body_html))) => {
@@ -119,7 +119,7 @@ fn handle_message_view_update(
             );
             Task::none()
         }
-        MessageViewMessage::AttachmentsLoaded(gen, _) if !state.is_current_generation(gen) => {
+        MessageViewMessage::AttachmentsLoaded(generation, _) if !state.is_current_generation(generation) => {
             Task::none() // Stale load — ignore
         }
         MessageViewMessage::AttachmentsLoaded(_, Ok(attachments)) => {

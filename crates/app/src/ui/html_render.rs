@@ -8,7 +8,7 @@
 //! table nesting (layout tables) or heavy style blocks fall back to plain text.
 
 use iced::widget::{column, container, row, text, Space};
-use iced::{Element, Length};
+use iced::{Element, Length, Padding};
 
 use crate::ui::layout::*;
 use crate::ui::theme;
@@ -145,7 +145,7 @@ fn render_block<'a, M: Clone + 'a>(block: Block) -> Element<'a, M> {
                     .size(TEXT_LG)
                     .style(theme::TextClass::Tertiary.style()),
             )
-            .padding([SPACE_XXS, SPACE_SM, SPACE_XXS, SPACE_MD])
+            .padding(Padding { top: SPACE_XXS, right: SPACE_SM, bottom: SPACE_XXS, left: SPACE_MD })
             .style(theme::ContainerClass::Elevated.style())
             .width(Length::Fill)
             .into()
@@ -164,7 +164,7 @@ fn render_block<'a, M: Clone + 'a>(block: Block) -> Element<'a, M> {
             .into()
         }
         Block::HorizontalRule => {
-            iced::widget::rule::Rule::horizontal(1).into()
+            iced::widget::rule::horizontal(1).into()
         }
     }
 }

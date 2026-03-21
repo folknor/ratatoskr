@@ -1,3 +1,5 @@
+mod accounts;
+mod calendar;
 mod connection;
 mod contacts;
 mod palette;

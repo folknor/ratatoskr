@@ -258,6 +258,7 @@ struct App {
 
     main_window_id: iced::window::Id,
     pop_out_windows: HashMap<iced::window::Id, PopOutWindow>,
+    pop_out_generation: u64,
     nav_generation: u64,
     thread_generation: u64,
 
@@ -324,6 +325,7 @@ impl App {
             window,
             main_window_id,
             pop_out_windows: HashMap::new(),
+            pop_out_generation: 0,
             nav_generation: 1,
             thread_generation: 0,
             registry,
@@ -942,6 +944,18 @@ impl App {
             ThreadListEvent::SearchExecute => {
                 self.update(Message::SearchExecute)
             }
+            ThreadListEvent::ThreadDeselected => {
+                self.thread_list.selected_thread = None;
+                self.reading_pane.set_thread(None);
+                Task::none()
+            }
+            ThreadListEvent::WidenSearchScope => {
+                // Widen search scope to all accounts
+                self.sidebar.selected_account = None;
+                self.nav_generation += 1;
+                self.update_thread_list_context_from_sidebar();
+                self.update(Message::SearchExecute)
+            }
         }
     }
 
@@ -960,7 +974,64 @@ impl App {
             ReadingPaneEvent::OpenMessagePopOut { message_index } => {
                 self.open_message_view_window(message_index)
             }
+            ReadingPaneEvent::ReplyToMessage { message_index } => {
+                self.handle_reading_pane_compose(message_index, ComposeMode::Reply {
+                    original_subject: self.current_subject(),
+                })
+            }
+            ReadingPaneEvent::ReplyAllToMessage { message_index } => {
+                self.handle_reading_pane_compose(message_index, ComposeMode::ReplyAll {
+                    original_subject: self.current_subject(),
+                })
+            }
+            ReadingPaneEvent::ForwardMessage { message_index } => {
+                self.handle_reading_pane_compose(message_index, ComposeMode::Forward {
+                    original_subject: self.current_subject(),
+                })
+            }
         }
+    }
+
+    /// Get the subject of the currently selected thread.
+    fn current_subject(&self) -> String {
+        self.thread_list
+            .selected_thread
+            .and_then(|idx| self.thread_list.threads.get(idx))
+            .and_then(|t| t.subject.clone())
+            .unwrap_or_default()
+    }
+
+    /// Open a compose window from a reading pane Reply/ReplyAll/Forward action.
+    fn handle_reading_pane_compose(
+        &mut self,
+        message_index: usize,
+        mode: ComposeMode,
+    ) -> Task<Message> {
+        // Clone all data upfront to avoid borrow checker conflicts with &mut self.
+        let msg = self.reading_pane.thread_messages.get(message_index).cloned();
+        let to_email = msg.as_ref().and_then(|m| m.from_address.clone());
+        let to_name = msg.as_ref().and_then(|m| m.from_name.clone());
+        let cc_emails = msg.as_ref().and_then(|m| m.cc_addresses.clone());
+        let thread_id = self
+            .thread_list
+            .selected_thread
+            .and_then(|idx| self.thread_list.threads.get(idx))
+            .map(|t| t.id.clone());
+        let message_id = msg.as_ref().map(|m| m.id.clone());
+        let snippet = msg.as_ref().and_then(|m| m.snippet.clone());
+
+        let state = pop_out::compose::ComposeState::new_reply(
+            &self.sidebar.accounts,
+            mode.clone(),
+            to_email.as_deref(),
+            to_name.as_deref(),
+            cc_emails.as_deref(),
+            snippet.as_deref(),
+            thread_id.as_deref(),
+            message_id.as_deref(),
+        );
+
+        self.open_compose_window_with_state(state, mode)
     }
 
     fn handle_status_bar(&mut self, msg: StatusBarMessage) -> Task<Message> {

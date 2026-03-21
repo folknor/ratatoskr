@@ -166,8 +166,8 @@ impl MessageViewState {
     }
 
     /// Check if a loaded result matches this window's current generation.
-    pub fn is_current_generation(&self, gen: u64) -> bool {
-        self.generation == gen
+    pub fn is_current_generation(&self, generation: u64) -> bool {
+        self.generation == generation
     }
 }
 
