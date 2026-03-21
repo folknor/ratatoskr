@@ -4,35 +4,21 @@
 
 These prevent the app from functioning as an email client.
 
-- [ ] **Provider send** — Compose saves to `local_drafts` with `sync_status = 'finalized'` but never actually sends via IMAP/SMTP/Gmail API/Graph. Need to wire `ProviderOps::send()` to pick up finalized drafts and transmit them. This is the single biggest gap for usability.
-
-- [ ] **Calendar provider sync (Layer 5)** — Google Calendar (API), Graph (CalDAV), and generic CalDAV sync. Events are local-only right now. Core calendar CRUD is ready (`crates/core/src/db/queries_extra/calendars.rs`). Need sync pipeline integration similar to email sync.
-
-- [ ] **Re-authentication flow (Phase 7)** — When OAuth tokens expire, there's no way to re-auth. Status bar has `AccountWarning`/`WarningKind::TokenExpiry` types and `RequestReauth` event, but no `ReauthWizard` to handle it. The compose agent noted that `AccountHealth::compute_health()` always returns `Healthy` until `token_expires_at` and `is_active` are plumbed from DB.
-
-- [ ] **Connect sync orchestrator to `IcedProgressReporter`** — The reporter type, `SyncEvent` enum, channel factory, and `Message::SyncProgress` handler all exist. What's missing is the sync pipeline actually using the reporter to emit events. Without this, the status bar never shows sync progress or connection warnings.
+- [ ] **Calendar provider sync — CalDAV** — Gmail and Graph calendar sync are done (`crates/gmail/src/calendar/`, `crates/graph/src/calendar_sync.rs`). Generic CalDAV sync for JMAP/IMAP providers is not yet implemented. Core calendar CRUD is ready (`crates/core/src/db/queries_extra/calendars.rs`).
 
 ## UX Polish
 
 Important for a good experience, not blocking core functionality.
 
-- [ ] **Right sidebar** — Still shows static "Calendar placeholder", "No pinned items" text. Should have mini-calendar with today's agenda and pinned/starred items. Calendar was built as a separate full-page mode instead.
+- [x] **Right sidebar** — ~~Still shows static placeholder text.~~ Done: mini calendar (`mini_month`), today's agenda, starred threads.
 
 - [ ] **Multi-select + auto-advance (Phase 3 interaction)** — Shift+click range select, Ctrl+click toggle select. Auto-advance to next thread after archive/trash. Inline reply composer. Context-dependent shortcut dispatch via `FocusedRegion`. Thread list keyboard nav (j/k/Enter/Escape) is done, but these interaction items remain.
 
 - [ ] **Scroll virtualization** — Thread list renders all cards in `column![]` inside `scrollable`. Fixed `THREAD_CARD_HEIGHT` exists for future virtualization. Currently fast with 1000 threads but won't scale. Needs iced-level virtual scrolling (only render visible rows) rather than application-level pagination — see detailed analysis in previous attempts.
 
-- [ ] **Undo/redo for all text inputs** — iced's built-in `TextInput` and `TextEditor` do not support Ctrl+Z/Ctrl+Y. Every text field should support basic undo/redo. The rich text editor already has full undo/redo via `EditOp` stack.
+- [x] **Undo/redo for text inputs** — Done. `UndoableText` wrapper (`crates/app/src/ui/undoable.rs`, `undoable_text_input.rs`) applied to search bar, compose subject, calendar event fields. Remaining: `UndoableList<T>` for pill-based inputs (To/Cc/Bcc, labels).
 
-  **Approach**: Use `dissimilar` crate for compact diff-based undo history per input. Wrap in `UndoableText { current: String, history: VecDeque<Patch>, position: usize }`. For pill-based inputs (To/Cc/Bcc, labels), define `UndoableList<T>` tracking add/remove operations.
-
-  **Reference**: cedilla `research/cedilla/src/app/core/history.rs` (dissimilar-based undo with circular buffer).
-
-- [ ] **Config shadow pattern for settings/edit flows** — Any UI that edits persistent state should clone into an `editing_*` shadow on open. Prevents partial saves, enables live preview, provides trivial change detection.
-
-  **Where to apply**: Account settings, app preferences, calendar event editor, contact import wizard, pinned search edit-in-place. **Exception**: contacts spec says fields save immediately (no Save/Cancel).
-
-  **Reference**: bloom `research/bloom/src/app.rs` lines 38, 196, 402.
+- [x] **Config shadow pattern for settings/edit flows** — Done. `PreferencesState` clone-on-open/commit/discard with change detection (`crates/app/src/ui/settings/types.rs`). Remaining: apply pattern to calendar event editor, contact import wizard, pinned search edit-in-place.
 
 - [ ] **`responsive` for adaptive layout** — Wrap layout in `iced::widget::responsive` to collapse panels at narrow window sizes (e.g., hide right sidebar below 900px, stack sidebar over thread list below 600px).
 
@@ -46,7 +32,7 @@ Important for a good experience, not blocking core functionality.
 
 - [ ] **Replace `pre_search_threads` with `PreSearchView`** — Spec recommends navigation-target-based restoration instead of thread vector cloning.
 
-- [ ] **Compose: remaining gaps** — File picker (needs `rfd` dependency), block-type format toggles (list/blockquote in toolbar), link insertion dialog, provider send (see Usability Blockers above).
+- [ ] **Compose: remaining UI gaps** — File picker (needs `rfd` dependency), block-type format toggles (list/blockquote in toolbar), link insertion dialog.
 
 ## Infrastructure
 
@@ -56,15 +42,14 @@ Cross-cutting work that enables or improves multiple features.
 
 - [ ] **Remaining core CRUD bypasses** — Pop-out body/attachment loads (`load_message_body`, `load_message_attachments`), compose draft save (raw SQL to `local_drafts`), `load_raw_source`, pinned search CRUD, palette label queries. Calendar, contacts, signatures, and accounts are resolved.
 
-- [ ] **Keybinding persistence + management UI (6e-6f)** — `BindingTable` supports overrides in memory but they're not saved/loaded. No settings panel for rebinding. Take a look at https://nyaa.place/blog/libadwaita-1-8/
+- [x] **Keybinding persistence (6e)** — Done. `BindingTable` loads overrides from `keybindings.json` at boot (`main.rs`) and saves via `save_overrides_to_file()`.
+- [ ] **Keybinding management UI (6f)** — No settings panel for rebinding yet. Take a look at https://nyaa.place/blog/libadwaita-1-8/
 
 - [ ] **Wire up system font detection (Phase 2 — Document font)** — Detected document font should be used for email body text. Requires threading a separate font through thread detail view and message body widgets. Add as a font setting in settings UI.
 
-- [ ] **Cache `thread_ids` on `PinnedSearch` struct** — Spec defines `thread_ids: Vec<(String, String)>` loaded lazily. Implementation always re-queries. Minor — DB query is fast.
+- [x] **Cache `thread_ids` on `PinnedSearch` struct** — Done. `thread_ids: Option<Vec<(String, String)>>` on `PinnedSearch`, loaded lazily, cached for reuse.
 
-- [ ] **Pinned searches Phase 2 features** — Staleness label, `SearchBarState` type, periodic expiry subscription.
-
-- [ ] **Search Phases 2 + 4** — Phase 2: smart folder CRUD via command palette (save search as smart folder). Phase 4: "Search here" scoped search from sidebar right-click context menu.
+- [x] **Pinned search + search phases 2+4** — Done. Thread ID caching, staleness label+refresh, periodic expiry, Save as Smart Folder (palette command `SaveAsSmartFolder`), "Search here" (sidebar right-click context menu).
 
 - [ ] **`color_palette_grid` not reusable** — Hardcoded to `AddAccountMessage::SelectColor(i)`. Should be generic widget in `widgets.rs` with `on_select` callback.
 
@@ -74,7 +59,7 @@ Cross-cutting work that enables or improves multiple features.
 
 New features that add capability without blocking core email functionality.
 
-- [ ] **Contact import crate** — CSV/XLSX/vCard import with encoding detection, column mapping, preview, and import wizard UI. Spec at `docs/contacts/import-spec.md`. Fold `seen-addresses` crate into the new contacts crate.
+- [x] **Contact import crate** — Done. `crates/contact-import/` (CSV/vCard, encoding detection, column mapping). 5-step wizard in settings UI. Remaining: fold `seen-addresses` crate into the contacts crate.
 
 - [ ] **Full contacts crate** — CardDAV sync (partially started in `core/src/carddav.rs`), contact detail views, merge/dedup, per-provider contact sync (Google People API, Microsoft Graph contacts, LDAP).
 
@@ -156,10 +141,9 @@ These are living reference documentation — patterns to follow as features are 
 
 - [ ] **Subscription orchestration pattern**
 
-  Well-established. Active: keyboard listener, chord timeout, search debounce, status bar cycling, settings animation, compose auto-save (30s). `IcedProgressReporter` built but not connected to sync.
+  Well-established. Active: keyboard listener, chord timeout, search debounce, status bar cycling, settings animation, compose auto-save (30s), `SyncProgressRecipe` subscription. `IcedProgressReporter` connected to sync orchestrator — email action confirmations shown in status bar.
 
   **Remaining:**
-  - Connect sync orchestrator to reporter
   - File system watches (draft changes, attachment modifications)
   - Provider push notifications (IMAP IDLE, JMAP push, Graph webhooks, Gmail watch)
   - GAL polling refresh (hourly, for contacts)
@@ -189,7 +173,36 @@ These are living reference documentation — patterns to follow as features are 
 ## Completed (2026-03-21)
 
 <details>
-<summary>66 items completed across 19 agents in 2 rounds</summary>
+<summary>100+ items completed across 35+ agents in 4 rounds</summary>
+
+### Round 4 — Infrastructure + Polish
+- [x] Compose send — outbox pattern (MIME assembly, finalized draft save, async send dispatch, sent/failed status)
+- [x] Right sidebar — mini calendar, today's agenda, starred threads
+- [x] Keybinding persistence (6e) — save/load overrides to keybindings.json
+- [x] Config shadow pattern — PreferencesState clone-on-open/commit/discard, change detection
+- [x] Undo/redo for text inputs — UndoableText wrapping search bar, compose subject, calendar event fields
+
+### Round 3 — Comprehensive Logging
+- [x] `log::error/warn/info/debug` across ALL crates — app, core, db, all 4 providers, sync, stores, search, squeeze, smtp, provider-utils, seen-addresses, contact-import
+- [x] `env_logger::init()` in `main()`
+
+### Round 2 — Core Send + Calendar + Sync
+- [x] Core send pipeline — `SendRequest`, MIME assembly via lettre, `build_mime_message()`, draft lifecycle functions, 11 tests
+- [x] Gmail calendar sync — Google Calendar API v3 (list/sync/CRUD, incremental syncToken, attendees, reminders)
+- [x] Graph calendar sync — Microsoft Calendar (calendarView/delta, CRUD, recurrence, Exchange category colors)
+- [x] IMAP/SMTP + JMAP send — already fully implemented (discovered by agent)
+- [x] Sync orchestrator — SyncProgressRecipe subscription, sync_receiver/reporter on App, email action confirmations in status bar
+- [x] Re-auth flow — reauth mode in AddAccountWizard, oauth_config_for_provider(), wire from RequestReauth, token update
+- [x] Pinned search + search phases 2+4 — thread ID caching, staleness label+refresh, periodic expiry, Save as Smart Folder, "Search here"
+- [x] Contact import — `crates/contact-import/` (CSV/vCard, encoding detection, column mapping), 5-step wizard in settings
+
+### Infrastructure (Round 2-4)
+- [x] All deps bumped (rusqlite 0.39, toml 1.0, zip 8, html5ever 0.39, etc.)
+- [x] Migrations wired at boot (Db::open runs run_all)
+- [x] DbThread.last_message_at fixed to Option<i64>
+- [x] Search debounce subscription fixed for iced fork (.with() pattern)
+
+### Round 1
 
 ### Editor
 - [x] Architecture doc stale claims fixed (test count, html_parse directory, editor_state.rs, draw_list_marker)
