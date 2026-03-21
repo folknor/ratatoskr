@@ -1,0 +1,165 @@
+//! Bridge between core's `get_thread_detail()` and the app's display types.
+//!
+//! Replaces the raw SQL shim that loaded messages and attachments separately.
+//! Core provides `ThreadDetail` with body text from BodyStore, ownership
+//! detection, collapsed summaries, resolved label colors, and persisted
+//! attachment collapse state.
+
+use std::sync::Arc;
+
+use ratatoskr_core::body_store::BodyStoreState;
+use ratatoskr_core::db::queries_extra::thread_detail::{
+    self, ThreadDetail, get_thread_detail,
+};
+use ratatoskr_core::db::queries_extra::thread_ui_state::set_attachments_collapsed;
+
+use super::connection::Db;
+use super::types::{ThreadAttachment, ThreadMessage};
+
+/// Label color info resolved from core's ThreadLabel.
+#[derive(Debug, Clone)]
+pub struct ResolvedLabel {
+    pub label_id: String,
+    pub name: String,
+    pub color_bg: String,
+    pub color_fg: String,
+}
+
+/// Full thread detail data for the reading pane.
+#[derive(Debug, Clone)]
+pub struct AppThreadDetail {
+    pub thread_id: String,
+    pub account_id: String,
+    pub subject: Option<String>,
+    pub is_starred: bool,
+    pub messages: Vec<ThreadMessage>,
+    pub labels: Vec<ResolvedLabel>,
+    pub attachments: Vec<ThreadAttachment>,
+    pub attachments_collapsed: bool,
+}
+
+/// Convert core's ThreadDetail into app display types.
+fn convert_thread_detail(detail: ThreadDetail) -> AppThreadDetail {
+    let messages = detail
+        .messages
+        .into_iter()
+        .map(convert_message)
+        .collect();
+
+    let labels = detail
+        .labels
+        .into_iter()
+        .map(|l| ResolvedLabel {
+            label_id: l.label_id,
+            name: l.name,
+            color_bg: l.color_bg,
+            color_fg: l.color_fg,
+        })
+        .collect();
+
+    let attachments = detail
+        .attachments
+        .into_iter()
+        .map(convert_attachment)
+        .collect();
+
+    AppThreadDetail {
+        thread_id: detail.thread_id,
+        account_id: detail.account_id,
+        subject: detail.subject,
+        is_starred: detail.is_starred,
+        messages,
+        labels,
+        attachments,
+        attachments_collapsed: detail.attachments_collapsed,
+    }
+}
+
+fn convert_message(msg: thread_detail::ThreadDetailMessage) -> ThreadMessage {
+    ThreadMessage {
+        id: msg.id,
+        thread_id: msg.thread_id,
+        account_id: msg.account_id,
+        from_name: msg.from_name,
+        from_address: msg.from_address,
+        to_addresses: msg.to_addresses,
+        cc_addresses: msg.cc_addresses,
+        date: Some(msg.date),
+        subject: msg.subject,
+        snippet: msg.collapsed_summary,
+        body_html: msg.body_html,
+        body_text: msg.body_text,
+        is_read: msg.is_read,
+        is_starred: msg.is_starred,
+        is_own_message: msg.is_own_message,
+    }
+}
+
+fn convert_attachment(att: thread_detail::ThreadAttachment) -> ThreadAttachment {
+    ThreadAttachment {
+        id: att.id,
+        filename: att.filename,
+        mime_type: att.mime_type,
+        size: att.size,
+        from_name: att.from_name,
+        date: Some(att.date),
+    }
+}
+
+/// Load full thread detail via core's `get_thread_detail()`.
+///
+/// This replaces the two separate `get_thread_messages` + `get_thread_attachments`
+/// calls with a single core function that also provides:
+/// - Body text from the BodyStore (decompressed from zstd)
+/// - Message ownership detection (is_own_message)
+/// - Quote/signature-stripped collapsed summaries
+/// - Resolved label colors
+/// - Persisted attachment collapse state
+pub async fn load_thread_detail(
+    db: &Db,
+    body_store: &BodyStoreState,
+    account_id: String,
+    thread_id: String,
+) -> Result<AppThreadDetail, String> {
+    let bs_conn = body_store.conn();
+    let db_conn = db.conn_arc();
+
+    tokio::task::spawn_blocking(move || {
+        let conn = db_conn
+            .lock()
+            .map_err(|e| format!("db lock: {e}"))?;
+        let bs = bs_conn
+            .lock()
+            .map_err(|e| format!("body store lock: {e}"))?;
+        let detail = get_thread_detail(&conn, &bs, &account_id, &thread_id)?;
+        Ok(convert_thread_detail(detail))
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking: {e}"))?
+}
+
+/// Persist attachment collapse state to core's thread_ui_state table.
+pub async fn persist_attachments_collapsed(
+    db: &Db,
+    account_id: String,
+    thread_id: String,
+    collapsed: bool,
+) -> Result<(), String> {
+    let conn = db.write_conn_arc();
+    tokio::task::spawn_blocking(move || {
+        let conn = conn
+            .lock()
+            .map_err(|e| format!("db write lock: {e}"))?;
+        set_attachments_collapsed(&conn, &account_id, &thread_id, collapsed)
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking: {e}"))?
+}
+
+/// Initialize the body store for loading message bodies.
+pub fn init_body_store() -> Result<BodyStoreState, String> {
+    let data_dir = crate::APP_DATA_DIR
+        .get()
+        .ok_or_else(|| "APP_DATA_DIR not set".to_string())?;
+    BodyStoreState::init(data_dir)
+}

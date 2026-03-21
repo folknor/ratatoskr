@@ -215,10 +215,16 @@ fn selected_thread_state(app: &App) -> ThreadState {
 /// allowing incremental rollout.
 pub fn dispatch_command(id: CommandId, _app: &App) -> Option<Message> {
     match id {
-        // Navigation
-        CommandId::NavNext => Some(Message::NavigateTo(NavigationTarget::Inbox)), // stub
-        CommandId::NavPrev => Some(Message::NavigateTo(NavigationTarget::Inbox)), // stub
-        CommandId::NavOpen => None,
+        // Navigation — thread list keyboard nav (j/k/Enter/Escape)
+        CommandId::NavNext => {
+            Some(Message::ThreadList(crate::ui::thread_list::ThreadListMessage::SelectNext))
+        }
+        CommandId::NavPrev => {
+            Some(Message::ThreadList(crate::ui::thread_list::ThreadListMessage::SelectPrevious))
+        }
+        CommandId::NavOpen => {
+            Some(Message::ThreadList(crate::ui::thread_list::ThreadListMessage::ActivateSelected))
+        }
         CommandId::NavMsgNext => None,
         CommandId::NavMsgPrev => None,
         CommandId::NavGoInbox => Some(Message::NavigateTo(NavigationTarget::Inbox)),

@@ -107,6 +107,18 @@ impl Db {
         })
     }
 
+    /// Access the underlying read-only connection Arc for synchronous use
+    /// across thread boundaries (e.g., passing to core functions).
+    pub fn conn_arc(&self) -> Arc<Mutex<Connection>> {
+        Arc::clone(&self.conn)
+    }
+
+    /// Access the underlying writable connection Arc for synchronous use
+    /// across thread boundaries.
+    pub fn write_conn_arc(&self) -> Arc<Mutex<Connection>> {
+        Arc::clone(&self.write_conn)
+    }
+
     /// Execute a closure on the writable connection. Use this for
     /// account creation, local state writes, and any operation that
     /// modifies the database.
@@ -298,11 +310,15 @@ impl Db {
                     from_name: row.get("from_name")?,
                     from_address: row.get("from_address")?,
                     to_addresses: row.get("to_addresses")?,
+                    cc_addresses: None,
                     date: row.get("date")?,
                     subject: row.get("subject")?,
                     snippet: row.get("snippet")?,
+                    body_html: None,
+                    body_text: None,
                     is_read: row.get::<_, i64>("is_read")? != 0,
                     is_starred: row.get::<_, i64>("is_starred")? != 0,
+                    is_own_message: false,
                 })
             })
             .map_err(|e| e.to_string())?

@@ -6,7 +6,7 @@ use iced::{Alignment, Element, Length, Padding, Task};
 use ratatoskr_command_palette::{BindingTable, CommandContext, CommandId, CommandRegistry};
 
 use crate::component::Component;
-use crate::db::{DateDisplay, Thread, ThreadAttachment, ThreadMessage};
+use crate::db::{AppThreadDetail, DateDisplay, ResolvedLabel, Thread, ThreadAttachment, ThreadMessage};
 use crate::font;
 use crate::icon;
 use crate::ui::layout::*;
@@ -22,6 +22,12 @@ pub enum ReadingPaneMessage {
     ToggleAllMessages,
     ToggleAttachmentsCollapsed,
     PopOut(usize),
+    /// Reply to the message at the given index.
+    Reply(usize),
+    /// Reply All to the message at the given index.
+    ReplyAll(usize),
+    /// Forward the message at the given index.
+    Forward(usize),
     Noop,
 }
 
@@ -31,6 +37,12 @@ pub enum ReadingPaneEvent {
     AttachmentCollapseChanged { thread_key: String, collapsed: bool },
     /// User clicked the pop-out button on a message; open it in a new window.
     OpenMessagePopOut { message_index: usize },
+    /// User clicked Reply on a specific message.
+    ReplyToMessage { message_index: usize },
+    /// User clicked Reply All on a specific message.
+    ReplyAllToMessage { message_index: usize },
+    /// User clicked Forward on a specific message.
+    ForwardMessage { message_index: usize },
 }
 
 // ── State ──────────────────────────────────────────────
@@ -38,6 +50,7 @@ pub enum ReadingPaneEvent {
 pub struct ReadingPane {
     pub thread_messages: Vec<ThreadMessage>,
     pub thread_attachments: Vec<ThreadAttachment>,
+    pub thread_labels: Vec<ResolvedLabel>,
     pub message_expanded: Vec<bool>,
     pub attachments_collapsed: bool,
     pub attachment_collapse_cache: HashMap<String, bool>,
@@ -60,6 +73,7 @@ impl ReadingPane {
         Self {
             thread_messages: Vec::new(),
             thread_attachments: Vec::new(),
+            thread_labels: Vec::new(),
             message_expanded: Vec::new(),
             attachments_collapsed: false,
             attachment_collapse_cache: HashMap::new(),
@@ -78,6 +92,7 @@ impl ReadingPane {
         });
         self.thread_messages.clear();
         self.thread_attachments.clear();
+        self.thread_labels.clear();
         self.message_expanded.clear();
         // Restore attachment collapse state from cache
         self.attachments_collapsed = thread
@@ -89,17 +104,53 @@ impl ReadingPane {
     }
 
     /// Apply message expansion rules after messages are loaded.
+    ///
+    /// Rules (messages are newest-first):
+    /// 1. Unread messages are expanded
+    /// 2. Most recent message (index 0) is expanded
+    /// 3. First message in thread (last index) is expanded
+    /// 4. Own messages are collapsed (unless rule 1-3 applies)
     pub fn apply_message_expansion(&mut self, messages: &[ThreadMessage]) {
         let len = messages.len();
         let mut expanded = vec![false; len];
 
         for (i, msg) in messages.iter().enumerate() {
+            // Rules 1-3: unread, most recent, or initial message
             if !msg.is_read || i == 0 || i == len - 1 {
                 expanded[i] = true;
+            }
+            // Rule 4: own messages default to collapsed
+            if msg.is_own_message && msg.is_read && i != 0 && i != len - 1 {
+                expanded[i] = false;
             }
         }
 
         self.message_expanded = expanded;
+    }
+
+    /// Load thread detail from core's get_thread_detail response.
+    pub fn load_thread_detail(&mut self, detail: AppThreadDetail) {
+        // Update thread ref with detail data
+        self.current_thread = Some(ThreadRef {
+            account_id: detail.account_id.clone(),
+            id: detail.thread_id.clone(),
+            subject: detail.subject,
+            is_starred: detail.is_starred,
+        });
+
+        // Set attachments collapsed from persisted state
+        self.attachments_collapsed = detail.attachments_collapsed;
+
+        // Update cache too
+        let key = format!("{}:{}", detail.account_id, detail.thread_id);
+        self.attachment_collapse_cache
+            .insert(key, detail.attachments_collapsed);
+
+        // Apply expansion rules then set messages
+        self.apply_message_expansion(&detail.messages);
+        self.thread_messages = detail.messages;
+        self.thread_attachments = detail.attachments;
+        self.thread_labels = detail.labels;
     }
 
     fn thread_key(&self) -> Option<String> {
@@ -148,6 +199,21 @@ impl Component for ReadingPane {
                     message_index: index,
                 };
                 (Task::none(), Some(event))
+            }
+            ReadingPaneMessage::Reply(index) => {
+                (Task::none(), Some(ReadingPaneEvent::ReplyToMessage {
+                    message_index: index,
+                }))
+            }
+            ReadingPaneMessage::ReplyAll(index) => {
+                (Task::none(), Some(ReadingPaneEvent::ReplyAllToMessage {
+                    message_index: index,
+                }))
+            }
+            ReadingPaneMessage::Forward(index) => {
+                (Task::none(), Some(ReadingPaneEvent::ForwardMessage {
+                    message_index: index,
+                }))
             }
             ReadingPaneMessage::Noop => (Task::none(), None),
         }
@@ -386,7 +452,9 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
                 first_message_date,
                 ReadingPaneMessage::ToggleMessageExpanded,
                 ReadingPaneMessage::PopOut,
-                ReadingPaneMessage::Noop,
+                ReadingPaneMessage::Reply,
+                ReadingPaneMessage::ReplyAll,
+                ReadingPaneMessage::Forward,
             ));
         } else {
             msg_col = msg_col.push(widgets::collapsed_message_row(

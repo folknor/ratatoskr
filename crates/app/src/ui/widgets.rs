@@ -1000,6 +1000,7 @@ pub fn message_card<'a, M: 'a>(thread: &'a Thread) -> Element<'a, M> {
 
 // ── Expanded message card ───────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 pub fn expanded_message_card<'a, M: Clone + 'a>(
     msg: &'a ThreadMessage,
     index: usize,
@@ -1007,7 +1008,9 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     first_message_date: Option<i64>,
     on_toggle: impl Fn(usize) -> M,
     on_pop_out: impl Fn(usize) -> M,
-    noop: M,
+    on_reply: impl Fn(usize) -> M,
+    on_reply_all: impl Fn(usize) -> M,
+    on_forward: impl Fn(usize) -> M,
 ) -> Element<'a, M> {
     let sender = msg
         .from_name
@@ -1060,14 +1063,28 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     .spacing(SPACE_SM)
     .align_y(Alignment::Start);
 
-    let body_text = msg.snippet.as_deref().unwrap_or("(no preview available)");
-    let body = container(text(body_text).size(TEXT_LG).style(text::secondary))
-        .padding(PAD_BODY);
+    let body: Element<'_, M> = if let Some(html) = msg.body_html.as_deref() {
+        container(super::html_render::render_html::<M>(
+            html,
+            msg.body_text.as_deref(),
+        ))
+        .padding(PAD_BODY)
+        .into()
+    } else {
+        let display = msg
+            .body_text
+            .as_deref()
+            .or(msg.snippet.as_deref())
+            .unwrap_or("(no preview available)");
+        container(text(display).size(TEXT_LG).style(text::secondary))
+            .padding(PAD_BODY)
+            .into()
+    };
 
     let actions = row![
-        reply_button(icon::reply(), "Reply", noop.clone()),
-        reply_button(icon::reply_all(), "Reply All", noop.clone()),
-        reply_button(icon::forward(), "Forward", noop),
+        reply_button(icon::reply(), "Reply", on_reply(index)),
+        reply_button(icon::reply_all(), "Reply All", on_reply_all(index)),
+        reply_button(icon::forward(), "Forward", on_forward(index)),
     ]
     .spacing(SPACE_XS);
 

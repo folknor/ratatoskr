@@ -15,7 +15,7 @@ use command_dispatch::{
     ReadingPanePosition, TaskAction,
 };
 use component::Component;
-use db::{Db, Thread};
+use db::{AppThreadDetail, Db, Thread};
 use iced::widget::{column, container, mouse_area, row, stack};
 use iced::{Element, Length, Point, Size, Task, Theme};
 use pop_out::{PopOutMessage, PopOutWindow};
@@ -26,6 +26,7 @@ use ratatoskr_command_palette::{
     BindingTable, Chord, CommandArgs, CommandId, CommandInputResolver, CommandRegistry,
     FocusedRegion, OptionItem, ResolveResult, current_platform,
 };
+use ratatoskr_core::body_store::BodyStoreState;
 use ratatoskr_core::db::queries_extra::navigation::{
     NavigationState, get_navigation_state,
 };
@@ -138,8 +139,7 @@ pub enum Message {
     AccountsLoaded(u64, Result<Vec<db::Account>, String>),
     NavigationLoaded(u64, Result<NavigationState, String>),
     ThreadsLoaded(u64, Result<Vec<Thread>, String>),
-    ThreadMessagesLoaded(u64, Result<Vec<db::ThreadMessage>, String>),
-    ThreadAttachmentsLoaded(u64, Result<Vec<db::ThreadAttachment>, String>),
+    ThreadDetailLoaded(u64, Result<AppThreadDetail, String>),
 
     // Existing UI
     Compose,
@@ -220,6 +220,7 @@ pub enum Message {
 
 struct App {
     db: Arc<Db>,
+    body_store: Option<BodyStoreState>,
     sidebar: Sidebar,
     thread_list: ThreadList,
     reading_pane: ReadingPane,
@@ -303,8 +304,11 @@ impl App {
         let binding_table = BindingTable::new(&registry, current_platform());
         let resolver = Arc::new(command_resolver::AppInputResolver::new(Arc::clone(&db)));
 
+        let body_store = db::threads::init_body_store().ok();
+
         let app = Self {
             db,
+            body_store,
             sidebar: Sidebar::new(),
             thread_list: ThreadList::new(),
             reading_pane: ReadingPane::new(),
@@ -558,23 +562,13 @@ impl App {
                 Task::none()
             }
             Message::WindowCloseRequested(id) => self.handle_window_close(id),
-            Message::ThreadMessagesLoaded(g, _) if g != self.thread_generation => Task::none(),
-            Message::ThreadMessagesLoaded(_, Ok(messages)) => {
-                self.reading_pane.apply_message_expansion(&messages);
-                self.reading_pane.thread_messages = messages;
+            Message::ThreadDetailLoaded(g, _) if g != self.thread_generation => Task::none(),
+            Message::ThreadDetailLoaded(_, Ok(detail)) => {
+                self.reading_pane.load_thread_detail(detail);
                 Task::none()
             }
-            Message::ThreadMessagesLoaded(_, Err(e)) => {
-                self.status = format!("Messages error: {e}");
-                Task::none()
-            }
-            Message::ThreadAttachmentsLoaded(g, _) if g != self.thread_generation => Task::none(),
-            Message::ThreadAttachmentsLoaded(_, Ok(attachments)) => {
-                self.reading_pane.thread_attachments = attachments;
-                Task::none()
-            }
-            Message::ThreadAttachmentsLoaded(_, Err(e)) => {
-                self.status = format!("Attachments error: {e}");
+            Message::ThreadDetailLoaded(_, Err(e)) => {
+                self.status = format!("Thread detail error: {e}");
                 Task::none()
             }
             Message::SetDateDisplay(display) => {
@@ -1803,6 +1797,14 @@ impl App {
             ThreadListEvent::SearchExecute => {
                 self.update(Message::SearchExecute)
             }
+            ThreadListEvent::ThreadDeselected => {
+                self.reading_pane.set_thread(None);
+                Task::none()
+            }
+            ThreadListEvent::WidenSearchScope => {
+                // TODO: widen search to All accounts scope
+                Task::none()
+            }
         }
     }
 
@@ -1820,9 +1822,46 @@ impl App {
         event: ReadingPaneEvent,
     ) -> Task<Message> {
         match event {
-            ReadingPaneEvent::AttachmentCollapseChanged { .. } => Task::none(),
+            ReadingPaneEvent::AttachmentCollapseChanged {
+                thread_key,
+                collapsed,
+            } => {
+                // Persist to SQLite via core's thread_ui_state
+                let parts: Vec<&str> = thread_key.splitn(2, ':').collect();
+                if parts.len() == 2 {
+                    let db = Arc::clone(&self.db);
+                    let account_id = parts[0].to_string();
+                    let thread_id = parts[1].to_string();
+                    Task::perform(
+                        async move {
+                            db::threads::persist_attachments_collapsed(
+                                &db,
+                                account_id,
+                                thread_id,
+                                collapsed,
+                            )
+                            .await
+                        },
+                        |_| Message::Noop,
+                    )
+                } else {
+                    Task::none()
+                }
+            }
             ReadingPaneEvent::OpenMessagePopOut { message_index } => {
                 self.open_message_view_window(message_index)
+            }
+            ReadingPaneEvent::ReplyToMessage { .. } => {
+                // TODO: open compose with reply context for the specific message
+                Task::none()
+            }
+            ReadingPaneEvent::ReplyAllToMessage { .. } => {
+                // TODO: open compose with reply-all context
+                Task::none()
+            }
+            ReadingPaneEvent::ForwardMessage { .. } => {
+                // TODO: open compose with forward context
+                Task::none()
             }
         }
     }
@@ -2118,26 +2157,19 @@ impl App {
             let db = Arc::clone(&self.db);
             let account_id = thread.account_id.clone();
             let thread_id = thread.id.clone();
-            let db2 = Arc::clone(&self.db);
-            let account_id2 = account_id.clone();
-            let thread_id2 = thread_id.clone();
             let load_gen = self.thread_generation;
-            return Task::batch([
-                Task::perform(
-                    async move {
-                        let r = db.get_thread_messages(account_id, thread_id).await;
-                        (load_gen, r)
-                    },
-                    |(g, result)| Message::ThreadMessagesLoaded(g, result),
-                ),
-                Task::perform(
-                    async move {
-                        let r = db2.get_thread_attachments(account_id2, thread_id2).await;
-                        (load_gen, r)
-                    },
-                    |(g, result)| Message::ThreadAttachmentsLoaded(g, result),
-                ),
-            ]);
+            let body_store = self.body_store.clone();
+            return Task::perform(
+                async move {
+                    let r = if let Some(bs) = body_store {
+                        db::threads::load_thread_detail(&db, &bs, account_id, thread_id).await
+                    } else {
+                        Err("body store not initialized".to_string())
+                    };
+                    (load_gen, r)
+                },
+                |(g, result)| Message::ThreadDetailLoaded(g, result),
+            );
         }
         Task::none()
     }

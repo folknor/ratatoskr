@@ -23,14 +23,36 @@ Audit date: 2026-03-21. Compared `problem-statement.md`, `implementation-spec.md
 
 ### Reading Pane / Conversation View
 - **Stacked message cards** — expanded and collapsed variants implemented (`expanded_message_card`, `collapsed_message_row`).
-- **Message collapse rules** — rules 1 (unread), 2 (most recent), 3 (initial) implemented in `ReadingPane::apply_message_expansion()`. Rule 4 (own messages) intentionally deferred (needs identity matching from core's `get_thread_detail`).
+- **Message collapse rules** — rules 1 (unread), 2 (most recent), 3 (initial), and 4 (own messages) all implemented in `ReadingPane::apply_message_expansion()`. Rule 4 uses `is_own_message` from core's `get_thread_detail`.
 - **Expand/collapse all toggle** — implemented via `ToggleAllMessages`.
 - **Attachment group** with collapse toggle — implemented with deduplication by filename and version count badge.
-- **Attachment collapse cache** — in-memory `HashMap<String, bool>` keyed by `account_id:thread_id` — matches spec's interim approach (Phase 4.2).
+- **Attachment collapse persistence** — wired to core's `thread_ui_state` table via `persist_attachments_collapsed()`. In-memory cache also maintained for fast reads.
 - **Star toggle** — visual-only button in thread header with `StarActive` button class.
 - **Date display setting** — `DateDisplay::RelativeOffset` / `Absolute` enum, wired to settings UI.
 - **Empty states** — "No conversation selected", "No conversations" / "No results" — all present.
 - **Pop-out message windows** — implemented via `PopOutWindow::MessageView` with separate window IDs.
+- **Per-message Reply/ReplyAll/Forward** — buttons wired to emit `ReadingPaneEvent::ReplyToMessage`, `ReplyAllToMessage`, `ForwardMessage`. Events handled in App (compose wiring pending).
+
+### Thread Detail from Core
+- **`get_thread_detail()` wired** — App loads thread detail via `db::threads::load_thread_detail()` which calls core's `get_thread_detail()` with both main DB and body store connections.
+- **Body text from BodyStore** — messages include `body_html` and `body_text` from zstd-decompressed body store.
+- **Message ownership detection** — `is_own_message` field populated by core's identity email matching.
+- **Quote-stripped collapsed summaries** — `collapsed_summary` from core used as `snippet` in collapsed message rows.
+- **Resolved label colors** — `thread_labels` on ReadingPane populated with colors from core's `resolve_label_color()`.
+
+### HTML Email Rendering
+- **DOM-to-widget pipeline** — `html_render.rs` parses HTML and emits native iced widgets for: paragraphs, headings, preformatted blocks, blockquotes, ordered/unordered lists, horizontal rules, and image alt text.
+- **Complexity heuristic** — `assess_complexity()` detects deeply nested tables and heavy style blocks, falling back to plain text for complex marketing emails.
+- **Fallback** — when HTML is too complex or only `body_text` is available, renders as plain text.
+
+### Keyboard Navigation
+- **j/k thread navigation** — `NavNext`/`NavPrev` commands wired to `ThreadList::SelectNext`/`SelectPrevious`.
+- **Enter to open** — `NavOpen` command wired to `ThreadList::ActivateSelected`.
+- **Escape to deselect** — `NavEscape` already existed; thread list supports `Deselect` message.
+- **Arrow Up/Down, Home/End** — `SelectPrevious`/`SelectNext`/`SelectFirst`/`SelectLast` messages on ThreadList.
+
+### Search Context
+- **"All" scope indicator** — search mode shows `"{count} results"` on left and `"All"` scope-widening link on right. Emits `ThreadListEvent::WidenSearchScope`.
 
 ### Window State Persistence
 - `WindowState` has `sidebar_width`, `thread_list_width`, `right_sidebar_open` fields with `#[serde(default)]` — matches spec exactly.
@@ -39,8 +61,8 @@ Audit date: 2026-03-21. Compared `problem-statement.md`, `implementation-spec.md
 
 ### Backend (implementation-spec.md)
 - **Slice 1** (label color fallback): Implemented in `crates/core/src/label_colors.rs` (per status table).
-- **Slice 2** (thread detail data layer): Implemented in `crates/core/src/db/queries_extra/thread_detail.rs` (per status table).
-- **Slice 3** (attachment collapse persistence): Migration v59, `thread_ui_state` table, `get/set_attachments_collapsed` functions — all complete.
+- **Slice 2** (thread detail data layer): Implemented in `crates/core/src/db/queries_extra/thread_detail.rs` (per status table). Now wired to app.
+- **Slice 3** (attachment collapse persistence): Migration v59, `thread_ui_state` table, `get/set_attachments_collapsed` functions — all complete. App wired to persist via `ReadingPaneEvent::AttachmentCollapseChanged`.
 - **Slice 4** (`FocusedRegion` on `CommandContext`): Implemented. `FocusedRegion` enum exists in `ratatoskr_command_palette`, App tracks `focused_region: Option<FocusedRegion>`.
 
 ### Right Sidebar
@@ -51,15 +73,12 @@ Audit date: 2026-03-21. Compared `problem-statement.md`, `implementation-spec.md
 
 ## Divergences
 
-### D1: App-Local DB Shim Still Used Instead of Core's `get_thread_detail()`
-The iced-impl spec itself flags this as stale: the app uses `crates/app/src/db/connection.rs` with raw SQL queries (`get_thread_messages`, `get_thread_attachments`, `get_threads`, `get_accounts`, `get_labels`) rather than core's `get_thread_detail()`. The core function exists and is complete, but the app has never been wired to use it. This means:
-- **No body text from BodyStore** — the app uses `snippet` as body placeholder (no decompressed body HTML/text).
-- **No message ownership detection** (collapse rule 4 never fires).
-- **No quote/signature-stripped collapsed summaries** — raw snippet truncation at 60 chars instead.
-- **No resolved label colors on thread detail** — label dots are always empty.
-- **Attachment collapse not persisted to SQLite** — the in-memory HashMap is used instead of `get/set_attachments_collapsed`.
+### D1: RESOLVED — Core's `get_thread_detail()` Now Wired
+~~The app used local DB shims instead of core's `get_thread_detail()`.~~
 
-**Files:** `/home/folk/Programs/ratatoskr/crates/app/src/db/connection.rs` (lines 279-347, 163-278)
+**Resolved.** The app now uses `db::threads::load_thread_detail()` which calls core's `get_thread_detail()` with both the main DB connection and the body store connection. This provides body text, ownership detection, collapsed summaries, resolved label colors, and persisted attachment collapse state.
+
+**Files:** `crates/app/src/db/threads.rs` (new bridge module), `crates/app/src/main.rs` (ThreadDetailLoaded message)
 
 ### D2: No PaneGrid — Custom Divider Implementation
 The problem statement and ecosystem survey reference `PaneGrid` and shadcn-rs resizable panels. The actual implementation uses manual divider widgets with `mouse_area` drag tracking. This is a conscious divergence — the custom approach works and avoids PaneGrid's complexity — but means features like `auto_save_id` persistence and drag constraints from the panel ecosystem are not available.
@@ -70,10 +89,10 @@ Thread listing uses *both* the app-local `Db::get_threads()` (raw SQL in `connec
 ### D4: Calendar CRUD Bypasses Core
 `crates/app/src/db/connection.rs` contains raw SQL for calendar event CRUD (`create_calendar_event`, `update_calendar_event`, `delete_calendar_event`) including table creation (`CREATE TABLE IF NOT EXISTS pinned_searches`, `contact_groups`, column additions on `contacts`). These bypass `ratatoskr-core` entirely. While calendar and contacts are outside main-layout scope, the pattern establishes a precedent of app-level schema management that the specs discourage.
 
-### D5: Search Context Line — Missing "All" Scope Indicator in Search Mode
-The problem statement specifies the search context line should show `"47 results"` on the left and `"All ↗"` scope-widening link on the right. The implementation shows only `"{thread_count} results"` with no scope indicator or widening action.
+### D5: RESOLVED — Search "All" Scope Indicator Added
+~~The search context line showed only result count with no scope indicator.~~
 
-**File:** `/home/folk/Programs/ratatoskr/crates/app/src/ui/thread_list.rs` (lines 160-166)
+**Resolved.** The search mode context row now shows `"{count} results"` on the left and an `"All"` scope-widening link on the right. The link emits `ThreadListEvent::WidenSearchScope` (wiring to actual scope change is pending).
 
 ### D6: Right Sidebar Still Shows Placeholder Content
 The problem statement describes a mini calendar + today's agenda + pinned/starred items. The right sidebar (`right_sidebar.rs`) still renders static placeholder text ("Calendar placeholder", "No pinned items"). The calendar feature has been built as a separate full-page mode (`AppMode::Calendar`) rather than integrated into the right sidebar.
@@ -82,22 +101,28 @@ The problem statement describes a mini calendar + today's agenda + pinned/starre
 
 ## What's Missing (from Specs)
 
-### M1: Phase 3 — Interaction Flow (Deferred)
-The iced-impl spec explicitly defers Phase 3. Missing items:
-- **Keyboard shortcuts** (j/k navigation, Enter, Escape, e/r/s/#) — the command palette and binding infrastructure exist, but no email-action shortcuts are wired for the thread list or reading pane.
-- **Auto-advance** after archive/trash/move — no `get_adjacent_thread()` call or advance logic.
-- **Multi-select** in thread list (Shift+click range, Ctrl+click toggle) — single selection only.
-- **Inline reply composer** — no composer embedded in the reading pane.
-- **Context-dependent shortcut dispatch** — `FocusedRegion` exists on `CommandContext` and on `App`, but the spec's table of region-specific key behaviors is not implemented.
+### M1: Phase 3 — Interaction Flow (Partially Implemented)
+The iced-impl spec explicitly deferred Phase 3. Status of individual items:
+- **Keyboard shortcuts** — j/k navigation, Enter, Escape wired via command palette bindings. Email action shortcuts (e for archive, # for trash, s for star) available through existing command palette infrastructure.
+- **Auto-advance** after archive/trash/move — not implemented. No `get_adjacent_thread()` call or advance logic.
+- **Multi-select** in thread list (Shift+click range, Ctrl+click toggle) — not implemented. Single selection only.
+- **Inline reply composer** — not implemented. No composer embedded in the reading pane.
+- **Context-dependent shortcut dispatch** — `FocusedRegion` exists on `CommandContext` and on `App`, but the spec's table of region-specific key behaviors is not fully implemented.
 
-### M2: Real Message Body Rendering
-Bodies are rendered as snippet text. No HTML email rendering (no iced_webview, litehtml, or DOM-to-widget pipeline). The expanded message card shows `snippet` not `body_html`/`body_text`.
+### M2: RESOLVED — HTML Email Body Rendering
+~~Bodies were rendered as snippet text only.~~
+
+**Resolved.** `html_render.rs` implements a DOM-to-widget pipeline that parses HTML and emits native iced widgets. Handles paragraphs, headings (h1-h6), preformatted blocks, blockquotes, ordered/unordered lists, horizontal rules, and image alt text. Includes complexity heuristic for fallback. Falls back to plain text for complex marketing emails with deeply nested tables or heavy CSS.
+
+**Not yet handled:** CID image references, remote image loading/caching, link click handling, table data rendering. These are future enhancements.
 
 ### M3: Scroll Virtualization
 The thread list renders all cards in a `column![]` inside a `scrollable`. No virtualization for large lists. The fixed `THREAD_CARD_HEIGHT` is in place to enable future virtualization, but the implementation is not started.
 
-### M4: Per-Message Reply/Reply All/Forward Actions
-The expanded message card widget signature includes action buttons, but they emit `Noop` or are visual-only (not wired to compose flow from the reading pane).
+### M4: PARTIALLY RESOLVED — Per-Message Reply/Reply All/Forward Actions
+~~The expanded message card action buttons emitted `Noop`.~~
+
+**Partially resolved.** Buttons now emit `ReadingPaneEvent::ReplyToMessage`, `ReplyAllToMessage`, `ForwardMessage` with the message index. The App handles these events but compose integration is pending (events currently produce `Task::none()`).
 
 ### M5: Image Hover Preview on Attachment Cards
 The problem statement specifies a fixed-position image preview on hover over image attachment cards. Not implemented.
@@ -117,7 +142,7 @@ The problem statement specifies overlay typeahead for `from:`, `to:`, `label:`, 
 
 Three generation counters exist:
 - `nav_generation` (u64) — guards `AccountsLoaded`, `NavigationLoaded`, `ThreadsLoaded`, `PinnedSearchThreadIdsLoaded`, `PinnedSearchThreadsLoaded`. Incremented on navigation changes.
-- `thread_generation` (u64) — guards `ThreadMessagesLoaded`, `ThreadAttachmentsLoaded`. Incremented on thread selection and navigation changes.
+- `thread_generation` (u64) — guards `ThreadDetailLoaded`. Incremented on thread selection and navigation changes.
 - `search_generation` (u64) — guards `SearchResultsLoaded`. Incremented on new searches and navigation resets.
 
 All stale responses are discarded via `if g != self.xxx_generation => Task::none()` guard patterns. This matches the bloom-style generational tracking recommended by the ecosystem survey.
@@ -161,28 +186,23 @@ No references to `iced_drop`, `Droppable`, or drag-and-drop anywhere in the app 
 
 All subscriptions are collected into a `Vec` and returned via `Subscription::batch(subs)`. This matches the pikeru pattern recommended by the ecosystem survey.
 
-### (f) Core CRUD Bypassed
-**Status: Significant bypass pattern exists.**
+### (f) Core CRUD Bypass
+**Status: Partially resolved.**
 
-The app crate (`crates/app/src/db/connection.rs`) contains its own `Db` struct with raw SQL for:
+Thread detail loading now goes through core's `get_thread_detail()` (via `db::threads::load_thread_detail()`). Attachment collapse persistence goes through core's `set_attachments_collapsed()`.
+
+Still bypassing core:
 - Account listing (`SELECT ... FROM accounts`)
 - Label listing (`SELECT ... FROM labels`)
-- Thread listing (`SELECT ... FROM threads` with label join)
-- Thread messages (`SELECT ... FROM messages`)
-- Thread attachments (`SELECT ... FROM attachments JOIN messages`)
-- Message body loading (snippet fallback)
-- Message attachments for pop-out view
-- Calendar event full CRUD (create, read, update, delete with raw INSERT/UPDATE/DELETE)
-- Pinned search management (including table creation)
-- Contact search and group management (including ALTER TABLE)
-
-The app also uses core's `get_threads_scoped()` and `get_navigation_state()` for the primary navigation path. This creates a split where some queries go through core and others bypass it. The iced-impl spec acknowledges this as "prototype expedient" that should be replaced by core query surfaces.
+- Thread listing (`SELECT ... FROM threads` — partially, `get_threads_scoped` from core is primary path)
+- Calendar event full CRUD
+- Pinned search management
+- Contact search and group management
 
 ### (g) Dead Code
 **Status: Minimal dead code found.**
 
-- `PendingChord::started` field is `#[allow(dead_code)]` (line 124 of `main.rs`) — stored but never read for timeout comparison (the timeout uses `iced::time::every` instead).
-- `AVATAR_THREAD_CARD` and `AVATAR_CONTACT_HERO` constants in `layout.rs` may be unused now that avatars were removed from thread cards and contact sidebar was deleted, but they could be used elsewhere (message cards use `AVATAR_MESSAGE_CARD`).
+- `PendingChord::started` field is `#[allow(dead_code)]` (line 124 of `main.rs`) — stored but never read for timeout comparison.
+- `AVATAR_THREAD_CARD` and `AVATAR_CONTACT_HERO` constants in `layout.rs` may be unused now that avatars were removed from thread cards and contact sidebar was deleted.
+- `Db::get_thread_messages()` and `Db::get_thread_attachments()` in `connection.rs` are now unused (replaced by `load_thread_detail`). Can be removed in a future cleanup.
 - Several TODO comments mark unfinished wiring (re-authentication flow, cc_addresses in pop-out, real SearchState initialization).
-- No unreachable match arms found.
-- No unused view functions found — all declared functions are called.
