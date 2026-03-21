@@ -46,9 +46,9 @@ impl Db {
             )
             .map_err(|e| format!("write pragmas: {e}"))?;
 
-        // Schema for pinned_searches, contact_groups, and contact extended
-        // columns is now managed by core migration 64 (and earlier migrations
-        // for contact_groups). No app-layer DDL needed.
+        // Run pending migrations on the writable connection.
+        ratatoskr_core::db::migrations::run_all(&write_conn)
+            .map_err(|e| format!("migrations: {e}"))?;
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),

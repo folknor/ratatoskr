@@ -19,7 +19,7 @@ chrono.workspace = true
 #iced = { git = "https://github.com/squidowl/iced", rev = "b201e4f", default-features = false, features = [
 #    "wgpu", "tokio", "lazy", "advanced", "canvas", "web-colors", "wayland", "x11",
 #] }
-iced = { git = "https://github.com/folknor/iced", branch = "sluggrs", default-features = false, features = [
+iced = { path = "/home/folk/Programs/sluggrs/repos/iced", default-features = false, features = [
     "wgpu", "tokio", "lazy", "advanced", "canvas", "web-colors", "wayland", "x11",
 ] }
 dirs = "6"
@@ -32,7 +32,9 @@ ratatoskr-label-colors = { path = "../label-colors" }
 iced-drop = { path = "../iced-drop" }
 ratatoskr-rich-text-editor = { path = "../rich-text-editor" }
 ratatoskr-contact-import = { path = "../contact-import" }
+env_logger = "0.11"
+log = "0.4"
 uuid = { version = "1", features = ["v4"] }
-toml = "0.8"
-mundy = { version = "0.1.9", default-features = false, features = ["color-scheme", "tokio", "log"] }
+toml = "1.0"
+mundy = { version = "0.2", default-features = false, features = ["color-scheme", "tokio", "log"] }
 display-info = "0.5"

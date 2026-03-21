@@ -83,6 +83,8 @@ static DEFAULT_SCALE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
 const CHORD_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1000);
 
 fn main() -> iced::Result {
+    env_logger::init();
+
     let app_data_dir = dirs::data_dir()
         .expect("no data dir")
         .join("com.velo.app");
@@ -467,7 +469,8 @@ impl App {
         if let Some(deadline) = self.search_debounce_deadline {
             subs.push(
                 iced::time::every(std::time::Duration::from_millis(50))
-                    .map(move |_| {
+                    .with(deadline)
+                    .map(|(_, deadline)| {
                         if iced::time::Instant::now() >= deadline {
                             Message::SearchExecute
                         } else {
@@ -521,8 +524,12 @@ impl App {
 
             // Data loading with generation guards
             Message::AccountsLoaded(g, _) if g != self.nav_generation => Task::none(),
-            Message::AccountsLoaded(_, Ok(accounts)) => self.handle_accounts_loaded(accounts),
+            Message::AccountsLoaded(_, Ok(accounts)) => {
+                eprintln!("[BOOT] AccountsLoaded: {} accounts", accounts.len());
+                self.handle_accounts_loaded(accounts)
+            }
             Message::AccountsLoaded(_, Err(e)) => {
+                eprintln!("[BOOT] AccountsLoaded error: {e}");
                 self.status = format!("Error: {e}");
                 Task::none()
             }
@@ -537,11 +544,13 @@ impl App {
             }
             Message::ThreadsLoaded(g, _) if g != self.nav_generation => Task::none(),
             Message::ThreadsLoaded(_, Ok(threads)) => {
+                eprintln!("[BOOT] ThreadsLoaded: {} threads", threads.len());
                 self.status = format!("{} threads", threads.len());
                 self.thread_list.set_threads(threads);
                 Task::none()
             }
             Message::ThreadsLoaded(_, Err(e)) => {
+                eprintln!("[BOOT] ThreadsLoaded error: {e}");
                 self.status = format!("Threads error: {e}");
                 Task::none()
             }
@@ -1655,7 +1664,7 @@ fn db_thread_to_app_thread(t: DbThread) -> Thread {
         account_id: t.account_id,
         subject: t.subject,
         snippet: t.snippet,
-        last_message_at: t.last_message_at.and_then(|s| s.parse().ok()),
+        last_message_at: t.last_message_at,
         message_count: t.message_count,
         is_read: t.is_read,
         is_starred: t.is_starred,

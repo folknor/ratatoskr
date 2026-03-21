@@ -48,6 +48,8 @@ Pure Rust desktop email client. Cargo workspace (19 crates). Key crates:
 
 **Core crate boundary**: Business logic belongs in `ratatoskr-core`. The app crate calls core functions directly (no command wrappers needed — the Tauri app shell has been removed). When adding new core functionality, add it to `crates/core/src/`.
 
+**iced is depended on in 3 places**: `crates/app/Cargo.toml` (full iced umbrella), `crates/rich-text-editor/Cargo.toml` (iced umbrella, optional behind `widget` feature), and `crates/iced-drop/Cargo.toml` (iced_core + iced_widget + iced_runtime individually). All three must point to the same iced source. When switching between the git URL and local path, update all three.
+
 ## `jmap-client` crate gotchas
 
 These are non-obvious behaviors of the `jmap-client` crate that will matter if the code is modified:

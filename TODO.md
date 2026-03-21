@@ -112,21 +112,6 @@ Dependent on upstream changes or manual external tasks.
 
 - [ ] **Restore OS-based theme and 1.0 scale** *(Deferred until 1.0 release)* — Revert `SettingsState::default()` from `"Light"` to `"System"`. Persist user preferences to disk.
 
-## Outdated Dependencies
-
-```
-rusqlite           0.32.1 → 0.39.0            minor
-css-inline         0.14.5 → 0.20.0            minor
-tokio-tungstenite  0.26.2 → 0.29.0            minor
-mundy              0.1.10 → 0.2.2             minor
-toml               0.8.23 → 1.0.7+spec-1.1.0  MAJOR (use non-spec version)
-libheif-rs          1.1.0 → 2.7.0             MAJOR
-lopdf              0.39.0 → 0.40.0            minor
-zip                 2.4.2 → 8.3.0             MAJOR
-html5ever          0.35.0 → 0.39.0            minor
-markup5ever        0.35.0 → 0.39.0            minor
-```
-
 ## Inline Image Store Eviction
 
 - [ ] **Wire up user-configurable eviction for `inline_images.db`** — Backend has `prune_to_size()`, `delete_unreferenced()`, `stats()`, `clear()`. Missing: settings UI for store size (128 MB cap is hardcoded), scheduled eviction sweep.

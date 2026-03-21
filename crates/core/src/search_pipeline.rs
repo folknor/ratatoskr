@@ -167,7 +167,7 @@ fn db_thread_to_unified(t: DbThread) -> UnifiedSearchResult {
         snippet: t.snippet,
         from_name: t.from_name,
         from_address: t.from_address,
-        date: t.last_message_at.as_deref().and_then(parse_date_string),
+        date: t.last_message_at,
         is_read: t.is_read,
         is_starred: t.is_starred,
         message_count: Some(t.message_count),
@@ -214,7 +214,7 @@ fn enrich_from_sql(
         result.is_starred = t.is_starred;
         result.message_count = Some(t.message_count);
         if result.date.is_none() {
-            result.date = t.last_message_at.as_deref().and_then(parse_date_string);
+            result.date = t.last_message_at;
         }
     }
     result

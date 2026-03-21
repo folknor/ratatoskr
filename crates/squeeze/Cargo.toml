@@ -33,11 +33,11 @@ image = { version = "0.25", default-features = false, features = [
 ] }
 mozjpeg-rs = "0.9"
 oxipng = { version = "10", default-features = false, features = ["parallel"] }
-lopdf = "0.39"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+lopdf = "0.40"
+zip = { version = "8", default-features = false, features = ["deflate"] }
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }
 
 [dependencies.libheif-rs]
-version = "1"
+version = "2"
 optional = true
