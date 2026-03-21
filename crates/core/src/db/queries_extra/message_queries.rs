@@ -15,28 +15,27 @@ pub struct MessageAttachment {
     pub size: Option<i64>,
 }
 
-/// Load body text and HTML for a single message.
+/// Load body text for a single message.
 ///
-/// Returns `(body_text, body_html)`. Returns `(None, None)` if the
-/// message is not found rather than erroring.
+/// NOTE: Message bodies live in the body store (bodies.db), NOT in the
+/// messages table. This function returns the `snippet` as a fallback
+/// for pop-out windows. For full body content, use `BodyStoreState::get()`
+/// from `crates/stores/`.
+///
+/// Returns `(body_text, body_html)`. body_html is always None here.
 pub fn get_message_body(
     conn: &Connection,
     account_id: &str,
     message_id: &str,
 ) -> Result<(Option<String>, Option<String>), String> {
     let result = conn.query_row(
-        "SELECT body_text, body_html FROM messages
+        "SELECT snippet FROM messages
          WHERE account_id = ?1 AND id = ?2",
         params![account_id, message_id],
-        |row| {
-            Ok((
-                row.get::<_, Option<String>>("body_text")?,
-                row.get::<_, Option<String>>("body_html")?,
-            ))
-        },
+        |row| row.get::<_, Option<String>>(0),
     );
     match result {
-        Ok(pair) => Ok(pair),
+        Ok(snippet) => Ok((snippet, None)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok((None, None)),
         Err(e) => Err(e.to_string()),
     }
@@ -72,25 +71,26 @@ pub fn get_message_attachments(
 
 /// Load raw email source for a message (Source view / Save As).
 ///
-/// Returns a placeholder string if the message has no source stored,
-/// and an error if the message is not found at all.
+/// NOTE: Raw source is not stored in the messages table in the seed
+/// database. This returns a placeholder. When real sync is running,
+/// raw source would be stored in the body store or a dedicated column.
 pub fn get_message_raw_source(
     conn: &Connection,
     account_id: &str,
     message_id: &str,
 ) -> Result<String, String> {
-    let result = conn.query_row(
-        "SELECT raw_source FROM messages
-         WHERE account_id = ?1 AND id = ?2",
-        params![account_id, message_id],
-        |row| row.get::<_, Option<String>>(0),
-    );
-    match result {
-        Ok(Some(source)) => Ok(source),
-        Ok(None) => Ok("(no source available)".to_string()),
-        Err(rusqlite::Error::QueryReturnedNoRows) => {
-            Err("Message not found".to_string())
-        }
-        Err(e) => Err(e.to_string()),
+    // Check the message exists
+    let exists: bool = conn
+        .query_row(
+            "SELECT 1 FROM messages WHERE account_id = ?1 AND id = ?2",
+            params![account_id, message_id],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+
+    if exists {
+        Ok("(raw source not available — message bodies are stored in the body store)".to_string())
+    } else {
+        Err("Message not found".to_string())
     }
 }
