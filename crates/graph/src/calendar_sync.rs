@@ -219,7 +219,7 @@ showAs,responseStatus,isCancelled,changeKey";
 /// Exchange categories use preset names like "preset0" through "preset24".
 /// We reuse the label-colors crate's mapping.
 fn category_color_to_hex(color: &str) -> Option<String> {
-    ratatoskr_label_colors::category_colors::preset_to_hex(color).map(|(bg, _)| bg)
+    ratatoskr_label_colors::category_colors::preset_to_hex(color).map(|(bg, _)| bg.to_string())
 }
 
 // ── Public API ────────────────────────────────────────────

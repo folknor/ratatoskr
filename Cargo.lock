@@ -5371,6 +5371,7 @@ dependencies = [
  "sha2",
  "tokio",
  "urlencoding",
+ "uuid",
 ]
 
 [[package]]
