@@ -16,7 +16,7 @@ use command_dispatch::{
 };
 use component::Component;
 use db::{Db, Thread};
-use iced::widget::{column, container, mouse_area, row, stack};
+use iced::widget::{column, container, mouse_area, row, stack, Space};
 use iced::{Element, Length, Point, Size, Task, Theme};
 use pop_out::{PopOutMessage, PopOutWindow};
 use pop_out::compose::{ComposeMessage, ComposeMode, ComposeState};
@@ -45,7 +45,9 @@ use ui::calendar::{
 use ui::reading_pane::{ReadingPane, ReadingPaneEvent, ReadingPaneMessage};
 use ui::settings::{Settings, SettingsEvent, SettingsMessage};
 use ui::sidebar::{Sidebar, SidebarEvent, SidebarMessage, truncate_query};
-use ui::status_bar::{StatusBar, StatusBarEvent, StatusBarMessage};
+use ui::status_bar::{
+    AccountWarning, StatusBar, StatusBarEvent, StatusBarMessage, SyncEvent, WarningKind,
+};
 use ui::thread_list::{ThreadList, ThreadListEvent, ThreadListMessage};
 use chrono::{Datelike, NaiveDate, Timelike};
 use std::collections::HashMap;
@@ -216,6 +218,10 @@ pub enum Message {
     PopOut(iced::window::Id, PopOutMessage),
     /// Open a message view pop-out for a specific message index.
     OpenMessageView(usize),
+
+    // Sync progress pipeline
+    /// A sync event from the IcedProgressReporter channel.
+    SyncProgress(SyncEvent),
 }
 
 struct App {
@@ -925,6 +931,12 @@ impl App {
             Message::OpenMessageView(message_index) => {
                 self.open_message_view_window(message_index)
             }
+
+            // Sync progress pipeline
+            Message::SyncProgress(event) => {
+                self.handle_sync_event(event);
+                Task::none()
+            }
         }
     }
 
@@ -959,7 +971,7 @@ impl App {
 
         if self.show_settings {
             let settings_view = self.settings.view().map(Message::Settings);
-            let status_bar = self.status_bar.view().map(Message::StatusBar);
+            let status_bar = self.status_bar_view();
             return column![
                 container(settings_view).height(Length::Fill),
                 status_bar,
@@ -1001,7 +1013,7 @@ impl App {
             }
         };
 
-        let status_bar = self.status_bar.view().map(Message::StatusBar);
+        let status_bar = self.status_bar_view();
         let full_layout = column![layout, status_bar];
 
         // Wrap in a mouse_area to track drag movement across the full window
@@ -1839,11 +1851,59 @@ impl App {
     fn handle_status_bar_event(&mut self, event: StatusBarEvent) -> Task<Message> {
         match event {
             StatusBarEvent::RequestReauth { account_id } => {
-                // TODO: Open re-authentication flow for this account.
-                // This will be wired when the accounts UI is implemented.
-                let _ = account_id;
+                // Re-authentication UI is not yet implemented. Show a
+                // status message so the user knows the click was received,
+                // and log for debugging.
+                let email = self.email_for_account(&account_id);
+                eprintln!("Re-auth requested for account {account_id} ({email})");
+                self.status_bar.show_confirmation(format!(
+                    "Re-authentication needed for {email} (not yet implemented)"
+                ));
                 Task::none()
             }
+        }
+    }
+
+    fn handle_sync_event(&mut self, event: SyncEvent) {
+        match event {
+            SyncEvent::Progress { account_id, phase, current, total } => {
+                let email = self.email_for_account(&account_id);
+                self.status_bar.report_sync_progress(
+                    account_id, email, current, total, phase,
+                );
+            }
+            SyncEvent::Complete { account_id } => {
+                self.status_bar.report_sync_complete(&account_id);
+                // Clear connection failure warnings on successful sync.
+                self.status_bar.clear_warning(&account_id);
+            }
+            SyncEvent::Error { account_id, error } => {
+                let email = self.email_for_account(&account_id);
+                self.status_bar.set_warning(AccountWarning {
+                    account_id,
+                    email,
+                    kind: WarningKind::ConnectionFailure { message: error },
+                });
+            }
+        }
+    }
+
+    /// Look up the email address for an account ID from the sidebar's
+    /// account list. Returns the account ID itself if not found.
+    fn email_for_account(&self, account_id: &str) -> String {
+        self.sidebar.accounts.iter()
+            .find(|a| a.id == account_id)
+            .map(|a| a.email.clone())
+            .unwrap_or_else(|| account_id.to_string())
+    }
+
+    /// Render the status bar, respecting the `sync_status_bar` setting.
+    /// When the setting is off, returns an empty zero-height element.
+    fn status_bar_view(&self) -> Element<'_, Message> {
+        if self.settings.sync_status_bar {
+            self.status_bar.view().map(Message::StatusBar)
+        } else {
+            Space::new().width(0).height(0).into()
         }
     }
 
@@ -2264,7 +2324,7 @@ impl App {
             right_sidebar
         ]
         .height(Length::Fill);
-        let status_bar = self.status_bar.view().map(Message::StatusBar);
+        let status_bar = self.status_bar_view();
         column![layout, status_bar].into()
     }
 

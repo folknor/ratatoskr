@@ -1,6 +1,7 @@
 # Status Bar: Spec vs. Implementation Discrepancies
 
 Audit date: 2026-03-21
+Updated: 2026-03-21 (post-implementation pass)
 
 Spec files reviewed:
 - `docs/status-bar/problem-statement.md`
@@ -36,7 +37,7 @@ Code files reviewed:
 
 9. **App integration** -- `status_bar` field on `App`, initialized via `StatusBar::new()` in boot. `Message::StatusBar` variant present. Subscription wired. `handle_status_bar()` and `handle_status_bar_event()` match spec structure.
 
-10. **View integration** -- Status bar rendered at bottom of main layout in both mail and calendar modes via `column![layout, status_bar]`. Also present in settings view. Present in pop-out message view (see divergence below).
+10. **View integration** -- Status bar rendered at bottom of main layout in both mail and calendar modes via `column![layout, status_bar]`. Also present in settings view. Not present in pop-out windows (correct per problem statement).
 
 11. **update() implementation** -- CycleTick advances both cycle indices with wrapping_add, expires confirmations. WarningClicked emits RequestReauth for TokenExpiry, no-ops for ConnectionFailure.
 
@@ -46,18 +47,23 @@ Code files reviewed:
 
 14. **format_number()** -- Thousands separator helper matches spec.
 
+15. **Idle state** -- Renders a fixed-height container with `STATUS_BAR_HEIGHT` and `ContainerClass::StatusBar` styling, maintaining consistent layout. Matches spec section 13.
+
+16. **ResolvedContent::Warning has account_id** -- The `account_id` is embedded in the resolved content, matching the spec's approach. This avoids the race condition of re-deriving from `self.warnings` via cycle index between `view()` and `update()`.
+
+17. **Sync progress pipeline** -- `SyncEvent` enum, `IcedProgressReporter` (implements `ProgressReporter` trait), and `create_sync_progress_channel()` factory are implemented. `Message::SyncProgress(SyncEvent)` variant wired in the app. `handle_sync_event()` routes Progress/Complete/Error events to the status bar methods.
+
+18. **Warning pipeline** -- `SyncEvent::Error` sets `ConnectionFailure` warnings. `SyncEvent::Complete` clears warnings. Token expiry warnings can be set via `set_warning()` from auth error paths.
+
+19. **Settings toggle** -- `sync_status_bar` from `SettingsState` is read in `status_bar_view()` helper. When false, the status bar is hidden (zero-height element).
+
+20. **Generational tracking** -- `sync_generations` map with `begin_sync_generation()`, `is_sync_stale()`, and `prune_stale_sync()` methods. `SyncAccountProgress` carries a `generation` field. Stale entries from dead sync tasks can be detected and pruned.
+
 ---
 
 ## Divergences
 
-### D1. `ResolvedContent::Warning` missing `account_id` field
-
-**Spec:** `ResolvedContent::Warning` carries `account_id: String` for the click handler.
-**Code:** The `account_id` field is absent from `ResolvedContent::Warning`. The `WarningClicked` handler re-derives the warning from `self.warnings` using `warning_cycle_index`, so the field is not functionally needed. However, there is a subtle race: if a warning is added or removed between `view()` (which resolved the displayed warning) and the `WarningClicked` message arriving in `update()`, the cycle index could point to a different warning. The spec's approach of embedding `account_id` in the resolved content would avoid this, but in practice the race window is negligible.
-
-**Severity:** Low -- functionally correct but architecturally divergent from spec.
-
-### D2. `warnings` uses `BTreeMap` instead of `HashMap`
+### D1. `warnings` uses `BTreeMap` instead of `HashMap`
 
 **Spec:** `warnings: HashMap<String, AccountWarning>`.
 **Code:** `warnings: BTreeMap<String, AccountWarning>`.
@@ -66,65 +72,36 @@ The `BTreeMap` provides deterministic iteration order (sorted by account ID), wh
 
 **Severity:** None (improvement).
 
-### D3. Idle state renders zero-height Space, not fixed-height container
-
-**Spec (section 13):** "When no warnings, sync progress, or confirmations are active, the status bar renders an empty container at its fixed height. [...] the bar's physical presence is constant."
-**Code:** `ResolvedContent::Idle` renders `Space::new().width(0).height(0)` -- the bar collapses to zero height.
-
-The code has a comment: "Nothing to show -- collapse to zero height. 'Absence means nothing to say' per the problem statement." This contradicts the implementation spec's explicit requirement for a constant-height container. The main content area shifts vertically when the status bar transitions between idle and active.
-
-**Severity:** Medium -- layout shift is noticeable and the spec explicitly called this out.
-
-### D4. Clickable `mouse_area` wraps all warnings, not just TokenExpiry
+### D2. Clickable `mouse_area` wraps all warnings, not just TokenExpiry
 
 **Spec (section 14):** "ConnectionFailure warnings render without the mouse_area wrapper (no on_press, no cursor change)."
-**Code:** The `mouse_area` wrapper with `on_press` and `Interaction::Pointer` is applied whenever `clickable` is true. The `clickable` flag is correctly set to true only for `TokenExpiry`. However, when cycling through multiple warnings, if the currently displayed warning is `ConnectionFailure`, `clickable` is false and no `mouse_area` is applied -- this matches the spec. But if `TokenExpiry` is displayed, the entire bar becomes clickable even though the `WarningClicked` handler correctly no-ops for `ConnectionFailure`. This is actually correct behavior.
+**Code:** The `mouse_area` wrapper with `on_press` and `Interaction::Pointer` is applied whenever `clickable` is true. The `clickable` flag is correctly set to true only for `TokenExpiry`. When the currently displayed warning is `ConnectionFailure`, `clickable` is false and no `mouse_area` is applied. This matches the spec.
 
 **Severity:** None -- on closer inspection this matches the spec.
 
 ---
 
-## What's Missing
+## Remaining Work
 
-### M1. Sync progress pipeline not wired
+### R1. Confirmation dispatch points not wired
 
-**Spec (sections 9.1-9.5):** `IcedProgressReporter`, `SyncEvent` enum, channel-based subscription, `Message::SyncProgress` variant, and the `update()` handler that calls `report_sync_progress()` / `report_sync_complete()` / `set_warning()`.
-**Code:** None of this exists. The `report_sync_progress()`, `report_sync_complete()`, `set_warning()`, and `clear_warning()` methods exist on `StatusBar` but are never called from `main.rs`. The `SyncEvent` type and `IcedProgressReporter` are not implemented anywhere in the app crate.
+`show_confirmation()` is ready to be called from action handlers (archive, trash, label, star, etc.) but `Message::EmailAction` is currently a stub. Confirmations will be wired when email actions are implemented. The pipeline is structurally complete -- only the call sites are missing.
 
-**Impact:** The status bar scaffold is complete but receives no real data. It will always show idle state.
+### R2. Token expiry warnings not wired to auth errors
 
-### M2. Confirmation pipeline not wired
+Token expiry is detected during sync when an OAuth refresh fails. The auth error handling path does not yet exist (accounts UI is not implemented). `set_warning()` with `WarningKind::TokenExpiry` is ready to be called from that path.
 
-**Spec (section 11.1):** `show_confirmation()` should be called from action handlers (move to trash, archive, apply label, etc.).
-**Code:** `show_confirmation()` exists on `StatusBar` but is never called from `main.rs` or any other file.
+### R3. `RequestReauth` shows a placeholder confirmation
 
-**Impact:** Transient confirmations never appear.
+The handler emits an `eprintln` log and shows a temporary confirmation ("not yet implemented") instead of opening a re-authentication flow. This is expected -- the accounts re-auth UI does not exist yet.
 
-### M3. Warning pipeline not wired
+### R4. Sync progress subscription not connected to sync orchestrator
 
-**Spec (sections 10.1-10.3):** Token expiry and connection failure warnings should be set from sync error handling.
-**Code:** `set_warning()` and `clear_warning()` exist but are never called.
+`IcedProgressReporter` and `create_sync_progress_channel()` are implemented, but the sync orchestrator does not yet use them. The receiver needs to be polled via an iced subscription that produces `Message::SyncProgress` events. This requires the sync orchestrator to accept an `IcedProgressReporter` instance, which is a cross-cutting change outside the status bar's scope.
 
-**Impact:** Warnings never appear.
+### R5. `prune_stale_sync` not called automatically
 
-### M4. Settings toggle not connected
-
-**Code:** `sync_status_bar: bool` exists in `SettingsState` with a UI toggle ("Show Sync Status Bar"), but this flag is never read in `main.rs` to conditionally show/hide the status bar.
-**Spec:** Does not mention a settings toggle at all.
-
-**Impact:** The toggle is dead UI -- changing it has no effect.
-
-### M5. `RequestReauth` handler is a stub
-
-**Spec (section 8.3):** `handle_status_bar_event` logs the request as a TODO placeholder.
-**Code:** Matches -- the handler drops the `account_id` with `let _ = account_id` and returns `Task::none()`. This is expected (spec notes it will be wired with the accounts UI), but worth tracking.
-
-### M6. Pop-out window includes status bar (spec says it should not)
-
-**Problem statement:** "The status bar exists in both mail and calendar modes. It does not appear in pop-out windows."
-**Code:** `view_message_detail_window()` (line ~2235) includes `column![layout, status_bar]`, rendering the status bar in the pop-out message detail window.
-
-**Severity:** Medium -- contradicts the problem statement.
+The generational tracking methods (`begin_sync_generation`, `is_sync_stale`, `prune_stale_sync`) are available but not yet called from the sync orchestrator. A periodic prune or prune-on-generation-bump should be added when the sync pipeline is fully wired.
 
 ---
 
@@ -132,7 +109,7 @@ The code has a comment: "Nothing to show -- collapse to zero height. 'Absence me
 
 ### a. Generational load tracking
 
-**Not used.** The spec's problem statement references bloom's generational tracking pattern for stale sync state, but the implementation does not use per-account generation counters. Sync progress is simply inserted/removed from a `HashMap`. There is no staleness detection -- if a sync task dies without calling `report_sync_complete()`, its progress entry will persist indefinitely, showing stale numbers.
+**Implemented.** Per-account `sync_generations` map with `begin_sync_generation()`, `is_sync_stale()`, and `prune_stale_sync()`. Each `SyncAccountProgress` entry carries a `generation` field stamped at insertion time. Not yet called from the sync orchestrator (see R5).
 
 ### b. Component trait
 
@@ -156,18 +133,25 @@ The code has a comment: "Nothing to show -- collapse to zero height. 'Absence me
 
 ### g. Dead code
 
-- **Inbound data methods** (`report_sync_progress`, `report_sync_complete`, `set_warning`, `clear_warning`, `show_confirmation`): All five methods are defined but never called from outside `status_bar.rs`. They are public API awaiting integration, not truly dead -- but currently unreachable.
-- **`StatusBarEvent::RequestReauth`**: Defined and handled, but can never be emitted because `set_warning()` is never called, so `warnings` is always empty, so `WarningClicked` always early-returns.
-- **`StatusBarMessage::WarningClicked`**: Same -- defined and handled but unreachable in practice.
-- **`sync_status_bar` settings field**: Defined, toggled in settings UI, but never read by any consumer.
-- **`format_number()`**: Defined but never executed (no sync progress data ever arrives).
+Previously all five inbound data methods were unreachable. Now:
+- **`handle_sync_event`**: Routes `SyncEvent` to `report_sync_progress`, `report_sync_complete`, `set_warning`, `clear_warning`. All reachable once the sync orchestrator is connected.
+- **`show_confirmation`**: Called from `handle_status_bar_event` for the placeholder reauth message. Will gain more call sites when email actions are wired.
+- **`format_number()`**: Reachable through `resolve_sync_progress()` once sync data flows.
+- **`sync_status_bar` settings field**: Now read by `status_bar_view()` in main.rs.
 
 ---
 
 ## Summary
 
-The status bar **scaffold is complete and faithfully implements the spec's architecture**: Component trait, types, priority state machine, subscription, view, theme tokens, layout constants, and app integration are all present and correct. The code quality is high -- the `BTreeMap` upgrade for deterministic cycling and the `build_status_row()` extraction are improvements over the spec.
+The status bar scaffold and all integration plumbing are complete:
+- Component architecture, types, state machine, view, theme tokens, layout constants all correct.
+- `SyncEvent` enum, `IcedProgressReporter`, and `create_sync_progress_channel()` implement the sync progress pipeline.
+- `Message::SyncProgress` variant and `handle_sync_event()` wire events from the reporter into the status bar.
+- Warning pipeline routes `SyncEvent::Error` to `set_warning()` and `SyncEvent::Complete` to `clear_warning()`.
+- Settings toggle (`sync_status_bar`) controls visibility.
+- Idle state renders at fixed height (no layout shift).
+- `ResolvedContent::Warning` embeds `account_id` to avoid race conditions.
+- Generational tracking API ready for stale sync detection.
+- Pop-out windows correctly do not include the status bar.
 
-However, **all three data pipelines (sync progress, warnings, confirmations) are unwired** -- the status bar receives no data and permanently shows idle state. The idle state itself diverges from spec (zero-height collapse vs. fixed-height container). The status bar incorrectly appears in pop-out windows. A settings toggle exists but is disconnected.
-
-The remaining work is integration, not architecture: connecting the sync layer's `ProgressReporter` events, wiring action confirmations, and connecting the settings toggle.
+Remaining work is connecting the sync orchestrator to the `IcedProgressReporter` and wiring `show_confirmation()` calls into email action handlers -- both are outside the status bar's scope and depend on features not yet implemented.
