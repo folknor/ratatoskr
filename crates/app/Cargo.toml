@@ -28,6 +28,7 @@ ratatoskr-system-fonts = { path = "../system-fonts" }
 ratatoskr-command-palette = { path = "../command-palette" }
 ratatoskr-core = { path = "../core" }
 ratatoskr-label-colors = { path = "../label-colors" }
+iced-drop = { path = "../iced-drop" }
 uuid = { version = "1", features = ["v4"] }
 toml = "0.8"
 mundy = { version = "0.1.9", default-features = false, features = ["color-scheme", "tokio", "log"] }

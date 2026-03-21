@@ -1,0 +1,90 @@
+//! Operations for finding drop zones in the widget tree.
+//!
+//! Vendored from <https://github.com/jhannyj/iced_drop> (v0.2.2).
+
+use iced_core::widget::operation::{Outcome, Scrollable};
+use iced_core::widget::{Id, Operation};
+use iced_core::{Rectangle, Vector};
+
+/// Produces an [`Operation`] that will find the drop zones that pass a filter on the zone's bounds.
+/// For any drop zone to be considered, the Element must have some Id.
+/// If `options` is `None`, all drop zones will be considered.
+/// Depth determines how deep into nested drop zones to go.
+/// If `depth` is `None`, nested dropzones will be fully explored.
+pub fn find_zones<F>(
+    filter: F,
+    options: Option<Vec<Id>>,
+    depth: Option<usize>,
+) -> impl Operation<Vec<(Id, Rectangle)>>
+where
+    F: Fn(&Rectangle) -> bool + Send + 'static,
+{
+    struct FindDropZone<F> {
+        filter: F,
+        options: Option<Vec<Id>>,
+        zones: Vec<(Id, Rectangle)>,
+        max_depth: Option<usize>,
+        c_depth: usize,
+        offset: Vector,
+        goto_next: bool,
+    }
+
+    impl<F> Operation<Vec<(Id, Rectangle)>> for FindDropZone<F>
+    where
+        F: Fn(&Rectangle) -> bool + Send + 'static,
+    {
+        fn traverse(
+            &mut self,
+            operate: &mut dyn FnMut(&mut dyn Operation<Vec<(Id, Rectangle)>>),
+        ) {
+            if self.goto_next {
+                operate(self);
+            }
+        }
+
+        fn container(&mut self, id: Option<&Id>, bounds: Rectangle) {
+            if let Some(id) = id {
+                let is_option = match &self.options {
+                    Some(options) => options.contains(id),
+                    None => true,
+                };
+                let bounds = bounds - self.offset;
+                if is_option && (self.filter)(&bounds) {
+                    self.c_depth += 1;
+                    self.zones.push((id.clone(), bounds));
+                }
+            }
+            self.goto_next = match &self.max_depth {
+                Some(m_depth) => self.c_depth < *m_depth,
+                None => true,
+            };
+        }
+
+        fn scrollable(
+            &mut self,
+            _id: Option<&Id>,
+            bounds: Rectangle,
+            _content_bounds: Rectangle,
+            translation: Vector,
+            _state: &mut dyn Scrollable,
+        ) {
+            if (self.filter)(&bounds) {
+                self.offset += translation;
+            }
+        }
+
+        fn finish(&self) -> Outcome<Vec<(Id, Rectangle)>> {
+            Outcome::Some(self.zones.clone())
+        }
+    }
+
+    FindDropZone {
+        filter,
+        options,
+        zones: vec![],
+        max_depth: depth,
+        c_depth: 0,
+        offset: Vector { x: 0.0, y: 0.0 },
+        goto_next: false,
+    }
+}
