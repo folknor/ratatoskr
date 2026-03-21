@@ -32,4 +32,5 @@ async-trait = "0.1"
 rusqlite.workspace = true
 sha2 = "0.10"
 urlencoding = "2"
+uuid = { version = "1", features = ["v4"] }
 futures = "0.3"

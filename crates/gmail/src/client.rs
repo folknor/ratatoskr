@@ -151,6 +151,56 @@ impl GmailClient {
         self.request(&url, "PATCH", Some(body), db).await
     }
 
+    /// Make an authenticated POST request to an absolute URL (e.g. Calendar API).
+    pub async fn post_absolute<T: DeserializeOwned, B: Serialize>(
+        &self,
+        url: &str,
+        body: &B,
+        db: &DbState,
+    ) -> Result<T, String> {
+        self.request(url, "POST", Some(body), db).await
+    }
+
+    /// Make an authenticated PUT request to an absolute URL (e.g. Calendar API).
+    pub async fn put_absolute<T: DeserializeOwned, B: Serialize>(
+        &self,
+        url: &str,
+        body: &B,
+        db: &DbState,
+    ) -> Result<T, String> {
+        self.request(url, "PUT", Some(body), db).await
+    }
+
+    /// Make an authenticated PATCH request to an absolute URL (e.g. Calendar API).
+    pub async fn patch_absolute<T: DeserializeOwned, B: Serialize>(
+        &self,
+        url: &str,
+        body: &B,
+        db: &DbState,
+    ) -> Result<T, String> {
+        self.request(url, "PATCH", Some(body), db).await
+    }
+
+    /// Make an authenticated DELETE request to an absolute URL.
+    /// Returns `()` — no response body expected.
+    pub async fn delete_absolute(&self, url: &str, db: &DbState) -> Result<(), String> {
+        let access_token = self.ensure_valid_token(db).await?;
+        let response = self
+            .execute_with_retry(url, "DELETE", None::<&()>, &access_token)
+            .await?;
+
+        if response.status().as_u16() == 401 {
+            let new_token = self.force_refresh(db).await?;
+            let retry = self
+                .execute_with_retry(url, "DELETE", None::<&()>, &new_token)
+                .await?;
+            http::check_response_status(retry, "Google API").await?;
+        } else {
+            http::check_response_status(response, "Google API").await?;
+        }
+        Ok(())
+    }
+
     /// Make an authenticated DELETE request to the Gmail API.
     /// Returns `()` — no response body expected.
     pub async fn delete(&self, path: &str, db: &DbState) -> Result<(), String> {

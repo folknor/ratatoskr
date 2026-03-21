@@ -1,5 +1,6 @@
 pub mod api;
 pub mod auth_parser;
+pub mod calendar;
 pub mod client;
 pub mod contacts;
 pub mod gdrive;

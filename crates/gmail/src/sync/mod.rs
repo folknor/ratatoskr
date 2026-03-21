@@ -93,6 +93,11 @@ async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), Strin
         log::warn!("Google otherContacts initial sync failed (non-fatal): {e}");
     }
 
+    // Phase 5: Sync Google Calendar (non-fatal)
+    if let Err(e) = super::calendar::sync_calendars(ctx.client, ctx.account_id, ctx.db).await {
+        log::warn!("Google Calendar initial sync failed (non-fatal): {e}");
+    }
+
     let total = thread_ids.len() as u64;
     emit_progress(ctx, "done", total, total);
     Ok(())
