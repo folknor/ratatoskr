@@ -28,6 +28,14 @@ impl DbState {
         Arc::clone(&self.conn)
     }
 
+    /// Create a `DbState` from an existing connection Arc.
+    ///
+    /// Useful for bridging between the app crate's `Db` connection and core
+    /// CRUD functions that expect `&DbState`.
+    pub fn from_arc(conn: Arc<Mutex<Connection>>) -> Self {
+        Self { conn }
+    }
+
     /// Open (or create) the SQLite database and apply all pending migrations.
     pub fn init(app_data_dir: &Path) -> Result<Self, String> {
         std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create app dir: {e}"))?;

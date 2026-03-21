@@ -76,6 +76,9 @@ pub fn bold<'a>() -> Text<'a> { to_text('\u{e05d}') }
 pub fn italic<'a>() -> Text<'a> { to_text('\u{e0fb}') }
 pub fn underline<'a>() -> Text<'a> { to_text('\u{e19a}') }
 pub fn list<'a>() -> Text<'a> { to_text('\u{e106}') }
+pub fn list_ordered<'a>() -> Text<'a> { to_text('\u{e107}') }
+pub fn strikethrough<'a>() -> Text<'a> { to_text('\u{e177}') }
+pub fn text_quote<'a>() -> Text<'a> { to_text('\u{e188}') }
 pub fn align_left<'a>() -> Text<'a> { to_text('\u{e185}') }
 
 // ── People & categories ──────────────────────────────────

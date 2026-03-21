@@ -1133,6 +1133,10 @@ impl App {
                 handlers::signatures::handle_delete_signature(&self.db, id)
                     .map(Message::SignatureOp)
             }
+            SettingsEvent::ReorderSignatures(ordered_ids) => {
+                handlers::signatures::handle_reorder_signatures(&self.db, ordered_ids)
+                    .map(Message::SignatureOp)
+            }
             SettingsEvent::LoadContacts(filter) => self.handle_load_contacts(filter),
             SettingsEvent::LoadGroups(filter) => self.handle_load_groups(filter),
             SettingsEvent::SaveContact(entry) => self.handle_save_contact(entry),

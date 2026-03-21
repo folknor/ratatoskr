@@ -91,7 +91,7 @@ impl Component for Settings {
                             signature_id: Some(sig.id.clone()),
                             account_id: sig.account_id.clone(),
                             name: UndoableText::with_initial(&sig.name),
-                            body: UndoableText::with_initial(&sig.body_html),
+                            body_editor: ratatoskr_rich_text_editor::EditorState::from_html(&sig.body_html),
                             is_default: sig.is_default,
                             is_reply_default: sig.is_reply_default,
                         });
@@ -118,6 +118,24 @@ impl Component for Settings {
             }
             SettingsMessage::ListDragMove(list_id, point) => {
                 return (self.handle_drag_move(list_id, point), None);
+            }
+            SettingsMessage::SignatureDragMove(point) => {
+                return (Task::none(), self.handle_signature_drag_move(point));
+            }
+            SettingsMessage::SignatureDragEnd => {
+                let was_dragging = self.signature_drag.as_ref().is_some_and(|d| d.is_dragging);
+                let account_id = self.signature_drag.as_ref().map(|d| d.account_id.clone());
+                self.signature_drag = None;
+                if was_dragging {
+                    if let Some(aid) = account_id {
+                        let ordered_ids: Vec<String> = self.signatures.iter()
+                            .filter(|s| s.account_id == aid)
+                            .map(|s| s.id.clone())
+                            .collect();
+                        return (Task::none(), Some(SettingsEvent::ReorderSignatures(ordered_ids)));
+                    }
+                }
+                return (Task::none(), None);
             }
             SettingsMessage::SelectTab(Tab::People) => {
                 self.active_tab = Tab::People;
@@ -274,6 +292,18 @@ impl Settings {
                 });
             }
             SettingsMessage::ListDragEnd(_) => self.drag_state = None,
+            SettingsMessage::SignatureDragGripPress(index) => {
+                // Find the account_id for the signature at this index.
+                if let Some(sig) = self.signatures.get(index) {
+                    self.signature_drag = Some(SignatureDragState {
+                        account_id: sig.account_id.clone(),
+                        dragging_index: index,
+                        start_y: -1.0,
+                        is_dragging: false,
+                    });
+                }
+            }
+            // SignatureDragEnd is handled in update() above (needs to emit events).
             SettingsMessage::ListRowClick(list_id, index) => {
                 if self.drag_state.is_none() {
                     let items = self.list_items_mut(&list_id);
@@ -340,7 +370,7 @@ impl Settings {
                         signature_id: Some(sig.id.clone()),
                         account_id: sig.account_id.clone(),
                         name: UndoableText::with_initial(&sig.name),
-                        body: UndoableText::with_initial(&sig.body_html),
+                        body_editor: ratatoskr_rich_text_editor::EditorState::from_html(&sig.body_html),
                         is_default: sig.is_default,
                         is_reply_default: sig.is_reply_default,
                     });
@@ -356,7 +386,7 @@ impl Settings {
                     signature_id: None,
                     account_id: account_id.clone(),
                     name: UndoableText::new(),
-                    body: UndoableText::new(),
+                    body_editor: ratatoskr_rich_text_editor::EditorState::new(),
                     is_default: false,
                     is_reply_default: false,
                 });
@@ -371,9 +401,12 @@ impl Settings {
                     editor.name.set_text(v);
                 }
             }
-            SettingsMessage::SignatureEditorBodyChanged(v) => {
+            SettingsMessage::SignatureEditorBodyChanged(_) => {
+                // Kept for backwards compat; body now uses the rich text editor.
+            }
+            SettingsMessage::SignatureEditorAction(action) => {
                 if let Some(ref mut editor) = self.signature_editor {
-                    editor.body.set_text(v);
+                    editor.body_editor.perform(action);
                 }
             }
             SettingsMessage::SignatureEditorToggleDefault(v) => {
@@ -516,9 +549,6 @@ impl Settings {
             InputField::SignatureName => {
                 if let Some(ref mut editor) = self.signature_editor { editor.name.undo(); }
             }
-            InputField::SignatureBody => {
-                if let Some(ref mut editor) = self.signature_editor { editor.body.undo(); }
-            }
         }
     }
 
@@ -530,9 +560,6 @@ impl Settings {
             InputField::OllamaModel => { self.ai_ollama_model.redo(); }
             InputField::SignatureName => {
                 if let Some(ref mut editor) = self.signature_editor { editor.name.redo(); }
-            }
-            InputField::SignatureBody => {
-                if let Some(ref mut editor) = self.signature_editor { editor.body.redo(); }
             }
         }
     }
@@ -549,7 +576,7 @@ impl Settings {
             id: editor.signature_id.clone(),
             account_id: editor.account_id.clone(),
             name,
-            body_html: editor.body.text().to_string(),
+            body_html: editor.body_editor.to_html(),
             is_default: editor.is_default,
             is_reply_default: editor.is_reply_default,
         };
@@ -680,6 +707,56 @@ impl Settings {
         self.overlay_anim.go_mut(false, Instant::now());
         self.group_editor = None;
         (Task::none(), Some(SettingsEvent::DeleteGroup(id)))
+    }
+
+    fn handle_signature_drag_move(&mut self, point: Point) -> Option<SettingsEvent> {
+        let Some(ref mut drag) = self.signature_drag else {
+            return None;
+        };
+
+        if drag.start_y < 0.0 {
+            drag.start_y = point.y;
+            return None;
+        }
+
+        if !drag.is_dragging {
+            if (point.y - drag.start_y).abs() < DRAG_START_THRESHOLD {
+                return None;
+            }
+            drag.is_dragging = true;
+        }
+
+        let row_step = SETTINGS_ROW_HEIGHT + 1.0;
+        let account_id = drag.account_id.clone();
+        let from = drag.dragging_index;
+
+        // Get indices of signatures belonging to this account.
+        let account_indices: Vec<usize> = self.signatures.iter()
+            .enumerate()
+            .filter(|(_, s)| s.account_id == account_id)
+            .map(|(i, _)| i)
+            .collect();
+        let count = account_indices.len();
+        if count <= 1 {
+            return None;
+        }
+
+        // Find position within account group.
+        let local_from = account_indices.iter().position(|&i| i == from)?;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let local_target = ((point.y / row_step).max(0.0) as usize).min(count.saturating_sub(1));
+
+        if local_target != local_from {
+            let global_from = account_indices[local_from];
+            let global_target = account_indices[local_target];
+            self.signatures.swap(global_from, global_target);
+            if let Some(ref mut d) = self.signature_drag {
+                d.dragging_index = global_target;
+            }
+        }
+
+        // On drag end, emit reorder event with ordered IDs.
+        None
     }
 
     pub(super) fn list_items_mut(&mut self, list_id: &str) -> &mut Vec<EditableItem> {

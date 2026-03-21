@@ -45,8 +45,21 @@ Spec: `docs/signatures/implementation-spec.md`
 
 - **Signature editor overlay** exists (`signature_editor_overlay` in
   `tabs.rs`). It has: name field, default checkboxes (both "new messages" and
-  "replies & forwards"), body field, save/delete buttons with delete
-  confirmation.
+  "replies & forwards"), rich text editor body field with formatting toolbar,
+  save/delete buttons with delete confirmation.
+
+- **Rich text editor integrated.** The signature editor uses
+  `RichTextEditor` from `crates/rich-text-editor/` with `EditorState` for
+  the body field. HTML round-trip via `EditorState::from_html()` /
+  `EditorState::to_html()`.
+
+- **Formatting toolbar implemented.** B/I/U/S (inline style toggles),
+  bullet list, numbered list, and blockquote (block type toggles) buttons
+  above the editor. Uses Lucide icons.
+
+- **Drag reorder grip handles implemented.** Each signature row has a grip
+  handle for drag reordering. The `db_reorder_signatures` core function is
+  wired to the UI via `SettingsEvent::ReorderSignatures`.
 
 - **Delete confirmation implemented.** Clicking delete (from list row or
   editor) opens the editor overlay with a "Delete this signature? Cancel /
@@ -55,7 +68,8 @@ Spec: `docs/signatures/implementation-spec.md`
 - **SignatureEditorState** exists in `crates/app/src/ui/settings/types.rs`.
 
 - **SignatureSaveRequest** and **SettingsEvent::SaveSignature /
-  DeleteSignature** exist, enabling upward event emission to the App.
+  DeleteSignature / ReorderSignatures** exist, enabling upward event
+  emission to the App.
 
 - **Settings component** implements `Component` trait correctly.
 
@@ -93,10 +107,11 @@ Spec: `docs/signatures/implementation-spec.md`
 
 ### Cross-cutting — Core CRUD used (not bypassed)
 
-- **App handlers use proper transactional CRUD.** The raw SQL in `main.rs`
-  has been replaced with `crates/app/src/handlers/signatures.rs` which uses
-  transactional default-clearing for both `is_default` and
-  `is_reply_default`. The handler is wired via `Message::SignatureOp`.
+- **App handlers delegate to core CRUD.** The raw SQL in
+  `handlers/signatures.rs` has been replaced with calls to core functions:
+  `db_insert_signature`, `db_update_signature`, `db_delete_signature`,
+  `db_get_all_signatures`, `db_reorder_signatures`. The app creates a
+  `DbState::from_arc()` bridge to pass its connection to core functions.
 
 ---
 
@@ -104,35 +119,21 @@ Spec: `docs/signatures/implementation-spec.md`
 
 ### Phase 2 — UI divergences
 
-1. **Signature editor uses plain `text_input`, not the rich text editor.**
-   The spec requires the signature editor to use the `RichTextEditor` widget
-   (with formatting toolbar, HTML round-trip via `Document`). The actual
-   implementation uses a basic `undoable_text_input` for the body field.
-   Users must type raw HTML. This is a V1 limitation pending editor Phase 3.
-
-2. **No formatting toolbar.** The spec calls for a formatting toolbar
-   (B/I/U/S, lists, blockquote, link). This is absent pending the rich text
-   editor integration.
-
-3. **No drag reorder grip handles.** The spec shows grip handles on
-   signature rows for reordering. The `db_reorder_signatures` query exists
-   but is not wired to UI drag handlers.
-
-4. **`SignatureEditorMessage` is flattened into `SettingsMessage`.** The spec
+1. **`SignatureEditorMessage` is flattened into `SettingsMessage`.** The spec
    proposes a dedicated `SignatureEditorMessage` enum. The actual code
    flattens all editor messages directly into `SettingsMessage`. This is a
    minor structural divergence — functionally equivalent.
 
 ### Phase 4 — Account switching (not implemented)
 
-5. **No account-switch signature replacement.** The
+2. **No account-switch signature replacement.** The
    `handle_from_account_changed` flow, `replace_signature` integration in
    compose state, and confirmation dialog for edited signatures are not
    implemented in the app crate. The compose window itself is a stub.
 
 ### Phase 5 — Send path (partial)
 
-6. **No draft restoration with signature state.** Draft persistence does not
+3. **No draft restoration with signature state.** Draft persistence does not
    reconstruct `signature_separator_index` from saved HTML.
 
 ---
@@ -141,8 +142,6 @@ Spec: `docs/signatures/implementation-spec.md`
 
 | Spec item | Status |
 |-----------|--------|
-| Phase 2.2: Rich text editor in signature editor | Not done (plain text input; blocked on editor Phase 3) |
-| Phase 2.2: Formatting toolbar | Not done (blocked on editor Phase 3) |
 | Phase 2.3: Per-account default signature dropdown in Account Settings | Not done (blocked on account settings impl) |
 | Phase 3.1: `ComposeDocumentState` in app crate | Not done (compose window is a stub) |
 | Phase 3.1: Signature edit detection (`signature_edited` flag) | Not done |
@@ -161,25 +160,26 @@ Spec: `docs/signatures/implementation-spec.md`
 ### b. Component trait
 
 **Implemented.** `Settings` implements `Component` with signature
-save/delete emitted upward to the App via `SettingsEvent`.
+save/delete/reorder emitted upward to the App via `SettingsEvent`.
 
 ### c. Token-to-Catalog theming (named style classes)
 
 **Used throughout.** No raw color values in signature UI code.
 
-### d. iced_drop drag-and-drop (signature reorder)
+### d. Drag-reorder (signature reorder)
 
-**Not implemented in UI.** The `db_reorder_signatures` query exists in core
-but grip handles and drag support are not wired for signature rows.
+**Implemented.** Grip handles on signature rows enable drag reordering.
+`SettingsEvent::ReorderSignatures` emits ordered IDs to the App, which calls
+`db_reorder_signatures` via core CRUD.
 
 ### e. Core CRUD properly used
 
-**Yes.** The raw SQL bypass has been eliminated. All signature operations
-go through `crates/app/src/handlers/signatures.rs` which uses proper
-transactional semantics for default-clearing.
+**Yes.** All signature operations go through core CRUD functions in
+`crates/core/src/db/queries_extra/compose.rs`. The app handler creates a
+`DbState::from_arc()` bridge from the app's connection Arc.
 
 ### f. Dead code
 
 **Reduced.** The core CRUD functions are no longer dead code — they are
-used by provider sync and the `db_resolve_signature_for_compose` function.
-The `html_to_plain_text` function is called from the app handler.
+used by provider sync, the app handler, and the
+`db_resolve_signature_for_compose` function.
