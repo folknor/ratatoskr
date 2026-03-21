@@ -404,6 +404,12 @@ pub enum VerticalMoveResult {
 /// checking if the cursor's line index within the paragraph is 0.
 ///
 /// Returns instructions for the Widget to complete the movement.
+///
+/// **Status:** Tested and ready to wire. Currently, vertical movement uses a
+/// simpler column-offset fallback in `EditorState::apply_move()`. This
+/// function provides pixel-precise cross-block movement and should be wired
+/// into the Widget's keyboard handler when the widget intercepts Up/Down
+/// at the render layer (requires access to the paragraph cache).
 pub fn prepare_move_up(
     current: DocPosition,
     block_layouts: &[BlockLayout],
@@ -452,6 +458,8 @@ pub fn prepare_move_up(
 /// visual line of its block's paragraph.
 ///
 /// Returns instructions for the Widget to complete the movement.
+///
+/// **Status:** Tested and ready to wire. See `prepare_move_up()` for details.
 pub fn prepare_move_down(
     current: DocPosition,
     block_layouts: &[BlockLayout],

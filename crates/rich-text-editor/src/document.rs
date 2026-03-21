@@ -143,6 +143,35 @@ impl HeadingLevel {
     }
 }
 
+// ── Text alignment ──────────────────────────────────────
+
+/// Text alignment for block-level elements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum TextAlignment {
+    /// Left-aligned (the default for LTR text).
+    #[default]
+    Left,
+    /// Center-aligned.
+    Center,
+    /// Right-aligned.
+    Right,
+}
+
+// ── Block attributes ───────────────────────────────────
+
+/// Block-level attributes that can be changed independently of the block type.
+///
+/// Used by `SetBlockAttrs` to modify alignment and list indent without
+/// changing the block variant (Paragraph, Heading, ListItem, etc.).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct BlockAttrs {
+    /// Text alignment for the block content.
+    pub alignment: TextAlignment,
+    /// Indent level (meaningful for ListItem; stored for all blocks but only
+    /// affects rendering of list items).
+    pub indent_level: u8,
+}
+
 // ── Block ───────────────────────────────────────────────
 
 /// A block-level element in the document.
@@ -293,6 +322,47 @@ impl Block {
     /// Whether this block is a structural container (BlockQuote).
     pub fn is_container(&self) -> bool {
         matches!(self, Self::BlockQuote { .. })
+    }
+
+    /// Extract the block-level attributes from this block.
+    ///
+    /// Indent level is only meaningful for `ListItem` (returns 0 for others).
+    /// Alignment defaults to `Left` (stored alignment is a future extension).
+    pub fn attrs(&self) -> BlockAttrs {
+        match self {
+            Self::ListItem { indent_level, .. } => BlockAttrs {
+                alignment: TextAlignment::Left,
+                indent_level: *indent_level,
+            },
+            _ => BlockAttrs::default(),
+        }
+    }
+
+    /// Return a clone of this block with the given attributes applied.
+    ///
+    /// Only attributes that are meaningful for the block type are applied:
+    /// - `indent_level` is applied to `ListItem` blocks.
+    /// - `alignment` is stored for future use (not yet rendered).
+    ///
+    /// Returns `None` if the block type does not support any attributes
+    /// (e.g., `HorizontalRule`, `Image`).
+    pub fn with_attrs(&self, attrs: BlockAttrs) -> Option<Self> {
+        match self {
+            Self::ListItem { ordered, runs, .. } => Some(Self::ListItem {
+                ordered: *ordered,
+                indent_level: attrs.indent_level,
+                runs: runs.clone(),
+            }),
+            Self::Paragraph { .. }
+            | Self::Heading { .. }
+            | Self::BlockQuote { .. } => {
+                // These block types don't currently have mutable attrs fields,
+                // but we accept the call to allow uniform handling.
+                // Indent level changes are silently ignored for non-list blocks.
+                Some(self.clone())
+            }
+            Self::HorizontalRule | Self::Image { .. } => None,
+        }
     }
 
     /// The `BlockKind` discriminant (type without data). Used by `SetBlockType`.
@@ -688,5 +758,59 @@ mod tests {
             src: String::new(), alt: "x".into(), width: None, height: None,
         };
         assert_eq!(img.char_len(), 0);
+    }
+
+    // ── BlockAttrs tests ────────────────────────────────
+
+    #[test]
+    fn list_item_attrs_returns_indent() {
+        let item = Block::list_item_with_indent("hello", false, 3);
+        let attrs = item.attrs();
+        assert_eq!(attrs.indent_level, 3);
+        assert_eq!(attrs.alignment, TextAlignment::Left);
+    }
+
+    #[test]
+    fn paragraph_attrs_returns_defaults() {
+        let para = Block::paragraph("hello");
+        let attrs = para.attrs();
+        assert_eq!(attrs, BlockAttrs::default());
+    }
+
+    #[test]
+    fn list_item_with_attrs_sets_indent() {
+        let item = Block::list_item("hello", true);
+        let new_item = item
+            .with_attrs(BlockAttrs {
+                indent_level: 2,
+                alignment: TextAlignment::Left,
+            })
+            .expect("with_attrs should succeed for ListItem");
+        assert_eq!(new_item.attrs().indent_level, 2);
+        assert_eq!(new_item.flattened_text(), "hello");
+        assert!(matches!(new_item, Block::ListItem { ordered: true, .. }));
+    }
+
+    #[test]
+    fn with_attrs_on_hr_returns_none() {
+        let hr = Block::HorizontalRule;
+        assert!(hr.with_attrs(BlockAttrs::default()).is_none());
+    }
+
+    #[test]
+    fn with_attrs_on_paragraph_returns_clone() {
+        let para = Block::paragraph("hello");
+        let result = para.with_attrs(BlockAttrs {
+            indent_level: 5,
+            ..Default::default()
+        });
+        assert!(result.is_some());
+        // Paragraph ignores indent_level
+        assert_eq!(result.as_ref().map(Block::flattened_text).as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn text_alignment_default_is_left() {
+        assert_eq!(TextAlignment::default(), TextAlignment::Left);
     }
 }

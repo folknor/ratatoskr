@@ -1,8 +1,6 @@
 # Rich Text Editor: Spec vs Implementation Discrepancies
 
-Audit date: 2026-03-21. Compared `docs/editor/architecture.md` and
-`docs/editor/research-summary.md` against actual code in
-`crates/rich-text-editor/`.
+Audit date: 2026-03-21. Updated after implementation pass.
 
 ---
 
@@ -20,14 +18,14 @@ These elements are implemented and match the architecture document:
   cursor-addressable items, indent tracking, and HTML serializer reconstructing
   `<ul>`/`<ol>` nesting. Matches spec.
 
-- **EditOp** — All 8 variants present: `InsertText`, `DeleteRange`, `SplitBlock`,
-  `MergeBlocks`, `ToggleInlineStyle`, `SetBlockType`, `InsertBlock`,
-  `RemoveBlock`. Each has apply + invert. `DeletedContent` captures full block
-  structure for undo.
+- **EditOp** — All 9 variants present: `InsertText`, `DeleteRange`, `SplitBlock`,
+  `MergeBlocks`, `ToggleInlineStyle`, `SetBlockType`, `SetBlockAttrs`,
+  `InsertBlock`, `RemoveBlock`. Each has apply + invert. `DeletedContent`
+  captures full block structure for undo.
 
 - **PosMap** — `PosMapEntry { old_offset, old_len, new_len }` and
-  `StructuralChange` enum with `Split`, `Merge`, `Insert`, `Remove`,
-  `CrossBlockDelete` variants. Matches spec.
+  `StructuralChange` enum with `Split`, `Merge`, `Insert` (with `count`
+  field), `Remove`, `CrossBlockDelete` variants. Matches spec.
 
 - **Normalization** — Slate-inspired dirty-block normalization with safety valve
   (42x multiplier). Both `normalize()` and `normalize_blocks()` entry points.
@@ -77,70 +75,49 @@ These elements are implemented and match the architecture document:
   fingerprint for round-trip detection. Matches spec.
 
 - **Crate structure** — Feature-gated widget module, pure-Rust core modules.
-  `html_parse` is a subdirectory (mod.rs + dom.rs) rather than a single file,
-  but this is a minor organizational detail. Matches spec intent.
+  `html_parse` is a subdirectory (`mod.rs` + `dom.rs`). `editor_state.rs` is a
+  separate file from `widget/mod.rs`. Both correctly reflected in the architecture
+  doc.
+
+- **Double/triple click** — `WidgetState.last_click` tracks click state for
+  word selection (double-click) and block selection (triple-click) using iced's
+  `Click` type with `kind()` detection. `Action::DoubleClick` and
+  `Action::TripleClick` variants handled by `EditorState::perform()`.
+
+- **SetBlockAttrs** — `EditOp::SetBlockAttrs` for block-level attributes
+  (alignment, indent level). Currently wired for `indent_level` on `ListItem`
+  blocks. `TextAlignment` enum defined for future use. Self-inverse (swap
+  old/new). Tested.
 
 ---
 
-## Discrepancies
+## Remaining items
 
-### 1. Architecture doc says `draw_list_marker()` is "not wired into the runtime draw path yet" -- but it IS wired in
+### 1. `prepare_move_up()` / `prepare_move_down()` not wired into widget event path
 
-The architecture doc (line 383-385) states: "`draw_list_marker()` exists but is
-not wired into the runtime draw path yet (lists currently render as a combined
-placeholder paragraph)."
+These public functions exist in `widget/cursor.rs` and are tested. They provide
+pixel-precise vertical cursor movement across block boundaries. Currently,
+vertical movement uses a simpler column-offset fallback in
+`EditorState::apply_move()`.
 
-**Actual code:** `draw_list_marker()` is called at `widget/mod.rs:529` in the
-main draw loop. Lists render with proper bullet/number markers, not as
-placeholder paragraphs. The doc is stale.
+**Why not wired:** Wiring requires the widget's keyboard handler to intercept
+Up/Down events at the render layer (where the paragraph cache is available),
+determine `is_first_line` / `is_last_line` from the cached paragraph, and then
+hit-test the target block. This is a significant refactoring of the move
+dispatch path — currently, all movement goes through `Action::Move` →
+`EditorState::perform()` which has no renderer access.
 
-### 2. Test count is higher than documented
+**Status:** Infrastructure ready. The functions have doc comments explaining
+their status. The column-offset fallback works correctly for email-length
+documents but doesn't handle wrapped lines within a single block.
 
-Architecture doc claims "428 tests." Actual count is **652 tests** (grep for
-`#[test]` across all source files in the crate). The doc has not been updated to
-reflect tests added since the architecture was written.
+### 2. `TextAlignment` not yet stored on block variants
 
-### 3. `StructuralChange::Insert` has a `count` field not in the spec
-
-The architecture doc shows `Insert { block_index }`. The actual code has
-`Insert { block_index: usize, count: usize }`, supporting multi-block insert
-tracking. Minor divergence; code is more capable than spec.
-
-### 4. `_last_click` field is dead code
-
-`WidgetState._last_click: Option<Click>` is prefixed with underscore and
-annotated "(future use)" in the comment at `widget/mod.rs:76-77`. It is
-initialized to `None` at line 818 and never read or written afterward.
-Double/triple click detection is not implemented.
-
-### 5. `prepare_move_up()` / `prepare_move_down()` are unused
-
-These public functions exist in `widget/cursor.rs` (lines 407, 455) and are
-tested, but are never called from the widget's `update()` method. The
-architecture doc acknowledges this: "These helpers exist and are tested, but the
-widget currently uses a simpler adjacent-block fallback." The functions are
-effectively dead code in the runtime path.
-
-### 6. `html_parse` is a module directory, not a single file
-
-Architecture doc lists `html_parse.rs` as a single file. Actual structure is
-`html_parse/mod.rs` + `html_parse/dom.rs` (TreeSink implementation separated
-into its own file). Functionally equivalent; doc filename is slightly misleading.
-
-### 7. `editor_state.rs` is a separate file not listed in the crate structure
-
-The architecture doc's crate structure section shows `widget/mod.rs` as owning
-"EditorState, Action, RichTextEditor widget (Widget trait impl)." In reality,
-`EditorState` and `Action` live in `widget/editor_state.rs`, a separate file.
-The widget's `Widget` trait impl remains in `widget/mod.rs`. This is a clean
-separation but the doc doesn't reflect it.
-
-### 8. `SetBlockAttrs` operation noted as "missing" in spec -- still missing
-
-Architecture doc (line 178-179) notes: "`SetBlockAttrs` for block-level
-attributes that aren't type changes (text alignment, list indent level). Add
-when implementing alignment or indentation." This operation has not been added.
-This is expected (documented as deferred).
+`TextAlignment` enum and `BlockAttrs.alignment` field are defined, but no
+`Block` variant currently stores alignment. `SetBlockAttrs` accepts alignment
+in its `BlockAttrs` but only `ListItem.indent_level` is actually persisted.
+Adding alignment storage requires adding an `alignment` field to `Paragraph`,
+`Heading`, and `ListItem` variants — a straightforward but broad change.
 
 ---
 
@@ -202,19 +179,12 @@ responsibility.
 
 ### g. Dead code
 
-Three instances identified:
+One instance remains:
 
-1. **`_last_click: Option<Click>`** in `WidgetState` -- initialized to `None`,
-   never used. Reserved for future double/triple click detection.
-
-2. **`prepare_move_up()` / `prepare_move_down()`** in `widget/cursor.rs` --
+1. **`prepare_move_up()` / `prepare_move_down()`** in `widget/cursor.rs` —
    public functions with tests, but never called from the widget. The widget
    uses a simpler column-preserving fallback for vertical movement instead.
-
-3. **`split_runs_at_char_offset()`** in `document.rs` -- public wrapper for
-   the private `split_runs_at()`. Called from `editor_state.rs` (line 784) for
-   structured paste, so this is actually live code. Not dead.
+   These are intentionally retained as infrastructure for pixel-precise
+   vertical movement — see "Remaining items" above.
 
 No `#[allow(dead_code)]` or `#[allow(unused)]` attributes found in the crate.
-The `_last_click` field uses the underscore prefix convention to suppress the
-unused field warning.

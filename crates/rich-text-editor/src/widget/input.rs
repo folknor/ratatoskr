@@ -360,6 +360,69 @@ fn block_text(doc: &Document, block_index: usize) -> String {
         .map_or_else(String::new, super::super::document::Block::flattened_text)
 }
 
+// ── Word / block selection helpers (double/triple click) ─
+
+/// Find the word boundaries around a character offset within a block.
+///
+/// Returns `(start, end)` char offsets. A "word" is a contiguous run of
+/// characters sharing the same `CharClass`. If the cursor is between two
+/// classes, the word to the left of the cursor is selected (left-affinity).
+pub fn word_at(doc: &Document, pos: DocPosition) -> (DocPosition, DocPosition) {
+    use super::super::document::Block;
+
+    let text = block_text(doc, pos.block_index);
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+
+    if len == 0 {
+        let p = DocPosition::new(pos.block_index, 0);
+        return (p, p);
+    }
+
+    // Determine the character class at (or just before) the cursor.
+    let anchor_idx = if pos.offset > 0 && pos.offset <= len {
+        pos.offset - 1
+    } else if pos.offset < len {
+        pos.offset
+    } else {
+        len - 1
+    };
+    let target_class = classify(chars[anchor_idx]);
+
+    // Expand left.
+    let mut start = anchor_idx;
+    while start > 0 && classify(chars[start - 1]) == target_class {
+        start -= 1;
+    }
+
+    // Expand right.
+    let mut end = anchor_idx + 1;
+    while end < len && classify(chars[end]) == target_class {
+        end += 1;
+    }
+
+    let block_len = doc.block(pos.block_index).map_or(0, Block::char_len);
+    let end = end.min(block_len);
+
+    (
+        DocPosition::new(pos.block_index, start),
+        DocPosition::new(pos.block_index, end),
+    )
+}
+
+/// Select an entire block (triple-click).
+///
+/// Returns anchor at block start and focus at block end.
+pub fn select_block(doc: &Document, pos: DocPosition) -> (DocPosition, DocPosition) {
+    use super::super::document::Block;
+
+    let block_len = doc.block(pos.block_index).map_or(0, Block::char_len);
+    (
+        DocPosition::new(pos.block_index, 0),
+        DocPosition::new(pos.block_index, block_len),
+    )
+}
+
 // ── Tests ───────────────────────────────────────────────
 
 #[cfg(test)]
@@ -990,6 +1053,101 @@ mod tests {
             // "foo_bar" is all word chars (underscore counts as word).
             let result = word_right(&doc, DocPosition::new(0, 0));
             assert_eq!(result, DocPosition::new(0, 8));
+        }
+    }
+
+    // ── word_at tests ────────────────────────────────────
+
+    mod word_at_tests {
+        use super::*;
+
+        #[test]
+        fn word_at_middle_of_word() {
+            let doc = single_block_doc("hello world");
+            let (start, end) = word_at(&doc, DocPosition::new(0, 3));
+            assert_eq!(start, DocPosition::new(0, 0));
+            assert_eq!(end, DocPosition::new(0, 5));
+        }
+
+        #[test]
+        fn word_at_start_of_word() {
+            let doc = single_block_doc("hello world");
+            let (start, end) = word_at(&doc, DocPosition::new(0, 0));
+            assert_eq!(start, DocPosition::new(0, 0));
+            assert_eq!(end, DocPosition::new(0, 5));
+        }
+
+        #[test]
+        fn word_at_end_of_word() {
+            let doc = single_block_doc("hello world");
+            // Offset 5 is on the space; left-affinity selects "hello"
+            let (start, end) = word_at(&doc, DocPosition::new(0, 5));
+            assert_eq!(start, DocPosition::new(0, 0));
+            assert_eq!(end, DocPosition::new(0, 5));
+        }
+
+        #[test]
+        fn word_at_second_word() {
+            let doc = single_block_doc("hello world");
+            let (start, end) = word_at(&doc, DocPosition::new(0, 8));
+            assert_eq!(start, DocPosition::new(0, 6));
+            assert_eq!(end, DocPosition::new(0, 11));
+        }
+
+        #[test]
+        fn word_at_empty_block() {
+            let doc = Document::from_blocks(vec![Block::empty_paragraph()]);
+            let (start, end) = word_at(&doc, DocPosition::new(0, 0));
+            assert_eq!(start, DocPosition::new(0, 0));
+            assert_eq!(end, DocPosition::new(0, 0));
+        }
+
+        #[test]
+        fn word_at_on_whitespace() {
+            let doc = single_block_doc("hello   world");
+            // Offset 6 is on a space (left-affinity: chars[5] = ' ')
+            let (start, end) = word_at(&doc, DocPosition::new(0, 6));
+            assert_eq!(start, DocPosition::new(0, 5));
+            assert_eq!(end, DocPosition::new(0, 8));
+        }
+
+        #[test]
+        fn word_at_punctuation() {
+            let doc = single_block_doc("hello, world");
+            // Offset 5 is comma; left-affinity: chars[4]='o' is word
+            let (start, end) = word_at(&doc, DocPosition::new(0, 5));
+            assert_eq!(start, DocPosition::new(0, 0));
+            assert_eq!(end, DocPosition::new(0, 5));
+        }
+    }
+
+    // ── select_block tests ───────────────────────────────
+
+    mod select_block_tests {
+        use super::*;
+
+        #[test]
+        fn select_block_selects_entire_block() {
+            let doc = single_block_doc("hello world");
+            let (start, end) = select_block(&doc, DocPosition::new(0, 3));
+            assert_eq!(start, DocPosition::new(0, 0));
+            assert_eq!(end, DocPosition::new(0, 11));
+        }
+
+        #[test]
+        fn select_block_empty() {
+            let doc = Document::from_blocks(vec![Block::empty_paragraph()]);
+            let (start, end) = select_block(&doc, DocPosition::new(0, 0));
+            assert_eq!(start, DocPosition::new(0, 0));
+            assert_eq!(end, DocPosition::new(0, 0));
+        }
+
+        #[test]
+        fn select_block_second_block() {
+            let doc = multi_block_doc();
+            let (start, end) = select_block(&doc, DocPosition::new(1, 2));
+            assert_eq!(start, DocPosition::new(1, 0));
+            assert_eq!(end, DocPosition::new(1, 5)); // "world" = 5 chars
         }
     }
 }
