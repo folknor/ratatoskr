@@ -1401,6 +1401,22 @@ static MIGRATIONS: &[Migration] = &[
             );
         "#,
     },
+    Migration {
+        version: 65,
+        description: "CalDAV event sync mapping table",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS caldav_event_map (
+                uri TEXT NOT NULL,
+                calendar_id TEXT NOT NULL,
+                event_uid TEXT NOT NULL,
+                etag TEXT,
+                PRIMARY KEY (uri, calendar_id),
+                FOREIGN KEY (calendar_id) REFERENCES calendars(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_caldav_event_map_calendar
+                ON caldav_event_map(calendar_id);
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -1645,6 +1661,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) AS max_ver FROM _migrations", [], |row| row.get("max_ver"))
             .expect("query");
-        assert_eq!(max_ver, 63);
+        assert_eq!(max_ver, 64);
     }
 }
