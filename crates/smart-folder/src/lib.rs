@@ -3,8 +3,7 @@ mod sql_builder;
 mod tokens;
 
 pub use parser::{ParsedQuery, parse_query};
-pub use sql_builder::query_threads;
-pub use tokens::resolve_query_tokens;
+pub use sql_builder::{count_matching, query_threads};
 
 use rusqlite::Connection;
 
@@ -20,14 +19,16 @@ pub struct SmartFolderParams<'a> {
 
 /// Execute a smart folder query string against the database.
 ///
-/// Resolves date tokens, parses operators, builds parameterized SQL,
-/// and returns matching threads (deduplicated by thread).
+/// The parser handles relative date offsets natively (`-7`, `-30`, `0`),
+/// so the old token system (`__LAST_7_DAYS__` etc.) is no longer needed
+/// for new queries. Legacy queries using tokens are still supported via
+/// a backward-compatibility shim during the migration period.
 pub fn execute_smart_folder_query(
     conn: &Connection,
     params: &SmartFolderParams<'_>,
 ) -> Result<Vec<DbThread>, String> {
-    let resolved = resolve_query_tokens(params.query);
-    let parsed = parse_query(&resolved);
+    let query = migrate_legacy_tokens(params.query);
+    let parsed = parse_query(&query);
     sql_builder::query_threads(conn, &parsed, params.scope, params.limit, params.offset)
 }
 
@@ -37,8 +38,23 @@ pub fn count_smart_folder_unread(
     query: &str,
     scope: &AccountScope,
 ) -> Result<i64, String> {
-    let resolved = resolve_query_tokens(query);
-    let mut parsed = parse_query(&resolved);
+    let query = migrate_legacy_tokens(query);
+    let mut parsed = parse_query(&query);
     parsed.is_unread = Some(true);
     sql_builder::count_matching(conn, &parsed, scope)
+}
+
+/// Translate legacy date tokens to the parser's native offset syntax.
+///
+/// This is a backward-compatibility shim. New smart folder queries
+/// should use offset syntax directly (e.g. `after:-7` instead of
+/// `after:__LAST_7_DAYS__`).
+fn migrate_legacy_tokens(query: &str) -> String {
+    if !query.contains("__") {
+        return query.to_owned();
+    }
+    query
+        .replace("__LAST_7_DAYS__", "-7")
+        .replace("__LAST_30_DAYS__", "-30")
+        .replace("__TODAY__", "0")
 }

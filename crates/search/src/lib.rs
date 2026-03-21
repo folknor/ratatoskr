@@ -120,17 +120,16 @@ pub struct SearchParams {
     /// `Some(ids)` = search only those accounts.
     pub account_ids: Option<Vec<String>>,
     pub free_text: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    /// From filters — multiple values produce OR semantics.
+    pub from: Vec<String>,
+    /// To filters — multiple values produce OR semantics.
+    pub to: Vec<String>,
     pub subject: Option<String>,
     pub has_attachment: Option<bool>,
     pub is_unread: Option<bool>,
     pub is_starred: Option<bool>,
     pub before: Option<i64>,
     pub after: Option<i64>,
-    /// Label filter — not handled in tantivy; caller must post-filter.
-    #[allow(dead_code)]
-    pub label: Option<String>,
     pub limit: Option<usize>,
 }
 
@@ -183,16 +182,12 @@ impl Fields {
 
 #[derive(Clone)]
 pub struct SearchState {
-    #[allow(dead_code)]
-    index: Index,
     reader: IndexReader,
     writer: Arc<Mutex<IndexWriter>>,
-    #[allow(dead_code)]
-    schema: Schema,
     fields: Fields,
 }
 
-// Safety: Index, IndexReader are Send+Sync; writer is behind Arc<Mutex>
+// Safety: IndexReader is Send+Sync; writer is behind Arc<Mutex>
 unsafe impl Send for SearchState {}
 unsafe impl Sync for SearchState {}
 
@@ -231,10 +226,8 @@ impl SearchState {
         let fields = Fields::from_schema(&schema);
 
         Ok(Self {
-            index,
             reader,
             writer: Arc::new(Mutex::new(writer)),
-            schema,
             fields,
         })
     }
@@ -342,48 +335,7 @@ impl SearchState {
         Ok(())
     }
 
-    /// Simple free-text search, optionally filtered by account IDs.
-    ///
-    /// - `account_ids = None` — search all accounts
-    /// - `account_ids = Some(ids)` — search only the given accounts
-    #[allow(dead_code)]
-    pub fn search(
-        &self,
-        query_str: &str,
-        account_ids: Option<&[String]>,
-        limit: usize,
-    ) -> Result<Vec<SearchResult>, String> {
-        let searcher = self.reader.searcher();
-        let query_parser = QueryParser::for_index(
-            searcher.index(),
-            vec![
-                self.fields.subject,
-                self.fields.from_name,
-                self.fields.body_text,
-                self.fields.snippet,
-            ],
-        );
-
-        let text_query = query_parser
-            .parse_query(query_str)
-            .map_err(|e| format!("parse query: {e}"))?;
-
-        let mut clauses: Vec<(Occur, Box<dyn Query>)> = vec![(Occur::Must, text_query)];
-
-        if let Some(filter) = self.build_account_filter(account_ids) {
-            clauses.push((Occur::Must, filter));
-        }
-
-        let combined = BooleanQuery::new(clauses);
-
-        let top_docs = searcher
-            .search(&combined, &TopDocs::with_limit(limit))
-            .map_err(|e| format!("search: {e}"))?;
-
-        self.collect_results(&searcher, &top_docs)
-    }
-
-    /// Advanced search with structured filters.
+    /// Search with structured filters.
     #[allow(clippy::too_many_lines)]
     pub fn search_with_filters(&self, params: &SearchParams) -> Result<Vec<SearchResult>, String> {
         let searcher = self.reader.searcher();
@@ -415,37 +367,47 @@ impl SearchState {
             clauses.push((Occur::Must, q));
         }
 
-        // from → TermQuery on from_address OR phrase on from_name
-        if let Some(ref from) = params.from
-            && !from.is_empty()
-        {
-            let from_addr: Box<dyn Query> = Box::new(TermQuery::new(
-                Term::from_field_text(self.fields.from_address, from),
-                tantivy::schema::IndexRecordOption::Basic,
-            ));
+        // from → OR across all from values (address term OR name phrase)
+        if !params.from.is_empty() {
+            let mut from_clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
             let from_name_qp =
                 QueryParser::for_index(searcher.index(), vec![self.fields.from_name]);
-            let from_name = from_name_qp
-                .parse_query(from)
-                .map_err(|e| format!("parse from: {e}"))?;
-            clauses.push((
-                Occur::Must,
-                Box::new(BooleanQuery::new(vec![
-                    (Occur::Should, from_addr),
-                    (Occur::Should, from_name),
-                ])),
-            ));
+            for from_val in &params.from {
+                if from_val.is_empty() {
+                    continue;
+                }
+                let from_addr: Box<dyn Query> = Box::new(TermQuery::new(
+                    Term::from_field_text(self.fields.from_address, from_val),
+                    tantivy::schema::IndexRecordOption::Basic,
+                ));
+                let from_name = from_name_qp
+                    .parse_query(from_val)
+                    .map_err(|e| format!("parse from: {e}"))?;
+                from_clauses.push((Occur::Should, from_addr));
+                from_clauses.push((Occur::Should, from_name));
+            }
+            if !from_clauses.is_empty() {
+                clauses.push((Occur::Must, Box::new(BooleanQuery::new(from_clauses))));
+            }
         }
 
-        // to → phrase on to_addresses
-        if let Some(ref to) = params.to
-            && !to.is_empty()
-        {
-            let to_qp = QueryParser::for_index(searcher.index(), vec![self.fields.to_addresses]);
-            let q = to_qp
-                .parse_query(to)
-                .map_err(|e| format!("parse to: {e}"))?;
-            clauses.push((Occur::Must, q));
+        // to → OR across all to values
+        if !params.to.is_empty() {
+            let mut to_clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
+            let to_qp =
+                QueryParser::for_index(searcher.index(), vec![self.fields.to_addresses]);
+            for to_val in &params.to {
+                if to_val.is_empty() {
+                    continue;
+                }
+                let q = to_qp
+                    .parse_query(to_val)
+                    .map_err(|e| format!("parse to: {e}"))?;
+                to_clauses.push((Occur::Should, q));
+            }
+            if !to_clauses.is_empty() {
+                clauses.push((Occur::Must, Box::new(BooleanQuery::new(to_clauses))));
+            }
         }
 
         // subject → phrase on subject
@@ -515,8 +477,6 @@ impl SearchState {
                 .unwrap_or(std::ops::Bound::Unbounded);
             clauses.push((Occur::Must, Box::new(RangeQuery::new(lower, upper))));
         }
-
-        // label filter is not supported in tantivy (lives in SQLite); caller post-filters.
 
         let limit = params.limit.unwrap_or(50);
 
@@ -732,6 +692,22 @@ mod tests {
 
     // ── Multi-account search tests ───────────────────────────────────
 
+    fn make_search_params(free_text: &str) -> SearchParams {
+        SearchParams {
+            account_ids: None,
+            free_text: Some(free_text.into()),
+            from: Vec::new(),
+            to: Vec::new(),
+            subject: None,
+            has_attachment: None,
+            is_unread: None,
+            is_starred: None,
+            before: None,
+            after: None,
+            limit: Some(10),
+        }
+    }
+
     #[tokio::test]
     async fn search_no_account_filter_returns_all() {
         let (state, _dir) = init_temp_search();
@@ -742,7 +718,8 @@ mod tests {
         state.index_messages_batch(&docs).await.expect("index");
         state.reader.reload().expect("reload");
 
-        let results = state.search("quarterly", None, 10).expect("search");
+        let params = make_search_params("quarterly");
+        let results = state.search_with_filters(&params).expect("search");
         assert_eq!(results.len(), 2);
     }
 
@@ -756,8 +733,9 @@ mod tests {
         state.index_messages_batch(&docs).await.expect("index");
         state.reader.reload().expect("reload");
 
-        let ids = vec!["acct-a".to_string()];
-        let results = state.search("quarterly", Some(&ids), 10).expect("search");
+        let mut params = make_search_params("quarterly");
+        params.account_ids = Some(vec!["acct-a".to_string()]);
+        let results = state.search_with_filters(&params).expect("search");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].account_id, "acct-a");
     }
@@ -773,8 +751,9 @@ mod tests {
         state.index_messages_batch(&docs).await.expect("index");
         state.reader.reload().expect("reload");
 
-        let ids = vec!["acct-a".to_string(), "acct-c".to_string()];
-        let results = state.search("quarterly", Some(&ids), 10).expect("search");
+        let mut params = make_search_params("quarterly");
+        params.account_ids = Some(vec!["acct-a".to_string(), "acct-c".to_string()]);
+        let results = state.search_with_filters(&params).expect("search");
         assert_eq!(results.len(), 2);
         let accts: Vec<&str> = results.iter().map(|r| r.account_id.as_str()).collect();
         assert!(accts.contains(&"acct-a"));
@@ -792,35 +771,8 @@ mod tests {
         state.index_messages_batch(&docs).await.expect("index");
         state.reader.reload().expect("reload");
 
-        let ids: Vec<String> = vec![];
-        let results = state.search("quarterly", Some(&ids), 10).expect("search");
-        assert_eq!(results.len(), 2);
-    }
-
-    #[tokio::test]
-    async fn search_with_filters_no_account_ids() {
-        let (state, _dir) = init_temp_search();
-        let docs = vec![
-            make_doc("m1", "acct-a", "t1", "Budget proposal"),
-            make_doc("m2", "acct-b", "t2", "Budget review"),
-        ];
-        state.index_messages_batch(&docs).await.expect("index");
-        state.reader.reload().expect("reload");
-
-        let params = SearchParams {
-            account_ids: None,
-            free_text: Some("budget".into()),
-            from: None,
-            to: None,
-            subject: None,
-            has_attachment: None,
-            is_unread: None,
-            is_starred: None,
-            before: None,
-            after: None,
-            label: None,
-            limit: Some(10),
-        };
+        let mut params = make_search_params("quarterly");
+        params.account_ids = Some(Vec::new());
         let results = state.search_with_filters(&params).expect("search");
         assert_eq!(results.len(), 2);
     }
@@ -836,20 +788,8 @@ mod tests {
         state.index_messages_batch(&docs).await.expect("index");
         state.reader.reload().expect("reload");
 
-        let params = SearchParams {
-            account_ids: Some(vec!["acct-b".into(), "acct-c".into()]),
-            free_text: Some("budget".into()),
-            from: None,
-            to: None,
-            subject: None,
-            has_attachment: None,
-            is_unread: None,
-            is_starred: None,
-            before: None,
-            after: None,
-            label: None,
-            limit: Some(10),
-        };
+        let mut params = make_search_params("budget");
+        params.account_ids = Some(vec!["acct-b".into(), "acct-c".into()]);
         let results = state.search_with_filters(&params).expect("search");
         assert_eq!(results.len(), 2);
         let accts: Vec<&str> = results.iter().map(|r| r.account_id.as_str()).collect();

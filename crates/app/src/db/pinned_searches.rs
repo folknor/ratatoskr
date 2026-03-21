@@ -281,6 +281,18 @@ impl Db {
         .await
     }
 
+    /// Deletes all pinned searches. Used for the "Clear all" action.
+    pub async fn delete_all_pinned_searches(&self) -> Result<u64, String> {
+        self.with_write_conn(move |conn| {
+            let deleted = conn
+                .execute("DELETE FROM pinned_searches", [])
+                .map_err(|e| e.to_string())?;
+            #[allow(clippy::cast_sign_loss)]
+            Ok(deleted as u64)
+        })
+        .await
+    }
+
     /// Removes pinned searches older than `max_age_secs` that haven't
     /// been accessed (updated_at == created_at).
     pub async fn expire_stale_pinned_searches(

@@ -344,13 +344,47 @@ impl App {
 
 /// Execute search off the main thread via spawn_blocking.
 ///
-/// TODO: Wire real SearchState once it is initialized at app startup.
+/// Tries the unified search pipeline (Tantivy + SQL) first. Falls back
+/// to SQL-only via the smart folder parser if no Tantivy index exists,
+/// and to a simple LIKE search for pure free-text without operators.
 pub(crate) async fn execute_search(
     db: Arc<db::Db>,
     query: String,
 ) -> Result<Vec<Thread>, String> {
     db.with_conn(move |conn| {
-        let pattern = format!("%{query}%");
+        let data_dir = crate::APP_DATA_DIR.get().ok_or("APP_DATA_DIR not set")?;
+        match ratatoskr_core::search::SearchState::init(data_dir) {
+            Ok(search_state) => {
+                let results = ratatoskr_core::search_pipeline::search(
+                    &query, &search_state, conn,
+                )?;
+                Ok(results.into_iter().map(unified_result_to_thread).collect())
+            }
+            Err(_) => {
+                // Tantivy index not available — fall back to SQL-only
+                execute_search_sql_fallback(conn, &query)
+            }
+        }
+    })
+    .await
+}
+
+/// SQL-only fallback search using the smart folder parser and SQL builder.
+fn execute_search_sql_fallback(
+    conn: &rusqlite::Connection,
+    query: &str,
+) -> Result<Vec<Thread>, String> {
+    let parsed = ratatoskr_core::smart_folder::parse_query(query);
+    let scope = ratatoskr_core::db::types::AccountScope::All;
+
+    if parsed.has_any_operator() || parsed.free_text.is_empty() {
+        let db_threads = ratatoskr_core::smart_folder::query_threads(
+            conn, &parsed, &scope, Some(200), Some(0),
+        )?;
+        Ok(db_threads.into_iter().map(crate::db_thread_to_app_thread).collect())
+    } else {
+        // Free text only, no Tantivy — do a simple LIKE search
+        let pattern = format!("%{}%", parsed.free_text);
         let mut stmt = conn
             .prepare(
                 "SELECT t.id, t.account_id, t.subject, t.snippet,
@@ -386,6 +420,24 @@ pub(crate) async fn execute_search(
             threads.push(row.map_err(|e| format!("search row: {e}"))?);
         }
         Ok(threads)
-    })
-    .await
+    }
+}
+
+/// Convert a `UnifiedSearchResult` from the search pipeline to an app `Thread`.
+fn unified_result_to_thread(
+    r: ratatoskr_core::search_pipeline::UnifiedSearchResult,
+) -> Thread {
+    Thread {
+        id: r.thread_id,
+        account_id: r.account_id,
+        subject: r.subject,
+        snippet: r.snippet,
+        last_message_at: r.date,
+        message_count: r.message_count.unwrap_or(1),
+        is_read: r.is_read,
+        is_starred: r.is_starred,
+        has_attachments: false,
+        from_name: r.from_name,
+        from_address: r.from_address,
+    }
 }
