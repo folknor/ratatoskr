@@ -1,6 +1,6 @@
 # Search: Spec vs Implementation Discrepancies
 
-Audit date: 2026-03-21
+Audit date: 2026-03-21 (updated after implementation pass)
 
 ## What Matches the Spec
 
@@ -10,11 +10,11 @@ Audit date: 2026-03-21
 
 - **SQL builder (Slice 2):** `crates/smart-folder/src/sql_builder.rs` implements all clause builders specified: `account:` (LIKE on display_name/email), `folder:` (label name + imap_folder_path), `in:` (label-based and flag-based shorthands), `is:tagged`, `has:contact`, `type:`/`has:` MIME filtering with glob support, `from:`/`to:` with contact expansion. OR semantics for repeated operators implemented correctly.
 
-- **Tantivy cross-account (Slice 3):** `crates/search/src/lib.rs` has `SearchParams.account_ids: Option<Vec<String>>` (not single `account_id`). `group_by_thread()` helper exists and is public.
+- **Tantivy cross-account (Slice 3):** `crates/search/src/lib.rs` has `SearchParams.account_ids: Option<Vec<String>>` (not single `account_id`). `group_by_thread()` helper exists and is public. **`SearchParams.from` and `SearchParams.to` are now `Vec<String>`** for proper OR semantics across all search paths.
 
-- **Unified pipeline (Slice 4):** `crates/core/src/search_pipeline.rs` implements the three-path router (`search_sql_only`, `search_tantivy_only`, `search_combined`) exactly as specified. `UnifiedSearchResult` type matches. The combined path does SQL-first then Tantivy intersection as designed.
+- **Unified pipeline (Slice 4):** `crates/core/src/search_pipeline.rs` implements the three-path router (`search_sql_only`, `search_tantivy_only`, `search_combined`) exactly as specified. `UnifiedSearchResult` type matches. The combined path does SQL-first then Tantivy intersection as designed. **`build_tantivy_params()` now passes all from/to values**, not just the first.
 
-### App Integration (Slice 5) -- Partially Implemented
+### App Integration (Slice 5) -- Wired to Unified Pipeline
 
 - **Generational load tracking:** Implemented. `search_generation: u64` in `App`, incremented before each dispatch, stale results silently dropped via `g != self.search_generation` guard. Also incremented on `SearchClear`.
 
@@ -30,11 +30,15 @@ Audit date: 2026-03-21
 
 - **Keyboard shortcuts:** `/` to focus and `Escape` to clear are implemented via event listeners in the subscription.
 
+- **Search execution:** `execute_search()` now calls the unified pipeline (`search_pipeline::search()`) when the Tantivy index is available, with a graceful SQL-only fallback when it is not. The fallback uses the smart folder parser and SQL builder to support structured operators, and falls back to LIKE search only for pure free-text queries without an index.
+
+- **SearchBlur unfocus:** `SearchBlur` handler now focuses a dummy widget ID to effectively remove focus from the search bar (iced does not expose a native `unfocus` operation).
+
 ### Pinned Searches -- Substantially Implemented
 
 - **PinnedSearch type:** `crates/app/src/db/pinned_searches.rs` has the `PinnedSearch` struct (without `thread_ids` field -- loaded lazily as spec allows).
 
-- **CRUD functions:** All specified: `create_or_update_pinned_search`, `update_pinned_search`, `delete_pinned_search`, `list_pinned_searches`, `get_pinned_search_thread_ids`, `get_threads_by_ids`, `expire_stale_pinned_searches`. Uses transactions for atomicity.
+- **CRUD functions:** All specified: `create_or_update_pinned_search`, `update_pinned_search`, `delete_pinned_search`, `delete_all_pinned_searches`, `list_pinned_searches`, `get_pinned_search_thread_ids`, `get_threads_by_ids`, `expire_stale_pinned_searches`. Uses transactions for atomicity.
 
 - **Sidebar rendering:** `pinned_searches_section` and `pinned_search_card` in `sidebar.rs`. Has `ButtonClass::PinnedSearch { active }` style in the theme.
 
@@ -44,44 +48,20 @@ Audit date: 2026-03-21
 
 - **Auto-expiry:** `expire_stale_pinned_searches(1_209_600)` (14 days) called after initial load.
 
+### Smart Folder Token Migration (Slice 6) -- Partial
+
+- **Token system deprecated:** `execute_smart_folder_query` and `count_smart_folder_unread` now use `migrate_legacy_tokens()` which translates `__LAST_7_DAYS__` -> `-7`, `__LAST_30_DAYS__` -> `-30`, `__TODAY__` -> `0` inline. The parser handles relative offsets natively. `resolve_query_tokens` is no longer re-exported from the crate. `count_matching` is now exported for direct use.
+
+### Dead Code Cleanup
+
+- **`SearchState.index` and `SearchState.schema`** fields removed from `SearchState` struct. No longer `#[allow(dead_code)]`.
+- **`SearchState::search()`** simple free-text method removed. Only `search_with_filters()` remains.
+- **`SearchParams.label`** field removed entirely. Label filtering is handled by the SQL builder, not Tantivy.
+- **`group_by_thread()` deduplication:** The private copy in `search_pipeline.rs` now delegates to the public `ratatoskr_search::group_by_thread()`, wrapping the results in `UnifiedSearchResult`.
+
 ---
 
 ## What Diverges from the Spec
-
-### Critical: execute_search is a Stub
-
-The app's `execute_search()` function (`crates/app/src/main.rs` ~line 2776) does **not** call the unified search pipeline. It is a raw SQL `LIKE` query against `threads.subject` and `threads.snippet`:
-
-```rust
-// Stub: use the unified search pipeline if SearchState is available.
-// For now, do a simple SQL LIKE search as a placeholder so the full
-// message flow, debounce, and generational tracking are exercised.
-```
-
-This means:
-- Tantivy ranking is never used for search
-- Structured operators (`from:`, `is:`, `has:`, `label:`, etc.) are not parsed or applied
-- The entire query parser and SQL builder are unused during app search
-- Cross-account filtering via `account:` is not available
-- Contact expansion is not available
-- `SearchState` is never initialized in the app
-
-The app comment explicitly says "TODO: Wire real SearchState once it is initialized at app startup."
-
-### Smart Folder Migration (Slice 6) -- Not Started
-
-- `execute_smart_folder_query` in `crates/smart-folder/src/lib.rs` still uses its own direct path (parse -> SQL builder -> execute). It has **not** been migrated to call `search()` from the unified pipeline.
-- The app does not import or reference `execute_smart_folder_query` or `search_pipeline` anywhere in `crates/app/src/main.rs`.
-- Smart folders in the sidebar appear to be rendered statically from navigation state; there is no evidence of smart folder query execution through the unified pipeline.
-- The token system (`__LAST_7_DAYS__`, etc.) is still active in `tokens.rs` and called by `execute_smart_folder_query`. No migration to offset syntax has been performed.
-
-### SearchParams.label is Dead
-
-`SearchParams.label: Option<String>` in `crates/search/src/lib.rs` is annotated `#[allow(dead_code)]` and has a comment "Label filter -- not handled in tantivy; caller must post-filter." The field exists but is never used by Tantivy internally. The unified pipeline passes `parsed.label.first().cloned()` into it, which has no effect.
-
-### Tantivy-only path: from/to only uses first value
-
-In `build_tantivy_params()`, `from` and `to` are set from `parsed.from.first().cloned()` and `parsed.to.first().cloned()`. This discards additional `from:` or `to:` values, breaking the OR semantics spec when the Tantivy-only path is taken. The SQL builder handles multi-value correctly.
 
 ### UnifiedSearchResult vs SearchResult naming
 
@@ -91,9 +71,13 @@ The problem statement spec defines `SearchResult`. The implementation names it `
 
 The pinned-searches spec defines `PinnedSearch` with a `thread_ids: Vec<(String, String)>` field. The implementation omits this field from the struct entirely, loading thread IDs via a separate `get_pinned_search_thread_ids()` call. This is a deliberate design choice (lazy loading) but diverges from the spec's data model.
 
-### delete_all_pinned_searches not implemented
+### Smart folder execution path not fully migrated
 
-The pinned-searches-implementation-spec specifies a `delete_all_pinned_searches` function. This function does not exist in the codebase. The "Clear all" action described in the product spec is not available.
+`execute_smart_folder_query` still uses its own direct path (parse -> SQL builder -> execute) rather than calling `search()` from the unified pipeline. This is intentional: the unified pipeline lives in `ratatoskr-core` which depends on `ratatoskr-smart-folder`, so calling back would create a circular dependency. The token system has been deprecated in favor of inline migration, but the execution path remains SQL-only for smart folders (no Tantivy ranking for smart folder queries that contain free text).
+
+### SearchState initialization is lazy
+
+`SearchState` is initialized per-search in `execute_search()` by calling `SearchState::init()` each time, rather than being initialized once at app startup and stored on `App`. This works because `SearchState::init()` opens an existing index (cheap) and the index directory is reused. However, storing it on `App` would avoid the per-search overhead.
 
 ---
 
@@ -153,14 +137,11 @@ No result count shown in the UI (though `self.status` is set to `"{n} results"` 
 
 ### f. Core CRUD Bypassed
 
-**Yes, for search execution.** The `execute_search` stub in `main.rs` writes raw SQL directly (`SELECT t.* FROM threads t WHERE t.subject LIKE ?1 ...`) rather than calling the unified search pipeline in core. This is the single largest gap.
+**No, for search execution.** `execute_search()` now calls the unified search pipeline from `ratatoskr_core::search_pipeline::search()`, with a SQL-only fallback that still uses the smart folder parser and SQL builder. Raw SQL LIKE is only used as a last-resort fallback for pure free-text when no Tantivy index exists.
 
 **No, for pinned searches.** Pinned search CRUD is in `crates/app/src/db/pinned_searches.rs`, which is app-level code but uses proper parameterized queries and transactions. The spec itself places pinned search CRUD in the app's `db.rs`, so this is intentional -- pinned searches are local UI state, not core domain logic.
 
 ### g. Dead Code
 
-- `SearchState.index` and `SearchState.schema` fields are `#[allow(dead_code)]` in `crates/search/src/lib.rs`.
-- `SearchParams.label` is `#[allow(dead_code)]` -- unused by Tantivy, passed but ignored.
-- `SearchState::search()` (the simple free-text method) is `#[allow(dead_code)]` -- only `search_with_filters()` is used by the pipeline.
-- `group_by_thread()` is public in both `crates/search/src/lib.rs` and duplicated (private) in `crates/core/src/search_pipeline.rs`. The core version converts `TantivyResult` -> `UnifiedSearchResult` while grouping; the search crate version works with `SearchResult` directly. Both exist and neither calls the other.
-- `resolve_query_tokens` in `crates/smart-folder/src/tokens.rs` is still active but should be deprecated per the spec once the parser handles relative offsets natively (which it does). The function is still called by `execute_smart_folder_query` and `count_smart_folder_unread`.
+- `group_by_thread()` in search crate is the canonical version; `search_pipeline.rs` delegates to it via `group_by_thread_unified()`.
+- `tokens.rs` in the smart-folder crate is no longer re-exported. `migrate_legacy_tokens()` handles the translation inline. The `tokens` module is retained for the test suite during the deprecation period.

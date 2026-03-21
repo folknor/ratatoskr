@@ -77,7 +77,7 @@ fn search_tantivy_only(
 ) -> Result<Vec<UnifiedSearchResult>, String> {
     let params = build_tantivy_params(parsed);
     let results = search_state.search_with_filters(&params)?;
-    let mut grouped = group_by_thread(results);
+    let mut grouped = group_by_thread_unified(results);
     grouped.sort_by(|a, b| b.rank.partial_cmp(&a.rank).unwrap_or(std::cmp::Ordering::Equal));
     Ok(grouped)
 }
@@ -112,7 +112,7 @@ fn search_combined(
         .collect();
 
     // Step 4: Group by thread, take max score.
-    let grouped = group_by_thread(filtered);
+    let grouped = group_by_thread_unified(filtered);
 
     // Step 5: Enrich with SQL metadata where available.
     let mut enriched: Vec<UnifiedSearchResult> = grouped
@@ -146,15 +146,14 @@ fn build_tantivy_params(parsed: &ParsedQuery) -> SearchParams {
     SearchParams {
         account_ids,
         free_text: Some(parsed.free_text.clone()),
-        from: parsed.from.first().cloned(),
-        to: parsed.to.first().cloned(),
+        from: parsed.from.clone(),
+        to: parsed.to.clone(),
         subject: None,
         has_attachment: if parsed.has_attachment { Some(true) } else { None },
         is_unread: parsed.is_unread,
         is_starred: parsed.is_starred,
         before: parsed.before,
         after: parsed.after,
-        label: parsed.label.first().cloned(),
         limit: Some(200),
     }
 }
@@ -177,20 +176,11 @@ fn db_thread_to_unified(t: DbThread) -> UnifiedSearchResult {
 }
 
 /// Group message-level Tantivy results by thread_id, taking the highest
-/// score per thread and using the first hit's metadata.
-fn group_by_thread(results: Vec<TantivyResult>) -> Vec<UnifiedSearchResult> {
-    let mut best: HashMap<String, UnifiedSearchResult> = HashMap::new();
-
-    for r in results {
-        let entry = best
-            .entry(r.thread_id.clone())
-            .or_insert_with(|| tantivy_result_to_unified(&r));
-        if r.rank > entry.rank {
-            *entry = tantivy_result_to_unified(&r);
-        }
-    }
-
-    best.into_values().collect()
+/// score per thread. Delegates to `ratatoskr_search::group_by_thread`
+/// for the grouping logic, then converts to `UnifiedSearchResult`.
+fn group_by_thread_unified(results: Vec<TantivyResult>) -> Vec<UnifiedSearchResult> {
+    let grouped = ratatoskr_search::group_by_thread(results);
+    grouped.into_iter().map(|r| tantivy_result_to_unified(&r)).collect()
 }
 
 /// Convert a single Tantivy result into a `UnifiedSearchResult`.
@@ -392,7 +382,7 @@ mod tests {
             },
         ];
 
-        let grouped = group_by_thread(results);
+        let grouped = group_by_thread_unified(results);
         assert_eq!(grouped.len(), 2);
 
         let t1 = grouped.iter().find(|r| r.thread_id == "t1");

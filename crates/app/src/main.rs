@@ -756,7 +756,10 @@ impl App {
             }
             Message::SearchBlur => {
                 // Unfocus the search bar without clearing search state.
-                Task::none()
+                // iced does not expose an `unfocus` widget operation, so we
+                // focus a dummy ID which effectively removes focus from the
+                // search bar's text_input.
+                iced::widget::operation::focus::<Message>("__blur__".to_string())
             }
 
             // Pinned searches
@@ -2799,21 +2802,55 @@ fn build_command_args(command_id: CommandId, item: &OptionItem) -> Option<Comman
     }
 }
 
-/// Execute search off the main thread via spawn_blocking.
+/// Execute search off the main thread using the unified search pipeline.
 ///
-/// TODO: Wire real SearchState once it is initialized at app startup.
-/// Currently stubs the search by querying the DB for threads matching
-/// the query as a substring in subject/snippet, since SearchState
-/// requires a Tantivy index that may not be available yet.
+/// Tries the full unified pipeline (Tantivy + SQL) first. If the Tantivy
+/// index is not available (e.g. first run before indexing), falls back to
+/// a SQL-only search via the smart folder query parser/builder.
 async fn execute_search(
     db: Arc<Db>,
     query: String,
 ) -> Result<Vec<Thread>, String> {
     db.with_conn(move |conn| {
-        // Stub: use the unified search pipeline if SearchState is available.
-        // For now, do a simple SQL LIKE search as a placeholder so the full
-        // message flow, debounce, and generational tracking are exercised.
-        let pattern = format!("%{query}%");
+        // Try the unified pipeline with SearchState.
+        // If the index doesn't exist yet, fall back to SQL-only.
+        let data_dir = APP_DATA_DIR.get().ok_or("APP_DATA_DIR not set")?;
+        match ratatoskr_core::search::SearchState::init(data_dir) {
+            Ok(search_state) => {
+                let results = ratatoskr_core::search_pipeline::search(
+                    &query, &search_state, conn,
+                )?;
+                Ok(results.into_iter().map(unified_result_to_thread).collect())
+            }
+            Err(_) => {
+                // Tantivy index not available — fall back to SQL-only
+                // via the smart folder parser which handles all operators.
+                execute_search_sql_fallback(conn, &query)
+            }
+        }
+    })
+    .await
+}
+
+/// SQL-only fallback search using the smart folder parser and SQL builder.
+/// Used when the Tantivy index is not yet available.
+fn execute_search_sql_fallback(
+    conn: &rusqlite::Connection,
+    query: &str,
+) -> Result<Vec<Thread>, String> {
+    let parsed = ratatoskr_core::smart_folder::parse_query(query);
+    let scope = ratatoskr_core::db::types::AccountScope::All;
+
+    // If the query has operators, use the SQL builder.
+    // If it's just free text, do a LIKE search on subject/snippet.
+    if parsed.has_any_operator() || parsed.free_text.is_empty() {
+        let db_threads = ratatoskr_core::smart_folder::query_threads(
+            conn, &parsed, &scope, Some(200), Some(0),
+        )?;
+        Ok(db_threads.into_iter().map(db_thread_to_app_thread).collect())
+    } else {
+        // Free text only, no Tantivy — do a simple LIKE search
+        let pattern = format!("%{}%", parsed.free_text);
         let mut stmt = conn
             .prepare(
                 "SELECT t.id, t.account_id, t.subject, t.snippet,
@@ -2849,8 +2886,26 @@ async fn execute_search(
             threads.push(row.map_err(|e| format!("search row: {e}"))?);
         }
         Ok(threads)
-    })
-    .await
+    }
+}
+
+/// Convert a `UnifiedSearchResult` from the search pipeline to an app `Thread`.
+fn unified_result_to_thread(
+    r: ratatoskr_core::search_pipeline::UnifiedSearchResult,
+) -> Thread {
+    Thread {
+        id: r.thread_id,
+        account_id: r.account_id,
+        subject: r.subject,
+        snippet: r.snippet,
+        last_message_at: r.date,
+        message_count: r.message_count.unwrap_or(1),
+        is_read: r.is_read,
+        is_starred: r.is_starred,
+        has_attachments: false,
+        from_name: r.from_name,
+        from_address: r.from_address,
+    }
 }
 
 fn db_thread_to_app_thread(t: DbThread) -> Thread {
