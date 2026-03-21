@@ -174,12 +174,13 @@ impl App {
             .reading_pane
             .thread_messages
             .get(message_index)
+            .cloned()
         else {
             return Task::none();
         };
 
         let generation = self.next_pop_out_generation();
-        let state = MessageViewState::from_thread_message(msg, generation);
+        let state = MessageViewState::from_thread_message(&msg, generation);
         let account_id = state.account_id.clone();
         let message_id = state.message_id.clone();
 

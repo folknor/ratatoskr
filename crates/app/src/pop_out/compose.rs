@@ -444,6 +444,9 @@ fn handle_token_input_message(
             }
         }
         TokenInputMessage::Focused | TokenInputMessage::Blurred => {}
+        TokenInputMessage::TokenContextMenu(_, _) => {}
+        TokenInputMessage::ArrowSelectToken(_) => {}
+        TokenInputMessage::ArrowToText => {}
         TokenInputMessage::Paste(content) => {
             // Split pasted text by commas/semicolons and tokenize
             for part in

@@ -2004,7 +2004,7 @@ fn account_card(account: &ManagedAccount) -> Element<'_, SettingsMessage> {
 }
 
 /// A tiny colored dot indicating account health.
-fn health_indicator(health: AccountHealth) -> Element<'_, SettingsMessage> {
+fn health_indicator<'a>(health: AccountHealth) -> Element<'a, SettingsMessage> {
     let color = match health {
         AccountHealth::Healthy => iced::Color::from_rgb(0.2, 0.8, 0.3),
         AccountHealth::Warning => iced::Color::from_rgb(1.0, 0.75, 0.0),

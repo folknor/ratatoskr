@@ -1117,7 +1117,8 @@ impl AddAccountWizard {
                 .style(text::base)
                 .font(iced::Font {
                     weight: iced::font::Weight::Bold,
-                    ..font::text(),
+                    ..font::text()
+
                 }),
             Space::new().height(SPACE_XS),
             text(&self.email).size(TEXT_LG).style(text::secondary),
@@ -1143,11 +1144,11 @@ impl AddAccountWizard {
     }
 }
 
-fn protocol_card_view<'a>(
+fn protocol_card_view(
     option: &ProtocolOption,
     index: usize,
     selected: bool,
-) -> Element<'a, AddAccountMessage> {
+) -> Element<'_, AddAccountMessage> {
     let name = protocol_display_name(
         &option.protocol,
         option.provider_name.as_deref(),
