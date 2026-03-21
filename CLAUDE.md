@@ -72,6 +72,33 @@ These are non-obvious behaviors of the `jmap-client` crate that will matter if t
 - `too_many_lines`: 100 max
 - `cognitive_complexity`: denied at threshold
 
+## Multi-Agent Orchestration
+
+When launching multiple subagents to work on features in parallel (using worktree isolation):
+
+**Structural preparation:**
+- Split shared files (like `main.rs`) into feature-scoped modules BEFORE launching agents. The `handlers/` module split reduced `main.rs` from 2849 to 1298 lines and eliminated most merge conflicts between agents.
+- Put architecture comments directly in code files agents will read first. Agents ignore documentation they're told to read but follow patterns they see in the code.
+
+**Agent prompts must be explicit about file structure:**
+- Tell agents "Read your handler file FIRST — it already has extracted methods"
+- Tell agents "main.rs is ONLY for Message enum variants and one-line dispatch arms"
+- Tell agents "Do NOT put handler logic, free functions, or multi-line match arms in main.rs"
+- Tell agents "If you see existing code in a handler file, extend it — do not replace it with a placeholder"
+- Include `UI.md` and `CLAUDE.md` in the required reading list
+
+**Merge strategy:**
+- Merge agent branches sequentially, resolving each conflict hunk individually
+- Do NOT use `git checkout --ours` to take an entire file — this silently drops the agent's work and requires manual porting
+- The `Message` enum in `main.rs` is an unavoidable merge bottleneck since every agent adds variants there
+- After merging all branches, run `cargo check --workspace` and fix any compilation errors before proceeding
+
+**Common agent mistakes to watch for:**
+- Using `gen` as a variable name (reserved keyword in edition 2024)
+- Using `iced::mouse::click::Kind` instead of `iced::advanced::mouse::click::Kind` (the `iced::mouse` re-export doesn't include the `click` submodule)
+- Re-adding code that's already in split module files (agents rewrite whole files instead of making targeted edits)
+- Agents should never run `cargo check/build/test` — the orchestrator validates between merges
+
 ## Encryption
 
 AES-256-GCM (`core/src/provider/crypto.rs`). Key file: `ratatoskr.key` (or legacy `velo.key`) in app data dir. Format: `base64(iv):base64(ct+tag)`. Falls back to zero-key if missing.
