@@ -27,11 +27,9 @@ dissimilar.workspace = true
 ratatoskr-system-fonts = { path = "../system-fonts" }
 ratatoskr-command-palette = { path = "../command-palette" }
 ratatoskr-core = { path = "../core" }
+ratatoskr-smart-folder = { path = "../smart-folder" }
 ratatoskr-label-colors = { path = "../label-colors" }
-<<<<<<< HEAD
 iced-drop = { path = "../iced-drop" }
-=======
->>>>>>> worktree-agent-a7bc4eca
 ratatoskr-rich-text-editor = { path = "../rich-text-editor" }
 uuid = { version = "1", features = ["v4"] }
 toml = "0.8"

@@ -318,9 +318,9 @@ where
 
         if let Some(on_drop) = self.on_drop.as_deref() {
             match event {
-                Event::Mouse(mouse::Event::ButtonPressed(
-                    mouse::Button::Left,
-                ))
+                Event::Mouse(mouse::Event::ButtonPressed {
+                    button: mouse::Button::Left, ..
+                })
                 | Event::Touch(touch::Event::FingerPressed { .. }) => {
                     let bounds = layout.bounds();
                     if cursor.is_over(bounds) {
@@ -339,9 +339,9 @@ where
                         }
                     }
                 }
-                Event::Mouse(mouse::Event::ButtonPressed(
-                    mouse::Button::Right,
-                ))
+                Event::Mouse(mouse::Event::ButtonPressed {
+                    button: mouse::Button::Right, ..
+                })
                 | Event::Touch(touch::Event::FingerLost { .. }) => {
                     if let Action::Drag(_, _) = state.action {
                         state.action = Action::None;

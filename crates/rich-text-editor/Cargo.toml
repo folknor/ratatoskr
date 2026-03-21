@@ -16,6 +16,6 @@ bitflags = "2"
 html5ever = "0.35"
 markup5ever = "0.16"
 
-iced = { path = "/home/folk/Programs/sluggrs/repos/iced", default-features = false, features = [
+iced = { git = "https://github.com/folknor/iced", branch = "sluggrs", default-features = false, features = [
     "wgpu", "tokio", "lazy", "advanced", "web-colors", "wayland", "x11",
 ], optional = true }

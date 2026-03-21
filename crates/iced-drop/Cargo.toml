@@ -8,9 +8,9 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-iced_core = { git = "https://github.com/folknor/iced", branch = "sluggrs" }
-iced_widget = { git = "https://github.com/folknor/iced", branch = "sluggrs" }
-iced_runtime = { git = "https://github.com/folknor/iced", branch = "sluggrs" }
+iced_core = { path = "/home/folk/Programs/sluggrs/repos/iced/core" }
+iced_widget = { path = "/home/folk/Programs/sluggrs/repos/iced/widget", features = ["wgpu"] }
+iced_runtime = { path = "/home/folk/Programs/sluggrs/repos/iced/runtime" }
 
 [lints]
 workspace = true

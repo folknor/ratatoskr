@@ -225,11 +225,14 @@ dependencies = [
  "dirs",
  "display-info",
  "dissimilar",
- "iced 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
+ "iced",
+ "iced-drop",
  "mundy",
  "ratatoskr-command-palette",
  "ratatoskr-core",
  "ratatoskr-label-colors",
+ "ratatoskr-rich-text-editor",
+ "ratatoskr-smart-folder",
  "ratatoskr-system-fonts",
  "rusqlite",
  "serde",
@@ -2351,6 +2354,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "hotpath"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2fde50be006a0fe95cc2fd6d25d884aa6932218e4055d7df2fa0d95c386acf8d"
+dependencies = [
+ "hotpath-macros",
+]
+
+[[package]]
+name = "hotpath-macros"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd884cee056e269e41e1127549458e1c4e309f31897ebbc1416982a74d40a5b5"
+
+[[package]]
 name = "html5ever"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2539,20 +2557,6 @@ dependencies = [
 [[package]]
 name = "iced"
 version = "0.15.0-dev"
-dependencies = [
- "iced_core 0.15.0-dev",
- "iced_debug 0.15.0-dev",
- "iced_futures 0.15.0-dev",
- "iced_renderer 0.15.0-dev",
- "iced_runtime 0.15.0-dev",
- "iced_widget 0.15.0-dev",
- "iced_winit 0.15.0-dev",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "iced"
-version = "0.15.0-dev"
 source = "git+https://github.com/folknor/iced?branch=sluggrs#d713109bf994e54f91885203367150ac743d7a4c"
 dependencies = [
  "iced_core 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
@@ -2561,8 +2565,17 @@ dependencies = [
  "iced_renderer 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
  "iced_runtime 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
  "iced_widget 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
- "iced_winit 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
+ "iced_winit",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "iced-drop"
+version = "0.1.0"
+dependencies = [
+ "iced_core 0.15.0-dev",
+ "iced_runtime 0.15.0-dev",
+ "iced_widget 0.15.0-dev",
 ]
 
 [[package]]
@@ -2625,7 +2638,6 @@ dependencies = [
  "iced_core 0.15.0-dev",
  "log",
  "rustc-hash 2.1.1",
- "tokio",
  "wasm-bindgen-futures",
  "wasmtimer",
 ]
@@ -2683,14 +2695,6 @@ dependencies = [
 [[package]]
 name = "iced_program"
 version = "0.15.0-dev"
-dependencies = [
- "iced_graphics 0.15.0-dev",
- "iced_runtime 0.15.0-dev",
-]
-
-[[package]]
-name = "iced_program"
-version = "0.15.0-dev"
 source = "git+https://github.com/folknor/iced?branch=sluggrs#d713109bf994e54f91885203367150ac743d7a4c"
 dependencies = [
  "iced_graphics 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
@@ -2702,7 +2706,6 @@ name = "iced_renderer"
 version = "0.15.0-dev"
 dependencies = [
  "iced_graphics 0.15.0-dev",
- "iced_tiny_skia 0.15.0-dev",
  "iced_wgpu 0.15.0-dev",
  "log",
  "thiserror 2.0.18",
@@ -2714,7 +2717,7 @@ version = "0.15.0-dev"
 source = "git+https://github.com/folknor/iced?branch=sluggrs#d713109bf994e54f91885203367150ac743d7a4c"
 dependencies = [
  "iced_graphics 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
- "iced_tiny_skia 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
+ "iced_tiny_skia",
  "iced_wgpu 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
  "log",
  "thiserror 2.0.18",
@@ -2741,21 +2744,6 @@ dependencies = [
  "iced_futures 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
  "raw-window-handle",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "iced_tiny_skia"
-version = "0.15.0-dev"
-dependencies = [
- "bytemuck",
- "cosmic-text",
- "iced_debug 0.15.0-dev",
- "iced_graphics 0.15.0-dev",
- "kurbo 0.10.4",
- "log",
- "rustc-hash 2.1.1",
- "softbuffer",
- "tiny-skia 0.11.4",
 ]
 
 [[package]]
@@ -2821,7 +2809,6 @@ dependencies = [
  "iced_renderer 0.15.0-dev",
  "log",
  "num-traits",
- "ouroboros",
  "rustc-hash 2.1.1",
  "thiserror 2.0.18",
  "unicode-segmentation",
@@ -2844,27 +2831,10 @@ dependencies = [
 [[package]]
 name = "iced_winit"
 version = "0.15.0-dev"
-dependencies = [
- "iced_debug 0.15.0-dev",
- "iced_program 0.15.0-dev",
- "log",
- "objc2 0.5.2",
- "rustc-hash 2.1.1",
- "thiserror 2.0.18",
- "tracing",
- "wasm-bindgen-futures",
- "web-sys",
- "window_clipboard",
- "winit",
-]
-
-[[package]]
-name = "iced_winit"
-version = "0.15.0-dev"
 source = "git+https://github.com/folknor/iced?branch=sluggrs#d713109bf994e54f91885203367150ac743d7a4c"
 dependencies = [
  "iced_debug 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
- "iced_program 0.15.0-dev (git+https://github.com/folknor/iced?branch=sluggrs)",
+ "iced_program",
  "log",
  "objc2 0.5.2",
  "rustc-hash 2.1.1",
@@ -5531,7 +5501,7 @@ version = "0.1.0"
 dependencies = [
  "bitflags 2.11.0",
  "html5ever 0.35.0",
- "iced 0.15.0-dev",
+ "iced",
  "markup5ever 0.16.2",
 ]
 
@@ -6391,6 +6361,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "cosmic-text",
+ "hotpath",
  "log",
  "skrifa 0.40.0",
  "wgpu",
