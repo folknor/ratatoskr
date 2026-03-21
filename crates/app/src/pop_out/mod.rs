@@ -1,5 +1,6 @@
 pub mod compose;
 pub mod message_view;
+pub mod session;
 
 pub use compose::{ComposeMessage, ComposeState};
 pub use message_view::{MessageViewMessage, MessageViewState};

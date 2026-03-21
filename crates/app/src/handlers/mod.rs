@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 // Feature-scoped handler modules. Each file contains `impl App` blocks
 // with methods that `main.rs::update()` dispatches to. Add new handler
 // methods in the appropriate file — do NOT put handler logic in main.rs.
@@ -26,3 +27,6 @@ pub enum SignatureResult {
     Deleted(Result<(), String>),
     Loaded(Result<Vec<SignatureEntry>, String>),
 }
+=======
+pub mod pop_out;
+>>>>>>> worktree-agent-a7996d65
