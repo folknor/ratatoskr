@@ -47,6 +47,7 @@ pub struct ProcessedSignatureImages {
 /// This is a **synchronous** extraction step. Call
 /// [`store_signature_images`] afterwards to persist the images.
 pub fn process_signature_images(html: &str) -> ProcessedSignatureImages {
+    log::debug!("Extracting signature images from HTML ({} bytes)", html.len());
     let mut images: Vec<InlineImage> = Vec::new();
     let mut seen_hashes: std::collections::HashSet<String> = std::collections::HashSet::new();
 
@@ -95,6 +96,7 @@ pub fn process_signature_images(html: &str) -> ProcessedSignatureImages {
             .to_string()
     });
 
+    log::debug!("Extracted {} unique signature images", images.len());
     ProcessedSignatureImages {
         html: result.into_owned(),
         images,

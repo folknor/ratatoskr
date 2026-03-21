@@ -16,6 +16,13 @@ fn decode_base64url(input: &str) -> Result<Vec<u8>, String> {
 
 /// Build an async SMTP transport from the given config.
 fn build_transport(config: &SmtpConfig) -> Result<AsyncSmtpTransport<Tokio1Executor>, String> {
+    log::debug!(
+        "Building SMTP transport: host={}:{}, security={}, auth={}",
+        config.host,
+        config.port,
+        config.security,
+        config.auth_method
+    );
     let credentials = Credentials::new(config.username.clone(), config.password.clone());
 
     // For OAuth2, force XOAUTH2 mechanism; for password, use default mechanisms
@@ -147,34 +154,63 @@ pub async fn send_raw_email(
 ) -> Result<SmtpSendResult, String> {
     let raw_bytes = decode_base64url(raw_email_base64url)?;
     let envelope = extract_envelope(&raw_bytes)?;
+    log::info!(
+        "Sending email via SMTP {}:{} from={:?} to={} recipients",
+        config.host,
+        config.port,
+        envelope.from(),
+        envelope.to().len()
+    );
     let transport = build_transport(config)?;
 
     transport
         .send_raw(&envelope, &raw_bytes)
         .await
-        .map(|_response| SmtpSendResult {
-            success: true,
-            message: "Email sent successfully".to_string(),
+        .map(|_response| {
+            log::info!("Email sent successfully via SMTP");
+            SmtpSendResult {
+                success: true,
+                message: "Email sent successfully".to_string(),
+            }
         })
-        .map_err(|e| format!("SMTP send error: {e}"))
+        .map_err(|e| {
+            log::error!("SMTP send failed: {e}");
+            format!("SMTP send error: {e}")
+        })
 }
 
 /// Test SMTP connectivity by connecting, authenticating, and disconnecting.
 pub async fn test_connection(config: &SmtpConfig) -> Result<SmtpSendResult, String> {
+    log::info!(
+        "Testing SMTP connection to {}:{} (security={})",
+        config.host,
+        config.port,
+        config.security
+    );
     let transport = build_transport(config)?;
 
     transport
         .test_connection()
         .await
-        .map(|success| SmtpSendResult {
-            success,
-            message: if success {
-                "Connection successful".to_string()
+        .map(|success| {
+            if success {
+                log::info!("SMTP connection test successful");
             } else {
-                "Connection failed".to_string()
-            },
+                log::error!("SMTP connection test failed");
+            }
+            SmtpSendResult {
+                success,
+                message: if success {
+                    "Connection successful".to_string()
+                } else {
+                    "Connection failed".to_string()
+                },
+            }
         })
-        .map_err(|e| format!("SMTP test error: {e}"))
+        .map_err(|e| {
+            log::error!("SMTP connection test error: {e}");
+            format!("SMTP test error: {e}")
+        })
 }
 
 #[cfg(test)]

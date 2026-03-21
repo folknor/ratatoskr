@@ -18,6 +18,7 @@ pub fn parse_address_list(raw: &str) -> Vec<(Option<String>, String)> {
     };
 
     let Some(to) = message.to() else {
+        log::debug!("mail-parser could not extract addresses, using fallback parser");
         return fallback_parse(raw);
     };
 

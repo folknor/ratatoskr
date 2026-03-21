@@ -28,12 +28,14 @@ pub fn load_encryption_key(app_data_dir: &Path) -> Result<[u8; 32], String> {
     let path = if key_path.exists() {
         key_path
     } else if legacy_path.exists() {
-        log::warn!("Using legacy key file velo.key — consider renaming to ratatoskr.key");
+        log::debug!("Using legacy key file velo.key");
         legacy_path
     } else {
-        log::warn!("No encryption key file found at {}, falling back to zero-key", app_data_dir.display());
+        log::error!("No encryption key file found (ratatoskr.key or velo.key)");
         return Err("No encryption key file found (ratatoskr.key)".to_string());
     };
+
+    log::debug!("Loading encryption key from {}", path.display());
 
     let contents =
         std::fs::read_to_string(&path).map_err(|e| format!("Failed to read key file: {e}"))?;
@@ -62,7 +64,7 @@ pub fn decrypt_value(key: &[u8; 32], encrypted: &str) -> Result<String, String> 
     let (iv_part, ct_part) = encrypted
         .split_once(':')
         .ok_or_else(|| {
-            log::error!("Decryption failed: invalid encrypted format (missing ':')");
+            log::error!("Decrypt failed: invalid format (missing ':' separator)");
             "Invalid encrypted format: missing ':'".to_string()
         })?;
 

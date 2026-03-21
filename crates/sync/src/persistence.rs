@@ -199,6 +199,12 @@ pub fn delete_messages_and_cleanup_threads(
         return Ok(vec![]);
     }
 
+    log::debug!(
+        "Deleting {} messages and cleaning up threads for account {}",
+        message_ids.len(),
+        account_id
+    );
+
     // Collect affected thread IDs before deleting
     let mut affected_threads: HashSet<String> = HashSet::new();
     for id in message_ids {
@@ -321,6 +327,7 @@ pub async fn store_message_bodies<T, FId, FHtml, FText>(
         return;
     }
 
+    log::debug!("Storing {} message bodies for {}", bodies.len(), provider_name);
     if let Err(error) = body_store.put_batch(bodies).await {
         log::warn!("Failed to store {provider_name} bodies: {error}");
     }
@@ -335,6 +342,7 @@ pub async fn store_inline_images(
         return;
     }
 
+    log::debug!("Storing inline images for {}", provider_name);
     if let Err(error) = inline_images.put_batch(images).await {
         log::warn!("Failed to store {provider_name} inline images: {error}");
     }
@@ -345,6 +353,7 @@ pub async fn index_search_documents(
     documents: Vec<SearchDocument>,
     provider_name: &str,
 ) {
+    log::debug!("Indexing {} search documents for {}", documents.len(), provider_name);
     if let Err(error) = search.index_messages_batch(&documents).await {
         log::warn!("Failed to index {provider_name} messages: {error}");
     }

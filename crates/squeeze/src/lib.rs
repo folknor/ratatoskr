@@ -80,6 +80,17 @@ pub fn compress(
 ) -> Result<CompressResult, SqueezeError> {
     let format = detect::detect(mime_type, input);
 
+    log::info!(
+        "Compression start: mime={}, format={:?}, original_size={} bytes",
+        mime_type,
+        format,
+        input.len()
+    );
+
+    if format == Format::Unsupported {
+        log::warn!("Unsupported format for compression: mime={}", mime_type);
+    }
+
     let unchanged = || {
         Ok(CompressResult {
             original_size: input.len(),
@@ -89,8 +100,9 @@ pub fn compress(
         })
     };
 
-    match format {
+    let result = match format {
         Format::Jpeg | Format::Png | Format::WebP | Format::Gif | Format::Bmp | Format::Tiff => {
+            log::debug!("Using image compression strategy for {:?}", format);
             image::compress_image(input, format, config)
         }
         Format::Heic => {
@@ -105,13 +117,17 @@ pub fn compress(
                 unchanged()
             }
         }
-        Format::Pdf => pdf::compress_pdf(input, config),
+        Format::Pdf => {
+            log::debug!("Using PDF compression strategy");
+            pdf::compress_pdf(input, config)
+        }
         Format::Ooxml(kind) => {
             let archive_kind = match kind {
                 detect::OoxmlKind::Docx => ArchiveKind::Docx,
                 detect::OoxmlKind::Xlsx => ArchiveKind::Xlsx,
                 detect::OoxmlKind::Pptx => ArchiveKind::Pptx,
             };
+            log::debug!("Using OOXML archive compression strategy for {:?}", kind);
             archive::compress_archive(input, archive_kind, config)
         }
         Format::Odf(kind) => {
@@ -120,9 +136,36 @@ pub fn compress(
                 detect::OdfKind::Ods => ArchiveKind::Ods,
                 detect::OdfKind::Odp => ArchiveKind::Odp,
             };
+            log::debug!("Using ODF archive compression strategy for {:?}", kind);
             archive::compress_archive(input, archive_kind, config)
         }
-        Format::Svg => svg::compress_svg(input, config.min_savings_pct),
+        Format::Svg => {
+            log::debug!("Using SVG compression strategy");
+            svg::compress_svg(input, config.min_savings_pct)
+        }
         Format::Unsupported => unchanged(),
+    };
+
+    match &result {
+        Ok(r) => {
+            if r.was_compressed() {
+                log::info!(
+                    "Compression complete: {} -> {} bytes ({:.1}% savings)",
+                    r.original_size,
+                    r.compressed_size,
+                    r.savings_pct()
+                );
+            } else {
+                log::info!(
+                    "Compression skipped (insufficient savings): {} bytes unchanged",
+                    r.original_size
+                );
+            }
+        }
+        Err(e) => {
+            log::error!("Compression failed: {}", e);
+        }
     }
+
+    result
 }
