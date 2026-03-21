@@ -1487,3 +1487,130 @@ pub fn emoji_picker<'a, M: 'a + Clone>(
     .style(theme::ContainerClass::SelectMenu.style())
     .into()
 }
+
+// ── Color palette grid ──────────────────────────────────
+//
+// Reusable grid of color swatches from the label-color presets.
+// The `on_select` callback receives the preset index when a swatch
+// is clicked.
+
+/// Swatch canvas painter for the color palette grid.
+struct SwatchPainter {
+    color: Color,
+    selected: bool,
+    used: bool,
+}
+
+impl<M> canvas::Program<M> for SwatchPainter {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry<Renderer>> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let radius = bounds.width.min(bounds.height) / 2.0;
+        let center =
+            iced::Point::new(bounds.width / 2.0, bounds.height / 2.0);
+
+        let circle = canvas::path::Path::circle(center, radius);
+
+        let draw_color = if self.used && !self.selected {
+            Color {
+                a: COLOR_SWATCH_DIMMED_ALPHA,
+                ..self.color
+            }
+        } else {
+            self.color
+        };
+
+        frame.fill(&circle, draw_color);
+
+        if self.used {
+            swatch_check_mark(&mut frame, bounds, radius);
+        }
+
+        vec![frame.into_geometry()]
+    }
+}
+
+/// Draw a small check-mark inside a swatch circle.
+fn swatch_check_mark(
+    frame: &mut canvas::Frame<Renderer>,
+    bounds: Rectangle,
+    radius: f32,
+) {
+    let check_color = Color::WHITE;
+    let check = canvas::path::Path::new(|b| {
+        let cx = bounds.width / 2.0;
+        let cy = bounds.height / 2.0;
+        let s = radius * COLOR_SWATCH_CHECK_SCALE;
+        b.move_to(iced::Point::new(cx - s * 0.5, cy));
+        b.line_to(iced::Point::new(cx - s * 0.1, cy + s * 0.4));
+        b.line_to(iced::Point::new(cx + s * 0.5, cy - s * 0.3));
+    });
+    frame.stroke(
+        &check,
+        canvas::Stroke::default()
+            .with_color(check_color)
+            .with_width(2.0),
+    );
+}
+
+/// Build a reusable color palette grid.
+///
+/// `selected` is the currently selected preset index (if any).
+/// `used_colors` are background hex strings of already-assigned colors
+/// (shown dimmed with a check mark).
+/// `on_select` maps a preset index to the caller's message type.
+pub fn color_palette_grid<'a, M: Clone + 'a>(
+    selected: Option<usize>,
+    used_colors: &[String],
+    on_select: impl Fn(usize) -> M + 'a,
+) -> Element<'a, M> {
+    let presets = ratatoskr_label_colors::category_colors::all_presets();
+    let mut grid = column![].spacing(SPACE_XS);
+    let mut current_row = row![].spacing(SPACE_XS);
+
+    for (i, &(_name, bg_hex, _fg_hex)) in presets.iter().enumerate() {
+        let is_selected = selected == Some(i);
+        let is_used = used_colors.iter().any(|c| c == bg_hex);
+        let color = theme::hex_to_color(bg_hex);
+
+        let swatch = Canvas::new(SwatchPainter {
+            color,
+            selected: is_selected,
+            used: is_used,
+        })
+        .width(COLOR_SWATCH_SIZE)
+        .height(COLOR_SWATCH_SIZE);
+
+        let style = if is_selected {
+            theme::ButtonClass::Chip { active: true }
+        } else {
+            theme::ButtonClass::BareTransparent
+        };
+
+        let swatch_btn = button(swatch)
+            .on_press(on_select(i))
+            .padding(PAD_COLOR_SWATCH)
+            .style(style.style());
+
+        current_row = current_row.push(swatch_btn);
+
+        if (i + 1) % COLOR_PALETTE_COLUMNS == 0 {
+            grid = grid.push(current_row);
+            current_row = row![].spacing(SPACE_XS);
+        }
+    }
+
+    if presets.len() % COLOR_PALETTE_COLUMNS != 0 {
+        grid = grid.push(current_row);
+    }
+
+    grid.into()
+}

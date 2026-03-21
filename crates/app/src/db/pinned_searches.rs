@@ -1,3 +1,10 @@
+// NOTE: Pinned searches are local UI state — they exist only in the app's
+// writable connection and are not synced to any provider. The raw SQL here
+// is intentional: these tables are created by the app crate (see
+// `db/connection.rs`) and the data never leaves the local device. Moving
+// them to core would create a dependency on a table that core doesn't own.
+// Reviewed 2026-03-21.
+
 use rusqlite::params;
 
 use super::connection::Db;

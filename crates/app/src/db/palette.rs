@@ -1,3 +1,9 @@
+// NOTE: Palette label queries are read-only views into the main DB for the
+// command palette UI. They are app-layer code because they return
+// `ratatoskr_command_palette::OptionItem` — a type from the palette crate
+// that core doesn't (and shouldn't) depend on. The queries are simple
+// label/account lookups with no business logic. Reviewed 2026-03-21.
+
 use rusqlite::params;
 
 use super::connection::Db;

@@ -350,6 +350,14 @@ pub const COLOR_SWATCH_SIZE: f32 = 28.0;
 pub const COLOR_PALETTE_COLUMNS: usize = 5;
 /// Protocol selection card height
 pub const PROTOCOL_CARD_HEIGHT: f32 = 64.0;
+/// Welcome icon size on the first-launch email input screen.
+pub const WELCOME_ICON_SIZE: f32 = 48.0;
+/// Color swatch button padding (around the canvas).
+pub const PAD_COLOR_SWATCH: f32 = 2.0;
+/// Alpha for dimmed (already-used) color swatches.
+pub const COLOR_SWATCH_DIMMED_ALPHA: f32 = 0.35;
+/// Proportional factor for check-mark size relative to swatch radius.
+pub const COLOR_SWATCH_CHECK_SCALE: f32 = 0.35;
 
 /// Status bar fixed height (one line of text + padding).
 pub const STATUS_BAR_HEIGHT: f32 = 28.0;
@@ -388,6 +396,9 @@ pub const PAD_TOKEN_INPUT: Padding = Padding {
 };
 /// Minimum width for the text input portion before wrapping.
 pub const TOKEN_TEXT_MIN_WIDTH: f32 = 120.0;
+/// Average character width as a proportion of `TEXT_MD` for layout estimation.
+/// Used in token chip width calculation and cursor positioning.
+pub const TOKEN_AVG_CHAR_WIDTH_FACTOR: f32 = 0.54;
 
 // ── Calendar ────────────────────────────────────────────
 

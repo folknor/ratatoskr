@@ -37,9 +37,9 @@ impl App {
             return self.restore_folder_view();
         }
 
-        // Store pre-search threads on first search from folder mode
+        // Remember that we were in folder mode before searching
         if self.thread_list.mode == ThreadListMode::Folder {
-            self.pre_search_threads = Some(self.thread_list.threads.clone());
+            self.was_in_folder_view = true;
         }
 
         self.search_generation += 1;
@@ -145,11 +145,11 @@ impl App {
     }
 
     pub(crate) fn handle_select_pinned_search(&mut self, id: i64) -> Task<Message> {
-        // Save pre-search threads on first activation from folder mode
+        // Remember that we were in folder mode before switching to pinned search
         if self.active_pinned_search.is_none()
             && self.thread_list.mode == ThreadListMode::Folder
         {
-            self.pre_search_threads = Some(self.thread_list.threads.clone());
+            self.was_in_folder_view = true;
         }
 
         self.active_pinned_search = Some(id);
@@ -322,10 +322,15 @@ impl App {
         self.search_debounce_deadline = None;
         self.search_generation += 1;
         self.thread_list.mode = ThreadListMode::Folder;
-        self.pre_search_threads = None;
+        self.was_in_folder_view = false;
     }
 
     /// Restore the thread list to folder view after clearing search.
+    ///
+    /// Instead of restoring a stale clone of the pre-search thread list,
+    /// this reloads from the database using the current navigation state.
+    /// This avoids the O(n) clone on every search entry and ensures the
+    /// thread list reflects any changes that happened during the search.
     pub(crate) fn restore_folder_view(&mut self) -> Task<Message> {
         self.thread_list.mode = ThreadListMode::Folder;
         self.search_query.clear();
@@ -334,9 +339,9 @@ impl App {
         self.reading_pane.thread_messages.clear();
         self.reading_pane.thread_attachments.clear();
         self.reading_pane.message_expanded.clear();
-        if let Some(threads) = self.pre_search_threads.take() {
-            self.status = format!("{} threads", threads.len());
-            self.thread_list.set_threads(threads);
+        if self.was_in_folder_view {
+            self.was_in_folder_view = false;
+            return self.load_threads_for_current_view();
         }
         Task::none()
     }

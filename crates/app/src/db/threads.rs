@@ -156,7 +156,7 @@ pub async fn persist_attachments_collapsed(
     .map_err(|e| format!("spawn_blocking: {e}"))?
 }
 
-// ── Legacy per-message query methods (used by pop-out and main thread loading) ──
+// ── Thread-level queries (still used by handle_select_thread) ──
 
 impl Db {
     /// Load messages for a thread (used by main window thread selection).
@@ -239,32 +239,30 @@ impl Db {
         })
         .await
     }
+}
 
+// ── Per-message queries — delegated to core ─────────────
+//
+// These thin wrappers call core's `message_queries` module and convert
+// the results into app display types. Raw SQL formerly lived here but
+// has been moved to `crates/core/src/db/queries_extra/message_queries.rs`.
+
+use ratatoskr_core::db::queries_extra::message_queries;
+
+impl Db {
     /// Load body text and HTML for a single message (used by pop-out windows).
     pub async fn load_message_body(
         &self,
         account_id: String,
         message_id: String,
     ) -> Result<(Option<String>, Option<String>), String> {
-        self.with_conn(move |conn| {
-            let result = conn.query_row(
-                "SELECT body_text, body_html FROM messages
-                 WHERE account_id = ?1 AND id = ?2",
-                rusqlite::params![account_id, message_id],
-                |row| {
-                    Ok((
-                        row.get::<_, Option<String>>("body_text")?,
-                        row.get::<_, Option<String>>("body_html")?,
-                    ))
-                },
-            );
-            match result {
-                Ok(pair) => Ok(pair),
-                Err(rusqlite::Error::QueryReturnedNoRows) => Ok((None, None)),
-                Err(e) => Err(e.to_string()),
-            }
+        let conn = self.conn_arc();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+            message_queries::get_message_body(&conn, &account_id, &message_id)
         })
         .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
     }
 
     /// Load attachments for a single message (used by pop-out windows).
@@ -273,29 +271,24 @@ impl Db {
         account_id: String,
         message_id: String,
     ) -> Result<Vec<super::types::MessageViewAttachment>, String> {
-        self.with_conn(move |conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, filename, mime_type, size
-                     FROM attachments
-                     WHERE account_id = ?1 AND message_id = ?2
-                     ORDER BY id ASC",
-                )
-                .map_err(|e| e.to_string())?;
-
-            stmt.query_map(rusqlite::params![account_id, message_id], |row| {
-                Ok(super::types::MessageViewAttachment {
-                    id: row.get("id")?,
-                    filename: row.get("filename")?,
-                    mime_type: row.get("mime_type")?,
-                    size: row.get("size")?,
+        let conn = self.conn_arc();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+            let core_atts = message_queries::get_message_attachments(
+                &conn, &account_id, &message_id,
+            )?;
+            Ok(core_atts
+                .into_iter()
+                .map(|a| super::types::MessageViewAttachment {
+                    id: a.id,
+                    filename: a.filename,
+                    mime_type: a.mime_type,
+                    size: a.size,
                 })
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())
+                .collect())
         })
         .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
     }
 
     /// Load raw email source for a message (used by pop-out Source view).
@@ -304,23 +297,13 @@ impl Db {
         account_id: String,
         message_id: String,
     ) -> Result<String, String> {
-        self.with_conn(move |conn| {
-            let result = conn.query_row(
-                "SELECT raw_source FROM messages
-                 WHERE account_id = ?1 AND id = ?2",
-                rusqlite::params![account_id, message_id],
-                |row| row.get::<_, Option<String>>(0),
-            );
-            match result {
-                Ok(Some(source)) => Ok(source),
-                Ok(None) => Ok("(no source available)".to_string()),
-                Err(rusqlite::Error::QueryReturnedNoRows) => {
-                    Err("Message not found".to_string())
-                }
-                Err(e) => Err(e.to_string()),
-            }
+        let conn = self.conn_arc();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+            message_queries::get_message_raw_source(&conn, &account_id, &message_id)
         })
         .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
     }
 }
 
