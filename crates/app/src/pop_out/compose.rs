@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use iced::widget::{button, column, container, pick_list, row, text, text_input, Space};
+use iced::widget::{button, column, container, mouse_area, pick_list, row, scrollable, text, text_input, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::db::{self, ContactMatch};
@@ -186,6 +186,14 @@ pub enum ComposeMessage {
 
 // ── Autocomplete state ──────────────────────────────────
 
+/// Which recipient field is currently active for autocomplete.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecipientField {
+    To,
+    Cc,
+    Bcc,
+}
+
 /// State for the recipient autocomplete dropdown.
 pub struct AutocompleteState {
     /// Current query being searched.
@@ -196,6 +204,8 @@ pub struct AutocompleteState {
     pub highlighted: Option<usize>,
     /// Generation counter to discard stale results.
     pub search_generation: u64,
+    /// Which recipient field is currently active.
+    pub active_field: RecipientField,
 }
 
 impl AutocompleteState {
@@ -205,6 +215,7 @@ impl AutocompleteState {
             results: Vec::new(),
             highlighted: None,
             search_generation: 0,
+            active_field: RecipientField::To,
         }
     }
 }
@@ -393,6 +404,13 @@ impl ComposeState {
 
 // ── Update ──────────────────────────────────────────────
 
+/// Update compose state for a given message.
+///
+/// NOTE: The caller (`handlers/pop_out.rs`) must check
+/// `handlers::contacts::should_trigger_autocomplete(&msg)` BEFORE calling
+/// this function. If it returns `true`, the caller should call
+/// `handlers::contacts::dispatch_autocomplete_search(db, window_id, state)`
+/// AFTER this function returns, to fire the async DB search.
 pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
     match msg {
         ComposeMessage::SubjectChanged(s) => {
@@ -408,26 +426,38 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
         }
         ComposeMessage::ShowCc => state.show_cc = true,
         ComposeMessage::ShowBcc => state.show_bcc = true,
-        ComposeMessage::ToTokenInput(msg) => {
+        ComposeMessage::ToTokenInput(inner) => {
+            if let TokenInputMessage::TextChanged(ref t) = inner {
+                state.autocomplete.query = t.clone();
+                state.autocomplete.active_field = RecipientField::To;
+            }
             handle_token_input_message(
                 &mut state.to,
-                msg,
+                inner,
                 &mut state.selected_to_token,
             );
             state.draft_dirty = true;
         }
-        ComposeMessage::CcTokenInput(msg) => {
+        ComposeMessage::CcTokenInput(inner) => {
+            if let TokenInputMessage::TextChanged(ref t) = inner {
+                state.autocomplete.query = t.clone();
+                state.autocomplete.active_field = RecipientField::Cc;
+            }
             handle_token_input_message(
                 &mut state.cc,
-                msg,
+                inner,
                 &mut state.selected_cc_token,
             );
             state.draft_dirty = true;
         }
-        ComposeMessage::BccTokenInput(msg) => {
+        ComposeMessage::BccTokenInput(inner) => {
+            if let TokenInputMessage::TextChanged(ref t) = inner {
+                state.autocomplete.query = t.clone();
+                state.autocomplete.active_field = RecipientField::Bcc;
+            }
             handle_token_input_message(
                 &mut state.bcc,
-                msg,
+                inner,
                 &mut state.selected_bcc_token,
             );
             state.draft_dirty = true;
@@ -471,8 +501,13 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                     .filter(|n| !n.is_empty())
                     .unwrap_or(&match_entry.email)
                     .to_string();
-                let id = state.to.next_token_id();
-                state.to.tokens.push(token_input::Token {
+                let target = match state.autocomplete.active_field {
+                    RecipientField::To => &mut state.to,
+                    RecipientField::Cc => &mut state.cc,
+                    RecipientField::Bcc => &mut state.bcc,
+                };
+                let id = target.next_token_id();
+                target.tokens.push(token_input::Token {
                     id,
                     email: match_entry.email,
                     label,
@@ -480,7 +515,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                     group_id: match_entry.group_id,
                     member_count: match_entry.member_count,
                 });
-                state.to.text.clear();
+                target.text.clear();
                 state.autocomplete.results.clear();
                 state.autocomplete.highlighted = None;
                 state.autocomplete.query.clear();
@@ -605,22 +640,22 @@ fn handle_token_input_message(
         TokenInputMessage::ArrowSelectToken(_) => {}
         TokenInputMessage::ArrowToText => {}
         TokenInputMessage::Paste(content) => {
-            // Split pasted text by commas/semicolons and tokenize
-            for part in
-                content.split([',', ';', '\n'])
-            {
-                let trimmed = part.trim();
-                if !trimmed.is_empty() {
-                    let id = value.next_token_id();
-                    value.tokens.push(token_input::Token {
-                        id,
-                        email: trimmed.to_string(),
-                        label: trimmed.to_string(),
-                        is_group: false,
-                        group_id: None,
-                        member_count: None,
-                    });
-                }
+            // Use RFC 5322 parser for proper name + email extraction
+            let parsed = crate::ui::token_input_parse::parse_pasted_addresses(&content);
+            for addr in parsed {
+                let label = addr.display_name.as_deref()
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or(&addr.email)
+                    .to_string();
+                let id = value.next_token_id();
+                value.tokens.push(token_input::Token {
+                    id,
+                    email: addr.email,
+                    label,
+                    is_group: false,
+                    group_id: None,
+                    member_count: None,
+                });
             }
             value.text.clear();
         }
@@ -694,6 +729,13 @@ fn compose_header<'a>(
     // Bcc field (if shown)
     if state.show_bcc {
         fields = fields.push(build_bcc_row(window_id, state));
+    }
+
+    // Autocomplete dropdown (rendered below the active recipient field)
+    if !state.autocomplete.query.is_empty()
+        && !state.autocomplete.results.is_empty()
+    {
+        fields = fields.push(autocomplete_dropdown(window_id, state));
     }
 
     // Subject
@@ -1084,6 +1126,69 @@ fn attachment_list<'a>(
     container(items)
         .padding(PAD_CONTENT)
         .width(Length::Fill)
+        .into()
+}
+
+// ── Autocomplete dropdown ───────────────────────────────
+
+fn autocomplete_dropdown<'a>(
+    window_id: iced::window::Id,
+    state: &'a ComposeState,
+) -> Element<'a, Message> {
+    let mut items = column![].spacing(SPACE_0);
+
+    for (idx, entry) in state.autocomplete.results.iter().enumerate() {
+        let is_highlighted = state.autocomplete.highlighted == Some(idx);
+
+        let display = if let Some(ref name) = entry.display_name {
+            format!("{name} <{}>", entry.email)
+        } else {
+            entry.email.clone()
+        };
+
+        let row_style = if is_highlighted {
+            theme::ButtonClass::Primary.style()
+        } else {
+            theme::ButtonClass::Ghost.style()
+        };
+
+        let row_btn = button(
+            text(display)
+                .size(TEXT_SM),
+        )
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::AutocompleteSelect(idx)),
+        ))
+        .width(Length::Fill)
+        .padding(PAD_INPUT)
+        .style(row_style);
+
+        items = items.push(
+            container(row_btn)
+                .width(Length::Fill)
+                .height(AUTOCOMPLETE_ROW_HEIGHT),
+        );
+    }
+
+    let dropdown = scrollable(items)
+        .height(Length::Shrink);
+
+    // Offset by label width to align with the token input fields
+    let offset_row = row![
+        Space::new().width(COMPOSE_LABEL_WIDTH + SPACE_XS),
+        container(dropdown)
+            .max_height(AUTOCOMPLETE_MAX_HEIGHT)
+            .width(Length::Fill)
+            .style(theme::ContainerClass::Elevated.style()),
+    ];
+
+    // Wrap in a mouse_area to dismiss when clicking outside
+    mouse_area(offset_row)
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::AutocompleteDismiss),
+        ))
         .into()
 }
 
