@@ -1900,45 +1900,64 @@ fn accounts_tab(state: &Settings) -> Element<'_, SettingsMessage> {
         .width(Length::Fill)
         .max_width(SETTINGS_CONTENT_MAX_WIDTH);
 
-    let mut cards: Vec<Element<'_, SettingsMessage>> = Vec::new();
-    for account in &state.managed_accounts {
-        cards.push(account_card(account));
+    // Account cards with drag-to-reorder grip handles.
+    // Wrapped in a single mouse_area so on_move fires continuously during drag.
+    let mut card_col = column![].width(Length::Fill);
+    for (i, account) in state.managed_accounts.iter().enumerate() {
+        if i > 0 {
+            card_col = card_col.push(
+                iced::widget::rule::horizontal(1)
+                    .style(theme::RuleClass::Subtle.style()),
+            );
+        }
+        card_col = card_col.push(account_card(account, i, &state.account_drag));
     }
 
+    let account_list: Element<'_, SettingsMessage> = if state.managed_accounts.len() > 1 {
+        mouse_area(card_col)
+            .on_move(|point| SettingsMessage::AccountDragMove(point))
+            .on_release(SettingsMessage::AccountDragEnd)
+            .on_exit(SettingsMessage::AccountDragEnd)
+            .into()
+    } else {
+        card_col.into()
+    };
+
     // Add Account button at the bottom
-    cards.push(
-        button(
-            container(
-                row![
-                    icon::plus().size(ICON_MD).style(text::base),
-                    text("Add Account")
-                        .size(TEXT_LG)
-                        .style(text::base)
-                        .font(iced::Font {
-                            weight: iced::font::Weight::Bold,
-                            ..crate::font::text()
-                        }),
-                ]
-                .spacing(SPACE_XS)
-                .align_y(Alignment::Center),
-            )
-            .center_x(Length::Fill)
+    let add_btn = button(
+        container(
+            row![
+                icon::plus().size(ICON_MD).style(text::base),
+                text("Add Account")
+                    .size(TEXT_LG)
+                    .style(text::base)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..crate::font::text()
+                    }),
+            ]
+            .spacing(SPACE_XS)
             .align_y(Alignment::Center),
         )
-        .on_press(SettingsMessage::AddAccountFromSettings)
-        .padding(PAD_SETTINGS_ROW)
-        .style(theme::ButtonClass::Action.style())
-        .width(Length::Fill)
-        .height(SETTINGS_ROW_HEIGHT)
-        .into(),
-    );
+        .center_x(Length::Fill)
+        .align_y(Alignment::Center),
+    )
+    .on_press(SettingsMessage::AddAccountFromSettings)
+    .padding(PAD_SETTINGS_ROW)
+    .style(theme::ButtonClass::Action.style())
+    .width(Length::Fill)
+    .height(SETTINGS_ROW_HEIGHT);
 
-    col = col.push(section("Accounts", cards));
+    col = col.push(section("Accounts", vec![account_list, add_btn.into()]));
 
     col.into()
 }
 
-fn account_card(account: &ManagedAccount) -> Element<'_, SettingsMessage> {
+fn account_card<'a>(
+    account: &'a ManagedAccount,
+    index: usize,
+    drag: &'a Option<AccountDragState>,
+) -> Element<'a, SettingsMessage> {
     let name = account
         .account_name
         .as_deref()
@@ -1947,6 +1966,20 @@ fn account_card(account: &ManagedAccount) -> Element<'_, SettingsMessage> {
 
     let provider_label = format_provider_label(&account.provider);
     let sync_label = format_last_sync(account.last_sync_at);
+
+    // Grip handle for drag-to-reorder
+    let grip_slot = mouse_area(
+        container(
+            icon::grip_vertical()
+                .size(ICON_MD)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .width(GRIP_SLOT_WIDTH)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center),
+    )
+    .on_press(SettingsMessage::AccountGripPress(index))
+    .interaction(iced::mouse::Interaction::Grab);
 
     let mut left = row![].spacing(SPACE_SM).align_y(Alignment::Center);
 
@@ -1980,6 +2013,7 @@ fn account_card(account: &ManagedAccount) -> Element<'_, SettingsMessage> {
     .align_x(Alignment::End);
 
     let content = row![
+        grip_slot,
         left,
         right,
         container(icon::chevron_right().size(ICON_XL).style(text::secondary))
@@ -1988,19 +2022,28 @@ fn account_card(account: &ManagedAccount) -> Element<'_, SettingsMessage> {
     .spacing(SPACE_SM)
     .align_y(Alignment::Center);
 
+    let is_being_dragged = drag
+        .as_ref()
+        .is_some_and(|d| d.dragging_index == index && d.is_dragging);
+
     let id = account.id.clone();
-    button(
-        container(content)
-            .padding(PAD_SETTINGS_ROW)
-            .width(Length::Fill)
-            .height(SETTINGS_TOGGLE_ROW_HEIGHT)
-            .align_y(Alignment::Center),
-    )
-    .on_press(SettingsMessage::AccountCardClicked(id))
-    .padding(0)
-    .style(theme::ButtonClass::Action.style())
-    .width(Length::Fill)
-    .into()
+    let mut inner_container = container(content)
+        .padding(PAD_SETTINGS_ROW)
+        .width(Length::Fill)
+        .height(SETTINGS_TOGGLE_ROW_HEIGHT)
+        .align_y(Alignment::Center);
+
+    if is_being_dragged {
+        inner_container =
+            inner_container.style(theme::ContainerClass::DraggingRow.style());
+    }
+
+    button(inner_container)
+        .on_press(SettingsMessage::AccountCardClicked(id))
+        .padding(0)
+        .style(theme::ButtonClass::Action.style())
+        .width(Length::Fill)
+        .into()
 }
 
 /// A tiny colored dot indicating account health.

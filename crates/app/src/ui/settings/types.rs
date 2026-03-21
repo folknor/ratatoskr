@@ -82,6 +82,9 @@ pub enum SettingsMessage {
     // Accounts tab
     AddAccountFromSettings,
     AccountCardClicked(String),
+    AccountGripPress(usize),
+    AccountDragMove(Point),
+    AccountDragEnd,
     CloseAccountEditor,
     SaveAccountEditor,
     AccountNameEditorChanged(String),
@@ -181,6 +184,9 @@ pub enum SettingsEvent {
     LoadGroups(String),
     /// Request the App to load group members by group ID.
     LoadGroupMembers(String),
+    /// Request the App to persist reordered account sort orders.
+    /// Vec of (account_id, new_sort_order).
+    ReorderAccounts(Vec<(String, i64)>),
 }
 
 /// Overlays that slide in from the right, covering the settings content.
@@ -406,6 +412,7 @@ pub struct Settings {
     pub demo_filters: Vec<EditableItem>,
     // Accounts tab
     pub managed_accounts: Vec<ManagedAccount>,
+    pub account_drag: Option<AccountDragState>,
     pub editing_account: Option<AccountEditor>,
     // Signatures
     pub signatures: Vec<SignatureEntry>,
@@ -505,6 +512,16 @@ pub struct DragState {
 /// Minimum Y movement before a grip press becomes a drag.
 pub(super) const DRAG_START_THRESHOLD: f32 = 4.0;
 
+/// State for an active account card drag operation.
+#[derive(Debug, Clone)]
+pub struct AccountDragState {
+    pub dragging_index: usize,
+    /// Y coordinate when the grip was pressed (list-relative, set on first move).
+    pub start_y: f32,
+    /// Whether the mouse has moved far enough to count as a real drag.
+    pub is_dragging: bool,
+}
+
 /// An item in an editable list.
 #[derive(Debug, Clone)]
 pub struct EditableItem {
@@ -580,6 +597,7 @@ impl Default for Settings {
                 EditableItem { label: "Star from VIPs".into(), enabled: Some(true) },
             ],
             managed_accounts: Vec::new(),
+            account_drag: None,
             editing_account: None,
             signatures: Vec::new(),
             signature_editor: None,

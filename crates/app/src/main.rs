@@ -1140,6 +1140,9 @@ impl App {
             SettingsEvent::SaveGroup(group, members) => self.handle_save_group(group, members),
             SettingsEvent::DeleteGroup(id) => self.handle_delete_group(id),
             SettingsEvent::LoadGroupMembers(group_id) => self.handle_load_group_members(group_id),
+            SettingsEvent::ReorderAccounts(orders) => {
+                self.handle_reorder_accounts(orders)
+            }
         }
     }
 
@@ -1254,6 +1257,31 @@ impl App {
                         param_vals.iter().map(AsRef::as_ref).collect();
                     conn.execute(&sql, param_refs.as_slice())
                         .map_err(|e| e.to_string())?;
+                    Ok(())
+                })
+                .await
+            },
+            Message::AccountUpdated,
+        )
+    }
+
+    fn handle_reorder_accounts(
+        &mut self,
+        orders: Vec<(String, i64)>,
+    ) -> Task<Message> {
+        let db = Arc::clone(&self.db);
+        Task::perform(
+            async move {
+                db.with_write_conn(move |conn| {
+                    let mut stmt = conn
+                        .prepare(
+                            "UPDATE accounts SET sort_order = ?1 WHERE id = ?2",
+                        )
+                        .map_err(|e| e.to_string())?;
+                    for (account_id, sort_order) in &orders {
+                        stmt.execute(rusqlite::params![sort_order, account_id])
+                            .map_err(|e| e.to_string())?;
+                    }
                     Ok(())
                 })
                 .await
