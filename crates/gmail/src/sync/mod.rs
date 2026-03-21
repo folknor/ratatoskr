@@ -60,6 +60,7 @@ pub async fn gmail_initial_sync(
 }
 
 async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), String> {
+    log::info!("[Gmail] Starting initial sync for account {} (days_back={days_back})", ctx.account_id);
     // Phase 1: Sync labels
     emit_progress(ctx, "labels", 0, 1);
     labels::sync_labels(ctx).await?;
@@ -99,6 +100,7 @@ async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), Strin
     }
 
     let total = thread_ids.len() as u64;
+    log::info!("[Gmail] Initial sync complete for account {}: {} threads synced", ctx.account_id, total);
     emit_progress(ctx, "done", total, total);
     Ok(())
 }

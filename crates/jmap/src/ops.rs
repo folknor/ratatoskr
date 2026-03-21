@@ -335,6 +335,7 @@ impl ProviderOps for JmapOps {
         _thread_id: Option<&str>,
         _mentions: &[(String, String)],
     ) -> Result<String, ProviderError> {
+        log::info!("[JMAP] Sending email");
         self.client.ensure_valid_token().await?;
         let patched = ratatoskr_provider_utils::headers::inject_read_receipt_header_base64url(raw_base64url)?;
         let raw_bytes = ratatoskr_provider_utils::encoding::decode_base64url_nopad(&patched)?;
@@ -389,9 +390,13 @@ impl ProviderOps for JmapOps {
 
         let email_id = import_response
             .created(&import_create_id)
-            .map_err(|e| ProviderError::Server(format!("Email/import: {e}")))?
+            .map_err(|e| {
+                log::error!("[JMAP] Send email failed: {e}");
+                ProviderError::Server(format!("Email/import: {e}"))
+            })?
             .take_id();
 
+        log::info!("[JMAP] Email sent successfully, email_id={email_id}");
         Ok(email_id)
     }
 

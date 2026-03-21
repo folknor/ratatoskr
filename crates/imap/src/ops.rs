@@ -618,11 +618,14 @@ impl ProviderOps for ImapOps {
             .unwrap_or_else(|| "Sent".to_string());
 
         // Inject read-receipt header and send via SMTP
+        log::info!("[IMAP] Sending email via SMTP for account {}", ctx.account_id);
         let patched = ratatoskr_provider_utils::headers::inject_read_receipt_header_base64url(raw_base64url)?;
         let result = smtp::client::send_raw_email(&smtp_config, &patched).await?;
         if !result.success {
+            log::error!("[IMAP] SMTP send failed for account {}: {}", ctx.account_id, result.message);
             return Err(ProviderError::Server(format!("SMTP send failed: {}", result.message)));
         }
+        log::info!("[IMAP] Email sent successfully via SMTP for account {}", ctx.account_id);
 
         let message_id = format!(
             "imap-sent-{}-{}",

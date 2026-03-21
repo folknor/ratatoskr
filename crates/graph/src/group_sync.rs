@@ -184,6 +184,7 @@ pub(crate) async fn sync_exchange_groups(
     db: &DbState,
     account_id: &str,
 ) -> Result<usize, String> {
+    log::debug!("[Graph] Syncing Exchange groups for account {account_id}");
     let groups = fetch_user_groups(client, db).await?;
     if groups.is_empty() {
         // Prune any previously synced groups for this account

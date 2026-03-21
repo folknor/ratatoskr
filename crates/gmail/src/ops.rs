@@ -210,11 +210,17 @@ impl ProviderOps for GmailOps {
         thread_id: Option<&str>,
         _mentions: &[(String, String)],
     ) -> Result<String, ProviderError> {
+        log::info!("[Gmail] Sending email for account {}", ctx.account_id);
         let patched = ratatoskr_provider_utils::headers::inject_read_receipt_header_base64url(raw_base64url)?;
         let msg = self
             .client
             .send_message(&patched, thread_id, ctx.db)
-            .await?;
+            .await
+            .map_err(|e| {
+                log::error!("[Gmail] Send email failed for account {}: {e}", ctx.account_id);
+                e
+            })?;
+        log::info!("[Gmail] Email sent successfully, message_id={}", msg.id);
         Ok(msg.id)
     }
 

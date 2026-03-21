@@ -78,6 +78,7 @@ pub async fn create_upload_session(
     filename: &str,
     db: &DbState,
 ) -> Result<UploadSession, String> {
+    log::debug!("[OneDrive] Creating upload session for '{filename}'");
     let encoded_path = encode_onedrive_path(filename);
     let path = format!(
         "/me/drive/root:/Ratatoskr Attachments/{encoded_path}:/createUploadSession"

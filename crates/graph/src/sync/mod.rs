@@ -63,6 +63,7 @@ pub(crate) async fn graph_initial_sync(
         progress: ctx.progress,
     };
 
+    log::info!("[Graph] Starting initial sync for account {} (days_back={days_back})", ctx.account_id);
     // Phase 1: Sync folders → labels → build folder map
     emit_progress(&sctx, "folders", "", 0, 1, 0);
 
@@ -153,6 +154,10 @@ pub(crate) async fn graph_initial_sync(
         .with_conn(move |conn| ratatoskr_sync::pipeline::mark_initial_sync_completed(conn, &aid))
         .await?;
 
+    log::info!(
+        "[Graph] Initial sync complete for account {}: {} folders, {} messages",
+        ctx.account_id, total_folders, total_messages
+    );
     emit_progress(
         &sctx,
         "done",
@@ -194,10 +199,12 @@ pub(crate) async fn graph_delta_sync(
     };
 
     let cycle = client.increment_sync_cycle();
+    log::info!("[Graph] Starting delta sync for account {} (cycle={cycle})", ctx.account_id);
 
     // Load stored delta tokens
     let mut tokens = load_delta_tokens(client, ctx.db, ctx.account_id).await?;
     if tokens.is_empty() {
+        log::error!("[Graph] No delta tokens for account {} — run initial sync first", ctx.account_id);
         return Err("GRAPH_NO_DELTA_STATE".to_string());
     }
 
@@ -309,6 +316,11 @@ pub(crate) async fn graph_delta_sync(
             log::warn!("Graph calendar delta sync failed (non-fatal): {e}");
         }
     }
+
+    log::info!(
+        "[Graph] Delta sync complete for account {}: {} new inbox, {} threads affected",
+        ctx.account_id, new_inbox_ids.len(), affected_thread_ids.len()
+    );
 
     Ok(SyncResult {
         new_inbox_message_ids: new_inbox_ids,

@@ -14,13 +14,19 @@ pub(super) async fn send_via_draft(
     thread_id: Option<&str>,
     mentions: &[(String, String)],
 ) -> Result<String, String> {
+    log::info!("[Graph] Sending email for account {}", ctx.account_id);
     let draft_id = create_draft_impl(client, ctx, raw_base64url, thread_id, mentions).await?;
     // Send the draft — no response body (202 Accepted)
     let enc_draft_id = urlencoding::encode(&draft_id);
     let me = client.api_path_prefix();
     client
         .post_no_content::<()>(&format!("{me}/messages/{enc_draft_id}/send"), None, ctx.db)
-        .await?;
+        .await
+        .map_err(|e| {
+            log::error!("[Graph] Send email failed for account {}: {e}", ctx.account_id);
+            e
+        })?;
+    log::info!("[Graph] Email sent successfully, draft_id={draft_id}");
     Ok(draft_id)
 }
 
