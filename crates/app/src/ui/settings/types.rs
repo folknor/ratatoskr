@@ -124,6 +124,16 @@ pub enum SettingsMessage {
     ContactCreate,
     ContactSaved(Result<(), String>),
     ContactDeleted(Result<(), String>),
+    // Contact Import
+    ImportContactsOpen,
+    ImportFileSelected(String, Vec<u8>),
+    ImportMappingChanged(usize, ImportContactField),
+    ImportToggleHeader(bool),
+    ImportToggleUpdateExisting(bool),
+    ImportAccountChanged(Option<String>),
+    ImportExecute,
+    ImportExecuted(Result<ImportResult, String>),
+    ImportBack,
     // Groups
     GroupFilterChanged(String),
     GroupsLoaded(Result<Vec<crate::db::GroupEntry>, String>),
@@ -189,6 +199,12 @@ pub enum SettingsEvent {
     LoadGroups(String),
     /// Request the App to load group members by group ID.
     LoadGroupMembers(String),
+    /// Request the App to execute a contact import.
+    ExecuteContactImport {
+        contacts: Vec<ratatoskr_contact_import::ImportedContact>,
+        account_id: Option<String>,
+        update_existing: bool,
+    },
 }
 
 /// Overlays that slide in from the right, covering the settings content.
@@ -210,6 +226,7 @@ pub enum SettingsOverlay {
         /// None for new group, Some for editing existing.
         group_id: Option<String>,
     },
+    ImportContacts,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -371,6 +388,156 @@ pub struct GroupEditorState {
     pub filter: String,
 }
 
+/// Re-export of `ContactField` from the import crate, used in settings messages.
+/// We wrap it to derive the traits needed for iced messages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportContactField {
+    DisplayName,
+    FirstName,
+    LastName,
+    Email,
+    Email2,
+    Phone,
+    Company,
+    Notes,
+    Group,
+    Ignore,
+}
+
+impl ImportContactField {
+    pub const ALL_OPTIONS: &[ImportContactField] = &[
+        ImportContactField::Ignore,
+        ImportContactField::DisplayName,
+        ImportContactField::FirstName,
+        ImportContactField::LastName,
+        ImportContactField::Email,
+        ImportContactField::Email2,
+        ImportContactField::Phone,
+        ImportContactField::Company,
+        ImportContactField::Notes,
+        ImportContactField::Group,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ImportContactField::DisplayName => "Name",
+            ImportContactField::FirstName => "First Name",
+            ImportContactField::LastName => "Last Name",
+            ImportContactField::Email => "Email",
+            ImportContactField::Email2 => "Email 2",
+            ImportContactField::Phone => "Phone",
+            ImportContactField::Company => "Company",
+            ImportContactField::Notes => "Notes",
+            ImportContactField::Group => "Group",
+            ImportContactField::Ignore => "Ignore",
+        }
+    }
+
+    /// Convert to the import crate's `ContactField`.
+    pub fn to_import_field(self) -> ratatoskr_contact_import::ContactField {
+        match self {
+            ImportContactField::DisplayName => ratatoskr_contact_import::ContactField::DisplayName,
+            ImportContactField::FirstName => ratatoskr_contact_import::ContactField::FirstName,
+            ImportContactField::LastName => ratatoskr_contact_import::ContactField::LastName,
+            ImportContactField::Email => ratatoskr_contact_import::ContactField::Email,
+            ImportContactField::Email2 => ratatoskr_contact_import::ContactField::Email2,
+            ImportContactField::Phone => ratatoskr_contact_import::ContactField::Phone,
+            ImportContactField::Company => ratatoskr_contact_import::ContactField::Company,
+            ImportContactField::Notes => ratatoskr_contact_import::ContactField::Notes,
+            ImportContactField::Group => ratatoskr_contact_import::ContactField::Group,
+            ImportContactField::Ignore => ratatoskr_contact_import::ContactField::Ignore,
+        }
+    }
+
+    /// Convert from the import crate's `ContactField`.
+    pub fn from_import_field(field: ratatoskr_contact_import::ContactField) -> Self {
+        match field {
+            ratatoskr_contact_import::ContactField::DisplayName => ImportContactField::DisplayName,
+            ratatoskr_contact_import::ContactField::FirstName => ImportContactField::FirstName,
+            ratatoskr_contact_import::ContactField::LastName => ImportContactField::LastName,
+            ratatoskr_contact_import::ContactField::Email => ImportContactField::Email,
+            ratatoskr_contact_import::ContactField::Email2 => ImportContactField::Email2,
+            ratatoskr_contact_import::ContactField::Phone => ImportContactField::Phone,
+            ratatoskr_contact_import::ContactField::Company => ImportContactField::Company,
+            ratatoskr_contact_import::ContactField::Notes => ImportContactField::Notes,
+            ratatoskr_contact_import::ContactField::Group => ImportContactField::Group,
+            ratatoskr_contact_import::ContactField::Ignore => ImportContactField::Ignore,
+        }
+    }
+}
+
+impl std::fmt::Display for ImportContactField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+/// The current step of the import wizard.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportStep {
+    /// Waiting for file selection.
+    FileSelect,
+    /// Column mapping + preview (CSV only).
+    Mapping,
+    /// Preview for vCard imports (no mapping needed).
+    VcfPreview,
+    /// Import is running.
+    Importing,
+    /// Import complete — show summary.
+    Summary,
+}
+
+/// Result of an import operation.
+#[derive(Debug, Clone)]
+pub struct ImportResult {
+    pub imported: usize,
+    pub skipped_no_email: usize,
+    pub skipped_duplicate: usize,
+    pub updated: usize,
+    pub groups_created: usize,
+}
+
+/// State for the contact import wizard.
+#[derive(Debug, Clone)]
+pub struct ImportWizardState {
+    pub step: ImportStep,
+    /// Selected file path (display only).
+    pub file_path: Option<String>,
+    /// Parsed import source.
+    pub source: Option<ratatoskr_contact_import::ImportSource>,
+    /// Preview data (for CSV).
+    pub preview: Option<ratatoskr_contact_import::ImportPreview>,
+    /// Column mappings (one per header column).
+    pub mappings: Vec<ImportContactField>,
+    /// Whether the first row is treated as a header.
+    pub has_header: bool,
+    /// Parsed vCard contacts (for VCF files).
+    pub vcf_contacts: Vec<ratatoskr_contact_import::ImportedContact>,
+    /// Target account for import.
+    pub account_id: Option<String>,
+    /// Whether to update existing contacts on duplicate email.
+    pub update_existing: bool,
+    /// Import result after completion.
+    pub result: Option<ImportResult>,
+}
+
+impl ImportWizardState {
+    pub fn new() -> Self {
+        Self {
+            step: ImportStep::FileSelect,
+            file_path: None,
+            source: None,
+            preview: None,
+            mappings: Vec::new(),
+            has_header: true,
+            vcf_contacts: Vec::new(),
+            account_id: None,
+            update_existing: false,
+            result: None,
+        }
+    }
+}
+
 pub struct Settings {
     pub active_tab: Tab,
     pub open_select: Option<SelectField>,
@@ -447,6 +614,8 @@ pub struct Settings {
     pub group_editor: Option<GroupEditorState>,
     /// Pending group delete ID awaiting confirmation.
     pub confirm_delete_group: Option<String>,
+    // Contact import wizard
+    pub import_wizard: Option<ImportWizardState>,
 }
 
 /// An account card in the settings list.
@@ -616,6 +785,7 @@ impl Default for Settings {
             groups: Vec::new(),
             group_editor: None,
             confirm_delete_group: None,
+            import_wizard: None,
         }
     }
 }

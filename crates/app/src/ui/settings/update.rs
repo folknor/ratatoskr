@@ -91,7 +91,7 @@ impl Component for Settings {
                             signature_id: Some(sig.id.clone()),
                             account_id: sig.account_id.clone(),
                             name: UndoableText::with_initial(&sig.name),
-                            body_editor: ratatoskr_rich_text_editor::EditorState::from_html(&sig.body_html),
+                            body: UndoableText::with_initial(&sig.body_html),
                             is_default: sig.is_default,
                             is_reply_default: sig.is_reply_default,
                         });
@@ -118,24 +118,6 @@ impl Component for Settings {
             }
             SettingsMessage::ListDragMove(list_id, point) => {
                 return (self.handle_drag_move(list_id, point), None);
-            }
-            SettingsMessage::SignatureDragMove(point) => {
-                return (Task::none(), self.handle_signature_drag_move(point));
-            }
-            SettingsMessage::SignatureDragEnd => {
-                let was_dragging = self.signature_drag.as_ref().is_some_and(|d| d.is_dragging);
-                let account_id = self.signature_drag.as_ref().map(|d| d.account_id.clone());
-                self.signature_drag = None;
-                if was_dragging {
-                    if let Some(aid) = account_id {
-                        let ordered_ids: Vec<String> = self.signatures.iter()
-                            .filter(|s| s.account_id == aid)
-                            .map(|s| s.id.clone())
-                            .collect();
-                        return (Task::none(), Some(SettingsEvent::ReorderSignatures(ordered_ids)));
-                    }
-                }
-                return (Task::none(), None);
             }
             SettingsMessage::SelectTab(Tab::People) => {
                 self.active_tab = Tab::People;
@@ -173,6 +155,85 @@ impl Component for Settings {
             }
             SettingsMessage::GroupCancelDelete => {
                 self.confirm_delete_group = None;
+                return (Task::none(), None);
+            }
+            SettingsMessage::ImportContactsOpen => {
+                self.import_wizard = Some(ImportWizardState::new());
+                self.overlay = Some(SettingsOverlay::ImportContacts);
+                self.overlay_anim.go_mut(true, Instant::now());
+                return (Task::none(), None);
+            }
+            SettingsMessage::ImportFileSelected(path, data) => {
+                return (self.handle_import_file_selected(path, data), None);
+            }
+            SettingsMessage::ImportMappingChanged(index, field) => {
+                if let Some(ref mut wizard) = self.import_wizard {
+                    if let Some(mapping) = wizard.mappings.get_mut(index) {
+                        *mapping = field;
+                    }
+                }
+                return (Task::none(), None);
+            }
+            SettingsMessage::ImportToggleHeader(has_header) => {
+                return (self.handle_import_toggle_header(has_header), None);
+            }
+            SettingsMessage::ImportToggleUpdateExisting(update) => {
+                if let Some(ref mut wizard) = self.import_wizard {
+                    wizard.update_existing = update;
+                }
+                return (Task::none(), None);
+            }
+            SettingsMessage::ImportAccountChanged(account_id) => {
+                if let Some(ref mut wizard) = self.import_wizard {
+                    wizard.account_id = account_id;
+                }
+                return (Task::none(), None);
+            }
+            SettingsMessage::ImportExecute => {
+                return self.handle_import_execute();
+            }
+            SettingsMessage::ImportExecuted(result) => {
+                if let Some(ref mut wizard) = self.import_wizard {
+                    match result {
+                        Ok(import_result) => {
+                            wizard.result = Some(import_result);
+                            wizard.step = ImportStep::Summary;
+                        }
+                        Err(e) => {
+                            eprintln!("Import failed: {e}");
+                            wizard.step = ImportStep::Summary;
+                            wizard.result = Some(ImportResult {
+                                imported: 0,
+                                skipped_no_email: 0,
+                                skipped_duplicate: 0,
+                                updated: 0,
+                                groups_created: 0,
+                            });
+                        }
+                    }
+                }
+                return (Task::none(), None);
+            }
+            SettingsMessage::ImportBack => {
+                if let Some(ref mut wizard) = self.import_wizard {
+                    match wizard.step {
+                        ImportStep::Mapping | ImportStep::VcfPreview => {
+                            wizard.step = ImportStep::FileSelect;
+                            wizard.source = None;
+                            wizard.preview = None;
+                            wizard.mappings.clear();
+                            wizard.vcf_contacts.clear();
+                        }
+                        ImportStep::Summary => {
+                            // Close the wizard
+                            self.import_wizard = None;
+                            self.overlay = None;
+                            self.overlay_anim.go_mut(false, Instant::now());
+                            return (Task::none(), Some(SettingsEvent::LoadContacts(self.contact_filter.clone())));
+                        }
+                        _ => {}
+                    }
+                }
                 return (Task::none(), None);
             }
             SettingsMessage::ContactFilterChanged(v) => {
@@ -292,18 +353,6 @@ impl Settings {
                 });
             }
             SettingsMessage::ListDragEnd(_) => self.drag_state = None,
-            SettingsMessage::SignatureDragGripPress(index) => {
-                // Find the account_id for the signature at this index.
-                if let Some(sig) = self.signatures.get(index) {
-                    self.signature_drag = Some(SignatureDragState {
-                        account_id: sig.account_id.clone(),
-                        dragging_index: index,
-                        start_y: -1.0,
-                        is_dragging: false,
-                    });
-                }
-            }
-            // SignatureDragEnd is handled in update() above (needs to emit events).
             SettingsMessage::ListRowClick(list_id, index) => {
                 if self.drag_state.is_none() {
                     let items = self.list_items_mut(&list_id);
@@ -370,7 +419,7 @@ impl Settings {
                         signature_id: Some(sig.id.clone()),
                         account_id: sig.account_id.clone(),
                         name: UndoableText::with_initial(&sig.name),
-                        body_editor: ratatoskr_rich_text_editor::EditorState::from_html(&sig.body_html),
+                        body: UndoableText::with_initial(&sig.body_html),
                         is_default: sig.is_default,
                         is_reply_default: sig.is_reply_default,
                     });
@@ -386,7 +435,7 @@ impl Settings {
                     signature_id: None,
                     account_id: account_id.clone(),
                     name: UndoableText::new(),
-                    body_editor: ratatoskr_rich_text_editor::EditorState::new(),
+                    body: UndoableText::new(),
                     is_default: false,
                     is_reply_default: false,
                 });
@@ -401,12 +450,9 @@ impl Settings {
                     editor.name.set_text(v);
                 }
             }
-            SettingsMessage::SignatureEditorBodyChanged(_) => {
-                // Kept for backwards compat; body now uses the rich text editor.
-            }
-            SettingsMessage::SignatureEditorAction(action) => {
+            SettingsMessage::SignatureEditorBodyChanged(v) => {
                 if let Some(ref mut editor) = self.signature_editor {
-                    editor.body_editor.perform(action);
+                    editor.body.set_text(v);
                 }
             }
             SettingsMessage::SignatureEditorToggleDefault(v) => {
@@ -430,6 +476,7 @@ impl Settings {
                 self.editing_account = None;
                 self.contact_editor = None;
                 self.group_editor = None;
+                self.import_wizard = None;
             }
             SettingsMessage::ContactsLoaded(Ok(contacts)) => {
                 self.contacts = contacts;
@@ -549,6 +596,9 @@ impl Settings {
             InputField::SignatureName => {
                 if let Some(ref mut editor) = self.signature_editor { editor.name.undo(); }
             }
+            InputField::SignatureBody => {
+                if let Some(ref mut editor) = self.signature_editor { editor.body.undo(); }
+            }
         }
     }
 
@@ -560,6 +610,9 @@ impl Settings {
             InputField::OllamaModel => { self.ai_ollama_model.redo(); }
             InputField::SignatureName => {
                 if let Some(ref mut editor) = self.signature_editor { editor.name.redo(); }
+            }
+            InputField::SignatureBody => {
+                if let Some(ref mut editor) = self.signature_editor { editor.body.redo(); }
             }
         }
     }
@@ -576,7 +629,7 @@ impl Settings {
             id: editor.signature_id.clone(),
             account_id: editor.account_id.clone(),
             name,
-            body_html: editor.body_editor.to_html(),
+            body_html: editor.body.text().to_string(),
             is_default: editor.is_default,
             is_reply_default: editor.is_reply_default,
         };
@@ -709,54 +762,139 @@ impl Settings {
         (Task::none(), Some(SettingsEvent::DeleteGroup(id)))
     }
 
-    fn handle_signature_drag_move(&mut self, point: Point) -> Option<SettingsEvent> {
-        let Some(ref mut drag) = self.signature_drag else {
-            return None;
+    fn handle_import_file_selected(&mut self, path: String, data: Vec<u8>) -> Task<SettingsMessage> {
+        let Some(ref mut wizard) = self.import_wizard else {
+            return Task::none();
         };
 
-        if drag.start_y < 0.0 {
-            drag.start_y = point.y;
-            return None;
-        }
+        // Detect format from extension
+        let lower_path = path.to_lowercase();
+        let format = if lower_path.ends_with(".vcf") || lower_path.ends_with(".vcard") {
+            ratatoskr_contact_import::ImportFormat::Vcf
+        } else {
+            ratatoskr_contact_import::ImportFormat::Csv
+        };
 
-        if !drag.is_dragging {
-            if (point.y - drag.start_y).abs() < DRAG_START_THRESHOLD {
-                return None;
+        let source = ratatoskr_contact_import::ImportSource {
+            format,
+            data,
+            filename: path.clone(),
+        };
+
+        match format {
+            ratatoskr_contact_import::ImportFormat::Csv => {
+                match ratatoskr_contact_import::parse_csv(&source, 20) {
+                    Ok(preview) => {
+                        let auto_mappings = ratatoskr_contact_import::auto_detect_mappings(&preview.headers);
+                        wizard.mappings = auto_mappings
+                            .iter()
+                            .map(|m| ImportContactField::from_import_field(m.target_field))
+                            .collect();
+                        wizard.has_header = preview.has_header;
+                        wizard.preview = Some(preview);
+                        wizard.source = Some(source);
+                        wizard.file_path = Some(path);
+                        wizard.step = ImportStep::Mapping;
+                    }
+                    Err(e) => {
+                        eprintln!("CSV parse error: {e}");
+                    }
+                }
             }
-            drag.is_dragging = true;
-        }
-
-        let row_step = SETTINGS_ROW_HEIGHT + 1.0;
-        let account_id = drag.account_id.clone();
-        let from = drag.dragging_index;
-
-        // Get indices of signatures belonging to this account.
-        let account_indices: Vec<usize> = self.signatures.iter()
-            .enumerate()
-            .filter(|(_, s)| s.account_id == account_id)
-            .map(|(i, _)| i)
-            .collect();
-        let count = account_indices.len();
-        if count <= 1 {
-            return None;
-        }
-
-        // Find position within account group.
-        let local_from = account_indices.iter().position(|&i| i == from)?;
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let local_target = ((point.y / row_step).max(0.0) as usize).min(count.saturating_sub(1));
-
-        if local_target != local_from {
-            let global_from = account_indices[local_from];
-            let global_target = account_indices[local_target];
-            self.signatures.swap(global_from, global_target);
-            if let Some(ref mut d) = self.signature_drag {
-                d.dragging_index = global_target;
+            ratatoskr_contact_import::ImportFormat::Vcf => {
+                match ratatoskr_contact_import::parse_vcf(&source.data) {
+                    Ok(contacts) => {
+                        wizard.vcf_contacts = contacts;
+                        wizard.source = Some(source);
+                        wizard.file_path = Some(path);
+                        wizard.step = ImportStep::VcfPreview;
+                    }
+                    Err(e) => {
+                        eprintln!("VCF parse error: {e}");
+                    }
+                }
             }
         }
 
-        // On drag end, emit reorder event with ordered IDs.
-        None
+        Task::none()
+    }
+
+    fn handle_import_toggle_header(&mut self, has_header: bool) -> Task<SettingsMessage> {
+        let Some(ref mut wizard) = self.import_wizard else {
+            return Task::none();
+        };
+        wizard.has_header = has_header;
+
+        // Re-parse with new header setting
+        if let Some(ref source) = wizard.source {
+            if source.format == ratatoskr_contact_import::ImportFormat::Csv {
+                if let Ok(preview) = ratatoskr_contact_import::csv_parser::parse_csv_with_header(source, 20, has_header) {
+                    let auto_mappings = ratatoskr_contact_import::auto_detect_mappings(&preview.headers);
+                    wizard.mappings = auto_mappings
+                        .iter()
+                        .map(|m| ImportContactField::from_import_field(m.target_field))
+                        .collect();
+                    wizard.preview = Some(preview);
+                }
+            }
+        }
+
+        Task::none()
+    }
+
+    fn handle_import_execute(&mut self) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
+        let Some(ref mut wizard) = self.import_wizard else {
+            return (Task::none(), None);
+        };
+
+        let contacts: Vec<ratatoskr_contact_import::ImportedContact> = match wizard.source.as_ref().map(|s| s.format) {
+            Some(ratatoskr_contact_import::ImportFormat::Csv) => {
+                let Some(ref source) = wizard.source else {
+                    return (Task::none(), None);
+                };
+                let mappings: Vec<ratatoskr_contact_import::ColumnMapping> = wizard.mappings
+                    .iter()
+                    .enumerate()
+                    .map(|(i, field)| {
+                        let header = wizard.preview
+                            .as_ref()
+                            .and_then(|p| p.headers.get(i))
+                            .cloned()
+                            .unwrap_or_default();
+                        ratatoskr_contact_import::ColumnMapping {
+                            source_index: i,
+                            source_column: header,
+                            target_field: field.to_import_field(),
+                        }
+                    })
+                    .collect();
+                match ratatoskr_contact_import::csv_parser::execute_csv_import(
+                    source,
+                    &mappings,
+                    wizard.has_header,
+                ) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("CSV import error: {e}");
+                        return (Task::none(), None);
+                    }
+                }
+            }
+            Some(ratatoskr_contact_import::ImportFormat::Vcf) => {
+                wizard.vcf_contacts.clone()
+            }
+            None => return (Task::none(), None),
+        };
+
+        wizard.step = ImportStep::Importing;
+        let account_id = wizard.account_id.clone();
+        let update_existing = wizard.update_existing;
+
+        (Task::none(), Some(SettingsEvent::ExecuteContactImport {
+            contacts,
+            account_id,
+            update_existing,
+        }))
     }
 
     pub(super) fn list_items_mut(&mut self, list_id: &str) -> &mut Vec<EditableItem> {

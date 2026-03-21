@@ -22,7 +22,11 @@ members = [
     "crates/imap",
     "crates/system-fonts",
     "crates/rich-text-editor",
+<<<<<<< HEAD
     "crates/iced-drop",
+=======
+    "crates/contact-import",
+>>>>>>> worktree-agent-ae01e4d5
 ]
 
 exclude = [

@@ -95,6 +95,125 @@ impl App {
             move |result| Message::Settings(SettingsMessage::GroupMembersLoaded(gid.clone(), result)),
         )
     }
+
+    pub(crate) fn handle_import_contacts(
+        &self,
+        contacts: Vec<ratatoskr_contact_import::ImportedContact>,
+        account_id: Option<String>,
+        update_existing: bool,
+    ) -> Task<Message> {
+        let db = Arc::clone(&self.db);
+        Task::perform(
+            async move {
+                execute_contact_import(&db, contacts, account_id, update_existing).await
+            },
+            |result| {
+                let mapped = result.map(|r| crate::ui::settings::ImportResult {
+                    imported: r.0,
+                    skipped_no_email: r.1,
+                    skipped_duplicate: r.2,
+                    updated: r.3,
+                    groups_created: r.4,
+                });
+                Message::Settings(SettingsMessage::ImportExecuted(mapped))
+            },
+        )
+    }
+}
+
+/// Execute the contact import against the database.
+async fn execute_contact_import(
+    db: &Arc<Db>,
+    contacts: Vec<ratatoskr_contact_import::ImportedContact>,
+    account_id: Option<String>,
+    update_existing: bool,
+) -> Result<(usize, usize, usize, usize, usize), String> {
+    let mut imported = 0usize;
+    let mut skipped_no_email = 0usize;
+    let mut skipped_duplicate = 0usize;
+    let mut updated = 0usize;
+
+    for contact in &contacts {
+        let Some(email) = contact.normalized_email() else {
+            skipped_no_email += 1;
+            continue;
+        };
+
+        if !email.contains('@') {
+            skipped_no_email += 1;
+            continue;
+        }
+
+        // Check for existing contact by email
+        let db_check = Arc::clone(db);
+        let email_check = email.clone();
+        let exists = db_check
+            .with_conn(move |conn| {
+                let mut stmt = conn
+                    .prepare("SELECT id FROM contacts WHERE email = ?1 LIMIT 1")
+                    .map_err(|e| e.to_string())?;
+                let found = stmt
+                    .query_row(rusqlite::params![email_check], |row| {
+                        row.get::<_, String>(0)
+                    })
+                    .ok();
+                Ok(found)
+            })
+            .await?;
+
+        if let Some(existing_id) = exists {
+            if update_existing {
+                let entry = build_contact_entry(
+                    existing_id,
+                    &email,
+                    contact,
+                    &account_id,
+                );
+                db.save_contact(entry).await?;
+                updated += 1;
+            } else {
+                skipped_duplicate += 1;
+            }
+        } else {
+            let entry = build_contact_entry(
+                uuid::Uuid::new_v4().to_string(),
+                &email,
+                contact,
+                &account_id,
+            );
+            db.save_contact(entry).await?;
+            imported += 1;
+        }
+    }
+
+    Ok((imported, skipped_no_email, skipped_duplicate, updated, 0))
+}
+
+fn build_contact_entry(
+    id: String,
+    email: &str,
+    contact: &ratatoskr_contact_import::ImportedContact,
+    account_id: &Option<String>,
+) -> ContactEntry {
+    let display_name = contact.effective_display_name();
+    let email2 = contact
+        .email2
+        .as_ref()
+        .map(|e| e.trim().to_lowercase())
+        .filter(|e| !e.is_empty());
+
+    ContactEntry {
+        id,
+        email: email.to_string(),
+        display_name,
+        email2,
+        phone: contact.phone.clone(),
+        company: contact.company.clone(),
+        notes: contact.notes.clone(),
+        account_id: account_id.clone(),
+        account_color: None,
+        groups: contact.groups.clone(),
+    }
 }
 
 // ── Compose autocomplete ───────────────────────────────

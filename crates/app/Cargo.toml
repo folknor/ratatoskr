@@ -29,8 +29,12 @@ ratatoskr-command-palette = { path = "../command-palette" }
 ratatoskr-core = { path = "../core" }
 ratatoskr-smart-folder = { path = "../smart-folder" }
 ratatoskr-label-colors = { path = "../label-colors" }
+<<<<<<< HEAD
 iced-drop = { path = "../iced-drop" }
 ratatoskr-rich-text-editor = { path = "../rich-text-editor" }
+=======
+ratatoskr-contact-import = { path = "../contact-import" }
+>>>>>>> worktree-agent-ae01e4d5
 uuid = { version = "1", features = ["v4"] }
 toml = "0.8"
 mundy = { version = "0.1.9", default-features = false, features = ["color-scheme", "tokio", "log"] }
