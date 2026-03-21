@@ -227,6 +227,93 @@ pub async fn db_update_account_sort_order(
     .await
 }
 
+/// Parameters for re-authentication — updating an existing account's
+/// credentials without changing its identity or provider.
+#[derive(Debug, Clone)]
+pub struct ReauthAccountParams {
+    /// OAuth fields (set when re-auth was OAuth-based)
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
+    pub token_expires_at: Option<i64>,
+    /// IMAP/SMTP password fields (set when re-auth was password-based)
+    pub imap_password: Option<String>,
+    pub smtp_password: Option<String>,
+}
+
+/// Synchronous token/credential update for re-authentication.
+/// Updates only the credential columns for an existing account.
+pub fn update_account_tokens_sync(
+    conn: &Connection,
+    account_id: &str,
+    params: ReauthAccountParams,
+) -> Result<(), String> {
+    let mut sets: Vec<(&str, Box<dyn rusqlite::types::ToSql>)> = Vec::new();
+    if let Some(v) = params.access_token {
+        sets.push(("access_token", Box::new(v)));
+    }
+    if let Some(v) = params.refresh_token {
+        sets.push(("refresh_token", Box::new(v)));
+    }
+    if let Some(v) = params.token_expires_at {
+        sets.push(("token_expires_at", Box::new(v)));
+    }
+    if let Some(v) = params.imap_password {
+        sets.push(("imap_password", Box::new(v)));
+    }
+    if let Some(v) = params.smtp_password {
+        sets.push(("smtp_password", Box::new(v)));
+    }
+    super::dynamic_update(conn, "accounts", "id", account_id, sets)
+}
+
+/// Lightweight auth info for re-authentication. Contains just enough
+/// to determine which auth flow to run and pre-populate server fields.
+#[derive(Debug, Clone)]
+pub struct AccountAuthInfo {
+    pub provider: String,
+    pub auth_method: String,
+    pub oauth_provider: Option<String>,
+    pub oauth_client_id: Option<String>,
+    // Server fields for password re-auth
+    pub imap_host: Option<String>,
+    pub imap_port: Option<i64>,
+    pub imap_security: Option<String>,
+    pub smtp_host: Option<String>,
+    pub smtp_port: Option<i64>,
+    pub smtp_security: Option<String>,
+    pub imap_username: Option<String>,
+}
+
+/// Fetch the auth info for a single account (synchronous).
+pub fn get_account_auth_info_sync(
+    conn: &Connection,
+    account_id: &str,
+) -> Result<AccountAuthInfo, String> {
+    conn.query_row(
+        "SELECT provider, auth_method, oauth_provider, oauth_client_id,
+                imap_host, imap_port, imap_security,
+                smtp_host, smtp_port, smtp_security, imap_username
+         FROM accounts WHERE id = ?1",
+        params![account_id],
+        |row| {
+            Ok(AccountAuthInfo {
+                provider: row.get("provider")?,
+                auth_method: row.get("auth_method")?,
+                oauth_provider: row.get("oauth_provider")?,
+                oauth_client_id: row.get("oauth_client_id")?,
+                imap_host: row.get("imap_host")?,
+                imap_port: row.get("imap_port")?,
+                imap_security: row.get("imap_security")?,
+                smtp_host: row.get("smtp_host")?,
+                smtp_port: row.get("smtp_port")?,
+                smtp_security: row.get("smtp_security")?,
+                imap_username: row.get("imap_username")?,
+            })
+        },
+    )
+    .map_err(|e| format!("Account not found: {e}"))
+}
+
 /// Check whether an account with the given email already exists.
 pub async fn db_account_exists_by_email(
     db: &DbState,

@@ -1,3 +1,20 @@
+//! Pinned search CRUD — app-local UI state.
+//!
+//! These queries intentionally stay in the app crate rather than moving
+//! to `ratatoskr-core` because:
+//!
+//! 1. **Pinned searches are local UI state**, not domain/sync data.
+//!    The `pinned_searches` and `pinned_search_threads` tables are
+//!    created by the app's write connection (see `db/connection.rs`)
+//!    and don't exist in the core schema.
+//!
+//! 2. **Thread snapshot queries** (`get_threads_by_ids`) join against
+//!    the app's `Thread` type and `row_to_thread` mapper, which are
+//!    app-specific display types.
+//!
+//! 3. **No sync involvement** — pinned searches are never synced to
+//!    any provider. They're purely a local bookmark mechanism.
+
 use rusqlite::params;
 
 use super::connection::Db;
