@@ -202,6 +202,8 @@ pub fn build_threads(messages: &[ThreadableMessage]) -> Vec<ThreadGroup> {
         return Vec::new();
     }
 
+    log::debug!("Building threads from {} messages (JWZ algorithm)", messages.len());
+
     let mut arena = Arena::new();
 
     // Step 1-2: Build containers and link parent-child via references
@@ -316,6 +318,8 @@ pub fn build_threads(messages: &[ThreadableMessage]) -> Vec<ThreadGroup> {
         });
     }
 
+    log::debug!("JWZ threading produced {} thread groups", thread_groups.len());
+
     thread_groups
 }
 
@@ -361,6 +365,12 @@ pub fn update_threads(
     if new_messages.is_empty() {
         return Vec::new();
     }
+
+    log::debug!(
+        "Updating threads: {} existing threads, {} new messages",
+        existing_threads.len(),
+        new_messages.len()
+    );
 
     // Build lookup maps
     let mut thread_to_message_ids: HashMap<String, Vec<String>> = HashMap::new();

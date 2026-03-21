@@ -11,6 +11,8 @@ pub fn parse_single_address_header(raw: Option<&str>) -> (Option<String>, Option
         return (None, None);
     };
 
+    log::debug!("Parsing address header: {:?}", raw);
+
     if let Some(angle_start) = raw.rfind('<')
         && let Some(angle_end) = raw[angle_start..].find('>')
     {

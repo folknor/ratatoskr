@@ -37,6 +37,7 @@ lopdf = "0.39"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }
+log = "0.4"
 
 [dependencies.libheif-rs]
 version = "1"

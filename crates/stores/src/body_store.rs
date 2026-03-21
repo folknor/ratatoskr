@@ -25,12 +25,21 @@ pub struct MessageBody {
 const ZSTD_LEVEL: i32 = 3;
 
 fn compress(data: &str) -> Result<Vec<u8>, String> {
-    zstd::encode_all(data.as_bytes(), ZSTD_LEVEL).map_err(|e| format!("zstd compress: {e}"))
+    zstd::encode_all(data.as_bytes(), ZSTD_LEVEL).map_err(|e| {
+        log::error!("zstd compression failed: {e}");
+        format!("zstd compress: {e}")
+    })
 }
 
 fn decompress(data: &[u8]) -> Result<String, String> {
-    let bytes = zstd::decode_all(data).map_err(|e| format!("zstd decompress: {e}"))?;
-    String::from_utf8(bytes).map_err(|e| format!("utf8 decode: {e}"))
+    let bytes = zstd::decode_all(data).map_err(|e| {
+        log::error!("zstd decompression failed: {e}");
+        format!("zstd decompress: {e}")
+    })?;
+    String::from_utf8(bytes).map_err(|e| {
+        log::error!("UTF-8 decode failed after decompression: {e}");
+        format!("utf8 decode: {e}")
+    })
 }
 
 impl BodyStoreState {
@@ -44,6 +53,7 @@ impl BodyStoreState {
         std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create app dir: {e}"))?;
 
         let db_path = app_data_dir.join("bodies.db");
+        log::info!("Initializing body store at {}", db_path.display());
         let conn = Connection::open(&db_path).map_err(|e| format!("open body store: {e}"))?;
 
         conn.execute_batch(
@@ -94,6 +104,7 @@ impl BodyStoreState {
         body_html: Option<String>,
         body_text: Option<String>,
     ) -> Result<(), String> {
+        log::debug!("Storing body for message_id={}", message_id);
         self.with_conn(move |conn| {
             let html_blob = body_html.as_deref().map(compress).transpose()?;
             let text_blob = body_text.as_deref().map(compress).transpose()?;
@@ -141,6 +152,7 @@ impl BodyStoreState {
 
     /// Retrieve a single message body (decompressed).
     pub async fn get(&self, message_id: String) -> Result<Option<MessageBody>, String> {
+        log::debug!("Retrieving body for message_id={}", message_id);
         self.with_conn(move |conn| {
             let mut stmt = conn
                 .prepare("SELECT body_html, body_text FROM bodies WHERE message_id = ?1")
@@ -231,6 +243,7 @@ impl BodyStoreState {
             return Ok(0);
         }
 
+        log::debug!("Pruning {} bodies from body store", message_ids.len());
         self.with_conn(move |conn| {
             let mut deleted: u64 = 0;
 

@@ -33,6 +33,7 @@ impl InlineImageStoreState {
         std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create app dir: {e}"))?;
 
         let db_path = app_data_dir.join("inline_images.db");
+        log::info!("Initializing inline image store at {}", db_path.display());
         let conn =
             Connection::open(&db_path).map_err(|e| format!("open inline image store: {e}"))?;
 
@@ -86,6 +87,7 @@ impl InlineImageStoreState {
         data: Vec<u8>,
         mime_type: String,
     ) -> Result<(), String> {
+        log::debug!("Storing inline image hash={} mime={} size={}", content_hash, mime_type, data.len());
         self.with_conn(move |conn| {
             #[allow(clippy::cast_possible_wrap)]
             let size = data.len() as i64;
@@ -140,6 +142,7 @@ impl InlineImageStoreState {
 
     /// Retrieve an inline image by content hash.
     pub async fn get(&self, content_hash: String) -> Result<Option<(Vec<u8>, String)>, String> {
+        log::debug!("Retrieving inline image hash={}", content_hash);
         self.with_conn(move |conn| {
             let result = conn
                 .query_row(
@@ -182,6 +185,7 @@ impl InlineImageStoreState {
 
     /// Clear all stored inline images.
     pub async fn clear(&self) -> Result<u64, String> {
+        log::info!("Clearing all inline images");
         self.with_conn(|conn| {
             let deleted = conn
                 .execute("DELETE FROM inline_images", [])
@@ -241,6 +245,11 @@ impl InlineImageStoreState {
                 return Ok(0);
             }
 
+            log::warn!(
+                "Inline image store size ({} bytes) exceeds threshold ({} bytes), pruning",
+                total_bytes,
+                max_bytes
+            );
             let excess = total_bytes - max_bytes_i64;
             let mut stmt = conn
                 .prepare(
@@ -281,6 +290,9 @@ impl InlineImageStoreState {
             }
             tx.commit()
                 .map_err(|e| format!("inline image prune commit: {e}"))?;
+            if deleted > 0 {
+                log::info!("Pruned {} inline images, freed {} bytes", deleted, freed);
+            }
             Ok(deleted)
         })
         .await

@@ -201,16 +201,26 @@ impl SearchState {
 
         let schema = build_schema();
 
+        log::info!("Initializing search index at {}", index_dir.display());
+
         let index = if Index::exists(
             &tantivy::directory::MmapDirectory::open(&index_dir)
                 .map_err(|e| format!("open mmap dir: {e}"))?,
         )
         .map_err(|e| format!("check index exists: {e}"))?
         {
-            Index::open_in_dir(&index_dir).map_err(|e| format!("open index: {e}"))?
+            log::info!("Opening existing search index");
+            Index::open_in_dir(&index_dir).map_err(|e| {
+                log::error!("Failed to open search index: {e}");
+                format!("open index: {e}")
+            })?
         } else {
+            log::info!("Creating new search index");
             Index::create_in_dir(&index_dir, schema.clone())
-                .map_err(|e| format!("create index: {e}"))?
+                .map_err(|e| {
+                    log::error!("Failed to create search index: {e}");
+                    format!("create index: {e}")
+                })?
         };
 
         let reader = index
@@ -295,6 +305,7 @@ impl SearchState {
 
     /// Batch-index multiple messages. Single commit at the end.
     pub async fn index_messages_batch(&self, msgs: &[SearchDocument]) -> Result<(), String> {
+        log::debug!("Indexing batch of {} messages", msgs.len());
         let mut writer = self.writer.lock().await;
 
         for msg in msgs {
@@ -338,6 +349,13 @@ impl SearchState {
     /// Search with structured filters.
     #[allow(clippy::too_many_lines)]
     pub fn search_with_filters(&self, params: &SearchParams) -> Result<Vec<SearchResult>, String> {
+        log::debug!(
+            "Searching with filters: free_text={:?}, from_count={}, to_count={}, limit={:?}",
+            params.free_text,
+            params.from.len(),
+            params.to.len(),
+            params.limit,
+        );
         let searcher = self.reader.searcher();
         let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
 
@@ -489,7 +507,9 @@ impl SearchState {
             .search(&combined, &TopDocs::with_limit(limit))
             .map_err(|e| format!("search: {e}"))?;
 
-        self.collect_results(&searcher, &top_docs)
+        let results = self.collect_results(&searcher, &top_docs)?;
+        log::debug!("Search returned {} results", results.len());
+        Ok(results)
     }
 
     /// Build an account filter query from optional account IDs.
@@ -526,6 +546,7 @@ impl SearchState {
 
     /// Clear all documents from the index.
     pub async fn clear_index(&self) -> Result<(), String> {
+        log::info!("Clearing entire search index");
         let mut writer = self.writer.lock().await;
         writer
             .delete_all_documents()

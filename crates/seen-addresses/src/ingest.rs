@@ -28,6 +28,12 @@ pub fn ingest_observations(
         return Ok(());
     }
 
+    log::debug!(
+        "Ingesting {} address observations for account {}",
+        observations.len(),
+        account_id
+    );
+
     let mut stmt = conn
         .prepare_cached(
             "INSERT INTO seen_addresses

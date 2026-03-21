@@ -203,8 +203,19 @@ pub fn sanitize_html_body(html: &str) -> String {
         return String::new();
     }
 
+    log::debug!("Sanitizing HTML body ({} bytes)", html.len());
+
     let stage1 = inline_css(html);
     let stage2 = strip_dangerous_elements(&stage1);
+
+    if stage2.len() < stage1.len() {
+        log::warn!(
+            "Stripped dangerous content from HTML: {} -> {} bytes",
+            stage1.len(),
+            stage2.len()
+        );
+    }
+
     whitelist_sanitize(&stage2)
 }
 
