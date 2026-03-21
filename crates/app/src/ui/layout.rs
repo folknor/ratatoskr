@@ -323,6 +323,9 @@ pub const SCROLLBAR_SPACING: f32 = SPACE_XXXS;
 
 // ── Palette overlay ─────────────────────────────────────
 
+/// Search typeahead popup max height.
+pub const TYPEAHEAD_MAX_HEIGHT: f32 = 300.0;
+
 /// Palette card width.
 pub const PALETTE_WIDTH: f32 = 600.0;
 /// Palette card max height.

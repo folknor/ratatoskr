@@ -956,6 +956,11 @@ impl App {
                 self.update_thread_list_context_from_sidebar();
                 self.update(Message::SearchExecute)
             }
+            ThreadListEvent::TypeaheadQuery { .. } => {
+                // Dynamic typeahead queries are handled in
+                // handle_search_query_changed via maybe_trigger_typeahead_query.
+                Task::none()
+            }
         }
     }
 

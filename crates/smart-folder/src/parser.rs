@@ -54,6 +54,96 @@ const HAS_EXPANSIONS: &[(&str, &[&str])] = &[
     ("calendar", &["text/calendar", "application/ics"]),
 ];
 
+// ── Cursor context analysis ─────────────────────────────
+
+/// Result of analyzing cursor position within a query string.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CursorContext {
+    /// Cursor is in free text (no operator context).
+    FreeText,
+    /// Cursor is inside an operator value.
+    InsideOperator {
+        /// The operator name (e.g., "from", "to", "label").
+        operator: String,
+        /// The partial value typed so far (e.g., "ali" from "from:ali").
+        partial_value: String,
+        /// Byte offset where the operator value starts in the query string.
+        value_start: usize,
+        /// Byte offset where the partial value ends (cursor position).
+        value_end: usize,
+    },
+}
+
+/// Analyze the cursor position in a query string to determine operator context.
+///
+/// Walks backward from `cursor_pos` to find the nearest `operator:` prefix.
+/// If found and no unquoted whitespace sits between the colon and cursor,
+/// we are inside that operator's value.
+pub fn analyze_cursor_context(query: &str, cursor_pos: usize) -> CursorContext {
+    let cursor = cursor_pos.min(query.len());
+
+    // Look backward from cursor to find `operator:` pattern.
+    let before = &query[..cursor];
+
+    // Find the last colon before the cursor that might be an operator.
+    for (colon_pos, _) in before.rmatch_indices(':') {
+        // Extract the word before the colon (the potential operator name).
+        let before_colon = &before[..colon_pos];
+        let op_start = before_colon
+            .rfind(char::is_whitespace)
+            .map_or(0, |p| p + 1);
+        let candidate = &before_colon[op_start..];
+
+        if candidate.is_empty() {
+            continue;
+        }
+
+        // Check if this candidate is a recognized operator (case-insensitive).
+        let lower = candidate.to_ascii_lowercase();
+        if !OPERATORS.contains(&lower.as_str()) {
+            continue;
+        }
+
+        // Everything from after the colon to the cursor is the partial value.
+        let value_start = colon_pos + 1;
+        let partial = &query[value_start..cursor];
+
+        // If the partial value starts with a quote, allow spaces inside it.
+        if partial.starts_with('"') {
+            // Inside a quoted value — check if there's a closing quote before cursor.
+            let after_open = &partial[1..];
+            if after_open.contains('"') {
+                // Closing quote found before cursor — not inside the operator anymore.
+                continue;
+            }
+            // Still inside an open quote.
+            return CursorContext::InsideOperator {
+                operator: lower,
+                partial_value: after_open.to_owned(),
+                value_start,
+                value_end: cursor,
+            };
+        }
+
+        // Unquoted value — if there's whitespace in the partial, the cursor
+        // has moved past this operator's value into free text.
+        if partial.contains(char::is_whitespace) {
+            continue;
+        }
+
+        return CursorContext::InsideOperator {
+            operator: lower,
+            partial_value: partial.to_owned(),
+            value_start,
+            value_end: cursor,
+        };
+    }
+
+    CursorContext::FreeText
+}
+
+// ── Parsed query types ──────────────────────────────────
+
 /// A parsed smart folder query with structured filter fields.
 #[derive(Debug, Default, Clone)]
 pub struct ParsedQuery {
@@ -895,5 +985,89 @@ mod tests {
         assert!(q.free_text.is_empty());
         // Verify no flags were set.
         assert!(!q.has_any_operator());
+    }
+
+    // -- Cursor context analysis --
+
+    #[test]
+    fn cursor_in_free_text() {
+        let ctx = analyze_cursor_context("hello world", 5);
+        assert_eq!(ctx, CursorContext::FreeText);
+    }
+
+    #[test]
+    fn cursor_at_operator_value_start() {
+        let ctx = analyze_cursor_context("from:", 5);
+        assert_eq!(
+            ctx,
+            CursorContext::InsideOperator {
+                operator: "from".to_owned(),
+                partial_value: String::new(),
+                value_start: 5,
+                value_end: 5,
+            }
+        );
+    }
+
+    #[test]
+    fn cursor_inside_operator_value() {
+        let ctx = analyze_cursor_context("from:ali", 8);
+        assert_eq!(
+            ctx,
+            CursorContext::InsideOperator {
+                operator: "from".to_owned(),
+                partial_value: "ali".to_owned(),
+                value_start: 5,
+                value_end: 8,
+            }
+        );
+    }
+
+    #[test]
+    fn cursor_after_completed_operator() {
+        let ctx = analyze_cursor_context("from:alice ", 11);
+        assert_eq!(ctx, CursorContext::FreeText);
+    }
+
+    #[test]
+    fn cursor_inside_quoted_value() {
+        let ctx = analyze_cursor_context("from:\"John D", 12);
+        assert_eq!(
+            ctx,
+            CursorContext::InsideOperator {
+                operator: "from".to_owned(),
+                partial_value: "John D".to_owned(),
+                value_start: 5,
+                value_end: 12,
+            }
+        );
+    }
+
+    #[test]
+    fn cursor_in_second_operator() {
+        let ctx = analyze_cursor_context("from:alice label:wo", 19);
+        assert_eq!(
+            ctx,
+            CursorContext::InsideOperator {
+                operator: "label".to_owned(),
+                partial_value: "wo".to_owned(),
+                value_start: 17,
+                value_end: 19,
+            }
+        );
+    }
+
+    #[test]
+    fn cursor_case_insensitive_operator() {
+        let ctx = analyze_cursor_context("FROM:ali", 8);
+        assert_eq!(
+            ctx,
+            CursorContext::InsideOperator {
+                operator: "from".to_owned(),
+                partial_value: "ali".to_owned(),
+                value_start: 5,
+                value_end: 8,
+            }
+        );
     }
 }

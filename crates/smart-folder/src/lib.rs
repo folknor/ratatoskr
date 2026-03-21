@@ -2,7 +2,7 @@ mod parser;
 mod sql_builder;
 mod tokens;
 
-pub use parser::{ParsedQuery, parse_query};
+pub use parser::{CursorContext, ParsedQuery, analyze_cursor_context, parse_query};
 pub use sql_builder::{count_matching, query_threads};
 
 use rusqlite::Connection;
