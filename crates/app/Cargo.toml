@@ -38,3 +38,4 @@ uuid = { version = "1", features = ["v4"] }
 toml = "1.0"
 mundy = { version = "0.2", default-features = false, features = ["color-scheme", "tokio", "log"] }
 display-info = "0.5"
+rfd = "0.15"

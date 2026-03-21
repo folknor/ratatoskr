@@ -13,11 +13,8 @@ use std::sync::Arc;
 use iced::{Point, Size, Task};
 
 use crate::db::Db;
-use crate::ui::undoable::UndoableText;
-use rusqlite::params;
-
 use crate::pop_out::compose::{
-    ComposeMessage, ComposeMode, ComposeState, tokens_to_csv,
+    ComposeAttachment, ComposeMessage, ComposeMode, ComposeState,
 };
 use crate::pop_out::message_view::{
     MessageViewMessage, MessageViewState, RenderingMode,
@@ -30,9 +27,6 @@ use crate::ui::layout::{
     MESSAGE_VIEW_MIN_WIDTH,
 };
 use crate::{App, Message, APP_DATA_DIR};
-
-/// Interval between auto-saves for dirty compose drafts.
-pub const DRAFT_AUTO_SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 
 // ── Pop-out message dispatch ────────────────────────────
 
@@ -90,41 +84,12 @@ impl App {
                 self.composer_is_open = false;
                 iced::window::close(window_id)
             }
-            // Compose send — needs App context for finalization
+            // Compose attach files — launch async file picker
             (
                 PopOutWindow::Compose(_),
-                PopOutMessage::Compose(ComposeMessage::Send),
-            ) => self.handle_compose_send(window_id),
-            // Send finalized — draft saved, now dispatch actual send
-            (
-                PopOutWindow::Compose(_),
-                PopOutMessage::Compose(
-                    ComposeMessage::SendFinalized(Ok(())),
-                ),
-            ) => self.dispatch_send(window_id),
-            // Send completed — close window or show error
-            (
-                PopOutWindow::Compose(_),
-                PopOutMessage::Compose(
-                    ComposeMessage::SendCompleted(_),
-                ),
-            ) => self.handle_send_completed(window_id, pop_out_msg),
-            // Draft saved — clear dirty flag
-            (
-                PopOutWindow::Compose(_),
-                PopOutMessage::Compose(ComposeMessage::DraftSaved(_)),
-            ) => {
-                let PopOutMessage::Compose(msg) = pop_out_msg else {
-                    return Task::none();
-                };
-                if let Some(PopOutWindow::Compose(state)) =
-                    self.pop_out_windows.get_mut(&window_id)
-                {
-                    crate::pop_out::compose::update_compose(state, msg);
-                }
-                Task::none()
-            }
-            // All other compose messages — pure state update
+                PopOutMessage::Compose(ComposeMessage::AttachFiles),
+            ) => handle_compose_attach_files(window_id),
+            // All other compose messages
             (PopOutWindow::Compose(state), PopOutMessage::Compose(_)) => {
                 let PopOutMessage::Compose(msg) = pop_out_msg else {
                     return Task::none();
@@ -203,6 +168,58 @@ fn handle_message_view_update(
     }
 }
 
+// ── Compose: attach files ───────────────────────────────
+
+/// Launch an async file picker and return the selected files as attachments.
+fn handle_compose_attach_files(
+    window_id: iced::window::Id,
+) -> Task<Message> {
+    Task::perform(
+        async {
+            let handles = rfd::AsyncFileDialog::new()
+                .set_title("Attach Files")
+                .pick_files()
+                .await;
+
+            let Some(handles) = handles else {
+                return Vec::new();
+            };
+
+            let mut attachments = Vec::new();
+            for handle in handles {
+                let name = handle.file_name();
+                let data = handle.read().await;
+                let mime_type =
+                    crate::pop_out::compose::mime_from_extension(&name);
+                attachments.push(ComposeAttachment {
+                    name,
+                    mime_type,
+                    data: Arc::new(data),
+                });
+            }
+            attachments
+        },
+        move |files| {
+            if files.is_empty() {
+                // User cancelled — no-op
+                Message::PopOut(
+                    window_id,
+                    PopOutMessage::Compose(ComposeMessage::FilesSelected(
+                        Vec::new(),
+                    )),
+                )
+            } else {
+                Message::PopOut(
+                    window_id,
+                    PopOutMessage::Compose(ComposeMessage::FilesSelected(
+                        files,
+                    )),
+                )
+            }
+        },
+    )
+}
+
 // ── Open windows ────────────────────────────────────────
 
 impl App {
@@ -268,7 +285,7 @@ impl App {
         mode: ComposeMode,
     ) -> Task<Message> {
         state.mode = mode;
-        state.subject = UndoableText::with_initial(&state.mode.prefixed_subject());
+        state.subject = state.mode.prefixed_subject();
 
         let settings = iced::window::Settings {
             size: Size::new(COMPOSE_DEFAULT_WIDTH, COMPOSE_DEFAULT_HEIGHT),
@@ -379,365 +396,6 @@ impl App {
 
         self.open_compose_window_with_state(state, mode)
     }
-}
-
-// ── Compose: send path ──────────────────────────────────
-
-impl App {
-    /// Handle the Send action from a compose window.
-    ///
-    /// Validates recipients, saves a finalized draft, and dispatches
-    /// `SendFinalized` on completion.
-    fn handle_compose_send(
-        &mut self,
-        window_id: iced::window::Id,
-    ) -> Task<Message> {
-        let Some(PopOutWindow::Compose(state)) =
-            self.pop_out_windows.get_mut(&window_id)
-        else {
-            return Task::none();
-        };
-
-        if state.sending {
-            return Task::none();
-        }
-
-        let has_recipients = !state.to.tokens.is_empty()
-            || !state.cc.tokens.is_empty()
-            || !state.bcc.tokens.is_empty();
-        if !has_recipients {
-            state.status =
-                Some("Add at least one recipient".to_string());
-            return Task::none();
-        }
-
-        state.status = Some("Preparing message...".to_string());
-        state.sending = true;
-
-        let db = Arc::clone(&self.db);
-        let fields = extract_draft_fields(state);
-
-        Task::perform(
-            async move { save_finalized_draft(db, fields).await },
-            move |result| {
-                Message::PopOut(
-                    window_id,
-                    PopOutMessage::Compose(
-                        ComposeMessage::SendFinalized(result),
-                    ),
-                )
-            },
-        )
-    }
-
-    /// After the draft is finalized in the DB, build the MIME message
-    /// and dispatch the actual provider send.
-    fn dispatch_send(
-        &mut self,
-        window_id: iced::window::Id,
-    ) -> Task<Message> {
-        let Some(PopOutWindow::Compose(state)) =
-            self.pop_out_windows.get_mut(&window_id)
-        else {
-            return Task::none();
-        };
-
-        state.status = Some("Sending...".to_string());
-
-        let send_req = build_send_request(state);
-        let draft_id = send_req.draft_id.clone();
-        let account_id = send_req.account_id.clone();
-        let thread_id = send_req.thread_id.clone();
-
-        // Build the MIME message (synchronous, CPU-bound)
-        let raw_b64 = match ratatoskr_core::send::build_mime_message_base64url(&send_req) {
-            Ok(b64) => b64,
-            Err(e) => {
-                if let Some(PopOutWindow::Compose(s)) =
-                    self.pop_out_windows.get_mut(&window_id)
-                {
-                    s.status = Some(format!("Failed to build message: {e}"));
-                    s.sending = false;
-                }
-                return Task::none();
-            }
-        };
-
-        // Look up provider type for this account
-        let provider = self
-            .sidebar
-            .accounts
-            .iter()
-            .find(|a| a.id == account_id)
-            .map(|a| a.provider.clone())
-            .unwrap_or_else(|| "gmail".to_string());
-
-        let db = Arc::clone(&self.db);
-
-        Task::perform(
-            async move {
-                send_via_outbox(
-                    db, draft_id, account_id, raw_b64,
-                    thread_id, provider,
-                )
-                .await
-            },
-            move |result| {
-                Message::PopOut(
-                    window_id,
-                    PopOutMessage::Compose(
-                        ComposeMessage::SendCompleted(result),
-                    ),
-                )
-            },
-        )
-    }
-
-    /// Handle the result of an async send: close window on success,
-    /// show error on failure.
-    fn handle_send_completed(
-        &mut self,
-        window_id: iced::window::Id,
-        pop_out_msg: PopOutMessage,
-    ) -> Task<Message> {
-        let PopOutMessage::Compose(msg) = pop_out_msg else {
-            return Task::none();
-        };
-
-        let is_success = matches!(
-            msg,
-            ComposeMessage::SendCompleted(Ok(_))
-        );
-
-        // Update state first
-        if let Some(PopOutWindow::Compose(state)) =
-            self.pop_out_windows.get_mut(&window_id)
-        {
-            crate::pop_out::compose::update_compose(state, msg);
-        }
-
-        if is_success {
-            // Close the compose window
-            self.pop_out_windows.remove(&window_id);
-            self.composer_is_open = false;
-            iced::window::close(window_id)
-        } else {
-            Task::none()
-        }
-    }
-}
-
-/// Fields extracted from compose state for the async draft-save boundary.
-struct DraftFields {
-    draft_id: String,
-    account_id: String,
-    from_email: Option<String>,
-    to_csv: Option<String>,
-    cc_csv: Option<String>,
-    bcc_csv: Option<String>,
-    subject: Option<String>,
-    body_html: String,
-    sig_id: Option<String>,
-    reply_msg_id: Option<String>,
-    thread_id: Option<String>,
-}
-
-/// Extract draft fields from compose state (before async boundary).
-fn extract_draft_fields(state: &ComposeState) -> DraftFields {
-    let body_text = state.body.text();
-    DraftFields {
-        draft_id: state.draft_id.clone(),
-        account_id: state.from_account.as_ref().map(|a| a.id.clone()).unwrap_or_default(),
-        from_email: state.from_account.as_ref().map(|a| a.email.clone()),
-        to_csv: tokens_to_csv(&state.to),
-        cc_csv: tokens_to_csv(&state.cc),
-        bcc_csv: tokens_to_csv(&state.bcc),
-        subject: if state.subject.text().is_empty() { None } else { Some(state.subject.text().to_string()) },
-        body_html: plain_text_to_html(&body_text),
-        sig_id: state.active_signature_id.clone(),
-        reply_msg_id: state.reply_message_id.clone(),
-        thread_id: state.reply_thread_id.clone(),
-    }
-}
-
-/// Save a finalized draft to the `local_drafts` table.
-async fn save_finalized_draft(
-    db: Arc<Db>,
-    f: DraftFields,
-) -> Result<(), String> {
-    db.with_write_conn(move |conn| {
-        conn.execute(
-            "INSERT INTO local_drafts \
-             (id, account_id, to_addresses, cc_addresses, \
-              bcc_addresses, subject, body_html, \
-              reply_to_message_id, thread_id, from_email, \
-              signature_id, updated_at, sync_status) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, \
-                     ?10, ?11, unixepoch(), 'finalized') \
-             ON CONFLICT(id) DO UPDATE SET \
-               to_addresses = ?3, cc_addresses = ?4, \
-               bcc_addresses = ?5, subject = ?6, \
-               body_html = ?7, reply_to_message_id = ?8, \
-               thread_id = ?9, from_email = ?10, \
-               signature_id = ?11, \
-               updated_at = unixepoch(), \
-               sync_status = 'finalized'",
-            params![
-                f.draft_id, f.account_id, f.to_csv, f.cc_csv,
-                f.bcc_csv, f.subject, f.body_html, f.reply_msg_id,
-                f.thread_id, f.from_email, f.sig_id,
-            ],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
-}
-
-/// Build a [`SendRequest`] from the current compose state.
-fn build_send_request(
-    state: &ComposeState,
-) -> ratatoskr_core::send::SendRequest {
-    let from = state
-        .from_account
-        .as_ref()
-        .map(|a| {
-            if let Some(ref name) = a.display_name {
-                format!("{name} <{}>", a.email)
-            } else {
-                a.email.clone()
-            }
-        })
-        .unwrap_or_default();
-
-    let to: Vec<String> =
-        state.to.tokens.iter().map(|t| t.email.clone()).collect();
-    let cc: Vec<String> =
-        state.cc.tokens.iter().map(|t| t.email.clone()).collect();
-    let bcc: Vec<String> =
-        state.bcc.tokens.iter().map(|t| t.email.clone()).collect();
-
-    let subject = if state.subject.text().is_empty() {
-        None
-    } else {
-        Some(state.subject.text().to_string())
-    };
-
-    let body_text = state.body.text();
-    let body_html = plain_text_to_html(&body_text);
-
-    ratatoskr_core::send::SendRequest {
-        draft_id: state.draft_id.clone(),
-        account_id: state
-            .from_account
-            .as_ref()
-            .map(|a| a.id.clone())
-            .unwrap_or_default(),
-        from,
-        to,
-        cc,
-        bcc,
-        subject,
-        body_html,
-        body_text,
-        attachments: Vec::new(),
-        in_reply_to: state.reply_message_id.clone(),
-        references: None,
-        thread_id: state.reply_thread_id.clone(),
-    }
-}
-
-/// Send via the outbox pattern: mark as sending, then attempt provider send.
-///
-/// This runs on a background thread. The actual provider call is delegated
-/// to `ratatoskr_core::send::mark_draft_sending` / `mark_draft_sent` /
-/// `mark_draft_failed` for lifecycle management.
-///
-/// For now, this stores the finalized MIME in the draft's sync_status
-/// and marks it ready for the sync pipeline to pick up. The sync pipeline
-/// will call `ProviderOps::send_email()` with the proper provider context.
-///
-/// In the immediate implementation, we mark the draft as 'sent' to close
-/// the loop, since the sync pipeline integration is a separate concern.
-async fn send_via_outbox(
-    db: Arc<Db>,
-    draft_id: String,
-    account_id: String,
-    raw_b64: String,
-    thread_id: Option<String>,
-    _provider: String,
-) -> Result<String, String> {
-    // Step 1: Mark draft as 'sending' to prevent duplicate sends
-    let draft_id_clone = draft_id.clone();
-    db.with_write_conn(move |conn| {
-        let rows = conn
-            .execute(
-                "UPDATE local_drafts SET sync_status = 'sending' \
-                 WHERE id = ?1 AND sync_status = 'finalized'",
-                params![draft_id_clone],
-            )
-            .map_err(|e| e.to_string())?;
-        if rows == 0 {
-            return Err(
-                "Draft not found or already sending".to_string()
-            );
-        }
-        Ok(())
-    })
-    .await?;
-
-    // Step 2: Store the raw MIME for the sync pipeline to pick up.
-    let draft_id_clone = draft_id.clone();
-    db.with_write_conn(move |conn| {
-        conn.execute(
-            "UPDATE local_drafts SET attachments = ?1, thread_id = ?2 \
-             WHERE id = ?3",
-            params![raw_b64, thread_id, draft_id_clone],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await?;
-
-    // Step 3: Mark as 'queued' — the sync pipeline will pick this up.
-    // For the immediate UX, we mark it as 'sent' with a placeholder
-    // message ID so the compose window closes. The actual provider send
-    // will happen when the sync pipeline processes 'sending' drafts.
-    let draft_id_clone = draft_id.clone();
-    let placeholder_id = format!("queued-{draft_id}");
-    let placeholder_clone = placeholder_id.clone();
-    db.with_write_conn(move |conn| {
-        conn.execute(
-            "UPDATE local_drafts SET sync_status = 'sent', \
-             remote_draft_id = ?1 WHERE id = ?2",
-            params![placeholder_clone, draft_id_clone],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await?;
-
-    Ok(placeholder_id)
-}
-
-/// Convert plain text to basic HTML by escaping entities and wrapping
-/// lines in `<p>` tags.
-fn plain_text_to_html(text: &str) -> String {
-    if text.trim().is_empty() {
-        return String::new();
-    }
-    let escaped = text
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;");
-    let paragraphs: Vec<String> = escaped
-        .split("\n\n")
-        .map(|para| {
-            let lines = para.replace('\n', "<br>\n");
-            format!("<p>{lines}</p>")
-        })
-        .collect();
-    paragraphs.join("\n")
 }
 
 // ── Async data loads ────────────────────────────────────
@@ -864,53 +522,6 @@ impl App {
     fn next_pop_out_generation(&mut self) -> u64 {
         self.pop_out_generation += 1;
         self.pop_out_generation
-    }
-}
-
-// ── Draft auto-save ─────────────────────────────────────
-
-impl App {
-    /// Returns `true` if any open compose window has unsaved changes.
-    pub(crate) fn has_dirty_compose_drafts(&self) -> bool {
-        self.pop_out_windows.values().any(|w| {
-            matches!(w, PopOutWindow::Compose(state) if state.draft_dirty)
-        })
-    }
-
-    /// Auto-save all dirty compose drafts to the local_drafts table.
-    pub(crate) fn auto_save_compose_drafts(&mut self) -> Task<Message> {
-        let mut tasks = Vec::new();
-
-        for (&window_id, window) in &mut self.pop_out_windows {
-            let PopOutWindow::Compose(state) = window else {
-                continue;
-            };
-            if !state.draft_dirty {
-                continue;
-            }
-            state.draft_dirty = false;
-
-            let db = Arc::clone(&self.db);
-            let fields = extract_draft_fields(state);
-
-            tasks.push(Task::perform(
-                async move {
-                    save_finalized_draft(db, fields).await
-                },
-                move |result| {
-                    Message::PopOut(
-                        window_id,
-                        PopOutMessage::Compose(ComposeMessage::DraftSaved(result)),
-                    )
-                },
-            ));
-        }
-
-        if tasks.is_empty() {
-            Task::none()
-        } else {
-            Task::batch(tasks)
-        }
     }
 }
 

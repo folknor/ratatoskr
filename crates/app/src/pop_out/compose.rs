@@ -1,4 +1,6 @@
-use iced::widget::{button, column, container, pick_list, row, text, Space};
+use std::sync::Arc;
+
+use iced::widget::{button, column, container, pick_list, row, text, text_input, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::db::{self, ContactMatch};
@@ -6,13 +8,7 @@ use crate::font;
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
-<<<<<<< HEAD
 use crate::ui::token_input::{self, TokenId, TokenInputMessage, TokenInputValue};
-use crate::ui::undoable::UndoableText;
-use crate::ui::undoable_text_input::undoable_text_input;
-=======
-use crate::ui::token_input::{self, RecipientField, TokenId, TokenInputMessage, TokenInputValue};
->>>>>>> worktree-agent-afd18fb2
 use crate::ui::widgets;
 use crate::Message;
 
@@ -72,13 +68,75 @@ impl std::fmt::Display for AccountInfo {
     }
 }
 
+/// An attachment queued for sending.
+#[derive(Debug, Clone)]
+pub struct ComposeAttachment {
+    /// Original file name.
+    pub name: String,
+    /// MIME type (guessed from extension).
+    pub mime_type: String,
+    /// File contents.
+    pub data: Arc<Vec<u8>>,
+}
+
+impl ComposeAttachment {
+    /// Human-readable file size.
+    pub fn display_size(&self) -> String {
+        let bytes = self.data.len();
+        if bytes < 1024 {
+            format!("{bytes} B")
+        } else if bytes < 1024 * 1024 {
+            format!("{:.1} KB", bytes as f64 / 1024.0)
+        } else {
+            format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+        }
+    }
+}
+
+/// Guess a MIME type from a file extension.
+pub fn mime_from_extension(name: &str) -> String {
+    let ext = name
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "pdf" => "application/pdf",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "txt" => "text/plain",
+        "html" | "htm" => "text/html",
+        "csv" => "text/csv",
+        "json" => "application/json",
+        "xml" => "application/xml",
+        "zip" => "application/zip",
+        "gz" | "gzip" => "application/gzip",
+        "tar" => "application/x-tar",
+        "doc" => "application/msword",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" => "application/vnd.ms-excel",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "ppt" => "application/vnd.ms-powerpoint",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "odt" => "application/vnd.oasis.opendocument.text",
+        "ods" => "application/vnd.oasis.opendocument.spreadsheet",
+        "mp3" => "audio/mpeg",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "eml" => "message/rfc822",
+        _ => "application/octet-stream",
+    }
+    .to_string()
+}
+
 // ── Messages ────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub enum ComposeMessage {
     SubjectChanged(String),
-    SubjectUndo,
-    SubjectRedo,
     BodyChanged(iced::widget::text_editor::Action),
     FromAccountChanged(AccountInfo),
     ShowCc,
@@ -98,31 +156,32 @@ pub enum ComposeMessage {
     AutocompleteNavigate(i32),
     /// Dismiss the autocomplete dropdown.
     AutocompleteDismiss,
-<<<<<<< HEAD
-    /// Attach files to the compose window.
-    AttachFiles,
-    /// Files have been attached (result from file picker).
-    FilesAttached(Vec<(String, std::path::PathBuf, u64)>),
-    /// Draft finalized and saved to DB — proceed with send.
-    SendFinalized(Result<(), String>),
-    /// Async send completed (Ok = provider message ID, Err = error).
-    SendCompleted(Result<String, String>),
-    /// Signature resolved from the database.
-    SignatureResolved(Option<(String, String, Option<String>)>),
-    /// Draft auto-save completed.
-    DraftSaved(Result<(), String>),
-=======
-    /// Move the currently selected token to a different recipient field.
-    MoveSelectedTokenToField(RecipientField),
->>>>>>> worktree-agent-afd18fb2
-    /// Formatting toolbar actions (stubs for V1).
+    /// Formatting toolbar actions (stubs — plain text editor).
     FormatBold,
     FormatItalic,
     FormatUnderline,
     FormatStrikethrough,
+    /// List / blockquote stubs — plain text editor has no block types.
     FormatList,
     FormatBlockquote,
+    /// Open the link insertion dialog.
     FormatLink,
+    // ── Attachments ──
+    /// User clicked the attach button — opens file picker.
+    AttachFiles,
+    /// File picker returned selected files (read asynchronously).
+    FilesSelected(Vec<ComposeAttachment>),
+    /// Remove an attachment by index.
+    RemoveAttachment(usize),
+    // ── Link dialog ──
+    /// Toggle the link insertion overlay.
+    ToggleLinkDialog,
+    /// URL field changed in the link dialog.
+    LinkUrlChanged(String),
+    /// Display text field changed in the link dialog.
+    LinkTextChanged(String),
+    /// Confirm link insertion.
+    LinkInsert,
 }
 
 // ── Autocomplete state ──────────────────────────────────
@@ -169,7 +228,7 @@ pub struct ComposeState {
     pub from_accounts: Vec<AccountInfo>,
 
     // Subject
-    pub subject: UndoableText,
+    pub subject: String,
 
     // Body (plain text for V1 — rich text editor in a future iteration)
     pub body: iced::widget::text_editor::Content,
@@ -181,15 +240,7 @@ pub struct ComposeState {
     pub reply_thread_id: Option<String>,
     pub reply_message_id: Option<String>,
 
-    // Draft tracking
-    pub draft_id: String,
-    pub draft_dirty: bool,
-    pub active_signature_id: Option<String>,
-
-    // Send in-flight flag
-    pub sending: bool,
-
-    // Status message (e.g. "Sending...")
+    // Status message (e.g. "Send not yet wired")
     pub status: Option<String>,
 
     // Discard confirmation
@@ -197,6 +248,14 @@ pub struct ComposeState {
 
     // Autocomplete
     pub autocomplete: AutocompleteState,
+
+    // Attachments
+    pub attachments: Vec<ComposeAttachment>,
+
+    // Link dialog
+    pub link_dialog_open: bool,
+    pub link_url: String,
+    pub link_text: String,
 
     // Window geometry
     pub width: f32,
@@ -218,18 +277,18 @@ impl ComposeState {
             selected_bcc_token: None,
             from_account,
             from_accounts,
-            subject: UndoableText::new(),
+            subject: String::new(),
             body: iced::widget::text_editor::Content::new(),
             mode: ComposeMode::New,
             reply_thread_id: None,
             reply_message_id: None,
-            draft_id: uuid::Uuid::new_v4().to_string(),
-            draft_dirty: false,
-            active_signature_id: None,
-            sending: false,
             status: None,
             discard_confirm_open: false,
             autocomplete: AutocompleteState::new(),
+            attachments: Vec::new(),
+            link_dialog_open: false,
+            link_url: String::new(),
+            link_text: String::new(),
             width: COMPOSE_DEFAULT_WIDTH,
             height: COMPOSE_DEFAULT_HEIGHT,
         }
@@ -249,7 +308,7 @@ impl ComposeState {
         state.mode = mode.clone();
 
         // Set subject
-        state.subject = UndoableText::with_initial(&mode.prefixed_subject());
+        state.subject = mode.prefixed_subject();
 
         // Add To recipient (not for Forward — forward starts with empty To)
         if !matches!(state.mode, ComposeMode::Forward { .. }) {
@@ -318,19 +377,6 @@ impl ComposeState {
         }
     }
 
-    /// Returns which field has a selected token, if any.
-    pub fn selected_token_field(&self) -> Option<RecipientField> {
-        if self.selected_to_token.is_some() {
-            Some(RecipientField::To)
-        } else if self.selected_cc_token.is_some() {
-            Some(RecipientField::Cc)
-        } else if self.selected_bcc_token.is_some() {
-            Some(RecipientField::Bcc)
-        } else {
-            None
-        }
-    }
-
     /// Returns true if the compose body has user content beyond the
     /// initial quoted text / signature.
     fn has_user_content(&self) -> bool {
@@ -345,16 +391,8 @@ impl ComposeState {
 
 pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
     match msg {
-        ComposeMessage::SubjectChanged(s) => {
-            state.subject.set_text(s);
-            state.draft_dirty = true;
-        }
-        ComposeMessage::SubjectUndo => { state.subject.undo(); }
-        ComposeMessage::SubjectRedo => { state.subject.redo(); }
-        ComposeMessage::BodyChanged(action) => {
-            state.body.perform(action);
-            state.draft_dirty = true;
-        }
+        ComposeMessage::SubjectChanged(s) => state.subject = s,
+        ComposeMessage::BodyChanged(action) => state.body.perform(action),
         ComposeMessage::FromAccountChanged(account) => {
             state.from_account = Some(account);
         }
@@ -381,51 +419,20 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                 &mut state.selected_bcc_token,
             );
         }
-        ComposeMessage::MoveSelectedTokenToField(target_field) => {
-            move_selected_token(state, target_field);
-        }
         ComposeMessage::Send => {
-            // Handled by the caller (handle_compose_send in pop_out.rs)
+            // V1: validate and show stub status
+            let has_recipients = !state.to.tokens.is_empty()
+                || !state.cc.tokens.is_empty()
+                || !state.bcc.tokens.is_empty();
+            if !has_recipients {
+                state.status =
+                    Some("Add at least one recipient".to_string());
+                return;
+            }
+            state.status = Some("Send not yet wired".to_string());
         }
         ComposeMessage::Discard => {
             // Handled by the caller (close window)
-        }
-        ComposeMessage::AttachFiles | ComposeMessage::FilesAttached(_) => {
-            // Handled by the caller (pop_out.rs)
-        }
-        ComposeMessage::SendFinalized(Ok(())) => {
-            state.status = Some("Sending...".to_string());
-            state.sending = true;
-        }
-        ComposeMessage::SendFinalized(Err(e)) => {
-            state.status = Some(format!("Failed to queue: {e}"));
-            state.sending = false;
-        }
-        ComposeMessage::SendCompleted(Ok(_msg_id)) => {
-            state.status = Some("Message sent".to_string());
-            state.sending = false;
-            // Window close handled by the caller
-        }
-        ComposeMessage::SendCompleted(Err(e)) => {
-            state.status = Some(format!("Send failed: {e}"));
-            state.sending = false;
-        }
-        ComposeMessage::SignatureResolved(Some((html, sig_id, _))) => {
-            state.active_signature_id = Some(sig_id);
-            // Append signature to body if it's a new compose
-            let body_text = state.body.text();
-            let sig_plain = ratatoskr_core::db::queries_extra::html_to_plain_text(&html);
-            if !sig_plain.trim().is_empty() {
-                let new_body = format!("{body_text}\n\n-- \n{sig_plain}");
-                state.body = iced::widget::text_editor::Content::with_text(&new_body);
-            }
-        }
-        ComposeMessage::SignatureResolved(None) => {}
-        ComposeMessage::DraftSaved(Ok(())) => {
-            state.draft_dirty = false;
-        }
-        ComposeMessage::DraftSaved(Err(e)) => {
-            eprintln!("Draft auto-save failed: {e}");
         }
         ComposeMessage::ToggleDiscardConfirm => {
             state.discard_confirm_open = !state.discard_confirm_open;
@@ -485,15 +492,63 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             state.autocomplete.results.clear();
             state.autocomplete.highlighted = None;
         }
-        // Formatting toolbar stubs
+        // Formatting toolbar — plain text editor, so these are stubs
         ComposeMessage::FormatBold
         | ComposeMessage::FormatItalic
         | ComposeMessage::FormatUnderline
         | ComposeMessage::FormatStrikethrough
         | ComposeMessage::FormatList
-        | ComposeMessage::FormatBlockquote
-        | ComposeMessage::FormatLink => {
-            // V1 stub — rich text editor not yet wired
+        | ComposeMessage::FormatBlockquote => {
+            // Plain text editor — no rich formatting support
+        }
+        // Link dialog
+        ComposeMessage::FormatLink | ComposeMessage::ToggleLinkDialog => {
+            if !state.link_dialog_open {
+                // Pre-fill display text with current selection
+                state.link_text = state
+                    .body
+                    .selection()
+                    .unwrap_or_default();
+                state.link_url.clear();
+            }
+            state.link_dialog_open = !state.link_dialog_open;
+        }
+        ComposeMessage::LinkUrlChanged(url) => state.link_url = url,
+        ComposeMessage::LinkTextChanged(t) => state.link_text = t,
+        ComposeMessage::LinkInsert => {
+            let url = state.link_url.trim().to_string();
+            let display = state.link_text.trim().to_string();
+            if !url.is_empty() {
+                // Insert markdown-style link into plain text editor
+                let link_text = if display.is_empty() {
+                    url.clone()
+                } else {
+                    format!("[{display}]({url})")
+                };
+                // Replace selection (or insert at cursor) with the link
+                state.body.perform(
+                    iced::widget::text_editor::Action::Edit(
+                        iced::widget::text_editor::Edit::Paste(
+                            Arc::new(link_text),
+                        ),
+                    ),
+                );
+            }
+            state.link_dialog_open = false;
+            state.link_url.clear();
+            state.link_text.clear();
+        }
+        // Attachments
+        ComposeMessage::AttachFiles => {
+            // Handled by the pop-out handler (async file picker)
+        }
+        ComposeMessage::FilesSelected(files) => {
+            state.attachments.extend(files);
+        }
+        ComposeMessage::RemoveAttachment(idx) => {
+            if idx < state.attachments.len() {
+                state.attachments.remove(idx);
+            }
         }
     }
 }
@@ -559,70 +614,6 @@ fn handle_token_input_message(
     }
 }
 
-/// Move the currently selected token from its source field to the target field.
-fn move_selected_token(state: &mut ComposeState, target: RecipientField) {
-    // Find which field has a selected token and extract it.
-    let (token, source) = if let Some(token_id) = state.selected_to_token {
-        let pos = state.to.tokens.iter().position(|t| t.id == token_id);
-        if let Some(idx) = pos {
-            (state.to.tokens.remove(idx), RecipientField::To)
-        } else {
-            return;
-        }
-    } else if let Some(token_id) = state.selected_cc_token {
-        let pos = state.cc.tokens.iter().position(|t| t.id == token_id);
-        if let Some(idx) = pos {
-            (state.cc.tokens.remove(idx), RecipientField::Cc)
-        } else {
-            return;
-        }
-    } else if let Some(token_id) = state.selected_bcc_token {
-        let pos = state.bcc.tokens.iter().position(|t| t.id == token_id);
-        if let Some(idx) = pos {
-            (state.bcc.tokens.remove(idx), RecipientField::Bcc)
-        } else {
-            return;
-        }
-    } else {
-        return;
-    };
-
-    // Don't move to the same field.
-    if source == target {
-        return;
-    }
-
-    // Clear selection on source.
-    match source {
-        RecipientField::To => state.selected_to_token = None,
-        RecipientField::Cc => state.selected_cc_token = None,
-        RecipientField::Bcc => state.selected_bcc_token = None,
-    }
-
-    // Re-ID the token for the target field and insert.
-    let target_value = match target {
-        RecipientField::To => &mut state.to,
-        RecipientField::Cc => &mut state.cc,
-        RecipientField::Bcc => &mut state.bcc,
-    };
-    let new_id = target_value.next_token_id();
-    target_value.tokens.push(token_input::Token {
-        id: new_id,
-        email: token.email,
-        label: token.label,
-        is_group: token.is_group,
-        group_id: token.group_id,
-        member_count: token.member_count,
-    });
-
-    // Auto-show Cc/Bcc if moving a token there.
-    match target {
-        RecipientField::Cc => state.show_cc = true,
-        RecipientField::Bcc => state.show_bcc = true,
-        RecipientField::To => {}
-    }
-}
-
 // ── View ────────────────────────────────────────────────
 
 pub fn view_compose_window<'a>(
@@ -640,14 +631,26 @@ pub fn view_compose_window<'a>(
         toolbar,
         widgets::divider(),
         body,
-        widgets::divider(),
-        footer
     ]
     .spacing(SPACE_0);
+
+    // Attachment list (between body and footer)
+    if !state.attachments.is_empty() {
+        content = content.push(widgets::divider());
+        content = content.push(attachment_list(window_id, state));
+    }
+
+    content = content.push(widgets::divider());
+    content = content.push(footer);
 
     // Discard confirmation overlay
     if state.discard_confirm_open {
         content = content.push(discard_confirmation(window_id));
+    }
+
+    // Link insertion dialog overlay
+    if state.link_dialog_open {
+        content = content.push(link_dialog(window_id, state));
     }
 
     container(content)
@@ -670,32 +673,24 @@ fn compose_header<'a>(
     // To field
     fields = fields.push(build_to_row(window_id, state));
 
-    // Show Cc/Bcc fields when visible, or when a token is selected in
-    // another field (as drop targets for cross-field token movement).
-    let has_selection = state.selected_token_field().is_some();
-    if state.show_cc || has_selection {
+    // Cc field (if shown)
+    if state.show_cc {
         fields = fields.push(build_cc_row(window_id, state));
     }
-    if state.show_bcc || has_selection {
+
+    // Bcc field (if shown)
+    if state.show_bcc {
         fields = fields.push(build_bcc_row(window_id, state));
     }
 
     // Subject
-    let subject_input = undoable_text_input("Subject", state.subject.text())
+    let subject_input = text_input("Subject", &state.subject)
         .on_input(move |s| {
             Message::PopOut(
                 window_id,
                 PopOutMessage::Compose(ComposeMessage::SubjectChanged(s)),
             )
         })
-        .on_undo(Message::PopOut(
-            window_id,
-            PopOutMessage::Compose(ComposeMessage::SubjectUndo),
-        ))
-        .on_redo(Message::PopOut(
-            window_id,
-            PopOutMessage::Compose(ComposeMessage::SubjectRedo),
-        ))
         .size(TEXT_LG)
         .padding(PAD_INPUT);
 
@@ -794,10 +789,8 @@ fn build_to_row<'a>(
 ) -> Element<'a, Message> {
     build_recipient_row_inner(
         "To",
-        RecipientField::To,
         &state.to,
         state.selected_to_token,
-        state.selected_token_field(),
         window_id,
         "Add recipients...",
         ComposeMessage::ToTokenInput,
@@ -810,10 +803,8 @@ fn build_cc_row<'a>(
 ) -> Element<'a, Message> {
     build_recipient_row_inner(
         "Cc",
-        RecipientField::Cc,
         &state.cc,
         state.selected_cc_token,
-        state.selected_token_field(),
         window_id,
         "Add Cc...",
         ComposeMessage::CcTokenInput,
@@ -826,23 +817,18 @@ fn build_bcc_row<'a>(
 ) -> Element<'a, Message> {
     build_recipient_row_inner(
         "Bcc",
-        RecipientField::Bcc,
         &state.bcc,
         state.selected_bcc_token,
-        state.selected_token_field(),
         window_id,
         "Add Bcc...",
         ComposeMessage::BccTokenInput,
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn build_recipient_row_inner<'a>(
     label: &'a str,
-    this_field: RecipientField,
     value: &'a TokenInputValue,
     selected: Option<TokenId>,
-    drag_source: Option<RecipientField>,
     window_id: iced::window::Id,
     placeholder: &'a str,
     wrap: fn(TokenInputMessage) -> ComposeMessage,
@@ -855,47 +841,19 @@ fn build_recipient_row_inner<'a>(
         move |msg| Message::PopOut(window_id, PopOutMessage::Compose(wrap(msg))),
     );
 
-    // When a token is selected in a *different* field, show the label as a
-    // drop-zone button so the user can click to move the token here.
-    let is_drop_target = drag_source.is_some_and(|src| src != this_field);
-
-    let label_element: Element<'a, Message> = if is_drop_target {
-        button(
-            row![
-                icon::arrow_right().size(ICON_XS).style(text::primary),
-                text(label)
-                    .size(TEXT_SM)
-                    .font(crate::font::text_semibold())
-                    .style(text::primary),
-            ]
-            .spacing(SPACE_XXXS)
-            .align_y(Alignment::Center),
-        )
-        .on_press(Message::PopOut(
-            window_id,
-            PopOutMessage::Compose(ComposeMessage::MoveSelectedTokenToField(
-                this_field,
-            )),
-        ))
-        .padding(PAD_ICON_BTN)
-        .style(theme::ButtonClass::Ghost.style())
-        .width(COMPOSE_LABEL_WIDTH)
-        .into()
-    } else {
+    row![
         container(
             text(label)
                 .size(TEXT_SM)
-                .style(theme::TextClass::Tertiary.style()),
+                .style(theme::TextClass::Tertiary.style())
         )
         .width(COMPOSE_LABEL_WIDTH)
-        .align_y(Alignment::Center)
-        .into()
-    };
-
-    row![label_element, field]
-        .spacing(SPACE_XS)
-        .align_y(Alignment::Start)
-        .into()
+        .align_y(Alignment::Center),
+        field,
+    ]
+    .spacing(SPACE_XS)
+    .align_y(Alignment::Start)
+    .into()
 }
 
 // ── Formatting toolbar ─────────────────────────────────
@@ -981,32 +939,43 @@ fn compose_footer<'a>(
     ))
     .padding(PAD_BUTTON);
 
-    let send_label = if state.sending {
-        "Sending..."
-    } else {
-        "Send"
-    };
-    let mut send_btn = button(
+    let send_btn = button(
         row![
             icon::send().size(ICON_SM),
-            text(send_label).size(TEXT_MD).font(font::text_semibold()),
+            text("Send").size(TEXT_MD).font(font::text_semibold()),
         ]
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),
     )
     .style(theme::ButtonClass::Primary.style())
+    .on_press(Message::PopOut(
+        window_id,
+        PopOutMessage::Compose(ComposeMessage::Send),
+    ))
     .padding(PAD_BUTTON);
 
-    if !state.sending {
-        send_btn = send_btn.on_press(Message::PopOut(
-            window_id,
-            PopOutMessage::Compose(ComposeMessage::Send),
-        ));
-    }
+    let attach_btn = button(
+        row![
+            icon::paperclip().size(ICON_SM),
+            text("Attach").size(TEXT_MD),
+        ]
+        .spacing(SPACE_XXS)
+        .align_y(Alignment::Center),
+    )
+    .style(theme::ButtonClass::Ghost.style())
+    .on_press(Message::PopOut(
+        window_id,
+        PopOutMessage::Compose(ComposeMessage::AttachFiles),
+    ))
+    .padding(PAD_BUTTON);
 
-    let footer_row =
-        row![discard_btn, Space::new().width(Length::Fill), send_btn]
-            .align_y(Alignment::Center);
+    let footer_row = row![
+        discard_btn,
+        attach_btn,
+        Space::new().width(Length::Fill),
+        send_btn,
+    ]
+    .align_y(Alignment::Center);
 
     container(footer_row)
         .padding(PAD_CONTENT)
@@ -1063,22 +1032,128 @@ fn discard_confirmation<'a>(
     .into()
 }
 
-// ── Helpers ─────────────────────────────────────────────
+// ── Attachment list ──────────────────────────────────────
 
-/// Convert token input recipients to a comma-separated email string.
-pub fn tokens_to_csv(value: &TokenInputValue) -> Option<String> {
-    if value.tokens.is_empty() {
-        return None;
+fn attachment_list<'a>(
+    window_id: iced::window::Id,
+    state: &'a ComposeState,
+) -> Element<'a, Message> {
+    let mut items = column![].spacing(SPACE_XXS);
+
+    for (idx, att) in state.attachments.iter().enumerate() {
+        let size_label = att.display_size();
+        let remove_btn = button(
+            icon::x().size(ICON_XS).style(text::secondary),
+        )
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::RemoveAttachment(idx)),
+        ))
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::BareIcon.style());
+
+        let att_row = row![
+            icon::paperclip()
+                .size(ICON_SM)
+                .style(text::secondary),
+            text(&att.name).size(TEXT_SM),
+            text(size_label)
+                .size(TEXT_XS)
+                .style(theme::TextClass::Tertiary.style()),
+            remove_btn,
+        ]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center);
+
+        items = items.push(att_row);
     }
-    Some(
-        value
-            .tokens
-            .iter()
-            .map(|t| t.email.as_str())
-            .collect::<Vec<_>>()
-            .join(", "),
-    )
+
+    container(items)
+        .padding(PAD_CONTENT)
+        .width(Length::Fill)
+        .into()
 }
+
+// ── Link insertion dialog ───────────────────────────────
+
+fn link_dialog<'a>(
+    window_id: iced::window::Id,
+    state: &'a ComposeState,
+) -> Element<'a, Message> {
+    let url_input = text_input("https://...", &state.link_url)
+        .on_input(move |s| {
+            Message::PopOut(
+                window_id,
+                PopOutMessage::Compose(ComposeMessage::LinkUrlChanged(s)),
+            )
+        })
+        .size(TEXT_MD)
+        .padding(PAD_INPUT);
+
+    let text_input_field =
+        text_input("Display text (optional)", &state.link_text)
+            .on_input(move |s| {
+                Message::PopOut(
+                    window_id,
+                    PopOutMessage::Compose(
+                        ComposeMessage::LinkTextChanged(s),
+                    ),
+                )
+            })
+            .size(TEXT_MD)
+            .padding(PAD_INPUT);
+
+    let cancel_btn = button(text("Cancel").size(TEXT_MD))
+        .style(theme::ButtonClass::Ghost.style())
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::ToggleLinkDialog),
+        ))
+        .padding(PAD_BUTTON);
+
+    let insert_btn = button(
+        text("Insert")
+            .size(TEXT_MD)
+            .font(font::text_semibold()),
+    )
+    .style(theme::ButtonClass::Primary.style())
+    .on_press(Message::PopOut(
+        window_id,
+        PopOutMessage::Compose(ComposeMessage::LinkInsert),
+    ))
+    .padding(PAD_BUTTON);
+
+    container(
+        column![
+            text("Insert Link")
+                .size(TEXT_TITLE)
+                .font(font::text_semibold())
+                .style(text::base),
+            column![
+                text("URL").size(TEXT_SM).style(text::secondary),
+                url_input,
+            ]
+            .spacing(SPACE_XXS),
+            column![
+                text("Display text")
+                    .size(TEXT_SM)
+                    .style(text::secondary),
+                text_input_field,
+            ]
+            .spacing(SPACE_XXS),
+            row![cancel_btn, insert_btn]
+                .spacing(SPACE_SM)
+                .align_y(Alignment::Center),
+        ]
+        .spacing(SPACE_SM),
+    )
+    .padding(PAD_CONTENT)
+    .style(theme::ContainerClass::Elevated.style())
+    .width(Length::Fill)
+    .into()
+}
+
+// ── Helpers ─────────────────────────────────────────────
 
 fn accounts_to_info(accounts: &[db::Account]) -> Vec<AccountInfo> {
     accounts
