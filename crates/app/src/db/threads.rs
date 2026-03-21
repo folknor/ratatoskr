@@ -156,7 +156,7 @@ pub async fn persist_attachments_collapsed(
     .map_err(|e| format!("spawn_blocking: {e}"))?
 }
 
-// ── Legacy per-message query methods (used by pop-out and main thread loading) ──
+// ── Thread-level queries (still used by handle_select_thread) ──
 
 impl Db {
     /// Load messages for a thread (used by main window thread selection).
@@ -239,36 +239,44 @@ impl Db {
         })
         .await
     }
+}
 
-    /// Load body text and HTML for a single message via the body store
-    /// (used by pop-out windows).
+// ── Per-message queries — delegated to core ─────────────
+//
+// These thin wrappers call core's `message_queries` module and convert
+// the results into app display types. Raw SQL formerly lived here but
+// has been moved to `crates/core/src/db/queries_extra/message_queries.rs`.
+
+use ratatoskr_core::db::queries_extra::message_queries;
+
+impl Db {
+    /// Load body text and HTML for a single message (used by pop-out windows).
     pub async fn load_message_body(
         &self,
-        _account_id: String,
+        account_id: String,
         message_id: String,
     ) -> Result<(Option<String>, Option<String>), String> {
-        let body_store = init_body_store()?;
-        let body = body_store.get(message_id).await?;
-        match body {
-            Some(b) => Ok((b.body_text, b.body_html)),
-            None => Ok((None, None)),
-        }
+        let conn = self.conn_arc();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+            message_queries::get_message_body(&conn, &account_id, &message_id)
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
     }
 
-    /// Load attachments for a single message via core's query
-    /// (used by pop-out windows).
+    /// Load attachments for a single message (used by pop-out windows).
     pub async fn load_message_attachments(
         &self,
         account_id: String,
         message_id: String,
     ) -> Result<Vec<super::types::MessageViewAttachment>, String> {
-        self.with_conn(move |conn| {
-            let core_atts =
-                ratatoskr_core::db::queries::get_attachments_for_message(
-                    conn,
-                    account_id,
-                    message_id,
-                )?;
+        let conn = self.conn_arc();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+            let core_atts = message_queries::get_message_attachments(
+                &conn, &account_id, &message_id,
+            )?;
             Ok(core_atts
                 .into_iter()
                 .map(|a| super::types::MessageViewAttachment {
@@ -280,6 +288,7 @@ impl Db {
                 .collect())
         })
         .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
     }
 
     /// Load raw email source for a message (used by pop-out Source view).
@@ -288,23 +297,13 @@ impl Db {
         account_id: String,
         message_id: String,
     ) -> Result<String, String> {
-        self.with_conn(move |conn| {
-            let result = conn.query_row(
-                "SELECT raw_source FROM messages
-                 WHERE account_id = ?1 AND id = ?2",
-                rusqlite::params![account_id, message_id],
-                |row| row.get::<_, Option<String>>(0),
-            );
-            match result {
-                Ok(Some(source)) => Ok(source),
-                Ok(None) => Ok("(no source available)".to_string()),
-                Err(rusqlite::Error::QueryReturnedNoRows) => {
-                    Err("Message not found".to_string())
-                }
-                Err(e) => Err(e.to_string()),
-            }
+        let conn = self.conn_arc();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+            message_queries::get_message_raw_source(&conn, &account_id, &message_id)
         })
         .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
     }
 }
 

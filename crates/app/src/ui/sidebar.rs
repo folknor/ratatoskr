@@ -40,10 +40,6 @@ pub enum SidebarMessage {
 pub enum SidebarEvent {
     AccountSelected(usize),
     AllAccountsSelected,
-    /// Emitted when account cycling completes. The parent should reload
-    /// navigation state — the sidebar already emits `AccountSelected`
-    /// for the actual account change, so this is supplementary.
-    CycleAccount,
     LabelSelected(Option<String>),
     Compose,
     ToggleSettings,

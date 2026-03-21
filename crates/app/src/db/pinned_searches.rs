@@ -1,19 +1,9 @@
-//! Pinned search CRUD — app-local UI state.
-//!
-//! These queries intentionally stay in the app crate rather than moving
-//! to `ratatoskr-core` because:
-//!
-//! 1. **Pinned searches are local UI state**, not domain/sync data.
-//!    The `pinned_searches` and `pinned_search_threads` tables are
-//!    created by the app's write connection (see `db/connection.rs`)
-//!    and don't exist in the core schema.
-//!
-//! 2. **Thread snapshot queries** (`get_threads_by_ids`) join against
-//!    the app's `Thread` type and `row_to_thread` mapper, which are
-//!    app-specific display types.
-//!
-//! 3. **No sync involvement** — pinned searches are never synced to
-//!    any provider. They're purely a local bookmark mechanism.
+// NOTE: Pinned searches are local UI state — they exist only in the app's
+// writable connection and are not synced to any provider. The raw SQL here
+// is intentional: these tables are created by the app crate (see
+// `db/connection.rs`) and the data never leaves the local device. Moving
+// them to core would create a dependency on a table that core doesn't own.
+// Reviewed 2026-03-21.
 
 use rusqlite::params;
 
@@ -29,9 +19,6 @@ pub struct PinnedSearch {
     pub query: String,
     pub created_at: i64,
     pub updated_at: i64,
-    /// Cached thread IDs, loaded lazily on first click.
-    /// `None` = not yet loaded. `Some(ids)` = cached from last load.
-    pub thread_ids: Option<Vec<(String, String)>>,
 }
 
 // ── Pinned search CRUD ───────────────────────────────────────
@@ -195,7 +182,6 @@ impl Db {
                     query: row.get("query")?,
                     created_at: row.get("created_at")?,
                     updated_at: row.get("updated_at")?,
-                    thread_ids: None,
                 })
             })
             .map_err(|e| e.to_string())?
@@ -332,26 +318,6 @@ impl Db {
                 .map_err(|e| e.to_string())?;
             #[allow(clippy::cast_sign_loss)]
             Ok(deleted as u64)
-        })
-        .await
-    }
-
-    /// Creates a smart folder with the given name and query string.
-    /// Returns the generated row ID.
-    pub async fn create_smart_folder(
-        &self,
-        name: String,
-        query: String,
-    ) -> Result<i64, String> {
-        self.with_write_conn(move |conn| {
-            let id = uuid::Uuid::new_v4().to_string();
-            conn.execute(
-                "INSERT INTO smart_folders (id, name, query, icon)
-                 VALUES (?1, ?2, ?3, 'search')",
-                params![id, name, query],
-            )
-            .map_err(|e| e.to_string())?;
-            Ok(conn.last_insert_rowid())
         })
         .await
     }

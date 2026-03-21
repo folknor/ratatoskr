@@ -14,6 +14,7 @@ use crate::font;
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
+use crate::ui::widgets;
 
 use ratatoskr_core::db::queries_extra::{
     CreateAccountParams, ReauthAccountParams, account_exists_by_email_sync,
@@ -1278,7 +1279,7 @@ impl AddAccountWizard {
 
         if self.is_first_launch {
             col = col.push(
-                container(icon::mail().size(48.0).style(text::primary))
+                container(icon::mail().size(WELCOME_ICON_SIZE).style(text::primary))
                     .align_x(Alignment::Center),
             );
             col = col.push(Space::new().height(SPACE_SM));
@@ -1728,9 +1729,10 @@ impl AddAccountWizard {
         col = col.push(
             text("Pick a color").size(TEXT_SM).style(text::secondary),
         );
-        col = col.push(color_palette_grid(
+        col = col.push(widgets::color_palette_grid(
             self.identity.selected_color_index,
             &self.used_colors,
+            AddAccountMessage::SelectColor,
         ));
 
         if let Some(ref err) = self.error {
@@ -1758,126 +1760,6 @@ fn view_creating<'a>() -> Element<'a, AddAccountMessage> {
     .align_x(Alignment::Center)
     .width(Length::Fill)
     .into()
-}
-
-// ── Color palette grid ───────────────────────────────────
-
-fn color_palette_grid<'a>(
-    selected: Option<usize>,
-    used_colors: &[String],
-) -> Element<'a, AddAccountMessage> {
-    let presets = ratatoskr_label_colors::category_colors::all_presets();
-    let mut grid = column![].spacing(SPACE_XS);
-    let mut current_row = row![].spacing(SPACE_XS);
-
-    for (i, &(_name, bg_hex, _fg_hex)) in presets.iter().enumerate() {
-        let is_selected = selected == Some(i);
-        let is_used = used_colors.iter().any(|c| c == bg_hex);
-        let color = theme::hex_to_color(bg_hex);
-
-        let swatch = iced::widget::Canvas::new(SwatchPainter {
-            color,
-            selected: is_selected,
-            used: is_used,
-        })
-        .width(COLOR_SWATCH_SIZE)
-        .height(COLOR_SWATCH_SIZE);
-
-        let style = if is_selected {
-            theme::ButtonClass::Chip { active: true }
-        } else {
-            theme::ButtonClass::BareTransparent
-        };
-
-        let swatch_btn = button(swatch)
-            .on_press(AddAccountMessage::SelectColor(i))
-            .padding(2)
-            .style(style.style());
-
-        current_row = current_row.push(swatch_btn);
-
-        if (i + 1) % COLOR_PALETTE_COLUMNS == 0 {
-            grid = grid.push(current_row);
-            current_row = row![].spacing(SPACE_XS);
-        }
-    }
-
-    // Push remaining swatches
-    if presets.len() % COLOR_PALETTE_COLUMNS != 0 {
-        grid = grid.push(current_row);
-    }
-
-    grid.into()
-}
-
-// ── Swatch canvas painter ────────────────────────────────
-
-struct SwatchPainter {
-    color: iced::Color,
-    selected: bool,
-    used: bool,
-}
-
-impl<M> iced::widget::canvas::Program<M> for SwatchPainter {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &(),
-        renderer: &iced::Renderer,
-        _theme: &iced::Theme,
-        bounds: iced::Rectangle,
-        _cursor: iced::mouse::Cursor,
-    ) -> Vec<iced::widget::canvas::Geometry<iced::Renderer>> {
-        let mut frame =
-            iced::widget::canvas::Frame::new(renderer, bounds.size());
-        let radius = bounds.width.min(bounds.height) / 2.0;
-        let center =
-            iced::Point::new(bounds.width / 2.0, bounds.height / 2.0);
-
-        let circle = iced::widget::canvas::path::Path::circle(center, radius);
-
-        let draw_color = if self.used && !self.selected {
-            // Dim used colors
-            iced::Color {
-                a: 0.35,
-                ..self.color
-            }
-        } else {
-            self.color
-        };
-
-        frame.fill(&circle, draw_color);
-
-        // Draw a small check for already-used colors
-        if self.used {
-            draw_check_mark(&mut frame, bounds, radius);
-        }
-
-        vec![frame.into_geometry()]
-    }
-}
-
-fn draw_check_mark(
-    frame: &mut iced::widget::canvas::Frame<iced::Renderer>,
-    bounds: iced::Rectangle,
-    radius: f32,
-) {
-    let check_color = iced::Color::WHITE;
-    let check = iced::widget::canvas::path::Path::new(|b| {
-        let cx = bounds.width / 2.0;
-        let cy = bounds.height / 2.0;
-        let s = radius * 0.35;
-        b.move_to(iced::Point::new(cx - s * 0.5, cy));
-        b.line_to(iced::Point::new(cx - s * 0.1, cy + s * 0.4));
-        b.line_to(iced::Point::new(cx + s * 0.5, cy - s * 0.3));
-    });
-    frame.stroke(
-        &check,
-        iced::widget::canvas::Stroke::default()
-            .with_color(check_color)
-            .with_width(2.0),
-    );
 }
 
 // ── Shared view helpers ──────────────────────────────────

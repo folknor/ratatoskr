@@ -174,7 +174,7 @@ pub fn token_input_field<'a, M: Clone + 'a>(
 /// Uses character count (not byte count) for correct non-ASCII width.
 /// Group tokens include space for the people icon prefix.
 fn estimate_token_width(token: &Token) -> f32 {
-    let avg_char_width = TEXT_MD * 0.54;
+    let avg_char_width = TEXT_MD * TOKEN_AVG_CHAR_WIDTH_FACTOR;
     #[allow(clippy::cast_precision_loss)]
     let text_width = token.label.chars().count() as f32 * avg_char_width;
     let icon_width = if token.is_group {
@@ -856,7 +856,7 @@ fn draw_text_area(
             bounds.x + text_x
         } else {
             let text_width =
-                widget.text.chars().count() as f32 * TEXT_MD * 0.54;
+                widget.text.chars().count() as f32 * TEXT_MD * TOKEN_AVG_CHAR_WIDTH_FACTOR;
             bounds.x + text_x + text_width
         };
         let cursor_y = bounds.y + text_y + SPACE_XXXS;

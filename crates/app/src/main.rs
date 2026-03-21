@@ -290,7 +290,10 @@ struct App {
     search_generation: u64,
     search_query: UndoableText,
     search_debounce_deadline: Option<iced::time::Instant>,
-    pre_search_threads: Option<Vec<Thread>>,
+    /// Whether the user was in a folder view before entering search.
+    /// When search is cleared, threads are reloaded from the current
+    /// navigation state instead of restoring a stale clone.
+    was_in_folder_view: bool,
 
     // Pinned searches
     pinned_searches: Vec<db::PinnedSearch>,
@@ -369,7 +372,7 @@ impl App {
             search_generation: 0,
             search_query: UndoableText::new(),
             search_debounce_deadline: None,
-            pre_search_threads: None,
+            was_in_folder_view: false,
             pinned_searches: Vec::new(),
             active_pinned_search: None,
             editing_pinned_search: None,
@@ -971,7 +974,6 @@ impl App {
                 self.update_thread_list_context_from_sidebar();
                 self.load_navigation_and_threads()
             }
-            SidebarEvent::CycleAccount => Task::none(),
             SidebarEvent::LabelSelected(label_id) => {
                 self.clear_search_state();
                 self.clear_pinned_search_context();
@@ -1453,7 +1455,7 @@ impl App {
         )
     }
 
-    fn load_threads_for_current_view(&self) -> Task<Message> {
+    pub(crate) fn load_threads_for_current_view(&self) -> Task<Message> {
         let db = Arc::clone(&self.db);
         let scope = self.current_scope();
         let label_id = self.sidebar.selected_label.clone();
