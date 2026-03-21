@@ -8,6 +8,11 @@ use crate::ui::theme;
 use crate::ui::undoable_text_input::undoable_text_input;
 use crate::ui::widgets;
 
+use ratatoskr_rich_text_editor::{
+    rich_text_editor, Action as RteAction, EditAction, InlineStyle,
+    BlockKind,
+};
+
 use super::row_widgets::*;
 use super::types::*;
 
@@ -909,9 +914,10 @@ fn signature_list_section(state: &Settings) -> Element<'_, SettingsMessage> {
                 .into(),
         );
 
-        // Signature rows for this account
+        // Signature rows for this account (with global indices for drag)
         for sig in &account_sigs {
-            items.push(signature_row(sig));
+            let global_idx = state.signatures.iter().position(|s| s.id == sig.id).unwrap_or(0);
+            items.push(signature_row(sig, global_idx));
         }
 
         // Add Signature button for this account
@@ -939,10 +945,16 @@ fn signature_list_section(state: &Settings) -> Element<'_, SettingsMessage> {
         );
     }
 
-    section("Signatures", items)
+    let sig_section = section("Signatures", items);
+
+    // Wrap in mouse_area for drag-move tracking.
+    mouse_area(sig_section)
+        .on_move(SettingsMessage::SignatureDragMove)
+        .on_release(SettingsMessage::SignatureDragEnd)
+        .into()
 }
 
-fn signature_row<'a>(sig: &'a SignatureEntry) -> Element<'a, SettingsMessage> {
+fn signature_row<'a>(sig: &'a SignatureEntry, global_index: usize) -> Element<'a, SettingsMessage> {
     let sig_id = sig.id.clone();
 
     let mut label_parts = column![
@@ -960,6 +972,18 @@ fn signature_row<'a>(sig: &'a SignatureEntry) -> Element<'a, SettingsMessage> {
     }
 
     let mut content = row![].spacing(SPACE_SM).align_y(Alignment::Center);
+
+    // Drag grip handle
+    content = content.push(
+        mouse_area(
+            container(icon::grip_vertical().size(ICON_MD).style(text::secondary))
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
+        )
+        .on_press(SettingsMessage::SignatureDragGripPress(global_index))
+        .interaction(iced::mouse::Interaction::Grab),
+    );
+
     content = content.push(
         container(label_parts).align_y(Alignment::Center).width(Length::Fill),
     );
@@ -1064,21 +1088,24 @@ fn signature_editor_overlay(state: &Settings) -> Element<'_, SettingsMessage> {
         ),
     ]));
 
-    // Body field — plain text for V1
+    // Formatting toolbar + rich text editor
     col = col.push(section("Content", vec![
         container(
             column![
-                text("Signature body (HTML)").size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
+                text("Signature body").size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
                 Space::new().height(SPACE_XXS),
-                undoable_text_input("Enter signature content...", editor.body.text())
-                    .id("sig-body")
-                    .on_input(SettingsMessage::SignatureEditorBodyChanged)
-                    .on_undo(SettingsMessage::UndoInput(InputField::SignatureBody))
-                    .on_redo(SettingsMessage::RedoInput(InputField::SignatureBody))
-                    .size(TEXT_LG)
-                    .padding(PAD_INPUT)
-                    .style(theme::TextInputClass::Settings.style())
-                    .width(Length::Fill),
+                signature_formatting_toolbar(editor),
+                Space::new().height(SPACE_XXS),
+                container(
+                    rich_text_editor(&editor.body_editor)
+                        .on_action(SettingsMessage::SignatureEditorAction)
+                        .font(crate::font::text())
+                        .height(Length::Fixed(200.0))
+                        .width(Length::Fill)
+                        .padding(PAD_INPUT),
+                )
+                .style(theme::ContainerClass::Surface.style())
+                .width(Length::Fill),
             ]
         )
         .padding(PAD_SETTINGS_ROW)
@@ -1096,7 +1123,6 @@ fn signature_editor_overlay(state: &Settings) -> Element<'_, SettingsMessage> {
             .as_deref() == Some(del_id.as_str());
 
         if is_confirming {
-            // Show confirmation buttons.
             btn_row = btn_row.push(
                 text("Delete this signature?").size(TEXT_LG).style(text::danger),
             );
@@ -1139,6 +1165,58 @@ fn signature_editor_overlay(state: &Settings) -> Element<'_, SettingsMessage> {
     col = col.push(btn_row);
 
     col.into()
+}
+
+/// Formatting toolbar for the signature rich text editor.
+///
+/// B/I/U/S, list toggles, blockquote, and link buttons.
+fn signature_formatting_toolbar<'a>(
+    _editor: &'a SignatureEditorState,
+) -> Element<'a, SettingsMessage> {
+    let inline_btn = |icon_widget: iced::widget::Text<'a>, style_bit: InlineStyle| {
+        button(
+            container(icon_widget.size(ICON_MD).style(text::base))
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center)
+                .width(SETTINGS_ROW_HEIGHT)
+                .height(SETTINGS_ROW_HEIGHT),
+        )
+        .on_press(SettingsMessage::SignatureEditorAction(
+            RteAction::Edit(EditAction::ToggleInlineStyle(style_bit)),
+        ))
+        .padding(0)
+        .style(theme::ButtonClass::Action.style())
+    };
+
+    let block_btn = |icon_widget: iced::widget::Text<'a>, block_kind: BlockKind| {
+        button(
+            container(icon_widget.size(ICON_MD).style(text::base))
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center)
+                .width(SETTINGS_ROW_HEIGHT)
+                .height(SETTINGS_ROW_HEIGHT),
+        )
+        .on_press(SettingsMessage::SignatureEditorAction(
+            RteAction::Edit(EditAction::SetBlockType(block_kind)),
+        ))
+        .padding(0)
+        .style(theme::ButtonClass::Action.style())
+    };
+
+    let toolbar = row![
+        inline_btn(icon::bold(), InlineStyle::BOLD),
+        inline_btn(icon::italic(), InlineStyle::ITALIC),
+        inline_btn(icon::underline(), InlineStyle::UNDERLINE),
+        inline_btn(icon::strikethrough(), InlineStyle::STRIKETHROUGH),
+        Space::new().width(SPACE_XS),
+        block_btn(icon::list(), BlockKind::ListItem { ordered: false }),
+        block_btn(icon::list_ordered(), BlockKind::ListItem { ordered: true }),
+        block_btn(icon::text_quote(), BlockKind::BlockQuote),
+    ]
+    .spacing(SPACE_XXXS)
+    .align_y(Alignment::Center);
+
+    toolbar.into()
 }
 
 // ── People tab ───────────────────────────────────────────

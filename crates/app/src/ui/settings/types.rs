@@ -4,6 +4,8 @@ use iced::time::Duration;
 use crate::db::DateDisplay;
 use crate::ui::undoable::UndoableText;
 
+use ratatoskr_rich_text_editor::EditorState as RteEditorState;
+
 // ── Messages ────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -102,9 +104,13 @@ pub enum SettingsMessage {
     SignatureDeleteCancelled,                  // cancel pending delete
     SignatureEditorNameChanged(String),
     SignatureEditorBodyChanged(String),
+    SignatureEditorAction(ratatoskr_rich_text_editor::Action),
     SignatureEditorToggleDefault(bool),
     SignatureEditorToggleReplyDefault(bool),
     SignatureEditorSave,
+    SignatureDragGripPress(usize),
+    SignatureDragMove(Point),
+    SignatureDragEnd,
     // Contacts
     ContactFilterChanged(String),
     ContactsLoaded(Result<Vec<crate::db::ContactEntry>, String>),
@@ -160,6 +166,8 @@ pub enum SettingsEvent {
     SaveSignature(SignatureSaveRequest),
     /// Request the App to delete a signature by ID.
     DeleteSignature(String),
+    /// Request the App to reorder signatures by ID list.
+    ReorderSignatures(Vec<String>),
     /// Request the App to save a contact.
     SaveContact(crate::db::ContactEntry),
     /// Request the App to delete a contact by ID.
@@ -287,7 +295,6 @@ pub enum InputField {
     OllamaUrl,
     OllamaModel,
     SignatureName,
-    SignatureBody,
 }
 
 // ── Signature types ──────────────────────────────────────
@@ -323,9 +330,23 @@ pub struct SignatureEditorState {
     pub signature_id: Option<String>,
     pub account_id: String,
     pub name: UndoableText,
-    pub body: UndoableText,
+    /// Rich text editor state for the signature body.
+    pub body_editor: RteEditorState,
     pub is_default: bool,
     pub is_reply_default: bool,
+}
+
+/// State for signature drag-reorder within a single account section.
+#[derive(Debug, Clone)]
+pub struct SignatureDragState {
+    /// Account ID of the group being dragged within.
+    pub account_id: String,
+    /// Index of the signature being dragged within the account's list.
+    pub dragging_index: usize,
+    /// Y coordinate when the grip was pressed (list-relative).
+    pub start_y: f32,
+    /// Whether the mouse has moved far enough to count as a real drag.
+    pub is_dragging: bool,
 }
 
 /// Editing state for the contact editor overlay.
@@ -412,6 +433,8 @@ pub struct Settings {
     pub signature_editor: Option<SignatureEditorState>,
     /// Signature ID pending delete confirmation.
     pub confirm_delete_signature: Option<String>,
+    /// Active signature drag-reorder state.
+    pub signature_drag: Option<SignatureDragState>,
     // Contacts management
     pub contact_filter: String,
     pub contacts: Vec<crate::db::ContactEntry>,
@@ -584,6 +607,7 @@ impl Default for Settings {
             signatures: Vec::new(),
             signature_editor: None,
             confirm_delete_signature: None,
+            signature_drag: None,
             contact_filter: String::new(),
             contacts: Vec::new(),
             contact_editor: None,

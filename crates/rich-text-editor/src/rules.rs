@@ -30,6 +30,8 @@ pub enum EditAction {
     SplitBlock,
     /// Toggle an inline style.
     ToggleInlineStyle(InlineStyle),
+    /// Set the block type at the cursor position (toolbar action).
+    SetBlockType(BlockKind),
 }
 
 /// Resolve a high-level user action into concrete `EditOp`s using the rules chain.
@@ -52,6 +54,7 @@ pub fn resolve(
         EditAction::DeleteSelection => resolve_delete_selection(doc, selection),
         EditAction::SplitBlock => resolve_split_block(doc, selection),
         EditAction::ToggleInlineStyle(style) => resolve_toggle_style(doc, selection, style),
+        EditAction::SetBlockType(kind) => resolve_set_block_type(doc, selection, kind),
     }
 }
 
@@ -612,6 +615,49 @@ fn resolve_toggle_style(
         start,
         end,
         style_bit: style,
+    }]
+}
+
+// ── Set block type (toolbar) ─────────────────────────────
+
+/// Resolve a `SetBlockType` action from the toolbar.
+///
+/// If the cursor is inside a block of a different type, emits a `SetBlockType`
+/// op. If the block is already the target type, toggles back to Paragraph.
+fn resolve_set_block_type(
+    doc: &Document,
+    selection: DocSelection,
+    kind: BlockKind,
+) -> Vec<EditOp> {
+    let block_index = selection.focus.block_index;
+    let Some(block) = doc.block(block_index) else {
+        return vec![];
+    };
+
+    let current_kind = block.kind();
+
+    // Toggle: if already the target kind, revert to Paragraph.
+    let new_kind = if current_kind == kind {
+        BlockKind::Paragraph
+    } else {
+        kind
+    };
+
+    // Don't emit a no-op.
+    if current_kind == new_kind {
+        return vec![];
+    }
+
+    // Only allow conversion of inline blocks (Paragraph, Heading, ListItem).
+    // Don't convert HorizontalRule, Image, or BlockQuote content blocks.
+    if matches!(current_kind, BlockKind::HorizontalRule | BlockKind::Image) {
+        return vec![];
+    }
+
+    vec![EditOp::SetBlockType {
+        block_index,
+        old: current_kind,
+        new: new_kind,
     }]
 }
 

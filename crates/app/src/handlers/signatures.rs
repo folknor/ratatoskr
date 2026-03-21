@@ -1,22 +1,21 @@
 //! Signature CRUD handlers for the app crate.
 //!
-//! These functions replace the raw SQL that was previously inlined in
-//! `main.rs`. They use the app's `Db` connection but implement proper
-//! transactional default-clearing semantics.
+//! These functions delegate to core CRUD functions in
+//! `ratatoskr_core::db::queries_extra::compose` rather than using raw SQL.
+//! The core functions handle transactional default-clearing properly.
 
 use std::sync::Arc;
 
 use iced::Task;
-use rusqlite::params;
 
 use crate::db::Db;
 use crate::ui::settings::SignatureEntry;
 
-/// Save a signature (insert or update) with transactional default management.
+/// Save a signature (insert or update) via core CRUD functions.
 ///
-/// When `is_default` is true, clears `is_default` on all other signatures for
-/// the same account. Same for `is_reply_default`. Auto-generates `body_text`
-/// from `body_html`.
+/// When `is_default` is true, the core functions clear `is_default` on all
+/// other signatures for the same account in a transaction. Same for
+/// `is_reply_default`. Auto-generates `body_text` from `body_html`.
 pub fn handle_save_signature(
     db: &Arc<Db>,
     req: crate::ui::settings::SignatureSaveRequest,
@@ -25,60 +24,33 @@ pub fn handle_save_signature(
     Task::perform(
         async move {
             let body_text = html_to_plain_text(&req.body_html);
-            db.with_write_conn(move |conn| {
-                let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+            let core_db = ratatoskr_core::db::DbState::from_arc(db.write_conn_arc());
 
-                if let Some(ref id) = req.id {
-                    // Update existing signature.
-                    clear_defaults_if_needed(
-                        &tx,
-                        id,
-                        req.is_default,
-                        req.is_reply_default,
-                    )?;
-                    tx.execute(
-                        "UPDATE signatures SET name = ?1, body_html = ?2, body_text = ?3, \
-                         is_default = ?4, is_reply_default = ?5 WHERE id = ?6",
-                        params![
-                            req.name,
-                            req.body_html,
-                            body_text,
-                            i64::from(req.is_default),
-                            i64::from(req.is_reply_default),
-                            id,
-                        ],
-                    )
-                    .map_err(|e| e.to_string())?;
-                } else {
-                    // Insert new signature.
-                    let id = uuid::Uuid::new_v4().to_string();
-                    clear_defaults_for_account(
-                        &tx,
-                        &req.account_id,
-                        req.is_default,
-                        req.is_reply_default,
-                    )?;
-                    tx.execute(
-                        "INSERT INTO signatures \
-                         (id, account_id, name, body_html, body_text, is_default, is_reply_default) \
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                        params![
-                            id,
-                            req.account_id,
-                            req.name,
-                            req.body_html,
-                            body_text,
-                            i64::from(req.is_default),
-                            i64::from(req.is_reply_default),
-                        ],
-                    )
-                    .map_err(|e| e.to_string())?;
-                }
-
-                tx.commit().map_err(|e| e.to_string())?;
-                Ok(())
-            })
-            .await
+            if let Some(ref id) = req.id {
+                // Update existing signature via core CRUD.
+                let params = ratatoskr_core::db::queries_extra::UpdateSignatureParams {
+                    id: id.clone(),
+                    name: Some(req.name),
+                    body_html: Some(req.body_html),
+                    body_text: Some(Some(body_text)),
+                    is_default: Some(req.is_default),
+                    is_reply_default: Some(req.is_reply_default),
+                };
+                ratatoskr_core::db::queries_extra::db_update_signature(&core_db, params).await
+            } else {
+                // Insert new signature via core CRUD.
+                let params = ratatoskr_core::db::queries_extra::InsertSignatureParams {
+                    account_id: req.account_id,
+                    name: req.name,
+                    body_html: req.body_html,
+                    body_text: Some(body_text),
+                    is_default: req.is_default,
+                    is_reply_default: req.is_reply_default,
+                };
+                ratatoskr_core::db::queries_extra::db_insert_signature(&core_db, params)
+                    .await
+                    .map(|_id| ())
+            }
         },
         |result| {
             if let Err(ref e) = result {
@@ -89,7 +61,7 @@ pub fn handle_save_signature(
     )
 }
 
-/// Delete a signature by ID.
+/// Delete a signature by ID via core CRUD.
 pub fn handle_delete_signature(
     db: &Arc<Db>,
     sig_id: String,
@@ -97,15 +69,8 @@ pub fn handle_delete_signature(
     let db = Arc::clone(db);
     Task::perform(
         async move {
-            db.with_write_conn(move |conn| {
-                conn.execute(
-                    "DELETE FROM signatures WHERE id = ?1",
-                    params![sig_id],
-                )
-                .map_err(|e| e.to_string())?;
-                Ok(())
-            })
-            .await
+            let core_db = ratatoskr_core::db::DbState::from_arc(db.write_conn_arc());
+            ratatoskr_core::db::queries_extra::db_delete_signature(&core_db, sig_id).await
         },
         |result| {
             if let Err(ref e) = result {
@@ -116,92 +81,53 @@ pub fn handle_delete_signature(
     )
 }
 
-/// Load all signatures from the DB asynchronously.
+/// Load all signatures from the DB asynchronously via core CRUD.
 pub fn load_signatures_async(
     db: &Arc<Db>,
 ) -> Task<super::SignatureResult> {
     let db = Arc::clone(db);
     Task::perform(
         async move {
-            db.with_conn(|conn| {
-                let mut stmt = conn
-                    .prepare(
-                        "SELECT id, account_id, name, body_html, body_text, is_default, \
-                         is_reply_default, sort_order \
-                         FROM signatures ORDER BY account_id, sort_order, name",
-                    )
-                    .map_err(|e| e.to_string())?;
-                let rows = stmt
-                    .query_map([], |row| {
-                        Ok(SignatureEntry {
-                            id: row.get("id")?,
-                            account_id: row.get("account_id")?,
-                            name: row.get("name")?,
-                            body_html: row.get::<_, Option<String>>("body_html")?
-                                .unwrap_or_default(),
-                            body_text: row.get("body_text")?,
-                            is_default: row.get::<_, i64>("is_default").unwrap_or(0) != 0,
-                            is_reply_default: row.get::<_, i64>("is_reply_default")
-                                .unwrap_or(0)
-                                != 0,
-                        })
-                    })
-                    .map_err(|e| e.to_string())?;
-                rows.collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| e.to_string())
-            })
-            .await
+            let core_db = ratatoskr_core::db::DbState::from_arc(db.conn_arc());
+            let db_sigs = ratatoskr_core::db::queries_extra::db_get_all_signatures(&core_db).await?;
+            // Convert DbSignature to the app's SignatureEntry type.
+            let entries = db_sigs
+                .into_iter()
+                .map(|s| SignatureEntry {
+                    id: s.id,
+                    account_id: s.account_id,
+                    name: s.name,
+                    body_html: s.body_html,
+                    body_text: s.body_text,
+                    is_default: s.is_default != 0,
+                    is_reply_default: s.is_reply_default != 0,
+                })
+                .collect();
+            Ok(entries)
         },
         |result| super::SignatureResult::Loaded(result),
     )
 }
 
-// ── Internal helpers ────────────────────────────────────
-
-/// When updating a signature: look up its account_id, then clear defaults
-/// for that account if needed.
-fn clear_defaults_if_needed(
-    conn: &rusqlite::Connection,
-    signature_id: &str,
-    is_default: bool,
-    is_reply_default: bool,
-) -> Result<(), String> {
-    let account_id: Option<String> = conn
-        .query_row(
-            "SELECT account_id FROM signatures WHERE id = ?1",
-            params![signature_id],
-            |row| row.get(0),
-        )
-        .ok();
-    if let Some(ref aid) = account_id {
-        clear_defaults_for_account(conn, aid, is_default, is_reply_default)?;
-    }
-    Ok(())
-}
-
-/// Clear `is_default` and/or `is_reply_default` for all signatures in the
-/// given account, in preparation for setting a new default.
-fn clear_defaults_for_account(
-    conn: &rusqlite::Connection,
-    account_id: &str,
-    clear_default: bool,
-    clear_reply_default: bool,
-) -> Result<(), String> {
-    if clear_default {
-        conn.execute(
-            "UPDATE signatures SET is_default = 0 WHERE account_id = ?1",
-            params![account_id],
-        )
-        .map_err(|e| e.to_string())?;
-    }
-    if clear_reply_default {
-        conn.execute(
-            "UPDATE signatures SET is_reply_default = 0 WHERE account_id = ?1",
-            params![account_id],
-        )
-        .map_err(|e| e.to_string())?;
-    }
-    Ok(())
+/// Reorder signatures by updating sort_order via core CRUD.
+pub fn handle_reorder_signatures(
+    db: &Arc<Db>,
+    ordered_ids: Vec<String>,
+) -> Task<super::SignatureResult> {
+    let db = Arc::clone(db);
+    Task::perform(
+        async move {
+            let core_db = ratatoskr_core::db::DbState::from_arc(db.write_conn_arc());
+            ratatoskr_core::db::queries_extra::db_reorder_signatures(&core_db, ordered_ids).await
+        },
+        |result| {
+            if let Err(ref e) = result {
+                eprintln!("Failed to reorder signatures: {e}");
+            }
+            // Reload after reorder.
+            super::SignatureResult::Saved(result)
+        },
+    )
 }
 
 // ── HTML-to-plain-text ──────────────────────────────────
