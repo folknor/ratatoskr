@@ -1,162 +1,99 @@
-# Search: Spec vs Implementation Discrepancies
+# Search: Spec vs. Code Discrepancies
 
-Audit date: 2026-03-21 (updated after implementation pass)
-
-## What Matches the Spec
-
-### Backend (Slices 1-4) -- Fully Implemented
-
-- **Parser overhaul (Slice 1):** `crates/smart-folder/src/parser.rs` matches the spec. `ParsedQuery` has all specified fields (`Vec<String>` for OR-capable operators, `attachment_types`, `has_contact`, `is_tagged`, `in_folder`, `folder`, `account`). `HAS_EXPANSIONS` table matches the spec exactly. `has_any_operator()` covers all fields. Greedy date parsing with `extract_date_value` is implemented. `subject:` and `is:important` are removed as specified.
-
-- **SQL builder (Slice 2):** `crates/smart-folder/src/sql_builder.rs` implements all clause builders specified: `account:` (LIKE on display_name/email), `folder:` (label name + imap_folder_path), `in:` (label-based and flag-based shorthands), `is:tagged`, `has:contact`, `type:`/`has:` MIME filtering with glob support, `from:`/`to:` with contact expansion. OR semantics for repeated operators implemented correctly.
-
-- **Tantivy cross-account (Slice 3):** `crates/search/src/lib.rs` has `SearchParams.account_ids: Option<Vec<String>>` (not single `account_id`). `group_by_thread()` helper exists and is public. **`SearchParams.from` and `SearchParams.to` are now `Vec<String>`** for proper OR semantics across all search paths.
-
-- **Unified pipeline (Slice 4):** `crates/core/src/search_pipeline.rs` implements the three-path router (`search_sql_only`, `search_tantivy_only`, `search_combined`) exactly as specified. `UnifiedSearchResult` type matches. The combined path does SQL-first then Tantivy intersection as designed. **`build_tantivy_params()` now passes all from/to values**, not just the first.
-
-### App Integration (Slice 5) -- Wired to Unified Pipeline
-
-- **Generational load tracking:** Implemented. `search_generation: u64` in `App`, incremented before each dispatch, stale results silently dropped via `g != self.search_generation` guard. Also incremented on `SearchClear`.
-
-- **Message enum:** All specified variants present: `SearchQueryChanged`, `SearchExecute`, `SearchResultsLoaded(u64, ...)`, `SearchClear`, `FocusSearchBar`, `SearchBlur`.
-
-- **Debounce subscription:** Implemented with `search_debounce_deadline: Option<iced::time::Instant>` and 50ms polling timer, matching the spec's V1 timer strategy.
-
-- **ThreadListMode:** Implemented as `enum ThreadListMode { Folder, Search }` on `ThreadList`.
-
-- **Search bar widget:** Real `text_input` in `thread_list_header` with `SearchInput`/`SearchSubmit` messages, mapped through `ThreadListEvent` to `App` messages.
-
-- **Component trait:** `ThreadList` implements `Component` trait (as do `Sidebar`, `ReadingPane`, `StatusBar`, `Settings`, `AddAccountWizard`). The search bar is part of the `ThreadList` component, not a separate component -- this matches the app-integration-spec which says "It is not a separate Component."
-
-- **Keyboard shortcuts:** `/` to focus and `Escape` to clear are implemented via event listeners in the subscription.
-
-- **Search execution:** `execute_search()` now calls the unified pipeline (`search_pipeline::search()`) when the Tantivy index is available, with a graceful SQL-only fallback when it is not. The fallback uses the smart folder parser and SQL builder to support structured operators, and falls back to LIKE search only for pure free-text queries without an index.
-
-- **SearchBlur unfocus:** `SearchBlur` handler now focuses a dummy widget ID to effectively remove focus from the search bar (iced does not expose a native `unfocus` operation).
-
-### Pinned Searches -- Substantially Implemented
-
-- **PinnedSearch type:** `crates/app/src/db/pinned_searches.rs` has the `PinnedSearch` struct (without `thread_ids` field -- loaded lazily as spec allows).
-
-- **CRUD functions:** All specified: `create_or_update_pinned_search`, `update_pinned_search`, `delete_pinned_search`, `delete_all_pinned_searches`, `list_pinned_searches`, `get_pinned_search_thread_ids`, `get_threads_by_ids`, `expire_stale_pinned_searches`. Uses transactions for atomicity.
-
-- **Sidebar rendering:** `pinned_searches_section` and `pinned_search_card` in `sidebar.rs`. Has `ButtonClass::PinnedSearch { active }` style in the theme.
-
-- **Lifecycle state machine:** `active_pinned_search`, `editing_pinned_search` state in `App`. Edit-in-place updates existing pinned search; new searches create new entries. Navigation away clears pinned search context.
-
-- **Generational tracking for pinned search loads:** Uses `nav_generation` for `PinnedSearchThreadIdsLoaded` and `PinnedSearchThreadsLoaded` staleness checks.
-
-- **Auto-expiry:** `expire_stale_pinned_searches(1_209_600)` (14 days) called after initial load and periodically via `iced::time::every(3600s)` subscription.
-
-- **Staleness label:** Pinned search cards show "outdated" label and a refresh button when results are > 1 hour old. Refresh re-executes the search and updates the pinned search entry.
-
-- **Thread ID caching:** `PinnedSearch.thread_ids: Option<Vec<(String, String)>>` caches loaded thread IDs. Subsequent clicks reuse the cache. Cache is invalidated on update or refresh.
-
-### Smart Folder Token Migration (Slice 6) -- Partial
-
-- **Token system deprecated:** `execute_smart_folder_query` and `count_smart_folder_unread` now use `migrate_legacy_tokens()` which translates `__LAST_7_DAYS__` -> `-7`, `__LAST_30_DAYS__` -> `-30`, `__TODAY__` -> `0` inline. The parser handles relative offsets natively. `resolve_query_tokens` is no longer re-exported from the crate. `count_matching` is now exported for direct use.
-
-### Dead Code Cleanup
-
-- **`SearchState.index` and `SearchState.schema`** fields removed from `SearchState` struct. No longer `#[allow(dead_code)]`.
-- **`SearchState::search()`** simple free-text method removed. Only `search_with_filters()` remains.
-- **`SearchParams.label`** field removed entirely. Label filtering is handled by the SQL builder, not Tantivy.
-- **`group_by_thread()` deduplication:** The private copy in `search_pipeline.rs` now delegates to the public `ratatoskr_search::group_by_thread()`, wrapping the results in `UnifiedSearchResult`.
+Audit date: 2026-03-21
 
 ---
 
-## What Diverges from the Spec
+## Divergences
+
+### SearchBlur does not unfocus
+
+`Message::SearchBlur => Task::none()` — the handler is a no-op. The spec (app-integration-spec Phase 1) calls for focusing a dummy widget ID to remove focus from the search bar. No unfocus behavior exists.
+- Code: `crates/app/src/main.rs:640`
 
 ### UnifiedSearchResult vs SearchResult naming
 
-The problem statement spec defines `SearchResult`. The implementation names it `UnifiedSearchResult`. The app-integration-spec acknowledges four result types in play (`UnifiedSearchResult`, `Thread`, `DbThread`, `SearchResult`) but the Tantivy crate's `SearchResult` and the core's `UnifiedSearchResult` are separate types. This is noted as a known seam in the spec but remains unresolved.
+The implementation uses `UnifiedSearchResult`; the spec defines `SearchResult`. The Tantivy crate has its own `SearchResult` type. Two parallel result types remain.
+- Code: `crates/app/src/search_pipeline.rs:18`, `crates/search/src/lib.rs`
 
-### PinnedSearch struct now has cached thread_ids
+### PinnedSearch struct omits thread_ids field
 
-The `PinnedSearch` struct now includes `thread_ids: Option<Vec<(String, String)>>` for lazy caching. On first click, thread IDs are loaded from DB and cached. Subsequent clicks use the cache. The cache is invalidated when the pinned search is updated (re-searched) or refreshed.
+Spec defines `PinnedSearch` with `thread_ids: Vec<(String, String)>`. Implementation omits this field entirely; thread IDs are loaded lazily via `get_pinned_search_thread_ids()`. Deliberate design choice but diverges from spec data model.
+- Code: `crates/app/src/db/pinned_searches.rs:10-15`
 
-### Smart folder execution path not fully migrated
+### Smart folder execution path not migrated to unified pipeline
 
-`execute_smart_folder_query` still uses its own direct path (parse -> SQL builder -> execute) rather than calling `search()` from the unified pipeline. This is intentional: the unified pipeline lives in `ratatoskr-core` which depends on `ratatoskr-smart-folder`, so calling back would create a circular dependency. The token system has been deprecated in favor of inline migration, but the execution path remains SQL-only for smart folders (no Tantivy ranking for smart folder queries that contain free text).
+`execute_smart_folder_query` uses its own direct path (parse -> SQL builder -> execute) rather than calling `search()` from the unified pipeline. This is a circular-dependency constraint (`ratatoskr-core` depends on `ratatoskr-smart-folder`). Smart folders get no Tantivy ranking for free-text queries.
+- Code: `crates/smart-folder/src/lib.rs:26-33`
 
-### SearchState initialization is lazy
+### SearchState initialized per-search, not stored on App
 
-`SearchState` is initialized per-search in `execute_search()` by calling `SearchState::init()` each time, rather than being initialized once at app startup and stored on `App`. This works because `SearchState::init()` opens an existing index (cheap) and the index directory is reused. However, storing it on `App` would avoid the per-search overhead.
+`SearchState::init()` is called inside `execute_search()` on every search dispatch. Not stored on `App` as the spec implies. Works because `init()` opens an existing index, but adds per-search overhead.
+- Spec: `docs/search/app-integration-spec.md` line ~1250
+- Code: `crates/app/src/handlers/search.rs:356`
+
+### delete_all_pinned_searches exists but is not wired
+
+The function exists but no `Message` variant or handler dispatches to it. Dead code from the user's perspective. The spec calls for a "Clear all" sidebar action.
+- Code: `crates/app/src/db/pinned_searches.rs:285`
+
+### Auto-expiry is startup-only, not periodic
+
+`expire_stale_pinned_searches(1_209_600)` runs once after initial `PinnedSearchesLoaded`, guarded by `expiry_ran: bool`. The spec calls for a daily periodic subscription via `iced::time::every(86400s)`. No `RunPinnedSearchExpiry` message exists.
+- Code: `crates/app/src/handlers/search.rs:130-136`, `crates/app/src/main.rs:285`
 
 ---
 
-## What's Missing (Not Yet Built)
+## Not implemented
 
-### Operator Typeahead (Phase 3 of app-integration-spec) -- Implemented
+### Operator typeahead (Phase 3)
 
-Typeahead popup is implemented in `crates/app/src/ui/thread_list.rs` with `TypeaheadState`, `TypeaheadItem`, and `TypeaheadDirection` types. Cursor context analysis lives in `crates/smart-folder/src/parser.rs` (`analyze_cursor_context()`). Covers all specified operators:
+No typeahead popup implementation. No contact lookup for `from:`/`to:`, no account-scoped `label:`/`folder:` suggestions, no date presets for `before:`/`after:`. The search bar is a plain `text_input` without any popup or overlay.
+- Spec: `docs/search/app-integration-spec.md` Phase 3
 
-- **Static presets:** `has:`, `is:`, `in:`, `before:`, `after:` populate items synchronously from const preset arrays.
-- **Dynamic DB queries:** `from:`/`to:` search contacts via `search_autocomplete()`, `account:` lists accounts, `label:`/`folder:` search labels across all accounts via `search_labels_for_typeahead()`.
-- **Keyboard navigation:** Arrow Up/Down to navigate, Enter/Tab to accept, Escape to dismiss. Handled in `handlers/keyboard.rs` before the captured-event skip.
-- **Selection insertion:** `apply_typeahead_selection()` replaces the partial value, quoting values with spaces, and appending a trailing space.
-- **Visual design:** Uses `ContainerClass::Elevated` styling, `ButtonClass::Dropdown` for items, stacked over the thread list body.
+### "Search here" interaction (Phase 4)
 
-**Minor divergences from spec:**
-- No debounce on `from:`/`to:` contact lookups (spec calls for 50ms). The query fires immediately. The DB query is fast enough that debounce is not needed for typical mailbox sizes.
-- Label/folder typeahead is not scoped by `account:` operator in the query. It searches across all accounts and shows the account email in the detail field.
-- `analyze_cursor_context()` assumes cursor is at end of query string (iced text_input on_input provides the full value but not cursor position). Mid-query editing may not trigger the correct context.
+No right-click context menu on sidebar folders/labels to prefill the search bar with scope operators.
+- Spec: `docs/search/app-integration-spec.md` Phase 4
 
-### "Search here" Interaction (Phase 4 of app-integration-spec) -- Implemented
+### "Save as Smart Folder" from search
 
-Right-click on sidebar folders and labels prefills the search bar with scope operators (e.g., `label:"Work" ` or `in:inbox `). Account-scoped labels include the `account:` prefix. The search bar is focused after prefilling. Implemented via `mouse_area.on_right_press` on nav items, flat labels, and tree labels.
+No command palette command to save the current search query as a smart folder. No graduation path from pinned search to smart folder.
+- Spec: `docs/search/app-integration-spec.md`
 
-### Smart Folder "Save as Smart Folder" from Search -- Implemented
+### Pinned search staleness label in sidebar
 
-`CommandId::SmartFolderSave` registered in the command palette with a Text input param for the folder name. Available when `search_query` is non-empty (via `CommandContext.search_query`). Creates a smart folder entry in the DB and reloads navigation. Text-param handling in the palette is via `enter_text_stage2()` / `try_text_input_confirm()` which bypass the resolver.
+Spec defines a `staleness: Option<String>` field and relative-time label ("Last updated 5 minutes ago") rendered below the search bar. Not implemented.
+- Spec: `docs/search/pinned-searches-implementation-spec.md` lines ~1153-1205
 
-### Smart Folder Form Editor Removal
+### Search result highlighting in reading pane
+Spec calls for matching messages to be expanded and matching terms highlighted when a search result is selected. Not implemented.
+- Spec: `docs/search/app-integration-spec.md`
 
-The settings UI still has a "Smart Folders" section (`settings/tabs.rs:563`) showing "Coming soon." The spec calls for removing the form-based editor entirely, but it was never built in the first place (it's a placeholder).
-
-### Search Result Highlighting in Reading Pane
-
-The spec calls for matching messages to be expanded and matching terms highlighted in the reading pane when a search result is selected. This is not implemented.
-
-### Search History
-
+### Search history
 No search history feature (recent queries via up-arrow in empty search bar).
+- Spec: `docs/search/app-integration-spec.md`
 
-### Search Result Count Indicator
+### Smart folder form editor removal
 
-No result count shown in the UI (though `self.status` is set to `"{n} results"` in the status bar on search completion, which may partially satisfy this).
+Settings UI has "Smart Folders" section showing "Coming soon." The spec calls for removing the form-based editor, but it was never built (placeholder only).
+- Code: `crates/app/src/ui/settings/tabs.rs:564`
 
 ---
 
-## Cross-Cutting Concern Status
+## Cross-cutting
 
-### a. Generational Load Tracking
+### Keyboard shortcuts
 
-**Implemented.** `search_generation: u64` follows the bloom pattern. Incremented on `SearchExecute` and `SearchClear`. Stale `SearchResultsLoaded` silently dropped. Pinned search thread loads use `nav_generation` for the same purpose.
+Implemented via command dispatch. `/` bound to `CommandId::AppSearch` -> `Message::FocusSearch` -> `Message::FocusSearchBar`. `Escape` dispatches `Message::SearchClear` when search is active. Both wired through command dispatch, not raw event listeners.
+- Code: `crates/command-palette/src/registry.rs:703`, `crates/app/src/main.rs:611-615,627,639`
 
-### b. Component Trait
+### Generational tracking
 
-**Used.** `ThreadList` implements `Component`. The search bar lives inside `ThreadList::view()` as specified (not a separate component). `Sidebar` also implements `Component` and handles pinned search card rendering.
+Implemented. `search_generation: u64` incremented on `SearchExecute` and `SearchClear`. Stale `SearchResultsLoaded` dropped. Pinned search loads use `nav_generation`.
+- Code: `crates/app/src/main.rs:636,645,651`
 
-### c. Token-to-Catalog Theming
+### Search result count
 
-**Partially used.** The search bar uses `theme::TextClass::Tertiary.style()` for context labels. Pinned search cards use `theme::ButtonClass::PinnedSearch { active }`. Layout constants (`TEXT_SM`, `SPACE_XXS`, `PAD_PANEL_HEADER`, `PAD_INPUT`, `TEXT_MD`) are used from `layout.rs`. This follows the named-style-class pattern.
-
-### d. iced_drop Drag-and-Drop
-
-**N/A.** No drag-and-drop in search features.
-
-### e. Subscription Orchestration
-
-**Used for debounce.** The search debounce timer uses `iced::time::every(50ms)` polling subscription, active only when `search_debounce_deadline` is `Some`. This is acknowledged in the spec as a "slightly wasteful but acceptable for V1" approach. No `subscription::channel` for off-main-thread search execution -- search uses `Task::perform` instead.
-
-### f. Core CRUD Bypassed
-
-**No, for search execution.** `execute_search()` now calls the unified search pipeline from `ratatoskr_core::search_pipeline::search()`, with a SQL-only fallback that still uses the smart folder parser and SQL builder. Raw SQL LIKE is only used as a last-resort fallback for pure free-text when no Tantivy index exists.
-
-**No, for pinned searches.** Pinned search CRUD is in `crates/app/src/db/pinned_searches.rs`, which is app-level code but uses proper parameterized queries and transactions. The spec itself places pinned search CRUD in the app's `db.rs`, so this is intentional -- pinned searches are local UI state, not core domain logic.
-
-### g. Dead Code
-
-- `group_by_thread()` in search crate is the canonical version; `search_pipeline.rs` delegates to it via `group_by_thread_unified()`.
-- `tokens.rs` in the smart-folder crate is no longer re-exported. `migrate_legacy_tokens()` handles the translation inline. The `tokens` module is retained for the test suite during the deprecation period.
+Partial. `self.status` set to `"{n} results"` and `"{n} threads (pinned search)"`. Shown in status bar, not in thread list header.
+- Code: `crates/app/src/handlers/search.rs:65,218`

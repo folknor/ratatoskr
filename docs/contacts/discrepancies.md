@@ -1,144 +1,73 @@
-# Contacts Feature: Spec vs Implementation Discrepancies
+# Contacts: Spec vs. Code Discrepancies
 
-Audit date: 2026-03-21 (updated). Covers `problem-statement.md`, `import-spec.md`, and `autocomplete-implementation-spec.md`.
-
----
-
-## What matches the spec
-
-### Token input widget (`crates/app/src/ui/token_input.rs`)
-
-- **Custom `advanced::Widget`** implementation as specified. File location matches spec (`crates/app/src/ui/token_input.rs`).
-- **Data types match**: `Token`, `TokenId`, `RecipientField`, `TokenInputValue` all present with the specified fields (`id`, `email`, `label`, `is_group`, `group_id`, `member_count`). `TokenInputValue` has `tokens`, `text`, `next_id` as specified.
-- **Wrapping flow layout** implemented correctly: tokens laid out left-to-right with row wrapping, text input placed after tokens, wraps to new row if remaining space < `TOKEN_TEXT_MIN_WIDTH`.
-- **Layout constants** all present in `crates/app/src/ui/layout.rs`: `TOKEN_HEIGHT` (24), `TOKEN_RADIUS`, `PAD_TOKEN`, `TOKEN_SPACING`, `TOKEN_ROW_SPACING`, `PAD_TOKEN_INPUT`, `TOKEN_TEXT_MIN_WIDTH` (120), `TOKEN_GROUP_ICON_SIZE`, `AUTOCOMPLETE_MAX_HEIGHT` (300), `AUTOCOMPLETE_ROW_HEIGHT` (32).
-- **Keyboard state machine** implemented: backspace-at-start selects last token, backspace-with-selected removes it, comma/semicolon always tokenize, space tokenizes if text contains `@`, Enter/Tab tokenize, Escape blurs.
-- **Paste handling** implemented with RFC 5322 parsing via `crates/app/src/ui/token_input_parse.rs`: handles `Name <email>`, `"Name" <email>`, bare email formats with display name extraction. Dedup within paste and against existing tokens. Invalid addresses silently dropped.
-- **Token chip drawing**: background quad with rounded corners, selected/hovered states with palette colors, label text rendering.
-- **Focus management**: click on token selects + focuses, click in field focuses, click outside blurs.
-- **Email validation**: `is_plausible_email()` helper present with basic `@` + `.` check.
-- **Arrow key navigation**: Left/Right arrow navigates between tokens. Left at text position 0 selects last token. Right from last token deselects and focuses text.
-- **Right-click context menu**: `TokenContextMenu(TokenId, Point)` message emitted on `mouse::Button::Right` click on tokens.
-- **Group token visual distinction**: People icon (`icon::users()` glyph) prepended to group tokens. Member count available on Token struct.
-- **Text width uses `chars().count()`** instead of `label.len()` byte count, correct for non-ASCII.
-- **Bulk paste banner**: 10+ pasted addresses shows a dismissible suggestion banner.
-- **Delete key**: Removes selected token (via `keyboard::key::Named::Delete`).
-
-### Autocomplete dropdown (Phase 2)
-
-- **`AutocompleteState`** in `ComposeState` with `active_field`, `query`, `results`, `highlighted`, `search_generation`.
-- **`search_contacts_for_autocomplete`** wired to compose via `handlers/contacts.rs` dispatch. Searches contacts, seen addresses, AND contact groups.
-- **Dropdown rendering** below focused field with highlighted row, mouse click to select.
-- **Generation counter** for stale result discard.
-- **Debounced search** via `Task::perform` with the generation pattern.
-- **`ComposeMessage::AutocompleteResults/Select/Navigate/Dismiss`** variants implemented.
-- **Ranking uses recency** (`last_contacted_at DESC`, `last_seen_at DESC`) not frequency.
-
-### Contact search types
-
-- `ContactMatch` type in `crates/app/src/db/contacts.rs` for autocomplete search, including `is_group`, `group_id`, `member_count` fields.
-
-### Compose integration (`crates/app/src/pop_out/compose.rs`)
-
-- To/Cc/Bcc fields each use `TokenInputValue` with per-field selected token state.
-- `ComposeMessage` has `ToTokenInput`, `CcTokenInput`, `BccTokenInput` variants.
-- `handle_token_input_msg` dispatches all `TokenInputMessage` variants including new ones.
-- Reply/ReplyAll/Forward modes populate tokens correctly.
-- Cc/Bcc toggle buttons with show/hide behavior.
-
-### Backend data layer
-
-- `crates/seen-addresses/`: `AddressObservation` with direction scoring (`SentTo`, `SentCc`, `ReceivedFrom`, `ReceivedCc`), `SeenAddressMatch` with score field.
-- `crates/core/src/db/queries.rs`: `search_contacts()` with FTS5 + LIKE fallback, contacts/seen-addresses union with deduplication and source priority ranking.
-- `crates/core/src/db/queries_extra/contact_groups.rs`: Full CRUD for contact groups, search, recursive group expansion with cycle detection.
-- `crates/core/src/db/queries_extra/contacts.rs`: Contact CRUD, stats, same-domain contacts, recent threads, attachments from contact, avatar updates.
-- CardDAV support: `crates/core/src/carddav/` with `parse.rs`, `sync.rs`, `client.rs`.
-- Contact photos: `crates/core/src/contact_photos.rs`.
-
-### Contact management UI (Settings)
-
-- Contact and group management lives in Settings (as specified).
-- Contact cards show: display name, email, email2, phone, company, notes, groups, account color.
-- Group cards show: name, member count, created/updated dates.
-- Filter inputs for both contacts and groups.
-- Slide-in editor overlay for both contacts and groups.
-- New Contact / New Group buttons.
-- **Delete confirmation** for both contacts and groups (two-step: Delete -> Confirm delete / Cancel).
-- **Account selector** dropdown on contact creation/edit (lists connected accounts + "Local").
-- **N+1 group membership query replaced** with single JOIN query using `GROUP_CONCAT`.
+Audit date: 2026-03-21
 
 ---
 
-## Divergences from spec
+## Divergences
 
-### Token input widget
+### Autocomplete — not wired
 
-1. **Missing `DragStarted`, `TokenDropped`, `MoveToken` messages**: The spec defines drag-and-drop messages for moving tokens between fields. Not implemented (requires `iced_drop` integration).
+Autocomplete search never triggered: `dispatch_autocomplete_search()` and `should_trigger_autocomplete()` are defined but never called. No autocomplete dropdown rendering in `view_compose_window()`. `AutocompleteState` missing `active_field` -- `AutocompleteSelect` always pushes tokens to `state.to`. Keyboard interception for dropdown not implemented.
+- Code: `crates/app/src/handlers/contacts.rs:103,133`, `crates/app/src/pop_out/compose.rs:106,359,475`
 
-2. **No `DragState`**: The spec defines `DragState { token_id, origin, current }` in `TokenInputState`. No drag state tracking.
+### Token input — paste parser not wired
 
-3. **Simplified `TokenInputState`**: Spec has `cursor_position: usize` and `drag: Option<DragState>`. Implementation has `token_bounds` and `is_focused`. Token selection is managed externally.
+RFC 5322 paste parser exists but is not called. `handle_token_input_message` handles `Paste` with simple `split([',', ';', '\n'])` instead. No bulk paste banner for 10+ addresses.
+- Code: `crates/app/src/ui/token_input_parse.rs:26`, `crates/app/src/pop_out/compose.rs:450`
 
-4. **Widget constructor signature differs**: Spec defines `token_input(field, tokens, text, placeholder, on_message)` with `RecipientField` parameter. Implementation is `token_input_field(tokens, text, placeholder, selected_token, on_message)` -- no `field` parameter, adds `selected_token` parameter instead.
+### Token input — drag and drop
 
-5. **Text measurement**: Spec calls for `renderer.measure()` for precise token widths. Implementation uses a character-width heuristic (`chars().count() * TEXT_MD * 0.54`). Correct for multi-byte characters but not pixel-precise.
-
-### Autocomplete dropdown
-
-6. **`ContactSearchResult` types in app crate instead of core**: Spec says `crates/core/src/contacts/search.rs`. Types are in `crates/app/src/db/contacts.rs` as `ContactMatch`. Violates crate boundary but functional.
-
-7. **No `search_contacts_unified` in core**: The app-layer search function handles contacts + seen addresses + groups directly rather than delegating to a core unified search function.
-
-8. **Keyboard interception for dropdown not implemented**: Spec says Up/Down/Enter/Tab should be intercepted at compose level when dropdown is visible. Currently these keys pass through to the token input widget regardless.
+No token drag-and-drop between fields. No `DragStarted`, `TokenDropped`, `MoveToken` messages. `iced_drop` is not a dependency.
+- Code: `crates/app/src/ui/token_input.rs`
 
 ### Contact management UI
 
-9. **No distinction between local and synced save behavior**: Spec says local contacts save immediately on edit, synced contacts use explicit Save button. Implementation always uses an explicit Save button regardless of source.
-
-10. **No provider write-back on save**: Spec says synced contact edits are pushed to the provider API. Implementation saves locally only.
-
-11. **Inline contact editing popover**: Spec describes a popover on reading pane sender/recipient pills for quick contact editing. Not implemented.
+No distinction between local and synced save behavior -- `save_contact_inner` always uses UPSERT with no source check. No provider write-back on save. No inline contact editing popover on reading pane pills.
+- Code: `crates/app/src/db/contacts.rs:445`, `crates/app/src/handlers/contacts.rs:38`
 
 ### Contact import
 
-12. **RESOLVED — Contact import implemented**: `crates/contact-import/` crate exists with CSV parsing (`csv_parser.rs`), vCard parsing (`vcard_parser.rs`), encoding detection (`detect.rs`), column mapping (`mapping.rs`), and types (`types.rs`). Import wizard UI present in settings (`ImportWizardState` in `settings/types.rs`, handler logic in `settings/update.rs`). Remaining: XLSX support (only CSV and vCard).
+Entire import feature missing. Spec defines `crates/contact-import/` crate for CSV/XLSX/vCard import. No such crate exists.
+- Spec: `docs/contacts/import-spec.md`
 
 ### GAL caching
 
-13. **GAL/directory caching not implemented**: Spec describes pre-fetching organization directory at startup with polling refresh. No GAL cache implementation found in the codebase.
+GAL/directory caching not implemented. Spec describes pre-fetching organization directory at startup with polling refresh.
+- Spec: `docs/contacts/autocomplete-implementation-spec.md`
+
+### Crate boundary
+
+App bypasses core CRUD for contacts. `crates/app/src/db/contacts.rs` has raw SQL for autocomplete search and contact/group CRUD. Core has parallel functions in `queries_extra/contacts.rs` and `contact_groups.rs`. `ContactMatch` type lives in app crate instead of core.
+- Code: `crates/app/src/db/contacts.rs:9` (ContactMatch), `crates/core/src/db/queries_extra/contacts.rs`
+
+## Dead code
+
+- `RecipientField` defined but unused at `crates/app/src/ui/token_input.rs:50`
+- `dispatch_autocomplete_search` and `should_trigger_autocomplete` never called at `crates/app/src/handlers/contacts.rs:103,133`
+- `AUTOCOMPLETE_MAX_HEIGHT` and `AUTOCOMPLETE_ROW_HEIGHT` never used at `crates/app/src/ui/layout.rs:433,435`
 
 ---
 
-## Cross-cutting concerns
+## Implemented and wired
 
-### a. Generational load tracking
+### Token input widget
+Custom `advanced::Widget` with wrapping flow layout, keyboard state machine (backspace/comma/Tab/Enter/Escape), arrow key navigation, right-click context menu, group icon rendering, paste message, email validation.
+- Code: `crates/app/src/ui/token_input.rs`
 
-**Used in autocomplete.** `search_generation: u64` in `AutocompleteState` discards stale search results, matching the pattern used elsewhere (`nav_generation`, `thread_generation`).
+### Compose window
+To/Cc/Bcc fields use `TokenInputValue`. Reply/ReplyAll/Forward populate tokens correctly. `AutocompleteState` struct exists with generation counter. Message variants for autocomplete results/select/navigate/dismiss exist and update state.
+- Code: `crates/app/src/pop_out/compose.rs`
 
-### b. Component trait
+### Backend data layer
+- `crates/seen-addresses/`: direction scoring
+- `crates/core/src/db/queries.rs:680`: `search_contacts()` with FTS5 + LIKE fallback
+- `crates/core/src/db/queries_extra/contact_groups.rs`: full CRUD, recursive expansion with cycle detection
+- `crates/core/src/db/queries_extra/contacts.rs`: contact CRUD, stats, avatar updates
+- `crates/app/src/db/contacts.rs`: app-level autocomplete search, contact/group CRUD
+- `crates/core/src/carddav/`: CardDAV sync
+- `crates/core/src/contact_photos.rs`: contact photos
 
-**Contacts UI is not componentized.** The settings panel (`Settings`) implements `Component`, and contacts management lives within it as part of the People tab. The compose window is handled via `PopOutMessage` dispatch with handler methods extracted to `crates/app/src/handlers/contacts.rs`.
-
-### c. Token-to-Catalog theming (named style classes)
-
-**Not applicable -- token input uses raw renderer drawing.** The token input widget draws directly via `renderer.fill_quad()` and `renderer.fill_text()` with palette colors, bypassing iced's styling system entirely. This is architecturally correct for a custom `advanced::Widget`.
-
-### d. iced_drop drag-and-drop
-
-**Not implemented.** `iced_drop` is not a dependency. No drag-and-drop for tokens between To/Cc/Bcc fields. No DnD in the group editor.
-
-### e. Subscription orchestration
-
-**No subscriptions used for contacts.** Contacts are loaded on-demand, not via streaming/polling. The GAL cache polling (spec calls for hourly refresh) would need subscriptions but is not implemented.
-
-### f. Core CRUD bypassed
-
-**Resolved for CRUD operations.** Contact save/delete, group save/delete, and settings list queries now delegate to synchronous core functions in `crates/core/src/db/queries_extra/contacts.rs` (`save_contact_sync`, `delete_contact_sync`, `load_contacts_for_settings_sync`) and `contact_groups.rs` (`save_group_sync`, `delete_group_sync`, `load_groups_for_settings_sync`, `load_group_member_emails_sync`). The app `db/contacts.rs` uses type aliases (`ContactEntry = ContactSettingsEntry`, `GroupEntry = GroupSettingsEntry`) for backward compatibility. Autocomplete search remains in the app crate since it combines contacts + seen_addresses + groups in an app-specific union query.
-
-### g. Dead code
-
-Dead code has been cleaned up:
-- `ContactSearchResult` and `ContactSearchKind` removed from `token_input.rs` (were never used).
-- `RecipientField` is now used by `AutocompleteState` and `TokenContextMenuState`.
-- `search_contacts_for_autocomplete` is now called from `handlers/contacts.rs` via `Db::search_autocomplete`.
-- `AUTOCOMPLETE_MAX_HEIGHT` and `AUTOCOMPLETE_ROW_HEIGHT` are now used by the autocomplete dropdown view.
+### Contact management UI (Settings People tab)
+Contact/group lists with filter inputs, slide-in editor overlays, full CRUD with delete confirmation.
+- Code: `crates/app/src/ui/settings/tabs.rs:1146`, `crates/app/src/handlers/contacts.rs:13-97`

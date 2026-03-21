@@ -1,185 +1,81 @@
-# Signatures: Spec vs Implementation Discrepancies
+# Signatures: Spec vs. Code Discrepancies
 
 Audit date: 2026-03-21
-Last updated: 2026-03-21
-
-Spec: `docs/signatures/implementation-spec.md`
 
 ---
 
-## What matches the spec
+## Divergences
 
-### Phase 1 — Data model (complete)
+### Phase 2 — UI
 
-- **`DbSignature` struct extended with all sync columns.** The struct in
-  `crates/db/src/db/types.rs` now includes `body_text`, `is_reply_default`,
-  `source`, `server_id`, `server_html_hash`, `last_synced_at`, `created_at`.
-  The `FromRow` impl in `from_row_impls.rs` reads all columns.
+**Signature editor uses plain `undoable_text_input`, not the rich text editor.** The editor overlay at `crates/app/src/ui/settings/tabs.rs:1067-1087` uses `undoable_text_input` for the body field. Users must type raw HTML. The `RichTextEditor` widget exists in `crates/rich-text-editor/` but is not wired to the signature editor. Status: **not implemented**.
 
-- **All CRUD functions exist and match spec.** The core CRUD in
-  `crates/core/src/db/queries_extra/compose.rs` includes:
-  `db_get_signatures_for_account`, `db_get_all_signatures`,
-  `db_get_default_signature`, `db_get_reply_signature`,
-  `db_insert_signature`, `db_update_signature`, `db_delete_signature`,
-  `db_reorder_signatures`, `db_set_reply_default_signature`,
-  `db_resolve_signature_for_compose`.
+**No formatting toolbar in signature editor.** Spec calls for B/I/U/S, lists, blockquote, link. Absent. Status: **not implemented** (blocked on rich text editor integration).
 
-- **Transactional default management** in insert and update matches the spec.
-  Both `is_default` and `is_reply_default` are cleared for the same account
-  in a transaction when setting a new default.
+**No drag reorder grip handles.** `db_reorder_signatures` exists at `crates/core/src/db/queries_extra/compose.rs:273` but no UI drag handles for signature rows. Status: **not implemented** (query exists, UI absent).
 
-- **`html_to_plain_text` implemented** in
-  `crates/core/src/db/queries_extra/compose.rs`. Uses `lol_html` to insert
-  newlines for block elements, then strips tags for plain-text output.
+**`SignatureEditorMessage` flattened into `SettingsMessage`.** Spec proposes dedicated enum. Actual code puts all editor messages directly in `SettingsMessage` at `crates/app/src/ui/settings/types.rs:98-107`. Functionally equivalent. Status: **minor structural divergence**.
 
-- **`body_text` auto-generated on save.** The handler in
-  `crates/app/src/handlers/signatures.rs` calls `html_to_plain_text()` when
-  saving a signature and stores the result in `body_text`.
+### Phase 4 — Account switching
 
-### Phase 2 — Settings UI (complete)
-
-- **Signature list section** is implemented in `crates/app/src/ui/settings/tabs.rs`
-  (`signature_list_section`). Signatures are grouped by account with account
-  header rows, per-account "Add Signature" buttons, and per-signature
-  edit/delete actions.
-
-- **Signature editor overlay** exists (`signature_editor_overlay` in
-  `tabs.rs`). It has: name field, default checkboxes (both "new messages" and
-  "replies & forwards"), rich text editor body field with formatting toolbar,
-  save/delete buttons with delete confirmation.
-
-- **Rich text editor integrated.** The signature editor uses
-  `RichTextEditor` from `crates/rich-text-editor/` with `EditorState` for
-  the body field. HTML round-trip via `EditorState::from_html()` /
-  `EditorState::to_html()`.
-
-- **Formatting toolbar implemented.** B/I/U/S (inline style toggles),
-  bullet list, numbered list, and blockquote (block type toggles) buttons
-  above the editor. Uses Lucide icons.
-
-- **Drag reorder grip handles implemented.** Each signature row has a grip
-  handle for drag reordering. The `db_reorder_signatures` core function is
-  wired to the UI via `SettingsEvent::ReorderSignatures`.
-
-- **Delete confirmation implemented.** Clicking delete (from list row or
-  editor) opens the editor overlay with a "Delete this signature? Cancel /
-  Confirm" prompt instead of deleting immediately.
-
-- **SignatureEditorState** exists in `crates/app/src/ui/settings/types.rs`.
-
-- **SignatureSaveRequest** and **SettingsEvent::SaveSignature /
-  DeleteSignature / ReorderSignatures** exist, enabling upward event
-  emission to the App.
-
-- **Settings component** implements `Component` trait correctly.
-
-- **Signature loading is async.** Uses `Task::perform` via
-  `handlers::signatures::load_signatures_async()`. No more synchronous
-  loading on the UI thread.
-
-### Phase 3 — Compose document assembly (complete)
-
-- **`assemble_compose_document`** is fully implemented in
-  `crates/rich-text-editor/src/compose.rs`.
-
-- **`ComposeDocumentAssembly`** struct now includes `active_signature_id`
-  alongside `document` and `signature_separator_index`.
-
-- **Signature manipulation helpers** (`insert_signature`,
-  `remove_signature`, `replace_signature`) are implemented with thorough
-  tests (15+ test cases).
+**No account-switch signature replacement.** No `handle_from_account_changed` signature flow, no `replace_signature` integration in compose, no confirmation dialog. Status: **not implemented**.
 
 ### Phase 5 — Send path (partial)
 
-- **`finalize_compose_html`** implemented in
-  `crates/core/src/db/queries_extra/compose.rs`. Wraps the signature region
-  in `<div id="ratatoskr-signature">`.
+**No draft restoration with signature state.** Draft persistence does not reconstruct `signature_separator_index` from saved HTML. Status: **not implemented**.
 
-- **`finalize_compose_plain_text`** implemented. Inserts RFC 3676 `-- \n`
-  separator before signature text.
+### Core CRUD bypassed
 
-### Provider sync infrastructure
-
-- Gmail signature sync (`crates/gmail/src/sync/labels.rs`) exists.
-- JMAP signature sync (`crates/jmap/src/signatures.rs`) exists.
-- Inline image extraction (`crates/provider-utils/src/signature_images.rs`)
-  exists.
-
-### Cross-cutting — Core CRUD used (not bypassed)
-
-- **App handlers delegate to core CRUD.** The raw SQL in
-  `handlers/signatures.rs` has been replaced with calls to core functions:
-  `db_insert_signature`, `db_update_signature`, `db_delete_signature`,
-  `db_get_all_signatures`, `db_reorder_signatures`. The app creates a
-  `DbState::from_arc()` bridge to pass its connection to core functions.
+**App handlers use raw SQL, not core CRUD functions.** `crates/app/src/handlers/signatures.rs` implements save/delete/load via raw SQL in `Db::with_write_conn`. It does NOT call `db_insert_signature()`, `db_update_signature()`, or `db_delete_signature()` from `crates/core/src/db/queries_extra/compose.rs`. It does call `html_to_plain_text()` from core (`signatures.rs:214`). Core CRUD functions are used only by provider sync. Status: **architectural divergence**.
 
 ---
 
-## What diverges from the spec
+## Implemented and wired
 
-### Phase 2 — UI divergences
+### Phase 1 — Data model
 
-1. **`SignatureEditorMessage` is flattened into `SettingsMessage`.** The spec
-   proposes a dedicated `SignatureEditorMessage` enum. The actual code
-   flattens all editor messages directly into `SettingsMessage`. This is a
-   minor structural divergence — functionally equivalent.
+- **`DbSignature` struct** in `crates/db/src/db/types.rs:536` includes all v41 columns: `body_text`, `is_reply_default`, `source`, `server_id`, `server_html_hash`, `last_synced_at`, `created_at`.
+- **Core CRUD functions** at `crates/core/src/db/queries_extra/compose.rs:91-327`: `db_get_signatures_for_account`, `db_get_all_signatures`, `db_get_default_signature`, `db_get_reply_signature`, `db_insert_signature`, `db_update_signature`, `db_delete_signature`, `db_reorder_signatures`, `db_set_reply_default_signature`, `db_resolve_signature_for_compose`.
+- **Transactional default management** in core insert/update: clears `is_default` and `is_reply_default` for same account in transaction.
+- **`html_to_plain_text`** at `compose.rs:716` using `lol_html`.
 
-### Phase 4 — Account switching (not implemented)
+### Phase 2 — Settings UI
 
-2. **No account-switch signature replacement.** The
-   `handle_from_account_changed` flow, `replace_signature` integration in
-   compose state, and confirmation dialog for edited signatures are not
-   implemented in the app crate. The compose window itself is a stub.
+- **Signature list section** at `tabs.rs:871`: grouped by account, per-account "Add Signature" buttons, per-signature edit/delete actions.
+- **Signature editor overlay** at `tabs.rs:1016`: name field, default checkboxes (new messages + replies/forwards), body field (plain text), save/delete with delete confirmation.
+- **`SignatureEditorState`** at `types.rs:320`.
+- **`SignatureSaveRequest`** and **`SettingsEvent::SaveSignature/DeleteSignature`** at `types.rs:308,160-162`.
+- **Settings `Component` trait** impl at `update.rs:14`.
+- **Async signature loading** via `handlers::signatures::load_signatures_async()` at `signatures.rs:119`.
+- **App handler dispatches** signature save/delete/load at `handlers/signatures.rs:20-157`, wired via `Message::SignatureOp` at `main.rs:237` and `SettingsEvent` at `main.rs:1128-1132`.
+
+### Phase 3 — Compose document assembly
+
+- **`assemble_compose_document`** at `crates/rich-text-editor/src/compose.rs:52`.
+- **`ComposeDocumentAssembly`** struct at `compose.rs:23` with `document`, `signature_separator_index`, `active_signature_id`.
+- **Signature manipulation helpers** (`insert_signature`, `remove_signature`, `replace_signature`) at `compose.rs:157,186,207`.
 
 ### Phase 5 — Send path (partial)
 
-3. **No draft restoration with signature state.** Draft persistence does not
-   reconstruct `signature_separator_index` from saved HTML.
+- **`finalize_compose_html`** at `crates/core/src/db/queries_extra/compose.rs:801`: wraps signature in `<div id="ratatoskr-signature">`.
+- **`finalize_compose_plain_text`** at `compose.rs:842`: inserts RFC 3676 `-- \n` separator.
+
+### Provider sync
+
+- Gmail signature sync at `crates/gmail/src/sync/labels.rs:155` (`sync_signatures`).
+- JMAP signature sync at `crates/jmap/src/signatures.rs`.
+- Inline image extraction at `crates/provider-utils/src/signature_images.rs`.
 
 ---
 
-## What is missing entirely
+## Not implemented
 
 | Spec item | Status |
 |-----------|--------|
-| Phase 2.3: Per-account default signature dropdown in Account Settings | Not done (blocked on account settings impl) |
-| Phase 3.1: `ComposeDocumentState` in app crate | Not done (compose window is a stub) |
-| Phase 3.1: Signature edit detection (`signature_edited` flag) | Not done |
-| Phase 4: Account-switching signature replacement + confirmation dialog | Not done (compose window is a stub) |
-| Phase 5.3: Draft restoration with signature state | Not done |
-
----
-
-## Cross-cutting concerns
-
-### a. Generational load tracking
-
-**Not used.** Signature loading uses async `Task::perform` via
-`handlers::signatures::load_signatures_async()`. No generation counters.
-
-### b. Component trait
-
-**Implemented.** `Settings` implements `Component` with signature
-save/delete/reorder emitted upward to the App via `SettingsEvent`.
-
-### c. Token-to-Catalog theming (named style classes)
-
-**Used throughout.** No raw color values in signature UI code.
-
-### d. Drag-reorder (signature reorder)
-
-**Implemented.** Grip handles on signature rows enable drag reordering.
-`SettingsEvent::ReorderSignatures` emits ordered IDs to the App, which calls
-`db_reorder_signatures` via core CRUD.
-
-### e. Core CRUD properly used
-
-**Yes.** All signature operations go through core CRUD functions in
-`crates/core/src/db/queries_extra/compose.rs`. The app handler creates a
-`DbState::from_arc()` bridge from the app's connection Arc.
-
-### f. Dead code
-
-**Reduced.** The core CRUD functions are no longer dead code — they are
-used by provider sync, the app handler, and the
-`db_resolve_signature_for_compose` function.
+| Phase 2.2: Rich text editor in signature editor | Not implemented (plain text input; blocked on editor integration) |
+| Phase 2.2: Formatting toolbar | Not implemented (blocked on editor integration) |
+| Phase 2.3: Per-account default signature dropdown in Account Settings | Not implemented |
+| Phase 3.1: `ComposeDocumentState` in app crate | Not implemented (compose uses `text_editor::Content`, not `Document`) |
+| Phase 3.1: Signature edit detection (`signature_edited` flag) | Not implemented |
+| Phase 4: Account-switching signature replacement + confirmation dialog | Not implemented |
+| Phase 5.3: Draft restoration with signature state | Not implemented |
