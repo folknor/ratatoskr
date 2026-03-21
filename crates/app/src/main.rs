@@ -604,6 +604,9 @@ impl App {
             // Settings and UI toggles
             Message::ToggleSettings => {
                 self.show_settings = !self.show_settings;
+                if self.show_settings {
+                    self.settings.begin_editing();
+                }
                 Task::none()
             }
             Message::ToggleRightSidebar => {
@@ -664,6 +667,7 @@ impl App {
                     return Task::none();
                 }
                 if self.show_settings {
+                    self.settings.commit_preferences();
                     self.show_settings = false;
                     return Task::none();
                 }
@@ -973,6 +977,9 @@ impl App {
             SidebarEvent::Compose => Task::none(),
             SidebarEvent::ToggleSettings => {
                 self.show_settings = !self.show_settings;
+                if self.show_settings {
+                    self.settings.begin_editing();
+                }
                 Task::none()
             }
             SidebarEvent::PinnedSearchSelected(id) => {
@@ -1189,6 +1196,11 @@ impl App {
         match event {
             SettingsEvent::Closed => {
                 self.show_settings = false;
+                Task::none()
+            }
+            SettingsEvent::PreferencesCommitted | SettingsEvent::PreferencesDiscarded => {
+                // Preferences have been committed or discarded within Settings.
+                // The live fields are already updated — no additional action needed.
                 Task::none()
             }
             SettingsEvent::DateDisplayChanged(display) => {
