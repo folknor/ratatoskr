@@ -3,6 +3,7 @@ use ratatoskr_core::provider::http::RetryConfig;
 
 pub mod caldav;
 pub mod google;
+pub mod graph;
 pub mod sync;
 pub mod types;
 

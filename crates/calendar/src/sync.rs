@@ -3,15 +3,18 @@ use rusqlite::{OptionalExtension, Row, params};
 use ratatoskr_core::db::DbState;
 use ratatoskr_core::db::types::DbCalendar;
 use ratatoskr_core::gmail::client::GmailState;
+use ratatoskr_core::graph::client::GraphState;
 
 use super::caldav::{caldav_list_calendars_impl, caldav_sync_events_impl};
 use super::google::{google_calendar_list_calendars_impl, google_calendar_sync_events_impl};
+use super::graph::{graph_calendar_list_calendars_impl, graph_calendar_sync_events_impl};
 use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};
 
 pub async fn calendar_sync_account_impl(
     account_id: &str,
     db: &DbState,
     gmail: &GmailState,
+    graph: &GraphState,
 ) -> Result<(), String> {
     let provider = db
         .with_conn({
@@ -38,6 +41,10 @@ pub async fn calendar_sync_account_impl(
                     if calendar_provider.as_deref() == Some("google_api") || provider == "gmail_api"
                     {
                         Ok(Some("google_api"))
+                    } else if calendar_provider.as_deref() == Some("graph")
+                        || provider == "graph"
+                    {
+                        Ok(Some("graph"))
                     } else if calendar_provider.as_deref() == Some("caldav")
                         || (provider == "caldav"
                             && caldav_url
@@ -55,6 +62,7 @@ pub async fn calendar_sync_account_impl(
 
     match provider.as_deref() {
         Some("google_api") => sync_google_calendar_account(account_id, db, gmail).await,
+        Some("graph") => sync_graph_calendar_account(account_id, db, graph).await,
         Some("caldav") => {
             sync_caldav_calendar_account(account_id, db, gmail.encryption_key()).await
         }
@@ -268,6 +276,31 @@ async fn sync_google_calendar_account(
 
     for calendar in visible_calendars {
         let sync_result = google_calendar_sync_events_impl(
+            account_id,
+            &calendar.remote_id,
+            calendar.sync_token,
+            db,
+            &client,
+        )
+        .await?;
+        apply_calendar_sync_result_impl(db, account_id, &calendar.remote_id, sync_result).await?;
+    }
+
+    Ok(())
+}
+
+async fn sync_graph_calendar_account(
+    account_id: &str,
+    db: &DbState,
+    graph: &GraphState,
+) -> Result<(), String> {
+    let client = graph.get(account_id).await?;
+    let calendars = graph_calendar_list_calendars_impl(account_id, db, &client).await?;
+    upsert_discovered_calendars_impl(db, account_id, "graph", calendars).await?;
+    let visible_calendars = load_visible_calendars(db, account_id).await?;
+
+    for calendar in visible_calendars {
+        let sync_result = graph_calendar_sync_events_impl(
             account_id,
             &calendar.remote_id,
             calendar.sync_token,
