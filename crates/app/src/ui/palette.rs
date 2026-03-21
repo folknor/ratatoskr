@@ -581,15 +581,15 @@ fn format_option_path(path: &Option<Vec<String>>) -> String {
     }
 }
 
-fn palette_result_row(
-    category_str: &'static str,
-    label_str: &'static str,
+fn palette_result_row<'a>(
+    category_str: &'a str,
+    label_str: &'a str,
     keybinding_str: Option<String>,
     available: bool,
     input_mode: InputMode,
     is_selected: bool,
     on_click: PaletteMessage,
-) -> Element<'_, PaletteMessage> {
+) -> Element<'a, PaletteMessage> {
     let text_style = if available {
         TextClass::Muted.style()
     } else {
