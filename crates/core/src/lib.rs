@@ -24,6 +24,7 @@ pub mod mentions;
 pub use ratatoskr_db::progress;
 pub mod provider;
 pub mod scheduled_send;
+pub mod send;
 pub use ratatoskr_search as search;
 pub mod search_pipeline;
 pub use ratatoskr_smart_folder as smart_folder;
