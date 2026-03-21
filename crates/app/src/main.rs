@@ -321,7 +321,11 @@ impl App {
             iced::window::open(window.to_window_settings());
 
         let registry = CommandRegistry::new();
-        let binding_table = BindingTable::new(&registry, current_platform());
+        let mut binding_table = BindingTable::new(&registry, current_platform());
+        let keybindings_path = data_dir.join("keybindings.json");
+        if let Err(e) = binding_table.load_overrides_from_file(&keybindings_path) {
+            eprintln!("warning: failed to load keybinding overrides: {e}");
+        }
         let resolver = Arc::new(command_resolver::AppInputResolver::new(Arc::clone(&db)));
 
         let (rx, reporter) = create_sync_progress_channel();

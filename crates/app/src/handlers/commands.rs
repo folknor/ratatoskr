@@ -1,10 +1,51 @@
 use iced::Task;
 
 use crate::command_dispatch::{self, EmailAction};
-use crate::{App, Message};
-use ratatoskr_command_palette::{CommandArgs, CommandId, OptionItem};
+use crate::{APP_DATA_DIR, App, Message};
+use ratatoskr_command_palette::{CommandArgs, CommandId, KeyBinding, OptionItem};
 
 impl App {
+    /// Save keybinding overrides to disk. Call this after any mutation
+    /// to `self.binding_table` overrides (`set_override`, `unbind`,
+    /// `remove_override`, `reset_all`).
+    pub(crate) fn save_keybinding_overrides(&self) {
+        let data_dir = APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
+        let path = data_dir.join("keybindings.json");
+        if let Err(e) = self.binding_table.save_overrides(&path) {
+            eprintln!("warning: failed to save keybinding overrides: {e}");
+        }
+    }
+
+    /// Set a keybinding override and persist to disk.
+    /// Returns `Err(conflicting_id)` if the binding conflicts.
+    pub(crate) fn set_keybinding(
+        &mut self,
+        id: CommandId,
+        binding: KeyBinding,
+    ) -> Result<(), CommandId> {
+        self.binding_table.set_override(id, binding)?;
+        self.save_keybinding_overrides();
+        Ok(())
+    }
+
+    /// Unbind a command (explicit, no fallback to default) and persist.
+    pub(crate) fn unbind_keybinding(&mut self, id: CommandId) {
+        self.binding_table.unbind(id);
+        self.save_keybinding_overrides();
+    }
+
+    /// Remove a keybinding override (revert to default) and persist.
+    pub(crate) fn remove_keybinding_override(&mut self, id: CommandId) {
+        self.binding_table.remove_override(id);
+        self.save_keybinding_overrides();
+    }
+
+    /// Reset all keybinding overrides to defaults and persist.
+    pub(crate) fn reset_all_keybindings(&mut self) {
+        self.binding_table.reset_all();
+        self.save_keybinding_overrides();
+    }
+
     pub(crate) fn handle_execute_command(&mut self, id: CommandId) -> Task<Message> {
         log::debug!("Executing command: {id:?}");
         self.registry.usage.record_usage(id);

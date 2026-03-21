@@ -1,5 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
+use std::path::Path;
 
 use serde::de::Deserializer;
 use serde::ser::Serializer;
@@ -507,6 +508,81 @@ impl BindingTable {
         &self.overrides
     }
 
+    /// Save current overrides to a JSON file.
+    ///
+    /// Format: `{ "overrides": { "command.id": "binding" | null } }`
+    /// where `null` means explicitly unbound. Only non-empty override
+    /// maps are written; an empty map deletes the file.
+    pub fn save_overrides(&self, path: &Path) -> Result<(), String> {
+        if self.overrides.is_empty() {
+            // Nothing to persist — remove stale file if present.
+            if path.exists() {
+                std::fs::remove_file(path).map_err(|e| format!("remove {}: {e}", path.display()))?;
+            }
+            return Ok(());
+        }
+
+        // Use BTreeMap for deterministic key order in the output.
+        let map: BTreeMap<String, Option<String>> = self
+            .overrides
+            .iter()
+            .map(|(id, binding)| (id.as_str().to_string(), binding.map(|kb| kb.canonical())))
+            .collect();
+
+        let wrapper = OverridesFile { overrides: map };
+        let json = serde_json::to_string_pretty(&wrapper)
+            .map_err(|e| format!("serialize overrides: {e}"))?;
+
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("create dir {}: {e}", parent.display()))?;
+        }
+
+        std::fs::write(path, json)
+            .map_err(|e| format!("write {}: {e}", path.display()))?;
+
+        Ok(())
+    }
+
+    /// Load overrides from a JSON file and apply them.
+    ///
+    /// If the file does not exist, this is a no-op (returns `Ok`).
+    /// Invalid entries (unknown command IDs, unparseable bindings) are
+    /// silently skipped so a hand-edited file with typos doesn't block
+    /// startup.
+    pub fn load_overrides_from_file(&mut self, path: &Path) -> Result<(), String> {
+        let bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(format!("read {}: {e}", path.display())),
+        };
+
+        let wrapper: OverridesFile = serde_json::from_slice(&bytes)
+            .map_err(|e| format!("parse {}: {e}", path.display()))?;
+
+        let mut overrides = HashMap::new();
+        for (key, value) in wrapper.overrides {
+            let Some(id) = CommandId::parse(&key) else {
+                continue; // unknown command — skip
+            };
+            match value {
+                None => {
+                    overrides.insert(id, None);
+                }
+                Some(ref binding_str) => {
+                    if let Ok(kb) = KeyBinding::parse(binding_str) {
+                        overrides.insert(id, Some(kb));
+                    }
+                    // unparseable binding — skip
+                }
+            }
+        }
+
+        self.overrides = overrides;
+        self.rebuild_reverse();
+        Ok(())
+    }
+
     fn check_chord_conflict(&self, id: CommandId, chord: &Chord) -> Option<CommandId> {
         if let Some(&existing) = self.single_reverse.get(chord)
             && existing != id
@@ -571,6 +647,12 @@ impl BindingTable {
             }
         }
     }
+}
+
+/// On-disk JSON representation for keybinding overrides.
+#[derive(Serialize, Deserialize)]
+struct OverridesFile {
+    overrides: BTreeMap<String, Option<String>>,
 }
 
 #[cfg(test)]
