@@ -86,8 +86,8 @@ Code reviewed: `crates/command-palette/src/` (all 9 files), `crates/app/src/comm
 ### From Slice 6f (Keybinding Management UI)
 - **Settings panel for keybinding rebinding**: Not implemented. Per roadmap, this is lower priority and can be deferred past V1.
 
-### Thread state fields
-- **`is_muted` and `is_pinned`**: The app-layer `Thread` struct (`crates/app/src/db/types.rs`) does not include `is_muted` or `is_pinned` fields, even though the DB has them on the `threads` table. These fields in `ThreadState` remain `None` until the `Thread` struct is extended. `is_draft`, `in_trash`, and `in_spam` are now derived from the current view context.
+### Thread state fields -- IMPLEMENTED
+- **`is_muted` and `is_pinned`**: Now present on the app-layer `Thread` struct (`crates/app/src/db/types.rs`) and populated from DB data via `row_to_thread()` and `db_thread_to_app_thread()`. The `selected_thread_state()` function in `command_dispatch.rs` reads these values from the selected thread and populates `CommandContext.thread_is_muted` and `CommandContext.thread_is_pinned`. `is_draft`, `in_trash`, and `in_spam` are derived from the `NavigationTarget` when available, falling back to sidebar `selected_label`.
 
 ---
 
