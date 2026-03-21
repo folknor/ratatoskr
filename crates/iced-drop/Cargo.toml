@@ -1,0 +1,16 @@
+[package]
+name = "iced-drop"
+description = "Vendored drag-and-drop widget for iced (from jhannyj/iced_drop)"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+iced_core = { git = "https://github.com/folknor/iced", branch = "sluggrs" }
+iced_widget = { git = "https://github.com/folknor/iced", branch = "sluggrs" }
+iced_runtime = { git = "https://github.com/folknor/iced", branch = "sluggrs" }
+
+[lints]
+workspace = true
