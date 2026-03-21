@@ -29,7 +29,12 @@ pub fn execute_smart_folder_query(
 ) -> Result<Vec<DbThread>, String> {
     let query = migrate_legacy_tokens(params.query);
     let parsed = parse_query(&query);
-    sql_builder::query_threads(conn, &parsed, params.scope, params.limit, params.offset)
+    log::debug!("Smart folder query parsed: {:?}", parsed);
+    let result = sql_builder::query_threads(conn, &parsed, params.scope, params.limit, params.offset);
+    if let Err(ref e) = result {
+        log::error!("Smart folder query execution failed: {e}");
+    }
+    result
 }
 
 /// Return the count of unread threads matching a smart folder query.
@@ -41,7 +46,11 @@ pub fn count_smart_folder_unread(
     let query = migrate_legacy_tokens(query);
     let mut parsed = parse_query(&query);
     parsed.is_unread = Some(true);
-    sql_builder::count_matching(conn, &parsed, scope)
+    let result = sql_builder::count_matching(conn, &parsed, scope);
+    if let Err(ref e) = result {
+        log::error!("Smart folder unread count failed: {e}");
+    }
+    result
 }
 
 /// Translate legacy date tokens to the parser's native offset syntax.

@@ -36,10 +36,17 @@ pub fn color_for_label(label_name: &str, namespace: &str) -> (&'static str, &'st
 /// If the label has synced `color_bg`/`color_fg` (Gmail), return those.
 /// Otherwise, deterministically assign from the preset palette.
 pub fn resolve_label_color(label: &DbLabel) -> (&str, &str) {
-    match (&label.color_bg, &label.color_fg) {
+    let result = match (&label.color_bg, &label.color_fg) {
         (Some(bg), Some(fg)) => (bg.as_str(), fg.as_str()),
         _ => color_for_label(&label.name, &label.account_id),
-    }
+    };
+    log::debug!(
+        "Resolved label color: name={}, bg={}, fg={}",
+        label.name,
+        result.0,
+        result.1,
+    );
+    result
 }
 
 #[cfg(test)]

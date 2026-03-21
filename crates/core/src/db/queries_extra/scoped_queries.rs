@@ -48,13 +48,16 @@ pub fn get_threads_scoped(
     limit: Option<i64>,
     offset: Option<i64>,
 ) -> Result<Vec<DbThread>, String> {
+    log::debug!(
+        "Scoped query: scope={scope:?}, label={label_id:?}, limit={limit:?}, offset={offset:?}"
+    );
     let lim = limit.unwrap_or(50);
     let off = offset.unwrap_or(0);
 
     let (scope_clause, scope_params) = account_scope_clause(scope, 1);
     let next_idx = scope_params.len() + 1;
 
-    if let Some(lid) = label_id {
+    let result = if let Some(lid) = label_id {
         let sql = format!(
             "SELECT t.*, m.from_name, m.from_address FROM threads t
              INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
@@ -80,7 +83,11 @@ pub fn get_threads_scoped(
             offset_idx = next_idx + 1,
         );
         execute_thread_query_no_label(conn, &sql, scope_params, lim, off)
+    };
+    if let Err(ref e) = result {
+        log::error!("Scoped query failed: scope={scope:?}, label={label_id:?}, error={e}");
     }
+    result
 }
 
 fn execute_thread_query_with_label(

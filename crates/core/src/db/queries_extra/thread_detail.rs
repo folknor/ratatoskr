@@ -516,7 +516,11 @@ pub fn get_thread_detail(
     account_id: &str,
     thread_id: &str,
 ) -> Result<ThreadDetail, String> {
-    let meta = query_thread_meta(conn, account_id, thread_id)?;
+    log::debug!("Loading thread detail: thread_id={thread_id}, account_id={account_id}");
+    let meta = query_thread_meta(conn, account_id, thread_id).map_err(|e| {
+        log::error!("Failed to load thread meta: thread_id={thread_id}, error={e}");
+        e
+    })?;
     let mut messages = query_messages(conn, account_id, thread_id)?;
 
     // Fetch and attach bodies
@@ -537,7 +541,7 @@ pub fn get_thread_detail(
     let attachments = query_thread_attachments(conn, account_id, thread_id)?;
     let attachments_collapsed = get_attachments_collapsed(conn, account_id, thread_id)?;
 
-    Ok(ThreadDetail {
+    let detail = ThreadDetail {
         thread_id: thread_id.to_string(),
         account_id: account_id.to_string(),
         subject: meta.subject,
@@ -549,7 +553,14 @@ pub fn get_thread_detail(
         labels,
         attachments,
         attachments_collapsed,
-    })
+    };
+    log::debug!(
+        "Thread detail loaded: thread_id={thread_id}, messages={}, labels={}, attachments={}",
+        detail.messages.len(),
+        detail.labels.len(),
+        detail.attachments.len(),
+    );
+    Ok(detail)
 }
 
 /// Set `is_own_message` and `collapsed_summary` on each message.

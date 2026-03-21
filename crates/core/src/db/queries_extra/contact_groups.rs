@@ -11,6 +11,7 @@ pub async fn db_create_contact_group(
     id: String,
     name: String,
 ) -> Result<(), String> {
+    log::debug!("Creating contact group: id={id}, name={name}");
     db.with_conn(move |conn| {
         conn.execute(
             "INSERT INTO contact_groups (id, name) VALUES (?1, ?2)",
@@ -27,6 +28,7 @@ pub async fn db_update_contact_group(
     id: String,
     name: String,
 ) -> Result<(), String> {
+    log::debug!("Updating contact group: id={id}, name={name}");
     db.with_conn(move |conn| {
         conn.execute(
             "UPDATE contact_groups SET name = ?1, updated_at = unixepoch() WHERE id = ?2",
@@ -39,6 +41,7 @@ pub async fn db_update_contact_group(
 }
 
 pub async fn db_delete_contact_group(db: &DbState, id: String) -> Result<(), String> {
+    log::debug!("Deleting contact group: id={id}");
     db.with_conn(move |conn| {
         let tx = conn
             .unchecked_transaction()
@@ -59,6 +62,10 @@ pub async fn db_delete_contact_group(db: &DbState, id: String) -> Result<(), Str
         Ok(())
     })
     .await
+    .map_err(|e| {
+        log::error!("Failed to delete contact group: {e}");
+        e
+    })
 }
 
 pub async fn db_get_all_contact_groups(
@@ -184,6 +191,7 @@ pub async fn db_search_contact_groups(
     query: String,
     limit: i64,
 ) -> Result<Vec<DbContactGroup>, String> {
+    log::debug!("Searching contact groups: query={query}, limit={limit}");
     db.with_conn(move |conn| {
         let pattern = format!("%{query}%");
         let mut stmt = conn

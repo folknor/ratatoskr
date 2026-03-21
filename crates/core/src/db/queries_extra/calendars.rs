@@ -160,6 +160,7 @@ pub async fn db_upsert_calendar_event(
     ical_data: Option<String>,
     uid: Option<String>,
 ) -> Result<(), String> {
+    log::info!("Upserting calendar event: account_id={account_id}, google_event_id={google_event_id}");
     db.with_conn(move |conn| {
         let id = uuid::Uuid::new_v4().to_string();
         conn.execute(
@@ -172,7 +173,10 @@ pub async fn db_upsert_calendar_event(
                    ical_data = ?17, uid = ?18, updated_at = unixepoch()",
             params![id, account_id, google_event_id, summary, description, location, start_time, end_time, is_all_day as i64, status, organizer_email, attendees_json, html_link, calendar_id, remote_event_id, etag, ical_data, uid],
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            log::error!("Failed to upsert calendar event: {e}");
+            e.to_string()
+        })?;
         Ok(())
     })
     .await
@@ -184,6 +188,7 @@ pub async fn db_get_calendar_events_in_range(
     start_time: i64,
     end_time: i64,
 ) -> Result<Vec<DbCalendarEvent>, String> {
+    log::debug!("Loading calendar events: account_id={account_id}, range={start_time}..{end_time}");
     db.with_conn(move |conn| {
         let mut stmt = conn
             .prepare(
@@ -296,12 +301,16 @@ pub async fn db_delete_event_by_remote_id(
 }
 
 pub async fn db_delete_calendar_event(db: &DbState, event_id: String) -> Result<(), String> {
+    log::info!("Deleting calendar event: id={event_id}");
     db.with_conn(move |conn| {
         conn.execute(
             "DELETE FROM calendar_events WHERE id = ?1",
             params![event_id],
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            log::error!("Failed to delete calendar event {}: {e}", event_id);
+            e.to_string()
+        })?;
         Ok(())
     })
     .await

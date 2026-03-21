@@ -48,12 +48,31 @@ pub fn search(
     let has_free_text = !parsed.free_text.is_empty();
     let has_operators = parsed.has_any_operator();
 
-    match (has_free_text, has_operators) {
+    let path_name = match (has_free_text, has_operators) {
+        (false, false) => "empty",
+        (false, true) => "sql_only",
+        (true, false) => "tantivy_only",
+        (true, true) => "combined",
+    };
+    log::debug!("Search pipeline routing: path={path_name}, query={query:?}");
+
+    let result = match (has_free_text, has_operators) {
         (false, false) => Ok(vec![]),
         (false, true) => search_sql_only(&parsed, conn),
         (true, false) => search_tantivy_only(&parsed, search_state),
         (true, true) => search_combined(&parsed, search_state, conn),
+    };
+
+    match &result {
+        Ok(results) => {
+            log::info!("Search executed via {path_name} path, returned {} results", results.len());
+        }
+        Err(e) => {
+            log::error!("Search failed via {path_name} path: {e}");
+        }
     }
+
+    result
 }
 
 // ── Path 1: SQL only ────────────────────────────────────────

@@ -10,6 +10,7 @@ pub async fn db_get_all_contacts(
     limit: Option<i64>,
     offset: Option<i64>,
 ) -> Result<Vec<DbContact>, String> {
+    log::debug!("Loading contacts: limit={limit:?}, offset={offset:?}");
     db.with_conn(move |conn| {
         let lim = limit.unwrap_or(500);
         let off = offset.unwrap_or(0);
@@ -32,6 +33,7 @@ pub async fn db_upsert_contact(
     email: String,
     display_name: Option<String>,
 ) -> Result<(), String> {
+    log::info!("Upserting contact: email={email}, display_name={display_name:?}");
     db.with_conn(move |conn| {
         let normalized = email.to_lowercase();
         conn.execute(
@@ -88,15 +90,20 @@ pub async fn db_update_contact_notes(
 }
 
 pub async fn db_delete_contact(db: &DbState, id: String) -> Result<(), String> {
+    log::info!("Deleting contact: id={id}");
     db.with_conn(move |conn| {
         conn.execute("DELETE FROM contacts WHERE id = ?1", params![id])
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                log::error!("Failed to delete contact {}: {e}", id);
+                e.to_string()
+            })?;
         Ok(())
     })
     .await
 }
 
 pub async fn db_get_contact_stats(db: &DbState, email: String) -> Result<ContactStats, String> {
+    log::debug!("Loading contact stats: email={email}");
     db.with_conn(move |conn| {
         let normalized = email.to_lowercase();
         conn.query_row(

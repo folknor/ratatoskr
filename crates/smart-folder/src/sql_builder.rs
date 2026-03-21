@@ -31,6 +31,7 @@ pub fn query_threads(
     let thread_flag_str = ctx.thread_flag_where_string();
 
     let sql = build_thread_select_sql(&where_str, &thread_flag_str, ctx.next_idx);
+    log::debug!("Smart folder SQL built: msg_clauses={}, thread_flag_clauses={}", ctx.msg_clauses.len(), ctx.thread_flag_clauses.len());
     ctx.params.push(Box::new(lim));
     ctx.params.push(Box::new(off));
 

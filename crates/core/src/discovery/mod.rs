@@ -17,11 +17,25 @@ const OVERALL_TIMEOUT: Duration = Duration::from_secs(15);
 /// Run the full discovery cascade for an email address.
 pub async fn discover(email: &str) -> Result<DiscoveredConfig, String> {
     let email = email.trim().to_lowercase();
+    log::info!("Starting email provider discovery for {email}");
     let domain = extract_domain(&email)?;
 
     match tokio::time::timeout(OVERALL_TIMEOUT, run_cascade(&email, &domain)).await {
-        Ok(result) => result,
-        Err(_) => Err("Discovery timed out after 15 seconds".to_string()),
+        Ok(Ok(config)) => {
+            log::info!(
+                "Discovery completed for {email}: {} protocol options found",
+                config.options.len()
+            );
+            Ok(config)
+        }
+        Ok(Err(e)) => {
+            log::error!("Discovery failed for {email}: {e}");
+            Err(e)
+        }
+        Err(_) => {
+            log::error!("Discovery timed out for {email} after 15 seconds");
+            Err("Discovery timed out after 15 seconds".to_string())
+        }
     }
 }
 
@@ -61,6 +75,11 @@ fn elapsed_ms(start: Instant) -> u64 {
 }
 
 fn make_diag(stage: &'static str, start: Instant, results: &[ProtocolOption]) -> StageDiagnostic {
+    log::debug!(
+        "Discovery stage '{stage}' completed: {} results in {}ms",
+        results.len(),
+        elapsed_ms(start)
+    );
     let outcome = if results.is_empty() {
         StageOutcome::NotFound
     } else {
