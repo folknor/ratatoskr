@@ -175,6 +175,12 @@ pub struct DbContact {
     pub frequency: i64,
     pub last_contacted_at: Option<String>,
     pub notes: Option<String>,
+    pub email2: Option<String>,
+    pub phone: Option<String>,
+    pub company: Option<String>,
+    pub account_id: Option<String>,
+    pub server_id: Option<String>,
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

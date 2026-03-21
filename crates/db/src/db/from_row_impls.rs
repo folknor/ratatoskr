@@ -113,6 +113,12 @@ impl_from_row!(DbContact {
     frequency,
     last_contacted_at,
     notes,
+    email2,
+    phone,
+    company,
+    account_id,
+    server_id,
+    source,
 });
 
 // ── Attachment ──────────────────────────────────────────────

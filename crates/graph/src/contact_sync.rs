@@ -296,8 +296,8 @@ fn persist_synced_contacts(
             let local_id = format!("graph-{account_id}-{email}");
 
             conn.execute(
-                "INSERT INTO contacts (id, email, display_name, source) \
-                 VALUES (?1, ?2, ?3, 'graph') \
+                "INSERT INTO contacts (id, email, display_name, source, account_id, server_id) \
+                 VALUES (?1, ?2, ?3, 'graph', ?4, ?5) \
                  ON CONFLICT(email) DO UPDATE SET \
                    display_name = CASE \
                      WHEN contacts.source = 'user' THEN contacts.display_name \
@@ -308,8 +308,10 @@ fn persist_synced_contacts(
                      WHEN contacts.source = 'user' THEN 'user' \
                      ELSE 'graph' \
                    END, \
+                   account_id = COALESCE(excluded.account_id, contacts.account_id), \
+                   server_id = COALESCE(excluded.server_id, contacts.server_id), \
                    updated_at = unixepoch()",
-                params![local_id, email, contact.display_name],
+                params![local_id, email, contact.display_name, account_id, contact.id],
             )
             .map_err(|e| format!("upsert synced contact: {e}"))?;
 

@@ -192,6 +192,10 @@ pub struct ContactEntry {
     pub account_id: Option<String>,
     pub account_color: Option<String>,
     pub groups: Vec<String>,
+    /// Contact source: "user", "google", "graph", "carddav".
+    /// Used to determine save behavior: local contacts save immediately,
+    /// synced contacts use explicit Save with provider write-back.
+    pub source: Option<String>,
 }
 
 /// A contact group entry for the settings management UI.
@@ -308,7 +312,7 @@ fn load_contacts_filtered(
     // Single query that JOINs contacts with their group memberships.
     let sql = if trimmed.is_empty() {
         "SELECT c.id, c.email, c.display_name, c.email2, c.phone,
-                c.company, c.notes, c.account_id,
+                c.company, c.notes, c.account_id, c.source,
                 a.account_color,
                 GROUP_CONCAT(g.name, '||') AS group_names
          FROM contacts c
@@ -323,7 +327,7 @@ fn load_contacts_filtered(
          LIMIT 200"
     } else {
         "SELECT c.id, c.email, c.display_name, c.email2, c.phone,
-                c.company, c.notes, c.account_id,
+                c.company, c.notes, c.account_id, c.source,
                 a.account_color,
                 GROUP_CONCAT(g.name, '||') AS group_names
          FROM contacts c
@@ -369,6 +373,7 @@ fn load_contacts_filtered(
                 account_id: row.get("account_id")?,
                 account_color: row.get("account_color")?,
                 groups,
+                source: row.get("source")?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -447,11 +452,12 @@ fn save_contact_inner(
     entry: &ContactEntry,
 ) -> Result<(), String> {
     let now = chrono::Utc::now().timestamp();
+    let source = entry.source.as_deref().unwrap_or("user");
     conn.execute(
         "INSERT INTO contacts (id, email, display_name, email2, phone,
                                company, notes, account_id, source,
                                created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'user', ?9, ?9)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)
          ON CONFLICT(id) DO UPDATE SET
              email = excluded.email,
              display_name = excluded.display_name,
@@ -470,6 +476,7 @@ fn save_contact_inner(
             entry.company,
             entry.notes,
             entry.account_id,
+            source,
             now,
         ],
     )

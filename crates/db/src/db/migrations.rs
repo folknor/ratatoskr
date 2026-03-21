@@ -1375,6 +1375,17 @@ static MIGRATIONS: &[Migration] = &[
             INSERT OR IGNORE INTO settings (key, value) VALUES ('calendar_default_view', 'month');
         "#,
     },
+    Migration {
+        version: 64,
+        description: "Contacts: email2, phone, company, account_id, server_id columns",
+        sql: r#"
+            ALTER TABLE contacts ADD COLUMN email2 TEXT;
+            ALTER TABLE contacts ADD COLUMN phone TEXT;
+            ALTER TABLE contacts ADD COLUMN company TEXT;
+            ALTER TABLE contacts ADD COLUMN account_id TEXT;
+            ALTER TABLE contacts ADD COLUMN server_id TEXT;
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
