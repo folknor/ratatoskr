@@ -1,7 +1,12 @@
 use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex};
 
+use iced::advanced::graphics::futures::subscription;
+use iced::advanced::subscription::Hasher;
+use iced::futures::stream::BoxStream;
+use iced::futures::StreamExt;
 use iced::widget::{container, mouse_area, row, text, Space};
-use iced::{Alignment, Element, Length};
+use iced::{Alignment, Element, Length, Subscription};
 
 use crate::component::Component;
 use crate::icon;
@@ -163,6 +168,67 @@ pub fn create_sync_progress_channel() -> (
 ) {
     let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
     (receiver, IcedProgressReporter { sender })
+}
+
+/// Shared handle for the sync progress receiver. The subscription
+/// recipe takes the receiver out on first poll; subsequent calls
+/// to the recipe (iced may re-create it) find `None` and produce
+/// an empty stream.
+pub type SyncProgressReceiver = Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<SyncEvent>>>>;
+
+/// Create a new shared receiver handle from a raw receiver.
+pub fn shared_receiver(
+    rx: tokio::sync::mpsc::UnboundedReceiver<SyncEvent>,
+) -> SyncProgressReceiver {
+    Arc::new(Mutex::new(Some(rx)))
+}
+
+/// iced subscription that drains the sync progress channel and
+/// yields `SyncEvent` messages.
+struct SyncProgressRecipe {
+    receiver: SyncProgressReceiver,
+}
+
+impl subscription::Recipe for SyncProgressRecipe {
+    type Output = SyncEvent;
+
+    fn hash(&self, state: &mut Hasher) {
+        use std::hash::Hash;
+        struct Marker;
+        std::any::TypeId::of::<Marker>().hash(state);
+    }
+
+    fn stream(
+        self: Box<Self>,
+        _input: subscription::EventStream,
+    ) -> BoxStream<'static, SyncEvent> {
+        let taken = self
+            .receiver
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take());
+
+        match taken {
+            Some(rx) => {
+                iced::futures::stream::unfold(rx, |mut rx| async {
+                    let event = rx.recv().await?;
+                    Some((event, rx))
+                })
+                .boxed()
+            }
+            None => iced::futures::stream::empty().boxed(),
+        }
+    }
+}
+
+/// Build an iced `Subscription` that yields `SyncEvent` from the
+/// shared receiver.
+pub fn sync_progress_subscription(
+    receiver: &SyncProgressReceiver,
+) -> Subscription<SyncEvent> {
+    subscription::from_recipe(SyncProgressRecipe {
+        receiver: Arc::clone(receiver),
+    })
 }
 
 // ── Messages & Events ───────────────────────────────────
