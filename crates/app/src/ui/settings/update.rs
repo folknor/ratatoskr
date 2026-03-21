@@ -201,7 +201,7 @@ impl Component for Settings {
                             wizard.step = ImportStep::Summary;
                         }
                         Err(e) => {
-                            eprintln!("Import failed: {e}");
+                            log::error!("Import failed: {e}");
                             wizard.step = ImportStep::Summary;
                             wizard.result = Some(ImportResult {
                                 imported: 0,
@@ -796,7 +796,7 @@ impl Settings {
                         wizard.step = ImportStep::Mapping;
                     }
                     Err(e) => {
-                        eprintln!("CSV parse error: {e}");
+                        log::error!("CSV parse error: {e}");
                     }
                 }
             }
@@ -809,7 +809,7 @@ impl Settings {
                         wizard.step = ImportStep::VcfPreview;
                     }
                     Err(e) => {
-                        eprintln!("VCF parse error: {e}");
+                        log::error!("VCF parse error: {e}");
                     }
                 }
             }
@@ -874,7 +874,7 @@ impl Settings {
                 ) {
                     Ok(c) => c,
                     Err(e) => {
-                        eprintln!("CSV import error: {e}");
+                        log::error!("CSV import error: {e}");
                         return (Task::none(), None);
                     }
                 }

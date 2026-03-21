@@ -65,7 +65,7 @@ impl App {
                 task.map(Message::AddAccount)
             }
             Err(e) => {
-                eprintln!("Failed to open re-auth wizard for {email}: {e}");
+                log::error!("Failed to open re-auth wizard for {email}: {e}");
                 self.status_bar.show_confirmation(format!(
                     "Could not re-authenticate {email}: {e}"
                 ));

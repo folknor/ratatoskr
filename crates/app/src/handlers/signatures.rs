@@ -131,7 +131,7 @@ pub fn handle_reorder_signatures(
         },
         |result| {
             if let Err(ref e) = result {
-                eprintln!("Failed to reorder signatures: {e}");
+                log::error!("Failed to reorder signatures: {e}");
             }
             // Reload after reorder.
             super::SignatureResult::Saved(result)

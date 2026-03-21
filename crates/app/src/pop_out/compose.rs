@@ -546,7 +546,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             state.draft_dirty = false;
         }
         ComposeMessage::DraftSaved(Err(e)) => {
-            eprintln!("Draft save failed: {e}");
+            log::error!("Draft save failed: {e}");
         }
         // Send finalization result
         ComposeMessage::SendFinalized(Ok(())) => {

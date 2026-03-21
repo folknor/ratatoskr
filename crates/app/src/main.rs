@@ -84,6 +84,7 @@ const CHORD_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1000
 
 fn main() -> iced::Result {
     env_logger::init();
+    log::info!("Ratatoskr starting");
 
     let app_data_dir = dirs::data_dir()
         .expect("no data dir")
@@ -525,11 +526,11 @@ impl App {
             // Data loading with generation guards
             Message::AccountsLoaded(g, _) if g != self.nav_generation => Task::none(),
             Message::AccountsLoaded(_, Ok(accounts)) => {
-                eprintln!("[BOOT] AccountsLoaded: {} accounts", accounts.len());
+                log::info!("Loaded {} accounts", accounts.len());
                 self.handle_accounts_loaded(accounts)
             }
             Message::AccountsLoaded(_, Err(e)) => {
-                eprintln!("[BOOT] AccountsLoaded error: {e}");
+                log::error!("AccountsLoaded error: {e}");
                 self.status = format!("Error: {e}");
                 Task::none()
             }
@@ -539,18 +540,19 @@ impl App {
                 Task::none()
             }
             Message::NavigationLoaded(_, Err(e)) => {
+                log::error!("Navigation load error: {e}");
                 self.status = format!("Navigation error: {e}");
                 Task::none()
             }
             Message::ThreadsLoaded(g, _) if g != self.nav_generation => Task::none(),
             Message::ThreadsLoaded(_, Ok(threads)) => {
-                eprintln!("[BOOT] ThreadsLoaded: {} threads", threads.len());
+                log::info!("Loaded {} threads", threads.len());
                 self.status = format!("{} threads", threads.len());
                 self.thread_list.set_threads(threads);
                 Task::none()
             }
             Message::ThreadsLoaded(_, Err(e)) => {
-                eprintln!("[BOOT] ThreadsLoaded error: {e}");
+                log::error!("ThreadsLoaded error: {e}");
                 self.status = format!("Threads error: {e}");
                 Task::none()
             }
@@ -561,6 +563,7 @@ impl App {
                 Task::none()
             }
             Message::ThreadMessagesLoaded(_, Err(e)) => {
+                log::error!("ThreadMessagesLoaded error: {e}");
                 self.status = format!("Messages error: {e}");
                 Task::none()
             }
@@ -570,6 +573,7 @@ impl App {
                 Task::none()
             }
             Message::ThreadAttachmentsLoaded(_, Err(e)) => {
+                log::error!("ThreadAttachmentsLoaded error: {e}");
                 self.status = format!("Attachments error: {e}");
                 Task::none()
             }
@@ -756,11 +760,11 @@ impl App {
                 )
             }
             Message::AccountDeleted(Err(e)) => {
-                eprintln!("Failed to delete account: {e}");
+                log::error!("Failed to delete account: {e}");
                 Task::none()
             }
             Message::AccountUpdated(Err(e)) => {
-                eprintln!("Failed to update account: {e}");
+                log::error!("Failed to update account: {e}");
                 Task::none()
             }
             Message::OpenAddAccount => {
@@ -1125,17 +1129,20 @@ impl App {
     fn handle_sync_event(&mut self, event: SyncEvent) {
         match event {
             SyncEvent::Progress { account_id, phase, current, total } => {
+                log::info!("Sync progress: account={account_id} phase={phase} {current}/{total}");
                 let email = self.email_for_account(&account_id);
                 self.status_bar.report_sync_progress(
                     account_id, email, current, total, phase,
                 );
             }
             SyncEvent::Complete { account_id } => {
+                log::info!("Sync complete: account={account_id}");
                 self.status_bar.report_sync_complete(&account_id);
                 // Clear connection failure warnings on successful sync.
                 self.status_bar.clear_warning(&account_id);
             }
             SyncEvent::Error { account_id, error } => {
+                log::warn!("Sync error: account={account_id} error={error}");
                 let email = self.email_for_account(&account_id);
                 self.status_bar.set_warning(AccountWarning {
                     account_id,
@@ -1242,7 +1249,7 @@ impl App {
                 Task::none()
             }
             handlers::SignatureResult::Loaded(Err(e)) => {
-                eprintln!("Failed to load signatures: {e}");
+                log::error!("Failed to load signatures: {e}");
                 Task::none()
             }
             handlers::SignatureResult::Saved(_) | handlers::SignatureResult::Deleted(_) => {
@@ -1387,6 +1394,9 @@ impl App {
 
     fn handle_select_thread(&mut self, idx: usize) -> Task<Message> {
         let thread = self.thread_list.threads.get(idx);
+        if let Some(t) = thread {
+            log::debug!("Thread selected: {}", t.id);
+        }
         self.reading_pane.set_thread(thread);
         self.thread_generation += 1;
         if let Some(thread) = thread {
@@ -1558,6 +1568,7 @@ impl App {
 
     fn handle_window_close(&mut self, id: iced::window::Id) -> Task<Message> {
         if id == self.main_window_id {
+            log::info!("Main window closing, saving state");
             let data_dir = APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
             self.window.sidebar_width = self.sidebar_width;
             self.window.thread_list_width = self.thread_list_width;
