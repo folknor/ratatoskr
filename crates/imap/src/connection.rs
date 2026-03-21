@@ -147,6 +147,7 @@ pub type ImapSession = Session<ImapStream>;
 ///
 /// Wraps the entire connection + auth sequence in a 60s overall timeout.
 pub async fn connect(config: &ImapConfig) -> Result<ImapSession, String> {
+    log::info!("[IMAP] Connecting to {}:{} (security={}, auth={})", config.host, config.port, config.security, config.auth_method);
     tokio::time::timeout(OVERALL_CONNECT_TIMEOUT, connect_inner(config))
         .await
         .map_err(|_| format!(
@@ -289,16 +290,26 @@ async fn authenticate(
 ) -> Result<ImapSession, String> {
     match config.auth_method.as_str() {
         "oauth2" => {
+            log::debug!("[IMAP] Authenticating with XOAUTH2 as {}", config.username);
             let auth = XOAuth2::new(&config.username, &config.password);
             client
                 .authenticate("XOAUTH2", auth)
                 .await
-                .map_err(|(e, _)| format!("XOAUTH2 authentication failed: {e}"))
+                .map_err(|(e, _)| {
+                    log::error!("[IMAP] XOAUTH2 authentication failed for {}: {e}", config.username);
+                    format!("XOAUTH2 authentication failed: {e}")
+                })
         }
-        _ => client
-            .login(&config.username, &config.password)
-            .await
-            .map_err(|(e, _)| format!("Login failed: {e}")),
+        _ => {
+            log::debug!("[IMAP] Authenticating with LOGIN as {}", config.username);
+            client
+                .login(&config.username, &config.password)
+                .await
+                .map_err(|(e, _)| {
+                    log::error!("[IMAP] LOGIN failed for {}: {e}", config.username);
+                    format!("Login failed: {e}")
+                })
+        }
     }
 }
 

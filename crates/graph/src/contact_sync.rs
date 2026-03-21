@@ -21,11 +21,13 @@ pub(crate) async fn graph_contacts_initial_sync(
     account_id: &str,
     db: &DbState,
 ) -> Result<(), String> {
+    log::info!("[Graph] Starting initial contact sync for account {account_id}");
     let folders = fetch_contact_folders(client, db).await?;
     if folders.is_empty() {
-        log::debug!("No contact folders found for account {account_id}");
+        log::debug!("[Graph] No contact folders found for account {account_id}");
         return Ok(());
     }
+    log::debug!("[Graph] Found {} contact folders for account {account_id}", folders.len());
 
     for folder in &folders {
         full_sync_contact_folder(client, account_id, db, &folder.id).await?;

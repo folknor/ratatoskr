@@ -96,9 +96,11 @@ pub async fn create_upload_session(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
+        log::error!("[GDrive] Failed to create upload session for '{file_name}': {status}");
         return Err(format!("Failed to create upload session: {status} {body}"));
     }
 
+    log::debug!("[GDrive] Created upload session for '{file_name}' ({file_size} bytes)");
     let upload_url = response
         .headers()
         .get("location")
@@ -273,10 +275,12 @@ pub async fn create_sharing_permission(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
+        log::error!("[GDrive] Failed to create sharing permission for file {file_id}: {status}");
         return Err(format!(
             "Failed to create sharing permission: {status} {body}"
         ));
     }
+    log::info!("[GDrive] Created sharing permission for file {file_id}");
 
     let _perm: PermissionResponse = response
         .json()

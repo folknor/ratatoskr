@@ -24,11 +24,14 @@ pub struct GmailSyncResult {
 // ---------------------------------------------------------------------------
 
 pub(super) async fn run_delta_sync(ctx: &SyncCtx<'_>) -> Result<GmailSyncResult, String> {
+    log::info!("[Gmail] Starting delta sync for account {}", ctx.account_id);
     // Read current history_id from account
     let last_history_id = { sync_state::load_account_history_id(ctx.db, ctx.account_id).await? };
     let Some(last_history_id) = last_history_id else {
+        log::error!("[Gmail] No history_id found for account {} — run initial sync first", ctx.account_id);
         return Err("No history_id found — run initial sync first".to_string());
     };
+    log::debug!("[Gmail] Delta sync from history_id={last_history_id}");
 
     let cycle = ctx.client.increment_sync_cycle();
 
@@ -54,6 +57,7 @@ pub(super) async fn run_delta_sync(ctx: &SyncCtx<'_>) -> Result<GmailSyncResult,
     let history_result = collect_history(ctx, &last_history_id).await?;
 
     if history_result.affected_thread_ids.is_empty() {
+        log::info!("[Gmail] Delta sync complete for account {}: no changes", ctx.account_id);
         update_history_id(ctx, &history_result.latest_history_id).await?;
         return Ok(GmailSyncResult {
             new_inbox_message_ids: vec![],
@@ -71,6 +75,13 @@ pub(super) async fn run_delta_sync(ctx: &SyncCtx<'_>) -> Result<GmailSyncResult,
 
     // Update history_id
     update_history_id(ctx, &history_result.latest_history_id).await?;
+
+    log::info!(
+        "[Gmail] Delta sync complete for account {}: {} threads affected, {} new inbox messages",
+        ctx.account_id,
+        history_result.affected_thread_ids.len(),
+        history_result.new_inbox_message_ids.len()
+    );
 
     Ok(GmailSyncResult {
         new_inbox_message_ids: history_result.new_inbox_message_ids.into_iter().collect(),
@@ -106,6 +117,7 @@ async fn collect_history(
         {
             Ok(r) => r,
             Err(e) if is_history_expired(&e) => {
+                log::warn!("[Gmail] History expired for account {}, full re-sync needed", ctx.account_id);
                 return Err("HISTORY_EXPIRED".to_string());
             }
             Err(e) => return Err(e),

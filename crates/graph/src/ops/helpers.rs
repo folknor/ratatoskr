@@ -209,6 +209,7 @@ pub(super) async fn execute_batch(
                     .as_ref()
                     .map(ToString::to_string)
                     .unwrap_or_default();
+                log::error!("[Graph] Batch request {} failed with status {}: {detail}", resp.id, resp.status);
                 return Err(format!(
                     "Batch request {} failed with status {}: {detail}",
                     resp.id, resp.status

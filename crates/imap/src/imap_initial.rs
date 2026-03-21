@@ -72,6 +72,7 @@ pub async fn imap_initial_sync(
     config: &ImapConfig,
     days_back: i64,
 ) -> Result<ImapSyncResult, String> {
+    log::info!("[IMAP] Starting initial sync for account {account_id} (days_back={days_back})");
     // Phase 1: List and sync folders
     emit_progress(
         progress,
@@ -313,6 +314,11 @@ pub async fn imap_initial_sync(
         stored_count,
         thread_groups.len(),
         total_messages_found
+    );
+
+    log::info!(
+        "[IMAP] Initial sync complete for account {account_id}: {} messages stored, {} threads",
+        stored_count, thread_groups.len()
     );
 
     Ok(ImapSyncResult {

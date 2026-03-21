@@ -260,11 +260,15 @@ impl JmapClient {
             }
         };
 
+        log::info!("[JMAP] Connecting to {} for account {account_id} (auth={})", creds.jmap_url, creds.auth_method);
         let client = Client::new()
             .credentials(jmap_credentials)
             .connect(&creds.jmap_url)
             .await
-            .map_err(|e| format!("JMAP connect failed: {e}"))?;
+            .map_err(|e| {
+                log::error!("[JMAP] Connection failed for account {account_id}: {e}");
+                format!("JMAP connect failed: {e}")
+            })?;
 
         let is_oauth = matches!(creds.auth_method.as_str(), "oauth2" | "bearer");
 

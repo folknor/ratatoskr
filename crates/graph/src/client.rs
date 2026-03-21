@@ -388,6 +388,7 @@ impl GraphClient {
         body: Option<&B>,
         db: &DbState,
     ) -> Result<T, String> {
+        log::debug!("[Graph] {method} {url}");
         let access_token = self.ensure_valid_token(db).await?;
         let _permit = self
             .inner
@@ -399,7 +400,9 @@ impl GraphClient {
             .execute_with_retry(url, method, body, &access_token)
             .await?;
 
-        if response.status().as_u16() == 401 {
+        let status = response.status().as_u16();
+        if status == 401 {
+            log::info!("[Graph] Got 401 for {method} {url}, refreshing token");
             let new_token = self.force_refresh(db).await?;
             let retry = self
                 .execute_with_retry(url, method, body, &new_token)
@@ -407,6 +410,7 @@ impl GraphClient {
             return http::parse_json_response(retry, "Graph API").await;
         }
 
+        log::debug!("[Graph] {method} {url} -> {status}");
         http::parse_json_response(response, "Graph API").await
     }
 
@@ -452,6 +456,7 @@ impl GraphClient {
                 return Ok(response);
             }
 
+            log::warn!("[Graph] Rate limited (429) on {method} {url}, attempt {attempt}");
             last_response = Some(response);
             if attempt == RETRY_CONFIG.max_attempts - 1 {
                 break;
@@ -496,7 +501,10 @@ impl GraphClient {
         builder
             .send()
             .await
-            .map_err(|e| format!("Graph API request failed: {e}"))
+            .map_err(|e| {
+                log::error!("[Graph] HTTP request failed: {method} {url}: {e}");
+                format!("Graph API request failed: {e}")
+            })
     }
 
     /// Get a valid access token, refreshing if needed.
@@ -534,6 +542,7 @@ impl GraphClient {
             }
         }
 
+        log::info!("[Graph] Refreshing OAuth token for account {}", self.inner.account_id);
         let refresh_token = self.inner.token.read().await.refresh_token.clone();
 
         let result = token::refresh_oauth_token(

@@ -75,6 +75,7 @@ pub async fn jmap_initial_sync(
         progress,
     };
 
+    log::info!("[JMAP] Starting initial sync for account {account_id} (days_back={days_back})");
     emit_progress(&ctx, "mailboxes", 0, 1);
 
     // Phase 1: Sync mailboxes -> labels
@@ -135,6 +136,7 @@ pub async fn jmap_initial_sync(
     db.with_conn(move |conn| ratatoskr_sync::pipeline::mark_initial_sync_completed(conn, &aid))
         .await?;
 
+    log::info!("[JMAP] Initial sync complete for account {account_id}: {fetched} messages synced");
     emit_progress(&ctx, "done", fetched, total_u64);
 
     Ok(())
@@ -191,7 +193,9 @@ pub async fn jmap_delta_sync(
     let email_state = load_sync_state(db, account_id, "Email").await?;
     let mailbox_state = load_sync_state(db, account_id, "Mailbox").await?;
 
+    log::info!("[JMAP] Starting delta sync for account {account_id}");
     let Some(email_state) = email_state else {
+        log::error!("[JMAP] No email state for account {account_id} — run initial sync first");
         return Err("JMAP_NO_STATE".to_string());
     };
 
@@ -216,8 +220,10 @@ pub async fn jmap_delta_sync(
             .map_err(|e| {
                 let msg = e.to_string();
                 if msg.contains("cannotCalculateChanges") {
+                    log::warn!("[JMAP] Email state expired for account {account_id}, full re-sync needed");
                     return "JMAP_STATE_EXPIRED".to_string();
                 }
+                log::error!("[JMAP] Email/changes failed for account {account_id}: {msg}");
                 format!("Email/changes: {msg}")
             })?;
 
@@ -268,6 +274,11 @@ pub async fn jmap_delta_sync(
 
     // Save updated states
     save_sync_state(db, account_id, "Email", &since_state).await?;
+
+    log::info!(
+        "[JMAP] Delta sync complete for account {account_id}: {} new inbox, {} threads affected",
+        new_inbox_ids.len(), affected_thread_ids.len()
+    );
 
     Ok(JmapSyncResult {
         new_inbox_email_ids: new_inbox_ids,

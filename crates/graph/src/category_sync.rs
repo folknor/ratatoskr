@@ -34,6 +34,7 @@ pub async fn graph_categories_sync(
     let aid = account_id.to_string();
     let categories = response.value;
     let count = categories.len();
+    log::info!("[Graph] Category sync for account {account_id}: {} categories fetched", count);
 
     db.with_conn(move |conn| {
         let tx = conn

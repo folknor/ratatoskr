@@ -161,6 +161,7 @@ impl GmailClient {
             .await?;
 
         if response.status().as_u16() == 401 {
+            log::info!("[Gmail] Got 401 for DELETE {url}, refreshing token");
             let new_token = self.force_refresh(db).await?;
             let retry = self
                 .execute_with_retry(&url, "DELETE", None::<&()>, &new_token)
@@ -184,12 +185,15 @@ impl GmailClient {
         body: Option<&B>,
         db: &DbState,
     ) -> Result<T, String> {
+        log::debug!("[Gmail] {method} {url}");
         let access_token = self.ensure_valid_token(db).await?;
         let response = self
             .execute_with_retry(url, method, body, &access_token)
             .await?;
 
-        if response.status().as_u16() == 401 {
+        let status = response.status().as_u16();
+        if status == 401 {
+            log::info!("[Gmail] Got 401 for {method} {url}, refreshing token");
             let new_token = self.force_refresh(db).await?;
             let retry = self
                 .execute_with_retry(url, method, body, &new_token)
@@ -197,6 +201,7 @@ impl GmailClient {
             return http::parse_json_response(retry, "Gmail API").await;
         }
 
+        log::debug!("[Gmail] {method} {url} -> {status}");
         http::parse_json_response(response, "Gmail API").await
     }
 
@@ -217,6 +222,7 @@ impl GmailClient {
                 return Ok(response);
             }
 
+            log::warn!("[Gmail] Rate limited (429) on {method} {url}, attempt {attempt}");
             last_response = Some(response);
             if attempt == RETRY_CONFIG.max_attempts - 1 {
                 break;
@@ -258,7 +264,10 @@ impl GmailClient {
         builder
             .send()
             .await
-            .map_err(|e| format!("Gmail API request failed: {e}"))
+            .map_err(|e| {
+                log::error!("[Gmail] HTTP request failed: {method} {url}: {e}");
+                format!("Gmail API request failed: {e}")
+            })
     }
 
     /// Get a valid access token, refreshing if needed.
@@ -302,6 +311,7 @@ impl GmailClient {
         // Read current refresh token
         let refresh_token = self.inner.token.read().await.refresh_token.clone();
 
+        log::info!("[Gmail] Refreshing OAuth token for account {}", self.inner.account_id);
         // Call Google's token endpoint
         let result = token::refresh_google_token(
             &self.inner.http,

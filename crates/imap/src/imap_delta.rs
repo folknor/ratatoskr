@@ -57,6 +57,7 @@ pub async fn imap_delta_sync(
     config: &ImapConfig,
     days_back: i64,
 ) -> Result<ImapSyncResult, String> {
+    log::info!("[IMAP] Starting delta sync for account {account_id} (days_back={days_back})");
     // List folders
     let all_folders = {
         let mut session = connect(config).await?;
@@ -264,6 +265,11 @@ pub async fn imap_delta_sync(
         })
         .await?;
     }
+
+    log::info!(
+        "[IMAP] Delta sync complete for account {account_id}: {} messages stored, {} threads, {} affected",
+        stored, thread_groups.len(), affected.len()
+    );
 
     Ok(ImapSyncResult {
         stored_count: stored,
