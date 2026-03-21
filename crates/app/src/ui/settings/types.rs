@@ -70,6 +70,10 @@ pub enum SettingsMessage {
     UndoInput(InputField),
     RedoInput(InputField),
     Noop,
+    /// Save current preference edits (commit shadow to committed state).
+    SavePreferences,
+    /// Cancel preference edits (discard shadow, restore committed state).
+    CancelPreferences,
     // Help tooltips
     HelpHover(String),
     HelpUnhover(String),
@@ -153,7 +157,13 @@ pub enum ContactField {
 /// Events the settings component emits upward to the App.
 #[derive(Debug, Clone)]
 pub enum SettingsEvent {
+    /// Settings panel closed. If preferences were dirty, they have been
+    /// committed (auto-save on close). The App should apply them.
     Closed,
+    /// Preferences were explicitly saved via SavePreferences.
+    PreferencesCommitted,
+    /// Preferences were explicitly cancelled — committed state restored.
+    PreferencesDiscarded,
     DateDisplayChanged(DateDisplay),
     OpenAddAccountWizard,
     /// Request the App to save a signature (insert or update) via core CRUD.
@@ -278,6 +288,29 @@ impl Tab {
     }
 }
 
+// ── Preferences shadow ──────────────────────────────────
+//
+// The "config shadow pattern": on settings open, clone the current
+// preferences into `editing_preferences`. All edits go to the shadow.
+// Save commits the shadow back, Close/Cancel discards it and restores
+// the original values. This enables live preview with safe rollback.
+
+/// Snapshot of user-facing preferences that support live preview.
+/// Compared with `PartialEq` for change detection.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreferencesState {
+    pub theme: String,
+    pub scale: f32,
+    pub density: String,
+    pub font_size: String,
+    pub date_display: DateDisplay,
+    pub reading_pane_position: String,
+    pub sync_status_bar: bool,
+    pub block_remote_images: bool,
+    pub phishing_detection: bool,
+    pub phishing_sensitivity: String,
+}
+
 // ── State ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -353,7 +386,13 @@ pub struct GroupEditorState {
 pub struct Settings {
     pub active_tab: Tab,
     pub open_select: Option<SelectField>,
-    // General
+    // General — preferences shadow pattern
+    /// The committed (persisted) preferences. Updated only on explicit save.
+    pub committed_preferences: PreferencesState,
+    /// The editing shadow. `Some` when settings panel is open. All preference
+    /// edits go here. Save commits it to `committed_preferences`, cancel
+    /// discards it and restores the committed values.
+    pub editing_preferences: Option<PreferencesState>,
     pub scale: f32,
     pub scale_preview: Option<f32>,
     pub theme: String,
@@ -514,18 +553,92 @@ pub struct EditableItem {
 
 impl Settings {
     pub fn with_scale(scale: f32) -> Self {
-        Self {
-            scale,
-            ..Self::default()
+        let mut s = Self::default();
+        s.scale = scale;
+        s.committed_preferences.scale = scale;
+        s
+    }
+
+    /// Snapshot current preferences into the editing shadow.
+    /// Called when the settings panel opens.
+    pub fn begin_editing(&mut self) {
+        self.editing_preferences = Some(self.snapshot_preferences());
+    }
+
+    /// Commit the editing shadow to committed state and apply to live fields.
+    /// Called on explicit save or when closing with intent to keep changes.
+    pub fn commit_preferences(&mut self) {
+        if let Some(prefs) = self.editing_preferences.take() {
+            self.committed_preferences = prefs.clone();
+            self.apply_preferences(&prefs);
         }
+    }
+
+    /// Discard the editing shadow and restore committed preferences.
+    /// Called when the user cancels or navigates away without saving.
+    pub fn discard_preferences(&mut self) {
+        self.editing_preferences = None;
+        let committed = self.committed_preferences.clone();
+        self.apply_preferences(&committed);
+    }
+
+    /// Whether the editing shadow differs from committed state.
+    /// Returns `false` if no editing session is active.
+    pub fn has_unsaved_changes(&self) -> bool {
+        self.editing_preferences.as_ref()
+            .is_some_and(|editing| *editing != self.committed_preferences)
+    }
+
+    /// Build a `PreferencesState` from the current live fields.
+    fn snapshot_preferences(&self) -> PreferencesState {
+        PreferencesState {
+            theme: self.theme.clone(),
+            scale: self.scale,
+            density: self.density.clone(),
+            font_size: self.font_size.clone(),
+            date_display: self.date_display,
+            reading_pane_position: self.reading_pane_position.clone(),
+            sync_status_bar: self.sync_status_bar,
+            block_remote_images: self.block_remote_images,
+            phishing_detection: self.phishing_detection,
+            phishing_sensitivity: self.phishing_sensitivity.clone(),
+        }
+    }
+
+    /// Apply a `PreferencesState` to the live fields (for preview or restore).
+    fn apply_preferences(&mut self, prefs: &PreferencesState) {
+        self.theme = prefs.theme.clone();
+        self.scale = prefs.scale;
+        self.density = prefs.density.clone();
+        self.font_size = prefs.font_size.clone();
+        self.date_display = prefs.date_display;
+        self.reading_pane_position = prefs.reading_pane_position.clone();
+        self.sync_status_bar = prefs.sync_status_bar;
+        self.block_remote_images = prefs.block_remote_images;
+        self.phishing_detection = prefs.phishing_detection;
+        self.phishing_sensitivity = prefs.phishing_sensitivity.clone();
     }
 }
 
 impl Default for Settings {
     fn default() -> Self {
+        let initial_preferences = PreferencesState {
+            theme: "Light".into(),
+            scale: 1.0,
+            density: "Default".into(),
+            font_size: "Default".into(),
+            date_display: DateDisplay::RelativeOffset,
+            reading_pane_position: "Right".into(),
+            sync_status_bar: true,
+            block_remote_images: false,
+            phishing_detection: true,
+            phishing_sensitivity: "Default".into(),
+        };
         Self {
             active_tab: Tab::General,
             open_select: None,
+            committed_preferences: initial_preferences,
+            editing_preferences: None,
             scale: 1.0,
             scale_preview: None,
             theme: "Light".into(),

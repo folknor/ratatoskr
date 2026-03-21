@@ -21,7 +21,17 @@ impl Component for Settings {
     ) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
         match message {
             SettingsMessage::Close => {
+                // Auto-save: commit any editing preferences on close.
+                self.commit_preferences();
                 return (Task::none(), Some(SettingsEvent::Closed));
+            }
+            SettingsMessage::SavePreferences => {
+                self.commit_preferences();
+                return (Task::none(), Some(SettingsEvent::PreferencesCommitted));
+            }
+            SettingsMessage::CancelPreferences => {
+                self.discard_preferences();
+                return (Task::none(), Some(SettingsEvent::PreferencesDiscarded));
             }
             SettingsMessage::FocusInput(id) => {
                 return (iced::widget::operation::focus(id), None);
@@ -34,6 +44,9 @@ impl Component for Settings {
                     "Absolute" => DateDisplay::Absolute,
                     _ => DateDisplay::RelativeOffset,
                 };
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.date_display = self.date_display;
+                }
                 self.open_select = None;
                 return (Task::none(), Some(SettingsEvent::DateDisplayChanged(self.date_display)));
             }
@@ -214,17 +227,52 @@ impl Settings {
             }
             SettingsMessage::ScaleDragged(v) => self.scale_preview = Some(v),
             SettingsMessage::ScaleReleased => {
-                if let Some(v) = self.scale_preview.take() { self.scale = v; }
+                if let Some(v) = self.scale_preview.take() {
+                    self.scale = v;
+                    if let Some(ref mut prefs) = self.editing_preferences { prefs.scale = v; }
+                }
             }
-            SettingsMessage::ThemeChanged(v) => { self.theme = v; self.open_select = None; }
-            SettingsMessage::DensityChanged(v) => { self.density = v; self.open_select = None; }
-            SettingsMessage::FontSizeChanged(v) => { self.font_size = v; self.open_select = None; }
-            SettingsMessage::ReadingPaneChanged(v) => { self.reading_pane_position = v; self.open_select = None; }
-            SettingsMessage::ThemeSelected(i) => { self.selected_theme = Some(i); self.theme = "Theme".into(); }
-            SettingsMessage::ToggleSyncStatusBar(v) => self.sync_status_bar = v,
-            SettingsMessage::ToggleBlockRemoteImages(v) => self.block_remote_images = v,
-            SettingsMessage::TogglePhishingDetection(v) => self.phishing_detection = v,
-            SettingsMessage::PhishingSensitivityChanged(v) => self.phishing_sensitivity = v,
+            SettingsMessage::ThemeChanged(v) => {
+                self.theme = v.clone();
+                if let Some(ref mut prefs) = self.editing_preferences { prefs.theme = v; }
+                self.open_select = None;
+            }
+            SettingsMessage::DensityChanged(v) => {
+                self.density = v.clone();
+                if let Some(ref mut prefs) = self.editing_preferences { prefs.density = v; }
+                self.open_select = None;
+            }
+            SettingsMessage::FontSizeChanged(v) => {
+                self.font_size = v.clone();
+                if let Some(ref mut prefs) = self.editing_preferences { prefs.font_size = v; }
+                self.open_select = None;
+            }
+            SettingsMessage::ReadingPaneChanged(v) => {
+                self.reading_pane_position = v.clone();
+                if let Some(ref mut prefs) = self.editing_preferences { prefs.reading_pane_position = v; }
+                self.open_select = None;
+            }
+            SettingsMessage::ThemeSelected(i) => {
+                self.selected_theme = Some(i);
+                self.theme = "Theme".into();
+                if let Some(ref mut prefs) = self.editing_preferences { prefs.theme = "Theme".into(); }
+            }
+            SettingsMessage::ToggleSyncStatusBar(v) => {
+                self.sync_status_bar = v;
+                if let Some(ref mut prefs) = self.editing_preferences { prefs.sync_status_bar = v; }
+            }
+            SettingsMessage::ToggleBlockRemoteImages(v) => {
+                self.block_remote_images = v;
+                if let Some(ref mut prefs) = self.editing_preferences { prefs.block_remote_images = v; }
+            }
+            SettingsMessage::TogglePhishingDetection(v) => {
+                self.phishing_detection = v;
+                if let Some(ref mut prefs) = self.editing_preferences { prefs.phishing_detection = v; }
+            }
+            SettingsMessage::PhishingSensitivityChanged(v) => {
+                self.phishing_sensitivity = v.clone();
+                if let Some(ref mut prefs) = self.editing_preferences { prefs.phishing_sensitivity = v; }
+            }
             SettingsMessage::ToggleSendAndArchive(v) => self.send_and_archive = v,
             SettingsMessage::UndoDelayChanged(v) => { self.undo_delay = v; self.open_select = None; }
             SettingsMessage::DefaultReplyChanged(v) => { self.default_reply_mode = v; self.open_select = None; }
