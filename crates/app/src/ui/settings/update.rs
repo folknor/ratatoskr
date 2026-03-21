@@ -157,6 +157,85 @@ impl Component for Settings {
                 self.confirm_delete_group = None;
                 return (Task::none(), None);
             }
+            SettingsMessage::ImportContactsOpen => {
+                self.import_wizard = Some(ImportWizardState::new());
+                self.overlay = Some(SettingsOverlay::ImportContacts);
+                self.overlay_anim.go_mut(true, Instant::now());
+                return (Task::none(), None);
+            }
+            SettingsMessage::ImportFileSelected(path, data) => {
+                return (self.handle_import_file_selected(path, data), None);
+            }
+            SettingsMessage::ImportMappingChanged(index, field) => {
+                if let Some(ref mut wizard) = self.import_wizard {
+                    if let Some(mapping) = wizard.mappings.get_mut(index) {
+                        *mapping = field;
+                    }
+                }
+                return (Task::none(), None);
+            }
+            SettingsMessage::ImportToggleHeader(has_header) => {
+                return (self.handle_import_toggle_header(has_header), None);
+            }
+            SettingsMessage::ImportToggleUpdateExisting(update) => {
+                if let Some(ref mut wizard) = self.import_wizard {
+                    wizard.update_existing = update;
+                }
+                return (Task::none(), None);
+            }
+            SettingsMessage::ImportAccountChanged(account_id) => {
+                if let Some(ref mut wizard) = self.import_wizard {
+                    wizard.account_id = account_id;
+                }
+                return (Task::none(), None);
+            }
+            SettingsMessage::ImportExecute => {
+                return self.handle_import_execute();
+            }
+            SettingsMessage::ImportExecuted(result) => {
+                if let Some(ref mut wizard) = self.import_wizard {
+                    match result {
+                        Ok(import_result) => {
+                            wizard.result = Some(import_result);
+                            wizard.step = ImportStep::Summary;
+                        }
+                        Err(e) => {
+                            eprintln!("Import failed: {e}");
+                            wizard.step = ImportStep::Summary;
+                            wizard.result = Some(ImportResult {
+                                imported: 0,
+                                skipped_no_email: 0,
+                                skipped_duplicate: 0,
+                                updated: 0,
+                                groups_created: 0,
+                            });
+                        }
+                    }
+                }
+                return (Task::none(), None);
+            }
+            SettingsMessage::ImportBack => {
+                if let Some(ref mut wizard) = self.import_wizard {
+                    match wizard.step {
+                        ImportStep::Mapping | ImportStep::VcfPreview => {
+                            wizard.step = ImportStep::FileSelect;
+                            wizard.source = None;
+                            wizard.preview = None;
+                            wizard.mappings.clear();
+                            wizard.vcf_contacts.clear();
+                        }
+                        ImportStep::Summary => {
+                            // Close the wizard
+                            self.import_wizard = None;
+                            self.overlay = None;
+                            self.overlay_anim.go_mut(false, Instant::now());
+                            return (Task::none(), Some(SettingsEvent::LoadContacts(self.contact_filter.clone())));
+                        }
+                        _ => {}
+                    }
+                }
+                return (Task::none(), None);
+            }
             SettingsMessage::ContactFilterChanged(v) => {
                 self.contact_filter = v.clone();
                 return (Task::none(), Some(SettingsEvent::LoadContacts(v)));
@@ -397,6 +476,7 @@ impl Settings {
                 self.editing_account = None;
                 self.contact_editor = None;
                 self.group_editor = None;
+                self.import_wizard = None;
             }
             SettingsMessage::ContactsLoaded(Ok(contacts)) => {
                 self.contacts = contacts;
@@ -680,6 +760,141 @@ impl Settings {
         self.overlay_anim.go_mut(false, Instant::now());
         self.group_editor = None;
         (Task::none(), Some(SettingsEvent::DeleteGroup(id)))
+    }
+
+    fn handle_import_file_selected(&mut self, path: String, data: Vec<u8>) -> Task<SettingsMessage> {
+        let Some(ref mut wizard) = self.import_wizard else {
+            return Task::none();
+        };
+
+        // Detect format from extension
+        let lower_path = path.to_lowercase();
+        let format = if lower_path.ends_with(".vcf") || lower_path.ends_with(".vcard") {
+            ratatoskr_contact_import::ImportFormat::Vcf
+        } else {
+            ratatoskr_contact_import::ImportFormat::Csv
+        };
+
+        let source = ratatoskr_contact_import::ImportSource {
+            format,
+            data,
+            filename: path.clone(),
+        };
+
+        match format {
+            ratatoskr_contact_import::ImportFormat::Csv => {
+                match ratatoskr_contact_import::parse_csv(&source, 20) {
+                    Ok(preview) => {
+                        let auto_mappings = ratatoskr_contact_import::auto_detect_mappings(&preview.headers);
+                        wizard.mappings = auto_mappings
+                            .iter()
+                            .map(|m| ImportContactField::from_import_field(m.target_field))
+                            .collect();
+                        wizard.has_header = preview.has_header;
+                        wizard.preview = Some(preview);
+                        wizard.source = Some(source);
+                        wizard.file_path = Some(path);
+                        wizard.step = ImportStep::Mapping;
+                    }
+                    Err(e) => {
+                        eprintln!("CSV parse error: {e}");
+                    }
+                }
+            }
+            ratatoskr_contact_import::ImportFormat::Vcf => {
+                match ratatoskr_contact_import::parse_vcf(&source.data) {
+                    Ok(contacts) => {
+                        wizard.vcf_contacts = contacts;
+                        wizard.source = Some(source);
+                        wizard.file_path = Some(path);
+                        wizard.step = ImportStep::VcfPreview;
+                    }
+                    Err(e) => {
+                        eprintln!("VCF parse error: {e}");
+                    }
+                }
+            }
+        }
+
+        Task::none()
+    }
+
+    fn handle_import_toggle_header(&mut self, has_header: bool) -> Task<SettingsMessage> {
+        let Some(ref mut wizard) = self.import_wizard else {
+            return Task::none();
+        };
+        wizard.has_header = has_header;
+
+        // Re-parse with new header setting
+        if let Some(ref source) = wizard.source {
+            if source.format == ratatoskr_contact_import::ImportFormat::Csv {
+                if let Ok(preview) = ratatoskr_contact_import::csv_parser::parse_csv_with_header(source, 20, has_header) {
+                    let auto_mappings = ratatoskr_contact_import::auto_detect_mappings(&preview.headers);
+                    wizard.mappings = auto_mappings
+                        .iter()
+                        .map(|m| ImportContactField::from_import_field(m.target_field))
+                        .collect();
+                    wizard.preview = Some(preview);
+                }
+            }
+        }
+
+        Task::none()
+    }
+
+    fn handle_import_execute(&mut self) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
+        let Some(ref mut wizard) = self.import_wizard else {
+            return (Task::none(), None);
+        };
+
+        let contacts: Vec<ratatoskr_contact_import::ImportedContact> = match wizard.source.as_ref().map(|s| s.format) {
+            Some(ratatoskr_contact_import::ImportFormat::Csv) => {
+                let Some(ref source) = wizard.source else {
+                    return (Task::none(), None);
+                };
+                let mappings: Vec<ratatoskr_contact_import::ColumnMapping> = wizard.mappings
+                    .iter()
+                    .enumerate()
+                    .map(|(i, field)| {
+                        let header = wizard.preview
+                            .as_ref()
+                            .and_then(|p| p.headers.get(i))
+                            .cloned()
+                            .unwrap_or_default();
+                        ratatoskr_contact_import::ColumnMapping {
+                            source_index: i,
+                            source_column: header,
+                            target_field: field.to_import_field(),
+                        }
+                    })
+                    .collect();
+                match ratatoskr_contact_import::csv_parser::execute_csv_import(
+                    source,
+                    &mappings,
+                    wizard.has_header,
+                ) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("CSV import error: {e}");
+                        return (Task::none(), None);
+                    }
+                }
+            }
+            Some(ratatoskr_contact_import::ImportFormat::Vcf) => {
+                wizard.vcf_contacts.clone()
+            }
+            None => return (Task::none(), None),
+        };
+
+        wizard.step = ImportStep::Importing;
+        let account_id = wizard.account_id.clone();
+        let update_existing = wizard.update_existing;
+
+        (Task::none(), Some(SettingsEvent::ExecuteContactImport {
+            contacts,
+            account_id,
+            update_existing,
+        }))
     }
 
     pub(super) fn list_items_mut(&mut self, list_id: &str) -> &mut Vec<EditableItem> {

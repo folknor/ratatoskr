@@ -1140,6 +1140,9 @@ impl App {
             SettingsEvent::SaveGroup(group, members) => self.handle_save_group(group, members),
             SettingsEvent::DeleteGroup(id) => self.handle_delete_group(id),
             SettingsEvent::LoadGroupMembers(group_id) => self.handle_load_group_members(group_id),
+            SettingsEvent::ExecuteContactImport { contacts, account_id, update_existing } => {
+                self.handle_import_contacts(contacts, account_id, update_existing)
+            }
         }
     }
 

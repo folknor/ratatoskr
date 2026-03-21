@@ -50,6 +50,7 @@ pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
             Some(SettingsOverlay::EditSignature { .. }) => signature_editor_overlay(state),
             Some(SettingsOverlay::EditContact { .. }) => contact_editor_overlay(state),
             Some(SettingsOverlay::EditGroup { .. }) => group_editor_overlay(state),
+            Some(SettingsOverlay::ImportContacts) => import_wizard_overlay(state),
             None => column![].into(), // closing animation
         };
 
@@ -1162,6 +1163,17 @@ fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
 
     col = col.push(section("Contacts", contact_items));
 
+    // ── Import section ──
+    col = col.push(section("Import", vec![
+        action_row(
+            "Import Contacts",
+            Some("Import from CSV or vCard file"),
+            Some(icon::upload()),
+            ActionKind::InApp,
+            SettingsMessage::ImportContactsOpen,
+        ),
+    ]));
+
     // ── Groups section ──
     let mut group_items: Vec<Element<'_, SettingsMessage>> = Vec::new();
 
@@ -2044,4 +2056,417 @@ fn format_last_sync(last_sync_at: Option<i64>) -> String {
             }
         }
     }
+}
+
+// ── Import wizard overlay ───────────────────────────────
+
+fn import_wizard_overlay(state: &Settings) -> Element<'_, SettingsMessage> {
+    let Some(ref wizard) = state.import_wizard else {
+        return column![].into();
+    };
+
+    let content: Element<'_, SettingsMessage> = match wizard.step {
+        ImportStep::FileSelect => import_step_file_select(wizard),
+        ImportStep::Mapping => import_step_mapping(wizard, &state.managed_accounts),
+        ImportStep::VcfPreview => import_step_vcf_preview(wizard, &state.managed_accounts),
+        ImportStep::Importing => import_step_importing(),
+        ImportStep::Summary => import_step_summary(wizard),
+    };
+
+    let mut col = column![].spacing(SPACE_LG).width(Length::Fill).max_width(SETTINGS_CONTENT_MAX_WIDTH);
+    col = col.push(
+        text("Import Contacts")
+            .size(TEXT_HEADING)
+            .style(text::base)
+            .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::text() }),
+    );
+    col = col.push(content);
+    col.into()
+}
+
+fn import_step_file_select(_wizard: &ImportWizardState) -> Element<'_, SettingsMessage> {
+    let items = vec![
+        import_file_select_row(),
+    ];
+    section("Select File", items)
+}
+
+fn import_file_select_row() -> Element<'static, SettingsMessage> {
+    let description = "Select a .csv or .vcf file to import contacts from.";
+    settings_row_container(
+        SETTINGS_TOGGLE_ROW_HEIGHT,
+        column![
+            text("Choose a CSV or vCard file to import.")
+                .size(TEXT_LG)
+                .style(text::base),
+            Space::new().height(SPACE_XS),
+            text(description)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+            Space::new().height(SPACE_SM),
+            text("Use the file browser to select a file. Supported formats: .csv, .vcf")
+                .size(TEXT_SM)
+                .style(theme::TextClass::Muted.style()),
+        ],
+    )
+}
+
+fn import_step_mapping<'a>(
+    wizard: &'a ImportWizardState,
+    accounts: &'a [ManagedAccount],
+) -> Element<'a, SettingsMessage> {
+    let mut col = column![].spacing(SPACE_LG).width(Length::Fill);
+
+    // File info
+    if let Some(ref path) = wizard.file_path {
+        col = col.push(import_file_info_row(path));
+    }
+
+    // Header toggle
+    col = col.push(import_header_toggle(wizard.has_header));
+
+    // Column mapping table
+    if let Some(ref preview) = wizard.preview {
+        col = col.push(import_mapping_table(preview, &wizard.mappings));
+        col = col.push(import_preview_stats(preview, &wizard.mappings));
+    }
+
+    // Account selector
+    col = col.push(import_account_selector(wizard, accounts));
+
+    // Update existing toggle
+    col = col.push(import_update_toggle(wizard.update_existing));
+
+    // Import button
+    col = col.push(import_execute_button());
+
+    col.into()
+}
+
+fn import_file_info_row(path: &str) -> Element<'_, SettingsMessage> {
+    section_untitled(vec![
+        settings_row_container(
+            SETTINGS_ROW_HEIGHT,
+            row![
+                icon::file().size(ICON_XL).style(text::secondary),
+                Space::new().width(SPACE_XS),
+                text(path).size(TEXT_LG).style(text::base),
+            ]
+            .align_y(Alignment::Center),
+        ),
+    ])
+}
+
+fn import_header_toggle(has_header: bool) -> Element<'static, SettingsMessage> {
+    toggle_row(
+        "First row is a header",
+        "Enable if the first row contains column names, not data.",
+        has_header,
+        SettingsMessage::ImportToggleHeader,
+    )
+}
+
+fn import_mapping_table<'a>(
+    preview: &'a ratatoskr_contact_import::ImportPreview,
+    mappings: &'a [ImportContactField],
+) -> Element<'a, SettingsMessage> {
+    let mut items: Vec<Element<'a, SettingsMessage>> = Vec::new();
+
+    // Header row: column names with mapping dropdowns
+    for (i, header) in preview.headers.iter().enumerate() {
+        let current_field = mappings.get(i).copied().unwrap_or(ImportContactField::Ignore);
+        items.push(import_column_mapping_row(i, header, current_field));
+    }
+
+    // Sample data rows (first 5)
+    let sample_count = preview.sample_rows.len().min(5);
+    if sample_count > 0 {
+        items.push(import_sample_header());
+        for row in preview.sample_rows.iter().take(sample_count) {
+            items.push(import_sample_row(row));
+        }
+    }
+
+    section("Column Mapping", items)
+}
+
+fn import_column_mapping_row(
+    index: usize,
+    header: &str,
+    current: ImportContactField,
+) -> Element<'_, SettingsMessage> {
+    let header_owned = header.to_string();
+    let selected = current.label().to_string();
+
+    button(
+        container(
+            row![
+                container(text(header_owned).size(TEXT_LG).style(text::base))
+                    .align_y(Alignment::Center)
+                    .width(Length::FillPortion(1)),
+                container(
+                    text(format!("-> {selected}")).size(TEXT_LG).style(text::primary),
+                )
+                .align_y(Alignment::Center)
+                .width(Length::FillPortion(1)),
+            ]
+            .align_y(Alignment::Center),
+        )
+        .padding(PAD_SETTINGS_ROW)
+        .width(Length::Fill)
+        .height(SETTINGS_ROW_HEIGHT)
+        .align_y(Alignment::Center),
+    )
+    .on_press(SettingsMessage::ImportMappingChanged(
+        index,
+        cycle_import_field(current),
+    ))
+    .padding(0)
+    .style(theme::ButtonClass::Action.style())
+    .width(Length::Fill)
+    .into()
+}
+
+/// Cycle through import field options on click.
+fn cycle_import_field(current: ImportContactField) -> ImportContactField {
+    let all = ImportContactField::ALL_OPTIONS;
+    let current_idx = all.iter().position(|&f| f == current).unwrap_or(0);
+    let next_idx = (current_idx + 1) % all.len();
+    all[next_idx]
+}
+
+fn import_sample_header() -> Element<'static, SettingsMessage> {
+    settings_row_container(
+        SETTINGS_ROW_HEIGHT,
+        text("Preview (first rows)")
+            .size(TEXT_SM)
+            .style(theme::TextClass::Tertiary.style())
+            .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::text() }),
+    )
+}
+
+fn import_sample_row(row: &[String]) -> Element<'_, SettingsMessage> {
+    let display = row.join("  |  ");
+    settings_row_container(
+        SETTINGS_ROW_HEIGHT,
+        text(display).size(TEXT_SM).style(text::secondary),
+    )
+}
+
+fn import_preview_stats<'a>(
+    preview: &'a ratatoskr_contact_import::ImportPreview,
+    mappings: &'a [ImportContactField],
+) -> Element<'a, SettingsMessage> {
+    let has_email = mappings.iter().any(|m| *m == ImportContactField::Email);
+    let status = if has_email {
+        format!("{} rows to import.", preview.total_rows)
+    } else {
+        "No Email column mapped. Map at least one column to Email.".to_string()
+    };
+    settings_row_container(
+        SETTINGS_ROW_HEIGHT,
+        text(status).size(TEXT_LG).style(if has_email { text::base } else { text::danger }),
+    )
+}
+
+fn import_account_selector<'a>(
+    wizard: &'a ImportWizardState,
+    accounts: &'a [ManagedAccount],
+) -> Element<'a, SettingsMessage> {
+    let selected_id = wizard.account_id.as_deref();
+
+    let mut btn_row = row![].spacing(SPACE_XS).align_y(Alignment::Center);
+
+    // "Local" option
+    let is_local = selected_id.is_none();
+    let local_style = if is_local {
+        theme::ButtonClass::Primary
+    } else {
+        theme::ButtonClass::Ghost
+    };
+    btn_row = btn_row.push(
+        button(text("Local").size(TEXT_SM))
+            .style(local_style.style())
+            .on_press(SettingsMessage::ImportAccountChanged(None))
+            .padding(PAD_ICON_BTN),
+    );
+
+    for account in accounts {
+        let is_selected = selected_id == Some(account.id.as_str());
+        let style = if is_selected {
+            theme::ButtonClass::Primary
+        } else {
+            theme::ButtonClass::Ghost
+        };
+        let aid = Some(account.id.clone());
+        btn_row = btn_row.push(
+            button(text(&account.email).size(TEXT_SM))
+                .style(style.style())
+                .on_press(SettingsMessage::ImportAccountChanged(aid))
+                .padding(PAD_ICON_BTN),
+        );
+    }
+
+    container(
+        column![
+            text("Import to account").size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
+            Space::new().height(SPACE_XXXS),
+            btn_row,
+        ],
+    )
+    .padding(PAD_SETTINGS_ROW)
+    .width(Length::Fill)
+    .into()
+}
+
+fn import_update_toggle(update_existing: bool) -> Element<'static, SettingsMessage> {
+    toggle_row(
+        "Update existing contacts",
+        "When a duplicate email is found, update the existing contact with imported data.",
+        update_existing,
+        SettingsMessage::ImportToggleUpdateExisting,
+    )
+}
+
+fn import_execute_button() -> Element<'static, SettingsMessage> {
+    container(
+        button(
+            container(text("Import").size(TEXT_LG)).center_x(Length::Fill),
+        )
+        .on_press(SettingsMessage::ImportExecute)
+        .padding(PAD_BUTTON)
+        .style(theme::ButtonClass::Primary.style())
+        .width(Length::Fixed(EDITOR_BUTTON_WIDTH)),
+    )
+    .width(Length::Fill)
+    .align_x(Alignment::End)
+    .padding(PAD_SETTINGS_ROW)
+    .into()
+}
+
+fn import_step_vcf_preview<'a>(
+    wizard: &'a ImportWizardState,
+    accounts: &'a [ManagedAccount],
+) -> Element<'a, SettingsMessage> {
+    let mut col = column![].spacing(SPACE_LG).width(Length::Fill);
+
+    // File info
+    if let Some(ref path) = wizard.file_path {
+        col = col.push(import_file_info_row(path));
+    }
+
+    // Contact list preview
+    let valid_count = wizard.vcf_contacts.iter().filter(|c| c.has_valid_email()).count();
+    let total = wizard.vcf_contacts.len();
+    let skipped = total - valid_count;
+
+    let stat_text = format!(
+        "{total} contacts found. {valid_count} with valid email, {skipped} without.",
+    );
+    col = col.push(settings_row_container(
+        SETTINGS_ROW_HEIGHT,
+        text(stat_text).size(TEXT_LG).style(text::base),
+    ));
+
+    // Preview first 10 contacts
+    let mut preview_items: Vec<Element<'a, SettingsMessage>> = Vec::new();
+    for contact in wizard.vcf_contacts.iter().take(10) {
+        preview_items.push(import_vcf_contact_row(contact));
+    }
+    if !preview_items.is_empty() {
+        col = col.push(section("Preview", preview_items));
+    }
+
+    // Account selector
+    col = col.push(import_account_selector(wizard, accounts));
+
+    // Update existing toggle
+    col = col.push(import_update_toggle(wizard.update_existing));
+
+    // Import button
+    col = col.push(import_execute_button());
+
+    col.into()
+}
+
+fn import_vcf_contact_row(contact: &ratatoskr_contact_import::ImportedContact) -> Element<'_, SettingsMessage> {
+    let name = contact.effective_display_name().unwrap_or_else(|| "(no name)".to_string());
+    let email = contact.normalized_email().unwrap_or_else(|| "(no email)".to_string());
+
+    let email_style: fn(&iced::Theme) -> text::Style = if contact.has_valid_email() {
+        text::secondary
+    } else {
+        text::danger
+    };
+
+    settings_row_container(
+        SETTINGS_ROW_HEIGHT,
+        row![
+            text(name).size(TEXT_LG).style(text::base).width(Length::FillPortion(1)),
+            text(email).size(TEXT_SM).style(email_style).width(Length::FillPortion(1)),
+        ]
+        .spacing(SPACE_SM)
+        .align_y(Alignment::Center),
+    )
+}
+
+fn import_step_importing() -> Element<'static, SettingsMessage> {
+    settings_row_container(
+        SETTINGS_TOGGLE_ROW_HEIGHT,
+        column![
+            text("Importing contacts...").size(TEXT_LG).style(text::base),
+            Space::new().height(SPACE_XS),
+            text("Please wait.").size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
+        ],
+    )
+}
+
+fn import_step_summary(wizard: &ImportWizardState) -> Element<'_, SettingsMessage> {
+    let mut col = column![].spacing(SPACE_LG).width(Length::Fill);
+
+    if let Some(ref result) = wizard.result {
+        let mut stats: Vec<Element<'_, SettingsMessage>> = Vec::new();
+        stats.push(import_stat_row("Imported", result.imported));
+        if result.updated > 0 {
+            stats.push(import_stat_row("Updated", result.updated));
+        }
+        if result.skipped_no_email > 0 {
+            stats.push(import_stat_row("Skipped (no email)", result.skipped_no_email));
+        }
+        if result.skipped_duplicate > 0 {
+            stats.push(import_stat_row("Skipped (duplicate)", result.skipped_duplicate));
+        }
+        if result.groups_created > 0 {
+            stats.push(import_stat_row("Groups created", result.groups_created));
+        }
+        col = col.push(section("Import Complete", stats));
+    }
+
+    col = col.push(
+        container(
+            button(
+                container(text("Done").size(TEXT_LG)).center_x(Length::Fill),
+            )
+            .on_press(SettingsMessage::ImportBack)
+            .padding(PAD_BUTTON)
+            .style(theme::ButtonClass::Primary.style())
+            .width(Length::Fixed(EDITOR_BUTTON_WIDTH)),
+        )
+        .width(Length::Fill)
+        .align_x(Alignment::End)
+        .padding(PAD_SETTINGS_ROW),
+    );
+
+    col.into()
+}
+
+fn import_stat_row(label: &str, count: usize) -> Element<'_, SettingsMessage> {
+    settings_row_container(
+        SETTINGS_ROW_HEIGHT,
+        row![
+            text(label).size(TEXT_LG).style(text::base).width(Length::Fill),
+            text(count.to_string()).size(TEXT_LG).style(text::primary),
+        ]
+        .align_y(Alignment::Center),
+    )
 }

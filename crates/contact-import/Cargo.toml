@@ -1,0 +1,13 @@
+[package]
+name = "ratatoskr-contact-import"
+description = "Contact import from CSV and vCard files"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+encoding_rs = "0.8"
+calcard = "0.3"
