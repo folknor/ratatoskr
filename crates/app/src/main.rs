@@ -36,7 +36,7 @@ mod ui;
 mod window_state;
 
 use command_dispatch::{
-    ComposeAction, EmailAction, KeyEventMessage, NavigationTarget, PaletteMessage,
+    ComposeAction, EmailAction, KeyEventMessage, NavigationTarget,
     ReadingPanePosition, TaskAction,
 };
 use component::Component;
@@ -45,7 +45,7 @@ use iced::widget::{column, container, mouse_area, row, stack, Space};
 use iced::{Element, Length, Point, Size, Task, Theme};
 use pop_out::{PopOutMessage, PopOutWindow};
 use pop_out::compose::ComposeMode;
-use ui::palette::PaletteState;
+use ui::palette::{Palette, PaletteMessage};
 use ratatoskr_command_palette::{
     BindingTable, Chord, CommandId, CommandRegistry,
     FocusedRegion, current_platform,
@@ -283,8 +283,7 @@ struct App {
     is_online: bool,
     composer_is_open: bool,
     pending_chord: Option<PendingChord>,
-    palette: PaletteState,
-    resolver: Arc<command_resolver::AppInputResolver>,
+    palette: Palette,
 
     // Search state
     search_generation: u64,
@@ -367,8 +366,10 @@ impl App {
             is_online: true,
             composer_is_open: false,
             pending_chord: None,
-            palette: PaletteState::new(),
-            resolver,
+            palette: Palette::new(
+                CommandRegistry::new(),
+                resolver,
+            ),
             search_generation: 0,
             search_query: UndoableText::new(),
             search_debounce_deadline: None,
@@ -905,15 +906,11 @@ impl App {
                     .height(Length::Fill)
                     .style(ui::theme::ContainerClass::PaletteBackdrop.style()),
             )
-            .on_press(Message::Palette(PaletteMessage::Close));
+            .on_press(Message::Palette(PaletteMessage::Close(
+                ratatoskr_command_palette::CommandContext::default(),
+            )));
 
-            let palette_widget = ui::palette::palette_card(
-                &self.palette,
-                |q| Message::Palette(PaletteMessage::QueryChanged(q)),
-                Message::Palette(PaletteMessage::Confirm),
-                |idx| Message::Palette(PaletteMessage::ClickResult(idx)),
-                |idx| Message::Palette(PaletteMessage::ClickOption(idx)),
-            );
+            let palette_widget = self.palette.view().map(Message::Palette);
 
             let palette_positioned = container(palette_widget)
                 .width(Length::Fill)
@@ -1749,10 +1746,26 @@ async fn load_threads_scoped(
     db.with_conn(move |conn| {
         let db_threads =
             get_threads_scoped(conn, &scope, label_id.as_deref(), Some(1000), None)?;
-        Ok(db_threads
+        let mut threads: Vec<Thread> = db_threads
             .into_iter()
             .map(db_thread_to_app_thread)
-            .collect())
+            .collect();
+
+        // When viewing Drafts, also include local-only drafts
+        if label_id.as_deref() == Some("DRAFT") {
+            let local = ratatoskr_core::db::queries_extra::get_local_draft_summaries(
+                conn, &scope, Some(1000), None,
+            )?;
+            let local_threads: Vec<Thread> = local
+                .into_iter()
+                .map(local_draft_to_app_thread)
+                .collect();
+            threads.extend(local_threads);
+            // Sort all drafts together by updated_at DESC
+            threads.sort_by(|a, b| b.last_message_at.cmp(&a.last_message_at));
+        }
+
+        Ok(threads)
     })
     .await
 }
@@ -1772,5 +1785,25 @@ fn db_thread_to_app_thread(t: DbThread) -> Thread {
         has_attachments: t.has_attachments,
         from_name: t.from_name,
         from_address: t.from_address,
+        is_local_draft: false,
+    }
+}
+
+fn local_draft_to_app_thread(
+    d: ratatoskr_core::db::queries_extra::LocalDraftSummary,
+) -> Thread {
+    Thread {
+        id: d.id,
+        account_id: d.account_id,
+        subject: d.subject,
+        snippet: d.snippet,
+        last_message_at: Some(d.updated_at),
+        message_count: 1,
+        is_read: true,
+        is_starred: false,
+        has_attachments: false,
+        from_name: None,
+        from_address: d.from_email,
+        is_local_draft: true,
     }
 }

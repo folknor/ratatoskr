@@ -19,9 +19,10 @@ pub enum FocusedRegion {
     Sidebar,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ViewType {
+    #[default]
     Inbox,
     Starred,
     Sent,
@@ -41,7 +42,7 @@ pub enum ViewType {
     PinnedSearch,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandContext {
     pub selected_thread_ids: Vec<String>,

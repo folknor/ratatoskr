@@ -455,6 +455,97 @@ pub fn get_draft_count_with_local(
     Ok(synced + local)
 }
 
+/// Local draft summary for display in the thread list.
+///
+/// These fields mirror the subset of `DbThread` that the app layer uses
+/// to build a unified drafts list. Local-only drafts don't have real threads,
+/// so most fields default to sensible values.
+#[derive(Debug, Clone)]
+pub struct LocalDraftSummary {
+    pub id: String,
+    pub account_id: String,
+    pub subject: Option<String>,
+    pub snippet: Option<String>,
+    pub updated_at: i64,
+    pub from_email: Option<String>,
+}
+
+/// Fetch local-only drafts (not yet synced) as summaries, scoped by `AccountScope`.
+///
+/// Returns drafts from `local_drafts` where `sync_status != 'synced'`,
+/// ordered by `updated_at DESC`. These are combined with server-synced
+/// draft threads by the app layer to produce a unified drafts view.
+pub fn get_local_draft_summaries(
+    conn: &Connection,
+    scope: &AccountScope,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<LocalDraftSummary>, String> {
+    let lim = limit.unwrap_or(50);
+    let off = offset.unwrap_or(0);
+
+    let (scope_clause, scope_params) = account_scope_clause(scope, 1);
+    let clause = scope_clause.replace("t.account_id", "account_id");
+    let next_idx = scope_params.len() + 1;
+
+    let sql = format!(
+        "SELECT id, account_id, subject, body_html, updated_at, from_email
+         FROM local_drafts
+         WHERE {clause} AND sync_status != 'synced'
+         ORDER BY updated_at DESC
+         LIMIT ?{next_idx} OFFSET ?{offset_idx}",
+        offset_idx = next_idx + 1,
+    );
+
+    let mut all_params: Vec<Box<dyn rusqlite::types::ToSql>> = scope_params;
+    all_params.push(Box::new(lim));
+    all_params.push(Box::new(off));
+
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+        all_params.iter().map(AsRef::as_ref).collect();
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    stmt.query_map(param_refs.as_slice(), |row| {
+        let body_html: Option<String> = row.get("body_html")?;
+        let snippet = body_html.map(|html| {
+            // Strip HTML tags for a simple snippet
+            let text = html
+                .replace("<br>", " ")
+                .replace("<br/>", " ")
+                .replace("<br />", " ")
+                .replace("&nbsp;", " ");
+            let mut result = String::new();
+            let mut in_tag = false;
+            for ch in text.chars() {
+                if ch == '<' {
+                    in_tag = true;
+                } else if ch == '>' {
+                    in_tag = false;
+                } else if !in_tag {
+                    result.push(ch);
+                }
+            }
+            let trimmed: String = result.split_whitespace().collect::<Vec<_>>().join(" ");
+            if trimmed.len() > 200 {
+                format!("{}...", &trimmed[..197])
+            } else {
+                trimmed
+            }
+        });
+        Ok(LocalDraftSummary {
+            id: row.get("id")?,
+            account_id: row.get("account_id")?,
+            subject: row.get("subject")?,
+            snippet,
+            updated_at: row.get("updated_at")?,
+            from_email: row.get("from_email")?,
+        })
+    })
+    .map_err(|e| e.to_string())?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())
+}
+
 /// Count local drafts that don't yet have a server-synced thread.
 fn count_local_drafts(
     conn: &Connection,

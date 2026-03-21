@@ -1,15 +1,64 @@
+use std::sync::Arc;
+
 use iced::widget::{column, container, mouse_area, row, scrollable, text, text_input};
-use iced::{Element, Length};
+use iced::{Element, Length, Task};
 use ratatoskr_command_palette::{
-    CommandId, CommandMatch, InputMode, OptionItem, OptionMatch,
+    CommandArgs, CommandContext, CommandId, CommandInputResolver, CommandMatch,
+    CommandRegistry, InputMode, OptionItem, OptionMatch,
 };
 
 use super::layout::*;
 use super::theme::{ContainerClass, TextClass};
+use crate::command_resolver::AppInputResolver;
+use crate::component::Component;
+use crate::handlers::commands::build_command_args;
+
+// ── Messages & Events ──────────────────────────────────
+
+/// Internal messages for the palette component.
+#[derive(Debug, Clone)]
+pub enum PaletteMessage {
+    /// Open the palette. Carries the current command context for registry queries.
+    Open(CommandContext),
+    /// Close the palette (Escape or backdrop click).
+    /// Carries context for re-querying when backing from stage 2 to stage 1.
+    Close(CommandContext),
+    /// Text input changed. Carries context for registry queries in stage 1.
+    QueryChanged(String, CommandContext),
+    /// Arrow down: select next result.
+    SelectNext,
+    /// Arrow up: select previous result.
+    SelectPrev,
+    /// Enter pressed: execute the currently selected command.
+    /// Carries context for loading parameterized options.
+    Confirm(CommandContext),
+    /// Mouse click on a result row. Carries context.
+    ClickResult(usize, CommandContext),
+    /// Mouse click on a stage 2 option row.
+    ClickOption(usize),
+    /// Stage 2: option list loaded from resolver.
+    /// The `u64` is the generation counter to discard stale results.
+    OptionsLoaded(u64, CommandId, Result<Vec<OptionItem>, String>),
+}
+
+/// Events the palette emits upward to the App.
+#[derive(Debug, Clone)]
+pub enum PaletteEvent {
+    /// Execute a direct (non-parameterized) command.
+    ExecuteCommand(CommandId),
+    /// Execute a parameterized command with resolved arguments.
+    ExecuteParameterized(CommandId, CommandArgs),
+    /// The palette was dismissed (closed without executing).
+    Dismissed,
+    /// An error occurred (e.g., from the options resolver).
+    Error(String),
+}
+
+// ── Stage ──────────────────────────────────────────────
 
 /// Which stage the palette is in.
 #[derive(Debug, Clone, Default)]
-pub enum PaletteStage {
+enum PaletteStage {
     /// Stage 1: searching commands via `CommandRegistry::query()`.
     #[default]
     CommandSearch,
@@ -17,31 +66,40 @@ pub enum PaletteStage {
     OptionPick,
 }
 
-/// Palette overlay state.
-pub struct PaletteState {
-    pub open: bool,
-    pub query: String,
-    pub results: Vec<CommandMatch>,
-    pub selected_index: usize,
-    // Stage 2 state
-    pub stage: PaletteStage,
+// ── Component ──────────────────────────────────────────
+
+/// Self-contained command palette component.
+///
+/// Owns the `CommandRegistry` and `AppInputResolver` references needed
+/// to query commands and load stage-2 options. Emits `PaletteEvent`
+/// variants for the App to handle (execute command, dismiss, etc.).
+pub struct Palette {
+    registry: CommandRegistry,
+    resolver: Arc<AppInputResolver>,
+    open: bool,
+    query: String,
+    results: Vec<CommandMatch>,
+    selected_index: usize,
+    stage: PaletteStage,
     /// Raw option items from the resolver (unfiltered).
-    pub option_items: Vec<OptionItem>,
+    option_items: Vec<OptionItem>,
     /// Filtered option matches for the current query.
-    pub option_matches: Vec<OptionMatch>,
+    option_matches: Vec<OptionMatch>,
     /// The command ID that entered stage 2.
-    pub stage2_command_id: Option<CommandId>,
+    stage2_command_id: Option<CommandId>,
     /// The param label to display in the placeholder (e.g., "Folder", "Label").
-    pub stage2_label: String,
+    stage2_label: String,
     /// Generation counter to discard stale resolver results.
-    pub option_load_generation: u64,
+    option_load_generation: u64,
     /// Whether the resolver is currently loading options.
-    pub options_loading: bool,
+    options_loading: bool,
 }
 
-impl PaletteState {
-    pub fn new() -> Self {
+impl Palette {
+    pub fn new(registry: CommandRegistry, resolver: Arc<AppInputResolver>) -> Self {
         Self {
+            registry,
+            resolver,
             open: false,
             query: String::new(),
             results: Vec::new(),
@@ -61,7 +119,7 @@ impl PaletteState {
     }
 
     /// Reset all palette state to closed defaults.
-    pub fn close(&mut self) {
+    fn close(&mut self) {
         self.open = false;
         self.query.clear();
         self.results.clear();
@@ -74,8 +132,8 @@ impl PaletteState {
         self.options_loading = false;
     }
 
-    /// Go back from stage 2 to stage 1, preserving the command search state.
-    pub fn back_to_stage1(&mut self) {
+    /// Go back from stage 2 to stage 1.
+    fn back_to_stage1(&mut self) {
         self.stage = PaletteStage::CommandSearch;
         self.query.clear();
         self.option_items.clear();
@@ -86,43 +144,286 @@ impl PaletteState {
     }
 
     /// Whether the palette is in stage 2 (option picking).
-    pub fn is_option_pick(&self) -> bool {
+    fn is_option_pick(&self) -> bool {
         matches!(self.stage, PaletteStage::OptionPick)
     }
-}
 
-/// Build the palette overlay widget.
-///
-/// Returns an `Element` that should be layered on top of the main layout
-/// via `iced::widget::stack![]`. The caller provides the backdrop click
-/// message externally (in `App::view()`), so this function only builds
-/// the palette card itself.
-pub fn palette_card<'a, M: 'a + Clone>(
-    state: &'a PaletteState,
-    on_query_changed: impl Fn(String) -> M + 'a,
-    on_confirm: M,
-    on_click_result: impl Fn(usize) -> M + 'a,
-    on_click_option: impl Fn(usize) -> M + 'a,
-) -> Element<'a, M> {
-    match &state.stage {
-        PaletteStage::CommandSearch => {
-            build_command_search_card(state, on_query_changed, on_confirm, on_click_result)
+    fn confirm(
+        &mut self,
+        ctx: &CommandContext,
+    ) -> (Task<PaletteMessage>, Option<PaletteEvent>) {
+        let Some(result) = self.results.get(self.selected_index) else {
+            return (Task::none(), None);
+        };
+        if !result.available {
+            return (Task::none(), None);
         }
-        PaletteStage::OptionPick => {
-            build_option_pick_card(state, on_query_changed, on_confirm, on_click_option)
+        let id = result.id;
+        let input_mode = result.input_mode;
+
+        match input_mode {
+            InputMode::Direct => {
+                self.close();
+                (Task::none(), Some(PaletteEvent::ExecuteCommand(id)))
+            }
+            InputMode::Parameterized { schema } => {
+                let param_label = schema
+                    .param_at(0)
+                    .map(|p| match p {
+                        ratatoskr_command_palette::ParamDef::ListPicker { label } => label,
+                        ratatoskr_command_palette::ParamDef::DateTime { label } => label,
+                        ratatoskr_command_palette::ParamDef::Enum { label, .. } => label,
+                        ratatoskr_command_palette::ParamDef::Text { label, .. } => label,
+                    })
+                    .unwrap_or("option");
+
+                // DateTime commands use preset options instead of a full picker
+                if matches!(
+                    schema.param_at(0),
+                    Some(ratatoskr_command_palette::ParamDef::DateTime { .. })
+                ) {
+                    let task = self.enter_snooze_stage2(id, param_label);
+                    return (task, None);
+                }
+
+                self.enter_option_stage2(id, param_label, ctx)
+            }
+        }
+    }
+
+    fn enter_option_stage2(
+        &mut self,
+        id: CommandId,
+        param_label: &str,
+        ctx: &CommandContext,
+    ) -> (Task<PaletteMessage>, Option<PaletteEvent>) {
+        self.stage = PaletteStage::OptionPick;
+        self.query.clear();
+        self.selected_index = 0;
+        self.stage2_command_id = Some(id);
+        self.stage2_label = param_label.to_string();
+        self.option_items.clear();
+        self.option_matches.clear();
+        self.options_loading = true;
+        self.option_load_generation += 1;
+        let generation = self.option_load_generation;
+
+        let resolver = Arc::clone(&self.resolver);
+        let ctx = ctx.clone();
+        let focus_task = iced::widget::operation::focus::<PaletteMessage>(
+            "palette-input".to_string(),
+        );
+        let load_task = Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    resolver.get_options(id, 0, &[], &ctx)
+                })
+                .await
+                .unwrap_or_else(|e| Err(format!("spawn_blocking: {e}")))
+            },
+            move |result| PaletteMessage::OptionsLoaded(generation, id, result),
+        );
+        (Task::batch([focus_task, load_task]), None)
+    }
+
+    fn enter_snooze_stage2(
+        &mut self,
+        id: CommandId,
+        param_label: &str,
+    ) -> Task<PaletteMessage> {
+        self.stage = PaletteStage::OptionPick;
+        self.query.clear();
+        self.selected_index = 0;
+        self.stage2_command_id = Some(id);
+        self.stage2_label = param_label.to_string();
+        self.options_loading = false;
+
+        let items = snooze_preset_options();
+        self.option_matches = ratatoskr_command_palette::search_options(&items, "");
+        self.option_items = items;
+
+        iced::widget::operation::focus::<PaletteMessage>(
+            "palette-input".to_string(),
+        )
+    }
+
+    fn confirm_option(&mut self) -> (Task<PaletteMessage>, Option<PaletteEvent>) {
+        let Some(option_match) = self.option_matches.get(self.selected_index) else {
+            return (Task::none(), None);
+        };
+        if option_match.item.disabled {
+            return (Task::none(), None);
+        }
+
+        let Some(command_id) = self.stage2_command_id else {
+            return (Task::none(), None);
+        };
+
+        let Some(args) = build_command_args(command_id, &option_match.item) else {
+            return (Task::none(), None);
+        };
+
+        self.close();
+        (
+            Task::none(),
+            Some(PaletteEvent::ExecuteParameterized(command_id, args)),
+        )
+    }
+
+    fn handle_options_loaded(
+        &mut self,
+        generation: u64,
+        command_id: CommandId,
+        result: Result<Vec<OptionItem>, String>,
+    ) -> (Task<PaletteMessage>, Option<PaletteEvent>) {
+        // Discard stale results
+        if generation < self.option_load_generation {
+            return (Task::none(), None);
+        }
+        // Verify we're still in the right stage for this command
+        if self.stage2_command_id != Some(command_id) {
+            return (Task::none(), None);
+        }
+
+        self.options_loading = false;
+
+        match result {
+            Ok(items) => {
+                self.option_matches =
+                    ratatoskr_command_palette::search_options(&items, &self.query);
+                self.option_items = items;
+                self.selected_index = 0;
+                (Task::none(), None)
+            }
+            Err(msg) => {
+                self.option_items.clear();
+                self.option_matches.clear();
+                (Task::none(), Some(PaletteEvent::Error(msg)))
+            }
         }
     }
 }
 
-fn build_command_search_card<'a, M: 'a + Clone>(
-    state: &PaletteState,
-    on_query_changed: impl Fn(String) -> M + 'a,
-    on_confirm: M,
-    on_click_result: impl Fn(usize) -> M + 'a,
-) -> Element<'a, M> {
+impl Component for Palette {
+    type Message = PaletteMessage;
+    type Event = PaletteEvent;
+
+    fn update(
+        &mut self,
+        message: PaletteMessage,
+    ) -> (Task<PaletteMessage>, Option<PaletteEvent>) {
+        match message {
+            PaletteMessage::Open(ctx) => {
+                let results = self.registry.query(&ctx, "");
+                self.open = true;
+                self.query.clear();
+                self.results = results;
+                self.selected_index = 0;
+                self.stage = PaletteStage::CommandSearch;
+                let task = iced::widget::operation::focus::<PaletteMessage>(
+                    "palette-input".to_string(),
+                );
+                (task, None)
+            }
+            PaletteMessage::Close(ctx) => {
+                // In stage 2, Escape goes back to stage 1 instead of closing.
+                if self.is_option_pick() {
+                    self.back_to_stage1();
+                    self.results = self.registry.query(&ctx, "");
+                    let task = iced::widget::operation::focus::<PaletteMessage>(
+                        "palette-input".to_string(),
+                    );
+                    return (task, None);
+                }
+                self.close();
+                (Task::none(), Some(PaletteEvent::Dismissed))
+            }
+            PaletteMessage::QueryChanged(query, ctx) => {
+                if self.is_option_pick() {
+                    // Stage 2: filter options with fuzzy search
+                    self.option_matches = ratatoskr_command_palette::search_options(
+                        &self.option_items,
+                        &query,
+                    );
+                    self.query = query;
+                    self.selected_index = 0;
+                } else {
+                    // Stage 1: query the registry
+                    self.results = self.registry.query(&ctx, &query);
+                    self.query = query;
+                    self.selected_index = 0;
+                }
+                (Task::none(), None)
+            }
+            PaletteMessage::SelectNext => {
+                let len = if self.is_option_pick() {
+                    self.option_matches.len()
+                } else {
+                    self.results.len()
+                };
+                if len > 0 {
+                    self.selected_index = (self.selected_index + 1).min(len - 1);
+                }
+                let task = scroll_to_selected(self.selected_index, len).discard();
+                (task, None)
+            }
+            PaletteMessage::SelectPrev => {
+                self.selected_index = self.selected_index.saturating_sub(1);
+                let len = if self.is_option_pick() {
+                    self.option_matches.len()
+                } else {
+                    self.results.len()
+                };
+                let task = scroll_to_selected(self.selected_index, len).discard();
+                (task, None)
+            }
+            PaletteMessage::Confirm(ctx) => {
+                if self.is_option_pick() {
+                    self.confirm_option()
+                } else {
+                    self.confirm(&ctx)
+                }
+            }
+            PaletteMessage::ClickResult(idx, ctx) => {
+                if idx < self.results.len() {
+                    self.selected_index = idx;
+                    self.confirm(&ctx)
+                } else {
+                    (Task::none(), None)
+                }
+            }
+            PaletteMessage::ClickOption(idx) => {
+                if idx < self.option_matches.len() {
+                    self.selected_index = idx;
+                    self.confirm_option()
+                } else {
+                    (Task::none(), None)
+                }
+            }
+            PaletteMessage::OptionsLoaded(generation, command_id, result) => {
+                self.handle_options_loaded(generation, command_id, result)
+            }
+        }
+    }
+
+    fn view(&self) -> Element<'_, PaletteMessage> {
+        match &self.stage {
+            PaletteStage::CommandSearch => build_command_search_card(self),
+            PaletteStage::OptionPick => build_option_pick_card(self),
+        }
+    }
+}
+
+// ── View helpers ───────────────────────────────────────
+
+fn build_command_search_card(state: &Palette) -> Element<'_, PaletteMessage> {
+    // We need a placeholder context for closures. The real context is
+    // carried by the message variant, but for the closure type we need
+    // a default. We use a dummy that will be replaced by the App's
+    // context wrapper when the message is mapped.
     let input = text_input("Type a command...", &state.query)
-        .on_input(on_query_changed)
-        .on_submit(on_confirm.clone())
+        .on_input(|q| PaletteMessage::QueryChanged(q, CommandContext::default()))
+        .on_submit(PaletteMessage::Confirm(CommandContext::default()))
         .id("palette-input")
         .padding(PAD_INPUT)
         .size(TEXT_LG);
@@ -130,7 +431,6 @@ fn build_command_search_card<'a, M: 'a + Clone>(
     let results_column = build_results_column(
         &state.results,
         state.selected_index,
-        on_click_result,
     );
 
     let results_scrollable = scrollable(results_column)
@@ -148,12 +448,7 @@ fn build_command_search_card<'a, M: 'a + Clone>(
         .into()
 }
 
-fn build_option_pick_card<'a, M: 'a + Clone>(
-    state: &'a PaletteState,
-    on_query_changed: impl Fn(String) -> M + 'a,
-    on_confirm: M,
-    on_click_option: impl Fn(usize) -> M + 'a,
-) -> Element<'a, M> {
+fn build_option_pick_card(state: &Palette) -> Element<'_, PaletteMessage> {
     let placeholder = if state.options_loading {
         "Loading...".to_string()
     } else {
@@ -161,8 +456,8 @@ fn build_option_pick_card<'a, M: 'a + Clone>(
     };
 
     let input = text_input(&placeholder, &state.query)
-        .on_input(on_query_changed)
-        .on_submit(on_confirm.clone())
+        .on_input(|q| PaletteMessage::QueryChanged(q, CommandContext::default()))
+        .on_submit(PaletteMessage::Confirm(CommandContext::default()))
         .id("palette-input")
         .padding(PAD_INPUT)
         .size(TEXT_LG);
@@ -170,7 +465,6 @@ fn build_option_pick_card<'a, M: 'a + Clone>(
     let options_column = build_options_column(
         &state.option_matches,
         state.selected_index,
-        on_click_option,
     );
 
     let options_scrollable = scrollable(options_column)
@@ -188,11 +482,10 @@ fn build_option_pick_card<'a, M: 'a + Clone>(
         .into()
 }
 
-fn build_results_column<'a, M: 'a + Clone>(
+fn build_results_column(
     results: &[CommandMatch],
     selected_index: usize,
-    on_click_result: impl Fn(usize) -> M + 'a,
-) -> Element<'a, M> {
+) -> Element<'_, PaletteMessage> {
     let mut col = column![].spacing(SPACE_XXXS);
 
     for (i, result) in results.iter().enumerate() {
@@ -204,7 +497,7 @@ fn build_results_column<'a, M: 'a + Clone>(
             result.available,
             result.input_mode,
             is_selected,
-            on_click_result(i),
+            PaletteMessage::ClickResult(i, CommandContext::default()),
         );
         col = col.push(row_element);
     }
@@ -212,27 +505,26 @@ fn build_results_column<'a, M: 'a + Clone>(
     col.into()
 }
 
-fn build_options_column<'a, M: 'a + Clone>(
+fn build_options_column<'a>(
     options: &'a [OptionMatch],
     selected_index: usize,
-    on_click_option: impl Fn(usize) -> M + 'a,
-) -> Element<'a, M> {
+) -> Element<'a, PaletteMessage> {
     let mut col = column![].spacing(SPACE_XXXS);
 
     for (i, option) in options.iter().enumerate() {
         let is_selected = i == selected_index;
-        let row_element = option_result_row(option, is_selected, on_click_option(i));
+        let row_element = option_result_row(option, is_selected, PaletteMessage::ClickOption(i));
         col = col.push(row_element);
     }
 
     col.into()
 }
 
-fn option_result_row<'a, M: 'a + Clone>(
+fn option_result_row<'a>(
     option: &'a OptionMatch,
     is_selected: bool,
-    on_click: M,
-) -> Element<'a, M> {
+    on_click: PaletteMessage,
+) -> Element<'a, PaletteMessage> {
     let label_style: fn(&iced::Theme) -> iced::widget::text::Style = if option.item.disabled {
         TextClass::Tertiary.style()
     } else {
@@ -250,7 +542,7 @@ fn option_result_row<'a, M: 'a + Clone>(
 
     // Path breadcrumb (right-aligned, dimmed)
     let path_display = format_option_path(&option.item.path);
-    let path_element: Element<'_, M> = if path_display.is_empty() {
+    let path_element: Element<'_, PaletteMessage> = if path_display.is_empty() {
         container("").into()
     } else {
         container(
@@ -289,15 +581,15 @@ fn format_option_path(path: &Option<Vec<String>>) -> String {
     }
 }
 
-fn palette_result_row<'a, M: 'a + Clone>(
+fn palette_result_row(
     category_str: &'static str,
     label_str: &'static str,
     keybinding_str: Option<String>,
     available: bool,
     input_mode: InputMode,
     is_selected: bool,
-    on_click: M,
-) -> Element<'a, M> {
+    on_click: PaletteMessage,
+) -> Element<'_, PaletteMessage> {
     let text_style = if available {
         TextClass::Muted.style()
     } else {
@@ -334,7 +626,7 @@ fn palette_result_row<'a, M: 'a + Clone>(
     .align_y(iced::Alignment::Center);
 
     // Keybinding hint (right, fixed width, pill style)
-    let keybinding: Element<'_, M> = match keybinding_str {
+    let keybinding: Element<'_, PaletteMessage> = match keybinding_str {
         Some(kb) => container(
             container(
                 text(kb)
@@ -377,8 +669,8 @@ fn palette_result_row<'a, M: 'a + Clone>(
 /// TODO: The iced fork does not expose `scrollable::scroll_to()`.
 /// This is a placeholder that returns `Task::none()` until
 /// scroll-to-item support is available.
-pub fn scroll_to_selected(_selected_index: usize, _total_items: usize) -> iced::Task<()> {
-    iced::Task::none()
+fn scroll_to_selected(_selected_index: usize, _total_items: usize) -> Task<()> {
+    Task::none()
 }
 
 /// Build the pending chord indicator badge.
@@ -406,7 +698,7 @@ pub fn chord_indicator<'a, M: 'a>(
 /// Build snooze preset options as `OptionItem`s for the DateTime picker.
 ///
 /// These are hardcoded presets — a proper date/time picker is deferred.
-pub fn snooze_preset_options() -> Vec<OptionItem> {
+fn snooze_preset_options() -> Vec<OptionItem> {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     let now_secs = SystemTime::now()

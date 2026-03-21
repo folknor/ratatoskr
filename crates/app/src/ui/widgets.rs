@@ -853,8 +853,19 @@ pub fn thread_card<'a, M: Clone + 'a>(
         theme::TextClass::Accent.style()
     };
 
-    // Line 3 indicators: label dots + attachment icon
+    // Line 3 indicators: draft badge + label dots + attachment icon
     let mut indicators = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
+    if thread.is_local_draft {
+        indicators = indicators.push(
+            container(
+                text("Draft")
+                    .size(TEXT_XS)
+                    .style(theme::TextClass::Accent.style()),
+            )
+            .padding(PAD_BADGE)
+            .style(theme::ContainerClass::KeyBadge.style()),
+        );
+    }
     for &(color,) in label_colors {
         indicators = indicators.push(label_dot(color));
     }
