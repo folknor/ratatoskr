@@ -31,6 +31,8 @@ use crate::ui::layout::{
 };
 use crate::{App, Message, APP_DATA_DIR};
 
+use ratatoskr_core::send::{SendAttachment, SendRequest};
+
 // ── Pop-out message dispatch ────────────────────────────
 
 impl App {
@@ -86,6 +88,21 @@ impl App {
                 self.pop_out_windows.remove(&window_id);
                 self.composer_is_open = false;
                 iced::window::close(window_id)
+            }
+            // Compose send — build MIME, queue for outbox, close window
+            (
+                PopOutWindow::Compose(_),
+                PopOutMessage::Compose(ComposeMessage::Send),
+            ) => self.handle_compose_send(window_id),
+            // Compose from-account changed — swap signature for new account
+            (
+                PopOutWindow::Compose(_),
+                PopOutMessage::Compose(ComposeMessage::FromAccountChanged(_)),
+            ) => {
+                let PopOutMessage::Compose(msg) = pop_out_msg else {
+                    return Task::none();
+                };
+                self.handle_compose_from_account_changed(window_id, msg)
             }
             // Compose attach files — launch async file picker
             (
@@ -720,7 +737,7 @@ impl App {
         } else {
             Some(state.subject.clone())
         };
-        let body_text = state.body.text();
+        let body_text = state.body.to_html();
         let body_html = if body_text.trim().is_empty() {
             None
         } else {
@@ -768,6 +785,251 @@ impl App {
             move |result| {
                 if let Err(e) = result {
                     log::error!("Failed to auto-save compose draft: {e}");
+                }
+                Message::Noop
+            },
+        )
+    }
+
+    // ── Compose send ─────────────────────────────────────
+
+    /// Build a MIME message from the compose state, save it to the draft row
+    /// as base64url in the `attachments` column, mark the draft `'queued'`,
+    /// close the compose window, and show a status bar confirmation.
+    ///
+    /// The sync pipeline will pick up queued drafts and send them via the
+    /// provider — this is the standard outbox pattern.
+    fn handle_compose_send(
+        &mut self,
+        window_id: iced::window::Id,
+    ) -> Task<Message> {
+        let Some(PopOutWindow::Compose(state)) =
+            self.pop_out_windows.get_mut(&window_id)
+        else {
+            return Task::none();
+        };
+
+        // ── Validate recipients ─────────────────────────
+        let has_recipients = !state.to.tokens.is_empty()
+            || !state.cc.tokens.is_empty()
+            || !state.bcc.tokens.is_empty();
+        if !has_recipients {
+            state.status =
+                Some("Add at least one recipient".to_string());
+            return Task::none();
+        }
+
+        // ── Build SendRequest from compose state ────────
+        let account_info = match state.from_account.as_ref() {
+            Some(a) => a.clone(),
+            None => {
+                state.status = Some("No sending account selected".to_string());
+                return Task::none();
+            }
+        };
+
+        let from = if let Some(ref name) = account_info.display_name {
+            format!("{name} <{}>", account_info.email)
+        } else {
+            account_info.email.clone()
+        };
+
+        let to: Vec<String> = state
+            .to
+            .tokens
+            .iter()
+            .map(|t| t.email.clone())
+            .collect();
+        let cc: Vec<String> = state
+            .cc
+            .tokens
+            .iter()
+            .map(|t| t.email.clone())
+            .collect();
+        let bcc: Vec<String> = state
+            .bcc
+            .tokens
+            .iter()
+            .map(|t| t.email.clone())
+            .collect();
+
+        let subject = if state.subject.is_empty() {
+            None
+        } else {
+            Some(state.subject.clone())
+        };
+
+        let body_html = state.body.to_html();
+        let body_text = state.body.document.flattened_text();
+
+        let attachments: Vec<SendAttachment> = state
+            .attachments
+            .iter()
+            .map(|a| SendAttachment {
+                filename: a.name.clone(),
+                mime_type: a.mime_type.clone(),
+                data: a.data.as_ref().clone(),
+                content_id: None,
+            })
+            .collect();
+
+        let draft_id = uuid::Uuid::new_v4().to_string();
+
+        let send_req = SendRequest {
+            draft_id: draft_id.clone(),
+            account_id: account_info.id.clone(),
+            from,
+            to,
+            cc,
+            bcc,
+            subject: subject.clone(),
+            body_html: body_html.clone(),
+            body_text: body_text.clone(),
+            attachments,
+            in_reply_to: state.reply_message_id.clone(),
+            references: state.reply_message_id.clone(),
+            thread_id: state.reply_thread_id.clone(),
+        };
+
+        // ── Build MIME (synchronous) ────────────────────
+        let mime_base64url =
+            match ratatoskr_core::send::build_mime_message_base64url(&send_req) {
+                Ok(encoded) => encoded,
+                Err(e) => {
+                    state.status = Some(format!("Failed to build message: {e}"));
+                    return Task::none();
+                }
+            };
+
+        // ── Persist finalized draft + queued MIME ───────
+        let account_id = account_info.id.clone();
+        let to_csv = tokens_to_csv(&state.to.tokens);
+        let cc_csv = tokens_to_csv(&state.cc.tokens);
+        let bcc_csv = tokens_to_csv(&state.bcc.tokens);
+        let from_email = Some(account_info.email.clone());
+        let reply_to_message_id = state.reply_message_id.clone();
+        let thread_id = state.reply_thread_id.clone();
+
+        let db = Arc::clone(&self.db);
+
+        // Close the compose window immediately (optimistic).
+        self.pop_out_windows.remove(&window_id);
+        self.composer_is_open = false;
+        self.status_bar.show_confirmation(
+            "Message queued for sending".to_string(),
+        );
+
+        Task::batch([
+            iced::window::close(window_id),
+            Task::perform(
+                async move {
+                    db.with_write_conn(move |conn| {
+                        conn.execute(
+                            "INSERT INTO local_drafts \
+                             (id, account_id, to_addresses, cc_addresses, bcc_addresses, \
+                              subject, body_html, reply_to_message_id, thread_id, \
+                              from_email, attachments, updated_at, sync_status) \
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, \
+                                     unixepoch(), 'queued')",
+                            rusqlite::params![
+                                draft_id,
+                                account_id,
+                                to_csv,
+                                cc_csv,
+                                bcc_csv,
+                                subject,
+                                body_html,
+                                reply_to_message_id,
+                                thread_id,
+                                from_email,
+                                mime_base64url,
+                            ],
+                        )
+                        .map_err(|e| e.to_string())?;
+                        Ok(())
+                    })
+                    .await
+                },
+                move |result| {
+                    if let Err(e) = result {
+                        log::error!(
+                            "Failed to save queued draft for sending: {e}"
+                        );
+                    }
+                    Message::Noop
+                },
+            ),
+        ])
+    }
+
+    // ── Compose signature account-switching ──────────────
+
+    /// When the user changes the "From" account, update the compose state
+    /// and dispatch a signature resolution task for the new account.
+    fn handle_compose_from_account_changed(
+        &mut self,
+        window_id: iced::window::Id,
+        msg: ComposeMessage,
+    ) -> Task<Message> {
+        let Some(PopOutWindow::Compose(state)) =
+            self.pop_out_windows.get_mut(&window_id)
+        else {
+            return Task::none();
+        };
+
+        // Let the standard update handler process the account change first
+        // (sets state.from_account to the new account).
+        crate::pop_out::compose::update_compose(state, msg);
+
+        // ── Signature swap dispatch ─────────────────────
+        // TODO(signature-switching): ComposeState needs `active_signature_id: Option<String>`
+        // and `signature_separator_index: Option<usize>` fields to track the current
+        // signature position in the document. These must be added to compose.rs
+        // (owned by another agent) before the full swap can work.
+        //
+        // Once those fields exist, the flow is:
+        // 1. Read `state.active_signature_id` (the old signature).
+        // 2. Call `db_resolve_signature_for_compose(db, new_account_id, from_email, is_reply)`
+        //    to get the new account's default signature.
+        // 3. On result, call `replace_signature()` from `ratatoskr_rich_text_editor::compose`
+        //    to swap the old signature for the new one in the document.
+        // 4. Update `state.active_signature_id` and `state.signature_separator_index`.
+
+        let Some(ref account) = state.from_account else {
+            return Task::none();
+        };
+
+        let account_id = account.id.clone();
+        let from_email = Some(account.email.clone());
+        let is_reply = matches!(
+            state.mode,
+            ComposeMode::Reply { .. }
+                | ComposeMode::ReplyAll { .. }
+        );
+
+        let db = Arc::clone(&self.db);
+
+        // Dispatch the signature resolution task. The result is currently
+        // logged but not applied, because ComposeState lacks the fields
+        // needed to track and replace signatures (see TODO above).
+        Task::perform(
+            async move {
+                // The app Db wrapper uses rusqlite directly; we need to call
+                // the core query. Build a DbState from the app's connection.
+                // TODO(signature-switching): Wire this to ratatoskr_core::db::queries_extra::compose::db_resolve_signature_for_compose
+                // once the result can be routed back to update ComposeState.
+                // For now, log the intent.
+                let _ = (db, account_id, from_email, is_reply);
+                log::debug!(
+                    "Signature resolution dispatched (not yet applied — \
+                     ComposeState needs active_signature_id / \
+                     signature_separator_index fields)"
+                );
+                Ok::<(), String>(())
+            },
+            move |result| {
+                if let Err(e) = result {
+                    log::error!("Signature resolution failed: {e}");
                 }
                 Message::Noop
             },

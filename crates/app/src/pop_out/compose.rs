@@ -2,6 +2,9 @@ use std::sync::Arc;
 
 use iced::widget::{button, column, container, mouse_area, pick_list, row, scrollable, text, text_input, Space};
 use iced::{Alignment, Element, Length};
+use ratatoskr_rich_text_editor::{
+    rich_text_editor, Action as RteAction, EditAction, EditorState, InlineStyle,
+};
 
 use crate::db::{self, ContactMatch};
 use crate::font;
@@ -137,7 +140,7 @@ pub fn mime_from_extension(name: &str) -> String {
 #[derive(Debug, Clone)]
 pub enum ComposeMessage {
     SubjectChanged(String),
-    BodyChanged(iced::widget::text_editor::Action),
+    BodyChanged(RteAction),
     FromAccountChanged(AccountInfo),
     ShowCc,
     ShowBcc,
@@ -156,12 +159,12 @@ pub enum ComposeMessage {
     AutocompleteNavigate(i32),
     /// Dismiss the autocomplete dropdown.
     AutocompleteDismiss,
-    /// Formatting toolbar actions (stubs — plain text editor).
+    /// Formatting toolbar actions — emit ToggleInlineStyle to the rich text editor.
     FormatBold,
     FormatItalic,
     FormatUnderline,
     FormatStrikethrough,
-    /// List / blockquote stubs — plain text editor has no block types.
+    /// List / blockquote toggle via SetBlockType.
     FormatList,
     FormatBlockquote,
     /// Open the link insertion dialog.
@@ -241,8 +244,8 @@ pub struct ComposeState {
     // Subject
     pub subject: String,
 
-    // Body (plain text for V1 — rich text editor in a future iteration)
-    pub body: iced::widget::text_editor::Content,
+    // Body (rich text editor)
+    pub body: EditorState,
 
     // Compose mode
     pub mode: ComposeMode,
@@ -292,7 +295,7 @@ impl ComposeState {
             from_account,
             from_accounts,
             subject: String::new(),
-            body: iced::widget::text_editor::Content::new(),
+            body: EditorState::new(),
             mode: ComposeMode::New,
             reply_thread_id: None,
             reply_message_id: None,
@@ -365,17 +368,23 @@ impl ComposeState {
             }
         }
 
-        // Set quoted body with attribution line
+        // Set quoted body with attribution line as HTML blockquote
         if let Some(body) = quoted_body {
             let attribution = build_attribution(to_name, to_email);
-            let quoted = body
+            // Build HTML: empty paragraph for user to type, attribution, blockquote
+            let escaped_body = body
+                .replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;");
+            let body_paras = escaped_body
                 .lines()
-                .map(|line| format!("> {line}"))
+                .map(|line| format!("<p>{line}</p>"))
                 .collect::<Vec<_>>()
-                .join("\n");
-            let full_body = format!("\n\n{attribution}\n{quoted}");
-            state.body =
-                iced::widget::text_editor::Content::with_text(&full_body);
+                .join("");
+            let html = format!(
+                "<p><br></p><p><em>{attribution}</em></p><blockquote>{body_paras}</blockquote>"
+            );
+            state.body = EditorState::from_html(&html);
         }
 
         state.reply_thread_id = thread_id.map(String::from);
@@ -395,10 +404,10 @@ impl ComposeState {
     /// Returns true if the compose body has user content beyond the
     /// initial quoted text / signature.
     fn has_user_content(&self) -> bool {
-        // Simple heuristic: non-empty body text
-        let body_text = self.body.text();
+        // Simple heuristic: non-empty flattened text
+        let body_text = self.body.document.flattened_text();
         let trimmed = body_text.trim();
-        !trimmed.is_empty() && !trimmed.starts_with('>')
+        !trimmed.is_empty()
     }
 }
 
@@ -543,23 +552,49 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             state.autocomplete.results.clear();
             state.autocomplete.highlighted = None;
         }
-        // Formatting toolbar — plain text editor, so these are stubs
-        ComposeMessage::FormatBold
-        | ComposeMessage::FormatItalic
-        | ComposeMessage::FormatUnderline
-        | ComposeMessage::FormatStrikethrough
-        | ComposeMessage::FormatList
-        | ComposeMessage::FormatBlockquote => {
-            // Plain text editor — no rich formatting support
+        // Formatting toolbar — emit ToggleInlineStyle to the rich text editor
+        ComposeMessage::FormatBold => {
+            state.body.perform(RteAction::Edit(
+                EditAction::ToggleInlineStyle(InlineStyle::BOLD),
+            ));
+            state.draft_dirty = true;
+        }
+        ComposeMessage::FormatItalic => {
+            state.body.perform(RteAction::Edit(
+                EditAction::ToggleInlineStyle(InlineStyle::ITALIC),
+            ));
+            state.draft_dirty = true;
+        }
+        ComposeMessage::FormatUnderline => {
+            state.body.perform(RteAction::Edit(
+                EditAction::ToggleInlineStyle(InlineStyle::UNDERLINE),
+            ));
+            state.draft_dirty = true;
+        }
+        ComposeMessage::FormatStrikethrough => {
+            state.body.perform(RteAction::Edit(
+                EditAction::ToggleInlineStyle(InlineStyle::STRIKETHROUGH),
+            ));
+            state.draft_dirty = true;
+        }
+        ComposeMessage::FormatList => {
+            state.body.perform(RteAction::Edit(
+                EditAction::SetBlockType(
+                    ratatoskr_rich_text_editor::BlockKind::ListItem {
+                        ordered: false,
+                    },
+                ),
+            ));
+            state.draft_dirty = true;
+        }
+        ComposeMessage::FormatBlockquote => {
+            // BlockQuote toggle not yet supported via SetBlockType
         }
         // Link dialog
         ComposeMessage::FormatLink | ComposeMessage::ToggleLinkDialog => {
             if !state.link_dialog_open {
                 // Pre-fill display text with current selection
-                state.link_text = state
-                    .body
-                    .selection()
-                    .unwrap_or_default();
+                state.link_text = state.body.selection_text();
                 state.link_url.clear();
             }
             state.link_dialog_open = !state.link_dialog_open;
@@ -570,20 +605,28 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             let url = state.link_url.trim().to_string();
             let display = state.link_text.trim().to_string();
             if !url.is_empty() {
-                // Insert markdown-style link into plain text editor
-                let link_text = if display.is_empty() {
+                let link_label = if display.is_empty() {
                     url.clone()
                 } else {
-                    format!("[{display}]({url})")
+                    display
                 };
-                // Replace selection (or insert at cursor) with the link
-                state.body.perform(
-                    iced::widget::text_editor::Action::Edit(
-                        iced::widget::text_editor::Edit::Paste(
-                            Arc::new(link_text),
-                        ),
-                    ),
-                );
+                // Build a small HTML snippet with the link and paste it
+                // by deleting the selection, inserting the text, then
+                // we rely on the editor's paste mechanism.
+                // Delete selection first if any.
+                if !state.body.selection.is_collapsed() {
+                    state.body.perform(RteAction::Edit(
+                        EditAction::DeleteSelection,
+                    ));
+                }
+                // Insert the display text
+                state.body.perform(RteAction::Edit(
+                    EditAction::InsertText(link_label),
+                ));
+                // Note: The rich text editor does not currently expose
+                // a link-insertion API via EditAction. The text is
+                // inserted without a hyperlink. A future editor update
+                // will add an InsertLink action.
             }
             state.link_dialog_open = false;
             state.link_url.clear();
@@ -951,7 +994,7 @@ fn compose_body<'a>(
     window_id: iced::window::Id,
     state: &'a ComposeState,
 ) -> Element<'a, Message> {
-    let editor = iced::widget::text_editor(&state.body)
+    let editor = rich_text_editor(&state.body)
         .on_action(move |action| {
             Message::PopOut(
                 window_id,
@@ -959,9 +1002,7 @@ fn compose_body<'a>(
             )
         })
         .height(Length::Fill)
-        .padding(SPACE_XS)
-        .font(font::text())
-        .size(TEXT_LG);
+        .font(font::text());
 
     container(editor)
         .width(Length::Fill)
