@@ -214,6 +214,12 @@ pub enum Message {
     PinnedSearchDismissed(i64, Result<(), String>),
     PinnedSearchSaved(Result<i64, String>),
     PinnedSearchesExpired(Result<u64, String>),
+    RefreshPinnedSearch(i64),
+    ExpiryTick,
+
+    // Search extras
+    SearchHere(String),
+    SmartFolderSaved(Result<i64, String>),
 
     // Calendar
     Calendar(CalendarMessage),
@@ -478,6 +484,14 @@ impl App {
             );
         }
 
+        // Periodic pinned search expiry — check every hour
+        if !self.pinned_searches.is_empty() {
+            subs.push(
+                iced::time::every(std::time::Duration::from_secs(3600))
+                    .map(|_| Message::ExpiryTick),
+            );
+        }
+
         if self.settings.overlay_anim.is_animating(iced::time::Instant::now()) {
             subs.push(
                 iced::window::frames()
@@ -690,6 +704,10 @@ impl App {
             Message::PinnedSearchesExpired(result) => {
                 self.handle_pinned_searches_expired(result)
             }
+            Message::RefreshPinnedSearch(id) => self.handle_refresh_pinned_search(id),
+            Message::ExpiryTick => self.handle_expiry_tick(),
+            Message::SearchHere(prefix) => self.handle_search_here(prefix),
+            Message::SmartFolderSaved(result) => self.handle_smart_folder_saved(result),
 
             // Calendar — delegated to handlers/calendar.rs
             Message::Calendar(cal_msg) => self.handle_calendar(cal_msg),
@@ -947,6 +965,12 @@ impl App {
             }
             SidebarEvent::ModeToggled => {
                 self.update(Message::ToggleAppMode)
+            }
+            SidebarEvent::SearchHere { query_prefix } => {
+                self.update(Message::SearchHere(query_prefix))
+            }
+            SidebarEvent::PinnedSearchRefreshed(id) => {
+                self.update(Message::RefreshPinnedSearch(id))
             }
         }
     }
