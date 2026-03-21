@@ -24,6 +24,7 @@ pub enum CommandId {
     NavGoTasks,
     NavGoAttachments,
     NavEscape,
+    NavigateToLabel,
 
     // Email
     EmailArchive,
@@ -102,6 +103,7 @@ const TABLE: &[(CommandId, &str)] = &[
     (CommandId::NavGoTasks, "nav.goTasks"),
     (CommandId::NavGoAttachments, "nav.goAttachments"),
     (CommandId::NavEscape, "nav.escape"),
+    (CommandId::NavigateToLabel, "nav.goLabel"),
     (CommandId::EmailArchive, "email.archive"),
     (CommandId::EmailTrash, "email.trash"),
     (CommandId::EmailPermanentDelete, "email.permanentDelete"),
@@ -191,6 +193,7 @@ const ALL_IDS: &[CommandId] = &[
     CommandId::NavGoTasks,
     CommandId::NavGoAttachments,
     CommandId::NavEscape,
+    CommandId::NavigateToLabel,
     CommandId::EmailArchive,
     CommandId::EmailTrash,
     CommandId::EmailPermanentDelete,

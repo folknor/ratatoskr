@@ -8,8 +8,8 @@ use super::input::OptionItem;
 /// provides a concrete implementation. The registry is immutable static data;
 /// the resolver needs DB access and live account state.
 ///
-/// - Tauri app: `TauriInputResolver` queries `DbState` for folders, labels, etc.
-/// - Future iced app: queries its own model.
+/// The iced app provides `AppInputResolver` which queries its `Db` for
+/// folders, labels, and accounts.
 pub trait CommandInputResolver: Send + Sync {
     /// Return available options for a `ListPicker` parameter step.
     ///

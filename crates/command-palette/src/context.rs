@@ -37,6 +37,8 @@ pub enum ViewType {
     Calendar,
     Settings,
     Attachments,
+    Search,
+    PinnedSearch,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

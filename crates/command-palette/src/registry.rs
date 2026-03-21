@@ -148,6 +148,7 @@ impl CommandRegistry {
         results.sort_by(|a, b| {
             b.available
                 .cmp(&a.available)
+                .then_with(|| b.recency_score.cmp(&a.recency_score))
                 .then_with(|| {
                     let a_rel = category_relevance(a.category, ctx);
                     let b_rel = category_relevance(b.category, ctx);
@@ -256,7 +257,9 @@ fn email_view_relevance(ctx: &CommandContext) -> u32 {
         | ViewType::Label
         | ViewType::SmartFolder
         | ViewType::Category
-        | ViewType::Attachments => 4,
+        | ViewType::Attachments
+        | ViewType::Search
+        | ViewType::PinnedSearch => 4,
         _ => 1,
     }
 }
@@ -408,6 +411,16 @@ fn register_navigation(out: &mut Vec<CommandDescriptor>) {
     out.push(desc(CommandId::NavGoSnoozed, "Go to Snoozed", "Navigation", None, always));
     out.push(desc(CommandId::NavGoTrash, "Go to Trash", "Navigation", None, always));
     out.push(desc(CommandId::NavGoAllMail, "Go to All Mail", "Navigation", None, always));
+    out.push(parameterized(
+        CommandId::NavigateToLabel,
+        "Go to Label",
+        "Navigation",
+        Some(KeyBinding::seq('g', 'l')),
+        always,
+        InputSchema::Single {
+            param: super::input::ParamDef::ListPicker { label: "Label" },
+        },
+    ));
     register_navigation_categories(out);
 }
 
