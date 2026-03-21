@@ -53,11 +53,20 @@ pub struct ThreadMessage {
     pub from_name: Option<String>,
     pub from_address: Option<String>,
     pub to_addresses: Option<String>,
+    pub cc_addresses: Option<String>,
     pub date: Option<i64>,
     pub subject: Option<String>,
+    /// Quote/signature-stripped summary for collapsed view.
+    /// Falls back to snippet when loaded via legacy path.
     pub snippet: Option<String>,
+    /// Full HTML body from the body store (zstd-decompressed).
+    pub body_html: Option<String>,
+    /// Full plain text body from the body store (zstd-decompressed).
+    pub body_text: Option<String>,
     pub is_read: bool,
     pub is_starred: bool,
+    /// Whether this message was sent by the account owner.
+    pub is_own_message: bool,
 }
 
 #[derive(Debug, Clone)]

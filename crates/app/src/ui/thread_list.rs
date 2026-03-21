@@ -1,4 +1,4 @@
-use iced::widget::{column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
 use iced::{Color, Element, Length, Task};
 
 use crate::component::Component;
@@ -16,6 +16,20 @@ pub enum ThreadListMessage {
     SearchInput(String),
     /// The user pressed Enter in the search bar.
     SearchSubmit,
+    /// Move selection up by one.
+    SelectPrevious,
+    /// Move selection down by one.
+    SelectNext,
+    /// Jump to first thread.
+    SelectFirst,
+    /// Jump to last thread.
+    SelectLast,
+    /// Open/activate the selected thread (Enter).
+    ActivateSelected,
+    /// Deselect current thread (Escape).
+    Deselect,
+    /// Widen search scope to "All" accounts.
+    WidenSearchScope,
 }
 
 /// Events the thread list emits upward to the App.
@@ -26,6 +40,10 @@ pub enum ThreadListEvent {
     SearchQueryChanged(String),
     /// The user pressed Enter — execute search immediately.
     SearchExecute,
+    /// Thread deselected.
+    ThreadDeselected,
+    /// User clicked "All" to widen search scope.
+    WidenSearchScope,
 }
 
 // ── Thread list mode ───────────────────────────────────
@@ -72,6 +90,34 @@ impl ThreadList {
         self.folder_name = folder_name;
         self.scope_name = scope_name;
     }
+
+    /// Move selection to the next thread (down), wrapping if needed.
+    fn select_next(&mut self) -> Option<ThreadListEvent> {
+        if self.threads.is_empty() {
+            return None;
+        }
+        let next = match self.selected_thread {
+            Some(i) if i + 1 < self.threads.len() => i + 1,
+            Some(_) => return None, // already at end
+            None => 0,
+        };
+        self.selected_thread = Some(next);
+        Some(ThreadListEvent::ThreadSelected(next))
+    }
+
+    /// Move selection to the previous thread (up).
+    fn select_previous(&mut self) -> Option<ThreadListEvent> {
+        if self.threads.is_empty() {
+            return None;
+        }
+        let prev = match self.selected_thread {
+            Some(0) => return None, // already at start
+            Some(i) => i - 1,
+            None => 0,
+        };
+        self.selected_thread = Some(prev);
+        Some(ThreadListEvent::ThreadSelected(prev))
+    }
 }
 
 // ── Component impl ─────────────────────────────────────
@@ -94,6 +140,43 @@ impl Component for ThreadList {
             }
             ThreadListMessage::SearchSubmit => {
                 (Task::none(), Some(ThreadListEvent::SearchExecute))
+            }
+            ThreadListMessage::SelectNext => {
+                let event = self.select_next();
+                (Task::none(), event)
+            }
+            ThreadListMessage::SelectPrevious => {
+                let event = self.select_previous();
+                (Task::none(), event)
+            }
+            ThreadListMessage::SelectFirst => {
+                if self.threads.is_empty() {
+                    return (Task::none(), None);
+                }
+                self.selected_thread = Some(0);
+                (Task::none(), Some(ThreadListEvent::ThreadSelected(0)))
+            }
+            ThreadListMessage::SelectLast => {
+                if self.threads.is_empty() {
+                    return (Task::none(), None);
+                }
+                let last = self.threads.len() - 1;
+                self.selected_thread = Some(last);
+                (Task::none(), Some(ThreadListEvent::ThreadSelected(last)))
+            }
+            ThreadListMessage::ActivateSelected => {
+                if let Some(idx) = self.selected_thread {
+                    (Task::none(), Some(ThreadListEvent::ThreadSelected(idx)))
+                } else {
+                    (Task::none(), None)
+                }
+            }
+            ThreadListMessage::Deselect => {
+                self.selected_thread = None;
+                (Task::none(), Some(ThreadListEvent::ThreadDeselected))
+            }
+            ThreadListMessage::WidenSearchScope => {
+                (Task::none(), Some(ThreadListEvent::WidenSearchScope))
             }
         }
     }
@@ -157,13 +240,28 @@ fn thread_list_header<'a>(
         ]
         .align_y(iced::Alignment::Center)
         .into(),
-        ThreadListMode::Search => row![
-            text(format!("{thread_count} results"))
+        ThreadListMode::Search => {
+            let results_text = text(format!("{thread_count} results"))
                 .size(TEXT_SM)
-                .style(theme::TextClass::Tertiary.style()),
-        ]
-        .align_y(iced::Alignment::Center)
-        .into(),
+                .style(theme::TextClass::Tertiary.style());
+
+            let all_link = button(
+                text("All")
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::Accent.style()),
+            )
+            .on_press(ThreadListMessage::WidenSearchScope)
+            .padding(0)
+            .style(theme::ButtonClass::Ghost.style());
+
+            row![
+                results_text,
+                Space::new().width(Length::Fill),
+                all_link,
+            ]
+            .align_y(iced::Alignment::Center)
+            .into()
+        }
     };
 
     container(

@@ -102,6 +102,18 @@ impl Db {
         })
     }
 
+    /// Access the underlying read-only connection Arc for synchronous use
+    /// across thread boundaries (e.g., passing to core functions).
+    pub fn conn_arc(&self) -> Arc<Mutex<Connection>> {
+        Arc::clone(&self.conn)
+    }
+
+    /// Access the underlying writable connection Arc for synchronous use
+    /// across thread boundaries.
+    pub fn write_conn_arc(&self) -> Arc<Mutex<Connection>> {
+        Arc::clone(&self.write_conn)
+    }
+
     /// Execute a closure on the writable connection.
     pub async fn with_write_conn<F, T>(&self, f: F) -> Result<T, String>
     where

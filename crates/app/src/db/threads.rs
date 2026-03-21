@@ -1,190 +1,165 @@
-use rusqlite::params;
+//! Bridge between core's `get_thread_detail()` and the app's display types.
+//!
+//! Replaces the raw SQL shim that loaded messages and attachments separately.
+//! Core provides `ThreadDetail` with body text from BodyStore, ownership
+//! detection, collapsed summaries, resolved label colors, and persisted
+//! attachment collapse state.
+
+use std::sync::Arc;
+
+use ratatoskr_core::body_store::BodyStoreState;
+use ratatoskr_core::db::queries_extra::thread_detail::{
+    self, ThreadDetail, get_thread_detail,
+};
+use ratatoskr_core::db::queries_extra::thread_ui_state::set_attachments_collapsed;
 
 use super::connection::Db;
-use super::types::{*, row_to_thread};
+use super::types::{ThreadAttachment, ThreadMessage};
 
-impl Db {
-    pub async fn get_threads(
-        &self,
-        account_id: String,
-        label_id: Option<String>,
-        limit: i64,
-    ) -> Result<Vec<Thread>, String> {
-        self.with_conn(move |conn| {
-            let (sql, do_label) = if label_id.is_some() {
-                (
-                    "SELECT t.*, m.from_name, m.from_address FROM threads t
-                     INNER JOIN thread_labels tl
-                       ON tl.account_id = t.account_id AND tl.thread_id = t.id
-                     LEFT JOIN messages m
-                       ON m.account_id = t.account_id AND m.thread_id = t.id
-                       AND m.date = (SELECT MAX(m2.date) FROM messages m2
-                                     WHERE m2.account_id = t.account_id
-                                       AND m2.thread_id = t.id)
-                     WHERE t.account_id = ?1 AND tl.label_id = ?2
-                     GROUP BY t.account_id, t.id
-                     ORDER BY t.is_pinned DESC, t.last_message_at DESC
-                     LIMIT ?3",
-                    true,
-                )
-            } else {
-                (
-                    "SELECT t.*, m.from_name, m.from_address FROM threads t
-                     LEFT JOIN messages m
-                       ON m.account_id = t.account_id AND m.thread_id = t.id
-                       AND m.date = (SELECT MAX(m2.date) FROM messages m2
-                                     WHERE m2.account_id = t.account_id
-                                       AND m2.thread_id = t.id)
-                     WHERE t.account_id = ?1
-                     ORDER BY t.is_pinned DESC, t.last_message_at DESC
-                     LIMIT ?2",
-                    false,
-                )
-            };
+/// Label color info resolved from core's ThreadLabel.
+#[derive(Debug, Clone)]
+pub struct ResolvedLabel {
+    pub label_id: String,
+    pub name: String,
+    pub color_bg: String,
+    pub color_fg: String,
+}
 
-            let mut stmt =
-                conn.prepare(sql).map_err(|e| e.to_string())?;
+/// Full thread detail data for the reading pane.
+#[derive(Debug, Clone)]
+pub struct AppThreadDetail {
+    pub thread_id: String,
+    pub account_id: String,
+    pub subject: Option<String>,
+    pub is_starred: bool,
+    pub messages: Vec<ThreadMessage>,
+    pub labels: Vec<ResolvedLabel>,
+    pub attachments: Vec<ThreadAttachment>,
+    pub attachments_collapsed: bool,
+}
 
-            let rows = if do_label {
-                stmt.query_map(
-                    params![account_id, label_id.unwrap_or_default(), limit],
-                    row_to_thread,
-                )
-            } else {
-                stmt.query_map(
-                    params![account_id, limit],
-                    row_to_thread,
-                )
-            };
+/// Convert core's ThreadDetail into app display types.
+fn convert_thread_detail(detail: ThreadDetail) -> AppThreadDetail {
+    let messages = detail
+        .messages
+        .into_iter()
+        .map(convert_message)
+        .collect();
 
-            rows.map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())
+    let labels = detail
+        .labels
+        .into_iter()
+        .map(|l| ResolvedLabel {
+            label_id: l.label_id,
+            name: l.name,
+            color_bg: l.color_bg,
+            color_fg: l.color_fg,
         })
-        .await
+        .collect();
+
+    let attachments = detail
+        .attachments
+        .into_iter()
+        .map(convert_attachment)
+        .collect();
+
+    AppThreadDetail {
+        thread_id: detail.thread_id,
+        account_id: detail.account_id,
+        subject: detail.subject,
+        is_starred: detail.is_starred,
+        messages,
+        labels,
+        attachments,
+        attachments_collapsed: detail.attachments_collapsed,
     }
+}
 
-    pub async fn get_thread_messages(
-        &self,
-        account_id: String,
-        thread_id: String,
-    ) -> Result<Vec<ThreadMessage>, String> {
-        self.with_conn(move |conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, thread_id, account_id, from_name, from_address,
-                        to_addresses, date, subject, snippet, is_read, is_starred
-                 FROM messages
-                 WHERE account_id = ?1 AND thread_id = ?2
-                 ORDER BY date DESC"
-            ).map_err(|e| e.to_string())?;
-
-            stmt.query_map(params![account_id, thread_id], |row| {
-                Ok(ThreadMessage {
-                    id: row.get("id")?,
-                    thread_id: row.get("thread_id")?,
-                    account_id: row.get("account_id")?,
-                    from_name: row.get("from_name")?,
-                    from_address: row.get("from_address")?,
-                    to_addresses: row.get("to_addresses")?,
-                    date: row.get("date")?,
-                    subject: row.get("subject")?,
-                    snippet: row.get("snippet")?,
-                    is_read: row.get::<_, i64>("is_read")? != 0,
-                    is_starred: row.get::<_, i64>("is_starred")? != 0,
-                })
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())
-        })
-        .await
+fn convert_message(msg: thread_detail::ThreadDetailMessage) -> ThreadMessage {
+    ThreadMessage {
+        id: msg.id,
+        thread_id: msg.thread_id,
+        account_id: msg.account_id,
+        from_name: msg.from_name,
+        from_address: msg.from_address,
+        to_addresses: msg.to_addresses,
+        cc_addresses: msg.cc_addresses,
+        date: Some(msg.date),
+        subject: msg.subject,
+        snippet: msg.collapsed_summary,
+        body_html: msg.body_html,
+        body_text: msg.body_text,
+        is_read: msg.is_read,
+        is_starred: msg.is_starred,
+        is_own_message: msg.is_own_message,
     }
+}
 
-    pub async fn get_thread_attachments(
-        &self,
-        account_id: String,
-        thread_id: String,
-    ) -> Result<Vec<ThreadAttachment>, String> {
-        self.with_conn(move |conn| {
-            let mut stmt = conn.prepare(
-                "SELECT a.id, a.filename, a.mime_type, a.size,
-                        m.from_name, m.date
-                 FROM attachments a
-                 JOIN messages m ON a.message_id = m.id AND a.account_id = m.account_id
-                 WHERE a.account_id = ?1 AND m.thread_id = ?2
-                   AND a.is_inline = 0
-                   AND a.filename IS NOT NULL AND a.filename != ''
-                 ORDER BY m.date DESC"
-            ).map_err(|e| e.to_string())?;
-
-            stmt.query_map(params![account_id, thread_id], |row| {
-                Ok(ThreadAttachment {
-                    id: row.get("id")?,
-                    filename: row.get("filename")?,
-                    mime_type: row.get("mime_type")?,
-                    size: row.get("size")?,
-                    from_name: row.get("from_name")?,
-                    date: row.get("date")?,
-                })
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())
-        })
-        .await
+fn convert_attachment(att: thread_detail::ThreadAttachment) -> ThreadAttachment {
+    ThreadAttachment {
+        id: att.id,
+        filename: att.filename,
+        mime_type: att.mime_type,
+        size: att.size,
+        from_name: att.from_name,
+        date: Some(att.date),
     }
+}
 
-    /// Load the body (text + HTML) for a single message.
-    pub async fn load_message_body(
-        &self,
-        account_id: String,
-        message_id: String,
-    ) -> Result<(Option<String>, Option<String>), String> {
-        self.with_conn(move |conn| {
-            let snippet: Option<String> = conn
-                .query_row(
-                    "SELECT snippet FROM messages
-                     WHERE account_id = ?1 AND id = ?2",
-                    params![account_id, message_id],
-                    |row| row.get(0),
-                )
-                .map_err(|e| e.to_string())?;
+/// Load full thread detail via core's `get_thread_detail()`.
+///
+/// This replaces the two separate `get_thread_messages` + `get_thread_attachments`
+/// calls with a single core function that also provides:
+/// - Body text from the BodyStore (decompressed from zstd)
+/// - Message ownership detection (is_own_message)
+/// - Quote/signature-stripped collapsed summaries
+/// - Resolved label colors
+/// - Persisted attachment collapse state
+pub async fn load_thread_detail(
+    db: &Db,
+    body_store: &BodyStoreState,
+    account_id: String,
+    thread_id: String,
+) -> Result<AppThreadDetail, String> {
+    let bs_conn = body_store.conn();
+    let db_conn = db.conn_arc();
 
-            Ok((snippet, None))
-        })
-        .await
-    }
+    tokio::task::spawn_blocking(move || {
+        let conn = db_conn
+            .lock()
+            .map_err(|e| format!("db lock: {e}"))?;
+        let bs = bs_conn
+            .lock()
+            .map_err(|e| format!("body store lock: {e}"))?;
+        let detail = get_thread_detail(&conn, &bs, &account_id, &thread_id)?;
+        Ok(convert_thread_detail(detail))
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking: {e}"))?
+}
 
-    /// Load attachments for a single message.
-    pub async fn load_message_attachments(
-        &self,
-        account_id: String,
-        message_id: String,
-    ) -> Result<Vec<MessageViewAttachment>, String> {
-        self.with_conn(move |conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, filename, mime_type, size
-                     FROM attachments
-                     WHERE account_id = ?1 AND message_id = ?2
-                       AND is_inline = 0
-                       AND filename IS NOT NULL AND filename != ''
-                     ORDER BY filename ASC",
-                )
-                .map_err(|e| e.to_string())?;
+/// Persist attachment collapse state to core's thread_ui_state table.
+pub async fn persist_attachments_collapsed(
+    db: &Db,
+    account_id: String,
+    thread_id: String,
+    collapsed: bool,
+) -> Result<(), String> {
+    let conn = db.write_conn_arc();
+    tokio::task::spawn_blocking(move || {
+        let conn = conn
+            .lock()
+            .map_err(|e| format!("db write lock: {e}"))?;
+        set_attachments_collapsed(&conn, &account_id, &thread_id, collapsed)
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking: {e}"))?
+}
 
-            stmt.query_map(params![account_id, message_id], |row| {
-                Ok(MessageViewAttachment {
-                    id: row.get("id")?,
-                    filename: row.get("filename")?,
-                    mime_type: row.get("mime_type")?,
-                    size: row.get("size")?,
-                })
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())
-        })
-        .await
-    }
+/// Initialize the body store for loading message bodies.
+pub fn init_body_store() -> Result<BodyStoreState, String> {
+    let data_dir = crate::APP_DATA_DIR
+        .get()
+        .ok_or_else(|| "APP_DATA_DIR not set".to_string())?;
+    BodyStoreState::init(data_dir)
 }
