@@ -76,30 +76,33 @@ These are non-obvious behaviors of the `jmap-client` crate that will matter if t
 
 ## Multi-Agent Orchestration
 
-When launching multiple subagents to work on features in parallel (using worktree isolation):
+**Do NOT use worktree isolation for parallel agents.** Worktrees create merge conflicts that silently drop agent work. Instead, launch agents in the same tree with strict file ownership — zero overlap.
 
-**Structural preparation:**
-- Split shared files (like `main.rs`) into feature-scoped modules BEFORE launching agents. The `handlers/` module split reduced `main.rs` from 2849 to 1298 lines and eliminated most merge conflicts between agents.
-- Put architecture comments directly in code files agents will read first. Agents ignore documentation they're told to read but follow patterns they see in the code.
+**Why no worktrees:** Worktrees let agents work on diverged snapshots. When merging back, `git checkout --ours/--theirs` drops code, conflict markers get missed, and features end up "existing but not wired" — types/functions created but never connected to message dispatch, views, or call sites. This happened repeatedly in a 114-commit session and was only caught by a rigorous 3-pass audit.
 
-**Agent prompts must be explicit about file structure:**
-- Tell agents "Read your handler file FIRST — it already has extracted methods"
-- Tell agents "main.rs is ONLY for Message enum variants and one-line dispatch arms"
-- Tell agents "Do NOT put handler logic, free functions, or multi-line match arms in main.rs"
-- Tell agents "If you see existing code in a handler file, extend it — do not replace it with a placeholder"
-- Include `UI.md` and `CLAUDE.md` in the required reading list
+**Agent coordination rules:**
+- Each agent gets exclusive ownership of specific files. No two agents touch the same file.
+- `main.rs` is shared — agents may ONLY add Message enum variants and one-line dispatch arms. All handler logic goes in `handlers/*.rs`.
+- Agents must read their handler file FIRST (it already has extracted methods). Do not replace existing code with placeholders.
+- Agents must NOT run `cargo check/build/test`. The orchestrator validates between agents.
+- Include `UI.md` and `CLAUDE.md` in every agent's required reading.
 
-**Merge strategy:**
-- Merge agent branches sequentially, resolving each conflict hunk individually
-- Do NOT use `git checkout --ours` to take an entire file — this silently drops the agent's work and requires manual porting
-- The `Message` enum in `main.rs` is an unavoidable merge bottleneck since every agent adds variants there
-- After merging all branches, run `cargo check --workspace` and fix any compilation errors before proceeding
+**Verification standard — "implemented" means wired:**
+- A feature is NOT implemented unless the user can reach it through current Message dispatch → handler → view wiring.
+- Types that exist but are never constructed, methods that exist but are never called, message variants with no dispatch arm — these are dead code, not implementations.
+- After agents complete, verify wiring by checking: (1) Message variant exists, (2) dispatch arm in update() calls handler, (3) handler performs the work, (4) view renders the result or side effect is observable.
 
-**Common agent mistakes to watch for:**
+**Audit protocol:**
+- Do not trust agent claims of completion. Verify existence + wiring + behavior.
+- Use the 3-pass audit structure: domain-specific verification → cross-cutting reconciliation → editorial normalization.
+- Discrepancies docs should contain only current gaps, not historical records. Remove resolved items entirely.
+
+**Common agent mistakes:**
 - Using `gen` as a variable name (reserved keyword in edition 2024)
 - Using `iced::mouse::click::Kind` instead of `iced::advanced::mouse::click::Kind` (the `iced::mouse` re-export doesn't include the `click` submodule)
-- Re-adding code that's already in split module files (agents rewrite whole files instead of making targeted edits)
-- Agents should never run `cargo check/build/test` — the orchestrator validates between merges
+- Creating types/functions without wiring them to message dispatch (the #1 failure mode)
+- Rewriting entire files instead of making targeted edits
+- Claiming features are "done" when only the types exist but call sites are missing
 
 ## Encryption
 
