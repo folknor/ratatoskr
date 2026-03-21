@@ -81,12 +81,20 @@ static DEFAULT_SCALE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
 const CHORD_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1000);
 
 fn main() -> iced::Result {
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("info"),
+    )
+    .init();
+
+    log::info!("Ratatoskr starting");
+
     let app_data_dir = dirs::data_dir()
         .expect("no data dir")
         .join("com.velo.app");
 
     let db = Db::open(&app_data_dir)
         .map_err(|e| iced::Error::WindowCreationFailed(e.into()))?;
+    log::info!("Database opened at {}", app_data_dir.display());
     let _ = DB.set(Arc::new(db));
 
     let detected_scale = display::detect_default_scale();
@@ -102,6 +110,10 @@ fn main() -> iced::Result {
             fonts.ui.map(|f| f.family)
         })
     };
+    log::info!(
+        "System UI font: {}",
+        system_font_family.as_deref().unwrap_or("(none detected)")
+    );
     font::set_system_ui_font(system_font_family);
 
     let _ = APP_DATA_DIR.set(app_data_dir);
@@ -290,6 +302,7 @@ struct App {
 
 impl App {
     fn boot() -> (Self, Task<Message>) {
+        log::info!("App boot: loading accounts and pinned searches");
         let db = Arc::clone(DB.get().expect("DB not initialized"));
         let db_ref = Arc::clone(&db);
         let db_ref2 = Arc::clone(&db);
@@ -481,6 +494,7 @@ impl App {
             Message::AccountsLoaded(g, _) if g != self.nav_generation => Task::none(),
             Message::AccountsLoaded(_, Ok(accounts)) => self.handle_accounts_loaded(accounts),
             Message::AccountsLoaded(_, Err(e)) => {
+                log::error!("Failed to load accounts: {e}");
                 self.status = format!("Error: {e}");
                 Task::none()
             }
@@ -490,16 +504,19 @@ impl App {
                 Task::none()
             }
             Message::NavigationLoaded(_, Err(e)) => {
+                log::error!("Failed to load navigation: {e}");
                 self.status = format!("Navigation error: {e}");
                 Task::none()
             }
             Message::ThreadsLoaded(g, _) if g != self.nav_generation => Task::none(),
             Message::ThreadsLoaded(_, Ok(threads)) => {
+                log::info!("Threads loaded: {} threads", threads.len());
                 self.status = format!("{} threads", threads.len());
                 self.thread_list.set_threads(threads);
                 Task::none()
             }
             Message::ThreadsLoaded(_, Err(e)) => {
+                log::error!("Failed to load threads: {e}");
                 self.status = format!("Threads error: {e}");
                 Task::none()
             }
@@ -510,6 +527,7 @@ impl App {
                 Task::none()
             }
             Message::ThreadMessagesLoaded(_, Err(e)) => {
+                log::error!("Failed to load thread messages: {e}");
                 self.status = format!("Messages error: {e}");
                 Task::none()
             }
@@ -519,6 +537,7 @@ impl App {
                 Task::none()
             }
             Message::ThreadAttachmentsLoaded(_, Err(e)) => {
+                log::error!("Failed to load thread attachments: {e}");
                 self.status = format!("Attachments error: {e}");
                 Task::none()
             }
@@ -700,11 +719,11 @@ impl App {
                 )
             }
             Message::AccountDeleted(Err(e)) => {
-                eprintln!("Failed to delete account: {e}");
+                log::error!("Failed to delete account: {e}");
                 Task::none()
             }
             Message::AccountUpdated(Err(e)) => {
-                eprintln!("Failed to update account: {e}");
+                log::error!("Failed to update account: {e}");
                 Task::none()
             }
             Message::OpenAddAccount => {
@@ -1047,7 +1066,7 @@ impl App {
         match event {
             StatusBarEvent::RequestReauth { account_id } => {
                 let email = self.email_for_account(&account_id);
-                eprintln!("Re-auth requested for account {account_id} ({email})");
+                log::info!("Re-auth requested for account {account_id} ({email})");
                 self.status_bar.show_confirmation(format!(
                     "Re-authentication needed for {email} (not yet implemented)"
                 ));
@@ -1060,17 +1079,21 @@ impl App {
         match event {
             SyncEvent::Progress { account_id, phase, current, total } => {
                 let email = self.email_for_account(&account_id);
+                log::info!("Sync progress: {email} — {phase} ({current}/{total})");
                 self.status_bar.report_sync_progress(
                     account_id, email, current, total, phase,
                 );
             }
             SyncEvent::Complete { account_id } => {
+                let email = self.email_for_account(&account_id);
+                log::info!("Sync completed for {email}");
                 self.status_bar.report_sync_complete(&account_id);
                 // Clear connection failure warnings on successful sync.
                 self.status_bar.clear_warning(&account_id);
             }
             SyncEvent::Error { account_id, error } => {
                 let email = self.email_for_account(&account_id);
+                log::error!("Sync error for {email}: {error}");
                 self.status_bar.set_warning(AccountWarning {
                     account_id,
                     email,
@@ -1169,7 +1192,7 @@ impl App {
                 Task::none()
             }
             handlers::SignatureResult::Loaded(Err(e)) => {
-                eprintln!("Failed to load signatures: {e}");
+                log::error!("Failed to load signatures: {e}");
                 Task::none()
             }
             handlers::SignatureResult::Saved(_) | handlers::SignatureResult::Deleted(_) => {
@@ -1317,6 +1340,7 @@ impl App {
         self.reading_pane.set_thread(thread);
         self.thread_generation += 1;
         if let Some(thread) = thread {
+            log::debug!("Thread selected: {} ({})", thread.id, thread.subject.as_deref().unwrap_or("(no subject)"));
             let db = Arc::clone(&self.db);
             let account_id = thread.account_id.clone();
             let thread_id = thread.id.clone();
@@ -1345,6 +1369,7 @@ impl App {
     }
 
     fn handle_accounts_loaded(&mut self, accounts: Vec<db::Account>) -> Task<Message> {
+        log::info!("Accounts loaded: {} accounts", accounts.len());
         self.sidebar.accounts = accounts;
         if self.sidebar.accounts.is_empty() {
             self.no_accounts = true;
@@ -1485,6 +1510,7 @@ impl App {
 
     fn handle_window_close(&mut self, id: iced::window::Id) -> Task<Message> {
         if id == self.main_window_id {
+            log::info!("Main window closing, saving session state");
             let data_dir = APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
             self.window.sidebar_width = self.sidebar_width;
             self.window.thread_list_width = self.thread_list_width;
@@ -1501,6 +1527,7 @@ impl App {
             return Task::batch(tasks);
         }
 
+        log::debug!("Pop-out window closed: {id:?}");
         if matches!(self.pop_out_windows.get(&id), Some(PopOutWindow::Compose(_))) {
             self.composer_is_open = false;
         }

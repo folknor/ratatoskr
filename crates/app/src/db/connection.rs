@@ -20,6 +20,7 @@ impl Db {
             return Err(format!("database not found: {}", db_path.display()));
         }
 
+        log::info!("Opening database: {}", db_path.display());
         let conn =
             Connection::open(&db_path).map_err(|e| format!("open db: {e}"))?;
 
@@ -96,6 +97,7 @@ impl Db {
             )
             .map_err(|e| format!("create contact_groups tables: {e}"))?;
 
+        log::info!("Database opened, migrations applied");
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             write_conn: Arc::new(Mutex::new(write_conn)),

@@ -63,6 +63,7 @@ impl App {
                             CalendarOverlay::EventDetail { event: data };
                     }
                     Err(e) => {
+                        log::error!("Failed to load calendar event: {e}");
                         self.status = format!("Failed to load event: {e}");
                     }
                 }
@@ -105,10 +106,12 @@ impl App {
             CalendarMessage::EventSaved(result) => {
                 match result {
                     Ok(()) => {
+                        log::info!("Calendar event saved");
                         self.calendar.overlay = CalendarOverlay::None;
                         return self.reload_calendar_events();
                     }
                     Err(e) => {
+                        log::error!("Failed to save calendar event: {e}");
                         self.status = format!("Save failed: {e}");
                     }
                 }
@@ -129,8 +132,14 @@ impl App {
             }
             CalendarMessage::EventDeleted(result) => {
                 match result {
-                    Ok(()) => return self.reload_calendar_events(),
-                    Err(e) => self.status = format!("Delete failed: {e}"),
+                    Ok(()) => {
+                        log::info!("Calendar event deleted");
+                        return self.reload_calendar_events();
+                    }
+                    Err(e) => {
+                        log::error!("Failed to delete calendar event: {e}");
+                        self.status = format!("Delete failed: {e}");
+                    }
                 }
                 Task::none()
             }
@@ -140,7 +149,10 @@ impl App {
                         self.calendar.events = events;
                         self.calendar.rebuild_view_data();
                     }
-                    Err(e) => self.status = format!("Load events error: {e}"),
+                    Err(e) => {
+                        log::error!("Failed to load calendar events: {e}");
+                        self.status = format!("Load events error: {e}");
+                    }
                 }
                 Task::none()
             }

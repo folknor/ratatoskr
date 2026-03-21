@@ -106,6 +106,7 @@ pub fn dispatch_autocomplete_search(
     state: &mut ComposeState,
 ) -> Task<Message> {
     let query = state.autocomplete.query.clone();
+    log::debug!("Autocomplete search: {query:?}");
     if query.trim().is_empty() {
         state.autocomplete.results.clear();
         state.autocomplete.highlighted = None;

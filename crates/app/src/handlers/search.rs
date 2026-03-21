@@ -11,6 +11,7 @@ use crate::{App, Message};
 
 impl App {
     pub(crate) fn handle_search_query_changed(&mut self, query: String) -> Task<Message> {
+        log::debug!("Search query changed: {query:?}");
         self.search_query = query;
         self.thread_list.search_query.clone_from(&self.search_query);
         if self.search_query.trim().is_empty() {
@@ -36,6 +37,7 @@ impl App {
         if query.is_empty() {
             return self.restore_folder_view();
         }
+        log::info!("Search executing: {query:?}");
 
         // Store pre-search threads on first search from folder mode
         if self.thread_list.mode == ThreadListMode::Folder {
@@ -62,6 +64,7 @@ impl App {
         match result {
             Ok(threads) => {
                 self.thread_list.mode = ThreadListMode::Search;
+                log::debug!("Search results: {} threads", threads.len());
                 self.status = format!("{} results", threads.len());
 
                 let thread_ids: Vec<(String, String)> = threads
@@ -96,6 +99,7 @@ impl App {
                 Task::none()
             }
             Err(e) => {
+                log::error!("Search failed: {e}");
                 self.status = format!("Search error: {e}");
                 Task::none()
             }
@@ -138,6 +142,7 @@ impl App {
                 Task::none()
             }
             Err(e) => {
+                log::error!("Failed to load pinned searches: {e}");
                 self.status = format!("Pinned searches error: {e}");
                 Task::none()
             }
@@ -145,6 +150,7 @@ impl App {
     }
 
     pub(crate) fn handle_select_pinned_search(&mut self, id: i64) -> Task<Message> {
+        log::debug!("Pinned search selected: id={id}");
         // Save pre-search threads on first activation from folder mode
         if self.active_pinned_search.is_none()
             && self.thread_list.mode == ThreadListMode::Folder
@@ -202,6 +208,7 @@ impl App {
                 )
             }
             Err(e) => {
+                log::error!("Failed to load pinned search thread IDs: {e}");
                 self.status = format!("Error loading pinned search: {e}");
                 Task::none()
             }
@@ -215,12 +222,14 @@ impl App {
         match result {
             Ok(threads) => {
                 self.thread_list.mode = ThreadListMode::Search;
+                log::debug!("Pinned search threads loaded: {} threads", threads.len());
                 self.status = format!("{} threads (pinned search)", threads.len());
                 self.thread_list.set_threads(threads);
                 self.thread_list.selected_thread = None;
                 Task::none()
             }
             Err(e) => {
+                log::error!("Failed to load pinned search threads: {e}");
                 self.status = format!("Threads error: {e}");
                 Task::none()
             }
@@ -245,6 +254,7 @@ impl App {
     ) -> Task<Message> {
         match result {
             Ok(()) => {
+                log::info!("Pinned search deleted: id={id}");
                 self.pinned_searches.retain(|ps| ps.id != id);
                 self.sidebar.pinned_searches.retain(|ps| ps.id != id);
                 if self.active_pinned_search == Some(id) {
@@ -256,6 +266,7 @@ impl App {
                 Task::none()
             }
             Err(e) => {
+                log::error!("Failed to dismiss pinned search: {e}");
                 self.status = format!("Dismiss error: {e}");
                 Task::none()
             }
@@ -268,6 +279,7 @@ impl App {
     ) -> Task<Message> {
         match result {
             Ok(id) => {
+                log::info!("Pinned search saved: id={id}");
                 self.active_pinned_search = Some(id);
                 self.sidebar.active_pinned_search = Some(id);
                 self.editing_pinned_search = Some(id);
@@ -279,6 +291,7 @@ impl App {
                 )
             }
             Err(e) => {
+                log::error!("Failed to save pinned search: {e}");
                 self.status = format!("Save pinned search error: {e}");
                 Task::none()
             }
@@ -302,6 +315,7 @@ impl App {
                 }
             }
             Err(e) => {
+                log::warn!("Pinned search expiry failed: {e}");
                 self.status = format!("Expiry warning: {e}");
                 Task::none()
             }
@@ -361,6 +375,7 @@ pub(crate) async fn execute_search(
                 Ok(results.into_iter().map(unified_result_to_thread).collect())
             }
             Err(_) => {
+                log::warn!("Tantivy index not available, falling back to SQL-only search");
                 // Tantivy index not available — fall back to SQL-only
                 execute_search_sql_fallback(conn, &query)
             }
