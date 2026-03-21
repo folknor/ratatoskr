@@ -65,6 +65,10 @@ pub struct CommandContext {
     pub composer_is_open: bool,
 
     pub focused_region: Option<FocusedRegion>,
+
+    /// Current search query (if any). Used for "Save as Smart Folder"
+    /// availability.
+    pub search_query: Option<String>,
 }
 
 impl CommandContext {
@@ -107,6 +111,7 @@ mod tests {
             is_online: true,
             composer_is_open: false,
             focused_region: None,
+            search_query: None,
         }
     }
 

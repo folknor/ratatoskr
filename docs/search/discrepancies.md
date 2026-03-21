@@ -46,7 +46,11 @@ Audit date: 2026-03-21 (updated after implementation pass)
 
 - **Generational tracking for pinned search loads:** Uses `nav_generation` for `PinnedSearchThreadIdsLoaded` and `PinnedSearchThreadsLoaded` staleness checks.
 
-- **Auto-expiry:** `expire_stale_pinned_searches(1_209_600)` (14 days) called after initial load.
+- **Auto-expiry:** `expire_stale_pinned_searches(1_209_600)` (14 days) called after initial load and periodically via `iced::time::every(3600s)` subscription.
+
+- **Staleness label:** Pinned search cards show "outdated" label and a refresh button when results are > 1 hour old. Refresh re-executes the search and updates the pinned search entry.
+
+- **Thread ID caching:** `PinnedSearch.thread_ids: Option<Vec<(String, String)>>` caches loaded thread IDs. Subsequent clicks reuse the cache. Cache is invalidated on update or refresh.
 
 ### Smart Folder Token Migration (Slice 6) -- Partial
 
@@ -67,9 +71,9 @@ Audit date: 2026-03-21 (updated after implementation pass)
 
 The problem statement spec defines `SearchResult`. The implementation names it `UnifiedSearchResult`. The app-integration-spec acknowledges four result types in play (`UnifiedSearchResult`, `Thread`, `DbThread`, `SearchResult`) but the Tantivy crate's `SearchResult` and the core's `UnifiedSearchResult` are separate types. This is noted as a known seam in the spec but remains unresolved.
 
-### PinnedSearch struct diverges from spec
+### PinnedSearch struct now has cached thread_ids
 
-The pinned-searches spec defines `PinnedSearch` with a `thread_ids: Vec<(String, String)>` field. The implementation omits this field from the struct entirely, loading thread IDs via a separate `get_pinned_search_thread_ids()` call. This is a deliberate design choice (lazy loading) but diverges from the spec's data model.
+The `PinnedSearch` struct now includes `thread_ids: Option<Vec<(String, String)>>` for lazy caching. On first click, thread IDs are loaded from DB and cached. Subsequent clicks use the cache. The cache is invalidated when the pinned search is updated (re-searched) or refreshed.
 
 ### Smart folder execution path not fully migrated
 
@@ -87,13 +91,13 @@ The pinned-searches spec defines `PinnedSearch` with a `thread_ids: Vec<(String,
 
 No typeahead popup implementation exists. No contact lookup for `from:`/`to:`, no account-scoped `label:`/`folder:` suggestions, no date presets for `before:`/`after:`. The search bar is a plain `text_input` without any popup or overlay.
 
-### "Search here" Interaction (Phase 4 of app-integration-spec)
+### "Search here" Interaction (Phase 4 of app-integration-spec) -- Implemented
 
-No right-click context menu on sidebar folders/labels to prefill the search bar with scope operators. No evidence of this interaction in the sidebar component.
+Right-click on sidebar folders and labels prefills the search bar with scope operators (e.g., `label:"Work" ` or `in:inbox `). Account-scoped labels include the `account:` prefix. The search bar is focused after prefilling. Implemented via `mouse_area.on_right_press` on nav items, flat labels, and tree labels.
 
-### Smart Folder "Save as Smart Folder" from Search
+### Smart Folder "Save as Smart Folder" from Search -- Implemented
 
-No command palette command to save the current search query as a smart folder. No graduation path from pinned search to smart folder exists in the command palette.
+`CommandId::SmartFolderSave` registered in the command palette with a Text input param for the folder name. Available when `search_query` is non-empty (via `CommandContext.search_query`). Creates a smart folder entry in the DB and reloads navigation. Text-param handling in the palette is via `enter_text_stage2()` / `try_text_input_confirm()` which bypass the resolver.
 
 ### Smart Folder Form Editor Removal
 

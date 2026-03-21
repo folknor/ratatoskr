@@ -168,6 +168,20 @@ impl App {
                 .set_context(format!("Search: {label}"), "All Accounts".to_string());
         }
 
+        // Use cached thread IDs if available
+        let cached_ids = self
+            .pinned_searches
+            .iter()
+            .find(|p| p.id == id)
+            .and_then(|p| p.thread_ids.clone());
+
+        if let Some(ids) = cached_ids {
+            let load_gen = self.nav_generation;
+            return self.handle_pinned_search_thread_ids_loaded_inner(
+                load_gen, id, Ok(ids),
+            );
+        }
+
         let db = Arc::clone(&self.db);
         let load_gen = self.nav_generation;
         Task::perform(
@@ -184,15 +198,39 @@ impl App {
         ps_id: i64,
         ids: Result<Vec<(String, String)>, String>,
     ) -> Task<Message> {
+        let load_gen = self.nav_generation;
+        self.handle_pinned_search_thread_ids_loaded_inner(load_gen, ps_id, ids)
+    }
+
+    fn handle_pinned_search_thread_ids_loaded_inner(
+        &mut self,
+        load_gen: u64,
+        ps_id: i64,
+        ids: Result<Vec<(String, String)>, String>,
+    ) -> Task<Message> {
         match ids {
             Ok(ids) => {
+                // Cache the thread IDs on the pinned search
+                for ps in &mut self.pinned_searches {
+                    if ps.id == ps_id {
+                        ps.thread_ids = Some(ids.clone());
+                        break;
+                    }
+                }
+                // Also update the sidebar copy
+                for ps in &mut self.sidebar.pinned_searches {
+                    if ps.id == ps_id {
+                        ps.thread_ids = Some(ids.clone());
+                        break;
+                    }
+                }
+
                 if let Some(ps) = self.pinned_searches.iter().find(|p| p.id == ps_id) {
                     self.search_query.clone_from(&ps.query);
                     self.thread_list.search_query.clone_from(&ps.query);
                 }
 
                 let db = Arc::clone(&self.db);
-                let load_gen = self.nav_generation;
                 Task::perform(
                     async move {
                         let result = db.get_threads_by_ids(ids).await;
@@ -272,6 +310,20 @@ impl App {
                 self.sidebar.active_pinned_search = Some(id);
                 self.editing_pinned_search = Some(id);
 
+                // Invalidate cached thread IDs for the updated pinned search
+                for ps in &mut self.pinned_searches {
+                    if ps.id == id {
+                        ps.thread_ids = None;
+                        break;
+                    }
+                }
+                for ps in &mut self.sidebar.pinned_searches {
+                    if ps.id == id {
+                        ps.thread_ids = None;
+                        break;
+                    }
+                }
+
                 let db = Arc::clone(&self.db);
                 Task::perform(
                     async move { db.list_pinned_searches().await },
@@ -303,6 +355,127 @@ impl App {
             }
             Err(e) => {
                 self.status = format!("Expiry warning: {e}");
+                Task::none()
+            }
+        }
+    }
+
+    /// Refresh a pinned search by re-executing its query.
+    pub(crate) fn handle_refresh_pinned_search(
+        &mut self,
+        id: i64,
+    ) -> Task<Message> {
+        // Invalidate cached thread IDs
+        for ps in &mut self.pinned_searches {
+            if ps.id == id {
+                ps.thread_ids = None;
+                break;
+            }
+        }
+        for ps in &mut self.sidebar.pinned_searches {
+            if ps.id == id {
+                ps.thread_ids = None;
+                break;
+            }
+        }
+
+        // Find the query and re-execute
+        let query = self
+            .pinned_searches
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| p.query.clone());
+
+        let Some(query) = query else {
+            return Task::none();
+        };
+
+        // Set up pinned search context
+        self.active_pinned_search = Some(id);
+        self.sidebar.active_pinned_search = Some(id);
+        self.editing_pinned_search = Some(id);
+        self.search_query.clone_from(&query);
+        self.thread_list.search_query.clone_from(&query);
+
+        // Store pre-search threads if needed
+        if self.thread_list.mode == ThreadListMode::Folder {
+            self.pre_search_threads = Some(self.thread_list.threads.clone());
+        }
+
+        // Execute search
+        self.search_generation += 1;
+        let generation = self.search_generation;
+        let db = Arc::clone(&self.db);
+
+        Task::perform(
+            async move {
+                let result = execute_search(db, query).await;
+                (generation, result)
+            },
+            |(g, result)| Message::SearchResultsLoaded(g, result),
+        )
+    }
+
+    /// Handle periodic expiry tick — run expiry if not recently checked.
+    pub(crate) fn handle_expiry_tick(&mut self) -> Task<Message> {
+        let db = Arc::clone(&self.db);
+        Task::perform(
+            async move { db.expire_stale_pinned_searches(1_209_600).await },
+            Message::PinnedSearchesExpired,
+        )
+    }
+
+    /// Handle "Search here" — prefill search bar with a scope query prefix.
+    pub(crate) fn handle_search_here(
+        &mut self,
+        query_prefix: String,
+    ) -> Task<Message> {
+        // Store pre-search state
+        if self.thread_list.mode == ThreadListMode::Folder {
+            self.pre_search_threads = Some(self.thread_list.threads.clone());
+        }
+
+        self.search_query = query_prefix;
+        self.thread_list.search_query.clone_from(&self.search_query);
+        self.clear_pinned_search_context();
+
+        // Focus the search bar so the user can type immediately
+        iced::widget::operation::focus::<Message>("search-bar".to_string())
+    }
+
+    /// Handle "Save as Smart Folder" — create a smart folder from the
+    /// current search query.
+    pub(crate) fn handle_save_as_smart_folder(
+        &mut self,
+        name: String,
+    ) -> Task<Message> {
+        let query = self.search_query.trim().to_string();
+        if query.is_empty() {
+            self.status = "No search query to save".to_string();
+            return Task::none();
+        }
+
+        let db = Arc::clone(&self.db);
+        Task::perform(
+            async move { db.create_smart_folder(name, query).await },
+            Message::SmartFolderSaved,
+        )
+    }
+
+    /// Handle smart folder saved result — reload navigation.
+    pub(crate) fn handle_smart_folder_saved(
+        &mut self,
+        result: Result<i64, String>,
+    ) -> Task<Message> {
+        match result {
+            Ok(_id) => {
+                self.status = "Smart folder saved".to_string();
+                // Reload navigation to show the new smart folder
+                self.nav_generation += 1;
+                self.fire_navigation_load()
+            }
+            Err(e) => {
+                self.status = format!("Save smart folder error: {e}");
                 Task::none()
             }
         }

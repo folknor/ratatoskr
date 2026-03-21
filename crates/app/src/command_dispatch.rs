@@ -108,6 +108,12 @@ pub fn build_context(app: &App) -> CommandContext {
     let (active_account_id, provider_kind) = active_account_info(app);
     let thread_state = selected_thread_state(app);
 
+    let search_query = if app.search_query.trim().is_empty() {
+        None
+    } else {
+        Some(app.search_query.clone())
+    };
+
     CommandContext {
         selected_thread_ids,
         active_message_id,
@@ -125,6 +131,7 @@ pub fn build_context(app: &App) -> CommandContext {
         is_online: app.is_online,
         composer_is_open: app.composer_is_open,
         focused_region: app.focused_region,
+        search_query,
     }
 }
 
@@ -351,7 +358,8 @@ pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
         | CommandId::EmailAddLabel
         | CommandId::EmailRemoveLabel
         | CommandId::EmailSnooze
-        | CommandId::NavigateToLabel => None,
+        | CommandId::NavigateToLabel
+        | CommandId::SmartFolderSave => None,
 
         // Compose / Tasks / View / Calendar / App
         _ => dispatch_other(id),
@@ -505,6 +513,10 @@ pub fn dispatch_parameterized(
             label_id,
             account_id,
         })),
+        (
+            CommandId::SmartFolderSave,
+            CommandArgs::SmartFolderSave { name },
+        ) => Some(Message::SaveAsSmartFolder(name)),
         _ => None,
     }
 }

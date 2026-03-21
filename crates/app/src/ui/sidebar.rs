@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use iced::widget::{button, column, container, row, scrollable, text, Space};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, text, Space};
 use iced::{Alignment, Element, Length, Task};
 
 use crate::component::Component;
@@ -8,7 +8,7 @@ use crate::db::{Account, PinnedSearch};
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
-use crate::ui::widgets::{self, DropdownEntry, DropdownIcon, NavItem};
+use crate::ui::widgets::{self, DropdownEntry, DropdownIcon};
 use ratatoskr_core::db::queries_extra::navigation::{
     FolderKind, NavigationFolder, NavigationState,
 };
@@ -29,7 +29,10 @@ pub enum SidebarMessage {
     ToggleSettings,
     SelectPinnedSearch(i64),
     DismissPinnedSearch(i64),
+    RefreshPinnedSearch(i64),
     ToggleMode,
+    /// Right-click "Search here" on a label/folder.
+    SearchHere(String),
 }
 
 /// Events the sidebar emits upward to the App.
@@ -46,7 +49,10 @@ pub enum SidebarEvent {
     ToggleSettings,
     PinnedSearchSelected(i64),
     PinnedSearchDismissed(i64),
+    PinnedSearchRefreshed(i64),
     ModeToggled,
+    /// "Search here" — prefill search bar with a scope query prefix.
+    SearchHere { query_prefix: String },
 }
 
 // ── Sidebar layout constants ─────────────────────────────
@@ -167,8 +173,14 @@ impl Component for Sidebar {
             SidebarMessage::DismissPinnedSearch(id) => {
                 (Task::none(), Some(SidebarEvent::PinnedSearchDismissed(id)))
             }
+            SidebarMessage::RefreshPinnedSearch(id) => {
+                (Task::none(), Some(SidebarEvent::PinnedSearchRefreshed(id)))
+            }
             SidebarMessage::ToggleMode => {
                 (Task::none(), Some(SidebarEvent::ModeToggled))
+            }
+            SidebarMessage::SearchHere(query_prefix) => {
+                (Task::none(), Some(SidebarEvent::SearchHere { query_prefix }))
             }
         }
     }
@@ -284,7 +296,7 @@ fn nav_items(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
         .map(|ns| &ns.folders[..])
         .unwrap_or(&[]);
 
-    let universal: Vec<NavItem<'_>> = folders
+    let universal: Vec<&NavigationFolder> = folders
         .iter()
         .filter(|f| matches!(f.folder_kind, FolderKind::Universal))
         .filter(|f| {
@@ -295,18 +307,34 @@ fn nav_items(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
                 true
             }
         })
-        .map(|f| NavItem {
-            label: &f.name,
-            id: &f.id,
-            unread: f.unread_count,
-        })
         .collect();
 
-    widgets::nav_group(
-        &universal,
-        &sidebar.selected_label,
-        SidebarMessage::SelectLabel,
-    )
+    let mut col = column![].spacing(SPACE_XXS);
+    for f in &universal {
+        let is_active = match &sidebar.selected_label {
+            Some(lid) => lid == &f.id,
+            None => f.id == "INBOX",
+        };
+        let on_press = if f.id == "INBOX" {
+            SidebarMessage::SelectLabel(None)
+        } else {
+            SidebarMessage::SelectLabel(Some(f.id.clone()))
+        };
+        let nav_btn = widgets::nav_button(
+            None,
+            &f.name,
+            is_active,
+            widgets::NavSize::Compact,
+            Some(f.unread_count),
+            on_press,
+        );
+        let query_prefix = build_search_here_folder_prefix(&f.name, sidebar);
+        col = col.push(
+            mouse_area(nav_btn)
+                .on_right_press(SidebarMessage::SearchHere(query_prefix)),
+        );
+    }
+    col.into()
 }
 
 fn smart_folders(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
@@ -382,6 +410,16 @@ fn pinned_searches_section(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
     col.into()
 }
 
+/// Whether a pinned search's results are stale (> 1 hour old).
+fn is_results_stale(updated_at: i64) -> bool {
+    let Some(dt) = chrono::DateTime::from_timestamp(updated_at, 0) else {
+        return true;
+    };
+    let now = chrono::Utc::now();
+    let delta = now.signed_duration_since(dt);
+    delta.num_hours() >= 1
+}
+
 fn pinned_search_card(
     ps: &PinnedSearch,
     active: bool,
@@ -390,6 +428,7 @@ fn pinned_search_card(
 
     let date_label = format_relative_time(ps.updated_at);
     let query_display = truncate_query(&ps.query, PINNED_SEARCH_QUERY_MAX_CHARS);
+    let stale = is_results_stale(ps.updated_at);
 
     // Spec 1E.4: query is primary text, date is secondary
     let query_style: fn(&iced::Theme) -> text::Style = if active {
@@ -403,15 +442,32 @@ fn pinned_search_card(
         theme::TextClass::Muted.style()
     };
 
+    let mut meta_row = row![
+        text(date_label).size(TEXT_SM).style(date_style),
+    ]
+    .spacing(SPACE_XXS)
+    .align_y(Alignment::Center);
+
+    // Staleness indicator: show when results are > 1 hour old
+    if stale {
+        meta_row = meta_row.push(
+            text("outdated")
+                .size(TEXT_XS)
+                .style(theme::TextClass::Muted.style()),
+        );
+    }
+
     let text_col = column![
         text(query_display)
             .size(TEXT_MD)
             .style(query_style)
             .wrapping(Wrapping::None),
-        text(date_label).size(TEXT_SM).style(date_style),
+        meta_row,
     ]
     .spacing(SPACE_XXXS)
     .width(Length::Fill);
+
+    let mut actions = column![].spacing(SPACE_XXXS);
 
     let dismiss_btn = button(
         container(
@@ -423,7 +479,26 @@ fn pinned_search_card(
     .padding(SPACE_XXXS)
     .style(theme::ButtonClass::BareIcon.style());
 
-    let content = row![text_col, dismiss_btn]
+    actions = actions.push(dismiss_btn);
+
+    // Show refresh button when stale
+    if stale {
+        let refresh_btn = button(
+            container(
+                icon::refresh()
+                    .size(ICON_XS)
+                    .style(theme::TextClass::Muted.style()),
+            )
+            .center(Length::Shrink),
+        )
+        .on_press(SidebarMessage::RefreshPinnedSearch(ps.id))
+        .padding(SPACE_XXXS)
+        .style(theme::ButtonClass::BareIcon.style());
+
+        actions = actions.push(refresh_btn);
+    }
+
+    let content = row![text_col, actions]
         .spacing(SPACE_XXS)
         .align_y(Alignment::Start);
 
@@ -633,19 +708,24 @@ fn render_label_tree<'a>(
                 .push(widgets::count_badge(node.folder.unread_count));
         }
 
+        let label_btn: Element<'_, SidebarMessage> = button(
+            container(item_row)
+                .padding(PAD_NAV_ITEM)
+                .width(Length::Fill),
+        )
+        .on_press(SidebarMessage::SelectLabel(Some(
+            node.folder.id.clone(),
+        )))
+        .padding(0)
+        .style(theme::ButtonClass::Nav { active }.style())
+        .width(Length::Fill)
+        .into();
+
+        let query_prefix = build_search_here_prefix(&node.folder.name, sidebar);
         elements.push(
-            button(
-                container(item_row)
-                    .padding(PAD_NAV_ITEM)
-                    .width(Length::Fill),
-            )
-            .on_press(SidebarMessage::SelectLabel(Some(
-                node.folder.id.clone(),
-            )))
-            .padding(0)
-            .style(theme::ButtonClass::Nav { active }.style())
-            .width(Length::Fill)
-            .into(),
+            mouse_area(label_btn)
+                .on_right_press(SidebarMessage::SearchHere(query_prefix))
+                .into(),
         );
     }
 
@@ -662,13 +742,67 @@ fn render_flat_labels<'a>(
         .take(12)
         .map(|f| {
             let active = sidebar.selected_label.as_deref() == Some(&f.id);
-            widgets::label_nav_item(
+            let label_btn = widgets::label_nav_item(
                 &f.name,
                 &f.id,
                 theme::avatar_color(&f.name),
                 active,
                 SidebarMessage::SelectLabel(Some(f.id.clone())),
-            )
+            );
+            let query_prefix = build_search_here_prefix(&f.name, sidebar);
+            mouse_area(label_btn)
+                .on_right_press(SidebarMessage::SearchHere(query_prefix))
+                .into()
         })
         .collect()
+}
+
+/// Build a scope query prefix for "Search here" from a label/folder name.
+fn build_search_here_prefix(name: &str, sidebar: &Sidebar) -> String {
+    match sidebar.selected_account {
+        Some(idx) => {
+            let account_name = sidebar
+                .accounts
+                .get(idx)
+                .map(|a| a.display_name.as_deref().unwrap_or(&a.email))
+                .unwrap_or("Unknown");
+            format!(
+                "account:{} label:{} ",
+                quote_if_needed(account_name),
+                quote_if_needed(name),
+            )
+        }
+        None => format!("label:{} ", quote_if_needed(name)),
+    }
+}
+
+/// Build a scope query prefix for universal folders (Inbox, Sent, etc.).
+fn build_search_here_folder_prefix(
+    folder_name: &str,
+    sidebar: &Sidebar,
+) -> String {
+    match sidebar.selected_account {
+        Some(idx) => {
+            let account_name = sidebar
+                .accounts
+                .get(idx)
+                .map(|a| a.display_name.as_deref().unwrap_or(&a.email))
+                .unwrap_or("Unknown");
+            format!(
+                "account:{} in:{} ",
+                quote_if_needed(account_name),
+                folder_name.to_lowercase(),
+            )
+        }
+        None => format!("in:{} ", folder_name.to_lowercase()),
+    }
+}
+
+/// Wrap a value in quotes if it contains spaces.
+fn quote_if_needed(s: &str) -> String {
+    if s.contains(' ') {
+        format!("\"{s}\"")
+    } else {
+        s.to_string()
+    }
 }

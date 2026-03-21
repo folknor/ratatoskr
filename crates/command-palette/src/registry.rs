@@ -60,6 +60,7 @@ impl CommandRegistry {
         register_view(&mut descriptors);
         register_calendar(&mut descriptors);
         register_app(&mut descriptors);
+        register_smart_folders(&mut descriptors);
 
         #[cfg(debug_assertions)]
         {
@@ -699,6 +700,25 @@ fn register_calendar(out: &mut Vec<CommandDescriptor>) {
     ));
 }
 
+fn register_smart_folders(out: &mut Vec<CommandDescriptor>) {
+    out.push(with_keywords(
+        parameterized(
+            CommandId::SmartFolderSave,
+            "Save as Smart Folder",
+            "Search",
+            None,
+            |ctx| ctx.search_query.as_ref().is_some_and(|q| !q.is_empty()),
+            InputSchema::Single {
+                param: super::input::ParamDef::Text {
+                    label: "Name",
+                    placeholder: "Smart folder name...",
+                },
+            },
+        ),
+        &["smart folder", "save search", "pin"],
+    ));
+}
+
 fn register_app(out: &mut Vec<CommandDescriptor>) {
     out.push(desc_kw(CommandId::AppSearch, "Search", "App", Some(KeyBinding::key('/')), always, &["find", "ctrl+f"]));
     out.push(desc(CommandId::AppAskAi, "Ask AI", "App", Some(KeyBinding::key('i')), always));
@@ -744,6 +764,7 @@ mod tests {
             is_online: true,
             composer_is_open: false,
             focused_region: None,
+            search_query: None,
         }
     }
 
