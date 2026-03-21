@@ -672,7 +672,7 @@ impl App {
                     self.show_settings = false;
                     return Task::none();
                 }
-                if !self.search_query.is_empty() || self.active_pinned_search.is_some() {
+                if !self.search_query.text().is_empty() || self.active_pinned_search.is_some() {
                     self.active_pinned_search = None;
                     self.sidebar.active_pinned_search = None;
                     self.editing_pinned_search = None;

@@ -14,16 +14,10 @@ use crate::{App, Message};
 
 impl App {
     pub(crate) fn handle_search_query_changed(&mut self, query: String) -> Task<Message> {
-<<<<<<< HEAD
         log::debug!("Search query changed: {query:?}");
-        self.search_query = query;
-        self.thread_list.search_query.clone_from(&self.search_query);
-        if self.search_query.trim().is_empty() {
-=======
         self.search_query.set_text(query);
         self.thread_list.search_query = self.search_query.text().to_owned();
         if self.search_query.text().trim().is_empty() {
->>>>>>> worktree-agent-aa14600b
             self.search_debounce_deadline = None;
             self.thread_list.typeahead.visible = false;
             if self.thread_list.mode == ThreadListMode::Search {
@@ -145,8 +139,8 @@ impl App {
     /// Analyze the current query for dynamic typeahead operators and
     /// dispatch a DB query if needed.
     fn maybe_trigger_typeahead_query(&mut self) -> Option<Task<Message>> {
-        let cursor_pos = self.search_query.len();
-        let ctx = analyze_cursor_context(&self.search_query, cursor_pos);
+        let cursor_pos = self.search_query.text().len();
+        let ctx = analyze_cursor_context(self.search_query.text(), cursor_pos);
 
         let ratatoskr_smart_folder::CursorContext::InsideOperator {
             ref operator,
@@ -545,7 +539,7 @@ impl App {
         self.active_pinned_search = Some(id);
         self.sidebar.active_pinned_search = Some(id);
         self.editing_pinned_search = Some(id);
-        self.search_query.clone_from(&query);
+        self.search_query.reset(query.clone());
         self.thread_list.search_query.clone_from(&query);
 
         // Store pre-search threads if needed
@@ -586,8 +580,8 @@ impl App {
             self.pre_search_threads = Some(self.thread_list.threads.clone());
         }
 
-        self.search_query = query_prefix;
-        self.thread_list.search_query.clone_from(&self.search_query);
+        self.search_query.reset(query_prefix.clone());
+        self.thread_list.search_query = query_prefix;
         self.clear_pinned_search_context();
 
         // Focus the search bar so the user can type immediately
@@ -600,7 +594,7 @@ impl App {
         &mut self,
         name: String,
     ) -> Task<Message> {
-        let query = self.search_query.trim().to_string();
+        let query = self.search_query.text().trim().to_string();
         if query.is_empty() {
             self.status = "No search query to save".to_string();
             return Task::none();

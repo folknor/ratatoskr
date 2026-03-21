@@ -19,7 +19,7 @@ pub struct RightSidebarData<'a> {
     pub threads: &'a [Thread],
 }
 
-pub fn view<'a>(open: bool, data: &'a RightSidebarData<'a>) -> Element<'a, Message> {
+pub fn view<'a>(open: bool, data: &RightSidebarData<'a>) -> Element<'a, Message> {
     if !open {
         return Space::new().width(0).height(0).into();
     }

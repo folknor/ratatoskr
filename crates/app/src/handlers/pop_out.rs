@@ -7,43 +7,32 @@
 //! - Window open/close for pop-outs
 //! - Session save/restore
 //! - Save As (.eml / .txt) flow
-//! - Compose send, draft save, signature resolution, attachment handling
 
 use std::sync::Arc;
 
 use iced::{Point, Size, Task};
-use rusqlite::params;
 
 use crate::db::Db;
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
+use crate::ui::undoable::UndoableText;
 use rusqlite::params;
 
->>>>>>> worktree-agent-ab570ae8
 use crate::pop_out::compose::{
     ComposeMessage, ComposeMode, ComposeState, tokens_to_csv,
 };
-=======
-use crate::pop_out::compose::{ComposeMessage, ComposeMode, ComposeState};
-use crate::ui::undoable::UndoableText;
->>>>>>> worktree-agent-aa14600b
 use crate::pop_out::message_view::{
     MessageViewMessage, MessageViewState, RenderingMode,
 };
 use crate::pop_out::session::{MessageViewSessionEntry, SessionState};
 use crate::pop_out::{PopOutMessage, PopOutWindow};
 use crate::ui::layout::{
-    COMPOSE_DEFAULT_HEIGHT, COMPOSE_DEFAULT_WIDTH, COMPOSE_MIN_HEIGHT,
-    COMPOSE_MIN_WIDTH, MESSAGE_VIEW_DEFAULT_HEIGHT,
-    MESSAGE_VIEW_DEFAULT_WIDTH, MESSAGE_VIEW_MIN_HEIGHT,
+    COMPOSE_DEFAULT_HEIGHT, COMPOSE_DEFAULT_WIDTH, COMPOSE_MIN_HEIGHT, COMPOSE_MIN_WIDTH,
+    MESSAGE_VIEW_DEFAULT_HEIGHT, MESSAGE_VIEW_DEFAULT_WIDTH, MESSAGE_VIEW_MIN_HEIGHT,
     MESSAGE_VIEW_MIN_WIDTH,
 };
 use crate::{App, Message, APP_DATA_DIR};
 
-/// Duration between auto-save ticks for compose windows.
-pub const DRAFT_AUTO_SAVE_INTERVAL: std::time::Duration =
-    std::time::Duration::from_secs(30);
+/// Interval between auto-saves for dirty compose drafts.
+pub const DRAFT_AUTO_SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 
 // ── Pop-out message dispatch ────────────────────────────
 
@@ -58,7 +47,7 @@ impl App {
             return Task::none();
         };
         match (window, &pop_out_msg) {
-            // Reply / ReplyAll / Forward from message view -> open compose
+            // Reply / ReplyAll / Forward from message view → open compose
             (
                 PopOutWindow::MessageView(_),
                 PopOutMessage::MessageView(
@@ -106,14 +95,6 @@ impl App {
                 PopOutWindow::Compose(_),
                 PopOutMessage::Compose(ComposeMessage::Send),
             ) => self.handle_compose_send(window_id),
-<<<<<<< HEAD
-            // Compose attach files — needs to open file dialog
-            (
-                PopOutWindow::Compose(_),
-                PopOutMessage::Compose(ComposeMessage::AttachFiles),
-            ) => self.handle_compose_attach_files(window_id),
-            // Compose draft save result — needs to clear dirty flag
-=======
             // Send finalized — draft saved, now dispatch actual send
             (
                 PopOutWindow::Compose(_),
@@ -129,7 +110,6 @@ impl App {
                 ),
             ) => self.handle_send_completed(window_id, pop_out_msg),
             // Draft saved — clear dirty flag
->>>>>>> worktree-agent-ab570ae8
             (
                 PopOutWindow::Compose(_),
                 PopOutMessage::Compose(ComposeMessage::DraftSaved(_)),
@@ -155,36 +135,6 @@ impl App {
             _ => Task::none(),
         }
     }
-
-    /// Returns true if any compose window has `draft_dirty` set.
-    pub(crate) fn has_dirty_compose_drafts(&self) -> bool {
-        self.pop_out_windows.values().any(|w| {
-            matches!(w, PopOutWindow::Compose(s) if s.draft_dirty)
-        })
-    }
-
-    /// Auto-save all dirty compose drafts. Called from subscription tick.
-    pub(crate) fn auto_save_compose_drafts(
-        &mut self,
-    ) -> Task<Message> {
-        let mut tasks = Vec::new();
-        let dirty_windows: Vec<iced::window::Id> = self
-            .pop_out_windows
-            .iter()
-            .filter_map(|(&id, w)| {
-                if let PopOutWindow::Compose(s) = w {
-                    if s.draft_dirty { Some(id) } else { None }
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        for win_id in dirty_windows {
-            tasks.push(self.save_compose_draft(win_id));
-        }
-        Task::batch(tasks)
-    }
 }
 
 // ── Message view update (free function) ─────────────────
@@ -203,7 +153,7 @@ fn handle_message_view_update(
             Task::none()
         }
         MessageViewMessage::BodyLoaded(_, Err(e)) => {
-            log::error!("Pop-out body load failed: {e}");
+            eprintln!("Pop-out body load failed: {e}");
             state.error_banner = Some(
                 "This message is no longer available. It may have been \
                  deleted or moved."
@@ -219,15 +169,14 @@ fn handle_message_view_update(
             Task::none()
         }
         MessageViewMessage::AttachmentsLoaded(_, Err(e)) => {
-            log::error!("Pop-out attachments load failed: {e}");
+            eprintln!("Pop-out attachments load failed: {e}");
             Task::none()
         }
         MessageViewMessage::RawSourceLoaded(Ok(source)) => {
             state.raw_source = Some(source);
             Task::none()
         }
-        MessageViewMessage::RawSourceLoaded(Err(ref e)) => {
-            log::error!("Pop-out raw source load failed: {e}");
+        MessageViewMessage::RawSourceLoaded(Err(_)) => {
             state.raw_source = Some("(failed to load source)".to_string());
             Task::none()
         }
@@ -271,7 +220,6 @@ impl App {
         else {
             return Task::none();
         };
-        log::info!("Opening message view pop-out for message {}", msg.id);
 
         let generation = self.next_pop_out_generation();
         let state = MessageViewState::from_thread_message(&msg, generation);
@@ -319,7 +267,6 @@ impl App {
         mut state: ComposeState,
         mode: ComposeMode,
     ) -> Task<Message> {
-        log::info!("Opening compose window: {mode:?}");
         state.mode = mode;
         state.subject = UndoableText::with_initial(&state.mode.prefixed_subject());
 
@@ -331,15 +278,11 @@ impl App {
         };
 
         let (window_id, open_task) = iced::window::open(settings);
-
-        // Resolve signature for the compose window
-        let sig_task = self.resolve_signature_for_compose(window_id, &state);
-
         self.pop_out_windows
             .insert(window_id, PopOutWindow::Compose(state));
         self.composer_is_open = true;
 
-        Task::batch([open_task.discard(), sig_task])
+        open_task.discard()
     }
 
     /// Open a compose window from a message view's Reply/ReplyAll/Forward.
@@ -438,123 +381,13 @@ impl App {
     }
 }
 
-<<<<<<< HEAD
-// ── Compose: signature resolution ───────────────────────
-
-impl App {
-    /// Resolve the appropriate signature for a compose window and dispatch
-    /// a `SignatureResolved` message with the result.
-    fn resolve_signature_for_compose(
-        &self,
-        window_id: iced::window::Id,
-        state: &ComposeState,
-    ) -> Task<Message> {
-        let Some(ref from) = state.from_account else {
-            return Task::none();
-        };
-
-        let db = Arc::clone(&self.db);
-        let account_id = from.id.clone();
-        let from_email = Some(from.email.clone());
-        let is_reply = state.mode.is_reply();
-
-        Task::perform(
-            async move {
-                resolve_signature_async(
-                    db, account_id, from_email, is_reply,
-                )
-                .await
-            },
-            move |result| {
-                Message::PopOut(
-                    window_id,
-                    PopOutMessage::Compose(
-                        ComposeMessage::SignatureResolved(result),
-                    ),
-                )
-            },
-        )
-    }
-}
-
-/// Resolve signature from the database (runs on background thread).
-async fn resolve_signature_async(
-    db: Arc<Db>,
-    account_id: String,
-    from_email: Option<String>,
-    is_reply: bool,
-) -> Option<(String, String, Option<String>)> {
-    let result = db
-        .with_conn(move |conn| {
-            // Resolution order:
-            // 1. Alias-level signature override
-            // 2. Reply-default or default signature
-            let sig_from_alias = from_email.as_ref().and_then(|email| {
-                conn.query_row(
-                    "SELECT signature_id FROM send_as_aliases \
-                     WHERE account_id = ?1 AND email = ?2 \
-                     AND signature_id IS NOT NULL",
-                    params![account_id, email],
-                    |row| row.get::<_, String>(0),
-                )
-                .ok()
-            });
-
-            let sig_id = if let Some(ref alias_id) = sig_from_alias {
-                alias_id.clone()
-            } else {
-                let sql = if is_reply {
-                    "SELECT id FROM signatures \
-                     WHERE account_id = ?1 \
-                     AND (is_reply_default = 1 OR is_default = 1) \
-                     ORDER BY is_reply_default DESC LIMIT 1"
-                } else {
-                    "SELECT id FROM signatures \
-                     WHERE account_id = ?1 AND is_default = 1 LIMIT 1"
-                };
-                match conn.query_row(sql, params![account_id], |row| {
-                    row.get::<_, String>(0)
-                }) {
-                    Ok(id) => id,
-                    Err(_) => return Ok(None),
-                }
-            };
-
-            // Fetch the full signature
-            let result = conn.query_row(
-                "SELECT id, body_html FROM signatures WHERE id = ?1",
-                params![sig_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                    ))
-                },
-            );
-            match result {
-                Ok((id, html)) => Ok(Some((html, id))),
-                Err(_) => Ok(None),
-            }
-        })
-        .await
-        .ok()
-        .flatten();
-
-    result.map(|(html, id)| (html, id, None))
-}
-
-=======
->>>>>>> worktree-agent-ab570ae8
 // ── Compose: send path ──────────────────────────────────
 
 impl App {
     /// Handle the Send action from a compose window.
-<<<<<<< HEAD
-=======
     ///
     /// Validates recipients, saves a finalized draft, and dispatches
     /// `SendFinalized` on completion.
->>>>>>> worktree-agent-ab570ae8
     fn handle_compose_send(
         &mut self,
         window_id: iced::window::Id,
@@ -565,14 +398,10 @@ impl App {
             return Task::none();
         };
 
-<<<<<<< HEAD
-        // Validate recipients
-=======
         if state.sending {
             return Task::none();
         }
 
->>>>>>> worktree-agent-ab570ae8
         let has_recipients = !state.to.tokens.is_empty()
             || !state.cc.tokens.is_empty()
             || !state.bcc.tokens.is_empty();
@@ -583,79 +412,6 @@ impl App {
         }
 
         state.status = Some("Preparing message...".to_string());
-<<<<<<< HEAD
-
-        // Extract what we need from state before the async boundary
-        let db = Arc::clone(&self.db);
-        let draft_id = state.draft_id.clone();
-        let account_id = state
-            .from_account
-            .as_ref()
-            .map(|a| a.id.clone())
-            .unwrap_or_default();
-        let from_email = state
-            .from_account
-            .as_ref()
-            .map(|a| a.email.clone());
-        let to_csv = tokens_to_csv(&state.to);
-        let cc_csv = tokens_to_csv(&state.cc);
-        let bcc_csv = tokens_to_csv(&state.bcc);
-        let subject = if state.subject.is_empty() {
-            None
-        } else {
-            Some(state.subject.clone())
-        };
-        let body_html = state.editor.to_html();
-        let sig_id = state.active_signature_id.clone();
-        let reply_msg_id = state.reply_message_id.clone();
-        let thread_id = state.reply_thread_id.clone();
-
-        // Finalize the HTML (wrap signature in identifying div)
-        let finalized_html = ratatoskr_core::db::queries_extra::finalize_compose_html(&body_html);
-
-        Task::perform(
-            async move {
-                db.with_write_conn(move |conn| {
-                    conn.execute(
-                        "INSERT INTO local_drafts \
-                         (id, account_id, to_addresses, cc_addresses, \
-                          bcc_addresses, subject, body_html, \
-                          reply_to_message_id, thread_id, from_email, \
-                          signature_id, updated_at, sync_status) \
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, \
-                                 ?10, ?11, unixepoch(), 'finalized') \
-                         ON CONFLICT(id) DO UPDATE SET \
-                           to_addresses = ?3, cc_addresses = ?4, \
-                           bcc_addresses = ?5, subject = ?6, \
-                           body_html = ?7, reply_to_message_id = ?8, \
-                           thread_id = ?9, from_email = ?10, \
-                           signature_id = ?11, \
-                           updated_at = unixepoch(), \
-                           sync_status = 'finalized'",
-                        params![
-                            draft_id,
-                            account_id,
-                            to_csv,
-                            cc_csv,
-                            bcc_csv,
-                            subject,
-                            finalized_html,
-                            reply_msg_id,
-                            thread_id,
-                            from_email,
-                            sig_id,
-                        ],
-                    )
-                    .map_err(|e| e.to_string())?;
-                    Ok(())
-                })
-                .await
-            },
-            move |result| {
-                Message::PopOut(
-                    window_id,
-                    PopOutMessage::Compose(ComposeMessage::SendFinalized(result)),
-=======
         state.sending = true;
 
         let db = Arc::clone(&self.db);
@@ -669,104 +425,23 @@ impl App {
                     PopOutMessage::Compose(
                         ComposeMessage::SendFinalized(result),
                     ),
->>>>>>> worktree-agent-ab570ae8
                 )
             },
         )
     }
-<<<<<<< HEAD
-}
-
-// ── Compose: draft auto-save ────────────────────────────
-
-impl App {
-    /// Save the current compose state as a local draft.
-    fn save_compose_draft(
-=======
 
     /// After the draft is finalized in the DB, build the MIME message
     /// and dispatch the actual provider send.
     fn dispatch_send(
->>>>>>> worktree-agent-ab570ae8
         &mut self,
         window_id: iced::window::Id,
     ) -> Task<Message> {
         let Some(PopOutWindow::Compose(state)) =
-<<<<<<< HEAD
-            self.pop_out_windows.get(&window_id)
-=======
             self.pop_out_windows.get_mut(&window_id)
->>>>>>> worktree-agent-ab570ae8
         else {
             return Task::none();
         };
 
-<<<<<<< HEAD
-        if !state.draft_dirty {
-            return Task::none();
-        }
-
-        let db = Arc::clone(&self.db);
-        let draft_id = state.draft_id.clone();
-        let account_id = state
-            .from_account
-            .as_ref()
-            .map(|a| a.id.clone())
-            .unwrap_or_default();
-        let from_email = state
-            .from_account
-            .as_ref()
-            .map(|a| a.email.clone());
-        let to_csv = tokens_to_csv(&state.to);
-        let cc_csv = tokens_to_csv(&state.cc);
-        let bcc_csv = tokens_to_csv(&state.bcc);
-        let subject = if state.subject.is_empty() {
-            None
-        } else {
-            Some(state.subject.clone())
-        };
-        let body_html = state.editor.to_html();
-        let sig_id = state.active_signature_id.clone();
-        let reply_msg_id = state.reply_message_id.clone();
-        let thread_id = state.reply_thread_id.clone();
-
-        Task::perform(
-            async move {
-                db.with_write_conn(move |conn| {
-                    conn.execute(
-                        "INSERT INTO local_drafts \
-                         (id, account_id, to_addresses, cc_addresses, \
-                          bcc_addresses, subject, body_html, \
-                          reply_to_message_id, thread_id, from_email, \
-                          signature_id, updated_at, sync_status) \
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, \
-                                 ?10, ?11, unixepoch(), 'pending') \
-                         ON CONFLICT(id) DO UPDATE SET \
-                           to_addresses = ?3, cc_addresses = ?4, \
-                           bcc_addresses = ?5, subject = ?6, \
-                           body_html = ?7, reply_to_message_id = ?8, \
-                           thread_id = ?9, from_email = ?10, \
-                           signature_id = ?11, \
-                           updated_at = unixepoch(), \
-                           sync_status = 'pending'",
-                        params![
-                            draft_id,
-                            account_id,
-                            to_csv,
-                            cc_csv,
-                            bcc_csv,
-                            subject,
-                            body_html,
-                            reply_msg_id,
-                            thread_id,
-                            from_email,
-                            sig_id,
-                        ],
-                    )
-                    .map_err(|e| e.to_string())?;
-                    Ok(())
-                })
-=======
         state.status = Some("Sending...".to_string());
 
         let send_req = build_send_request(state);
@@ -805,68 +480,18 @@ impl App {
                     db, draft_id, account_id, raw_b64,
                     thread_id, provider,
                 )
->>>>>>> worktree-agent-ab570ae8
                 .await
             },
             move |result| {
                 Message::PopOut(
                     window_id,
-<<<<<<< HEAD
-                    PopOutMessage::Compose(ComposeMessage::DraftSaved(result)),
-=======
                     PopOutMessage::Compose(
                         ComposeMessage::SendCompleted(result),
                     ),
->>>>>>> worktree-agent-ab570ae8
                 )
             },
         )
     }
-<<<<<<< HEAD
-}
-
-// ── Compose: attachment handling ────────────────────────
-
-impl App {
-    /// Handle the AttachFiles action — stub file picker.
-    fn handle_compose_attach_files(
-        &self,
-        window_id: iced::window::Id,
-    ) -> Task<Message> {
-        // rfd is not yet a dependency. Use a stub that reads from
-        // a well-known location or simply reports that file picking
-        // is not yet available. When rfd is added, this will use
-        // AsyncFileDialog.
-        Task::perform(
-            async move {
-                // Stub: in a real implementation, this would open a native
-                // file picker dialog via rfd::AsyncFileDialog.
-                // For now, return an empty list.
-                Vec::<(String, std::path::PathBuf, u64)>::new()
-            },
-            move |files| {
-                if files.is_empty() {
-                    // No files selected (or stub)
-                    Message::PopOut(
-                        window_id,
-                        PopOutMessage::Compose(ComposeMessage::FilesAttached(
-                            Vec::new(),
-                        )),
-                    )
-                } else {
-                    Message::PopOut(
-                        window_id,
-                        PopOutMessage::Compose(ComposeMessage::FilesAttached(
-                            files,
-                        )),
-                    )
-                }
-            },
-        )
-    }
-}
-
-=======
 
     /// Handle the result of an async send: close window on success,
     /// show error on failure.
@@ -927,7 +552,7 @@ fn extract_draft_fields(state: &ComposeState) -> DraftFields {
         to_csv: tokens_to_csv(&state.to),
         cc_csv: tokens_to_csv(&state.cc),
         bcc_csv: tokens_to_csv(&state.bcc),
-        subject: if state.subject.is_empty() { None } else { Some(state.subject.clone()) },
+        subject: if state.subject.text().is_empty() { None } else { Some(state.subject.text().to_string()) },
         body_html: plain_text_to_html(&body_text),
         sig_id: state.active_signature_id.clone(),
         reply_msg_id: state.reply_message_id.clone(),
@@ -992,10 +617,10 @@ fn build_send_request(
     let bcc: Vec<String> =
         state.bcc.tokens.iter().map(|t| t.email.clone()).collect();
 
-    let subject = if state.subject.is_empty() {
+    let subject = if state.subject.text().is_empty() {
         None
     } else {
-        Some(state.subject.clone())
+        Some(state.subject.text().to_string())
     };
 
     let body_text = state.body.text();
@@ -1115,24 +740,7 @@ fn plain_text_to_html(text: &str) -> String {
     paragraphs.join("\n")
 }
 
->>>>>>> worktree-agent-ab570ae8
 // ── Async data loads ────────────────────────────────────
-//
-// Pop-out windows use `Db::load_message_body()` and
-// `Db::load_message_attachments()` directly (app-layer raw SQL)
-// rather than `get_thread_detail()` from core. This is intentional:
-//
-// - Pop-out windows load a SINGLE message by ID, while
-//   `get_thread_detail()` loads an entire thread's messages.
-// - Pop-out windows need body HTML (for rendering modes) which
-//   `get_thread_detail()` also provides, but the thread-level
-//   overhead (labels, collapsed summaries, all messages) is wasted
-//   for a single-message view.
-// - Raw source loading (`load_raw_source`) has no core equivalent
-//   and is only needed for the pop-out Source rendering mode.
-//
-// If core gains a `get_single_message_detail()` function in the
-// future, these loads should migrate to it.
 
 impl App {
     /// Dispatch body + attachment loads for a message view window.
@@ -1256,6 +864,53 @@ impl App {
     fn next_pop_out_generation(&mut self) -> u64 {
         self.pop_out_generation += 1;
         self.pop_out_generation
+    }
+}
+
+// ── Draft auto-save ─────────────────────────────────────
+
+impl App {
+    /// Returns `true` if any open compose window has unsaved changes.
+    pub(crate) fn has_dirty_compose_drafts(&self) -> bool {
+        self.pop_out_windows.values().any(|w| {
+            matches!(w, PopOutWindow::Compose(state) if state.draft_dirty)
+        })
+    }
+
+    /// Auto-save all dirty compose drafts to the local_drafts table.
+    pub(crate) fn auto_save_compose_drafts(&mut self) -> Task<Message> {
+        let mut tasks = Vec::new();
+
+        for (&window_id, window) in &mut self.pop_out_windows {
+            let PopOutWindow::Compose(state) = window else {
+                continue;
+            };
+            if !state.draft_dirty {
+                continue;
+            }
+            state.draft_dirty = false;
+
+            let db = Arc::clone(&self.db);
+            let fields = extract_draft_fields(state);
+
+            tasks.push(Task::perform(
+                async move {
+                    save_finalized_draft(db, fields).await
+                },
+                move |result| {
+                    Message::PopOut(
+                        window_id,
+                        PopOutMessage::Compose(ComposeMessage::DraftSaved(result)),
+                    )
+                },
+            ));
+        }
+
+        if tasks.is_empty() {
+            Task::none()
+        } else {
+            Task::batch(tasks)
+        }
     }
 }
 

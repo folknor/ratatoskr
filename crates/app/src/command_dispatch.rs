@@ -143,10 +143,10 @@ pub fn build_context(app: &App) -> CommandContext {
     let (active_account_id, provider_kind) = active_account_info(app);
     let thread_state = selected_thread_state(app);
 
-    let search_query = if app.search_query.trim().is_empty() {
+    let search_query = if app.search_query.text().trim().is_empty() {
         None
     } else {
-        Some(app.search_query.clone())
+        Some(app.search_query.text().to_string())
     };
 
     CommandContext {
