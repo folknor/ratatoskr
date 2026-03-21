@@ -8,7 +8,8 @@ use crate::{App, Message, load_accounts};
 impl App {
     pub(crate) fn handle_add_account_event(&mut self, event: AddAccountEvent) -> Task<Message> {
         match event {
-            AddAccountEvent::AccountAdded(_account_id) => {
+            AddAccountEvent::AccountAdded(ref _account_id) => {
+                log::info!("Account added successfully");
                 self.add_account_wizard = None;
                 self.no_accounts = false;
                 let db = Arc::clone(&self.db);

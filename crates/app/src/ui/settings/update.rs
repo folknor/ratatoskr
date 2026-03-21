@@ -487,13 +487,13 @@ impl Settings {
                 self.contacts = contacts;
             }
             SettingsMessage::ContactsLoaded(Err(e)) => {
-                eprintln!("Failed to load contacts: {e}");
+                log::error!("Failed to load contacts: {e}");
             }
             SettingsMessage::GroupsLoaded(Ok(groups)) => {
                 self.groups = groups;
             }
             SettingsMessage::GroupsLoaded(Err(e)) => {
-                eprintln!("Failed to load groups: {e}");
+                log::error!("Failed to load groups: {e}");
             }
             SettingsMessage::GroupMembersLoaded(group_id, Ok(members)) => {
                 if let Some(ref mut editor) = self.group_editor {
@@ -503,7 +503,7 @@ impl Settings {
                 }
             }
             SettingsMessage::GroupMembersLoaded(_, Err(e)) => {
-                eprintln!("Failed to load group members: {e}");
+                log::error!("Failed to load group members: {e}");
             }
             SettingsMessage::ContactClick(id) => {
                 self.open_contact_editor(&id);

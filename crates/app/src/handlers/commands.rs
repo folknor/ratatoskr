@@ -6,6 +6,7 @@ use ratatoskr_command_palette::{CommandArgs, CommandId, OptionItem};
 
 impl App {
     pub(crate) fn handle_execute_command(&mut self, id: CommandId) -> Task<Message> {
+        log::debug!("Executing command: {id:?}");
         self.registry.usage.record_usage(id);
         match command_dispatch::dispatch_command(id, self) {
             Some(msg) => self.update(msg),
@@ -47,6 +48,7 @@ impl App {
         id: CommandId,
         args: CommandArgs,
     ) -> Task<Message> {
+        log::debug!("Executing parameterized command: {id:?}");
         self.registry.usage.record_usage(id);
         match command_dispatch::dispatch_parameterized(id, args) {
             Some(msg) => self.update(msg),

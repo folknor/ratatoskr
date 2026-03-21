@@ -11,6 +11,7 @@ impl App {
     pub(crate) fn handle_palette(&mut self, msg: PaletteMessage) -> Task<Message> {
         match msg {
             PaletteMessage::Open => {
+                log::debug!("Command palette opened");
                 // Don't open palette when settings overlay is showing —
                 // the palette can't render there, creating a hidden-modal state.
                 if self.show_settings {
@@ -35,6 +36,7 @@ impl App {
                         "palette-input".to_string(),
                     );
                 }
+                log::debug!("Command palette closed");
                 self.palette.close();
                 Task::none()
             }
@@ -219,6 +221,7 @@ impl App {
                 self.palette.selected_index = 0;
             }
             Err(msg) => {
+                log::error!("Palette options load error: {msg}");
                 self.palette.option_items.clear();
                 self.palette.option_matches.clear();
                 self.status = format!("Palette error: {msg}");

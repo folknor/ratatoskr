@@ -175,7 +175,7 @@ fn handle_message_view_update(
             Task::none()
         }
         MessageViewMessage::BodyLoaded(_, Err(e)) => {
-            eprintln!("Pop-out body load failed: {e}");
+            log::error!("Pop-out body load failed: {e}");
             state.error_banner = Some(
                 "This message is no longer available. It may have been \
                  deleted or moved."
@@ -191,14 +191,15 @@ fn handle_message_view_update(
             Task::none()
         }
         MessageViewMessage::AttachmentsLoaded(_, Err(e)) => {
-            eprintln!("Pop-out attachments load failed: {e}");
+            log::error!("Pop-out attachments load failed: {e}");
             Task::none()
         }
         MessageViewMessage::RawSourceLoaded(Ok(source)) => {
             state.raw_source = Some(source);
             Task::none()
         }
-        MessageViewMessage::RawSourceLoaded(Err(_)) => {
+        MessageViewMessage::RawSourceLoaded(Err(ref e)) => {
+            log::error!("Pop-out raw source load failed: {e}");
             state.raw_source = Some("(failed to load source)".to_string());
             Task::none()
         }
@@ -242,6 +243,7 @@ impl App {
         else {
             return Task::none();
         };
+        log::info!("Opening message view pop-out for message {}", msg.id);
 
         let generation = self.next_pop_out_generation();
         let state = MessageViewState::from_thread_message(&msg, generation);
@@ -289,6 +291,7 @@ impl App {
         mut state: ComposeState,
         mode: ComposeMode,
     ) -> Task<Message> {
+        log::info!("Opening compose window: {mode:?}");
         state.mode = mode;
         state.subject = state.mode.prefixed_subject();
 

@@ -54,7 +54,9 @@ pub fn handle_save_signature(
         },
         |result| {
             if let Err(ref e) = result {
-                eprintln!("Failed to save signature: {e}");
+                log::error!("Failed to save signature: {e}");
+            } else {
+                log::info!("Signature saved");
             }
             super::SignatureResult::Saved(result)
         },
@@ -74,7 +76,9 @@ pub fn handle_delete_signature(
         },
         |result| {
             if let Err(ref e) = result {
-                eprintln!("Failed to delete signature: {e}");
+                log::error!("Failed to delete signature: {e}");
+            } else {
+                log::info!("Signature deleted");
             }
             super::SignatureResult::Deleted(result)
         },
@@ -105,7 +109,12 @@ pub fn load_signatures_async(
                 .collect();
             Ok(entries)
         },
-        |result| super::SignatureResult::Loaded(result),
+        |result| {
+            if let Ok(ref sigs) = result {
+                log::info!("Signatures loaded: {} entries", sigs.len());
+            }
+            super::SignatureResult::Loaded(result)
+        },
     )
 }
 

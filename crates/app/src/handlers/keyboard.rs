@@ -85,6 +85,7 @@ impl App {
 
         // 4. If we're in pending chord state, resolve the sequence
         if let Some(pending) = self.pending_chord.take() {
+            log::debug!("Resolving chord sequence: {:?} + {:?}", pending.first, chord);
             if let Some(id) = self.binding_table.resolve_sequence(
                 &pending.first, &chord,
             ) {
