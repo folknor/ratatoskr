@@ -162,6 +162,16 @@ pub fn color_dot<'a, M: 'a>(color: Color) -> Element<'a, M> {
         .into()
 }
 
+/// A color dot at a custom size.
+pub fn color_dot_sized<'a, M: 'a>(color: Color, size: f32) -> Element<'a, M> {
+    let dot = Canvas::new(DotPainter { color })
+        .width(size)
+        .height(size);
+    container(dot)
+        .center_y(Length::Shrink)
+        .into()
+}
+
 // ── Badges ──────────────────────────────────────────────
 
 pub fn count_badge<'a, M: 'a>(count: i64) -> Element<'a, M> {

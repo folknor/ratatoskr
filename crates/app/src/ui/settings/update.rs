@@ -40,6 +40,43 @@ impl Component for Settings {
             SettingsMessage::AddAccountFromSettings => {
                 return (Task::none(), Some(SettingsEvent::OpenAddAccountWizard));
             }
+            SettingsMessage::AccountCardClicked(id) => {
+                self.open_account_editor(&id);
+                return (Task::none(), None);
+            }
+            SettingsMessage::CloseAccountEditor => {
+                self.editing_account = None;
+                self.overlay = None;
+                self.overlay_anim.go_mut(false, Instant::now());
+                return (Task::none(), None);
+            }
+            SettingsMessage::SaveAccountEditor => {
+                return self.handle_account_editor_save();
+            }
+            SettingsMessage::DeleteAccountRequested(id) => {
+                if let Some(ref mut editor) = self.editing_account {
+                    if editor.account_id == id {
+                        editor.show_delete_confirmation = true;
+                    }
+                }
+                return (Task::none(), None);
+            }
+            SettingsMessage::DeleteAccountConfirmed(id) => {
+                self.editing_account = None;
+                self.overlay = None;
+                self.overlay_anim.go_mut(false, Instant::now());
+                return (Task::none(), Some(SettingsEvent::DeleteAccount(id)));
+            }
+            SettingsMessage::DeleteAccountCancelled => {
+                if let Some(ref mut editor) = self.editing_account {
+                    editor.show_delete_confirmation = false;
+                }
+                return (Task::none(), None);
+            }
+            SettingsMessage::ReauthenticateAccount(_id) => {
+                // TODO: Wire to re-auth flow (Phase 7)
+                return (Task::none(), None);
+            }
             SettingsMessage::SignatureEditorSave => {
                 return self.handle_signature_save();
             }
@@ -241,6 +278,42 @@ impl Settings {
                 }
             }
             SettingsMessage::ListMenu(_, _) => {}
+            SettingsMessage::AccountNameEditorChanged(v) => {
+                if let Some(ref mut editor) = self.editing_account {
+                    editor.account_name = v;
+                    editor.dirty = true;
+                }
+            }
+            SettingsMessage::DisplayNameEditorChanged(v) => {
+                if let Some(ref mut editor) = self.editing_account {
+                    editor.display_name = v;
+                    editor.dirty = true;
+                }
+            }
+            SettingsMessage::AccountColorEditorChanged(idx) => {
+                if let Some(ref mut editor) = self.editing_account {
+                    editor.account_color_index = Some(idx);
+                    editor.dirty = true;
+                }
+            }
+            SettingsMessage::CaldavUrlChanged(v) => {
+                if let Some(ref mut editor) = self.editing_account {
+                    editor.caldav_url = v;
+                    editor.dirty = true;
+                }
+            }
+            SettingsMessage::CaldavUsernameChanged(v) => {
+                if let Some(ref mut editor) = self.editing_account {
+                    editor.caldav_username = v;
+                    editor.dirty = true;
+                }
+            }
+            SettingsMessage::CaldavPasswordChanged(v) => {
+                if let Some(ref mut editor) = self.editing_account {
+                    editor.caldav_password = v;
+                    editor.dirty = true;
+                }
+            }
             SettingsMessage::SignatureEdit(sig_id) => {
                 if let Some(sig) = self.signatures.iter().find(|s| s.id == sig_id) {
                     self.signature_editor = Some(SignatureEditorState {
@@ -301,6 +374,7 @@ impl Settings {
                 self.overlay = None;
                 self.overlay_anim.go_mut(false, Instant::now());
                 self.signature_editor = None;
+                self.editing_account = None;
                 self.contact_editor = None;
                 self.group_editor = None;
             }
@@ -589,6 +663,70 @@ impl Settings {
             "filters" => &mut self.demo_filters,
             _ => &mut self.demo_labels,
         }
+    }
+
+    fn open_account_editor(&mut self, account_id: &str) {
+        let Some(account) = self.managed_accounts.iter().find(|a| a.id == account_id) else {
+            return;
+        };
+        // Resolve current color index from hex
+        let presets = ratatoskr_label_colors::category_colors::all_presets();
+        let color_index = account.account_color.as_deref().and_then(|hex| {
+            presets.iter().position(|(_, bg, _)| *bg == hex)
+        });
+
+        self.editing_account = Some(AccountEditor {
+            account_id: account.id.clone(),
+            account_email: account.email.clone(),
+            account_name: account.account_name.clone().unwrap_or_default(),
+            display_name: account.display_name.clone().unwrap_or_default(),
+            account_color_index: color_index,
+            caldav_url: String::new(),
+            caldav_username: String::new(),
+            caldav_password: String::new(),
+            show_delete_confirmation: false,
+            dirty: false,
+        });
+        self.overlay = Some(SettingsOverlay::AccountEditor);
+        self.overlay_anim.go_mut(true, iced::time::Instant::now());
+    }
+
+    fn handle_account_editor_save(
+        &mut self,
+    ) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
+        let Some(ref editor) = self.editing_account else {
+            return (Task::none(), None);
+        };
+        if !editor.dirty {
+            // Nothing changed — just close
+            self.editing_account = None;
+            self.overlay = None;
+            self.overlay_anim.go_mut(false, iced::time::Instant::now());
+            return (Task::none(), None);
+        }
+
+        let presets = ratatoskr_label_colors::category_colors::all_presets();
+        let color_hex = editor.account_color_index
+            .and_then(|i| presets.get(i))
+            .map(|(_, bg, _)| (*bg).to_string());
+
+        let params = ratatoskr_core::db::queries_extra::UpdateAccountParams {
+            account_name: Some(editor.account_name.clone()),
+            display_name: Some(editor.display_name.clone()),
+            account_color: color_hex,
+            caldav_url: non_empty(editor.caldav_url.trim()),
+            caldav_username: non_empty(editor.caldav_username.trim()),
+            caldav_password: non_empty(editor.caldav_password.trim()),
+        };
+        let account_id = editor.account_id.clone();
+
+        self.editing_account = None;
+        self.overlay = None;
+        self.overlay_anim.go_mut(false, iced::time::Instant::now());
+        (Task::none(), Some(SettingsEvent::SaveAccountChanges {
+            account_id,
+            params,
+        }))
     }
 }
 

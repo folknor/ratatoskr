@@ -81,6 +81,19 @@ pub enum SettingsMessage {
     OverlayAnimTick(iced::time::Instant),
     // Accounts tab
     AddAccountFromSettings,
+    AccountCardClicked(String),
+    CloseAccountEditor,
+    SaveAccountEditor,
+    AccountNameEditorChanged(String),
+    DisplayNameEditorChanged(String),
+    AccountColorEditorChanged(usize),
+    CaldavUrlChanged(String),
+    CaldavUsernameChanged(String),
+    CaldavPasswordChanged(String),
+    ReauthenticateAccount(String),
+    DeleteAccountRequested(String),
+    DeleteAccountConfirmed(String),
+    DeleteAccountCancelled,
     // Signatures
     SignatureEdit(String),                     // signature_id — open editor overlay
     SignatureCreate(String),                   // account_id — open editor for new sig
@@ -150,6 +163,13 @@ pub enum SettingsEvent {
     SaveGroup(crate::db::GroupEntry, Vec<String>),
     /// Request the App to delete a group by ID.
     DeleteGroup(String),
+    /// Request the App to delete an account.
+    DeleteAccount(String),
+    /// Request the App to save account editor changes.
+    SaveAccountChanges {
+        account_id: String,
+        params: ratatoskr_core::db::queries_extra::UpdateAccountParams,
+    },
     /// Request the App to load contacts (with filter).
     LoadContacts(String),
     /// Request the App to load groups (with filter).
@@ -163,6 +183,7 @@ pub enum SettingsEvent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SettingsOverlay {
     CreateFilter,
+    AccountEditor,
     EditSignature {
         /// None for new signature, Some for editing existing.
         signature_id: Option<String>,
@@ -380,6 +401,7 @@ pub struct Settings {
     pub demo_filters: Vec<EditableItem>,
     // Accounts tab
     pub managed_accounts: Vec<ManagedAccount>,
+    pub editing_account: Option<AccountEditor>,
     // Signatures
     pub signatures: Vec<SignatureEntry>,
     pub signature_editor: Option<SignatureEditorState>,
@@ -405,6 +427,59 @@ pub struct ManagedAccount {
     pub account_color: Option<String>,
     pub display_name: Option<String>,
     pub last_sync_at: Option<i64>,
+    pub health: AccountHealth,
+}
+
+/// Account health status for the settings card indicator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountHealth {
+    Healthy,
+    Warning,
+    Error,
+    Disabled,
+}
+
+impl Default for AccountHealth {
+    fn default() -> Self {
+        Self::Healthy
+    }
+}
+
+/// Compute account health from token expiry and sync state.
+pub fn compute_health(
+    last_sync_at: Option<i64>,
+    token_expires_at: Option<i64>,
+    is_active: bool,
+) -> AccountHealth {
+    if !is_active {
+        return AccountHealth::Disabled;
+    }
+    let now = chrono::Utc::now().timestamp();
+    if let Some(expires) = token_expires_at {
+        let no_recent_sync = last_sync_at.map_or(true, |ls| now - ls > 3600);
+        if expires < now && no_recent_sync {
+            return AccountHealth::Error;
+        }
+        if expires < now + 86400 {
+            return AccountHealth::Warning;
+        }
+    }
+    AccountHealth::Healthy
+}
+
+/// The slide-in editor state for a single account.
+#[derive(Debug, Clone)]
+pub struct AccountEditor {
+    pub account_id: String,
+    pub account_email: String,
+    pub account_name: String,
+    pub display_name: String,
+    pub account_color_index: Option<usize>,
+    pub caldav_url: String,
+    pub caldav_username: String,
+    pub caldav_password: String,
+    pub show_delete_confirmation: bool,
+    pub dirty: bool,
 }
 
 /// State for an active drag operation.
@@ -496,6 +571,7 @@ impl Default for Settings {
                 EditableItem { label: "Star from VIPs".into(), enabled: Some(true) },
             ],
             managed_accounts: Vec::new(),
+            editing_account: None,
             signatures: Vec::new(),
             signature_editor: None,
             confirm_delete_signature: None,
