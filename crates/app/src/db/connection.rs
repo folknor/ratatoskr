@@ -284,7 +284,8 @@ impl Db {
         self.with_conn(move |conn| {
             let mut stmt = conn.prepare(
                 "SELECT id, thread_id, account_id, from_name, from_address,
-                        to_addresses, date, subject, snippet, is_read, is_starred
+                        to_addresses, cc_addresses, date, subject, snippet,
+                        is_read, is_starred
                  FROM messages
                  WHERE account_id = ?1 AND thread_id = ?2
                  ORDER BY date DESC"
@@ -298,6 +299,7 @@ impl Db {
                     from_name: row.get("from_name")?,
                     from_address: row.get("from_address")?,
                     to_addresses: row.get("to_addresses")?,
+                    cc_addresses: row.get("cc_addresses")?,
                     date: row.get("date")?,
                     subject: row.get("subject")?,
                     snippet: row.get("snippet")?,
@@ -400,6 +402,61 @@ impl Db {
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())
+        })
+        .await
+    }
+
+    /// Load raw email source for a message (headers + body).
+    /// Synthesizes from available fields as a prototype — full implementation
+    /// would query the raw message from the body store or provider cache.
+    pub async fn load_raw_source(
+        &self,
+        account_id: String,
+        message_id: String,
+    ) -> Result<String, String> {
+        self.with_conn(move |conn| {
+            let result = conn.query_row(
+                "SELECT from_address, to_addresses, cc_addresses,
+                        subject, date, snippet
+                 FROM messages
+                 WHERE account_id = ?1 AND id = ?2",
+                params![account_id, message_id],
+                |row| {
+                    let from: Option<String> = row.get("from_address")?;
+                    let to: Option<String> = row.get("to_addresses")?;
+                    let cc: Option<String> = row.get("cc_addresses")?;
+                    let subject: Option<String> = row.get("subject")?;
+                    let date: Option<i64> = row.get("date")?;
+                    let snippet: Option<String> = row.get("snippet")?;
+                    Ok((from, to, cc, subject, date, snippet))
+                },
+            );
+            match result {
+                Ok((from, to, cc, subject, date, snippet)) => {
+                    let mut source = String::new();
+                    if let Some(f) = from {
+                        source.push_str(&format!("From: {f}\r\n"));
+                    }
+                    if let Some(t) = to {
+                        source.push_str(&format!("To: {t}\r\n"));
+                    }
+                    if let Some(c) = cc {
+                        source.push_str(&format!("Cc: {c}\r\n"));
+                    }
+                    if let Some(s) = subject {
+                        source.push_str(&format!("Subject: {s}\r\n"));
+                    }
+                    if let Some(d) = date {
+                        source.push_str(&format!("Date: {d}\r\n"));
+                    }
+                    source.push_str("\r\n");
+                    if let Some(body) = snippet {
+                        source.push_str(&body);
+                    }
+                    Ok(source)
+                }
+                Err(e) => Err(e.to_string()),
+            }
         })
         .await
     }

@@ -28,7 +28,8 @@ impl ComposeMode {
     pub fn prefixed_subject(&self) -> String {
         match self {
             Self::New => String::new(),
-            Self::Reply { original_subject } | Self::ReplyAll { original_subject } => {
+            Self::Reply { original_subject }
+            | Self::ReplyAll { original_subject } => {
                 if original_subject.starts_with("Re: ") {
                     original_subject.clone()
                 } else {
@@ -79,6 +80,16 @@ pub enum ComposeMessage {
     BccTokenInput(TokenInputMessage),
     Send,
     Discard,
+    /// Toggle discard confirmation dialog.
+    ToggleDiscardConfirm,
+    /// Formatting toolbar actions (stubs for V1).
+    FormatBold,
+    FormatItalic,
+    FormatUnderline,
+    FormatStrikethrough,
+    FormatList,
+    FormatBlockquote,
+    FormatLink,
 }
 
 // ── State ───────────────────────────────────────────────
@@ -102,7 +113,7 @@ pub struct ComposeState {
     // Subject
     pub subject: String,
 
-    // Body (plain text for V1)
+    // Body (plain text for V1 — rich text editor in a future iteration)
     pub body: iced::widget::text_editor::Content,
 
     // Compose mode
@@ -114,6 +125,9 @@ pub struct ComposeState {
 
     // Status message (e.g. "Send not yet wired")
     pub status: Option<String>,
+
+    // Discard confirmation
+    pub discard_confirm_open: bool,
 
     // Window geometry
     pub width: f32,
@@ -141,6 +155,7 @@ impl ComposeState {
             reply_thread_id: None,
             reply_message_id: None,
             status: None,
+            discard_confirm_open: false,
             width: COMPOSE_DEFAULT_WIDTH,
             height: COMPOSE_DEFAULT_HEIGHT,
         }
@@ -182,7 +197,9 @@ impl ComposeState {
         // Add Cc recipients for ReplyAll
         if let ComposeMode::ReplyAll { .. } = &state.mode {
             if let Some(cc_str) = cc_emails {
-                for addr in cc_str.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                for addr in
+                    cc_str.split(',').map(str::trim).filter(|s| !s.is_empty())
+                {
                     let id = state.cc.next_token_id();
                     state.cc.tokens.push(token_input::Token {
                         id,
@@ -198,15 +215,17 @@ impl ComposeState {
             }
         }
 
-        // Set quoted body
+        // Set quoted body with attribution line
         if let Some(body) = quoted_body {
+            let attribution = build_attribution(to_name, to_email);
             let quoted = body
                 .lines()
                 .map(|line| format!("> {line}"))
                 .collect::<Vec<_>>()
                 .join("\n");
-            let full_body = format!("\n\n{quoted}");
-            state.body = iced::widget::text_editor::Content::with_text(&full_body);
+            let full_body = format!("\n\n{attribution}\n{quoted}");
+            state.body =
+                iced::widget::text_editor::Content::with_text(&full_body);
         }
 
         state.reply_thread_id = thread_id.map(String::from);
@@ -222,6 +241,15 @@ impl ComposeState {
             _ => self.mode.prefixed_subject(),
         }
     }
+
+    /// Returns true if the compose body has user content beyond the
+    /// initial quoted text / signature.
+    fn has_user_content(&self) -> bool {
+        // Simple heuristic: non-empty body text
+        let body_text = self.body.text();
+        let trimmed = body_text.trim();
+        !trimmed.is_empty() && !trimmed.starts_with('>')
+    }
 }
 
 // ── Update ──────────────────────────────────────────────
@@ -236,13 +264,25 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
         ComposeMessage::ShowCc => state.show_cc = true,
         ComposeMessage::ShowBcc => state.show_bcc = true,
         ComposeMessage::ToTokenInput(msg) => {
-            handle_token_input_message(&mut state.to, msg, &mut state.selected_to_token);
+            handle_token_input_message(
+                &mut state.to,
+                msg,
+                &mut state.selected_to_token,
+            );
         }
         ComposeMessage::CcTokenInput(msg) => {
-            handle_token_input_message(&mut state.cc, msg, &mut state.selected_cc_token);
+            handle_token_input_message(
+                &mut state.cc,
+                msg,
+                &mut state.selected_cc_token,
+            );
         }
         ComposeMessage::BccTokenInput(msg) => {
-            handle_token_input_message(&mut state.bcc, msg, &mut state.selected_bcc_token);
+            handle_token_input_message(
+                &mut state.bcc,
+                msg,
+                &mut state.selected_bcc_token,
+            );
         }
         ComposeMessage::Send => {
             // V1: validate and show stub status
@@ -250,13 +290,27 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                 || !state.cc.tokens.is_empty()
                 || !state.bcc.tokens.is_empty();
             if !has_recipients {
-                state.status = Some("Add at least one recipient".to_string());
+                state.status =
+                    Some("Add at least one recipient".to_string());
                 return;
             }
             state.status = Some("Send not yet wired".to_string());
         }
         ComposeMessage::Discard => {
             // Handled by the caller (close window)
+        }
+        ComposeMessage::ToggleDiscardConfirm => {
+            state.discard_confirm_open = !state.discard_confirm_open;
+        }
+        // Formatting toolbar stubs
+        ComposeMessage::FormatBold
+        | ComposeMessage::FormatItalic
+        | ComposeMessage::FormatUnderline
+        | ComposeMessage::FormatStrikethrough
+        | ComposeMessage::FormatList
+        | ComposeMessage::FormatBlockquote
+        | ComposeMessage::FormatLink => {
+            // V1 stub — rich text editor not yet wired
         }
     }
 }
@@ -297,7 +351,9 @@ fn handle_token_input_message(
         TokenInputMessage::Focused | TokenInputMessage::Blurred => {}
         TokenInputMessage::Paste(content) => {
             // Split pasted text by commas/semicolons and tokenize
-            for part in content.split([',', ';', '\n']) {
+            for part in
+                content.split([',', ';', '\n'])
+            {
                 let trimmed = part.trim();
                 if !trimmed.is_empty() {
                     let id = value.next_token_id();
@@ -322,11 +378,25 @@ pub fn view_compose_window<'a>(
     state: &'a ComposeState,
 ) -> Element<'a, Message> {
     let header = compose_header(window_id, state);
+    let toolbar = formatting_toolbar(window_id);
     let body = compose_body(window_id, state);
     let footer = compose_footer(window_id, state);
 
-    let content = column![header, widgets::divider(), body, widgets::divider(), footer]
-        .spacing(SPACE_0);
+    let mut content = column![
+        header,
+        widgets::divider(),
+        toolbar,
+        widgets::divider(),
+        body,
+        widgets::divider(),
+        footer
+    ]
+    .spacing(SPACE_0);
+
+    // Discard confirmation overlay
+    if state.discard_confirm_open {
+        content = content.push(discard_confirmation(window_id));
+    }
 
     container(content)
         .width(Length::Fill)
@@ -463,7 +533,10 @@ fn build_to_row<'a>(
     state: &'a ComposeState,
 ) -> Element<'a, Message> {
     build_recipient_row_inner(
-        "To", &state.to, state.selected_to_token, window_id,
+        "To",
+        &state.to,
+        state.selected_to_token,
+        window_id,
         "Add recipients...",
         ComposeMessage::ToTokenInput,
     )
@@ -474,7 +547,10 @@ fn build_cc_row<'a>(
     state: &'a ComposeState,
 ) -> Element<'a, Message> {
     build_recipient_row_inner(
-        "Cc", &state.cc, state.selected_cc_token, window_id,
+        "Cc",
+        &state.cc,
+        state.selected_cc_token,
+        window_id,
         "Add Cc...",
         ComposeMessage::CcTokenInput,
     )
@@ -485,7 +561,10 @@ fn build_bcc_row<'a>(
     state: &'a ComposeState,
 ) -> Element<'a, Message> {
     build_recipient_row_inner(
-        "Bcc", &state.bcc, state.selected_bcc_token, window_id,
+        "Bcc",
+        &state.bcc,
+        state.selected_bcc_token,
+        window_id,
         "Add Bcc...",
         ComposeMessage::BccTokenInput,
     )
@@ -522,6 +601,39 @@ fn build_recipient_row_inner<'a>(
     .into()
 }
 
+// ── Formatting toolbar ─────────────────────────────────
+
+fn formatting_toolbar<'a>(
+    window_id: iced::window::Id,
+) -> Element<'a, Message> {
+    let fmt_btn = |ico: iced::widget::Text<'a>, msg: ComposeMessage| {
+        button(ico.size(ICON_SM).style(text::secondary))
+            .on_press(Message::PopOut(
+                window_id,
+                PopOutMessage::Compose(msg),
+            ))
+            .padding(PAD_ICON_BTN)
+            .style(theme::ButtonClass::BareIcon.style())
+    };
+
+    let toolbar = row![
+        fmt_btn(icon::bold(), ComposeMessage::FormatBold),
+        fmt_btn(icon::italic(), ComposeMessage::FormatItalic),
+        fmt_btn(icon::underline(), ComposeMessage::FormatUnderline),
+        fmt_btn(icon::list(), ComposeMessage::FormatList),
+        fmt_btn(icon::link(), ComposeMessage::FormatLink),
+    ]
+    .spacing(SPACE_XXS)
+    .align_y(Alignment::Center);
+
+    container(toolbar)
+        .padding(PAD_TOOLBAR)
+        .width(Length::Fill)
+        .into()
+}
+
+// ── Body ────────────────────────────────────────────────
+
 fn compose_body<'a>(
     window_id: iced::window::Id,
     state: &'a ComposeState,
@@ -544,10 +656,18 @@ fn compose_body<'a>(
         .into()
 }
 
+// ── Footer ──────────────────────────────────────────────
+
 fn compose_footer<'a>(
     window_id: iced::window::Id,
-    _state: &'a ComposeState,
+    state: &'a ComposeState,
 ) -> Element<'a, Message> {
+    // Discard button — shows confirmation if there's user content
+    let discard_msg = if state.has_user_content() {
+        ComposeMessage::ToggleDiscardConfirm
+    } else {
+        ComposeMessage::Discard
+    };
 
     let discard_btn = button(
         row![
@@ -560,7 +680,7 @@ fn compose_footer<'a>(
     .style(theme::ButtonClass::Ghost.style())
     .on_press(Message::PopOut(
         window_id,
-        PopOutMessage::Compose(ComposeMessage::Discard),
+        PopOutMessage::Compose(discard_msg),
     ))
     .padding(PAD_BUTTON);
 
@@ -579,13 +699,63 @@ fn compose_footer<'a>(
     ))
     .padding(PAD_BUTTON);
 
-    let footer_row = row![discard_btn, Space::new().width(Length::Fill), send_btn]
-        .align_y(Alignment::Center);
+    let footer_row =
+        row![discard_btn, Space::new().width(Length::Fill), send_btn]
+            .align_y(Alignment::Center);
 
     container(footer_row)
         .padding(PAD_CONTENT)
         .width(Length::Fill)
         .into()
+}
+
+// ── Discard confirmation ────────────────────────────────
+
+fn discard_confirmation<'a>(
+    window_id: iced::window::Id,
+) -> Element<'a, Message> {
+    let confirm_btn = button(
+        text("Discard")
+            .size(TEXT_MD)
+            .font(font::text_semibold()),
+    )
+    .style(theme::ButtonClass::Ghost.style())
+    .on_press(Message::PopOut(
+        window_id,
+        PopOutMessage::Compose(ComposeMessage::Discard),
+    ))
+    .padding(PAD_BUTTON);
+
+    let cancel_btn = button(
+        text("Keep editing").size(TEXT_MD),
+    )
+    .style(theme::ButtonClass::Primary.style())
+    .on_press(Message::PopOut(
+        window_id,
+        PopOutMessage::Compose(ComposeMessage::ToggleDiscardConfirm),
+    ))
+    .padding(PAD_BUTTON);
+
+    container(
+        column![
+            text("Discard this draft?")
+                .size(TEXT_TITLE)
+                .font(font::text_semibold())
+                .style(text::base),
+            text("Your unsaved changes will be lost.")
+                .size(TEXT_MD)
+                .style(text::secondary),
+            row![confirm_btn, cancel_btn]
+                .spacing(SPACE_SM)
+                .align_y(Alignment::Center),
+        ]
+        .spacing(SPACE_SM)
+        .align_x(Alignment::Center),
+    )
+    .padding(PAD_CONTENT)
+    .style(theme::ContainerClass::Elevated.style())
+    .width(Length::Fill)
+    .into()
 }
 
 // ── Helpers ─────────────────────────────────────────────
@@ -600,4 +770,18 @@ fn accounts_to_info(accounts: &[db::Account]) -> Vec<AccountInfo> {
             account_name: a.account_name.clone(),
         })
         .collect()
+}
+
+/// Build an attribution line for quoted content, e.g.
+/// "On Mar 19, Alice Smith <alice@corp.com> wrote:"
+fn build_attribution(name: Option<&str>, email: Option<&str>) -> String {
+    let sender = match (name, email) {
+        (Some(n), Some(e)) if !n.is_empty() => format!("{n} <{e}>"),
+        (_, Some(e)) => e.to_string(),
+        (Some(n), None) if !n.is_empty() => n.to_string(),
+        _ => "someone".to_string(),
+    };
+    // We omit the date here since we don't have it in the compose context.
+    // The full implementation would include the original message date.
+    format!("{sender} wrote:")
 }

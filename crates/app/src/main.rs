@@ -5,6 +5,7 @@ mod component;
 mod db;
 mod display;
 mod font;
+mod handlers;
 mod icon;
 mod pop_out;
 mod ui;
@@ -19,8 +20,7 @@ use db::{Db, Thread};
 use iced::widget::{column, container, mouse_area, row, stack};
 use iced::{Element, Length, Point, Size, Task, Theme};
 use pop_out::{PopOutMessage, PopOutWindow};
-use pop_out::compose::{ComposeMessage, ComposeMode, ComposeState};
-use pop_out::message_view::{MessageViewMessage, MessageViewState};
+use pop_out::compose::ComposeMode;
 use ui::palette::PaletteState;
 use ratatoskr_command_palette::{
     BindingTable, Chord, CommandArgs, CommandId, CommandInputResolver, CommandRegistry,
@@ -32,9 +32,7 @@ use ratatoskr_core::db::queries_extra::navigation::{
 use ratatoskr_core::db::queries_extra::get_threads_scoped;
 use ratatoskr_core::db::types::{AccountScope, DbThread};
 use ui::layout::{
-    COMPOSE_DEFAULT_HEIGHT, COMPOSE_DEFAULT_WIDTH, COMPOSE_MIN_HEIGHT, COMPOSE_MIN_WIDTH,
-    MESSAGE_VIEW_DEFAULT_HEIGHT, MESSAGE_VIEW_DEFAULT_WIDTH, MESSAGE_VIEW_MIN_HEIGHT,
-    MESSAGE_VIEW_MIN_WIDTH, RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH,
+    RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH,
     THREAD_LIST_MIN_WIDTH,
 };
 use ui::add_account::{AddAccountEvent, AddAccountMessage, AddAccountWizard};
@@ -241,6 +239,8 @@ struct App {
     main_window_id: iced::window::Id,
     /// All open pop-out windows. The main window is NOT in this map.
     pop_out_windows: HashMap<iced::window::Id, PopOutWindow>,
+    /// Per-window generation counter for staleness detection in pop-out loads.
+    pop_out_generation: u64,
     /// Incremented on every navigation load (accounts, labels, threads).
     nav_generation: u64,
     /// Incremented on every thread detail load (messages, attachments).
@@ -294,7 +294,10 @@ impl App {
         let db_ref = Arc::clone(&db);
         let db_ref2 = Arc::clone(&db);
         let data_dir = APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
-        let window = window_state::WindowState::load(data_dir);
+
+        // Load session state (includes main window + pop-out restore data)
+        let session = pop_out::session::SessionState::load(data_dir);
+        let window = session.main_window.clone();
 
         let (main_window_id, open_task) =
             iced::window::open(window.to_window_settings());
@@ -303,7 +306,7 @@ impl App {
         let binding_table = BindingTable::new(&registry, current_platform());
         let resolver = Arc::new(command_resolver::AppInputResolver::new(Arc::clone(&db)));
 
-        let app = Self {
+        let mut app = Self {
             db,
             sidebar: Sidebar::new(),
             thread_list: ThreadList::new(),
@@ -325,6 +328,7 @@ impl App {
             window,
             main_window_id,
             pop_out_windows: HashMap::new(),
+            pop_out_generation: 0,
             nav_generation: 1,
             thread_generation: 0,
             registry,
@@ -346,8 +350,12 @@ impl App {
             no_accounts: false,
             add_account_wizard: None,
         };
+
+        // Restore pop-out windows from session
+        let restore_tasks = app.restore_pop_out_windows(&session);
+
         let load_gen = app.nav_generation;
-        (app, Task::batch([
+        let mut all_tasks = vec![
             open_task.discard(),
             Task::perform(
                 async move { (load_gen, load_accounts(db_ref).await) },
@@ -357,7 +365,10 @@ impl App {
                 async move { db_ref2.list_pinned_searches().await },
                 Message::PinnedSearchesLoaded,
             ),
-        ]))
+        ];
+        all_tasks.extend(restore_tasks);
+
+        (app, Task::batch(all_tasks))
     }
 
     fn title(&self, window_id: iced::window::Id) -> String {
@@ -554,6 +565,15 @@ impl App {
             Message::WindowMoved(id, point) => {
                 if id == self.main_window_id {
                     self.window.set_position(point);
+                } else {
+                    match self.pop_out_windows.get_mut(&id) {
+                        Some(PopOutWindow::MessageView(state)) => {
+                            state.x = Some(point.x);
+                            state.y = Some(point.y);
+                        }
+                        Some(PopOutWindow::Compose(_)) => {}
+                        None => {}
+                    }
                 }
                 Task::none()
             }
@@ -2285,12 +2305,11 @@ impl App {
 
     fn handle_window_close(&mut self, id: iced::window::Id) -> Task<Message> {
         if id == self.main_window_id {
-            // Save main window state
-            let data_dir = APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
+            // Save main window state + session (pop-out windows)
             self.window.sidebar_width = self.sidebar_width;
             self.window.thread_list_width = self.thread_list_width;
             self.window.right_sidebar_open = self.right_sidebar_open;
-            self.window.save(data_dir);
+            self.save_session_state();
             // Close all pop-out windows, then close main and exit
             let mut tasks: Vec<Task<Message>> = self
                 .pop_out_windows
@@ -2467,282 +2486,8 @@ impl App {
     }
 }
 
-// ── Pop-out window handling ─────────────────────────────
-
-impl App {
-    fn handle_pop_out_message(
-        &mut self,
-        window_id: iced::window::Id,
-        pop_out_msg: PopOutMessage,
-    ) -> Task<Message> {
-        let Some(window) = self.pop_out_windows.get_mut(&window_id) else {
-            return Task::none();
-        };
-        match (window, &pop_out_msg) {
-            (
-                PopOutWindow::MessageView(_),
-                PopOutMessage::MessageView(
-                    MessageViewMessage::Reply
-                    | MessageViewMessage::ReplyAll
-                    | MessageViewMessage::Forward,
-                ),
-            ) => {
-                let mv_msg = match pop_out_msg {
-                    PopOutMessage::MessageView(m) => m,
-                    _ => return Task::none(),
-                };
-                self.open_compose_from_message_view(window_id, mv_msg)
-            }
-            (
-                PopOutWindow::MessageView(state),
-                PopOutMessage::MessageView(_),
-            ) => {
-                let PopOutMessage::MessageView(msg) = pop_out_msg else {
-                    return Task::none();
-                };
-                handle_message_view_update(state, msg)
-            }
-            (
-                PopOutWindow::Compose(_),
-                PopOutMessage::Compose(ComposeMessage::Discard),
-            ) => {
-                self.pop_out_windows.remove(&window_id);
-                self.composer_is_open = false;
-                iced::window::close(window_id)
-            }
-            (
-                PopOutWindow::Compose(state),
-                PopOutMessage::Compose(_),
-            ) => {
-                let PopOutMessage::Compose(msg) = pop_out_msg else {
-                    return Task::none();
-                };
-                pop_out::compose::update_compose(state, msg);
-                Task::none()
-            }
-            _ => Task::none(),
-        }
-    }
-
-    fn open_message_view_window(
-        &mut self,
-        message_index: usize,
-    ) -> Task<Message> {
-        let Some(msg) = self.reading_pane.thread_messages.get(message_index)
-        else {
-            return Task::none();
-        };
-
-        let state = MessageViewState::from_thread_message(msg);
-        let account_id = state.account_id.clone();
-        let message_id = state.message_id.clone();
-
-        let settings = iced::window::Settings {
-            size: Size::new(
-                MESSAGE_VIEW_DEFAULT_WIDTH,
-                MESSAGE_VIEW_DEFAULT_HEIGHT,
-            ),
-            min_size: Some(Size::new(
-                MESSAGE_VIEW_MIN_WIDTH,
-                MESSAGE_VIEW_MIN_HEIGHT,
-            )),
-            exit_on_close_request: false,
-            ..Default::default()
-        };
-
-        let (window_id, open_task) = iced::window::open(settings);
-        self.pop_out_windows
-            .insert(window_id, PopOutWindow::MessageView(state));
-
-        // Dispatch async data loads for body and attachments
-        let db = Arc::clone(&self.db);
-        let db2 = Arc::clone(&self.db);
-        let account_id2 = account_id.clone();
-        let message_id2 = message_id.clone();
-
-        Task::batch([
-            open_task.discard(),
-            Task::perform(
-                async move {
-                    db.load_message_body(account_id, message_id).await
-                },
-                move |result| {
-                    Message::PopOut(
-                        window_id,
-                        PopOutMessage::MessageView(
-                            MessageViewMessage::BodyLoaded(result),
-                        ),
-                    )
-                },
-            ),
-            Task::perform(
-                async move {
-                    db2.load_message_attachments(account_id2, message_id2)
-                        .await
-                },
-                move |result| {
-                    Message::PopOut(
-                        window_id,
-                        PopOutMessage::MessageView(
-                            MessageViewMessage::AttachmentsLoaded(result),
-                        ),
-                    )
-                },
-            ),
-        ])
-    }
-
-    fn open_compose_window(&mut self, mode: ComposeMode) -> Task<Message> {
-        let state = ComposeState::new(&self.sidebar.accounts);
-        self.open_compose_window_with_state(state, mode)
-    }
-
-    fn open_compose_window_with_state(
-        &mut self,
-        mut state: ComposeState,
-        mode: ComposeMode,
-    ) -> Task<Message> {
-        state.mode = mode;
-        state.subject = state.mode.prefixed_subject();
-
-        let settings = iced::window::Settings {
-            size: Size::new(COMPOSE_DEFAULT_WIDTH, COMPOSE_DEFAULT_HEIGHT),
-            min_size: Some(Size::new(COMPOSE_MIN_WIDTH, COMPOSE_MIN_HEIGHT)),
-            exit_on_close_request: false,
-            ..Default::default()
-        };
-
-        let (window_id, open_task) = iced::window::open(settings);
-        self.pop_out_windows
-            .insert(window_id, PopOutWindow::Compose(state));
-        self.composer_is_open = true;
-
-        open_task.discard()
-    }
-
-    fn open_compose_from_message_view(
-        &mut self,
-        window_id: iced::window::Id,
-        action: MessageViewMessage,
-    ) -> Task<Message> {
-        let Some(PopOutWindow::MessageView(mv)) =
-            self.pop_out_windows.get(&window_id)
-        else {
-            return Task::none();
-        };
-
-        let subject = mv.subject.clone().unwrap_or_default();
-        let mode = match action {
-            MessageViewMessage::Reply => ComposeMode::Reply {
-                original_subject: subject,
-            },
-            MessageViewMessage::ReplyAll => ComposeMode::ReplyAll {
-                original_subject: subject,
-            },
-            MessageViewMessage::Forward => ComposeMode::Forward {
-                original_subject: subject,
-            },
-            _ => return Task::none(),
-        };
-
-        // TODO: cc_addresses not yet in MessageViewState — pass None
-        // until the data model is extended. Passing to_addresses was wrong
-        // (it duplicated To recipients into Cc).
-        let state = ComposeState::new_reply(
-            &self.sidebar.accounts,
-            mode.clone(),
-            mv.from_address.as_deref(),
-            mv.from_name.as_deref(),
-            None,
-            mv.body_text.as_deref().or(mv.snippet.as_deref()),
-            Some(&mv.thread_id),
-            Some(&mv.message_id),
-        );
-
-        self.open_compose_window_with_state(state, mode)
-    }
-
-    fn handle_compose_action(
-        &mut self,
-        action: ComposeAction,
-    ) -> Task<Message> {
-        // Get reply context from the currently selected thread/message
-        let selected_thread = self
-            .thread_list
-            .selected_thread
-            .and_then(|idx| self.thread_list.threads.get(idx));
-        let last_message = self.reading_pane.thread_messages.first();
-
-        let subject = selected_thread
-            .and_then(|t| t.subject.clone())
-            .unwrap_or_default();
-
-        let mode = match action {
-            ComposeAction::Reply => ComposeMode::Reply {
-                original_subject: subject,
-            },
-            ComposeAction::ReplyAll => ComposeMode::ReplyAll {
-                original_subject: subject,
-            },
-            ComposeAction::Forward => ComposeMode::Forward {
-                original_subject: subject,
-            },
-        };
-
-        let to_email = last_message.and_then(|m| m.from_address.as_deref());
-        let to_name = last_message.and_then(|m| m.from_name.as_deref());
-        // TODO: cc_addresses not yet in ThreadMessage — pass None until
-        // the data model is extended. Passing to_addresses here was wrong
-        // (it duplicated To recipients into Cc).
-        let cc_emails: Option<&str> = None;
-        let thread_id = selected_thread.map(|t| t.id.as_str());
-        let message_id = last_message.map(|m| m.id.as_str());
-        let snippet = last_message.and_then(|m| m.snippet.as_deref());
-
-        let state = ComposeState::new_reply(
-            &self.sidebar.accounts,
-            mode.clone(),
-            to_email,
-            to_name,
-            cc_emails,
-            snippet,
-            thread_id,
-            message_id,
-        );
-
-        self.open_compose_window_with_state(state, mode)
-    }
-}
-
-fn handle_message_view_update(
-    state: &mut MessageViewState,
-    msg: MessageViewMessage,
-) -> Task<Message> {
-    match msg {
-        MessageViewMessage::BodyLoaded(Ok((body_text, body_html))) => {
-            state.body_text = body_text;
-            state.body_html = body_html;
-            Task::none()
-        }
-        MessageViewMessage::BodyLoaded(Err(e)) => {
-            eprintln!("Pop-out body load failed: {e}");
-            Task::none()
-        }
-        MessageViewMessage::AttachmentsLoaded(Ok(attachments)) => {
-            state.attachments = attachments;
-            Task::none()
-        }
-        MessageViewMessage::AttachmentsLoaded(Err(e)) => {
-            eprintln!("Pop-out attachments load failed: {e}");
-            Task::none()
-        }
-        MessageViewMessage::Reply
-        | MessageViewMessage::ReplyAll
-        | MessageViewMessage::Forward
-        | MessageViewMessage::Noop => Task::none(),
-    }
-}
-
+// Pop-out window handling is in handlers/pop_out.rs.
+// The dispatch arms in update() delegate to methods defined there.
 
 async fn load_accounts(db: Arc<Db>) -> Result<Vec<db::Account>, String> {
     db.get_accounts().await

@@ -53,6 +53,7 @@ pub struct ThreadMessage {
     pub from_name: Option<String>,
     pub from_address: Option<String>,
     pub to_addresses: Option<String>,
+    pub cc_addresses: Option<String>,
     pub date: Option<i64>,
     pub subject: Option<String>,
     pub snippet: Option<String>,
