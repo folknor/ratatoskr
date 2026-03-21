@@ -244,6 +244,12 @@ pub enum Message {
     OpenMessageView(usize),
     ComposeDraftTick,
 
+    // Thread detail via core
+    ThreadDetailLoaded(u64, Result<db::AppThreadDetail, String>),
+
+    // Pinned search management
+    ClearAllPinnedSearches,
+
     // Sync progress pipeline
     SyncProgress(SyncEvent),
 
@@ -316,6 +322,9 @@ struct App {
     sync_receiver: SyncProgressReceiver,
     #[allow(dead_code)]
     sync_reporter: Arc<ui::status_bar::IcedProgressReporter>,
+
+    /// Body store for loading decompressed message bodies via core.
+    body_store: Option<ratatoskr_core::body_store::BodyStoreState>,
 }
 
 impl App {
@@ -341,7 +350,17 @@ impl App {
         let sync_receiver = shared_receiver(rx);
         let sync_reporter = Arc::new(reporter);
 
-        let app = Self {
+        let body_store = match db::threads::init_body_store() {
+            Ok(bs) => Some(bs),
+            Err(e) => {
+                log::error!("Failed to init body store: {e}");
+                None
+            }
+        };
+
+        let session = pop_out::session::SessionState::load(data_dir);
+
+        let mut app = Self {
             db,
             sidebar: Sidebar::new(),
             thread_list: ThreadList::new(),
@@ -390,9 +409,14 @@ impl App {
             navigation_target: None,
             sync_receiver,
             sync_reporter,
+            body_store,
         };
+
+        // Restore pop-out windows from previous session
+        let mut session_tasks = app.restore_pop_out_windows(&session);
+
         let load_gen = app.nav_generation;
-        (app, Task::batch([
+        let mut boot_tasks = vec![
             open_task.discard(),
             Task::perform(
                 async move { (load_gen, load_accounts(db_ref).await) },
@@ -402,7 +426,9 @@ impl App {
                 async move { db_ref2.list_pinned_searches().await },
                 Message::PinnedSearchesLoaded,
             ),
-        ]))
+        ];
+        boot_tasks.append(&mut session_tasks);
+        (app, Task::batch(boot_tasks))
     }
 
     fn title(&self, window_id: iced::window::Id) -> String {
@@ -815,6 +841,21 @@ impl App {
                 self.open_message_view_window(message_index)
             }
             Message::ComposeDraftTick => self.auto_save_compose_drafts(),
+
+            // Thread detail via core (replaces separate messages/attachments loads)
+            Message::ThreadDetailLoaded(g, _) if g != self.thread_generation => Task::none(),
+            Message::ThreadDetailLoaded(_, Ok(detail)) => {
+                self.reading_pane.load_thread_detail(detail);
+                Task::none()
+            }
+            Message::ThreadDetailLoaded(_, Err(e)) => {
+                log::error!("ThreadDetailLoaded error: {e}");
+                self.status = format!("Thread detail error: {e}");
+                Task::none()
+            }
+
+            // Clear all pinned searches
+            Message::ClearAllPinnedSearches => self.handle_clear_all_pinned_searches(),
 
             // Sync progress pipeline
             Message::SyncProgress(event) => {
@@ -1359,12 +1400,7 @@ impl App {
         Task::perform(
             async move {
                 db.with_write_conn(move |conn| {
-                    conn.execute(
-                        "DELETE FROM accounts WHERE id = ?1",
-                        rusqlite::params![account_id],
-                    )
-                    .map_err(|e| e.to_string())?;
-                    Ok(())
+                    ratatoskr_core::account::delete::delete_account_row(&conn, &account_id)
                 })
                 .await
             },
@@ -1372,6 +1408,10 @@ impl App {
         )
     }
 
+    // TODO: Replace with core's `db_update_account()` once the app's `Db`
+    // type is unified with core's `DbState`, or once `dynamic_update` is
+    // made public. Core's async function requires `&DbState` which the app
+    // does not currently expose.
     fn handle_save_account_changes(
         &mut self,
         account_id: String,
@@ -1404,7 +1444,6 @@ impl App {
                     if sets.is_empty() {
                         return Ok(());
                     }
-                    // Manual dynamic update since we can't use DbState here
                     let mut placeholders = Vec::new();
                     let mut param_vals: Vec<Box<dyn rusqlite::types::ToSql>> =
                         Vec::new();
@@ -1513,13 +1552,32 @@ impl App {
         self.reading_pane.set_thread(thread);
         self.thread_generation += 1;
         if let Some(thread) = thread {
-            let db = Arc::clone(&self.db);
             let account_id = thread.account_id.clone();
             let thread_id = thread.id.clone();
+            let load_gen = self.thread_generation;
+
+            // Use core's thread detail if body store is available,
+            // otherwise fall back to the old separate queries.
+            if let Some(ref body_store) = self.body_store {
+                let db = Arc::clone(&self.db);
+                let bs = body_store.clone();
+                return Task::perform(
+                    async move {
+                        let r = db::threads::load_thread_detail(
+                            &db, &bs, account_id, thread_id,
+                        )
+                        .await;
+                        (load_gen, r)
+                    },
+                    |(g, result)| Message::ThreadDetailLoaded(g, result),
+                );
+            }
+
+            // Fallback: old separate queries (no body store)
+            let db = Arc::clone(&self.db);
             let db2 = Arc::clone(&self.db);
             let account_id2 = account_id.clone();
             let thread_id2 = thread_id.clone();
-            let load_gen = self.thread_generation;
             return Task::batch([
                 Task::perform(
                     async move {
@@ -1683,6 +1741,25 @@ impl App {
         Task::none()
     }
 
+    fn handle_clear_all_pinned_searches(&mut self) -> Task<Message> {
+        self.pinned_searches.clear();
+        self.active_pinned_search = None;
+        self.sidebar.active_pinned_search = None;
+        self.sidebar.pinned_searches.clear();
+        let db = Arc::clone(&self.db);
+        Task::perform(
+            async move {
+                db.delete_all_pinned_searches().await.map(|_| ())
+            },
+            |result| {
+                if let Err(e) = result {
+                    log::error!("Failed to clear pinned searches: {e}");
+                }
+                Message::Noop
+            },
+        )
+    }
+
     fn handle_window_close(&mut self, id: iced::window::Id) -> Task<Message> {
         if id == self.main_window_id {
             log::info!("Main window closing, saving state");
@@ -1691,6 +1768,7 @@ impl App {
             self.window.thread_list_width = self.thread_list_width;
             self.window.right_sidebar_open = self.right_sidebar_open;
             self.window.save(data_dir);
+            self.save_session_state();
             let mut tasks: Vec<Task<Message>> = self
                 .pop_out_windows
                 .keys()
