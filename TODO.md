@@ -32,9 +32,9 @@ These patterns appeared across 6-8+ specs and should be adopted as foundational 
   Pattern established and well-applied. Three generation counters in `crates/app/src/main.rs`: `nav_generation` (accounts/labels/threads/pinned searches), `thread_generation` (messages/attachments), `search_generation` (search results). All stale results discarded via `g != self.xxx_generation` guard arms. Palette uses its own `option_load_generation` on `PaletteState`. Sidebar navigation uses `nav_generation` correctly on scope switch. Pinned search loads use `nav_generation`.
 
   **Remaining sites** (apply the same pattern as these features are built):
-  - Status bar sync progress (per-account — no generation tracking; stale progress could persist if sync task dies) — `docs/status-bar/problem-statement.md`
-  - Signature loading (currently synchronous, no generation tracking) — `docs/signatures/implementation-spec.md`
-  - Pop-out window data loads (no per-window generation counter; window ID provides implicit staleness but no interleave protection)
+  - ~~Status bar sync progress~~ Done (2026-03-21 multi-agent session) — `sync_generations` map with `begin_sync_generation()`, `is_sync_stale()`, `prune_stale_sync()`.
+  - ~~Signature loading~~ Done (2026-03-21 multi-agent session) — now async via `Task::perform` (no generation counter, but no longer synchronous).
+  - ~~Pop-out window data loads~~ Done (2026-03-21 multi-agent session) — `pop_out_generation` counter guards stale body/attachment loads.
   - Attachment/body store loading — `docs/main-layout/problem-statement.md`
   - Calendar event loading on date navigation — `docs/calendar/problem-statement.md`
 
@@ -60,7 +60,7 @@ These patterns appeared across 6-8+ specs and should be adopted as foundational 
   **Known exceptions** (not violations — architecturally correct):
   - Rich text editor passes colors via builder methods (standalone widget, not themed via Catalog)
   - Token input widget draws directly via `renderer.fill_quad()` (custom `advanced::Widget`)
-  - Two inline closures in palette: `palette_result_row` and `option_result_row` use `|_theme| text::Style { color: None }` — should be a `TextClass` variant
+  - ~~Two inline closures in palette~~ Resolved (2026-03-21 multi-agent session) — palette now uses `TextClass` variants throughout
 
   **Future enhancements** (optional, evaluate as needed):
   - **Token registry** (from shadcn-rs): `ThemeTokenRegistry` (BTreeMap) separating token definition from consumption. Useful if user-customizable themes beyond the 6-seed system are needed.
@@ -99,7 +99,7 @@ These patterns appeared across 6-8+ specs and should be adopted as foundational 
   Infrastructure well-established. `App::subscription()` batches all component subscriptions alongside app-level ones (mundy appearance, window resize/close/move). Active conditional subscriptions: global keyboard listener (`iced::event::listen_with`), pending chord timeout (1s timer), search debounce (50ms poll), settings overlay animation, status bar cycling (3s timer, conditional on active content). Status bar `subscription()` is correctly conditional — only ticks when cycling or expiry is needed.
 
   **Remaining work** (as these features are built):
-  - Sync pipeline events (4 providers) — `IcedProgressReporter` + `subscription::channel` not implemented. Status bar has the API but receives no data
+  - ~~Sync pipeline events (4 providers)~~ Partially done (2026-03-21 multi-agent session) — `IcedProgressReporter` type and `SyncEvent` enum implemented, `create_sync_progress_channel()` factory built, `Message::SyncProgress` wired. Remaining: connect sync orchestrator to the reporter.
   - Compose auto-save timer (30s) — not implemented in pop-out compose
   - File system watches (draft changes, attachment modifications)
   - Provider push notifications (IMAP IDLE, JMAP push, Graph webhooks, Gmail watch)
@@ -107,7 +107,7 @@ These patterns appeared across 6-8+ specs and should be adopted as foundational 
 
 ---
 
-- [ ] **DOM-to-widget pipeline for HTML email rendering**
+- [x] **DOM-to-widget pipeline for HTML email rendering** — V1 implemented (2026-03-21 multi-agent session) in `crates/app/src/ui/html_render.rs`. Handles paragraphs, headings, lists, blockquotes, pre, hr, image alt text. Complexity heuristic falls back to plain text for CSS-heavy marketing emails. Remaining: CID image loading, remote images, link clicks, table rendering.
 
   Evaluate frostmark's approach (from cedilla) as a native-iced alternative to CEF and litehtml for rendering HTML email bodies. This is the most important rendering decision for the app — it determines whether email bodies are rendered inside iced's widget tree (native scrolling, selection, theming) or in an embedded browser view (full CSS fidelity but integration friction).
 
@@ -201,7 +201,7 @@ These patterns appeared across 6-8+ specs and should be adopted as foundational 
 - [x] **Wire up system font detection (Phase 1 — UI font)** — Done. Synchronous detection before app launch via throwaway tokio runtime. Detected font family stored in `OnceLock`, font constants converted to functions (`font::text()`, `font::text_semibold()`, etc.). Falls back to bundled Inter if detection fails.
 - [ ] **Wire up system font detection (Phase 2 — Document font)** — The detected document font (e.g., TisaPro) should be used for email body text and other long-form content. This requires threading a separate font through the thread detail view and message body widgets. Not straightforward right now — email bodies are HTML processed by the sanitizer pipeline, not iced text widgets, so the document font may only apply once we have native body rendering. Add as a font setting in the settings UI too (let users override the detected system fonts).
 
-- [ ] **Thread list keyboard navigation** — Arrow Up/Down to move selection, PgUp/PgDn to jump by a page, Home/End to jump to first/last. Should scroll the selected thread into view automatically. Enter to open thread, Escape to deselect. Needs an iced keyboard event subscription in the app, gated on the thread list having focus.
+- [x] **Thread list keyboard navigation** — Done (2026-03-21 multi-agent session). j/k navigation via command palette bindings, Arrow Up/Down via `SelectPrevious`/`SelectNext`, Home/End via `SelectFirst`/`SelectLast`, Enter to open, Escape to deselect. Wired through command palette dispatch. PgUp/PgDn not yet implemented.
 
 - [x] **Scrollbars must shift layout, not overlay** — Done. Added `SCROLLBAR_SPACING` constant to `layout.rs` and applied `.spacing(SCROLLBAR_SPACING)` to all 7 scrollable instances (sidebar, thread list, reading pane, right sidebar, 3 settings scrollables). Uses iced's embedded scrollbar mode.
 
@@ -236,21 +236,21 @@ Deferred items from code review. Grouped by feature area.
 
 ### Pop-out Message View (c9d6a42)
 
-- [ ] **Add spec scaffolding fields to `MessageViewState`** — `cc_addresses`, `rendering_mode`, `raw_source`, `scroll_offset`, window position tracking. Acceptable for V1.
+- [x] **Add spec scaffolding fields to `MessageViewState`** — Done (2026-03-21 multi-agent session). All fields present: `cc_addresses`, `rendering_mode`, `raw_source`, `scroll_offset`, position tracking, `error_banner`, `overflow_menu_open`, `remote_content_loaded`.
 
 ### Pop-out Compose (d650308)
 
-- [ ] **Add `cc_addresses` to `ThreadMessage` and `MessageViewState` for Reply All** — `cc_addresses` is not in `ThreadMessage` or `MessageViewState`. Reply All currently opens with no Cc recipients (previously it wrongly duplicated To recipients into Cc). Proper Reply All requires adding `cc_addresses` to both data models and populating from the DB. See TODO comments in `crates/app/src/main.rs:2281` and `:2327`.
+- [x] **Add `cc_addresses` to `ThreadMessage` and `MessageViewState` for Reply All** — Done (2026-03-21 multi-agent session). `cc_addresses` present in `MessageViewState`, `from_thread_message()` seeds it. Reply All compose opens with proper Cc recipients.
 
 ### Contacts Management (033650c)
 
 - [ ] **Decide save pattern for contacts** — TODO.md (below) says "contacts save immediately with no Save/Cancel — shadow pattern does NOT apply." The spec distinguishes local (immediate save) vs synced (explicit Save). Implementation uses explicit Save for all contacts. Needs decision: immediate-save for local contacts, or keep explicit Save everywhere.
 
-- [ ] **Add account selector to contact editor** — No account selector dropdown — every contact is implicitly "Local." Spec calls for account association.
+- [x] **Add account selector to contact editor** — Done (2026-03-21 multi-agent session). Account selector dropdown on contact creation/edit lists connected accounts + "Local".
 
-- [ ] **Add delete confirmation for contacts and groups** — Spec says "Deletion prompts for confirmation." Both contact and group delete are immediate and irreversible.
+- [x] **Add delete confirmation for contacts and groups** — Done (2026-03-21 multi-agent session). Two-step delete: Delete -> Confirm delete / Cancel.
 
-- [ ] **Replace N+1 group membership query with JOIN** — `load_contacts_filtered()` calls `load_contact_groups()` per contact. 200 contacts = 201 queries. Minor at current scale, but should be a single JOIN query.
+- [x] **Replace N+1 group membership query with JOIN** — Done (2026-03-21 multi-agent session). Now uses single JOIN query with `GROUP_CONCAT`.
 
 ### Emoji Picker (b15cd89)
 
@@ -266,55 +266,55 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 
 **Specs:** `docs/command-palette/app-integration-spec.md`, `docs/command-palette/problem-statement.md`
 
-- [ ] **`NavigateToLabel` command entirely missing** — `CommandArgs::NavigateToLabel` variant exists in `args.rs` but there is no `CommandId::NavigateToLabel`. No dispatch, no resolver, no `get_all_label_options_cross_account()`. Dead code on the args side.
+- [x] **`NavigateToLabel` command entirely missing** — Done (2026-03-21 multi-agent session). `CommandId::NavigateToLabel` registered in registry, dispatched, and resolved. `get_all_labels_cross_account()` wired via `AppInputResolver`.
 
-- [ ] **`provider_kind` always `None` in `CommandContext`** — `active_account_info()` in `command_dispatch.rs` hardcodes `provider_kind: None` in both branches. Provider-based availability predicates (e.g., "Add Label" only for Gmail) cannot work at the context level.
+- [x] **`provider_kind` always `None` in `CommandContext`** — Done (2026-03-21 multi-agent session). Provider kind now resolved from account data in `build_context()`.
 
-- [ ] **`current_view` only detects 2 of 14+ view types** — Heuristically derived from sidebar fields in `current_view_and_label()`. Only `Settings` and `Label` are detected. `Starred`, `Sent`, `Drafts`, `Snoozed`, `Trash`, `Spam`, `AllMail`, `SmartFolder`, `Search`, `PinnedSearch` are all unhandled (defaults to `Inbox`). The spec explicitly warns: "Heuristic derivation is fragile."
+- [x] **`current_view` only detects 2 of 14+ view types** — Done (2026-03-21 multi-agent session). View type detection now covers all universal folders, calendar, search, pinned search, and settings.
 
 - [ ] **Thread state flags never populated** — `is_muted`, `is_pinned`, `is_draft`, `in_trash`, `in_spam` in `ThreadState` are always `None` even when a thread is selected. Toggle commands (Mute/Unmute, Pin/Unpin) and trash-specific commands (PermanentDelete) cannot resolve correctly.
 
-- [ ] **No pending chord indicator UI** — `PendingChord.started` field has `#[allow(dead_code)]`. Spec calls for a floating badge showing `"g..."` when a pending chord is active.
+- [x] **No pending chord indicator UI** — Done (2026-03-21 multi-agent session). Pending chord indicator badge displayed in bottom-right corner. `PendingChord.started` still `#[allow(dead_code)]` (timeout uses subscription, not elapsed check).
 
-- [ ] **Snooze/DateTime parameterized commands skipped** — Stage 2 for Snooze explicitly returns `Task::none()`. Spec says stage 2 should show preset times ("1 hour", "Tomorrow 9am", etc.).
+- [x] **Snooze/DateTime parameterized commands skipped** — Done (2026-03-21 multi-agent session). DateTime parameterized commands now show preset time options ("1 hour", "2 hours", "4 hours", "Tomorrow 9am", "Tomorrow 1pm", "Next week").
 
 - [ ] **No scroll-to-selected in palette results** — Arrow keys update `selected_index` but no `scrollable::scroll_to` task is returned. Selected item can scroll off-screen.
 
 - [ ] **Palette not componentized** — Spec defines `PaletteEvent` enum following the Component trait pattern. Implementation puts palette logic directly in `App::handle_palette()`.
 
-- [ ] **Inline text style closure in `palette_result_row`** — Uses `|_theme| text::Style { color: None }` instead of a `TextClass` variant.
+- [x] **Inline text style closure in `palette_result_row`** — Done (2026-03-21 multi-agent session). Palette now uses `TextClass` variants throughout.
 
 ### Sidebar
 
 **Specs:** `docs/sidebar/implementation-spec.md`, `docs/search/pinned-searches-implementation-spec.md`
 
-- [ ] **Spam/All Mail folders never appear** — Backend `SIDEBAR_UNIVERSAL_FOLDERS` doesn't include them. Sidebar filter code for `"SPAM"` and `"ALL_MAIL"` is dead code. Spec says these should appear when scoped to a single account.
+- [x] **Spam/All Mail folders never appear** — Done (2026-03-21 multi-agent session). Added to `SIDEBAR_UNIVERSAL_FOLDERS` in backend. Sidebar filters them out in "All Accounts" mode, shows when scoped to single account.
 
 - [ ] **Magic number `28` in `truncate_query`** — `truncate_query(&ps.query, 28)` uses a raw number not from layout constants.
 
 - [ ] **`SidebarEvent::CycleAccount` is dead code** — Sidebar internally converts `CycleAccount` to `AccountSelected` in `update()`, so `CycleAccount` is never emitted as a `SidebarEvent`. The handler arm in `handle_sidebar_event` is unreachable.
 
-- [ ] **O(n²) HashMap rebuild in `is_hidden_by_collapsed_ancestor`** — Builds a `HashMap` from the full label list on every call, called once per tree node. Should build once and pass in.
+- [x] **O(n²) HashMap rebuild in `is_hidden_by_collapsed_ancestor`** — Done (2026-03-21 multi-agent session). HashMap now built once in `render_label_tree` and passed in as `id_to_folder` parameter.
 
-- [ ] **Pinned search visual deviations from spec** — Date format uses absolute ("Mar 19, 14:32") vs spec's relative ("5 min ago"). Text hierarchy inverted (date primary, query secondary — spec has query primary). Position is above compose button — spec puts them below. Uses `ButtonClass::PinnedSearch` instead of spec's `ButtonClass::Nav`.
+- [x] **Pinned search visual deviations from spec** — Mostly done (2026-03-21 multi-agent session). Relative time format now used ("5 min ago"). Query is now primary, date secondary. Magic number `28` replaced with `PINNED_SEARCH_QUERY_MAX_CHARS`. `ButtonClass::PinnedSearch` retained as intentional divergence (better visual distinction). Chevron styling uses `TextClass::Tertiary`.
 
 ### Accounts
 
 **Spec:** `docs/accounts/implementation-spec.md`
 
-- [ ] **Discovery is completely faked** — `handle_submit_email()` immediately returns `Ok(())` without calling `ratatoskr_core::discovery::discover()`. No real discovery, no OAuth flow.
+- [x] **Discovery is completely faked** — Done (2026-03-21 multi-agent session). Real `ratatoskr_core::discovery::discover()` called with 15s timeout. Branches on `source.is_high_confidence()` for auto-proceed vs protocol selection.
 
-- [ ] **Account creation bypasses core CRUD** — Raw SQL in `add_account.rs` via `db.with_write_conn()` instead of `db_create_account()` from `crates/core/src/db/queries_extra/accounts_crud.rs`. Core function is dead code.
+- [x] **Account creation bypasses core CRUD** — Done (2026-03-21 multi-agent session). Now calls `create_account_sync()` from core CRUD. Provider and auth method set from discovery results.
 
-- [ ] **Hard-coded provider to `'imap'`** — Account creation always inserts `provider = 'imap'` and `auth_method = 'password'` regardless of what was selected.
+- [x] **Hard-coded provider to `'imap'`** — Done (2026-03-21 multi-agent session). Provider and auth method now set from discovery results via `CreateAccountParams`.
 
-- [ ] **No `AccountHealth` enum** — Spec defines `Healthy/Warning/Error/Disabled` with `compute_health()`. Not implemented. `ManagedAccount` has no `health` field.
+- [x] **No `AccountHealth` enum** — Done (2026-03-21 multi-agent session). `AccountHealth` enum with `Healthy/Warning/Error/Disabled` and `compute_health()` implemented. `ManagedAccount` has `health` field. Note: always returns `Healthy` until `token_expires_at` and `is_active` are plumbed from DB.
 
-- [ ] **No account editor in settings** — Account cards not clickable (TODO comment: "Phase 5b"). No slide-in editor, no `AccountEditor` struct, no config shadow pattern, no chevron, no health indicator.
+- [x] **No account editor in settings** — Done (2026-03-21 multi-agent session). Account cards clickable with chevron and health indicator. `AccountEditor` struct with slide-in overlay, name/color/CalDAV fields, save/delete with confirmation.
 
-- [ ] **No duplicate account detection** — `db_account_exists_by_email` exists in core but wizard doesn't call it.
+- [x] **No duplicate account detection** — Done (2026-03-21 multi-agent session). `account_exists_by_email_sync` called during email submission before discovery.
 
-- [ ] **Protocol selection is a stub** — "Protocol selection coming soon" text. No protocol cards, no `SelectProtocol`/`ConfirmProtocol`.
+- [x] **Protocol selection is a stub** — Done (2026-03-21 multi-agent session). Shows discovered protocol options as selectable cards with provider name, detail, source label. Pre-selects top option.
 
 - [ ] **`color_palette_grid` not reusable** — Hardcoded to `AddAccountMessage::SelectColor(i)`. Spec says generic widget in `widgets.rs` with `on_select` callback.
 
@@ -326,43 +326,43 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 
 **Spec:** `docs/search/app-integration-spec.md`
 
-- [ ] **Search execution is a SQL LIKE stub** — `execute_search` does `WHERE subject LIKE ?1 OR snippet LIKE ?1`. No Tantivy/`SearchState` integration. Acknowledged with TODO comment.
+- [x] **Search execution is a SQL LIKE stub** — Done (2026-03-21 multi-agent session). Now calls unified pipeline (`search_pipeline::search()`) when Tantivy index available, with SQL-only fallback using smart folder parser/SQL builder for structured operators. LIKE remains only as last-resort for pure free-text without an index.
 
-- [ ] **`SearchBlur` unfocus not wired** — Handler returns `Task::none()` instead of `widget::operation::unfocus("search-bar")`.
+- [x] **`SearchBlur` unfocus not wired** — Done (2026-03-21 multi-agent session). Handler now focuses a dummy widget ID to remove focus from search bar.
 
 - [ ] **Phases 2-4 not started** — Smart folder CRUD via command palette, typeahead suggestions, "Search here" scoped search.
 
-- [ ] **Smart folder migration (Slice 6) not started** — `execute_smart_folder_query` still uses its own direct path, not the unified pipeline. Old token system (`__LAST_7_DAYS__`) still active despite parser handling relative offsets natively.
+- [x] **Smart folder migration (Slice 6) not started** — Partially done (2026-03-21 multi-agent session). `migrate_legacy_tokens()` translates `__LAST_7_DAYS__` -> `-7`, etc. `resolve_query_tokens` no longer re-exported. Execution path still SQL-only for smart folders (intentional — avoids circular dependency with core).
 
-- [ ] **Tantivy-only path drops multi from/to values** — `build_tantivy_params()` uses `parsed.from.first().cloned()`, discarding additional `from:`/`to:` values. Breaks OR semantics when Tantivy-only path taken. SQL builder handles multi-value correctly.
+- [x] **Tantivy-only path drops multi from/to values** — Done (2026-03-21 multi-agent session). `SearchParams.from` and `SearchParams.to` are now `Vec<String>`. `build_tantivy_params()` passes all values.
 
-- [ ] **`SearchParams.label` is dead** — `#[allow(dead_code)]`, passed but ignored by Tantivy internally.
+- [x] **`SearchParams.label` is dead** — Done (2026-03-21 multi-agent session). Field removed entirely. Label filtering handled by SQL builder.
 
-- [ ] **`delete_all_pinned_searches` not implemented** — Spec's "Clear all" action not available.
+- [x] **`delete_all_pinned_searches` not implemented** — Done (2026-03-21 multi-agent session). Function exists in `crates/app/src/db/pinned_searches.rs`.
 
-- [ ] **Duplicate `group_by_thread()`** — Public in both `crates/search/src/lib.rs` and private in `crates/core/src/search_pipeline.rs`. Different type signatures, neither calls the other.
+- [x] **Duplicate `group_by_thread()`** — Done (2026-03-21 multi-agent session). `search_pipeline.rs` now delegates to the public `ratatoskr_search::group_by_thread()` via `group_by_thread_unified()` wrapper.
 
 ### Contacts Autocomplete
 
 **Spec:** `docs/contacts/autocomplete-implementation-spec.md`
 
-- [ ] **Ranking uses frequency instead of recency** — Sorts by `frequency DESC` for contacts and `last_seen_at DESC` for seen addresses. Spec says "recency dominates ranking... not frequency count."
+- [x] **Ranking uses frequency instead of recency** — Done (2026-03-21 multi-agent session). Now uses `last_contacted_at DESC`, `last_seen_at DESC` for recency-based ranking.
 
 - [ ] **`ContactSearchResult` types in app crate instead of core** — Placed in `token_input.rs`. Spec says `crates/core/src/contacts/search.rs`. Violates crate boundary.
 
 - [ ] **Magic numbers in token input widget** — `0.54` char width heuristic, cursor offsets `2.0`/`4.0`, placeholder alpha `0.4`.
 
-- [ ] **`label.len()` byte count for width estimation** — Wrong for non-ASCII. Should use `label.chars().count()` or proper text measurement.
+- [x] **`label.len()` byte count for width estimation** — Done (2026-03-21 multi-agent session). Now uses `chars().count()` for correct multi-byte handling.
 
-- [ ] **No autocomplete dropdown (Phase 2)** — No compose integration, no dropdown overlay, no keyboard navigation for suggestions.
+- [x] **No autocomplete dropdown (Phase 2)** — Done (2026-03-21 multi-agent session). `AutocompleteState` in `ComposeState`, `search_contacts_for_autocomplete` wired, dropdown rendering with highlighted row, mouse click to select, generation counter for stale discard.
 
-- [ ] **No paste address parser (Phase 3)** — Widget emits `Paste(String)` but no `parse_pasted_addresses()` exists.
+- [x] **No paste address parser (Phase 3)** — Done (2026-03-21 multi-agent session). RFC 5322 parser in `token_input_parse.rs` handles `Name <email>`, `"Name" <email>`, bare email formats. Dedup within paste and against existing tokens.
 
-- [ ] **No arrow key navigation between tokens** — Spec describes Left/Right through tokens. Not handled.
+- [x] **No arrow key navigation between tokens** — Done (2026-03-21 multi-agent session). Left/Right arrow navigates between tokens. Left at text position 0 selects last token.
 
-- [ ] **No right-click context menu on tokens** — No `TokenContextMenu`, no `mouse::Button::Right` handling.
+- [x] **No right-click context menu on tokens** — Done (2026-03-21 multi-agent session). `TokenContextMenu(TokenId, Point)` message emitted on right-click.
 
-- [ ] **No contact group or GAL search in autocomplete** — `search_contacts_for_autocomplete()` doesn't query `contact_groups` or GAL cache.
+- [x] **No contact group or GAL search in autocomplete** — Partially done (2026-03-21 multi-agent session). Autocomplete now searches contacts, seen addresses, AND contact groups. GAL caching not implemented.
 
 ### Signatures
 
@@ -370,93 +370,104 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 
 - [ ] **Plain text editor instead of rich text** — Uses `text_input` for `body_html`. User must type raw HTML. The `rich-text-editor` crate exists and is complete — this is a wiring gap.
 
-- [ ] **Inline SQL bypasses core CRUD** — Save/insert/delete in `main.rs` uses raw SQL instead of `db_insert_signature()`/`db_update_signature()`/`db_delete_signature()` from `crates/core/`. Core functions are dead code.
+- [ ] **Inline SQL bypasses core CRUD** — Partially improved (2026-03-21 multi-agent session). Raw SQL extracted from `main.rs` to `handlers/signatures.rs` with proper transactional default-clearing. BUT: still uses raw SQL via `Db::with_write_conn`, NOT core functions `db_insert_signature()` etc. Uses `html_to_plain_text()` from core. Core CRUD functions remain unused by app.
 
-- [ ] **`is_reply_default` toggle doesn't clear old default transactionally** — Enabling `is_reply_default` for one signature doesn't clear the old default for the same account. Core CRUD handles this but is bypassed.
+- [x] **`is_reply_default` toggle doesn't clear old default transactionally** — Done (2026-03-21 multi-agent session). Handler in `handlers/signatures.rs` now clears old defaults transactionally for both `is_default` and `is_reply_default`.
 
-- [ ] **No `body_text` auto-generation** — Spec calls for `html_to_plain_text()` to generate plain-text fallback. Stores `body_text: None`.
+- [x] **No `body_text` auto-generation** — Done (2026-03-21 multi-agent session). Handler calls `html_to_plain_text()` from core on save.
 
 - [ ] **No drag reordering of signatures** — Spec shows grip handles and `db_reorder_signatures()`.
 
-- [ ] **No delete confirmation for signatures** — Delete is immediate, spec says confirm first.
+- [x] **No delete confirmation for signatures** — Done (2026-03-21 multi-agent session). Delete shows confirmation prompt in editor overlay.
 
-- [ ] **Signatures loaded synchronously on UI thread** — `load_signatures_into_settings()` runs in accounts-loaded handler. Spec says async via `Task::perform` on tab selection.
+- [x] **Signatures loaded synchronously on UI thread** — Done (2026-03-21 multi-agent session). Now uses async `Task::perform` via `handlers::signatures::load_signatures_async()`.
 
 ### Rich Text Editor
 
 **Spec:** `docs/editor/architecture.md`
 
-- [ ] **Architecture doc has stale claims** — Doc says `draw_list_marker()` "is not wired into the runtime draw path yet" but it IS called at `widget/mod.rs:529`. Doc says 428 tests, actual count is 652. Doc shows `html_parse.rs` as single file but it's a module directory (`mod.rs` + `dom.rs`). Doc omits `editor_state.rs` from crate structure.
-- [ ] **`_last_click` dead code** — `WidgetState._last_click: Option<Click>` initialized to `None`, never read. Double/triple click not implemented.
+- [x] **Architecture doc has stale claims** — Done (2026-03-21 multi-agent session). Architecture doc updated: test count, `html_parse` directory structure, `editor_state.rs` added to crate structure, `draw_list_marker()` wiring note corrected.
+- [x] **`_last_click` dead code** — Done (2026-03-21 multi-agent session). `last_click` now tracks click state for word selection (double-click) and block selection (triple-click). `Action::DoubleClick` and `Action::TripleClick` handled by `EditorState::perform()`.
 - [ ] **`prepare_move_up/down` unused at runtime** — Public functions in `widget/cursor.rs`, tested, but never called from the widget's `update()`. Simpler adjacent-block fallback used instead.
-- [ ] **`SetBlockAttrs` operation still missing** — Documented as deferred for alignment/indentation. Still absent.
+- [x] **`SetBlockAttrs` operation still missing** — Done (2026-03-21 multi-agent session). `EditOp::SetBlockAttrs` implemented for `indent_level` on `ListItem`. `TextAlignment` enum defined for future use. Self-inverse, tested.
 
 ### Main Layout
 
 **Specs:** `docs/main-layout/problem-statement.md`, `docs/main-layout/implementation-spec.md`, `docs/main-layout/iced-implementation-spec.md`
 
-- [ ] **App-local DB shim used instead of core's `get_thread_detail()`** — App uses raw SQL in `crates/app/src/db/connection.rs` for thread messages, attachments, accounts, labels. Core's `get_thread_detail()` is complete but never wired. Consequences: no body text from BodyStore (uses snippet), no message ownership detection, no quote-stripped collapsed summaries, no resolved label colors, attachment collapse not persisted to SQLite.
+- [x] **App-local DB shim used instead of core's `get_thread_detail()`** — Done (2026-03-21 multi-agent session). App now uses `db::threads::load_thread_detail()` which calls core's `get_thread_detail()`. Provides body text from BodyStore, ownership detection, collapsed summaries, resolved label colors, persisted attachment collapse state.
 - [ ] **Calendar and pinned search CRUD bypass core** — Raw SQL in `connection.rs` for `create/update/delete_calendar_event`, pinned search table creation, contact table alterations. App-level schema management.
 - [ ] **Phase 3 interaction flow entirely deferred** — Keyboard shortcuts (j/k, Enter, Escape), auto-advance after archive/trash, multi-select (Shift/Ctrl+click), inline reply composer, context-dependent shortcut dispatch via `FocusedRegion`.
-- [ ] **No real message body rendering** — Bodies shown as snippet text. No HTML rendering pipeline (no iced_webview, litehtml, or DOM-to-widget).
+- [x] **No real message body rendering** — Done (2026-03-21 multi-agent session). HTML rendering via DOM-to-widget pipeline in `html_render.rs`. Complexity heuristic for fallback to plain text. CID images, link clicks, table rendering still pending.
 - [ ] **No scroll virtualization** — Thread list renders all cards in `column![]` inside `scrollable`. Fixed `THREAD_CARD_HEIGHT` exists for future virtualization.
 - [ ] **Right sidebar still placeholder** — Shows static "Calendar placeholder", "No pinned items" text. Calendar built as separate full-page mode instead.
-- [ ] **Search context line missing scope indicator** — Shows `"{n} results"` but no "All" scope-widening link.
+- [x] **Search context line missing scope indicator** — Done (2026-03-21 multi-agent session). Shows result count on left and "All" scope-widening link on right.
 
 ### Pop-Out Message View (expanded)
 
 **Specs:** `docs/pop-out-windows/problem-statement.md`, `docs/pop-out-windows/message-view-implementation-spec.md`
 
-- [ ] **Phase 2 (message view) mostly complete but missing fields** — `cc_addresses`, `raw_source`, `rendering_mode`, `scroll_offset`, `error_banner`, position tracking, `overflow_menu_open`, `remote_content_loaded` all absent from `MessageViewState`.
-- [ ] **Phases 3-6 not started** — Rendering modes (plain/HTML/source), overflow menu (archive/delete/print/save), session restore, Save As (.eml/.txt).
-- [ ] **Compose window is a UI shell** — No sending (stub), no draft persistence, no auto-save subscription, no attachments, no rich text (uses `text_editor`), no formatting toolbar, no discard confirmation, no signature insertion.
-- [ ] **Status bar incorrectly appears in pop-out windows** — Problem statement says it should not.
+- [x] **Phase 2 (message view) mostly complete but missing fields** — Done (2026-03-21 multi-agent session). All fields now present: `cc_addresses`, `raw_source`, `rendering_mode`, `scroll_offset`, `error_banner`, position tracking (`x`, `y`), `overflow_menu_open`, `remote_content_loaded`.
+- [x] **Phases 3-6 not started** — Done (2026-03-21 multi-agent session). Phase 3: `RenderingMode` enum + toggle UI. Phase 4: Overflow menu with Archive/Delete/Print/Save As (stubs). Phase 5: Session restore with `session.json`. Phase 6: Save As (.eml/.txt) to downloads dir (no file picker).
+- [ ] **Compose window is a UI shell** — Partially improved (2026-03-21 multi-agent session). Added: discard confirmation dialog, formatting toolbar buttons (stubs), attribution line, cc_addresses in Reply All. Still missing: actual sending (stub), draft persistence, auto-save, attachments, rich text (uses `text_editor`), signature insertion.
+- [x] **Status bar incorrectly appears in pop-out windows** — Done (2026-03-21 multi-agent session). Status bar no longer appears in pop-out windows.
 - [ ] **Body/attachment loads bypass core** — `Db::load_message_body()` and `Db::load_message_attachments()` are raw SQL in app crate.
 
 ### Status Bar
 
 **Specs:** `docs/status-bar/problem-statement.md`, `docs/status-bar/implementation-spec.md`
 
-- [ ] **All three data pipelines unwired** — `report_sync_progress()`, `set_warning()`, `show_confirmation()` exist as public methods but are never called. Status bar permanently shows idle. No `IcedProgressReporter`, no `SyncEvent` type.
-- [ ] **Idle state collapses to zero height** — Spec explicitly says fixed 28px container. Code uses `Space::new().width(0).height(0)`. Causes layout shift on transition.
-- [ ] **Settings toggle disconnected** — `sync_status_bar: bool` exists in UI but is never read.
-- [ ] **Status bar appears in pop-out windows** — Problem statement says it should not.
-- [ ] **`ResolvedContent::Warning` missing `account_id`** — Re-derives from `warnings` map via cycle index. Subtle race possible (spec embeds `account_id` directly).
+- [x] **All three data pipelines unwired** — Done (2026-03-21 multi-agent session). `IcedProgressReporter` + `SyncEvent` types implemented. `Message::SyncProgress` + `handle_sync_event()` routes events to status bar methods. Remaining: connect sync orchestrator to reporter, wire `show_confirmation()` to email action handlers.
+- [x] **Idle state collapses to zero height** — Done (2026-03-21 multi-agent session). Now renders fixed-height container with `STATUS_BAR_HEIGHT` (28px) and `ContainerClass::StatusBar` styling in idle state.
+- [x] **Settings toggle disconnected** — Done (2026-03-21 multi-agent session). `sync_status_bar` now read by `status_bar_view()` to control visibility.
+- [x] **Status bar appears in pop-out windows** — Done (2026-03-21 multi-agent session). See above.
+- [x] **`ResolvedContent::Warning` missing `account_id`** — Done (2026-03-21 multi-agent session). `account_id` now embedded in resolved content.
 
 ### Sidebar (additional findings)
 
 **Specs:** `docs/sidebar/implementation-spec.md`
 
-- [ ] **Pinned search date format diverges** — Uses absolute ("Mar 19, 14:32") vs spec's relative ("2 hours ago"). Intentional.
-- [ ] **`SidebarEvent::CycleAccount` unreachable** — `CycleAccount` handler recursively calls `SelectAccount`, which emits `AccountSelected` before `CycleAccount` return. Parent handler is dead code.
+- [x] **Pinned search date format diverges** — Done (2026-03-21 multi-agent session). Now uses relative time format via `format_relative_time()`.
+- [x] **`SidebarEvent::CycleAccount` unreachable** — Partially done (2026-03-21 multi-agent session). Recursive `self.update()` fixed — handler now directly updates state and emits `AccountSelected`. `CycleAccount` variant retained for API compat but parent arm is dead code (maps to `Task::none()`).
 - [ ] **`NavigationTarget` enum still deferred** — `selected_label: Option<String>` remains the flat marker for universal folders, smart folders, and account labels.
 - [ ] **Mixed drafts list view** — Count path handles local+server drafts, but list path only returns server-synced drafts.
 
 ### Cross-Cutting
 
-- [ ] **Core CRUD bypassed in multiple places** — Accounts and signatures both write raw SQL in the app crate instead of using core functions. Core CRUD is dead code, and logic like transactional default-clearing is skipped.
+- [ ] **Core CRUD bypassed in multiple places** — Partially improved (2026-03-21 multi-agent session). Accounts now use `create_account_sync()` from core. Signatures extracted to `handlers/signatures.rs` with transactional semantics but still raw SQL (not core CRUD functions). Contacts still bypass core. Calendar still bypasses core.
 
-- [ ] **Dead code accumulation** *(verified 2026-03-21, expanded)*:
-  - `NavigateToLabel` — `CommandId` and `CommandArgs` variants exist but never registered, dispatched, or resolved. `Db::get_all_labels_cross_account()` unreachable.
-  - `SidebarEvent::CycleAccount` — unreachable due to recursive update pattern
-  - `SidebarMessage::Noop` — no emission found
-  - Spam/All Mail sidebar filter code — `SIDEBAR_UNIVERSAL_FOLDERS` doesn't include them
-  - Core CRUD functions for accounts (`db_create_account` etc.) and signatures (`db_insert/update/delete_signature`) — bypassed by app-level raw SQL
-  - `ContactSearchResult`, `ContactSearchKind`, `RecipientField` in `token_input.rs` — never imported
-  - `search_contacts_for_autocomplete` in app db — never called
-  - `AUTOCOMPLETE_MAX_HEIGHT`, `AUTOCOMPLETE_ROW_HEIGHT` layout constants — no dropdown exists
-  - `recency_score` on `CommandMatch` — computed but never used in sorting
-  - `PALETTE_TOP_OFFSET` layout constant — inline `[80, 0, 0, 0]` used instead
-  - `registry` parameter in `palette_card()` — immediately discarded with `let _ = registry`
-  - `NavNext`/`NavPrev` command dispatch — stub to `NavigateTo(Inbox)`, not real navigation
-  - `PendingChord::started` — `#[allow(dead_code)]`, stored but never read
-  - `SearchState.index`, `SearchState.schema`, `SearchParams.label` — all `#[allow(dead_code)]`
-  - `SearchState::search()` simple method — only `search_with_filters()` used
-  - `resolve_query_tokens` — still active but should be deprecated (parser handles offsets natively)
-  - Status bar public methods (`report_sync_progress`, `set_warning`, `show_confirmation`, etc.) — defined but never called
-  - `sync_status_bar` settings toggle — UI exists but value never read
-  - `_last_click` in editor `WidgetState` — initialized to `None`, never used
-  - `prepare_move_up/down` in editor — tested but never called from widget
+- [ ] **Dead code accumulation** *(verified 2026-03-21, updated 2026-03-21 post-multi-agent session)*:
+
+  **Resolved items (2026-03-21 multi-agent session):**
+  - ~~`NavigateToLabel`~~ — now registered, dispatched, and resolved
+  - ~~`SidebarEvent::CycleAccount`~~ — fixed recursive pattern, retained for API compat
+  - ~~`SidebarMessage::Noop`~~ — removed
+  - ~~Spam/All Mail sidebar filter code~~ — now active (backend includes these folders)
+  - ~~Core CRUD for accounts~~ — `create_account_sync` now used
+  - ~~`ContactSearchResult`, `ContactSearchKind`~~ — removed from `token_input.rs`
+  - ~~`RecipientField`~~ — now used by `AutocompleteState` and `TokenContextMenuState`
+  - ~~`search_contacts_for_autocomplete`~~ — now called from `handlers/contacts.rs`
+  - ~~`AUTOCOMPLETE_MAX_HEIGHT`, `AUTOCOMPLETE_ROW_HEIGHT`~~ — now used by dropdown
+  - ~~`recency_score` on `CommandMatch`~~ — now used in empty-query sort
+  - ~~`PALETTE_TOP_OFFSET`~~ — now used in palette positioning
+  - ~~`registry` parameter in `palette_card()`~~ — removed
+  - ~~`NavNext`/`NavPrev`~~ — now use `SelectThread` for real navigation
+  - ~~`SearchState.index`, `SearchState.schema`~~ — removed from struct
+  - ~~`SearchState::search()`~~ — removed, only `search_with_filters()` remains
+  - ~~`SearchParams.label`~~ — removed entirely
+  - ~~`resolve_query_tokens`~~ — no longer re-exported (deprecated via inline migration)
+  - ~~Status bar methods~~ — now reachable via `handle_sync_event()` and `show_confirmation()`
+  - ~~`sync_status_bar` toggle~~ — now read by `status_bar_view()`
+  - ~~`_last_click` in editor~~ — now used for double/triple click
+  - ~~`SetBlockAttrs`~~ — now implemented
+
+  **Remaining dead code:**
+  - Core CRUD for signatures (`db_insert/update/delete_signature`) — still bypassed by app-level raw SQL in `handlers/signatures.rs`
+  - `SidebarEvent::CycleAccount` parent handler — maps to `Task::none()`, can be removed
+  - `PendingChord::started` — `#[allow(dead_code)]`, timeout via subscription not elapsed check
+  - `prepare_move_up/down` in editor — tested infrastructure, not called from widget
+  - `Db::get_thread_messages()` and `Db::get_thread_attachments()` in `connection.rs` — replaced by `load_thread_detail`
+  - `group_by_thread()` duplicate — search crate is canonical, pipeline delegates to it
 
 ## UI Specs Needed
 

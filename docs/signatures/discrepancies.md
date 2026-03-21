@@ -91,12 +91,17 @@ Spec: `docs/signatures/implementation-spec.md`
 - Inline image extraction (`crates/provider-utils/src/signature_images.rs`)
   exists.
 
-### Cross-cutting — Core CRUD used (not bypassed)
+### Cross-cutting — Transactional defaults (raw SQL, not core CRUD functions)
 
-- **App handlers use proper transactional CRUD.** The raw SQL in `main.rs`
-  has been replaced with `crates/app/src/handlers/signatures.rs` which uses
-  transactional default-clearing for both `is_default` and
-  `is_reply_default`. The handler is wired via `Message::SignatureOp`.
+- **App handlers use proper transactional semantics but raw SQL, not core
+  CRUD functions.** The raw SQL in `main.rs` has been extracted to
+  `crates/app/src/handlers/signatures.rs` which implements transactional
+  default-clearing for both `is_default` and `is_reply_default` via raw
+  SQL in `Db::with_write_conn`. The handler does NOT call core functions
+  like `db_insert_signature()` / `db_update_signature()` /
+  `db_delete_signature()` from `crates/core/src/db/queries_extra/compose.rs`.
+  It does call `html_to_plain_text()` from core. The core CRUD functions
+  remain unused by the app (used only by provider sync).
 
 ---
 
@@ -172,11 +177,16 @@ save/delete emitted upward to the App via `SettingsEvent`.
 **Not implemented in UI.** The `db_reorder_signatures` query exists in core
 but grip handles and drag support are not wired for signature rows.
 
-### e. Core CRUD properly used
+### e. Core CRUD partially bypassed
 
-**Yes.** The raw SQL bypass has been eliminated. All signature operations
-go through `crates/app/src/handlers/signatures.rs` which uses proper
-transactional semantics for default-clearing.
+**No — still raw SQL.** Signature operations go through
+`crates/app/src/handlers/signatures.rs` which implements proper
+transactional semantics for default-clearing, but does so via raw SQL
+in `Db::with_write_conn`, not by calling the core CRUD functions
+(`db_insert_signature`, `db_update_signature`, `db_delete_signature`).
+The core functions in `crates/core/src/db/queries_extra/compose.rs` are
+still only used by provider sync code, not the app UI. The `html_to_plain_text`
+function from core IS used.
 
 ### f. Dead code
 
