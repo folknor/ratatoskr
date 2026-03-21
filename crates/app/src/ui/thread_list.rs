@@ -20,6 +20,41 @@ pub enum AutoAdvanceDirection {
     Previous,
 }
 
+// ── Typeahead types ───────────────────────────────────
+
+/// A single typeahead suggestion item.
+#[derive(Debug, Clone)]
+pub struct TypeaheadItem {
+    pub label: String,
+    pub detail: Option<String>,
+    pub insert_value: String,
+}
+
+/// Direction for navigating typeahead suggestions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeaheadDirection {
+    Up,
+    Down,
+}
+
+/// State for the typeahead suggestion dropdown.
+#[derive(Debug, Clone)]
+pub struct TypeaheadState {
+    pub visible: bool,
+    pub items: Vec<TypeaheadItem>,
+    pub selected: usize,
+}
+
+impl Default for TypeaheadState {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            items: Vec::new(),
+            selected: 0,
+        }
+    }
+}
+
 // ── Messages & Events ──────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -53,6 +88,14 @@ pub enum ThreadListMessage {
     WidenSearchScope,
     /// Auto-advance after an email action removed the actioned thread(s).
     AutoAdvance,
+    /// Navigate typeahead suggestions up or down.
+    TypeaheadNavigate(TypeaheadDirection),
+    /// Typeahead suggestion items loaded from async query.
+    TypeaheadItemsLoaded(Vec<TypeaheadItem>),
+    /// User selected a typeahead suggestion by index.
+    TypeaheadSelect(usize),
+    /// Dismiss the typeahead dropdown.
+    TypeaheadDismiss,
 }
 
 /// Events the thread list emits upward to the App.
@@ -106,6 +149,8 @@ pub struct ThreadList {
     pub search_query: String,
     /// Direction to auto-advance after an email action removes a thread.
     pub auto_advance_direction: AutoAdvanceDirection,
+    /// Typeahead suggestion state.
+    pub typeahead: TypeaheadState,
 }
 
 impl ThreadList {
@@ -120,6 +165,7 @@ impl ThreadList {
             mode: ThreadListMode::Folder,
             search_query: String::new(),
             auto_advance_direction: AutoAdvanceDirection::Next,
+            typeahead: TypeaheadState::default(),
         }
     }
 
@@ -369,6 +415,37 @@ impl Component for ThreadList {
             }
             ThreadListMessage::WidenSearchScope => {
                 (Task::none(), Some(ThreadListEvent::WidenSearchScope))
+            }
+            ThreadListMessage::TypeaheadNavigate(direction) => {
+                if !self.typeahead.items.is_empty() {
+                    match direction {
+                        TypeaheadDirection::Up => {
+                            if self.typeahead.selected > 0 {
+                                self.typeahead.selected -= 1;
+                            }
+                        }
+                        TypeaheadDirection::Down => {
+                            if self.typeahead.selected + 1 < self.typeahead.items.len() {
+                                self.typeahead.selected += 1;
+                            }
+                        }
+                    }
+                }
+                (Task::none(), None)
+            }
+            ThreadListMessage::TypeaheadItemsLoaded(items) => {
+                self.typeahead.items = items;
+                self.typeahead.selected = 0;
+                self.typeahead.visible = !self.typeahead.items.is_empty();
+                (Task::none(), None)
+            }
+            ThreadListMessage::TypeaheadSelect(_idx) => {
+                self.typeahead.visible = false;
+                (Task::none(), None)
+            }
+            ThreadListMessage::TypeaheadDismiss => {
+                self.typeahead.visible = false;
+                (Task::none(), None)
             }
         }
     }

@@ -9,8 +9,11 @@
 //! - Save As (.eml / .txt) flow
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use iced::{Point, Size, Task};
+
+pub const DRAFT_AUTO_SAVE_INTERVAL: Duration = Duration::from_secs(30);
 
 use crate::db::Db;
 use crate::pop_out::compose::{
