@@ -37,6 +37,9 @@ pub struct SyncAccountProgress {
     pub current: u64,
     pub total: u64,
     pub phase: String,
+    /// Generation counter. Incremented each time a sync cycle starts for
+    /// this account. Used to detect stale progress entries from dead tasks.
+    pub generation: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +54,7 @@ enum ResolvedContent {
     Warning {
         text: String,
         clickable: bool,
+        account_id: String,
     },
     SyncProgress {
         text: String,
@@ -58,6 +62,107 @@ enum ResolvedContent {
     Confirmation {
         text: String,
     },
+}
+
+// ── Sync event pipeline ─────────────────────────────────
+
+/// Events produced by the `IcedProgressReporter` and delivered to the
+/// app via an iced subscription channel.
+#[derive(Debug, Clone)]
+pub enum SyncEvent {
+    Progress {
+        account_id: String,
+        phase: String,
+        current: u64,
+        total: u64,
+    },
+    Complete {
+        account_id: String,
+    },
+    Error {
+        account_id: String,
+        error: String,
+    },
+}
+
+impl SyncEvent {
+    /// Parse a `SyncEvent` from a raw progress reporter event name and
+    /// JSON payload.
+    pub fn from_json(event_name: &str, json: serde_json::Value) -> Self {
+        // Sync-complete events are signalled by the event name suffix.
+        if event_name.ends_with("-sync-complete") {
+            let account_id = json
+                .get("accountId")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            return Self::Complete { account_id };
+        }
+
+        // Error events.
+        if event_name.ends_with("-sync-error") {
+            let account_id = json
+                .get("accountId")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let error = json
+                .get("error")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("unknown error")
+                .to_string();
+            return Self::Error { account_id, error };
+        }
+
+        // Default: progress event.
+        let account_id = json
+            .get("accountId")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let phase = json
+            .get("phase")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let current = json
+            .get("current")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        let total = json
+            .get("total")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+
+        Self::Progress { account_id, phase, current, total }
+    }
+}
+
+/// `ProgressReporter` implementation that sends events through an iced
+/// subscription channel. Created via `sync_progress_subscription()`.
+pub struct IcedProgressReporter {
+    sender: tokio::sync::mpsc::UnboundedSender<SyncEvent>,
+}
+
+impl ratatoskr_core::progress::ProgressReporter for IcedProgressReporter {
+    fn emit_json(&self, event_name: &str, json: serde_json::Value) {
+        let event = SyncEvent::from_json(event_name, json);
+        // Best-effort send — drop on failure (receiver closed).
+        let _ = self.sender.send(event);
+    }
+}
+
+/// Create a sync progress subscription and its corresponding reporter.
+///
+/// Returns `(subscription, reporter)`. The subscription produces
+/// `SyncEvent` messages. The reporter should be passed to the sync
+/// layer as its `ProgressReporter`.
+pub fn create_sync_progress_channel() -> (
+    tokio::sync::mpsc::UnboundedReceiver<SyncEvent>,
+    IcedProgressReporter,
+) {
+    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+    (receiver, IcedProgressReporter { sender })
 }
 
 // ── Messages & Events ───────────────────────────────────
@@ -84,6 +189,10 @@ pub struct StatusBar {
     confirmation: Option<Confirmation>,
     warning_cycle_index: usize,
     sync_cycle_index: usize,
+    /// Per-account generation counters for stale sync detection.
+    /// Incremented when a sync cycle starts; if a progress entry's
+    /// generation is behind the current generation, the entry is stale.
+    sync_generations: HashMap<String, u64>,
 }
 
 impl StatusBar {
@@ -94,11 +203,14 @@ impl StatusBar {
             confirmation: None,
             warning_cycle_index: 0,
             sync_cycle_index: 0,
+            sync_generations: HashMap::new(),
         }
     }
 
     // ── Inbound data methods (called by App) ────────────
 
+    /// Record sync progress for an account. Called when the progress
+    /// reporter delivers a Progress event.
     pub fn report_sync_progress(
         &mut self,
         account_id: String,
@@ -107,24 +219,65 @@ impl StatusBar {
         total: u64,
         phase: String,
     ) {
+        let generation = self.current_generation(&account_id);
         self.sync_progress.insert(
             account_id,
-            SyncAccountProgress { email, current, total, phase },
+            SyncAccountProgress { email, current, total, phase, generation },
         );
     }
 
+    /// Remove sync progress for an account (sync finished or cancelled).
     pub fn report_sync_complete(&mut self, account_id: &str) {
         self.sync_progress.remove(account_id);
     }
 
+    /// Begin a new sync generation for an account. Returns the new
+    /// generation number. Call this at the start of each sync cycle
+    /// so that old progress entries can be detected as stale.
+    pub fn begin_sync_generation(&mut self, account_id: &str) -> u64 {
+        let generation = self.sync_generations
+            .entry(account_id.to_string())
+            .or_insert(0);
+        *generation = generation.wrapping_add(1);
+        *generation
+    }
+
+    /// Check if an account's sync progress entry is stale (its
+    /// generation is behind the current generation for that account).
+    pub fn is_sync_stale(&self, account_id: &str) -> bool {
+        let Some(progress) = self.sync_progress.get(account_id) else {
+            return false;
+        };
+        let current_gen = self.sync_generations.get(account_id).copied().unwrap_or(0);
+        progress.generation != current_gen
+    }
+
+    /// Remove stale sync progress entries (where generation is behind).
+    pub fn prune_stale_sync(&mut self) {
+        let stale_ids: Vec<String> = self.sync_progress.keys()
+            .filter(|id| self.is_sync_stale(id))
+            .cloned()
+            .collect();
+        for id in stale_ids {
+            self.sync_progress.remove(&id);
+        }
+    }
+
+    fn current_generation(&self, account_id: &str) -> u64 {
+        self.sync_generations.get(account_id).copied().unwrap_or(0)
+    }
+
+    /// Set a warning for an account. Replaces any existing warning.
     pub fn set_warning(&mut self, warning: AccountWarning) {
         self.warnings.insert(warning.account_id.clone(), warning);
     }
 
+    /// Clear the warning for an account.
     pub fn clear_warning(&mut self, account_id: &str) {
         self.warnings.remove(account_id);
     }
 
+    /// Show a transient confirmation message (~3s).
     pub fn show_confirmation(&mut self, text: String) {
         self.confirmation = Some(Confirmation {
             text,
@@ -203,11 +356,16 @@ impl StatusBar {
             )
         };
 
-        ResolvedContent::Warning { text, clickable }
+        ResolvedContent::Warning {
+            text,
+            clickable,
+            account_id: warning.account_id.clone(),
+        }
     }
 
     fn resolve_sync_progress(&self) -> ResolvedContent {
-        let accounts: Vec<&SyncAccountProgress> = self.sync_progress.values().collect();
+        let accounts: Vec<&SyncAccountProgress> =
+            self.sync_progress.values().collect();
 
         let text = if accounts.len() == 1 {
             let p = accounts[0];
@@ -284,13 +442,17 @@ impl Component for StatusBar {
 
         match content {
             ResolvedContent::Idle => {
-                // Nothing to show — collapse to zero height.
-                // "Absence means nothing to say" per the problem statement.
-                Space::new().width(0).height(0).into()
+                // Empty bar at fixed height for consistent layout.
+                container(Space::new().height(0))
+                    .width(Length::Fill)
+                    .height(STATUS_BAR_HEIGHT)
+                    .style(ContainerClass::StatusBar.style())
+                    .into()
             }
             ResolvedContent::Warning {
                 text: warning_text,
                 clickable,
+                ..
             } => {
                 let bar = build_status_row(
                     icon::alert_triangle(),
