@@ -538,8 +538,15 @@ pub struct DbSignature {
     pub account_id: String,
     pub name: String,
     pub body_html: String,
+    pub body_text: Option<String>,
     pub is_default: i64,
+    pub is_reply_default: i64,
     pub sort_order: i64,
+    pub source: String,
+    pub server_id: Option<String>,
+    pub server_html_hash: Option<String>,
+    pub last_synced_at: Option<i64>,
+    pub created_at: i64,
 }
 
 // ── Send-As Alias ──────────────────────────────────────────

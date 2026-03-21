@@ -27,6 +27,9 @@ pub struct ComposeDocumentAssembly {
     /// was inserted. Everything from this index to the attribution line (or end
     /// of document if no quoted content) is the signature region.
     pub signature_separator_index: Option<usize>,
+    /// The ID of the signature that was inserted, for change detection when
+    /// switching From accounts.
+    pub active_signature_id: Option<String>,
 }
 
 // ── Assembly ────────────────────────────────────────────
@@ -48,10 +51,12 @@ pub struct ComposeDocumentAssembly {
 /// If `quoted_content` is `None`, the attribution and blockquote are omitted.
 pub fn assemble_compose_document(
     signature_html: Option<&str>,
+    signature_id: Option<String>,
     quoted_content: Option<QuotedContent>,
 ) -> ComposeDocumentAssembly {
     let mut blocks: Vec<Block> = Vec::new();
     let mut sig_sep_index = None;
+    let mut active_sig_id = None;
 
     // 1. Initial empty paragraph for user content.
     blocks.push(Block::empty_paragraph());
@@ -62,6 +67,7 @@ pub fn assemble_compose_document(
     {
         sig_sep_index = Some(blocks.len());
         blocks.push(Block::HorizontalRule);
+        active_sig_id = signature_id;
 
         let sig_doc = from_html(sig_html);
         for block in sig_doc.blocks {
@@ -81,6 +87,7 @@ pub fn assemble_compose_document(
     ComposeDocumentAssembly {
         document: Document::from_blocks(blocks),
         signature_separator_index: sig_sep_index,
+        active_signature_id: active_sig_id,
     }
 }
 
@@ -217,7 +224,7 @@ mod tests {
 
     #[test]
     fn assemble_no_signature_no_quoted() {
-        let result = assemble_compose_document(None, None);
+        let result = assemble_compose_document(None, None, None);
         assert_eq!(result.document.block_count(), 1);
         assert_eq!(
             result.document.block(0),
@@ -230,6 +237,7 @@ mod tests {
     fn assemble_with_signature_only() {
         let result = assemble_compose_document(
             Some("<p>Best regards,</p><p>Alice</p>"),
+            None,
             None,
         );
         // Block 0: empty paragraph
@@ -258,6 +266,7 @@ mod tests {
     fn assemble_with_signature_and_reply() {
         let result = assemble_compose_document(
             Some("<p>Cheers,</p>"),
+            None,
             Some(QuotedContent {
                 attribution: "On Mar 19, 2026, Bob wrote:".to_owned(),
                 body_html: "<p>Original message</p>".to_owned(),
@@ -292,6 +301,7 @@ mod tests {
     #[test]
     fn assemble_with_quoted_content_only() {
         let result = assemble_compose_document(
+            None,
             None,
             Some(QuotedContent {
                 attribution: "On Mar 19, 2026, Carol wrote:".to_owned(),
@@ -500,13 +510,14 @@ mod tests {
     #[test]
     fn signature_separator_index_correct_for_various_signatures() {
         // Single-block signature.
-        let result = assemble_compose_document(Some("<p>Short</p>"), None);
+        let result = assemble_compose_document(Some("<p>Short</p>"), None, None);
         assert_eq!(result.signature_separator_index, Some(1));
         assert_eq!(result.document.block_count(), 3); // empty + HR + sig
 
         // Multi-block signature.
         let result = assemble_compose_document(
             Some("<p>Line 1</p><p>Line 2</p><p>Line 3</p>"),
+            None,
             None,
         );
         assert_eq!(result.signature_separator_index, Some(1));
@@ -516,7 +527,7 @@ mod tests {
     #[test]
     fn assemble_signature_with_rich_html() {
         let sig_html = "<p><strong>Alice Smith</strong></p><p>Engineering Lead</p>";
-        let result = assemble_compose_document(Some(sig_html), None);
+        let result = assemble_compose_document(Some(sig_html), None, None);
         assert_eq!(result.signature_separator_index, Some(1));
 
         // Verify the bold run.
@@ -533,6 +544,7 @@ mod tests {
     fn assemble_full_reply_structure() {
         let result = assemble_compose_document(
             Some("<p>Thanks,</p><p>Alice</p>"),
+            None,
             Some(QuotedContent {
                 attribution: "On Mar 19, 2026, Bob Jones wrote:".to_owned(),
                 body_html: "<p>Hey Alice,</p><p>How are you?</p>".to_owned(),
@@ -562,21 +574,21 @@ mod tests {
 
     #[test]
     fn assemble_blank_signature_omitted() {
-        let result = assemble_compose_document(Some(""), None);
+        let result = assemble_compose_document(Some(""), None, None);
         assert_eq!(result.document.block_count(), 1);
         assert!(result.signature_separator_index.is_none());
     }
 
     #[test]
     fn assemble_whitespace_signature_omitted() {
-        let result = assemble_compose_document(Some("   \n  "), None);
+        let result = assemble_compose_document(Some("   \n  "), None, None);
         assert_eq!(result.document.block_count(), 1);
         assert!(result.signature_separator_index.is_none());
     }
 
     #[test]
     fn assemble_empty_paragraph_signature_omitted() {
-        let result = assemble_compose_document(Some("<p>  </p>"), None);
+        let result = assemble_compose_document(Some("<p>  </p>"), None, None);
         assert_eq!(result.document.block_count(), 1);
         assert!(result.signature_separator_index.is_none());
     }
@@ -604,6 +616,7 @@ mod tests {
         // A document containing only an image should NOT be blank.
         let result = assemble_compose_document(
             Some(r#"<img src="inline-image:abc123" alt="logo">"#),
+            None,
             None,
         );
         // Should have: empty paragraph + HR + image block

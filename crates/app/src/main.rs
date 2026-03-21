@@ -5,6 +5,7 @@ mod component;
 mod db;
 mod display;
 mod font;
+mod handlers;
 mod icon;
 mod pop_out;
 mod ui;
@@ -210,6 +211,8 @@ pub enum Message {
     AddAccount(AddAccountMessage),
     OpenAddAccount,
     ReloadSignatures,
+    /// Result from an async signature operation (save/delete/load).
+    SignatureOp(handlers::SignatureResult),
 
     // Pop-out windows
     /// A message targeting a specific pop-out window.
@@ -914,8 +917,11 @@ impl App {
                 Task::none()
             }
             Message::ReloadSignatures => {
-                self.load_signatures_into_settings();
-                Task::none()
+                handlers::signatures::load_signatures_async(&self.db)
+                    .map(Message::SignatureOp)
+            }
+            Message::SignatureOp(result) => {
+                self.handle_signature_op(result)
             }
 
             // Pop-out windows
@@ -1876,73 +1882,12 @@ impl App {
                 Task::none()
             }
             SettingsEvent::SaveSignature(req) => {
-                let db = Arc::clone(&self.db);
-                Task::perform(
-                    async move {
-                        db.with_write_conn(move |conn| {
-                            if let Some(ref id) = req.id {
-                                conn.execute(
-                                    "UPDATE signatures SET name = ?1, body_html = ?2, \
-                                     is_default = ?3, is_reply_default = ?4 WHERE id = ?5",
-                                    rusqlite::params![
-                                        req.name,
-                                        req.body_html,
-                                        if req.is_default { 1 } else { 0 },
-                                        if req.is_reply_default { 1 } else { 0 },
-                                        id,
-                                    ],
-                                )
-                                .map_err(|e| e.to_string())?;
-                            } else {
-                                let id = uuid::Uuid::new_v4().to_string();
-                                conn.execute(
-                                    "INSERT INTO signatures (id, account_id, name, body_html, \
-                                     is_default, is_reply_default) \
-                                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                                    rusqlite::params![
-                                        id,
-                                        req.account_id,
-                                        req.name,
-                                        req.body_html,
-                                        if req.is_default { 1 } else { 0 },
-                                        if req.is_reply_default { 1 } else { 0 },
-                                    ],
-                                )
-                                .map_err(|e| e.to_string())?;
-                            }
-                            Ok(())
-                        })
-                        .await
-                    },
-                    |result| {
-                        if let Err(e) = result {
-                            eprintln!("Failed to save signature: {e}");
-                        }
-                        Message::ReloadSignatures
-                    },
-                )
+                handlers::signatures::handle_save_signature(&self.db, req)
+                    .map(Message::SignatureOp)
             }
             SettingsEvent::DeleteSignature(sig_id) => {
-                let db = Arc::clone(&self.db);
-                Task::perform(
-                    async move {
-                        db.with_write_conn(move |conn| {
-                            conn.execute(
-                                "DELETE FROM signatures WHERE id = ?1",
-                                rusqlite::params![sig_id],
-                            )
-                            .map_err(|e| e.to_string())?;
-                            Ok(())
-                        })
-                        .await
-                    },
-                    |result| {
-                        if let Err(e) = result {
-                            eprintln!("Failed to delete signature: {e}");
-                        }
-                        Message::ReloadSignatures
-                    },
-                )
+                handlers::signatures::handle_delete_signature(&self.db, sig_id)
+                    .map(Message::SignatureOp)
             }
             SettingsEvent::LoadContacts(filter) => {
                 let db = Arc::clone(&self.db);
@@ -2168,11 +2113,13 @@ impl App {
                 last_sync_at: a.last_sync_at,
             })
             .collect();
-        // Load signatures for the settings UI
-        self.load_signatures_into_settings();
         self.sidebar.selected_account = Some(0);
         self.status = format!("Loaded {} accounts", self.sidebar.accounts.len());
-        self.load_navigation_and_threads()
+        // Load signatures asynchronously alongside navigation/threads.
+        let sig_task = handlers::signatures::load_signatures_async(&self.db)
+            .map(Message::SignatureOp);
+        let nav_task = self.load_navigation_and_threads();
+        Task::batch([sig_task, nav_task])
     }
 
     fn view_first_launch_modal<'a>(
@@ -2406,39 +2353,22 @@ impl App {
         Task::none()
     }
 
-    /// Load signatures from DB into settings.signatures synchronously.
-    /// Called after accounts load so the settings UI has signature data.
-    fn load_signatures_into_settings(&mut self) {
-        let result = self.db.with_conn_sync(|conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, account_id, name, body_html, is_default,
-                            is_reply_default, sort_order
-                     FROM signatures ORDER BY account_id, sort_order, name",
-                )
-                .map_err(|e| e.to_string())?;
-            let rows = stmt
-                .query_map([], |row| {
-                    Ok(ui::settings::SignatureEntry {
-                        id: row.get("id")?,
-                        account_id: row.get("account_id")?,
-                        name: row.get("name")?,
-                        body_html: row.get::<_, Option<String>>("body_html")?
-                            .unwrap_or_default(),
-                        body_text: None,
-                        is_default: row.get::<_, i64>("is_default").unwrap_or(0) != 0,
-                        is_reply_default: row.get::<_, i64>("is_reply_default")
-                            .unwrap_or(0)
-                            != 0,
-                    })
-                })
-                .map_err(|e| e.to_string())?;
-            rows.collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())
-        });
+    /// Handle the result of an async signature operation.
+    fn handle_signature_op(&mut self, result: handlers::SignatureResult) -> Task<Message> {
         match result {
-            Ok(sigs) => self.settings.signatures = sigs,
-            Err(e) => eprintln!("Failed to load signatures: {e}"),
+            handlers::SignatureResult::Loaded(Ok(sigs)) => {
+                self.settings.signatures = sigs;
+                Task::none()
+            }
+            handlers::SignatureResult::Loaded(Err(e)) => {
+                eprintln!("Failed to load signatures: {e}");
+                Task::none()
+            }
+            handlers::SignatureResult::Saved(_) | handlers::SignatureResult::Deleted(_) => {
+                // After save/delete, reload signatures asynchronously.
+                handlers::signatures::load_signatures_async(&self.db)
+                    .map(Message::SignatureOp)
+            }
         }
     }
 
