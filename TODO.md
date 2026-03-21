@@ -67,7 +67,7 @@ These patterns appeared across 6-8+ specs and should be adopted as foundational 
 
 ---
 
-- [ ] **Vendor iced_drop for drag-and-drop**
+- [x] **Vendor iced_drop for drag-and-drop** *(Done 2026-03-21)* — Vendored into `crates/iced-drop/`, adapted to our iced fork, added to workspace. Not yet wired to any UI.
 
   Add iced_drop (623 lines, zero external dependencies beyond iced) as a vendored crate in the workspace. This is the only "steal the code" repo from the survey — everything else is "steal the pattern."
 
@@ -100,7 +100,7 @@ These patterns appeared across 6-8+ specs and should be adopted as foundational 
 
   **Remaining work** (as these features are built):
   - ~~Sync pipeline events (4 providers)~~ Partially done (2026-03-21 multi-agent session) — `IcedProgressReporter` type and `SyncEvent` enum implemented, `create_sync_progress_channel()` factory built, `Message::SyncProgress` wired. Remaining: connect sync orchestrator to the reporter.
-  - Compose auto-save timer (30s) — not implemented in pop-out compose
+  - ~~Compose auto-save timer (30s)~~ Done (2026-03-21 multi-agent session) — `iced::time::every(30s)` subscription fires `Message::ComposeDraftTick` when any compose window has `draft_dirty` set. Saves to `local_drafts` table.
   - File system watches (draft changes, attachment modifications)
   - Provider push notifications (IMAP IDLE, JMAP push, Graph webhooks, Gmail watch)
   - GAL polling refresh (hourly, for contacts)
@@ -272,7 +272,7 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 
 - [x] **`current_view` only detects 2 of 14+ view types** — Done (2026-03-21 multi-agent session). View type detection now covers all universal folders, calendar, search, pinned search, and settings.
 
-- [ ] **Thread state flags never populated** — `is_muted`, `is_pinned`, `is_draft`, `in_trash`, `in_spam` in `ThreadState` are always `None` even when a thread is selected. Toggle commands (Mute/Unmute, Pin/Unpin) and trash-specific commands (PermanentDelete) cannot resolve correctly.
+- [x] **Thread state flags never populated** — Done (2026-03-21 multi-agent session). `is_pinned` and `is_muted` populated from thread data. `in_trash`, `in_spam`, `is_draft` still require label-based detection (not yet implemented).
 
 - [x] **No pending chord indicator UI** — Done (2026-03-21 multi-agent session). Pending chord indicator badge displayed in bottom-right corner. `PendingChord.started` still `#[allow(dead_code)]` (timeout uses subscription, not elapsed check).
 
@@ -330,7 +330,7 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 
 - [x] **`SearchBlur` unfocus not wired** — Done (2026-03-21 multi-agent session). Handler now focuses a dummy widget ID to remove focus from search bar.
 
-- [ ] **Phases 2-4 not started** — Smart folder CRUD via command palette, typeahead suggestions, "Search here" scoped search.
+- [ ] **Phases 2-4 partially done** — Phase 3 (typeahead) done (2026-03-21 multi-agent session): `CursorContext` operator detection in smart-folder parser, dropdown suggestions for from/to (contacts), label/folder, account, has/is/in, before/after (date presets), keyboard navigation (arrows, Tab, Escape). Phase 2 (smart folder CRUD via palette) and Phase 4 ("Search here" scoped search) not started.
 
 - [x] **Smart folder migration (Slice 6) not started** — Partially done (2026-03-21 multi-agent session). `migrate_legacy_tokens()` translates `__LAST_7_DAYS__` -> `-7`, etc. `resolve_query_tokens` no longer re-exported. Execution path still SQL-only for smart folders (intentional — avoids circular dependency with core).
 
@@ -368,15 +368,15 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 
 **Spec:** `docs/signatures/implementation-spec.md`
 
-- [ ] **Plain text editor instead of rich text** — Uses `text_input` for `body_html`. User must type raw HTML. The `rich-text-editor` crate exists and is complete — this is a wiring gap.
+- [x] **Plain text editor instead of rich text** — Done (2026-03-21 multi-agent session). Signature editor now uses `RichTextEditor` with `EditorState`, formatting toolbar (B/I/U/S, lists, blockquote), HTML round-trip via `from_html()`/`to_html()`.
 
-- [ ] **Inline SQL bypasses core CRUD** — Partially improved (2026-03-21 multi-agent session). Raw SQL extracted from `main.rs` to `handlers/signatures.rs` with proper transactional default-clearing. BUT: still uses raw SQL via `Db::with_write_conn`, NOT core functions `db_insert_signature()` etc. Uses `html_to_plain_text()` from core. Core CRUD functions remain unused by app.
+- [x] **Inline SQL bypasses core CRUD** — Done (2026-03-21 multi-agent session). `handlers/signatures.rs` now delegates to core CRUD functions: `db_insert_signature`, `db_update_signature`, `db_delete_signature`, `db_get_all_signatures`, `db_reorder_signatures` via `DbState::from_arc()` bridge. No more raw SQL.
 
 - [x] **`is_reply_default` toggle doesn't clear old default transactionally** — Done (2026-03-21 multi-agent session). Handler in `handlers/signatures.rs` now clears old defaults transactionally for both `is_default` and `is_reply_default`.
 
 - [x] **No `body_text` auto-generation** — Done (2026-03-21 multi-agent session). Handler calls `html_to_plain_text()` from core on save.
 
-- [ ] **No drag reordering of signatures** — Spec shows grip handles and `db_reorder_signatures()`.
+- [x] **No drag reordering of signatures** — Done (2026-03-21 multi-agent session). Grip handles on signature rows, `SignatureDragGripPress`/`ListDragMove`/`ListDragEnd` messages, `SettingsEvent::ReorderSignatures` emits to App which calls `db_reorder_signatures` via core CRUD.
 
 - [x] **No delete confirmation for signatures** — Done (2026-03-21 multi-agent session). Delete shows confirmation prompt in editor overlay.
 
@@ -396,7 +396,7 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 **Specs:** `docs/main-layout/problem-statement.md`, `docs/main-layout/implementation-spec.md`, `docs/main-layout/iced-implementation-spec.md`
 
 - [x] **App-local DB shim used instead of core's `get_thread_detail()`** — Done (2026-03-21 multi-agent session). App now uses `db::threads::load_thread_detail()` which calls core's `get_thread_detail()`. Provides body text from BodyStore, ownership detection, collapsed summaries, resolved label colors, persisted attachment collapse state.
-- [ ] **Calendar and pinned search CRUD bypass core** — Raw SQL in `connection.rs` for `create/update/delete_calendar_event`, pinned search table creation, contact table alterations. App-level schema management.
+- [ ] **Calendar and pinned search CRUD bypass core** — Calendar CRUD moved to core (`crates/core/src/db/queries_extra/calendars.rs`). Schema DDL removed from `connection.rs`. **Remaining:** pinned search CRUD still in app crate.
 - [ ] **Phase 3 interaction flow entirely deferred** — Keyboard shortcuts (j/k, Enter, Escape), auto-advance after archive/trash, multi-select (Shift/Ctrl+click), inline reply composer, context-dependent shortcut dispatch via `FocusedRegion`.
 - [x] **No real message body rendering** — Done (2026-03-21 multi-agent session). HTML rendering via DOM-to-widget pipeline in `html_render.rs`. Complexity heuristic for fallback to plain text. CID images, link clicks, table rendering still pending.
 - [ ] **No scroll virtualization** — Thread list renders all cards in `column![]` inside `scrollable`. Fixed `THREAD_CARD_HEIGHT` exists for future virtualization.
@@ -409,7 +409,7 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 
 - [x] **Phase 2 (message view) mostly complete but missing fields** — Done (2026-03-21 multi-agent session). All fields now present: `cc_addresses`, `raw_source`, `rendering_mode`, `scroll_offset`, `error_banner`, position tracking (`x`, `y`), `overflow_menu_open`, `remote_content_loaded`.
 - [x] **Phases 3-6 not started** — Done (2026-03-21 multi-agent session). Phase 3: `RenderingMode` enum + toggle UI. Phase 4: Overflow menu with Archive/Delete/Print/Save As (stubs). Phase 5: Session restore with `session.json`. Phase 6: Save As (.eml/.txt) to downloads dir (no file picker).
-- [ ] **Compose window is a UI shell** — Partially improved (2026-03-21 multi-agent session). Added: discard confirmation dialog, formatting toolbar buttons (stubs), attribution line, cc_addresses in Reply All. Still missing: actual sending (stub), draft persistence, auto-save, attachments, rich text (uses `text_editor`), signature insertion.
+- [x] **Compose window is a UI shell** — Done (2026-03-21 multi-agent session). Full compose workflow: rich text editor (`EditorState` from `crates/rich-text-editor/`), formatting toolbar (B/I/U), signature resolution at compose creation via `assemble_compose_document()`, draft auto-save every 30s via subscription, attachment handling (stub file picker), send path (finalize HTML + save to `local_drafts`), discard confirmation with content detection. Remaining gaps: actual provider send, file picker (`rfd` not a dep), block-type format toggles (list/blockquote), link insertion dialog.
 - [x] **Status bar incorrectly appears in pop-out windows** — Done (2026-03-21 multi-agent session). Status bar no longer appears in pop-out windows.
 - [ ] **Body/attachment loads bypass core** — `Db::load_message_body()` and `Db::load_message_attachments()` are raw SQL in app crate.
 
@@ -429,12 +429,12 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 
 - [x] **Pinned search date format diverges** — Done (2026-03-21 multi-agent session). Now uses relative time format via `format_relative_time()`.
 - [x] **`SidebarEvent::CycleAccount` unreachable** — Partially done (2026-03-21 multi-agent session). Recursive `self.update()` fixed — handler now directly updates state and emits `AccountSelected`. `CycleAccount` variant retained for API compat but parent arm is dead code (maps to `Task::none()`).
-- [ ] **`NavigationTarget` enum still deferred** — `selected_label: Option<String>` remains the flat marker for universal folders, smart folders, and account labels.
+- [x] **`NavigationTarget` enum implemented** — Done (2026-03-21 multi-agent session). `NavigationTarget` enum in `command_dispatch.rs` with Inbox, Starred, Snoozed, Sent, Drafts, Trash, Spam, AllMail, SmartFolder, Label, Search, PinnedSearch variants. `Message::NavigateTo` dispatch wired. Note: `selected_label: Option<String>` still exists as the underlying sidebar state — `NavigationTarget::to_label_id()` bridges the two. Full replacement of `selected_label` deferred.
 - [ ] **Mixed drafts list view** — Count path handles local+server drafts, but list path only returns server-synced drafts.
 
 ### Cross-Cutting
 
-- [ ] **Core CRUD bypassed in multiple places** — Partially improved (2026-03-21 multi-agent session). Accounts now use `create_account_sync()` from core. Signatures extracted to `handlers/signatures.rs` with transactional semantics but still raw SQL (not core CRUD functions). Contacts still bypass core. Calendar still bypasses core.
+- [ ] **Core CRUD bypassed in multiple places** — Substantially improved (2026-03-21 multi-agent session). Accounts use `create_account_sync()`. Signatures now use core CRUD functions (`db_insert/update/delete_signature`, `db_get_all_signatures`, `db_reorder_signatures`) via `DbState::from_arc()` bridge. Calendar CRUD moved to core (`crates/core/src/db/queries_extra/calendars.rs`). Contacts/groups CRUD moved to core (`contacts.rs`, `contact_groups.rs`). Schema DDL removed from app's `connection.rs`. **Remaining bypasses:** pop-out body/attachment loads (`Db::load_message_body()`, `Db::load_message_attachments()`), compose draft save (raw SQL to `local_drafts`), `load_raw_source`, pinned search CRUD, palette label queries.
 
 - [ ] **Dead code accumulation** *(verified 2026-03-21, updated 2026-03-21 post-multi-agent session)*:
 
@@ -461,8 +461,11 @@ Gaps found comparing current code against implementation specs. Grouped by featu
   - ~~`_last_click` in editor~~ — now used for double/triple click
   - ~~`SetBlockAttrs`~~ — now implemented
 
+  **Resolved items (2026-03-21 multi-agent session, batch 2):**
+  - ~~Core CRUD for signatures~~ — `handlers/signatures.rs` now delegates to `db_insert/update/delete_signature` etc. via `DbState::from_arc()`
+  - ~~`NavigationTarget` enum deferred~~ — now implemented in `command_dispatch.rs` with `Message::NavigateTo` dispatch
+
   **Remaining dead code:**
-  - Core CRUD for signatures (`db_insert/update/delete_signature`) — still bypassed by app-level raw SQL in `handlers/signatures.rs`
   - `SidebarEvent::CycleAccount` parent handler — maps to `Task::none()`, can be removed
   - `PendingChord::started` — `#[allow(dead_code)]`, timeout via subscription not elapsed check
   - `prepare_move_up/down` in editor — tested infrastructure, not called from widget

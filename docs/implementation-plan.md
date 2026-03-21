@@ -59,17 +59,17 @@ Prioritized implementation plan for Ratatoskr features.
 
 | Task | Spec | Status |
 |------|------|--------|
-| Contacts autocomplete + token input | `docs/contacts/autocomplete-implementation-spec.md` | Not started |
-| Search app integration (slices 5-6) | `docs/search/app-integration-spec.md` | Not started |
+| Contacts autocomplete + token input | `docs/contacts/autocomplete-implementation-spec.md` | Done ✅ (autocomplete dropdown, paste parser, arrow nav, context menu, group search) |
+| Search app integration (slices 5-6) | `docs/search/app-integration-spec.md` | Mostly done ✅ (unified pipeline wired, smart folder migration, typeahead Phase 3). Remaining: smart folder CRUD via palette (Phase 2), scoped search (Phase 4) |
 
 ### Tier 3 — Compose / Advanced Surfaces
 
 | Task | Spec | Status |
 |------|------|--------|
-| Pop-out compose window | Not yet written | Blocked on contacts autocomplete (editor ✅) |
-| Pop-out message view | `docs/pop-out-windows/message-view-implementation-spec.md` | Not started |
-| Signatures | `docs/signatures/implementation-spec.md` | Not started (editor dependency satisfied ✅) |
-| Pinned searches | `docs/search/pinned-searches-implementation-spec.md` | Not started (blocked on search integration) |
+| Pop-out compose window | Not yet written | Done ✅ — Rich text editor, formatting toolbar, signature resolution, draft auto-save (30s), attachment tracking (stub picker), send path (finalize + local_drafts), discard confirmation. Remaining: provider send, file picker (rfd), block-type toggles, link dialog |
+| Pop-out message view | `docs/pop-out-windows/message-view-implementation-spec.md` | Done ✅ — Phases 1-6 complete (rendering modes, overflow menu, session restore, Save As) |
+| Signatures | `docs/signatures/implementation-spec.md` | Done ✅ — Core CRUD wired, rich text editor, formatting toolbar, drag reorder with grip handles, delete confirmation, async loading. Remaining: Phase 4 (account-switch replacement), Phase 5 (draft restoration) |
+| Pinned searches | `docs/search/pinned-searches-implementation-spec.md` | Substantially done ✅ (missing graduation to smart folder) |
 
 ### Tier 4 — Additive Management
 
@@ -86,7 +86,7 @@ Prioritized implementation plan for Ratatoskr features.
 | Layer 1: Data model + mode switcher | No spec (product doc) | Done ✅ |
 | Layer 2: Month view + mini-month | No spec (product doc) | Done ✅ |
 | Layer 3: Day/Week/Work Week time grid | No spec (product doc) | Done ✅ |
-| Layer 4: Event CRUD + popover/modal | Not started | |
+| Layer 4: Event CRUD + popover/modal | No spec (product doc) | Done ✅ — CRUD moved to core (`calendars.rs`), detail/editor/delete overlays |
 | Layer 5: Provider sync (Google/Graph/CalDAV) | Not started | |
 
 **Deferred calendar review items (tracked, not blocking):**
@@ -110,15 +110,15 @@ Prioritized implementation plan for Ratatoskr features.
 | Spec | Doc | Audit Status |
 |------|-----|-------------|
 | Command palette app integration | `docs/command-palette/app-integration-spec.md` | Core infra solid (Slices 1-4). `NavigateToLabel` entirely dead. Palette not componentized. 5 commands return None. No chord indicator. |
-| Sidebar | `docs/sidebar/implementation-spec.md` | Phases 1A-1E complete. Best cross-cutting compliance. Minor: date format, `CycleAccount` dead, `NavigationTarget` still deferred. |
+| Sidebar | `docs/sidebar/implementation-spec.md` | Phases 1A-1E complete. Best cross-cutting compliance. `NavigationTarget` enum now implemented (dispatch layer over `selected_label`). Minor: `CycleAccount` parent handler dead. |
 | Accounts | `docs/accounts/implementation-spec.md` | Wizard UI mostly matches. Discovery faked, OAuth unwired, protocol selection placeholder, core CRUD bypassed, no editor/health/reauth/deletion. |
 | Status bar | `docs/status-bar/implementation-spec.md` | Scaffold faithful. All 3 data pipelines unwired (sync/warnings/confirmations). Idle collapses to zero height (spec says fixed). Appears in pop-outs. |
-| Contacts autocomplete | `docs/contacts/autocomplete-implementation-spec.md` | Token input widget exists. Autocomplete dropdown entirely missing. No compose wiring. Core CRUD bypassed. Import crate missing. |
-| Search app integration | `docs/search/app-integration-spec.md` | Backend (Slices 1-4) fully implemented. App search is SQL LIKE stub — entire pipeline unreachable from UI. Smart folder migration not started. |
+| Contacts autocomplete | `docs/contacts/autocomplete-implementation-spec.md` | Done. Autocomplete dropdown, paste parser (RFC 5322), arrow key nav, context menu, group search. Remaining: GAL caching, `ContactSearchResult` in app crate (should be core). |
+| Search app integration | `docs/search/app-integration-spec.md` | Mostly done. Unified pipeline wired, smart folder migration, typeahead (Phase 3) with `CursorContext` operator detection. Remaining: Phase 2 (smart folder CRUD via palette), Phase 4 (scoped search). |
 | Editor | `docs/editor/architecture.md` | Very faithful. 652 tests (doc says 428). Doc has stale claims. Minor dead code (`_last_click`, `prepare_move_up/down`). |
-| Signatures | `docs/signatures/implementation-spec.md` | Basic CRUD + settings UI + compose assembly. Plain text editor (not rich text). Core CRUD bypassed. Phases 4-5 missing. |
+| Signatures | `docs/signatures/implementation-spec.md` | Phases 1-3 complete. Core CRUD wired (not bypassed). Rich text editor + formatting toolbar. Drag reorder. Phases 4-5 missing (account-switch replacement, draft restoration). |
 | Pinned searches | `docs/search/pinned-searches-implementation-spec.md` | Substantially implemented. Missing `delete_all_pinned_searches`. Date format diverges. No graduation to smart folder. |
-| Pop-out message view | `docs/pop-out-windows/message-view-implementation-spec.md` | Phase 1 complete. Phase 2 mostly done (missing fields). Phases 3-6 not started. Compose is UI shell only. |
+| Pop-out message view | `docs/pop-out-windows/message-view-implementation-spec.md` | Phases 1-6 complete. Compose workflow complete (rich text, signatures, auto-save, send path, discard confirmation). Remaining: provider send, file picker, HTML rendering in pop-out. |
 | Main layout | `docs/main-layout/iced-implementation-spec.md` | Core structure matches. App-local DB shim bypasses core's `get_thread_detail()`. Phase 3 interaction deferred. No body rendering. |
 
 ## Dependency Graph
@@ -132,49 +132,52 @@ Tier 1 — COMPLETE:
 
   Remaining (lower priority):
     Command Palette 6e-6f (persistence, keybinding UI)
-    Sidebar 1E (pinned searches section, needs search integration)
     Sidebar Phase 2 (strip actions, needs palette maturity)
 
-Tier 2 (next):
-  Contacts Autocomplete (independent)
-    └── Pop-Out Compose (Tier 3, spec not yet written)
-  Search App Integration
-    └── Pinned Searches (Tier 3)
-    └── Sidebar 1E (pinned searches section)
+Tier 2 — MOSTLY COMPLETE:
+  Contacts Autocomplete ✅ (autocomplete dropdown, paste parser, arrow nav, group search)
+  Search App Integration ✅ (unified pipeline, smart folder migration, typeahead Phase 3)
+    Remaining: smart folder CRUD via palette (Phase 2), scoped search (Phase 4)
 
 Rich Text Editor — COMPLETE ✅
-  Unblocks: Signatures, Pop-Out Compose
 
-Tier 3:
-  Pop-Out Message View Phase 1 (shared multi-window infra)
-    ├── Pop-Out Compose (+ Editor ✅ + Contacts Autocomplete + Signatures)
-    └── Calendar pop-out (Tier 5)
-  Signatures (depends on: Editor ✅ — ready to start)
-  Pinned Searches (depends on: Search App Integration)
+Tier 3 — MOSTLY COMPLETE:
+  Pop-Out Message View Phases 1-6 ✅
+  Pop-Out Compose ✅ (rich text, signatures, auto-save, send path, discard)
+    Remaining: provider send, file picker (rfd), block-type toggles, link dialog
+  Signatures Phases 1-3 ✅ (core CRUD, rich text editor, drag reorder)
+    Remaining: Phase 4 (account-switch), Phase 5 (draft restoration)
+  Pinned Searches ✅ (mostly done, missing graduation to smart folder)
 
 Tier 4:
-  Contacts Management + Import (depends on: Contacts Autocomplete)
+  Contacts Management + Import (depends on: Contacts Autocomplete ✅)
   Emoji Picker (independent)
 
 Tier 5:
-  Calendar Layers 1-3 ✅ (depends on: Tier 1 shell being solid ✅)
+  Calendar Layers 1-4 ✅ (CRUD moved to core)
+    Remaining: Layer 5 (provider sync)
+
+Vendored crates:
+  iced-drop ✅ (vendored, not yet wired to UI)
+
+NavigationTarget ✅ (enum + dispatch, selected_label still underlies sidebar state)
 ```
 
 ## Cross-Cutting Concerns
 
 *(Verified by full 10-feature audit 2026-03-21. Detailed reports in `docs/<feature>/discrepancies.md`.)*
 
-- **Core CRUD bypass (partially resolved):** Calendar CRUD, contacts/groups CRUD, and pop-out body/attachment loading now delegate to core functions. Calendar uses `create/update/delete/get_calendar_event_sync` and `load_calendar_events_for_view_sync`. Contacts use `save_contact_sync`, `delete_contact_sync`, `load_contacts_for_settings_sync` and group equivalents. Pop-out body loads use `BodyStoreState::get()`, attachment loads use `get_attachments_for_message()`. Schema for pinned_searches and contact extended columns moved to migration 64. **Remaining bypasses:** accounts, signatures, main-window thread messages/attachments, pinned search CRUD, palette label queries, and `load_raw_source`. Accounts and signatures remain the worst offenders.
+- **Core CRUD bypass (substantially resolved):** Calendar CRUD moved to core (`calendars.rs`). Contacts/groups CRUD moved to core (`contacts.rs`, `contact_groups.rs`). Signatures now use core CRUD functions (`db_insert/update/delete_signature`, `db_get_all_signatures`, `db_reorder_signatures`) via `DbState::from_arc()` bridge. Accounts use `create_account_sync()`. Pop-out body loads use `BodyStoreState::get()`, attachment loads use `get_attachments_for_message()`. Schema DDL removed from `connection.rs` — all DDL in core migrations. **Remaining bypasses:** pop-out `load_message_body()`/`load_message_attachments()` (raw SQL), compose draft save (raw SQL to `local_drafts`), `load_raw_source`, pinned search CRUD, palette label queries.
 - **Writable DB connection:** Multiple features need local-state writes (pinned searches, attachment collapse, session restore, keybinding overrides, account metadata). The first feature to land should establish the `local_conn` pattern. This is a cross-cutting architecture decision, not owned by any single spec.
-- **NavigationTarget enum:** Still deferred. `selected_label: Option<String>` remains the flat marker for universal folders, smart folders, and account labels. The command palette spec introduced this but it was never implemented.
+- **NavigationTarget enum:** Implemented (2026-03-21). `NavigationTarget` enum in `command_dispatch.rs` with 19 variants (Inbox, Starred, Snoozed, Sent, Drafts, Trash, Spam, AllMail, Primary, Updates, Promotions, Social, Newsletters, Tasks, Attachments, SmartFolder, Label, Search, PinnedSearch). `Message::NavigateTo` dispatch wired in `main.rs`. Thread state flags (`is_pinned`, `is_muted`) populated. Note: `selected_label: Option<String>` still underlies sidebar state — `NavigationTarget::to_label_id()` bridges the two representations.
 - **Generational load tracking:** Well-implemented where applied — three counters in App (`nav_generation`, `thread_generation`, `search_generation`) plus `option_load_generation` on `PaletteState`. Properly guards 8+ async load paths. Remaining gaps: status bar (no staleness detection for sync progress), signatures (synchronous loading), pop-out windows (no per-window generation).
 - **Component trait:** Six components extracted (Sidebar, ThreadList, ReadingPane, Settings, StatusBar, AddAccountWizard). Palette, compose, calendar, and pop-out windows are not componentized.
 - **Token-to-Catalog theming:** Very clean — zero inline style closures across all UI files. Two minor exceptions in palette (should be `TextClass` variants).
-- **Subscription orchestration:** Infrastructure solid. Active subscriptions: keyboard listener, chord timeout, search debounce, status bar cycling, settings animation. Gap: sync pipeline entirely unwired (no `IcedProgressReporter`), compose auto-save timer missing.
-- **Dead code accumulation:** Significant. 20+ identified items across features — see TODO.md for full inventory.
+- **Subscription orchestration:** Infrastructure solid. Active subscriptions: keyboard listener, chord timeout, search debounce, status bar cycling, settings animation, compose auto-save (30s tick when dirty). `IcedProgressReporter` + `SyncEvent` types implemented with `Message::SyncProgress` dispatch. Gap: sync orchestrator not yet connected to reporter.
+- **Dead code accumulation:** Reduced. Two rounds of cleanup (2026-03-21) resolved ~20 items. Remaining: `SidebarEvent::CycleAccount` parent handler, `PendingChord::started`, `prepare_move_up/down` in editor, `Db::get_thread_messages()`/`get_thread_attachments()`, `group_by_thread()` duplicate. See TODO.md for full inventory.
 - **Editor** is complete (all 5 phases, 652 tests). Signatures and compose are now unblocked. Together with contacts autocomplete, the editor enables the full compose workflow.
-- **Pop-out windows** are deliberately split into compose (heavy dependencies) and message-view (mostly independent, but Phase 1 is shared infrastructure). Phase 1 is complete. Compose is a UI shell only — no sending, drafts, auto-save, attachments, or rich text.
-- **Contacts** are deliberately split into autocomplete (core email loop blocker) and management (additive, Tier 4). Token input widget exists but autocomplete dropdown is entirely missing — not wired to compose.
+- **Pop-out windows** are deliberately split into compose (heavy dependencies) and message-view (mostly independent, but Phase 1 is shared infrastructure). All phases complete. Compose has full workflow: rich text editor, formatting toolbar, signature resolution, draft auto-save (30s), attachment tracking, send path (finalize + local_drafts), discard confirmation. Remaining: provider send, file picker (rfd), block-type toggles.
+- **Contacts** are deliberately split into autocomplete (core email loop blocker) and management (additive, Tier 4). Autocomplete complete: dropdown with highlighted rows, paste parser (RFC 5322), arrow key navigation, context menu, group search, generation counter for stale discard. Wired to compose.
 - **Result type convergence:** The search specs identify four overlapping thread-result types (`UnifiedSearchResult`, `Thread`, `DbThread`, `SearchResult`). These should converge into a unified thread-presentation type. The natural time to do this is during search app integration (Tier 2) — specifically when wiring `UnifiedSearchResult` → `Thread` conversion in Phase 1 and the smart folder `DbThread` adapter in Phase 2. Not a blocker, but one of the cleaner refactor seams now visible.
 - **Label/folder semantics:** The resolver now checks provider type and rejects Add/Remove Label on folder-based providers (Exchange/IMAP/JMAP). Move to Folder is the correct operation for those providers. This distinction is enforced in `AppInputResolver` and `Db::is_folder_based_provider()`.
-- **Search execution is a stub:** The entire backend pipeline (parser, SQL builder, Tantivy, unified pipeline) is unreachable from the UI. App uses `WHERE subject LIKE` instead. `SearchState` never initialized.
+- **Search execution wired:** Unified pipeline (`search_pipeline::search()`) now reachable from UI when Tantivy index available, with SQL-only fallback using smart folder parser/SQL builder for structured operators. LIKE remains only as last-resort for pure free-text without an index. Typeahead (Phase 3) complete with `CursorContext` operator detection and dropdown suggestions.
