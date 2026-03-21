@@ -232,9 +232,23 @@ fn persist_google_contacts(
         let avatar_url = extract_avatar_url(person);
         let local_id = format!("google-{account_id}-{email}");
 
+        let phone = person
+            .phone_numbers
+            .as_ref()
+            .and_then(|nums| nums.first())
+            .and_then(|p| p.value.as_deref())
+            .filter(|v| !v.is_empty());
+        let company = person
+            .organizations
+            .as_ref()
+            .and_then(|orgs| orgs.first())
+            .and_then(|o| o.name.as_deref())
+            .filter(|v| !v.is_empty());
+
         conn.execute(
-            "INSERT INTO contacts (id, email, display_name, avatar_url, source) \
-             VALUES (?1, ?2, ?3, ?4, 'google') \
+            "INSERT INTO contacts (id, email, display_name, avatar_url, phone, company,
+                                   source, account_id, server_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'google', ?7, ?8) \
              ON CONFLICT(email) DO UPDATE SET \
                display_name = CASE \
                  WHEN contacts.source = 'user' THEN contacts.display_name \
@@ -245,12 +259,23 @@ fn persist_google_contacts(
                  WHEN contacts.source = 'user' THEN contacts.avatar_url \
                  ELSE COALESCE(excluded.avatar_url, contacts.avatar_url) \
                END, \
+               phone = CASE \
+                 WHEN contacts.source = 'user' THEN contacts.phone \
+                 ELSE COALESCE(excluded.phone, contacts.phone) \
+               END, \
+               company = CASE \
+                 WHEN contacts.source = 'user' THEN contacts.company \
+                 ELSE COALESCE(excluded.company, contacts.company) \
+               END, \
                source = CASE \
                  WHEN contacts.source = 'user' THEN 'user' \
                  ELSE 'google' \
                END, \
+               account_id = COALESCE(excluded.account_id, contacts.account_id), \
+               server_id = COALESCE(excluded.server_id, contacts.server_id), \
                updated_at = unixepoch()",
-            params![local_id, email, display_name, avatar_url],
+            params![local_id, email, display_name, avatar_url, phone, company,
+                    account_id, resource_name],
         )
         .map_err(|e| format!("upsert google contact: {e}"))?;
 

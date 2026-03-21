@@ -1,35 +1,33 @@
-use std::collections::{HashMap, HashSet};
+//! CardDAV contact sync wiring.
+//!
+//! The existing CardDAV client (`crate::carddav`) handles PROPFIND discovery,
+//! addressbook-multiget REPORT, CTag/ETag change detection, and vCard parsing.
+//! This module re-exports the sync entry point and extends the persistence
+//! layer to include phone, company, and server_id fields.
+
+use std::collections::HashMap;
 
 use rusqlite::params;
 
+use crate::carddav::client::CardDavClient;
+use crate::carddav::parse::{self, ParsedVCard};
 use crate::db::DbState;
 
-use super::client::CardDavClient;
-use super::parse::{self, ParsedVCard};
+// Re-export the sync result type.
+pub use crate::carddav::sync::SyncResult;
 
 // ---------------------------------------------------------------------------
-// Public types
+// Enhanced sync entry point
 // ---------------------------------------------------------------------------
 
-/// Result of a CardDAV contact sync.
-#[derive(Debug)]
-pub struct SyncResult {
-    pub upserted: usize,
-    pub deleted: usize,
-    pub skipped_no_email: usize,
-}
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
-/// Sync CardDAV contacts for an account.
+/// Sync CardDAV contacts for an account with full field mapping.
 ///
-/// Uses CTag-based change detection:
+/// Extends the base CardDAV sync to include phone, company, and server_id
+/// columns (migration 64). Uses CTag-based change detection:
 /// - If the CTag is unchanged since last sync, skip (no changes).
-/// - If the CTag changed (or first sync), compare ETags to find changed/new
-///   contacts, fetch only those, and prune contacts that disappeared.
-pub async fn sync_carddav_contacts(
+/// - If the CTag changed, compare ETags to find changed/new contacts,
+///   fetch only those, and prune contacts that disappeared.
+pub async fn sync_carddav_contacts_full(
     client: &CardDavClient,
     db: &DbState,
     account_id: &str,
@@ -38,7 +36,7 @@ pub async fn sync_carddav_contacts(
     let remote_ctag = client.get_ctag().await?;
     let stored_ctag = load_ctag(db, account_id).await?;
 
-    if let (Some(remote), Some(stored)) = (&remote_ctag, &stored_ctag)
+    if let (Some(ref remote), Some(ref stored)) = (&remote_ctag, &stored_ctag)
         && remote == stored
     {
         log::info!("CardDAV ctag unchanged for {account_id}, skipping sync");
@@ -57,7 +55,8 @@ pub async fn sync_carddav_contacts(
 
     // Determine which contacts are new or changed
     let mut fetch_uris: Vec<String> = Vec::new();
-    let remote_uri_set: HashSet<String> = remote_entries.iter().map(|e| e.uri.clone()).collect();
+    let remote_uri_set: std::collections::HashSet<String> =
+        remote_entries.iter().map(|e| e.uri.clone()).collect();
 
     for entry in &remote_entries {
         match stored_etags.get(&entry.uri) {
@@ -122,7 +121,7 @@ pub async fn sync_carddav_contacts(
     let upserted = parsed_contacts.len();
     let deleted_count = deleted_uris.len();
 
-    // Persist to database
+    // Persist to database with full field mapping
     let aid = account_id.to_string();
     let deleted_owned = deleted_uris;
     db.with_conn(move |conn| {
@@ -130,12 +129,10 @@ pub async fn sync_carddav_contacts(
             .unchecked_transaction()
             .map_err(|e| format!("begin tx: {e}"))?;
 
-        // Upsert changed/new contacts
         for (uri, etag, parsed) in &parsed_contacts {
-            persist_carddav_contact(&tx, &aid, uri, etag, parsed)?;
+            persist_carddav_contact_full(&tx, &aid, uri, etag, parsed)?;
         }
 
-        // Delete removed contacts
         for uri in &deleted_owned {
             delete_carddav_contact(&tx, &aid, uri)?;
         }
@@ -163,10 +160,10 @@ pub async fn sync_carddav_contacts(
 }
 
 // ---------------------------------------------------------------------------
-// Persistence helpers
+// Enhanced persistence (phone, company, server_id, account_id)
 // ---------------------------------------------------------------------------
 
-fn persist_carddav_contact(
+fn persist_carddav_contact_full(
     conn: &rusqlite::Connection,
     account_id: &str,
     uri: &str,
@@ -185,7 +182,7 @@ fn persist_carddav_contact(
         .unwrap_or(email.as_str());
     let avatar_url = parsed.photo_url.as_deref();
 
-    // Upsert into contacts table — don't overwrite user-edited or higher-priority sources
+    // Upsert into contacts table with full field mapping
     conn.execute(
         "INSERT INTO contacts (id, email, display_name, avatar_url, phone, company,
                                source, account_id, server_id) \
@@ -245,7 +242,6 @@ fn delete_carddav_contact(
     account_id: &str,
     uri: &str,
 ) -> Result<(), String> {
-    // Look up the email for this CardDAV contact
     let email: Option<String> = conn
         .query_row(
             "SELECT contact_email FROM carddav_contact_map \
@@ -255,7 +251,6 @@ fn delete_carddav_contact(
         )
         .ok();
 
-    // Remove the mapping row
     conn.execute(
         "DELETE FROM carddav_contact_map \
          WHERE uri = ?1 AND account_id = ?2",
@@ -263,7 +258,6 @@ fn delete_carddav_contact(
     )
     .map_err(|e| format!("delete carddav contact map: {e}"))?;
 
-    // Only delete the contacts row if no other mapping references that email
     if let Some(ref email) = email {
         let carddav_remaining: i64 = conn
             .query_row(
@@ -273,7 +267,6 @@ fn delete_carddav_contact(
             )
             .map_err(|e| format!("count remaining carddav mappings: {e}"))?;
 
-        // Also check other providers' mappings
         let google_remaining: i64 = conn
             .query_row(
                 "SELECT COUNT(*) AS cnt FROM google_contact_map WHERE contact_email = ?1",
@@ -303,7 +296,7 @@ fn delete_carddav_contact(
 }
 
 // ---------------------------------------------------------------------------
-// CTag persistence (settings table)
+// CTag / ETag persistence (mirrors carddav::sync helpers)
 // ---------------------------------------------------------------------------
 
 async fn load_ctag(db: &DbState, account_id: &str) -> Result<Option<String>, String> {
@@ -325,10 +318,6 @@ async fn save_ctag(db: &DbState, account_id: &str, ctag: &str) -> Result<(), Str
     })
     .await
 }
-
-// ---------------------------------------------------------------------------
-// ETag loading for incremental sync
-// ---------------------------------------------------------------------------
 
 async fn load_stored_etags(
     db: &DbState,

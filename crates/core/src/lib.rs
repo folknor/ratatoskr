@@ -5,6 +5,7 @@ pub use ratatoskr_stores::body_store;
 pub mod caldav;
 pub mod carddav;
 pub mod cloud_attachments;
+pub mod contacts;
 pub use ratatoskr_sync::categorization;
 pub mod contact_photos;
 pub use ratatoskr_label_colors::category_colors;

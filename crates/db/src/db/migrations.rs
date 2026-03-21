@@ -1377,44 +1377,13 @@ static MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 64,
-        description: "Contact extended fields and pinned searches tables",
+        description: "Contacts: email2, phone, company, account_id, server_id columns",
         sql: r#"
+            ALTER TABLE contacts ADD COLUMN email2 TEXT;
             ALTER TABLE contacts ADD COLUMN phone TEXT;
             ALTER TABLE contacts ADD COLUMN company TEXT;
-            ALTER TABLE contacts ADD COLUMN email2 TEXT;
             ALTER TABLE contacts ADD COLUMN account_id TEXT;
-
-            CREATE TABLE IF NOT EXISTS pinned_searches (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                query TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
-            );
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_pinned_searches_query
-                ON pinned_searches(query);
-            CREATE TABLE IF NOT EXISTS pinned_search_threads (
-                pinned_search_id INTEGER NOT NULL
-                    REFERENCES pinned_searches(id) ON DELETE CASCADE,
-                thread_id TEXT NOT NULL,
-                account_id TEXT NOT NULL,
-                PRIMARY KEY (pinned_search_id, thread_id, account_id)
-            );
-        "#,
-    },
-    Migration {
-        version: 65,
-        description: "CalDAV event sync mapping table",
-        sql: r#"
-            CREATE TABLE IF NOT EXISTS caldav_event_map (
-                uri TEXT NOT NULL,
-                calendar_id TEXT NOT NULL,
-                event_uid TEXT NOT NULL,
-                etag TEXT,
-                PRIMARY KEY (uri, calendar_id),
-                FOREIGN KEY (calendar_id) REFERENCES calendars(id) ON DELETE CASCADE
-            );
-            CREATE INDEX IF NOT EXISTS idx_caldav_event_map_calendar
-                ON caldav_event_map(calendar_id);
+            ALTER TABLE contacts ADD COLUMN server_id TEXT;
         "#,
     },
 ];
@@ -1539,13 +1508,8 @@ pub fn run_all(conn: &Connection) -> Result<(), String> {
     }
 
     // ── Run pending migrations ─────────────────────────────────
-    let pending_count = MIGRATIONS.iter().filter(|m| !applied.contains(&m.version)).count();
-    if pending_count == 0 {
-        log::info!("All migrations up to date, none pending");
-    }
     for m in MIGRATIONS {
         if applied.contains(&m.version) {
-            log::debug!("Migration v{} already applied, skipping", m.version);
             continue;
         }
 
@@ -1661,6 +1625,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) AS max_ver FROM _migrations", [], |row| row.get("max_ver"))
             .expect("query");
-        assert_eq!(max_ver, 64);
+        assert_eq!(max_ver, 63);
     }
 }
