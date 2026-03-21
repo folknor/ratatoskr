@@ -102,6 +102,17 @@ impl App {
         }
     }
 
+    pub(crate) fn apply_search_debounce(&mut self) -> Task<Message> {
+        if self.search_query.text().trim().is_empty() {
+            self.search_debounce_deadline = None;
+        } else {
+            self.search_debounce_deadline = Some(
+                iced::time::Instant::now() + std::time::Duration::from_millis(150),
+            );
+        }
+        Task::none()
+    }
+
     pub(crate) fn handle_search_clear(&mut self) -> Task<Message> {
         self.search_query.reset(String::new());
         self.thread_list.search_query.clear();
@@ -450,5 +461,75 @@ fn unified_result_to_thread(
         from_name: r.from_name,
         from_address: r.from_address,
         is_local_draft: false,
+    }
+}
+
+// ── Search phases 2+4 methods ──────────────────────────
+
+impl App {
+    pub(crate) fn handle_refresh_pinned_search(
+        &mut self,
+        id: i64,
+    ) -> Task<Message> {
+        for ps in &mut self.pinned_searches {
+            if ps.id == id {
+                ps.thread_ids = None;
+                break;
+            }
+        }
+        self.handle_select_pinned_search(id)
+    }
+
+    pub(crate) fn handle_expiry_tick(&mut self) -> Task<Message> {
+        let db = Arc::clone(&self.db);
+        Task::perform(
+            async move { db.expire_stale_pinned_searches(1_209_600).await },
+            Message::PinnedSearchesExpired,
+        )
+    }
+
+    pub(crate) fn handle_search_here(
+        &mut self,
+        query_prefix: String,
+    ) -> Task<Message> {
+        if self.thread_list.mode == ThreadListMode::Folder {
+            self.was_in_folder_view = true;
+        }
+        self.search_query.reset(query_prefix.clone());
+        self.thread_list.search_query = query_prefix;
+        self.clear_pinned_search_context();
+        iced::widget::operation::focus::<Message>("search-bar".to_string())
+    }
+
+    pub(crate) fn handle_save_as_smart_folder(
+        &mut self,
+        name: String,
+    ) -> Task<Message> {
+        let query = self.search_query.text().trim().to_string();
+        if query.is_empty() {
+            return Task::none();
+        }
+        let db = Arc::clone(&self.db);
+        Task::perform(
+            async move { db.create_smart_folder(name, query).await },
+            Message::SmartFolderSaved,
+        )
+    }
+
+    pub(crate) fn handle_smart_folder_saved(
+        &mut self,
+        result: Result<i64, String>,
+    ) -> Task<Message> {
+        match result {
+            Ok(_id) => {
+                log::info!("Smart folder saved");
+                self.nav_generation += 1;
+                self.fire_navigation_load()
+            }
+            Err(e) => {
+                log::error!("Save smart folder error: {e}");
+                Task::none()
+            }
+        }
     }
 }
