@@ -1063,6 +1063,23 @@ impl App {
                 // handle_search_query_changed via maybe_trigger_typeahead_query.
                 Task::none()
             }
+            ThreadListEvent::MultiSelectionChanged(_count) => {
+                // Selection count changed — no action needed yet.
+                Task::none()
+            }
+            ThreadListEvent::AutoAdvance { new_index } => {
+                if let Some(idx) = new_index {
+                    self.handle_select_thread(idx)
+                } else {
+                    self.thread_list.selected_thread = None;
+                    self.reading_pane.set_thread(None);
+                    Task::none()
+                }
+            }
+            ThreadListEvent::BatchAction(_indices) => {
+                // Batch email actions not yet wired to providers.
+                Task::none()
+            }
         }
     }
 
@@ -1254,13 +1271,11 @@ impl App {
             SettingsEvent::SaveGroup(group, members) => self.handle_save_group(group, members),
             SettingsEvent::DeleteGroup(id) => self.handle_delete_group(id),
             SettingsEvent::LoadGroupMembers(group_id) => self.handle_load_group_members(group_id),
-<<<<<<< HEAD
             SettingsEvent::ExecuteContactImport { contacts, account_id, update_existing } => {
                 self.handle_import_contacts(contacts, account_id, update_existing)
-=======
+            }
             SettingsEvent::ReorderAccounts(orders) => {
                 self.handle_reorder_accounts(orders)
->>>>>>> worktree-agent-afd18fb2
             }
         }
     }

@@ -260,6 +260,9 @@ pub struct ComposeState {
     // Window geometry
     pub width: f32,
     pub height: f32,
+
+    // Draft auto-save
+    pub draft_dirty: bool,
 }
 
 impl ComposeState {
@@ -291,6 +294,7 @@ impl ComposeState {
             link_text: String::new(),
             width: COMPOSE_DEFAULT_WIDTH,
             height: COMPOSE_DEFAULT_HEIGHT,
+            draft_dirty: false,
         }
     }
 
@@ -391,8 +395,14 @@ impl ComposeState {
 
 pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
     match msg {
-        ComposeMessage::SubjectChanged(s) => state.subject = s,
-        ComposeMessage::BodyChanged(action) => state.body.perform(action),
+        ComposeMessage::SubjectChanged(s) => {
+            state.subject = s;
+            state.draft_dirty = true;
+        }
+        ComposeMessage::BodyChanged(action) => {
+            state.body.perform(action);
+            state.draft_dirty = true;
+        }
         ComposeMessage::FromAccountChanged(account) => {
             state.from_account = Some(account);
         }
@@ -404,6 +414,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                 msg,
                 &mut state.selected_to_token,
             );
+            state.draft_dirty = true;
         }
         ComposeMessage::CcTokenInput(msg) => {
             handle_token_input_message(
@@ -411,6 +422,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                 msg,
                 &mut state.selected_cc_token,
             );
+            state.draft_dirty = true;
         }
         ComposeMessage::BccTokenInput(msg) => {
             handle_token_input_message(
@@ -418,6 +430,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                 msg,
                 &mut state.selected_bcc_token,
             );
+            state.draft_dirty = true;
         }
         ComposeMessage::Send => {
             // V1: validate and show stub status

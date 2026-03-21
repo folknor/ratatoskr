@@ -671,3 +671,127 @@ async fn save_message_dialog(
 
     Ok(())
 }
+
+// ── Draft auto-save helpers ─────────────────────────────
+
+/// Convert token input tokens into a comma-separated string of email addresses.
+fn tokens_to_csv(tokens: &[crate::ui::token_input::Token]) -> Option<String> {
+    if tokens.is_empty() {
+        return None;
+    }
+    Some(
+        tokens
+            .iter()
+            .map(|t| t.email.as_str())
+            .collect::<Vec<_>>()
+            .join(","),
+    )
+}
+
+impl App {
+    /// Returns true if any compose window has `draft_dirty` set.
+    pub(crate) fn has_dirty_compose_drafts(&self) -> bool {
+        self.pop_out_windows.values().any(|w| {
+            matches!(w, PopOutWindow::Compose(s) if s.draft_dirty)
+        })
+    }
+
+    /// Save a single compose window's state as a local draft.
+    fn save_compose_draft(&mut self, window_id: iced::window::Id) -> Task<Message> {
+        let Some(PopOutWindow::Compose(state)) =
+            self.pop_out_windows.get_mut(&window_id)
+        else {
+            return Task::none();
+        };
+        state.draft_dirty = false;
+
+        let account_id = state
+            .from_account
+            .as_ref()
+            .map(|a| a.id.clone())
+            .unwrap_or_default();
+
+        let to_csv = tokens_to_csv(&state.to.tokens);
+        let cc_csv = tokens_to_csv(&state.cc.tokens);
+        let bcc_csv = tokens_to_csv(&state.bcc.tokens);
+
+        let subject = if state.subject.is_empty() {
+            None
+        } else {
+            Some(state.subject.clone())
+        };
+        let body_text = state.body.text();
+        let body_html = if body_text.trim().is_empty() {
+            None
+        } else {
+            Some(body_text)
+        };
+        let from_email = state.from_account.as_ref().map(|a| a.email.clone());
+        let reply_to_message_id = state.reply_message_id.clone();
+        let thread_id = state.reply_thread_id.clone();
+
+        let draft_id = uuid::Uuid::new_v4().to_string();
+        let db = Arc::clone(&self.db);
+
+        Task::perform(
+            async move {
+                db.with_write_conn(move |conn| {
+                    conn.execute(
+                        "INSERT INTO local_drafts \
+                         (id, account_id, to_addresses, cc_addresses, bcc_addresses, \
+                          subject, body_html, reply_to_message_id, thread_id, \
+                          from_email, updated_at, sync_status) \
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, unixepoch(), 'pending') \
+                         ON CONFLICT(id) DO UPDATE SET \
+                           to_addresses = ?3, cc_addresses = ?4, bcc_addresses = ?5, \
+                           subject = ?6, body_html = ?7, reply_to_message_id = ?8, \
+                           thread_id = ?9, from_email = ?10, \
+                           updated_at = unixepoch(), sync_status = 'pending'",
+                        rusqlite::params![
+                            draft_id,
+                            account_id,
+                            to_csv,
+                            cc_csv,
+                            bcc_csv,
+                            subject,
+                            body_html,
+                            reply_to_message_id,
+                            thread_id,
+                            from_email,
+                        ],
+                    )
+                    .map_err(|e| e.to_string())?;
+                    Ok(())
+                })
+                .await
+            },
+            move |result| {
+                if let Err(e) = result {
+                    log::error!("Failed to auto-save compose draft: {e}");
+                }
+                Message::Noop
+            },
+        )
+    }
+
+    /// Auto-save all dirty compose drafts. Called from subscription tick.
+    pub(crate) fn auto_save_compose_drafts(&mut self) -> Task<Message> {
+        let dirty_windows: Vec<iced::window::Id> = self
+            .pop_out_windows
+            .iter()
+            .filter_map(|(&id, w)| {
+                if let PopOutWindow::Compose(s) = w {
+                    if s.draft_dirty { Some(id) } else { None }
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut tasks = Vec::new();
+        for win_id in dirty_windows {
+            tasks.push(self.save_compose_draft(win_id));
+        }
+        Task::batch(tasks)
+    }
+}

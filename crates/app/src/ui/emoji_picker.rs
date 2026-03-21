@@ -421,7 +421,7 @@ fn build_emoji_grid<'a, M: Clone + 'a>(
 
 /// Build rows of emoji buttons from a list of (emoji_string, name) pairs.
 fn build_grid_rows<'a, M: Clone + 'a>(
-    items: &[(String, &str)],
+    items: &[(String, &'a str)],
     map_msg: &(impl Fn(EmojiPickerMessage) -> M + Clone + 'a),
 ) -> Vec<Element<'a, M>> {
     items
@@ -470,7 +470,8 @@ fn build_grid_rows<'a, M: Clone + 'a>(
             let mut row_children = btns;
             while row_children.len() < EMOJI_GRID_COLUMNS {
                 row_children.push(
-                    Space::with_width(EMOJI_BUTTON_SIZE)
+                    Space::new()
+                        .width(EMOJI_BUTTON_SIZE)
                         .height(EMOJI_BUTTON_SIZE)
                         .into(),
                 );

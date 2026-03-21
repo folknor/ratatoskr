@@ -299,7 +299,7 @@ impl CalDavClient {
             .body(ical_data.to_string());
 
         if let Some(etag_val) = etag {
-            if let Ok(val) = format!("\"{etag_val}\"").parse() {
+            if let Ok(val) = format!("\"{etag_val}\"").parse::<reqwest::header::HeaderValue>() {
                 req = req.header(IF_MATCH, val);
             }
         }
@@ -338,7 +338,7 @@ impl CalDavClient {
             .headers(self.auth_headers());
 
         if let Some(etag_val) = etag {
-            if let Ok(val) = format!("\"{etag_val}\"").parse() {
+            if let Ok(val) = format!("\"{etag_val}\"").parse::<reqwest::header::HeaderValue>() {
                 req = req.header(IF_MATCH, val);
             }
         }

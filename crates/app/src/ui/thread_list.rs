@@ -119,6 +119,12 @@ pub enum ThreadListEvent {
     },
     /// Batch action: apply email action to all selected thread indices.
     BatchAction(Vec<usize>),
+    /// Typeahead operator query needs async data.
+    TypeaheadQuery { operator: String, partial_value: String },
+    /// Search undo requested.
+    SearchUndo,
+    /// Search redo requested.
+    SearchRedo,
 }
 
 // ── Thread list mode ───────────────────────────────────
