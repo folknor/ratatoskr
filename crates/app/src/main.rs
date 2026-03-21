@@ -219,6 +219,7 @@ pub enum Message {
 
     // Search extras
     SearchHere(String),
+    SaveAsSmartFolder(String),
     SmartFolderSaved(Result<i64, String>),
 
     // Calendar
@@ -367,7 +368,6 @@ impl App {
             expiry_ran: false,
             no_accounts: false,
             add_account_wizard: None,
-<<<<<<< HEAD
             navigation_target: None,
             sync_receiver,
             sync_reporter,
@@ -707,6 +707,7 @@ impl App {
             Message::RefreshPinnedSearch(id) => self.handle_refresh_pinned_search(id),
             Message::ExpiryTick => self.handle_expiry_tick(),
             Message::SearchHere(prefix) => self.handle_search_here(prefix),
+            Message::SaveAsSmartFolder(name) => self.handle_save_as_smart_folder(name),
             Message::SmartFolderSaved(result) => self.handle_smart_folder_saved(result),
 
             // Calendar — delegated to handlers/calendar.rs

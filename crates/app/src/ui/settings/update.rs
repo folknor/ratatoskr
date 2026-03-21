@@ -5,6 +5,7 @@ use crate::component::Component;
 use crate::db::DateDisplay;
 use crate::ui::layout::*;
 use crate::ui::undoable::UndoableText;
+use ratatoskr_rich_text_editor::EditorState as RteEditorState;
 
 use super::tabs::settings_view;
 use super::types::*;
@@ -91,7 +92,7 @@ impl Component for Settings {
                             signature_id: Some(sig.id.clone()),
                             account_id: sig.account_id.clone(),
                             name: UndoableText::with_initial(&sig.name),
-                            body: UndoableText::with_initial(&sig.body_html),
+                            body_editor: RteEditorState::from_html(&sig.body_html),
                             is_default: sig.is_default,
                             is_reply_default: sig.is_reply_default,
                         });
@@ -419,7 +420,7 @@ impl Settings {
                         signature_id: Some(sig.id.clone()),
                         account_id: sig.account_id.clone(),
                         name: UndoableText::with_initial(&sig.name),
-                        body: UndoableText::with_initial(&sig.body_html),
+                        body_editor: RteEditorState::from_html(&sig.body_html),
                         is_default: sig.is_default,
                         is_reply_default: sig.is_reply_default,
                     });
@@ -435,7 +436,7 @@ impl Settings {
                     signature_id: None,
                     account_id: account_id.clone(),
                     name: UndoableText::new(),
-                    body: UndoableText::new(),
+                    body_editor: RteEditorState::new(),
                     is_default: false,
                     is_reply_default: false,
                 });
@@ -450,9 +451,13 @@ impl Settings {
                     editor.name.set_text(v);
                 }
             }
-            SettingsMessage::SignatureEditorBodyChanged(v) => {
+            SettingsMessage::SignatureEditorBodyChanged(_) => {
+                // Legacy plain-text body changes are no longer used;
+                // the rich text editor sends SignatureEditorAction instead.
+            }
+            SettingsMessage::SignatureEditorAction(action) => {
                 if let Some(ref mut editor) = self.signature_editor {
-                    editor.body.set_text(v);
+                    editor.body_editor.perform(action);
                 }
             }
             SettingsMessage::SignatureEditorToggleDefault(v) => {
@@ -596,9 +601,6 @@ impl Settings {
             InputField::SignatureName => {
                 if let Some(ref mut editor) = self.signature_editor { editor.name.undo(); }
             }
-            InputField::SignatureBody => {
-                if let Some(ref mut editor) = self.signature_editor { editor.body.undo(); }
-            }
         }
     }
 
@@ -610,9 +612,6 @@ impl Settings {
             InputField::OllamaModel => { self.ai_ollama_model.redo(); }
             InputField::SignatureName => {
                 if let Some(ref mut editor) = self.signature_editor { editor.name.redo(); }
-            }
-            InputField::SignatureBody => {
-                if let Some(ref mut editor) = self.signature_editor { editor.body.redo(); }
             }
         }
     }
@@ -629,7 +628,7 @@ impl Settings {
             id: editor.signature_id.clone(),
             account_id: editor.account_id.clone(),
             name,
-            body_html: editor.body.text().to_string(),
+            body_html: editor.body_editor.to_html(),
             is_default: editor.is_default,
             is_reply_default: editor.is_reply_default,
         };
