@@ -91,9 +91,10 @@ pub fn get_navigation_state(
 
 /// The ordered set of universal sidebar folders.
 ///
-/// Per docs/sidebar/problem-statement.md: Spam and All Mail are omitted from
-/// the unified view. Snoozed is included (local feature, works across all
-/// providers). Spam only appears when scoped to a specific account.
+/// Per docs/sidebar/problem-statement.md: Spam and All Mail are included here
+/// but filtered out in the sidebar UI when in "All Accounts" mode. They appear
+/// only when scoped to a single account. Snoozed is included (local feature,
+/// works across all providers).
 ///
 /// Note: SNOOZED is not in `SYSTEM_FOLDER_ROLES` because it has no provider
 /// mapping — it's a purely local feature. We define it inline here.
@@ -104,6 +105,8 @@ const SIDEBAR_UNIVERSAL_FOLDERS: &[(&str, &str)] = &[
     ("SENT", "Sent"),
     ("DRAFT", "Drafts"),
     ("TRASH", "Trash"),
+    ("SPAM", "Spam"),
+    ("ALL_MAIL", "All Mail"),
 ];
 
 /// Universal folders with their unread counts.
