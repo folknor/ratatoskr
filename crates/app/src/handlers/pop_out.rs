@@ -13,7 +13,9 @@ use std::sync::Arc;
 use iced::{Point, Size, Task};
 
 use crate::db::Db;
-use crate::pop_out::compose::{ComposeMessage, ComposeMode, ComposeState};
+use crate::pop_out::compose::{
+    ComposeAttachment, ComposeMessage, ComposeMode, ComposeState,
+};
 use crate::pop_out::message_view::{
     MessageViewMessage, MessageViewState, RenderingMode,
 };
@@ -82,6 +84,11 @@ impl App {
                 self.composer_is_open = false;
                 iced::window::close(window_id)
             }
+            // Compose attach files — launch async file picker
+            (
+                PopOutWindow::Compose(_),
+                PopOutMessage::Compose(ComposeMessage::AttachFiles),
+            ) => handle_compose_attach_files(window_id),
             // All other compose messages
             (PopOutWindow::Compose(state), PopOutMessage::Compose(_)) => {
                 let PopOutMessage::Compose(msg) = pop_out_msg else {
@@ -159,6 +166,58 @@ fn handle_message_view_update(
         | MessageViewMessage::SaveAs
         | MessageViewMessage::Noop => Task::none(),
     }
+}
+
+// ── Compose: attach files ───────────────────────────────
+
+/// Launch an async file picker and return the selected files as attachments.
+fn handle_compose_attach_files(
+    window_id: iced::window::Id,
+) -> Task<Message> {
+    Task::perform(
+        async {
+            let handles = rfd::AsyncFileDialog::new()
+                .set_title("Attach Files")
+                .pick_files()
+                .await;
+
+            let Some(handles) = handles else {
+                return Vec::new();
+            };
+
+            let mut attachments = Vec::new();
+            for handle in handles {
+                let name = handle.file_name();
+                let data = handle.read().await;
+                let mime_type =
+                    crate::pop_out::compose::mime_from_extension(&name);
+                attachments.push(ComposeAttachment {
+                    name,
+                    mime_type,
+                    data: Arc::new(data),
+                });
+            }
+            attachments
+        },
+        move |files| {
+            if files.is_empty() {
+                // User cancelled — no-op
+                Message::PopOut(
+                    window_id,
+                    PopOutMessage::Compose(ComposeMessage::FilesSelected(
+                        Vec::new(),
+                    )),
+                )
+            } else {
+                Message::PopOut(
+                    window_id,
+                    PopOutMessage::Compose(ComposeMessage::FilesSelected(
+                        files,
+                    )),
+                )
+            }
+        },
+    )
 }
 
 // ── Open windows ────────────────────────────────────────

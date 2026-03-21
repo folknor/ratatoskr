@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use iced::widget::{button, column, container, pick_list, row, text, text_input, Space};
 use iced::{Alignment, Element, Length};
 
@@ -66,6 +68,70 @@ impl std::fmt::Display for AccountInfo {
     }
 }
 
+/// An attachment queued for sending.
+#[derive(Debug, Clone)]
+pub struct ComposeAttachment {
+    /// Original file name.
+    pub name: String,
+    /// MIME type (guessed from extension).
+    pub mime_type: String,
+    /// File contents.
+    pub data: Arc<Vec<u8>>,
+}
+
+impl ComposeAttachment {
+    /// Human-readable file size.
+    pub fn display_size(&self) -> String {
+        let bytes = self.data.len();
+        if bytes < 1024 {
+            format!("{bytes} B")
+        } else if bytes < 1024 * 1024 {
+            format!("{:.1} KB", bytes as f64 / 1024.0)
+        } else {
+            format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+        }
+    }
+}
+
+/// Guess a MIME type from a file extension.
+pub fn mime_from_extension(name: &str) -> String {
+    let ext = name
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "pdf" => "application/pdf",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "txt" => "text/plain",
+        "html" | "htm" => "text/html",
+        "csv" => "text/csv",
+        "json" => "application/json",
+        "xml" => "application/xml",
+        "zip" => "application/zip",
+        "gz" | "gzip" => "application/gzip",
+        "tar" => "application/x-tar",
+        "doc" => "application/msword",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" => "application/vnd.ms-excel",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "ppt" => "application/vnd.ms-powerpoint",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "odt" => "application/vnd.oasis.opendocument.text",
+        "ods" => "application/vnd.oasis.opendocument.spreadsheet",
+        "mp3" => "audio/mpeg",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "eml" => "message/rfc822",
+        _ => "application/octet-stream",
+    }
+    .to_string()
+}
+
 // ── Messages ────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -90,14 +156,32 @@ pub enum ComposeMessage {
     AutocompleteNavigate(i32),
     /// Dismiss the autocomplete dropdown.
     AutocompleteDismiss,
-    /// Formatting toolbar actions (stubs for V1).
+    /// Formatting toolbar actions (stubs — plain text editor).
     FormatBold,
     FormatItalic,
     FormatUnderline,
     FormatStrikethrough,
+    /// List / blockquote stubs — plain text editor has no block types.
     FormatList,
     FormatBlockquote,
+    /// Open the link insertion dialog.
     FormatLink,
+    // ── Attachments ──
+    /// User clicked the attach button — opens file picker.
+    AttachFiles,
+    /// File picker returned selected files (read asynchronously).
+    FilesSelected(Vec<ComposeAttachment>),
+    /// Remove an attachment by index.
+    RemoveAttachment(usize),
+    // ── Link dialog ──
+    /// Toggle the link insertion overlay.
+    ToggleLinkDialog,
+    /// URL field changed in the link dialog.
+    LinkUrlChanged(String),
+    /// Display text field changed in the link dialog.
+    LinkTextChanged(String),
+    /// Confirm link insertion.
+    LinkInsert,
 }
 
 // ── Autocomplete state ──────────────────────────────────
@@ -165,6 +249,14 @@ pub struct ComposeState {
     // Autocomplete
     pub autocomplete: AutocompleteState,
 
+    // Attachments
+    pub attachments: Vec<ComposeAttachment>,
+
+    // Link dialog
+    pub link_dialog_open: bool,
+    pub link_url: String,
+    pub link_text: String,
+
     // Window geometry
     pub width: f32,
     pub height: f32,
@@ -193,6 +285,10 @@ impl ComposeState {
             status: None,
             discard_confirm_open: false,
             autocomplete: AutocompleteState::new(),
+            attachments: Vec::new(),
+            link_dialog_open: false,
+            link_url: String::new(),
+            link_text: String::new(),
             width: COMPOSE_DEFAULT_WIDTH,
             height: COMPOSE_DEFAULT_HEIGHT,
         }
@@ -396,15 +492,63 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             state.autocomplete.results.clear();
             state.autocomplete.highlighted = None;
         }
-        // Formatting toolbar stubs
+        // Formatting toolbar — plain text editor, so these are stubs
         ComposeMessage::FormatBold
         | ComposeMessage::FormatItalic
         | ComposeMessage::FormatUnderline
         | ComposeMessage::FormatStrikethrough
         | ComposeMessage::FormatList
-        | ComposeMessage::FormatBlockquote
-        | ComposeMessage::FormatLink => {
-            // V1 stub — rich text editor not yet wired
+        | ComposeMessage::FormatBlockquote => {
+            // Plain text editor — no rich formatting support
+        }
+        // Link dialog
+        ComposeMessage::FormatLink | ComposeMessage::ToggleLinkDialog => {
+            if !state.link_dialog_open {
+                // Pre-fill display text with current selection
+                state.link_text = state
+                    .body
+                    .selection()
+                    .unwrap_or_default();
+                state.link_url.clear();
+            }
+            state.link_dialog_open = !state.link_dialog_open;
+        }
+        ComposeMessage::LinkUrlChanged(url) => state.link_url = url,
+        ComposeMessage::LinkTextChanged(t) => state.link_text = t,
+        ComposeMessage::LinkInsert => {
+            let url = state.link_url.trim().to_string();
+            let display = state.link_text.trim().to_string();
+            if !url.is_empty() {
+                // Insert markdown-style link into plain text editor
+                let link_text = if display.is_empty() {
+                    url.clone()
+                } else {
+                    format!("[{display}]({url})")
+                };
+                // Replace selection (or insert at cursor) with the link
+                state.body.perform(
+                    iced::widget::text_editor::Action::Edit(
+                        iced::widget::text_editor::Edit::Paste(
+                            Arc::new(link_text),
+                        ),
+                    ),
+                );
+            }
+            state.link_dialog_open = false;
+            state.link_url.clear();
+            state.link_text.clear();
+        }
+        // Attachments
+        ComposeMessage::AttachFiles => {
+            // Handled by the pop-out handler (async file picker)
+        }
+        ComposeMessage::FilesSelected(files) => {
+            state.attachments.extend(files);
+        }
+        ComposeMessage::RemoveAttachment(idx) => {
+            if idx < state.attachments.len() {
+                state.attachments.remove(idx);
+            }
         }
     }
 }
@@ -487,14 +631,26 @@ pub fn view_compose_window<'a>(
         toolbar,
         widgets::divider(),
         body,
-        widgets::divider(),
-        footer
     ]
     .spacing(SPACE_0);
+
+    // Attachment list (between body and footer)
+    if !state.attachments.is_empty() {
+        content = content.push(widgets::divider());
+        content = content.push(attachment_list(window_id, state));
+    }
+
+    content = content.push(widgets::divider());
+    content = content.push(footer);
 
     // Discard confirmation overlay
     if state.discard_confirm_open {
         content = content.push(discard_confirmation(window_id));
+    }
+
+    // Link insertion dialog overlay
+    if state.link_dialog_open {
+        content = content.push(link_dialog(window_id, state));
     }
 
     container(content)
@@ -798,9 +954,28 @@ fn compose_footer<'a>(
     ))
     .padding(PAD_BUTTON);
 
-    let footer_row =
-        row![discard_btn, Space::new().width(Length::Fill), send_btn]
-            .align_y(Alignment::Center);
+    let attach_btn = button(
+        row![
+            icon::paperclip().size(ICON_SM),
+            text("Attach").size(TEXT_MD),
+        ]
+        .spacing(SPACE_XXS)
+        .align_y(Alignment::Center),
+    )
+    .style(theme::ButtonClass::Ghost.style())
+    .on_press(Message::PopOut(
+        window_id,
+        PopOutMessage::Compose(ComposeMessage::AttachFiles),
+    ))
+    .padding(PAD_BUTTON);
+
+    let footer_row = row![
+        discard_btn,
+        attach_btn,
+        Space::new().width(Length::Fill),
+        send_btn,
+    ]
+    .align_y(Alignment::Center);
 
     container(footer_row)
         .padding(PAD_CONTENT)
@@ -850,6 +1025,127 @@ fn discard_confirmation<'a>(
         ]
         .spacing(SPACE_SM)
         .align_x(Alignment::Center),
+    )
+    .padding(PAD_CONTENT)
+    .style(theme::ContainerClass::Elevated.style())
+    .width(Length::Fill)
+    .into()
+}
+
+// ── Attachment list ──────────────────────────────────────
+
+fn attachment_list<'a>(
+    window_id: iced::window::Id,
+    state: &'a ComposeState,
+) -> Element<'a, Message> {
+    let mut items = column![].spacing(SPACE_XXS);
+
+    for (idx, att) in state.attachments.iter().enumerate() {
+        let size_label = att.display_size();
+        let remove_btn = button(
+            icon::x().size(ICON_XS).style(text::secondary),
+        )
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::RemoveAttachment(idx)),
+        ))
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::BareIcon.style());
+
+        let att_row = row![
+            icon::paperclip()
+                .size(ICON_SM)
+                .style(text::secondary),
+            text(&att.name).size(TEXT_SM),
+            text(size_label)
+                .size(TEXT_XS)
+                .style(theme::TextClass::Tertiary.style()),
+            remove_btn,
+        ]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center);
+
+        items = items.push(att_row);
+    }
+
+    container(items)
+        .padding(PAD_CONTENT)
+        .width(Length::Fill)
+        .into()
+}
+
+// ── Link insertion dialog ───────────────────────────────
+
+fn link_dialog<'a>(
+    window_id: iced::window::Id,
+    state: &'a ComposeState,
+) -> Element<'a, Message> {
+    let url_input = text_input("https://...", &state.link_url)
+        .on_input(move |s| {
+            Message::PopOut(
+                window_id,
+                PopOutMessage::Compose(ComposeMessage::LinkUrlChanged(s)),
+            )
+        })
+        .size(TEXT_MD)
+        .padding(PAD_INPUT);
+
+    let text_input_field =
+        text_input("Display text (optional)", &state.link_text)
+            .on_input(move |s| {
+                Message::PopOut(
+                    window_id,
+                    PopOutMessage::Compose(
+                        ComposeMessage::LinkTextChanged(s),
+                    ),
+                )
+            })
+            .size(TEXT_MD)
+            .padding(PAD_INPUT);
+
+    let cancel_btn = button(text("Cancel").size(TEXT_MD))
+        .style(theme::ButtonClass::Ghost.style())
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::ToggleLinkDialog),
+        ))
+        .padding(PAD_BUTTON);
+
+    let insert_btn = button(
+        text("Insert")
+            .size(TEXT_MD)
+            .font(font::text_semibold()),
+    )
+    .style(theme::ButtonClass::Primary.style())
+    .on_press(Message::PopOut(
+        window_id,
+        PopOutMessage::Compose(ComposeMessage::LinkInsert),
+    ))
+    .padding(PAD_BUTTON);
+
+    container(
+        column![
+            text("Insert Link")
+                .size(TEXT_TITLE)
+                .font(font::text_semibold())
+                .style(text::base),
+            column![
+                text("URL").size(TEXT_SM).style(text::secondary),
+                url_input,
+            ]
+            .spacing(SPACE_XXS),
+            column![
+                text("Display text")
+                    .size(TEXT_SM)
+                    .style(text::secondary),
+                text_input_field,
+            ]
+            .spacing(SPACE_XXS),
+            row![cancel_btn, insert_btn]
+                .spacing(SPACE_SM)
+                .align_y(Alignment::Center),
+        ]
+        .spacing(SPACE_SM),
     )
     .padding(PAD_CONTENT)
     .style(theme::ContainerClass::Elevated.style())
