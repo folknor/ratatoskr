@@ -312,7 +312,6 @@ fn selected_thread_state(app: &App) -> ThreadState {
 /// allowing incremental rollout.
 pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
     match id {
-<<<<<<< HEAD
         // Navigation
         CommandId::NavNext => dispatch_nav_next(app),
         CommandId::NavPrev => dispatch_nav_prev(app),
@@ -361,20 +360,6 @@ pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
 
 fn dispatch_navigation(id: CommandId) -> Option<Message> {
     match id {
-=======
-        // Navigation — thread list keyboard nav (j/k/Enter/Escape)
-        CommandId::NavNext => {
-            Some(Message::ThreadList(crate::ui::thread_list::ThreadListMessage::SelectNext))
-        }
-        CommandId::NavPrev => {
-            Some(Message::ThreadList(crate::ui::thread_list::ThreadListMessage::SelectPrevious))
-        }
-        CommandId::NavOpen => {
-            Some(Message::ThreadList(crate::ui::thread_list::ThreadListMessage::ActivateSelected))
-        }
-        CommandId::NavMsgNext => None,
-        CommandId::NavMsgPrev => None,
->>>>>>> worktree-agent-a35d2dcb
         CommandId::NavGoInbox => Some(Message::NavigateTo(NavigationTarget::Inbox)),
         CommandId::NavGoStarred => Some(Message::NavigateTo(NavigationTarget::Starred)),
         CommandId::NavGoSent => Some(Message::NavigateTo(NavigationTarget::Sent)),
