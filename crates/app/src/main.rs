@@ -66,7 +66,9 @@ use ui::reading_pane::{ReadingPane, ReadingPaneEvent, ReadingPaneMessage};
 use ui::settings::{Settings, SettingsEvent, SettingsMessage};
 use ui::sidebar::{Sidebar, SidebarEvent, SidebarMessage};
 use ui::status_bar::{
-    AccountWarning, StatusBar, StatusBarEvent, StatusBarMessage, SyncEvent, WarningKind,
+    AccountWarning, StatusBar, StatusBarEvent, StatusBarMessage, SyncEvent,
+    SyncProgressReceiver, WarningKind, create_sync_progress_channel, shared_receiver,
+    sync_progress_subscription,
 };
 use ui::thread_list::{ThreadList, ThreadListEvent, ThreadListMessage};
 use std::collections::HashMap;
@@ -289,8 +291,12 @@ struct App {
     add_account_wizard: Option<AddAccountWizard>,
 
     /// The current navigation target, set by `Message::NavigateTo`.
-    /// Used for view type derivation and thread state context.
     navigation_target: Option<NavigationTarget>,
+
+    // Sync progress pipeline
+    sync_receiver: SyncProgressReceiver,
+    #[allow(dead_code)]
+    sync_reporter: Arc<ui::status_bar::IcedProgressReporter>,
 }
 
 impl App {
@@ -307,6 +313,10 @@ impl App {
         let registry = CommandRegistry::new();
         let binding_table = BindingTable::new(&registry, current_platform());
         let resolver = Arc::new(command_resolver::AppInputResolver::new(Arc::clone(&db)));
+
+        let (rx, reporter) = create_sync_progress_channel();
+        let sync_receiver = shared_receiver(rx);
+        let sync_reporter = Arc::new(reporter);
 
         let app = Self {
             db,
@@ -351,7 +361,10 @@ impl App {
             expiry_ran: false,
             no_accounts: false,
             add_account_wizard: None,
+<<<<<<< HEAD
             navigation_target: None,
+            sync_receiver,
+            sync_reporter,
         };
         let load_gen = app.nav_generation;
         (app, Task::batch([
@@ -434,6 +447,8 @@ impl App {
             self.reading_pane.subscription().map(Message::ReadingPane),
             self.settings.subscription().map(Message::Settings),
             self.status_bar.subscription().map(Message::StatusBar),
+            sync_progress_subscription(&self.sync_receiver)
+                .map(Message::SyncProgress),
         ];
 
         if self.pending_chord.is_some() {
@@ -629,7 +644,7 @@ impl App {
                 }
                 Task::none()
             }
-            Message::EmailAction(_action) => Task::none(),
+            Message::EmailAction(action) => self.handle_email_action(action),
             Message::ComposeAction(action) => self.handle_compose_action(action),
             Message::TaskAction(_action) => Task::none(),
             Message::SetTheme(theme) => {

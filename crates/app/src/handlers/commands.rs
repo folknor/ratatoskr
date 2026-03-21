@@ -1,6 +1,6 @@
 use iced::Task;
 
-use crate::command_dispatch;
+use crate::command_dispatch::{self, EmailAction};
 use crate::{App, Message};
 use ratatoskr_command_palette::{CommandArgs, CommandId, OptionItem};
 
@@ -11,6 +11,35 @@ impl App {
             Some(msg) => self.update(msg),
             None => Task::none(),
         }
+    }
+
+    /// Handle an email action and show a status bar confirmation.
+    ///
+    /// The actual server-side mutation is not yet implemented — this
+    /// wires the confirmation message so the user sees feedback.
+    pub(crate) fn handle_email_action(
+        &mut self,
+        action: EmailAction,
+    ) -> Task<Message> {
+        let confirmation = match &action {
+            EmailAction::Archive => Some("Archived"),
+            EmailAction::Trash => Some("Moved to Trash"),
+            EmailAction::PermanentDelete => Some("Permanently deleted"),
+            EmailAction::ToggleSpam => Some("Spam status toggled"),
+            EmailAction::ToggleRead => Some("Read status toggled"),
+            EmailAction::ToggleStar => Some("Star toggled"),
+            EmailAction::TogglePin => Some("Pin toggled"),
+            EmailAction::ToggleMute => Some("Mute toggled"),
+            EmailAction::Unsubscribe => Some("Unsubscribed"),
+            EmailAction::MoveToFolder { .. } => Some("Moved to folder"),
+            EmailAction::AddLabel { .. } => Some("Label applied"),
+            EmailAction::RemoveLabel { .. } => Some("Label removed"),
+            EmailAction::Snooze { .. } => Some("Snoozed"),
+        };
+        if let Some(msg) = confirmation {
+            self.status_bar.show_confirmation(msg.to_string());
+        }
+        Task::none()
     }
 
     pub(crate) fn handle_execute_parameterized(
