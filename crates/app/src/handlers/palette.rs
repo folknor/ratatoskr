@@ -66,11 +66,24 @@ impl App {
                     self.palette.selected_index = (self.palette.selected_index + 1)
                         .min(len - 1);
                 }
-                Task::none()
+                crate::ui::palette::scroll_to_selected(
+                    self.palette.selected_index,
+                    len,
+                )
+                .discard()
             }
             PaletteMessage::SelectPrev => {
+                let len = if self.palette.is_option_pick() {
+                    self.palette.option_matches.len()
+                } else {
+                    self.palette.results.len()
+                };
                 self.palette.selected_index = self.palette.selected_index.saturating_sub(1);
-                Task::none()
+                crate::ui::palette::scroll_to_selected(
+                    self.palette.selected_index,
+                    len,
+                )
+                .discard()
             }
             PaletteMessage::Confirm => {
                 if self.palette.is_option_pick() {
@@ -128,13 +141,12 @@ impl App {
                     })
                     .unwrap_or("option");
 
-                // Skip DateTime commands for now (snooze picker is complex)
+                // DateTime commands use preset options instead of a full picker
                 if matches!(
                     schema.param_at(0),
                     Some(ratatoskr_command_palette::ParamDef::DateTime { .. })
                 ) {
-                    self.palette.close();
-                    return Task::none();
+                    return self.enter_snooze_stage2(id, param_label);
                 }
 
                 // Transition to stage 2
@@ -205,6 +217,28 @@ impl App {
             }
         }
         Task::none()
+    }
+
+    fn enter_snooze_stage2(
+        &mut self,
+        id: CommandId,
+        param_label: &str,
+    ) -> Task<Message> {
+        self.palette.stage = PaletteStage::OptionPick;
+        self.palette.query.clear();
+        self.palette.selected_index = 0;
+        self.palette.stage2_command_id = Some(id);
+        self.palette.stage2_label = param_label.to_string();
+        self.palette.options_loading = false;
+
+        let items = crate::ui::palette::snooze_preset_options();
+        self.palette.option_matches =
+            ratatoskr_command_palette::search_options(&items, "");
+        self.palette.option_items = items;
+
+        iced::widget::operation::focus::<Message>(
+            "palette-input".to_string(),
+        )
     }
 
     fn palette_confirm_option(&mut self) -> Task<Message> {

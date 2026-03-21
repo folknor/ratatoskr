@@ -372,22 +372,13 @@ fn palette_result_row<'a, M: 'a + Clone>(
         .into()
 }
 
-/// Compute a `scrollable::scroll_to` task to keep the selected item
-/// visible in the palette results scrollable.
-pub fn scroll_to_selected(selected_index: usize, total_items: usize) -> iced::Task<()> {
-    if total_items == 0 {
-        return iced::Task::none();
-    }
-    // Compute a fractional offset that puts the selected item in view.
-    // The scrollable ID is "palette-results".
-    let fraction = selected_index as f32 / total_items.max(1) as f32;
-    iced::widget::scrollable::scroll_to(
-        "palette-results".to_string(),
-        scrollable::AbsoluteOffset {
-            x: 0.0,
-            y: fraction * (total_items as f32 * PALETTE_RESULT_HEIGHT),
-        },
-    )
+/// Keep the selected item visible in the palette results scrollable.
+///
+/// TODO: The iced fork does not expose `scrollable::scroll_to()`.
+/// This is a placeholder that returns `Task::none()` until
+/// scroll-to-item support is available.
+pub fn scroll_to_selected(_selected_index: usize, _total_items: usize) -> iced::Task<()> {
+    iced::Task::none()
 }
 
 /// Build the pending chord indicator badge.

@@ -49,6 +49,24 @@ pub(crate) fn build_command_args(command_id: CommandId, item: &OptionItem) -> Op
                 .ok()
                 .map(|ts| CommandArgs::Snooze { until: ts })
         }
+        CommandId::NavigateToLabel => {
+            let (account_id, label_id) = split_cross_account_id(&item.id)?;
+            Some(CommandArgs::NavigateToLabel {
+                label_id,
+                account_id,
+            })
+        }
         _ => None,
     }
+}
+
+/// Split a cross-account encoded ID ("account_id:label_id") into its parts.
+fn split_cross_account_id(encoded: &str) -> Option<(String, String)> {
+    let colon_pos = encoded.find(':')?;
+    let account_id = encoded[..colon_pos].to_string();
+    let label_id = encoded[colon_pos + 1..].to_string();
+    if account_id.is_empty() || label_id.is_empty() {
+        return None;
+    }
+    Some((account_id, label_id))
 }

@@ -781,7 +781,6 @@ impl App {
 
             let palette_widget = ui::palette::palette_card(
                 &self.palette,
-                &self.registry,
                 |q| Message::Palette(PaletteMessage::QueryChanged(q)),
                 Message::Palette(PaletteMessage::Confirm),
                 |idx| Message::Palette(PaletteMessage::ClickResult(idx)),
@@ -799,6 +798,14 @@ impl App {
                 .align_x(iced::Alignment::Center);
 
             stack![main_layout, backdrop, palette_positioned].into()
+        } else if let Some(ref pending) = self.pending_chord {
+            let chord_display = pending.first.display(current_platform());
+            let indicator = ui::palette::chord_indicator::<Message>(&chord_display);
+            let indicator_positioned = container(indicator)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(iced::Alignment::End);
+            stack![main_layout, indicator_positioned].into()
         } else {
             main_layout
         }
