@@ -1,3 +1,20 @@
+//! Palette label/folder queries — app-layer read-only lookups.
+//!
+//! These queries stay in the app crate because:
+//!
+//! 1. **Palette-specific return type** — they return
+//!    `ratatoskr_command_palette::OptionItem`, which is a UI type
+//!    defined in the `command-palette` crate. Core shouldn't depend
+//!    on UI presentation types.
+//!
+//! 2. **Read-only** — these are pure SELECT queries against the
+//!    synced `labels`, `thread_labels`, and `accounts` tables.
+//!    They don't modify any state.
+//!
+//! 3. **Presentation logic** — the `/`-delimiter splitting
+//!    (`label_name_to_option_item`) and cross-account ID encoding
+//!    (`account_id:label_id`) are palette UI concerns.
+
 use rusqlite::params;
 
 use super::connection::Db;

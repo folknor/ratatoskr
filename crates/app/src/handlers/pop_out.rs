@@ -745,6 +745,22 @@ impl App {
 }
 
 // ── Async data loads ────────────────────────────────────
+//
+// Pop-out windows use `Db::load_message_body()` and
+// `Db::load_message_attachments()` directly (app-layer raw SQL)
+// rather than `get_thread_detail()` from core. This is intentional:
+//
+// - Pop-out windows load a SINGLE message by ID, while
+//   `get_thread_detail()` loads an entire thread's messages.
+// - Pop-out windows need body HTML (for rendering modes) which
+//   `get_thread_detail()` also provides, but the thread-level
+//   overhead (labels, collapsed summaries, all messages) is wasted
+//   for a single-message view.
+// - Raw source loading (`load_raw_source`) has no core equivalent
+//   and is only needed for the pop-out Source rendering mode.
+//
+// If core gains a `get_single_message_detail()` function in the
+// future, these loads should migrate to it.
 
 impl App {
     /// Dispatch body + attachment loads for a message view window.

@@ -16,7 +16,8 @@ use crate::ui::layout::*;
 use crate::ui::theme;
 
 use ratatoskr_core::db::queries_extra::{
-    CreateAccountParams, account_exists_by_email_sync, create_account_sync,
+    CreateAccountParams, ReauthAccountParams, account_exists_by_email_sync,
+    create_account_sync, get_account_auth_info_sync, update_account_tokens_sync,
 };
 use ratatoskr_core::discovery::types::{
     AuthMethod, DiscoveredConfig, DiscoverySource, Protocol, ProtocolOption, Security,
@@ -182,6 +183,9 @@ pub enum AddAccountMessage {
     // Step 5: Creation
     AccountCreated(u64, Result<String, String>),
 
+    // Re-auth: token/credential update
+    ReauthTokensSaved(u64, Result<(), String>),
+
     // General
     Cancel,
     Back,
@@ -193,6 +197,8 @@ pub enum AddAccountMessage {
 pub enum AddAccountEvent {
     /// Wizard completed successfully. Carry the new account ID.
     AccountAdded(String),
+    /// Re-authentication completed successfully. Carry the account ID.
+    ReauthComplete(String),
     /// Wizard cancelled.
     Cancelled,
 }
@@ -221,6 +227,9 @@ pub struct AddAccountWizard {
     pub used_colors: Vec<String>,
     /// DB handle for account creation (writable).
     db: Arc<Db>,
+    /// Re-auth mode: when set, the wizard skips email/discovery/identity
+    /// and goes straight to the auth step for this existing account.
+    reauth_account_id: Option<String>,
 }
 
 impl AddAccountWizard {
@@ -230,6 +239,67 @@ impl AddAccountWizard {
 
     pub fn new_add_account(used_colors: Vec<String>, db: Arc<Db>) -> Self {
         Self::new(false, used_colors, db)
+    }
+
+    /// Create a re-auth wizard for an existing account. Looks up the
+    /// account's auth method and skips straight to the appropriate
+    /// auth step (OAuth or password).
+    pub fn new_reauth(
+        account_id: String,
+        email: String,
+        db: Arc<Db>,
+    ) -> Result<(Self, Task<AddAccountMessage>), String> {
+        let auth_info = db.with_conn_sync(|conn| {
+            get_account_auth_info_sync(conn, &account_id)
+        })?;
+
+        let mut wizard = Self::new(false, Vec::new(), db);
+        wizard.email = email;
+        wizard.reauth_account_id = Some(account_id);
+        wizard.resolved_provider = auth_info.provider;
+        wizard.resolved_auth_method = auth_info.auth_method.clone();
+
+        let task = if auth_info.auth_method == "oauth" {
+            wizard.start_reauth_oauth(
+                auth_info.oauth_provider.as_deref(),
+                auth_info.oauth_client_id.as_deref(),
+            )
+        } else {
+            // Pre-populate server fields for password re-auth
+            if let Some(host) = auth_info.imap_host {
+                wizard.auth_state.imap_host = host;
+            }
+            if let Some(port) = auth_info.imap_port {
+                wizard.auth_state.imap_port = port.to_string();
+            }
+            if let Some(sec) = auth_info.imap_security {
+                wizard.auth_state.imap_security = match sec.as_str() {
+                    "starttls" => SecurityOption::StartTls,
+                    "none" => SecurityOption::None,
+                    _ => SecurityOption::Tls,
+                };
+            }
+            if let Some(host) = auth_info.smtp_host {
+                wizard.auth_state.smtp_host = host;
+            }
+            if let Some(port) = auth_info.smtp_port {
+                wizard.auth_state.smtp_port = port.to_string();
+            }
+            if let Some(sec) = auth_info.smtp_security {
+                wizard.auth_state.smtp_security = match sec.as_str() {
+                    "tls" => SecurityOption::Tls,
+                    "none" => SecurityOption::None,
+                    _ => SecurityOption::StartTls,
+                };
+            }
+            if let Some(username) = auth_info.imap_username {
+                wizard.auth_state.username = username;
+            }
+            wizard.step = AddAccountStep::PasswordAuth;
+            Task::none()
+        };
+
+        Ok((wizard, task))
     }
 
     fn new(is_first_launch: bool, used_colors: Vec<String>, db: Arc<Db>) -> Self {
@@ -259,6 +329,7 @@ impl AddAccountWizard {
             },
             used_colors,
             db,
+            reauth_account_id: None,
         }
     }
 
@@ -321,6 +392,35 @@ impl Component for AddAccountWizard {
                 (Task::none(), None)
             }
             AddAccountMessage::ValidationComplete(_, Ok(())) => {
+                // Re-auth mode: save password credentials directly.
+                if let Some(ref account_id) = self.reauth_account_id {
+                    let reauth_params = ReauthAccountParams {
+                        access_token: None,
+                        refresh_token: None,
+                        token_expires_at: None,
+                        imap_password: Some(self.auth_state.password.clone()),
+                        smtp_password: if self.auth_state.use_separate_smtp_credentials {
+                            Some(self.auth_state.smtp_password.clone())
+                        } else {
+                            None
+                        },
+                    };
+                    self.generation += 1;
+                    let generation = self.generation;
+                    let db = Arc::clone(&self.db);
+                    let aid = account_id.clone();
+                    let task = Task::perform(
+                        async move {
+                            let result = db.with_write_conn(move |conn| {
+                                update_account_tokens_sync(conn, &aid, reauth_params)
+                            }).await;
+                            (generation, result)
+                        },
+                        |(g, result)| AddAccountMessage::ReauthTokensSaved(g, result),
+                    );
+                    return (task, None);
+                }
+
                 self.prefill_identity_name();
                 self.step = AddAccountStep::Identity;
                 self.error = None;
@@ -352,6 +452,18 @@ impl Component for AddAccountWizard {
             AddAccountMessage::AccountCreated(_, Err(e)) => {
                 self.error = Some(e);
                 self.step = AddAccountStep::Identity;
+                (Task::none(), None)
+            }
+            AddAccountMessage::ReauthTokensSaved(g, _) if g != self.generation => {
+                (Task::none(), None)
+            }
+            AddAccountMessage::ReauthTokensSaved(_, Ok(())) => {
+                let account_id = self.reauth_account_id.clone()
+                    .unwrap_or_default();
+                (Task::none(), Some(AddAccountEvent::ReauthComplete(account_id)))
+            }
+            AddAccountMessage::ReauthTokensSaved(_, Err(e)) => {
+                self.error = Some(format!("Failed to save credentials: {e}"));
                 (Task::none(), None)
             }
             AddAccountMessage::Cancel | AddAccountMessage::CancelOAuth => {
@@ -563,6 +675,90 @@ impl AddAccountWizard {
         }
     }
 
+    /// Start the OAuth flow for re-auth, using the stored provider info.
+    fn start_reauth_oauth(
+        &mut self,
+        oauth_provider: Option<&str>,
+        oauth_client_id: Option<&str>,
+    ) -> Task<AddAccountMessage> {
+        let provider_id = oauth_provider.unwrap_or("").to_string();
+        let client_id = if oauth_client_id.is_some_and(|c| !c.is_empty()) {
+            oauth_client_id.expect("checked").to_string()
+        } else {
+            resolve_client_id(&provider_id)
+        };
+
+        // Look up the full OAuth config from the discovery registry
+        let oauth_config =
+            ratatoskr_core::discovery::registry::oauth_config_for_provider(&provider_id);
+        let Some(auth_method) = oauth_config else {
+            self.step = AddAccountStep::PasswordAuth;
+            self.error = Some(format!(
+                "No OAuth configuration found for provider '{provider_id}'. \
+                 Please enter credentials manually."
+            ));
+            return Task::none();
+        };
+
+        let AuthMethod::OAuth2 {
+            auth_url,
+            token_url,
+            scopes,
+            use_pkce,
+            ..
+        } = auth_method
+        else {
+            self.step = AddAccountStep::PasswordAuth;
+            return Task::none();
+        };
+
+        self.step = AddAccountStep::OAuthWaiting;
+        self.error = None;
+        self.generation += 1;
+        let generation = self.generation;
+        let provider_id_clone = provider_id.clone();
+        let client_id_clone = client_id.clone();
+
+        let request = ratatoskr_core::oauth::OAuthProviderAuthorizationRequest {
+            provider_id,
+            auth_url,
+            token_url,
+            scopes,
+            user_info_url: None,
+            use_pkce,
+            client_id,
+            client_secret: None,
+        };
+
+        Task::perform(
+            async move {
+                let provider =
+                    ratatoskr_core::oauth::GenericOAuthProvider::from_request(request);
+                let open_url = |url: &str| -> Result<(), String> {
+                    open_browser_url(url)
+                };
+                let result = ratatoskr_core::oauth::authorize_with_provider(
+                    &provider, &open_url,
+                )
+                .await;
+                let mapped = result.map(|bundle| OAuthSuccess {
+                    access_token: bundle.tokens.access_token,
+                    refresh_token: bundle.tokens.refresh_token,
+                    token_expires_at: Some(
+                        chrono::Utc::now().timestamp()
+                            + bundle.tokens.expires_in as i64,
+                    ),
+                    user_email: bundle.user_info.email,
+                    user_name: bundle.user_info.name,
+                    oauth_provider: provider_id_clone,
+                    oauth_client_id: client_id_clone,
+                });
+                (generation, mapped)
+            },
+            |(g, result)| AddAccountMessage::OAuthComplete(g, result),
+        )
+    }
+
     fn prefill_auth_from_option(&mut self, option: &ProtocolOption) {
         if let Protocol::Imap {
             ref incoming,
@@ -591,6 +787,31 @@ impl AddAccountWizard {
         &mut self,
         success: OAuthSuccess,
     ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
+        // Re-auth mode: save tokens directly, skip identity step.
+        if let Some(ref account_id) = self.reauth_account_id {
+            let reauth_params = ReauthAccountParams {
+                access_token: Some(success.access_token.clone()),
+                refresh_token: success.refresh_token.clone(),
+                token_expires_at: success.token_expires_at,
+                imap_password: None,
+                smtp_password: None,
+            };
+            self.generation += 1;
+            let generation = self.generation;
+            let db = Arc::clone(&self.db);
+            let aid = account_id.clone();
+            let task = Task::perform(
+                async move {
+                    let result = db.with_write_conn(move |conn| {
+                        update_account_tokens_sync(conn, &aid, reauth_params)
+                    }).await;
+                    (generation, result)
+                },
+                |(g, result)| AddAccountMessage::ReauthTokensSaved(g, result),
+            );
+            return (task, None);
+        }
+
         self.oauth_success = Some(success);
         self.prefill_identity_name();
         self.step = AddAccountStep::Identity;
@@ -601,6 +822,29 @@ impl AddAccountWizard {
     fn handle_retry_oauth(
         &mut self,
     ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
+        // Re-auth mode: re-run using stored provider info
+        if self.reauth_account_id.is_some() {
+            self.error = None;
+            // Look up auth info again for the retry
+            let aid = self.reauth_account_id.clone().unwrap_or_default();
+            let auth_info = self.db.with_conn_sync(|conn| {
+                get_account_auth_info_sync(conn, &aid)
+            });
+            match auth_info {
+                Ok(info) => {
+                    let task = self.start_reauth_oauth(
+                        info.oauth_provider.as_deref(),
+                        info.oauth_client_id.as_deref(),
+                    );
+                    return (task, None);
+                }
+                Err(e) => {
+                    self.error = Some(format!("Failed to look up account: {e}"));
+                    return (Task::none(), None);
+                }
+            }
+        }
+
         // Re-run the OAuth flow using the stored discovery config
         let config = match &self.discovery {
             Some(c) => c.clone(),
@@ -780,6 +1024,12 @@ impl AddAccountWizard {
     }
 
     fn handle_back(&mut self) {
+        // In re-auth mode, Back is equivalent to Cancel — there's no
+        // previous step to go back to.
+        if self.reauth_account_id.is_some() {
+            return;
+        }
+
         match self.step {
             AddAccountStep::PasswordAuth | AddAccountStep::ManualConfiguration => {
                 self.step = AddAccountStep::EmailInput;
@@ -1257,8 +1507,14 @@ impl AddAccountWizard {
             .align_x(Alignment::Center)
             .width(Length::Fill);
 
+        let heading = if self.reauth_account_id.is_some() {
+            "Re-authenticate in your browser"
+        } else {
+            "Complete sign-in in your browser"
+        };
+
         col = col.push(
-            text("Complete sign-in in your browser")
+            text(heading)
                 .size(TEXT_HEADING)
                 .style(text::base)
                 .font(iced::Font {
@@ -1266,6 +1522,13 @@ impl AddAccountWizard {
                     ..font::text()
                 }),
         );
+
+        // Show the account email for re-auth context
+        if self.reauth_account_id.is_some() {
+            col = col.push(
+                text(&self.email).size(TEXT_LG).style(text::secondary),
+            );
+        }
         col = col.push(Space::new().height(SPACE_MD));
         col = col.push(
             text("Waiting for authorization...")
@@ -1293,8 +1556,14 @@ impl AddAccountWizard {
     fn view_password_auth(&self) -> Element<'_, AddAccountMessage> {
         let mut col = column![].spacing(SPACE_MD).width(Length::Fill);
 
+        let heading = if self.reauth_account_id.is_some() {
+            "Re-authenticate"
+        } else {
+            "Sign In"
+        };
+
         col = col.push(
-            text("Sign In")
+            text(heading)
                 .size(TEXT_HEADING)
                 .style(text::base)
                 .font(iced::Font {
@@ -1302,6 +1571,13 @@ impl AddAccountWizard {
                     ..font::text()
                 }),
         );
+
+        // Show the account email for re-auth context
+        if self.reauth_account_id.is_some() {
+            col = col.push(
+                text(&self.email).size(TEXT_LG).style(text::secondary),
+            );
+        }
 
         // IMAP section
         col = col.push(text("Incoming (IMAP)").size(TEXT_XL).style(text::base));

@@ -1083,12 +1083,7 @@ impl App {
     fn handle_status_bar_event(&mut self, event: StatusBarEvent) -> Task<Message> {
         match event {
             StatusBarEvent::RequestReauth { account_id } => {
-                let email = self.email_for_account(&account_id);
-                eprintln!("Re-auth requested for account {account_id} ({email})");
-                self.status_bar.show_confirmation(format!(
-                    "Re-authentication needed for {email} (not yet implemented)"
-                ));
-                Task::none()
+                self.handle_open_reauth_wizard(account_id)
             }
         }
     }

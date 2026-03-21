@@ -488,6 +488,48 @@ pub fn is_known_jmap_provider(domain: &str) -> bool {
     })
 }
 
+/// Look up OAuth endpoints by provider ID (e.g. "google", "microsoft",
+/// "microsoft_graph"). Used for re-authentication when we already know
+/// the provider.
+pub fn oauth_config_for_provider(provider_id: &str) -> Option<AuthMethod> {
+    // Check well-known OAuth constants first.
+    let well_known: &[&RegistryAuth] = &[
+        &GOOGLE_OAUTH,
+        &MICROSOFT_IMAP_OAUTH,
+        &YAHOO_OAUTH,
+    ];
+    for auth in well_known {
+        if let RegistryAuth::OAuth2 { provider_id: pid, .. } = auth {
+            if *pid == provider_id {
+                return Some(auth_method_from_registry(auth));
+            }
+        }
+    }
+    // Search per-option auth overrides in the full registry.
+    for entry in REGISTRY {
+        for (_, auth_override) in entry.options {
+            if let Some(cfg) = auth_override {
+                if matches_provider_id(&cfg.primary, provider_id) {
+                    return Some(auth_method_from_registry(&cfg.primary));
+                }
+                for alt in cfg.alternatives {
+                    if matches_provider_id(alt, provider_id) {
+                        return Some(auth_method_from_registry(alt));
+                    }
+                }
+            }
+        }
+        if matches_provider_id(&entry.default_auth.primary, provider_id) {
+            return Some(auth_method_from_registry(&entry.default_auth.primary));
+        }
+    }
+    None
+}
+
+fn matches_provider_id(auth: &RegistryAuth, target: &str) -> bool {
+    matches!(auth, RegistryAuth::OAuth2 { provider_id, .. } if *provider_id == target)
+}
+
 /// Look up OAuth endpoints for a domain (used by autoconfig when XML says OAuth2).
 pub fn lookup_oauth_for_domain(domain: &str) -> Option<AuthMethod> {
     let lower = domain.to_lowercase();

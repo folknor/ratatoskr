@@ -19,6 +19,15 @@ impl App {
                     |(g, result)| Message::AccountsLoaded(g, result),
                 )
             }
+            AddAccountEvent::ReauthComplete(account_id) => {
+                self.add_account_wizard = None;
+                self.status_bar.clear_warning(&account_id);
+                let email = self.email_for_account(&account_id);
+                self.status_bar.show_confirmation(format!(
+                    "{email} re-authenticated successfully"
+                ));
+                Task::none()
+            }
             AddAccountEvent::Cancelled => {
                 if !self.no_accounts {
                     self.add_account_wizard = None;
@@ -36,5 +45,31 @@ impl App {
             Some(AddAccountWizard::new_add_account(used_colors, Arc::clone(&self.db)));
         self.show_settings = false;
         Task::none()
+    }
+
+    /// Open a re-auth wizard for an existing account.
+    pub(crate) fn handle_open_reauth_wizard(
+        &mut self,
+        account_id: String,
+    ) -> Task<Message> {
+        let email = self.email_for_account(&account_id);
+        match AddAccountWizard::new_reauth(
+            account_id,
+            email.clone(),
+            Arc::clone(&self.db),
+        ) {
+            Ok((wizard, task)) => {
+                self.add_account_wizard = Some(wizard);
+                self.show_settings = false;
+                task.map(Message::AddAccount)
+            }
+            Err(e) => {
+                eprintln!("Failed to open re-auth wizard for {email}: {e}");
+                self.status_bar.show_confirmation(format!(
+                    "Could not re-authenticate {email}: {e}"
+                ));
+                Task::none()
+            }
+        }
     }
 }
