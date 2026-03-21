@@ -24,8 +24,8 @@ pub mod undo;
 pub mod widget;
 
 pub use document::{
-    Block, BlockKind, DocPosition, DocSelection, DocSlice, Document, HeadingLevel, InlineStyle,
-    StyledRun,
+    Block, BlockAttrs, BlockKind, DocPosition, DocSelection, DocSlice, Document, HeadingLevel,
+    InlineStyle, StyledRun, TextAlignment,
 };
 pub use normalize::normalize;
 pub use operations::{EditOp, PosMap};

@@ -46,6 +46,10 @@ pub enum Action {
     Paste(String),
     /// A click at a document position (resolved by the widget via hit testing).
     Click(DocPosition),
+    /// A double-click at a document position (select word).
+    DoubleClick(DocPosition),
+    /// A triple-click at a document position (select block/line).
+    TripleClick(DocPosition),
     /// A drag to a document position (extends selection).
     Drag(DocPosition),
     /// A link was clicked.
@@ -225,6 +229,12 @@ impl EditorState {
             }
             Action::Click(doc_pos) => {
                 self.handle_click(doc_pos);
+            }
+            Action::DoubleClick(doc_pos) => {
+                self.handle_double_click(doc_pos);
+            }
+            Action::TripleClick(doc_pos) => {
+                self.handle_triple_click(doc_pos);
             }
             Action::Drag(doc_pos) => {
                 self.handle_drag(doc_pos);
@@ -596,6 +606,7 @@ impl EditorState {
             }
             EditOp::ToggleInlineStyle { .. }
             | EditOp::SetBlockType { .. }
+            | EditOp::SetBlockAttrs { .. }
             | EditOp::InsertBlock { .. }
             | EditOp::RemoveBlock { .. } => {
                 // These don't move the cursor.
@@ -741,6 +752,28 @@ impl EditorState {
         let doc_pos = self.document.clamp_position(doc_pos);
         self.selection = DocSelection::caret(doc_pos);
         self.drag = Some(DragState::start(doc_pos));
+        self.pending_style = InlineStyle::empty();
+    }
+
+    /// Handle a double-click: select the word at the clicked position.
+    fn handle_double_click(&mut self, doc_pos: DocPosition) {
+        self.cursor.focus();
+        self.cursor.reset_blink();
+        let doc_pos = self.document.clamp_position(doc_pos);
+        let (start, end) = input::word_at(&self.document, doc_pos);
+        self.selection = DocSelection::range(start, end);
+        self.drag = None;
+        self.pending_style = InlineStyle::empty();
+    }
+
+    /// Handle a triple-click: select the entire block at the clicked position.
+    fn handle_triple_click(&mut self, doc_pos: DocPosition) {
+        self.cursor.focus();
+        self.cursor.reset_blink();
+        let doc_pos = self.document.clamp_position(doc_pos);
+        let (start, end) = input::select_block(&self.document, doc_pos);
+        self.selection = DocSelection::range(start, end);
+        self.drag = None;
         self.pending_style = InlineStyle::empty();
     }
 
@@ -1718,5 +1751,57 @@ mod tests {
         // Total content (100) fits within viewport (200) — max_scroll = 0.
         super::super::ensure_cursor_visible(&mut offset, 50.0, 20.0, 200.0, 100.0);
         assert!(offset.abs() < f32::EPSILON);
+    }
+
+    // ── Double-click / triple-click ──────────────────────
+
+    #[test]
+    fn double_click_selects_word() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![
+            Block::paragraph("hello world"),
+        ]));
+        state.perform(Action::DoubleClick(DocPosition::new(0, 3)));
+        assert_eq!(state.selection.start(), DocPosition::new(0, 0));
+        assert_eq!(state.selection.end(), DocPosition::new(0, 5));
+    }
+
+    #[test]
+    fn double_click_selects_second_word() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![
+            Block::paragraph("hello world"),
+        ]));
+        state.perform(Action::DoubleClick(DocPosition::new(0, 8)));
+        assert_eq!(state.selection.start(), DocPosition::new(0, 6));
+        assert_eq!(state.selection.end(), DocPosition::new(0, 11));
+    }
+
+    #[test]
+    fn triple_click_selects_block() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![
+            Block::paragraph("hello world"),
+        ]));
+        state.perform(Action::TripleClick(DocPosition::new(0, 3)));
+        assert_eq!(state.selection.start(), DocPosition::new(0, 0));
+        assert_eq!(state.selection.end(), DocPosition::new(0, 11));
+    }
+
+    #[test]
+    fn triple_click_second_block() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![
+            Block::paragraph("first"),
+            Block::paragraph("second block"),
+        ]));
+        state.perform(Action::TripleClick(DocPosition::new(1, 4)));
+        assert_eq!(state.selection.start(), DocPosition::new(1, 0));
+        assert_eq!(state.selection.end(), DocPosition::new(1, 12));
+    }
+
+    #[test]
+    fn double_click_clears_drag() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![
+            Block::paragraph("hello world"),
+        ]));
+        state.perform(Action::DoubleClick(DocPosition::new(0, 3)));
+        assert!(state.drag.is_none());
     }
 }

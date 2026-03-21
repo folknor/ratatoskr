@@ -10,7 +10,7 @@ only reference project that solves rendering + input on a declarative UI framewo
 without contentEditable). See `docs/editor/research-summary.md` for detailed
 analysis of all four.
 
-**Crate:** `crates/rich-text-editor/` — 14,300+ lines, 428 tests, zero clippy
+**Crate:** `crates/rich-text-editor/` — 14,300+ lines, 680+ tests, zero clippy
 warnings. Pure-Rust core modules (no iced dependency) + feature-gated widget.
 
 ---
@@ -113,7 +113,7 @@ single-block open-ended fragment.
 
 ## Editing Operations
 
-**Status: fully implemented. All 8 variants with apply + invert.**
+**Status: fully implemented. All 9 variants with apply + invert.**
 
 Operation-based for undo/redo, not patch-based. Every user action creates an
 `EditOp` that knows how to apply and reverse itself. Each `apply()` returns a
@@ -128,6 +128,7 @@ EditOp
   MergeBlocks      { block_index, saved: Block, merge_offset: usize }
   ToggleInlineStyle { start, end, style_bit }
   SetBlockType     { block_index, old: BlockKind, new: BlockKind }
+  SetBlockAttrs    { block_index, old: BlockAttrs, new: BlockAttrs }
   InsertBlock      { index, block }
   RemoveBlock      { index, saved: Block }
 
@@ -163,7 +164,7 @@ PosMapEntry { old_offset, old_len, new_len }
 StructuralChange
   Split   { block_index, split_offset }
   Merge   { block_index, merge_offset }
-  Insert  { block_index }
+  Insert  { block_index, count }
   Remove  { block_index }
   CrossBlockDelete { start_block, removed_count, start_offset }
 ```
@@ -173,10 +174,12 @@ mapping. Split remaps positions after the split offset into the new block.
 Merge adds merge_offset when collapsing positions. CrossBlockDelete collapses
 positions in deleted blocks to the deletion point.
 
-### Missing operation
+### SetBlockAttrs
 
-`SetBlockAttrs` for block-level attributes that aren't type changes (text
-alignment, list indent level). Add when implementing alignment or indentation.
+`SetBlockAttrs` modifies block-level attributes (alignment, indent level)
+without changing the block type. Currently wired for `indent_level` on
+`ListItem` blocks. `TextAlignment` is defined but not yet stored on block
+variants (future extension). Self-inverse (swap old/new).
 
 ### Undo stack
 
@@ -365,6 +368,8 @@ pub enum Action {
     Undo, Redo,
     Copy, Cut, Paste(String),
     Click(DocPosition),      // resolved by widget via Paragraph::hit_test
+    DoubleClick(DocPosition), // select word at position
+    TripleClick(DocPosition), // select block at position
     Drag(DocPosition),
     LinkClicked(String),
     Focus, Blur,
@@ -380,9 +385,8 @@ pub enum Action {
 - Font sizes: H1 = 18px, H2 = 16px, H3 = 14px, body = 13px
 - Block spacing, blockquote border/indent, list marker width constants
 - Drawing helpers: `draw_horizontal_rule()`, `draw_blockquote_border()`,
-  `draw_paragraph()`. `draw_list_marker()` exists but is not wired into the
-  runtime draw path yet (lists currently render as a combined placeholder
-  paragraph).
+  `draw_paragraph()`, `draw_list_marker()`. Lists render with proper
+  bullet/number markers via `draw_list_marker()` called in the main draw loop.
 
 ### Hit testing and cursor (widget/cursor.rs)
 
@@ -394,10 +398,12 @@ pub enum Action {
   translate to block-local coordinates
 - `selection_block_ranges()` — decompose selection into per-block participation
   (Single/First/Full/Last)
-- `prepare_move_up()` / `prepare_move_down()` — infrastructure for vertical
-  cursor movement with cross-block boundary handling. These helpers exist and
-  are tested, but the widget currently uses a simpler adjacent-block fallback
-  (see Known limitations).
+- `prepare_move_up()` / `prepare_move_down()` — infrastructure for
+  pixel-precise vertical cursor movement with cross-block boundary handling.
+  These helpers are tested and ready to wire. Currently, vertical movement
+  uses a simpler column-offset fallback in `EditorState::apply_move()`.
+  Wiring requires the widget to intercept Up/Down at the render layer where
+  the paragraph cache is available.
 
 Hit testing in the Widget's `update()` method uses `ParagraphCache::block_at_y()`
 to find the clicked block, then `Paragraph::hit_test()` on the cached paragraph
@@ -473,10 +479,13 @@ crates/rich-text-editor/
     rules.rs                  // Heuristic rules: insert/delete/format behavior
     undo.rs                   // UndoStack, UndoGroup, cursor bookmark mapping
     html_serialize.rs         // Document → HTML (including <img>)
-    html_parse.rs             // HTML → Document (html5ever TreeSink, including <img>)
+    html_parse/
+      mod.rs                  // HTML → Document (block/inline classification, whitespace collapsing)
+      dom.rs                  // html5ever TreeSink implementation
     compose.rs                // Compose document assembly: signatures, reply quoting, forward headers
     widget/
-      mod.rs                  // EditorState, Action, RichTextEditor widget (Widget trait impl)
+      mod.rs                  // RichTextEditor widget (Widget trait impl), click detection
+      editor_state.rs         // EditorState, Action, InternalClipboard, perform() dispatch
       input.rs                // Key binding → action mapping, cursor movement helpers
       render.rs               // ParagraphCache, span building, draw helpers
       cursor.rs               // CursorState, hit testing, selection rects, vertical movement
@@ -519,8 +528,9 @@ sending `Action::Edit(EditAction::ToggleInlineStyle(...))` etc.
 
 - Document model with all 6 block types (Paragraph, Heading, List, BlockQuote,
   HorizontalRule, Image), Arc structural sharing, DocSlice
-- All 8 EditOp variants with correct apply, invert, and PosMap (including
-  split_offset, merge_offset, start_offset on structural changes)
+- All 9 EditOp variants with correct apply, invert, and PosMap (including
+  split_offset, merge_offset, start_offset on structural changes,
+  SetBlockAttrs for indent level)
 - Normalization with dirty tracking and safety valve
 - Rules engine with insert/delete/format behavior, including pending style
   application, link boundary exclusivity, link formatting at caret, heading
@@ -544,7 +554,9 @@ sending `Action::Edit(EditAction::ToggleInlineStyle(...))` etc.
 - Widget: paragraph caching, exact cursor placement via grapheme_position,
   per-line selection rectangles, scrolling (wheel + auto-scroll + drag
   auto-scroll), mouse hit testing with Paragraph::hit_test
-- 428 tests across all modules
+- Double-click (select word) and triple-click (select block) detection
+  using iced's `Click` type with `kind()` detection
+- 680+ tests across all modules
 
 ### What remains
 

@@ -133,6 +133,14 @@ pub enum EditOp {
         new: BlockKind,
     },
 
+    /// Set block-level attributes (alignment, indent level) without changing
+    /// the block type.
+    SetBlockAttrs {
+        block_index: usize,
+        old: crate::document::BlockAttrs,
+        new: crate::document::BlockAttrs,
+    },
+
     /// Insert a new block at an index.
     InsertBlock { index: usize, block: Block },
 
@@ -295,6 +303,9 @@ impl EditOp {
             Self::SetBlockType {
                 block_index, new, ..
             } => apply_set_block_type(doc, *block_index, *new),
+            Self::SetBlockAttrs {
+                block_index, new, ..
+            } => apply_set_block_attrs(doc, *block_index, *new),
             Self::InsertBlock { index, block } => apply_insert_block(doc, *index, block),
             Self::RemoveBlock { index, .. } => apply_remove_block(doc, *index),
         }
@@ -377,6 +388,16 @@ impl EditOp {
                 old,
                 new,
             } => Self::SetBlockType {
+                block_index: *block_index,
+                old: *new,
+                new: *old,
+            },
+
+            Self::SetBlockAttrs {
+                block_index,
+                old,
+                new,
+            } => Self::SetBlockAttrs {
                 block_index: *block_index,
                 old: *new,
                 new: *old,
@@ -1000,6 +1021,28 @@ fn apply_set_block_type(doc: &mut Document, block_index: usize, new: BlockKind) 
     };
 
     doc.replace_block(block_index, new_block);
+
+    PosMap {
+        block_index,
+        entries: Vec::new(),
+        structural: None,
+    }
+}
+
+// ── Apply: SetBlockAttrs ────────────────────────────────
+
+fn apply_set_block_attrs(
+    doc: &mut Document,
+    block_index: usize,
+    new: crate::document::BlockAttrs,
+) -> PosMap {
+    let block = doc
+        .block(block_index)
+        .expect("SetBlockAttrs: block out of bounds");
+
+    if let Some(new_block) = block.with_attrs(new) {
+        doc.replace_block(block_index, new_block);
+    }
 
     PosMap {
         block_index,
@@ -2154,5 +2197,101 @@ mod tests {
         }
         .apply(&mut doc);
         assert_eq!(pm.map(DocPosition::new(0, 5)), DocPosition::new(0, 2));
+    }
+
+    // ── SetBlockAttrs ─────────────────────────────────────
+
+    #[test]
+    fn set_block_attrs_changes_indent_level() {
+        use crate::document::BlockAttrs;
+
+        let mut doc = Document::from_blocks(vec![Block::list_item("item", false)]);
+        let old = doc.block(0).map(Block::attrs).unwrap_or_default();
+        assert_eq!(old.indent_level, 0);
+
+        EditOp::SetBlockAttrs {
+            block_index: 0,
+            old,
+            new: BlockAttrs {
+                indent_level: 2,
+                ..old
+            },
+        }
+        .apply(&mut doc);
+
+        match doc.block(0) {
+            Some(Block::ListItem { indent_level, .. }) => {
+                assert_eq!(*indent_level, 2);
+            }
+            other => panic!("Expected ListItem, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn set_block_attrs_invert_restores() {
+        use crate::document::BlockAttrs;
+
+        let mut doc = Document::from_blocks(vec![
+            Block::list_item_with_indent("item", false, 1),
+        ]);
+        let old = BlockAttrs {
+            indent_level: 1,
+            ..Default::default()
+        };
+        let new = BlockAttrs {
+            indent_level: 3,
+            ..Default::default()
+        };
+        let op = EditOp::SetBlockAttrs {
+            block_index: 0,
+            old,
+            new,
+        };
+        op.apply(&mut doc);
+        assert_eq!(doc.block(0).map(Block::attrs).map(|a| a.indent_level), Some(3));
+
+        op.invert().apply(&mut doc);
+        assert_eq!(doc.block(0).map(Block::attrs).map(|a| a.indent_level), Some(1));
+    }
+
+    #[test]
+    fn set_block_attrs_no_op_for_non_list() {
+        use crate::document::BlockAttrs;
+
+        let mut doc = Document::from_blocks(vec![Block::paragraph("hello")]);
+        let old = BlockAttrs::default();
+        let new = BlockAttrs {
+            indent_level: 2,
+            ..Default::default()
+        };
+        EditOp::SetBlockAttrs {
+            block_index: 0,
+            old,
+            new,
+        }
+        .apply(&mut doc);
+
+        // Paragraph doesn't have indent_level, so attrs remain default
+        assert_eq!(doc.block(0).map(Block::attrs), Some(BlockAttrs::default()));
+    }
+
+    #[test]
+    fn set_block_attrs_posmap_is_no_op() {
+        use crate::document::BlockAttrs;
+
+        let mut doc = Document::from_blocks(vec![Block::list_item("test", false)]);
+        let pm = EditOp::SetBlockAttrs {
+            block_index: 0,
+            old: BlockAttrs::default(),
+            new: BlockAttrs {
+                indent_level: 1,
+                ..Default::default()
+            },
+        }
+        .apply(&mut doc);
+
+        // SetBlockAttrs should not produce structural changes.
+        assert!(pm.structural.is_none());
+        assert!(pm.entries.is_empty());
     }
 }

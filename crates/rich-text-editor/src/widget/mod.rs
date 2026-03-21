@@ -73,8 +73,8 @@ struct WidgetState {
     cache: ParagraphCache<IcedParagraph>,
     /// Focus tracking for cursor blink.
     focus: Option<FocusState>,
-    /// Last mouse click for double/triple click detection (future use).
-    _last_click: Option<Click>,
+    /// Last mouse click for double/triple click detection.
+    last_click: Option<Click>,
     /// Whether a drag is active.
     dragging: bool,
     /// Vertical scroll offset in pixels. 0.0 means the top of the document
@@ -418,11 +418,32 @@ impl<Message> RichTextEditor<'_, Message> {
                         &self.state.document,
                     );
 
+                    // Detect double/triple click using iced's Click type.
+                    let click = Click::new(position, mouse::Button::Left, widget_state.last_click.take());
+                    let click_kind = click.kind();
+                    widget_state.last_click = Some(click);
+
                     widget_state.focus = Some(FocusState::now());
-                    widget_state.dragging = true;
 
                     shell.publish(on_action(Action::Focus));
-                    shell.publish(on_action(Action::Click(doc_pos)));
+
+                    match click_kind {
+                        mouse::click::Kind::Triple => {
+                            // Triple click: select entire block.
+                            widget_state.dragging = false;
+                            shell.publish(on_action(Action::TripleClick(doc_pos)));
+                        }
+                        mouse::click::Kind::Double => {
+                            // Double click: select word.
+                            widget_state.dragging = false;
+                            shell.publish(on_action(Action::DoubleClick(doc_pos)));
+                        }
+                        mouse::click::Kind::Single => {
+                            widget_state.dragging = true;
+                            shell.publish(on_action(Action::Click(doc_pos)));
+                        }
+                    }
+
                     shell.capture_event();
                 } else if widget_state.focus.is_some() {
                     // Click outside the editor: blur.
@@ -815,7 +836,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
         widget::tree::State::new(WidgetState {
             cache: ParagraphCache::new(),
             focus: None,
-            _last_click: None,
+            last_click: None,
             dragging: false,
             scroll_offset: 0.0,
         })
