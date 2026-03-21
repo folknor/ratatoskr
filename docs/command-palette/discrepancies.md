@@ -99,7 +99,7 @@ Code reviewed: `crates/command-palette/src/` (all 9 files), `crates/app/src/comm
 
 ### b. Component trait
 
-**Status: Not used for palette.** The `Component` trait exists in `crates/app/src/component.rs` with the spec's `(Task<Self::Message>, Option<Self::Event>)` return signature. The palette does not implement it -- all logic is inline in `App::handle_palette()`. No `PaletteEvent` type exists. Other components in the app (sidebar, thread list, reading pane, settings) appear to use direct message passing rather than the Component trait as well, so this may reflect a broader architectural decision rather than a palette-specific omission.
+**Status: RESOLVED.** `Palette` now implements `Component` in `crates/app/src/ui/palette.rs` (line 307). `PaletteEvent` enum defined with `ExecuteCommand`, `ExecuteParameterized`, `Dismissed`, `Error` variants. `PaletteMessage` handles internal state transitions. Events emitted to parent `App` via the standard Component pattern.
 
 ### c. Token-to-Catalog theming
 

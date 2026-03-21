@@ -101,7 +101,7 @@ Audit date: 2026-03-21 (updated). Covers `problem-statement.md`, `import-spec.md
 
 ### Contact import
 
-12. **Entire import feature missing**: The spec defines a `crates/contact-import/` crate for CSV/XLSX/vCard import with encoding detection, column mapping, preview, and an import wizard UI. No such crate exists. No import UI in settings.
+12. **RESOLVED — Contact import implemented**: `crates/contact-import/` crate exists with CSV parsing (`csv_parser.rs`), vCard parsing (`vcard_parser.rs`), encoding detection (`detect.rs`), column mapping (`mapping.rs`), and types (`types.rs`). Import wizard UI present in settings (`ImportWizardState` in `settings/types.rs`, handler logic in `settings/update.rs`). Remaining: XLSX support (only CSV and vCard).
 
 ### GAL caching
 

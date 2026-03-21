@@ -103,11 +103,11 @@ The problem statement describes a mini calendar + today's agenda + pinned/starre
 
 ## What's Missing (from Specs)
 
-### M1: Phase 3 — Interaction Flow (Partially Implemented)
-The iced-impl spec explicitly deferred Phase 3. Status of individual items:
+### M1: SUBSTANTIALLY RESOLVED — Phase 3 Interaction Flow
+~~The iced-impl spec explicitly deferred Phase 3.~~ Most items now implemented:
 - **Keyboard shortcuts** — j/k navigation, Enter, Escape wired via command palette bindings. Email action shortcuts (e for archive, # for trash, s for star) available through existing command palette infrastructure.
-- **Auto-advance** after archive/trash/move — not implemented. No `get_adjacent_thread()` call or advance logic.
-- **Multi-select** in thread list (Shift+click range, Ctrl+click toggle) — not implemented. Single selection only.
+- **Auto-advance** — Done. `AutoAdvanceDirection` enum (`Next`/`Previous`) with `auto_advance()` method on `ThreadListState`. Navigates to next/previous thread after destructive actions.
+- **Multi-select** — Done. `selected_threads: HashSet<usize>` on `ThreadListState`. `ToggleSelectThread` (Ctrl+click), `RangeSelectThread` (Shift+click range select), `SelectAll`. Selection count tracked. `ModifiersChanged` message tracks modifier key state in `App`.
 - **Inline reply composer** — not implemented. No composer embedded in the reading pane.
 - **Context-dependent shortcut dispatch** — `FocusedRegion` exists on `CommandContext` and on `App`, but the spec's table of region-specific key behaviors is not fully implemented.
 

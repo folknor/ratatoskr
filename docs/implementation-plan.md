@@ -75,8 +75,8 @@ Prioritized implementation plan for Ratatoskr features.
 
 | Task | Spec | Status |
 |------|------|--------|
-| Contacts management + import | Not yet written | Not started |
-| Emoji picker | Not yet written | Base widget done (2026-03-21). 8-category searchable grid in `crates/app/src/ui/emoji_picker.rs`. Missing: skin tones, flags category, recent emoji persistence. |
+| Contacts management + import | Not yet written | Substantially complete (2026-03-21). Full contacts crate: CardDAV/Google/Graph sync, dedup, unified search, CRUD. `crates/contact-import/` crate with CSV/vCard import, encoding detection, column mapping. Import wizard UI in settings. Missing: LDAP, provider write-back on edit, XLSX import. |
+| Emoji picker | Not yet written | Done ✅ (2026-03-21). 9-category searchable grid (Smileys, People, Nature, Food, Activities, Travel, Objects, Symbols, Flags) with skin tone selector (6 variants), recent emoji persistence, 340+ emoji. |
 | Read receipts (outgoing) | No spec needed | Not started |
 
 ### Tier 5 — Calendar
@@ -110,17 +110,17 @@ Prioritized implementation plan for Ratatoskr features.
 
 | Spec | Doc | Audit Status |
 |------|-----|-------------|
-| Command palette app integration | `docs/command-palette/app-integration-spec.md` | Core infra solid (Slices 1-4). `NavigateToLabel` wired end-to-end. `provider_kind`/`current_view` fixed. Chord indicator added. Snooze presets implemented. Recency sort wired. Palette not componentized. 4 commands return None (`NavMsgNext/Prev`, `EmailSelectAll/FromHere`). |
-| Sidebar | `docs/sidebar/implementation-spec.md` | Phases 1A-1E + Phase 2 complete. Best cross-cutting compliance. Spam/All Mail wired. O(n^2) fixed. Dead code cleaned. Relative dates. Chevron styling. Minor: `CycleAccount` parent arm dead, `NavigationTarget` still deferred. |
+| Command palette app integration | `docs/command-palette/app-integration-spec.md` | Core infra solid (Slices 1-4). `NavigateToLabel` wired end-to-end. `provider_kind`/`current_view` fixed. Chord indicator added. Snooze presets implemented. Recency sort wired. Palette componentized (Component trait + PaletteEvent enum). 4 commands return None (`NavMsgNext/Prev`, `EmailSelectAll/FromHere`). |
+| Sidebar | `docs/sidebar/implementation-spec.md` | Phases 1A-1E + Phase 2 complete. Best cross-cutting compliance. Spam/All Mail wired. O(n^2) fixed. Dead code cleaned. Relative dates. Chevron styling. `CycleAccount` recursive pattern fixed. Magic number `28` replaced with `PINNED_SEARCH_QUERY_MAX_CHARS`. Minor: `CycleAccount` parent arm dead, `NavigationTarget` still deferred. Mixed drafts unified (local+server). |
 | Accounts | `docs/accounts/implementation-spec.md` | Wizard substantially complete. Real discovery wired, OAuth flow, protocol selection, credential validation, core CRUD for creation, account editor in settings, `AccountHealth` enum, account deletion, duplicate detection, drag-to-reorder (custom DragState). Missing: re-auth flow, sidebar Phase 6 (color dots). |
 | Status bar | `docs/status-bar/implementation-spec.md` | Scaffold + pipelines wired. `IcedProgressReporter` + `SyncEvent` types implemented. Idle fixed height. Settings toggle wired. Generational tracking. Not in pop-outs. Remaining: connect sync orchestrator, wire confirmations to email actions. |
-| Contacts autocomplete | `docs/contacts/autocomplete-implementation-spec.md` | Token input + autocomplete dropdown + compose wiring complete. Paste parser, arrow keys, right-click menu, group/GAL search, recency ranking, N+1 fix, account selector, delete confirmation. App-level CRUD bypasses core. Import crate missing. |
+| Contacts autocomplete | `docs/contacts/autocomplete-implementation-spec.md` | Token input + autocomplete dropdown + compose wiring complete. Paste parser, arrow keys, right-click menu, group/GAL search, recency ranking, N+1 fix, account selector, delete confirmation. Contact CRUD delegates to core. `crates/contact-import/` crate with CSV/vCard import and import wizard UI. |
 | Search app integration | `docs/search/app-integration-spec.md` | Backend + app integration (Slices 1-5) complete. Unified pipeline wired. Smart folder token migration done. Missing: typeahead (Phase 3), "Search here" (Phase 4), smart folder graduation. |
 | Editor | `docs/editor/architecture.md` | Very faithful. Doc stale claims fixed. Double/triple click implemented. `SetBlockAttrs` added. Minor: `prepare_move_up/down` still unwired infrastructure. |
 | Signatures | `docs/signatures/implementation-spec.md` | Phases 1-3, 5 substantially complete. DbSignature extended (7 cols), html_to_plain_text, transactional defaults (raw SQL, not core CRUD), async loading, delete confirmation, active_signature_id, finalize_compose. Missing: rich text editor, Phase 4 account switching. |
 | Pinned searches | `docs/search/pinned-searches-implementation-spec.md` | Substantially complete. `delete_all_pinned_searches` added. Relative dates. Auto-expiry. Missing: staleness label, graduation to smart folder. |
 | Pop-out message view | `docs/pop-out-windows/message-view-implementation-spec.md` | Phases 1-6 substantially complete. RenderingMode toggle, overflow menu, session restore, Save As, cc_addresses, error banner, per-window generation. Missing: file picker, HTML rendering, Archive/Delete wiring. Compose enhanced (discard confirm, attribution line). |
-| Main layout | `docs/main-layout/iced-implementation-spec.md` | Core structure matches. Core's `get_thread_detail()` wired (body store, ownership, label colors, attachment persistence). HTML rendering pipeline (DOM-to-widget). Thread list keyboard nav. Search scope indicator. Per-message Reply/ReplyAll/Forward. Phase 3: keyboard nav done; multi-select NOT done (`EmailSelectAll` stubbed, no Ctrl/Shift+click); auto-advance NOT done. |
+| Main layout | `docs/main-layout/iced-implementation-spec.md` | Core structure matches. Core's `get_thread_detail()` wired (body store, ownership, label colors, attachment persistence). HTML rendering pipeline (DOM-to-widget). Thread list keyboard nav. Search scope indicator. Per-message Reply/ReplyAll/Forward. Phase 3 substantially done: keyboard nav, multi-select (Ctrl+click toggle, Shift+click range, SelectAll, `selected_threads: HashSet`), auto-advance (`AutoAdvanceDirection` enum), `ModifiersChanged`. Remaining: inline reply composer, `FocusedRegion` dispatch. `PreSearchView` pattern done (`was_in_folder_view` replaces `pre_search_threads` clone). |
 
 ## Dependency Graph
 
@@ -159,8 +159,8 @@ Tier 3 — SUBSTANTIALLY COMPLETE (2026-03-21):
     Pop-out message view: file picker for Save As, HTML rendering
 
 Tier 4:
-  Contacts Management + Import (depends on: Contacts Autocomplete ✅)
-  Emoji Picker ✅ (base widget done 2026-03-21: 8 categories, search. Missing: skin tones, flags, recents)
+  Contacts Management + Import ✅ (substantially complete: CardDAV/Google/Graph sync, dedup, contact-import crate, import wizard)
+  Emoji Picker ✅ (complete: 9 categories incl. Flags, skin tones, recent persistence, 340+ emoji)
 
 Tier 5 — COMPLETE (2026-03-21):
   Calendar Layers 1-5 ✅ (depends on: Tier 1 shell being solid ✅)
@@ -175,18 +175,19 @@ Main Layout (cross-cutting, 2026-03-21):
   Thread list keyboard nav ✅
   Search scope indicator ✅
   Per-message Reply/ReplyAll/Forward ✅
-  Multi-select — NOT done (EmailSelectAll stubbed, no Ctrl/Shift+click, no auto-advance)
+  Multi-select + auto-advance ✅ (Ctrl+click, Shift+click range, SelectAll, AutoAdvanceDirection, ModifiersChanged)
+  PreSearchView pattern ✅ (was_in_folder_view replaces pre_search_threads clone)
 ```
 
 ## Cross-Cutting Concerns
 
 *(Verified by full 10-feature audit 2026-03-21. Detailed reports in `docs/<feature>/discrepancies.md`.)*
 
-- **Core CRUD bypass (partially resolved):** Accounts now use `create_account_sync()` from core for creation. Signatures extracted to `handlers/signatures.rs` with transactional default-clearing semantics — but still raw SQL, not core CRUD function calls. Thread detail now wired through core's `get_thread_detail()`. Calendar events now have core CRUD via `crates/core/src/db/queries_extra/calendars.rs` (upsert with etag/ical_data/uid). Calendar sync uses core's `DbState`. Contacts, pinned searches, and message body loading for pop-outs still bypass core. Sidebar remains at zero core bypass.
+- **Core CRUD bypass (substantially resolved):** Accounts now use `create_account_sync()` from core for creation. Signatures extracted to `handlers/signatures.rs` with transactional default-clearing semantics — but still raw SQL, not core CRUD function calls. Thread detail now wired through core's `get_thread_detail()`. Calendar events now have core CRUD via `crates/core/src/db/queries_extra/calendars.rs` (upsert with etag/ical_data/uid). Calendar sync uses core's `DbState`. Contacts CRUD delegates to core (`save_contact_sync`, `delete_contact_sync`, `load_contacts_for_settings_sync`). Pinned searches and message body loading for pop-outs still bypass core. Sidebar remains at zero core bypass.
 - **Writable DB connection:** Multiple features need local-state writes (pinned searches, attachment collapse, session restore, keybinding overrides, account metadata). The first feature to land should establish the `local_conn` pattern. This is a cross-cutting architecture decision, not owned by any single spec.
 - **NavigationTarget enum:** Still deferred. `selected_label: Option<String>` remains the flat marker for universal folders, smart folders, and account labels. The command palette spec introduced this but it was never implemented.
 - **Generational load tracking:** Well-implemented throughout — three counters in App (`nav_generation`, `thread_generation`, `search_generation`) plus `option_load_generation` on `PaletteState`, `pop_out_generation` for pop-out windows, `sync_generations` map on status bar, `search_generation` on `AutocompleteState` for contacts. Previous gaps resolved: status bar has per-account generational tracking, signatures load async, pop-out windows use per-window generation. Remaining: calendar event loading.
-- **Component trait:** Six components extracted (Sidebar, ThreadList, ReadingPane, Settings, StatusBar, AddAccountWizard). Palette, compose, calendar, and pop-out windows are not componentized.
+- **Component trait:** Seven components extracted (Sidebar, ThreadList, ReadingPane, Settings, StatusBar, AddAccountWizard, Palette). Compose, calendar, and pop-out windows are not componentized.
 - **Token-to-Catalog theming:** Very clean — zero inline style closures across all UI files. Previous palette exceptions resolved (now uses `TextClass` variants).
 - **Subscription orchestration:** Infrastructure solid. Active subscriptions: keyboard listener, chord timeout, search debounce, status bar cycling, settings animation. `IcedProgressReporter` + `SyncEvent` + `create_sync_progress_channel()` implemented — sync orchestrator connection remaining. Compose auto-save timer still missing.
 - **Dead code accumulation:** Substantially reduced (2026-03-21). ~20 of the original 20+ items resolved. Remaining: core signature CRUD functions, `CycleAccount` parent handler, `PendingChord.started`, `prepare_move_up/down`, obsolete `Db::get_thread_messages/attachments`. See TODO.md for full inventory.

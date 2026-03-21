@@ -47,7 +47,7 @@ These patterns appeared across 6-8+ specs and should be adopted as foundational 
   **Remaining panels to componentize** (as these features are built):
   - **Compose** — currently uses free functions (`update_compose`), not `Component` trait
   - **Calendar** — state lives on `App` directly, rendered via free functions
-  - **Command palette** — `PaletteState` managed directly by App, no `PaletteEvent` type. May be intentional (tight coupling to registry/resolver)
+  - ~~**Command palette**~~ — Done. `Palette` now implements `Component` with `PaletteEvent` enum.
   - **Pop-out windows** — use free functions (`view_message_window`, `view_compose_window`), inconsistent with main window components
   - **Right sidebar** — stateless view function (appropriate given no interaction)
 
@@ -221,7 +221,7 @@ Deferred items from code review. Grouped by feature area.
 
 ### Pinned Searches (1ba6249)
 
-- [ ] **Replace `pre_search_threads` with `PreSearchView`** — The spec recommends against the `pre_search_threads` clone approach (calling it a "V1 shortcut") and proposes `PreSearchView` for navigation-target-based restoration. The implementation uses `pre_search_threads` for save and `restore_folder_view()` for dismiss. Both search and pinned searches should converge on `PreSearchView`.
+- [x] **Replace `pre_search_threads` with `PreSearchView`** — Done. `pre_search_threads` clone removed entirely. Replaced with `was_in_folder_view: bool` flag on `App`. Search dismissal uses `restore_folder_view()` for navigation-target-based restoration.
 
 - [ ] **Cache `thread_ids` on `PinnedSearch` struct** — The spec defines `thread_ids: Vec<(String, String)>` on the struct (loaded lazily) so re-clicking the same pinned search doesn't re-query the DB. The implementation always re-queries. Minor — the DB query is fast.
 
@@ -247,13 +247,13 @@ Deferred items from code review. Grouped by feature area.
 
 ### Emoji Picker (b15cd89)
 
-- [x] **Emoji picker widget implemented** — Done (2026-03-21 round 5). `crates/app/src/ui/emoji_picker.rs` provides a searchable, categorized emoji grid with 8 categories (Smileys, People, Nature, Food, Activities, Travel, Objects, Symbols). Reusable view function.
+- [x] **Emoji picker widget implemented** — Done (2026-03-21 round 5). `crates/app/src/ui/emoji_picker.rs` provides a searchable, categorized emoji grid with 9 categories (Smileys, People, Nature, Food, Activities, Travel, Objects, Symbols, Flags). Reusable view function.
 
-- [ ] **Recent/frequent emoji section** — Picker has no persistence for recently used emoji. No JSON file for recency tracking.
+- [x] **Recent/frequent emoji section** — Done. `record_recent()` persists recently used emoji (VecDeque, max capacity). Recent section shown above category grid.
 
-- [ ] **Skin tone selection** — No skin tone support. All emoji render with default yellow tone.
+- [x] **Skin tone selection** — Done. `SkinTone` enum with 6 variants (Default + 5 modifiers). Skin tone selector row in picker UI. `apply_skin_tone()` applies Unicode modifier to compatible emoji. `skin_tone_support` field on `EmojiEntry`.
 
-- [ ] **Flags emoji category** — Most emoji pickers include country/flag emoji. Not included in the static table (8 categories, not 10).
+- [x] **Flags emoji category** — Done. `EmojiCategory::Flags` added as 9th category with 40+ country flag emoji (regional indicator pairs) plus pride/special flags.
 
 ## Spec-vs-Code Audit (2026-03-20, updated 2026-03-21)
 
@@ -277,7 +277,7 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 
 - [ ] **No scroll-to-selected in palette results** — Arrow keys update `selected_index` but no `scrollable::scroll_to` task is returned. Selected item can scroll off-screen.
 
-- [ ] **Palette not componentized** — Spec defines `PaletteEvent` enum following the Component trait pattern. Implementation puts palette logic directly in `App::handle_palette()`.
+- [x] **Palette not componentized** — Done. `Palette` now implements `Component` trait in `palette.rs` with `PaletteEvent` enum (`ExecuteCommand`, `ExecuteParameterized`, `Dismissed`, `Error`). `PaletteMessage` for internal state, events emitted to parent `App`.
 
 - [x] **Inline text style closure in `palette_result_row`** — Done (2026-03-21 multi-agent session). Palette now uses `TextClass` variants throughout.
 
@@ -287,9 +287,9 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 
 - [x] **Spam/All Mail folders never appear** — Done (2026-03-21 multi-agent session). Added to `SIDEBAR_UNIVERSAL_FOLDERS` in backend. Sidebar filters them out in "All Accounts" mode, shows when scoped to single account.
 
-- [ ] **Magic number `28` in `truncate_query`** — `truncate_query(&ps.query, 28)` uses a raw number not from layout constants.
+- [x] **Magic number `28` in `truncate_query`** — Done. Now uses `PINNED_SEARCH_QUERY_MAX_CHARS` constant (value 28) defined at module level in `sidebar.rs`.
 
-- [ ] **`SidebarEvent::CycleAccount` is dead code** — Sidebar internally converts `CycleAccount` to `AccountSelected` in `update()`, so `CycleAccount` is never emitted as a `SidebarEvent`. The handler arm in `handle_sidebar_event` is unreachable.
+- [x] **`SidebarEvent::CycleAccount` dead code reduced** — Done. Recursive `self.update()` pattern fixed. Handler now directly updates state and emits `AccountSelected`. Variant retained for API compat but parent handler arm is dead code (maps to `Task::none()`).
 
 - [x] **O(n²) HashMap rebuild in `is_hidden_by_collapsed_ancestor`** — Done (2026-03-21 multi-agent session). HashMap now built once in `render_label_tree` and passed in as `id_to_folder` parameter.
 
@@ -313,9 +313,9 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 
 - [x] **Protocol selection is a stub** — Done (2026-03-21 multi-agent session). Shows discovered protocol options as selectable cards with provider name, detail, source label. Pre-selects top option.
 
-- [ ] **`color_palette_grid` not reusable** — Hardcoded to `AddAccountMessage::SelectColor(i)`. Spec says generic widget in `widgets.rs` with `on_select` callback.
+- [x] **`color_palette_grid` not reusable** — Done. Moved to `widgets.rs` as `pub fn color_palette_grid<'a, M: Clone + 'a>(selected, used_colors, on_select)` with generic `on_select` callback. `add_account.rs` calls it via `widgets::color_palette_grid()`.
 
-- [ ] **Magic numbers in add_account.rs** — `icon::mail().size(48.0)`, `.padding(2)`, stroke width `2.0`, alpha `0.35`.
+- [x] **Magic numbers in add_account.rs** — Done. `WELCOME_ICON_SIZE` constant in `layout.rs` replaces `48.0`. Layout constants used throughout.
 
 - [ ] **No re-authentication flow (Phase 7)** — No `ReauthWizard`, no health indicators, no error recovery.
 
@@ -394,7 +394,7 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 
 - [x] **App-local DB shim used instead of core's `get_thread_detail()`** — Done (2026-03-21 multi-agent session). App now uses `db::threads::load_thread_detail()` which calls core's `get_thread_detail()`. Provides body text from BodyStore, ownership detection, collapsed summaries, resolved label colors, persisted attachment collapse state.
 - [ ] **Calendar and pinned search CRUD bypass core** — Raw SQL in `connection.rs` for `create/update/delete_calendar_event`, pinned search table creation, contact table alterations. App-level schema management.
-- [ ] **Phase 3 interaction flow partially done** — Keyboard shortcuts (j/k, Enter, Escape) implemented via command palette dispatch. Multi-select (Shift/Ctrl+click) NOT implemented — `EmailSelectAll` command returns `None` (stubbed). Auto-advance after archive/trash NOT implemented. Inline reply composer NOT started. Context-dependent shortcut dispatch via `FocusedRegion` partially wired.
+- [x] **Phase 3 interaction flow substantially done** — Keyboard shortcuts (j/k, Enter, Escape) implemented via command palette dispatch. Multi-select done: `ToggleSelectThread` (Ctrl+click), `RangeSelectThread` (Shift+click), `SelectAll`, `selected_threads: HashSet<usize>`. Auto-advance done: `AutoAdvanceDirection` enum, `auto_advance()` method. `ModifiersChanged` tracks modifier key state. Remaining: inline reply composer, context-dependent shortcut dispatch via `FocusedRegion`.
 - [x] **No real message body rendering** — Done (2026-03-21 multi-agent session). HTML rendering via DOM-to-widget pipeline in `html_render.rs`. Complexity heuristic for fallback to plain text. CID images, link clicks, table rendering still pending.
 - [ ] **No scroll virtualization** — Thread list renders all cards in `column![]` inside `scrollable`. Fixed `THREAD_CARD_HEIGHT` exists for future virtualization.
 - [ ] **Right sidebar still placeholder** — Shows static "Calendar placeholder", "No pinned items" text. Calendar built as separate full-page mode instead.
@@ -427,11 +427,11 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 - [x] **Pinned search date format diverges** — Done (2026-03-21 multi-agent session). Now uses relative time format via `format_relative_time()`.
 - [x] **`SidebarEvent::CycleAccount` unreachable** — Partially done (2026-03-21 multi-agent session). Recursive `self.update()` fixed — handler now directly updates state and emits `AccountSelected`. `CycleAccount` variant retained for API compat but parent arm is dead code (maps to `Task::none()`).
 - [ ] **`NavigationTarget` enum still deferred** — `selected_label: Option<String>` remains the flat marker for universal folders, smart folders, and account labels.
-- [ ] **Mixed drafts list view** — Count path handles local+server drafts, but list path only returns server-synced drafts.
+- [x] **Mixed drafts list view** — Done. `local_draft_to_app_thread()` converts local drafts from `local_drafts` table to `AppThread` with `is_local_draft: true`. Drafts folder view now merges local + server drafts. UI distinguishes via `is_local_draft` flag on thread cards.
 
 ### Cross-Cutting
 
-- [ ] **Core CRUD bypassed in multiple places** — Partially improved (2026-03-21 multi-agent session). Accounts now use `create_account_sync()` from core. Signatures extracted to `handlers/signatures.rs` with transactional semantics but still raw SQL (not core CRUD functions). Contacts still bypass core. Calendar still bypasses core.
+- [ ] **Core CRUD bypassed in some places** — Substantially improved (2026-03-21). Accounts use `create_account_sync()` from core. Contacts CRUD delegates to core (`save_contact_sync`, `delete_contact_sync`). Calendar CRUD delegates to core (`create/update/delete_calendar_event_sync`). Signatures extracted to `handlers/signatures.rs` with transactional semantics but still raw SQL (not core CRUD functions). Pinned searches and message body loading for pop-outs still bypass core.
 
 - [ ] **Dead code accumulation** *(verified 2026-03-21, updated 2026-03-21 post-multi-agent session)*:
 
@@ -474,9 +474,9 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 
 - [x] **Account card drag-to-reorder** — Custom `DragState` in settings (grip handle, Y-axis threshold, index swap). Does NOT use iced_drop. Works for single-list reorder only.
 
-- [ ] **Multi-select + auto-advance** — NOT implemented despite being claimed. `EmailSelectAll` command returns `None` (stubbed at line 394 of `command_dispatch.rs`). No Ctrl+click toggle, no Shift+click range, no selection count in header, no auto-advance after destructive actions.
+- [x] **Multi-select + auto-advance** — Done. `ThreadList` has `selected_threads: HashSet<usize>`, `ToggleSelectThread` (Ctrl+click), `RangeSelectThread` (Shift+click range), `SelectAll`. Selection count tracked. `AutoAdvanceDirection` enum with `auto_advance()` method navigates to next/previous thread after destructive actions. `ModifiersChanged` message tracks modifier key state.
 
-- [ ] **Compose UI gaps** — rfd file picker NOT added (comment in `handlers/pop_out.rs` says "rfd is not yet a dependency"). No link insertion dialog. No `draft_dirty` tracking. No `save_compose_draft` auto-save.
+- [x] **Compose UI gaps (partially resolved)** — rfd IS a dependency (`rfd = "0.15"` in app Cargo.toml). Link insertion dialog implemented (`ToggleLinkDialog`, `link_dialog()` view function, `InsertLink` message). Remaining: `draft_dirty` tracking, `save_compose_draft` auto-save, block-type toggles.
 
 - [ ] **Compose token field DnD** — NOT implemented. Drag-and-drop between To/Cc/Bcc fields not wired.
 
@@ -488,7 +488,7 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 
 ## Contacts Surface
 
-- [ ] **Implement full contacts crate** — The current `seen-addresses` crate (643 lines, `crates/seen-addresses/`) only tracks sender addresses seen during sync. A proper contacts implementation needs: CardDAV sync (partially started in `core/src/carddav.rs`), contact search/autocomplete, contact detail views, contact groups/labels, merge/dedup, per-provider contact sync (Google People API, Microsoft Graph contacts, LDAP). When this lands, fold `seen-addresses` into the new contacts crate — it's the same domain and shares the same DB tables.
+- [x] **Implement full contacts crate** — Substantially done. `crates/core/src/contacts/` provides: CardDAV sync (`sync_carddav.rs`), Google People API sync (`sync_google.rs`), Microsoft Graph contacts sync (`sync_graph.rs`), deduplication (`dedup.rs`), unified search (`search.rs`), contact save/delete (`save.rs`), seen address integration (`seen_addresses.rs`). `crates/core/src/carddav/` provides CardDAV client (`client.rs`), vCard parsing (`parse.rs`), sync engine (`sync.rs`). `crates/core/src/db/queries_extra/contacts.rs` has full CRUD. `crates/contact-import/` provides CSV/vCard import with encoding detection and column mapping. Import wizard UI in settings. Remaining: LDAP, provider write-back on edit, fold `seen-addresses` crate into contacts.
 
 ## Code Quality
 
