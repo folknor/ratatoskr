@@ -870,7 +870,11 @@ impl App {
                 .width(Length::Fill)
                 .height(Length::Fill);
 
-                let right_sidebar = ui::right_sidebar::view::<Message>(self.right_sidebar_open);
+                let rs_data = ui::right_sidebar::RightSidebarData {
+                    calendar: &self.calendar,
+                    threads: &self.thread_list.threads,
+                };
+                let right_sidebar = ui::right_sidebar::view(self.right_sidebar_open, &rs_data);
 
                 row![sidebar, divider_sidebar, thread_list, divider_thread, reading_pane, right_sidebar]
                     .height(Length::Fill)
@@ -1552,8 +1556,12 @@ impl App {
         )
         .width(Length::Fill)
         .height(Length::Fill);
+        let rs_data = ui::right_sidebar::RightSidebarData {
+            calendar: &self.calendar,
+            threads: &self.thread_list.threads,
+        };
         let right_sidebar =
-            ui::right_sidebar::view::<Message>(self.right_sidebar_open);
+            ui::right_sidebar::view(self.right_sidebar_open, &rs_data);
         let layout = row![
             sidebar,
             divider_sidebar,
