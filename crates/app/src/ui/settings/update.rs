@@ -817,6 +817,7 @@ impl Settings {
             account_id: editor.account_id.clone(),
             account_color: None,
             groups: Vec::new(),
+            source: Some("user".to_string()),
         };
         self.overlay = None;
         self.overlay_anim.go_mut(false, Instant::now());

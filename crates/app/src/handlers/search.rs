@@ -11,9 +11,9 @@ use crate::{App, Message};
 
 impl App {
     pub(crate) fn handle_search_query_changed(&mut self, query: String) -> Task<Message> {
-        self.search_query = query;
-        self.thread_list.search_query.clone_from(&self.search_query);
-        if self.search_query.trim().is_empty() {
+        self.search_query.set_text(query);
+        self.thread_list.search_query = self.search_query.text().to_string();
+        if self.search_query.text().trim().is_empty() {
             self.search_debounce_deadline = None;
             if self.thread_list.mode == ThreadListMode::Search {
                 self.clear_pinned_search_context();
@@ -32,7 +32,7 @@ impl App {
 
     pub(crate) fn handle_search_execute(&mut self) -> Task<Message> {
         self.search_debounce_deadline = None;
-        let query = self.search_query.trim().to_string();
+        let query = self.search_query.text().trim().to_string();
         if query.is_empty() {
             return self.restore_folder_view();
         }
@@ -68,7 +68,7 @@ impl App {
                     .iter()
                     .map(|t| (t.id.clone(), t.account_id.clone()))
                     .collect();
-                let query = self.search_query.clone();
+                let query = self.search_query.text().to_string();
 
                 self.thread_list.set_threads(threads);
                 self.thread_list.selected_thread = None;
@@ -103,7 +103,7 @@ impl App {
     }
 
     pub(crate) fn handle_search_clear(&mut self) -> Task<Message> {
-        self.search_query.clear();
+        self.search_query.reset(String::new());
         self.thread_list.search_query.clear();
         self.search_debounce_deadline = None;
         self.search_generation += 1;
@@ -187,7 +187,7 @@ impl App {
         match ids {
             Ok(ids) => {
                 if let Some(ps) = self.pinned_searches.iter().find(|p| p.id == ps_id) {
-                    self.search_query.clone_from(&ps.query);
+                    self.search_query.reset(ps.query.clone());
                     self.thread_list.search_query.clone_from(&ps.query);
                 }
 
@@ -317,7 +317,7 @@ impl App {
 
     /// Clear all search-related state without restoring pre-search threads.
     pub(crate) fn clear_search_state(&mut self) {
-        self.search_query.clear();
+        self.search_query.reset(String::new());
         self.thread_list.search_query.clear();
         self.search_debounce_deadline = None;
         self.search_generation += 1;
@@ -333,7 +333,7 @@ impl App {
     /// thread list reflects any changes that happened during the search.
     pub(crate) fn restore_folder_view(&mut self) -> Task<Message> {
         self.thread_list.mode = ThreadListMode::Folder;
-        self.search_query.clear();
+        self.search_query.reset(String::new());
         self.thread_list.search_query.clear();
         self.thread_list.selected_thread = None;
         self.reading_pane.thread_messages.clear();
@@ -414,9 +414,12 @@ fn execute_search_sql_fallback(
                     message_count: row.get(5)?,
                     is_read: row.get(6)?,
                     is_starred: row.get(7)?,
+                    is_pinned: false,
+                    is_muted: false,
                     has_attachments: row.get(8)?,
                     from_name: row.get(9)?,
                     from_address: row.get(10)?,
+                    is_local_draft: false,
                 })
             })
             .map_err(|e| format!("search query: {e}"))?;
@@ -441,8 +444,11 @@ fn unified_result_to_thread(
         message_count: r.message_count.unwrap_or(1),
         is_read: r.is_read,
         is_starred: r.is_starred,
+        is_pinned: false,
+        is_muted: false,
         has_attachments: false,
         from_name: r.from_name,
         from_address: r.from_address,
+        is_local_draft: false,
     }
 }

@@ -36,7 +36,7 @@ pub async fn sync_carddav_contacts_full(
     let remote_ctag = client.get_ctag().await?;
     let stored_ctag = load_ctag(db, account_id).await?;
 
-    if let (Some(ref remote), Some(ref stored)) = (&remote_ctag, &stored_ctag)
+    if let (Some(remote), Some(stored)) = (&remote_ctag, &stored_ctag)
         && remote == stored
     {
         log::info!("CardDAV ctag unchanged for {account_id}, skipping sync");

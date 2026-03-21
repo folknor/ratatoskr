@@ -213,6 +213,7 @@ fn build_contact_entry(
         account_id: account_id.clone(),
         account_color: None,
         groups: contact.groups.clone(),
+        source: None,
     }
 }
 

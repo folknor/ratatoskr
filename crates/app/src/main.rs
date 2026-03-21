@@ -1801,6 +1801,8 @@ fn local_draft_to_app_thread(
         message_count: 1,
         is_read: true,
         is_starred: false,
+        is_pinned: false,
+        is_muted: false,
         has_attachments: false,
         from_name: None,
         from_address: d.from_email,
