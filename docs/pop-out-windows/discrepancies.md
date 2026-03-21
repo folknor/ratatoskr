@@ -62,19 +62,25 @@ Audit date: 2026-03-21 (updated). Compared `problem-statement.md` and `message-v
 - **`.txt` export**: Writes plain text body to downloads directory — matches spec (prototype level).
 - **No file picker**: Uses `dirs::download_dir()` fallback instead of `rfd` dialog — deviation (see below).
 
-### Compose Window (enhanced from V1)
-- **`ComposeState`** with recipients (token input), from account picker, subject, body (text editor), mode — matches spec.
-- **`ComposeMode` enum** with `New`, `Reply`, `ReplyAll`, `Forward` — matches spec.
-- **Cc/Bcc toggle buttons** that disappear after activation — matches problem statement.
-- **`open_compose_from_message_view()`**: Reply/ReplyAll/Forward from message view opens compose with `cc_addresses` — now implemented.
-- **Recipient token input**: Paste handling, backspace selection, tokenization — matches spec.
-- **Attribution line**: Quoted content now prefixed with "sender wrote:" — matches problem statement.
-- **Formatting toolbar**: B/I/U/List/Link buttons rendered (stubs for V1) — matches spec structure.
-- **Discard confirmation dialog**: Shows "Discard this draft?" with confirm/cancel when user content exists — matches problem statement.
+### Compose Window (complete compose workflow)
+- **Rich text editor**: `RichTextEditor` from `crates/rich-text-editor/` replaces `iced::widget::text_editor`. Uses `EditorState::new()` / `EditorState::from_document()`, wired through `EditorAction` / `perform()`.
+- **Formatting toolbar**: B/I/U buttons emit `Action::Edit(EditAction::ToggleInlineStyle(InlineStyle::BOLD))` etc. through `EditorState::perform()`. List/Link are stubs (block-type toggle not yet exposed via `EditAction`).
+- **Signature insertion**: `assemble_compose_document()` called via async `SignatureResolved` message at compose window creation. Resolves account-specific signature from DB using alias-level overrides, reply-default, and default signature resolution order.
+- **Draft auto-save**: `iced::time::every(30s)` subscription active when any compose window has `draft_dirty` set. Saves to `local_drafts` table via `Db::with_write_conn`. `Message::ComposeDraftTick` variant dispatches `auto_save_compose_drafts()`.
+- **Attachment handling**: Attach button in footer. Tracks `ComposeAttachment` list (name, path, size). Attachment section with file icon, name, size, remove button. File picker is stubbed (returns empty list) — `rfd` crate not yet a dependency.
+- **Send path**: Validates recipients, serializes editor to HTML via `EditorState::to_html()`, calls `finalize_compose_html()` from core to wrap signature in identifying div, saves finalized draft to `local_drafts` with `sync_status = 'finalized'`. Actual provider send is a separate concern.
+- **Discard confirmation**: Checks `has_user_content()` (scans blocks before signature separator, checks recipients/subject/attachments) before prompting.
+- **`ComposeState`** with recipients (token input), from account picker, subject, rich text editor, mode, signature tracking, attachments, draft persistence ID — complete.
+- **`ComposeMode` enum** with `New`, `Reply`, `ReplyAll`, `Forward` plus `is_reply()` helper.
+- **Cc/Bcc toggle buttons** that disappear after activation.
+- **`open_compose_from_message_view()`**: Reply/ReplyAll/Forward from message view opens compose with `cc_addresses`.
+- **Recipient token input**: Paste handling, backspace selection, tokenization.
+- **Attribution line**: Quoted content via `assemble_compose_document` with `QuotedContent` struct for rich-text blockquote.
 
 ### Handler Architecture
 - **`handlers/pop_out.rs`**: All pop-out window logic extracted from `main.rs`. `main.rs` is a thin dispatch layer with one-line match arms.
 - **`pop_out/session.rs`**: Session state persistence module (save/restore/migration).
+- **Compose-specific handlers**: `handle_compose_send()`, `handle_compose_attach_files()`, `save_compose_draft()`, `resolve_signature_for_compose()` in `handlers/pop_out.rs`.
 
 ---
 
@@ -83,23 +89,20 @@ Audit date: 2026-03-21 (updated). Compared `problem-statement.md` and `message-v
 ### Save As uses fallback directory, not file picker
 - Spec calls for `rfd` (Rust File Dialogs) crate. Implementation saves directly to `dirs::download_dir()` without user dialog. The `rfd` crate is not yet a dependency. When added, the `save_message_dialog()` function should switch to `rfd::AsyncFileDialog`.
 
-### Compose Send is a stub
-- `ComposeMessage::Send` validates recipients exist but shows "Send not yet wired" — no actual email sending or MIME assembly.
+### Compose Send saves draft, does not send via provider
+- `ComposeMessage::Send` validates recipients, finalizes HTML (wraps signature in identifying div), and saves to `local_drafts` with `sync_status = 'finalized'`. Actual email sending via provider ops is a separate concern not yet wired.
 
-### Compose auto-save not implemented
-- Problem statement requires auto-save every ~30 seconds. No `iced::time::every(30s)` subscription exists for compose windows.
+### Compose attachment file picker is a stub
+- The `handle_compose_attach_files()` method returns an empty file list. The `rfd` crate is not yet a dependency. When added, this will use `rfd::AsyncFileDialog`. Attachment tracking, display, and removal are fully implemented.
 
-### Compose uses `text_editor` not rich text
-- Spec describes a rich text WYSIWYG editor. Implementation uses `iced::widget::text_editor` (plain text). The formatting toolbar buttons are stubs. The `rich-text-editor` crate exists but is not yet wired.
+### Block-type format toggles are stubs
+- `FormatList` and `FormatBlockquote` toolbar buttons do not yet toggle block types. The editor supports `ListItem` and `BlockQuote` block types, but the `EditAction` enum does not expose a `SetBlockType` variant. When `EditAction::SetBlockType` is added to the editor crate, these buttons will wire through.
 
-### Compose attachment handling not implemented
-- No file picker integration, no drag-and-drop zones, no attachment compression via squeeze crate, no attachment size tracking.
+### Link insertion is a stub
+- `FormatLink` toolbar button is a no-op. Link insertion requires a URL input dialog which is not yet implemented.
 
-### Compose signature insertion not implemented
-- No `assemble_compose_document` call, no signature insertion on From account change.
-
-### `Db::load_message_body()` now uses body store
-- **Resolved.** `load_message_body()` now reads from `BodyStoreState` (zstd-compressed bodies in `bodies.db`) instead of querying the `messages` table directly.
+### `Db::load_message_body()` uses raw SQL, not body store
+- The implementation queries `messages.snippet` directly instead of the body store (`BodyStoreState` in `crates/stores/`). This is a known prototype simplification per the spec.
 
 ### `Db::load_raw_source()` synthesizes from fields, not raw message
 - The raw source is built from individual fields (From, To, Cc, Subject, Date, snippet) rather than fetching the actual RFC 5322 raw message. The full implementation should query the raw message if cached locally.
@@ -130,10 +133,10 @@ Audit date: 2026-03-21 (updated). Compared `problem-statement.md` and `message-v
 **Not implemented.** Attachment drag-and-drop is entirely unimplemented for compose windows.
 
 ### e. Subscription Orchestration
-**No pop-out-specific subscriptions exist.** Pop-out windows rely on global keyboard and window event subscriptions. The compose auto-save timer subscription (`iced::time::every(30s)`) is not implemented.
+**Compose auto-save subscription implemented.** `iced::time::every(30s)` subscription fires `Message::ComposeDraftTick` when any compose window has `draft_dirty` set. Other pop-out windows rely on global keyboard and window event subscriptions.
 
 ### f. Core CRUD Bypassed (Raw SQL)
-**Largely resolved.** `load_message_body()` now uses `BodyStoreState::get()` from the body store. `load_message_attachments()` now delegates to `ratatoskr_core::db::queries::get_attachments_for_message()`. Only `load_raw_source()` still uses raw SQL (reads from the `messages` table `raw_source` column, which is the correct location for raw RFC 5322 data).
+**Partially.** `load_message_body()`, `load_message_attachments()`, and `load_raw_source()` still use raw SQL in the app crate's `Db` module. Compose draft save uses raw SQL through `Db::with_write_conn` writing to the `local_drafts` table (same schema as `db_save_local_draft` in core). Signature resolution uses raw SQL matching core's `db_resolve_signature_for_compose` logic.
 
 ### g. Dead Code
 **Minimal.** The `body_html` field on `MessageViewState` is populated by `BodyLoaded` but only used as a fallback path (HTML rendering not yet implemented). The `scroll_offset` field is declared but not yet wired to the scrollable widget. These are forward-looking fields, not dead code.
@@ -150,5 +153,10 @@ Audit date: 2026-03-21 (updated). Compared `problem-statement.md` and `message-v
 | Phase 4: Action Buttons (overflow) | Complete (Archive/Delete/Print are stubs) |
 | Phase 5: Session Restore | Complete |
 | Phase 6: Save As | Partial (no file picker dialog — saves to downloads dir) |
-| Compose Window | Enhanced (formatting toolbar, discard confirm, attribution line; no rich text/send/drafts/attachments) |
+| Compose: Rich Text Editor | Complete (RichTextEditor wired, formatting toolbar, EditorState/Action/perform) |
+| Compose: Signature Insertion | Complete (assemble_compose_document, async DB resolution, alias overrides) |
+| Compose: Draft Auto-Save | Complete (30s subscription, local_drafts table, dirty tracking) |
+| Compose: Attachments | Partial (tracking/display/remove done, file picker stubbed — rfd not a dep) |
+| Compose: Send Path | Partial (finalize HTML + save draft; provider send not wired) |
+| Compose: Discard Confirmation | Complete (checks has_user_content before prompting) |
 | Handler Architecture | Complete (extracted to handlers/pop_out.rs) |
