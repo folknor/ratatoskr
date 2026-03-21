@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, pick_list, row, text, text_input, Space};
+use iced::widget::{button, column, container, pick_list, row, text, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::db::{self, ContactMatch};
@@ -7,6 +7,8 @@ use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::token_input::{self, TokenId, TokenInputMessage, TokenInputValue};
+use crate::ui::undoable::UndoableText;
+use crate::ui::undoable_text_input::undoable_text_input;
 use crate::ui::widgets;
 use crate::Message;
 
@@ -71,6 +73,8 @@ impl std::fmt::Display for AccountInfo {
 #[derive(Debug, Clone)]
 pub enum ComposeMessage {
     SubjectChanged(String),
+    SubjectUndo,
+    SubjectRedo,
     BodyChanged(iced::widget::text_editor::Action),
     FromAccountChanged(AccountInfo),
     ShowCc,
@@ -156,7 +160,7 @@ pub struct ComposeState {
     pub from_accounts: Vec<AccountInfo>,
 
     // Subject
-    pub subject: String,
+    pub subject: UndoableText,
 
     // Body (plain text for V1 — rich text editor in a future iteration)
     pub body: iced::widget::text_editor::Content,
@@ -205,7 +209,7 @@ impl ComposeState {
             selected_bcc_token: None,
             from_account,
             from_accounts,
-            subject: String::new(),
+            subject: UndoableText::new(),
             body: iced::widget::text_editor::Content::new(),
             mode: ComposeMode::New,
             reply_thread_id: None,
@@ -236,7 +240,7 @@ impl ComposeState {
         state.mode = mode.clone();
 
         // Set subject
-        state.subject = mode.prefixed_subject();
+        state.subject = UndoableText::with_initial(&mode.prefixed_subject());
 
         // Add To recipient (not for Forward — forward starts with empty To)
         if !matches!(state.mode, ComposeMode::Forward { .. }) {
@@ -320,9 +324,11 @@ impl ComposeState {
 pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
     match msg {
         ComposeMessage::SubjectChanged(s) => {
-            state.subject = s;
+            state.subject.set_text(s);
             state.draft_dirty = true;
         }
+        ComposeMessage::SubjectUndo => { state.subject.undo(); }
+        ComposeMessage::SubjectRedo => { state.subject.redo(); }
         ComposeMessage::BodyChanged(action) => {
             state.body.perform(action);
             state.draft_dirty = true;
@@ -586,13 +592,21 @@ fn compose_header<'a>(
     }
 
     // Subject
-    let subject_input = text_input("Subject", &state.subject)
+    let subject_input = undoable_text_input("Subject", state.subject.text())
         .on_input(move |s| {
             Message::PopOut(
                 window_id,
                 PopOutMessage::Compose(ComposeMessage::SubjectChanged(s)),
             )
         })
+        .on_undo(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::SubjectUndo),
+        ))
+        .on_redo(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::SubjectRedo),
+        ))
         .size(TEXT_LG)
         .padding(PAD_INPUT);
 

@@ -15,6 +15,8 @@ use super::calendar_month;
 use super::calendar_time_grid;
 use super::layout::*;
 use super::theme;
+use super::undoable::UndoableText;
+use super::undoable_text_input::undoable_text_input;
 
 // ── Calendar view enum ─────────────────────────────────
 
@@ -152,6 +154,10 @@ pub struct CalendarState {
     pub overlay: CalendarOverlay,
     /// Cached events from the DB. Reloaded after CRUD operations.
     pub events: Vec<calendar_time_grid::TimeGridEvent>,
+    /// Undo state for event editor text fields.
+    pub editor_undo_title: UndoableText,
+    pub editor_undo_location: UndoableText,
+    pub editor_undo_description: UndoableText,
 }
 
 impl CalendarState {
@@ -177,7 +183,17 @@ impl CalendarState {
             time_grid_config,
             overlay: CalendarOverlay::None,
             events: Vec::new(),
+            editor_undo_title: UndoableText::new(),
+            editor_undo_location: UndoableText::new(),
+            editor_undo_description: UndoableText::new(),
         }
+    }
+
+    /// Reset editor undo state when opening the editor overlay.
+    pub fn reset_editor_undo(&mut self, event: &CalendarEventData) {
+        self.editor_undo_title = UndoableText::with_initial(&event.title);
+        self.editor_undo_location = UndoableText::with_initial(&event.location);
+        self.editor_undo_description = UndoableText::with_initial(&event.description);
     }
 
     /// Navigate the mini-month to the previous month.
@@ -278,6 +294,14 @@ pub enum EventField {
     AllDay(bool),
 }
 
+/// Identifies a text field in the event editor for undo/redo.
+#[derive(Debug, Clone, Copy)]
+pub enum EventTextField {
+    Title,
+    Location,
+    Description,
+}
+
 #[derive(Debug, Clone)]
 pub enum CalendarMessage {
     /// A date was clicked in the mini-month or main view.
@@ -300,6 +324,10 @@ pub enum CalendarMessage {
     OpenEventEditor(Option<CalendarEventData>),
     /// A field in the event editor changed.
     EventFieldChanged(EventField),
+    /// Undo the last edit to a text field in the event editor.
+    EventFieldUndo(EventTextField),
+    /// Redo a previously undone edit to a text field in the event editor.
+    EventFieldRedo(EventTextField),
     /// Save the event (create or update).
     SaveEvent,
     /// Async save completed.
@@ -477,8 +505,10 @@ fn event_editor_card(
     // Title
     content = content.push(form_field(
         "Title",
-        text_input("Event title", &event.title)
+        undoable_text_input("Event title", &event.title)
             .on_input(|s| CalendarMessage::EventFieldChanged(EventField::Title(s)))
+            .on_undo(CalendarMessage::EventFieldUndo(EventTextField::Title))
+            .on_redo(CalendarMessage::EventFieldRedo(EventTextField::Title))
             .padding(PAD_INPUT)
             .size(TEXT_MD)
             .into(),
@@ -516,8 +546,10 @@ fn event_editor_card(
     // Location
     content = content.push(form_field(
         "Location",
-        text_input("Location (optional)", &event.location)
+        undoable_text_input("Location (optional)", &event.location)
             .on_input(|s| CalendarMessage::EventFieldChanged(EventField::Location(s)))
+            .on_undo(CalendarMessage::EventFieldUndo(EventTextField::Location))
+            .on_redo(CalendarMessage::EventFieldRedo(EventTextField::Location))
             .padding(PAD_INPUT)
             .size(TEXT_MD)
             .into(),
@@ -526,8 +558,10 @@ fn event_editor_card(
     // Description
     content = content.push(form_field(
         "Description",
-        text_input("Description (optional)", &event.description)
+        undoable_text_input("Description (optional)", &event.description)
             .on_input(|s| CalendarMessage::EventFieldChanged(EventField::Description(s)))
+            .on_undo(CalendarMessage::EventFieldUndo(EventTextField::Description))
+            .on_redo(CalendarMessage::EventFieldRedo(EventTextField::Description))
             .padding(PAD_INPUT)
             .size(TEXT_MD)
             .into(),

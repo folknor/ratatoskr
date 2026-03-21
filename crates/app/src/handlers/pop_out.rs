@@ -16,6 +16,7 @@ use rusqlite::params;
 
 use crate::db::Db;
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 use rusqlite::params;
 
@@ -23,6 +24,10 @@ use rusqlite::params;
 use crate::pop_out::compose::{
     ComposeMessage, ComposeMode, ComposeState, tokens_to_csv,
 };
+=======
+use crate::pop_out::compose::{ComposeMessage, ComposeMode, ComposeState};
+use crate::ui::undoable::UndoableText;
+>>>>>>> worktree-agent-aa14600b
 use crate::pop_out::message_view::{
     MessageViewMessage, MessageViewState, RenderingMode,
 };
@@ -316,7 +321,7 @@ impl App {
     ) -> Task<Message> {
         log::info!("Opening compose window: {mode:?}");
         state.mode = mode;
-        state.subject = state.mode.prefixed_subject();
+        state.subject = UndoableText::with_initial(&state.mode.prefixed_subject());
 
         let settings = iced::window::Settings {
             size: Size::new(COMPOSE_DEFAULT_WIDTH, COMPOSE_DEFAULT_HEIGHT),

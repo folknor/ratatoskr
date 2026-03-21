@@ -8,6 +8,7 @@ use crate::component::Component;
 use crate::db::Thread;
 use crate::ui::layout::*;
 use crate::ui::theme;
+use crate::ui::undoable_text_input::undoable_text_input;
 use crate::ui::widgets;
 
 // ── Typeahead types ────────────────────────────────────
@@ -52,6 +53,10 @@ pub enum ThreadListMessage {
     SearchInput(String),
     /// The user pressed Enter in the search bar.
     SearchSubmit,
+    /// Undo the last search bar edit.
+    SearchUndo,
+    /// Redo a previously undone search bar edit.
+    SearchRedo,
     /// Move selection up by one.
     SelectPrevious,
     /// Move selection down by one.
@@ -86,6 +91,10 @@ pub enum ThreadListEvent {
     SearchExecute,
     /// Thread deselected.
     ThreadDeselected,
+    /// Undo search bar text.
+    SearchUndo,
+    /// Redo search bar text.
+    SearchRedo,
     /// User clicked "All" to widen search scope.
     WidenSearchScope,
     /// Typeahead needs suggestions for an operator value.
@@ -303,6 +312,12 @@ impl Component for ThreadList {
                 self.typeahead.visible = false;
                 (Task::none(), Some(ThreadListEvent::SearchExecute))
             }
+            ThreadListMessage::SearchUndo => {
+                (Task::none(), Some(ThreadListEvent::SearchUndo))
+            }
+            ThreadListMessage::SearchRedo => {
+                (Task::none(), Some(ThreadListEvent::SearchRedo))
+            }
             ThreadListMessage::SelectNext => {
                 let event = self.select_next();
                 (Task::none(), event)
@@ -430,10 +445,12 @@ fn thread_list_header<'a>(
     mode: &ThreadListMode,
     thread_count: usize,
 ) -> Element<'a, ThreadListMessage> {
-    let search_input = text_input("Search...", search_query)
+    let search_input = undoable_text_input("Search...", search_query)
         .id("search-bar")
         .on_input(ThreadListMessage::SearchInput)
         .on_submit(ThreadListMessage::SearchSubmit)
+        .on_undo(ThreadListMessage::SearchUndo)
+        .on_redo(ThreadListMessage::SearchRedo)
         .size(TEXT_MD)
         .padding(PAD_INPUT);
 
