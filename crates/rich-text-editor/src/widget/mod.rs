@@ -428,17 +428,17 @@ impl<Message> RichTextEditor<'_, Message> {
                     shell.publish(on_action(Action::Focus));
 
                     match click_kind {
-                        mouse::click::Kind::Triple => {
+                        iced::advanced::mouse::click::Kind::Triple => {
                             // Triple click: select entire block.
                             widget_state.dragging = false;
                             shell.publish(on_action(Action::TripleClick(doc_pos)));
                         }
-                        mouse::click::Kind::Double => {
+                        iced::advanced::mouse::click::Kind::Double => {
                             // Double click: select word.
                             widget_state.dragging = false;
                             shell.publish(on_action(Action::DoubleClick(doc_pos)));
                         }
-                        mouse::click::Kind::Single => {
+                        iced::advanced::mouse::click::Kind::Single => {
                             widget_state.dragging = true;
                             shell.publish(on_action(Action::Click(doc_pos)));
                         }
