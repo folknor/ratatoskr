@@ -1,3 +1,27 @@
+// ── ARCHITECTURE NOTE ───────────────────────────────────
+//
+// This file is a THIN DISPATCH LAYER. It contains:
+//   - The `Message` enum
+//   - The `App` struct definition
+//   - `boot()`, `title()`, `theme()`, `subscription()`
+//   - `update()` — which dispatches to handler methods
+//   - `view()` / `view_main_window()` — layout assembly
+//   - Component delegation (handle_sidebar, handle_thread_list, etc.)
+//   - Navigation/thread loading helpers
+//
+// ALL FEATURE LOGIC lives in `handlers/` modules. Each handler file
+// adds `impl App` methods that `update()` dispatches to. When adding
+// new functionality:
+//
+//   1. Add the `Message` variant here
+//   2. Add a ONE-LINE dispatch arm: `Message::Foo(x) => self.handle_foo(x)`
+//   3. Implement `handle_foo()` in the appropriate `handlers/*.rs` file
+//
+// Do NOT put multi-line handler logic, free functions, or match arms
+// with business logic in this file. See `handlers/mod.rs` for the
+// module index and `UI.md` for the full module map.
+// ────────────────────────────────────────────────────────
+
 mod appearance;
 mod command_dispatch;
 mod command_resolver;
@@ -432,6 +456,8 @@ impl App {
         iced::Subscription::batch(subs)
     }
 
+    /// Central message dispatch. Each arm should be a ONE-LINE delegation
+    /// to a handler method in `handlers/*.rs`. Do not inline logic here.
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             // Component delegation

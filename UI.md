@@ -2,6 +2,8 @@
 
 iced UI for the Ratatoskr email client (`crates/app/`). Uses iced 0.15-dev (Halloy's fork) against a seeded test database.
 
+**iced fork:** `https://github.com/folknor/iced`, branch `sluggrs`. Local checkout at `/home/folk/Programs/sluggrs/repos/iced`. When you need to check what API is available in our iced version, read files in that directory — do not assume upstream iced APIs exist.
+
 ## App module structure (`crates/app/src/`)
 
 `main.rs` is a thin dispatch layer (~1300 lines). All feature logic lives in handler modules.
@@ -52,6 +54,10 @@ Non-component UI: `calendar.rs`, `calendar_month.rs`, `calendar_time_grid.rs`, `
 **`Padding::from` with mixed types:** `Padding::from([0, CONSTANT])` won't compile if `CONSTANT` is `f32` — Rust infers the array as `[i32; 2]`. Always use `[0.0, CONSTANT]` to keep both elements `f32`.
 
 **`iced::Font::DEFAULT` is not Inter:** We set `default_font(font::TEXT)` which is `Font::new("Inter")`. If you construct a font with `iced::Font { weight, ..iced::Font::DEFAULT }` it will NOT use Inter. Always spread from `font::TEXT` instead: `iced::Font { weight, ..font::TEXT }`.
+
+**`iced::mouse` doesn't re-export the `click` submodule.** `iced::mouse` (from `iced::core::mouse` via `iced/src/lib.rs`) only re-exports `Button`, `Cursor`, `Event`, `Interaction`, `ScrollDelta`. To access `Click`, `click::Kind` (Single/Double/Triple), or anything else in the `click` module, use `iced::advanced::mouse::click::Click` and `iced::advanced::mouse::click::Kind`. The `iced::advanced` module re-exports the full `iced::core::mouse` which includes `pub mod click`.
+
+**`scrollable::scroll_to()` does not exist in this iced fork.** There is no public function to programmatically scroll a `Scrollable` to a specific offset. The internal `State` has `scroll_by()` but it's not exposed as a top-level function. If you need scroll-to-item behavior, you'll need a different approach (e.g., widget operations or state manipulation).
 
 **Button `text_color` doesn't reach children with explicit `.style()`.** If you set `text_color` on a button style but the `text()` or icon inside has its own `.style(some_fn)`, the explicit style wins. The button's `text_color` only affects children that don't override it. This means changing a button style's color has no visible effect when all children set their own style — you have to change the text/icon styles too.
 
