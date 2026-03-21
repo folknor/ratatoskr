@@ -30,7 +30,6 @@ pub enum SidebarMessage {
     SelectPinnedSearch(i64),
     DismissPinnedSearch(i64),
     ToggleMode,
-    Noop,
 }
 
 /// Events the sidebar emits upward to the App.
@@ -38,6 +37,9 @@ pub enum SidebarMessage {
 pub enum SidebarEvent {
     AccountSelected(usize),
     AllAccountsSelected,
+    /// Emitted when account cycling completes. The parent should reload
+    /// navigation state — the sidebar already emits `AccountSelected`
+    /// for the actual account change, so this is supplementary.
     CycleAccount,
     LabelSelected(Option<String>),
     Compose,
@@ -46,6 +48,11 @@ pub enum SidebarEvent {
     PinnedSearchDismissed(i64),
     ModeToggled,
 }
+
+// ── Sidebar layout constants ─────────────────────────────
+
+/// Maximum display length for pinned search query text before truncation.
+const PINNED_SEARCH_QUERY_MAX_CHARS: usize = 28;
 
 // ── State ──────────────────────────────────────────────
 
@@ -118,7 +125,10 @@ impl Component for Sidebar {
                         Some(idx) => (idx + 1) % self.accounts.len(),
                         None => 0,
                     };
-                    self.update(SidebarMessage::SelectAccount(next))
+                    self.selected_account = Some(next);
+                    self.selected_label = None;
+                    self.scope_dropdown_open = false;
+                    (Task::none(), Some(SidebarEvent::AccountSelected(next)))
                 } else {
                     (Task::none(), None)
                 }
@@ -160,7 +170,6 @@ impl Component for Sidebar {
             SidebarMessage::ToggleMode => {
                 (Task::none(), Some(SidebarEvent::ModeToggled))
             }
-            SidebarMessage::Noop => (Task::none(), None),
         }
     }
 
@@ -379,26 +388,27 @@ fn pinned_search_card(
 ) -> Element<'_, SidebarMessage> {
     use iced::widget::text::Wrapping;
 
-    let date_label = format_pinned_search_date(ps.updated_at);
-    let query_display = truncate_query(&ps.query, 28);
+    let date_label = format_relative_time(ps.updated_at);
+    let query_display = truncate_query(&ps.query, PINNED_SEARCH_QUERY_MAX_CHARS);
 
-    let date_style: fn(&iced::Theme) -> text::Style = if active {
+    // Spec 1E.4: query is primary text, date is secondary
+    let query_style: fn(&iced::Theme) -> text::Style = if active {
         text::primary
     } else {
         text::base
     };
-    let query_style: fn(&iced::Theme) -> text::Style = if active {
+    let date_style: fn(&iced::Theme) -> text::Style = if active {
         text::secondary
     } else {
         theme::TextClass::Muted.style()
     };
 
     let text_col = column![
-        text(date_label).size(TEXT_MD).style(date_style),
         text(query_display)
-            .size(TEXT_SM)
+            .size(TEXT_MD)
             .style(query_style)
             .wrapping(Wrapping::None),
+        text(date_label).size(TEXT_SM).style(date_style),
     ]
     .spacing(SPACE_XXXS)
     .width(Length::Fill);
@@ -427,11 +437,26 @@ fn pinned_search_card(
     .into()
 }
 
-/// Formats a unix timestamp as "Mar 19, 14:32" for the pinned search card.
-fn format_pinned_search_date(timestamp: i64) -> String {
-    chrono::DateTime::from_timestamp(timestamp, 0)
-        .map(|dt| dt.with_timezone(&chrono::Local).format("%b %d, %H:%M").to_string())
-        .unwrap_or_else(|| "Unknown".to_string())
+/// Formats a unix timestamp as a relative time string (e.g. "5 min ago", "2 hours ago").
+fn format_relative_time(timestamp: i64) -> String {
+    let Some(dt) = chrono::DateTime::from_timestamp(timestamp, 0) else {
+        return "Unknown".to_string();
+    };
+    let now = chrono::Utc::now();
+    let delta = now.signed_duration_since(dt);
+
+    if delta.num_seconds() < 60 {
+        "just now".to_string()
+    } else if delta.num_minutes() < 60 {
+        let m = delta.num_minutes();
+        format!("{m} min ago")
+    } else if delta.num_hours() < 24 {
+        let h = delta.num_hours();
+        format!("{h} hours ago")
+    } else {
+        let d = delta.num_days();
+        format!("{d} days ago")
+    }
 }
 
 /// Truncates a query string for display, adding ellipsis if needed.
@@ -512,16 +537,14 @@ fn tree_sort<'a>(folders: &[&'a NavigationFolder]) -> Vec<TreeNode<'a>> {
 }
 
 /// Check whether a folder is hidden because any of its ancestors is collapsed.
+///
+/// `id_to_folder` must be pre-built from the full label list to avoid
+/// O(n^2) rebuilds when called per tree node.
 fn is_hidden_by_collapsed_ancestor(
     folder: &NavigationFolder,
-    all_labels: &[&NavigationFolder],
+    id_to_folder: &HashMap<&str, &NavigationFolder>,
     collapsed: &HashSet<String>,
 ) -> bool {
-    let id_to_folder: HashMap<&str, &NavigationFolder> = all_labels
-        .iter()
-        .map(|f| (f.id.as_str(), *f))
-        .collect();
-
     let mut current_parent = folder.parent_id.as_deref();
     let mut depth = 0u16;
     while let Some(pid) = current_parent {
@@ -547,9 +570,14 @@ fn render_label_tree<'a>(
     let tree = tree_sort(labels);
     let mut elements = Vec::new();
 
+    // Build lookup map once for O(n) total instead of O(n^2)
+    let id_to_folder: HashMap<&str, &NavigationFolder> =
+        labels.iter().map(|f| (f.id.as_str(), *f)).collect();
+
     for node in &tree {
         // Skip if any ancestor is collapsed
-        if is_hidden_by_collapsed_ancestor(node.folder, labels, &sidebar.collapsed_folders) {
+        if is_hidden_by_collapsed_ancestor(node.folder, &id_to_folder, &sidebar.collapsed_folders)
+        {
             continue;
         }
 
@@ -575,12 +603,16 @@ fn render_label_tree<'a>(
                 icon::chevron_down()
             };
             item_row = item_row.push(
-                button(chevron.size(ICON_XS))
-                    .on_press(SidebarMessage::ToggleFolderExpand(
-                        node.folder.id.clone(),
-                    ))
-                    .padding(SPACE_XXXS)
-                    .style(theme::ButtonClass::Ghost.style()),
+                button(
+                    chevron
+                        .size(ICON_XS)
+                        .style(theme::TextClass::Tertiary.style()),
+                )
+                .on_press(SidebarMessage::ToggleFolderExpand(
+                    node.folder.id.clone(),
+                ))
+                .padding(SPACE_XXXS)
+                .style(theme::ButtonClass::Ghost.style()),
             );
         }
 
