@@ -2,6 +2,7 @@ use rusqlite::params;
 
 use super::connection::Db;
 use super::types::*;
+use crate::ui::thread_list::TypeaheadItem;
 
 impl Db {
     pub async fn get_accounts(&self) -> Result<Vec<Account>, String> {
@@ -52,6 +53,45 @@ impl Db {
                 Ok(Label {
                     id: row.get("id")?,
                     name: row.get("name")?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+        })
+        .await
+    }
+
+    /// Search labels across all accounts for typeahead suggestions.
+    ///
+    /// Returns up to 10 matches where label name contains the partial
+    /// query string (case-insensitive). Includes account email in the
+    /// detail field for disambiguation.
+    pub async fn search_labels_for_typeahead(
+        &self,
+        partial: String,
+    ) -> Result<Vec<TypeaheadItem>, String> {
+        self.with_conn(move |conn| {
+            let pattern = format!("%{partial}%");
+            let mut stmt = conn
+                .prepare(
+                    "SELECT DISTINCT l.name, a.email AS account_email
+                     FROM labels l
+                     JOIN accounts a ON l.account_id = a.id
+                     WHERE l.visible = 1
+                       AND l.name LIKE ?1 COLLATE NOCASE
+                     ORDER BY l.name ASC
+                     LIMIT 10",
+                )
+                .map_err(|e| e.to_string())?;
+
+            stmt.query_map(params![pattern], |row| {
+                let name: String = row.get("name")?;
+                let account_email: String = row.get("account_email")?;
+                Ok(TypeaheadItem {
+                    label: name.clone(),
+                    detail: Some(account_email),
+                    insert_value: name,
                 })
             })
             .map_err(|e| e.to_string())?

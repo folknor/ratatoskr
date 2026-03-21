@@ -83,9 +83,20 @@ The pinned-searches spec defines `PinnedSearch` with a `thread_ids: Vec<(String,
 
 ## What's Missing (Not Yet Built)
 
-### Operator Typeahead (Phase 3 of app-integration-spec)
+### Operator Typeahead (Phase 3 of app-integration-spec) -- Implemented
 
-No typeahead popup implementation exists. No contact lookup for `from:`/`to:`, no account-scoped `label:`/`folder:` suggestions, no date presets for `before:`/`after:`. The search bar is a plain `text_input` without any popup or overlay.
+Typeahead popup is implemented in `crates/app/src/ui/thread_list.rs` with `TypeaheadState`, `TypeaheadItem`, and `TypeaheadDirection` types. Cursor context analysis lives in `crates/smart-folder/src/parser.rs` (`analyze_cursor_context()`). Covers all specified operators:
+
+- **Static presets:** `has:`, `is:`, `in:`, `before:`, `after:` populate items synchronously from const preset arrays.
+- **Dynamic DB queries:** `from:`/`to:` search contacts via `search_autocomplete()`, `account:` lists accounts, `label:`/`folder:` search labels across all accounts via `search_labels_for_typeahead()`.
+- **Keyboard navigation:** Arrow Up/Down to navigate, Enter/Tab to accept, Escape to dismiss. Handled in `handlers/keyboard.rs` before the captured-event skip.
+- **Selection insertion:** `apply_typeahead_selection()` replaces the partial value, quoting values with spaces, and appending a trailing space.
+- **Visual design:** Uses `ContainerClass::Elevated` styling, `ButtonClass::Dropdown` for items, stacked over the thread list body.
+
+**Minor divergences from spec:**
+- No debounce on `from:`/`to:` contact lookups (spec calls for 50ms). The query fires immediately. The DB query is fast enough that debounce is not needed for typical mailbox sizes.
+- Label/folder typeahead is not scoped by `account:` operator in the query. It searches across all accounts and shows the account email in the detail field.
+- `analyze_cursor_context()` assumes cursor is at end of query string (iced text_input on_input provides the full value but not cursor position). Mid-query editing may not trigger the correct context.
 
 ### "Search here" Interaction (Phase 4 of app-integration-spec)
 

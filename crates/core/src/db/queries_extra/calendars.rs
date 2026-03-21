@@ -427,6 +427,154 @@ pub async fn db_delete_reminders_for_event(
     .await
 }
 
+// ── Synchronous calendar event helpers (for app-layer use) ──
+
+/// Get a single calendar event by its DB id (synchronous).
+pub fn get_calendar_event_sync(
+    conn: &rusqlite::Connection,
+    event_id: &str,
+) -> Result<Option<DbCalendarEvent>, String> {
+    let result = conn.query_row(
+        "SELECT * FROM calendar_events WHERE id = ?1",
+        params![event_id],
+        DbCalendarEvent::from_row,
+    );
+    match result {
+        Ok(event) => Ok(Some(event)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Create a new local calendar event (synchronous). Returns the new event ID.
+#[allow(clippy::too_many_arguments)]
+pub fn create_calendar_event_sync(
+    conn: &rusqlite::Connection,
+    account_id: &str,
+    summary: &str,
+    description: &str,
+    location: &str,
+    start_time: i64,
+    end_time: i64,
+    is_all_day: bool,
+    calendar_id: Option<&str>,
+) -> Result<String, String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO calendar_events
+            (id, account_id, google_event_id, summary, description,
+             location, start_time, end_time, is_all_day, status,
+             calendar_id)
+         VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, ?8, 'confirmed', ?9)",
+        params![
+            id,
+            account_id,
+            summary,
+            description,
+            location,
+            start_time,
+            end_time,
+            is_all_day as i64,
+            calendar_id,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+/// Update an existing calendar event (synchronous).
+#[allow(clippy::too_many_arguments)]
+pub fn update_calendar_event_sync(
+    conn: &rusqlite::Connection,
+    event_id: &str,
+    summary: &str,
+    description: &str,
+    location: &str,
+    start_time: i64,
+    end_time: i64,
+    is_all_day: bool,
+    calendar_id: Option<&str>,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE calendar_events SET
+            summary = ?2, description = ?3, location = ?4,
+            start_time = ?5, end_time = ?6, is_all_day = ?7,
+            calendar_id = ?8, updated_at = unixepoch()
+         WHERE id = ?1",
+        params![
+            event_id,
+            summary,
+            description,
+            location,
+            start_time,
+            end_time,
+            is_all_day as i64,
+            calendar_id,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Delete a calendar event by id (synchronous).
+pub fn delete_calendar_event_sync(
+    conn: &rusqlite::Connection,
+    event_id: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM calendar_events WHERE id = ?1",
+        params![event_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// A calendar event with resolved calendar color, suitable for view rendering.
+#[derive(Debug, Clone)]
+pub struct CalendarViewEvent {
+    pub id: String,
+    pub title: String,
+    pub start_time: i64,
+    pub end_time: i64,
+    pub all_day: bool,
+    pub color: String,
+    pub calendar_name: Option<String>,
+}
+
+/// Load all calendar events with resolved calendar colors (synchronous).
+pub fn load_calendar_events_for_view_sync(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<CalendarViewEvent>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT e.id, e.summary, e.start_time, e.end_time,
+                    e.is_all_day, COALESCE(c.color, '#3498db') AS color,
+                    c.display_name AS calendar_name
+             FROM calendar_events e
+             LEFT JOIN calendars c
+               ON c.account_id = e.account_id AND c.id = e.calendar_id
+             ORDER BY e.start_time ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(CalendarViewEvent {
+                id: row.get::<_, String>("id")?,
+                title: row.get::<_, Option<String>>("summary")?
+                    .unwrap_or_default(),
+                start_time: row.get("start_time")?,
+                end_time: row.get("end_time")?,
+                all_day: row.get::<_, i64>("is_all_day")? != 0,
+                color: row.get::<_, Option<String>>("color")?
+                    .unwrap_or_else(|| "#3498db".to_string()),
+                calendar_name: row.get("calendar_name")?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
 // ── All-account calendar queries (for unified calendar) ────
 
 pub async fn db_get_all_visible_calendars(

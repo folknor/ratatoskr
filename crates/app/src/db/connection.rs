@@ -46,55 +46,9 @@ impl Db {
             )
             .map_err(|e| format!("write pragmas: {e}"))?;
 
-        // Create pinned searches tables (local app state).
-        write_conn
-            .execute_batch(
-                "CREATE TABLE IF NOT EXISTS pinned_searches (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    query TEXT NOT NULL,
-                    created_at INTEGER NOT NULL,
-                    updated_at INTEGER NOT NULL
-                );
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_pinned_searches_query
-                    ON pinned_searches(query);
-                CREATE TABLE IF NOT EXISTS pinned_search_threads (
-                    pinned_search_id INTEGER NOT NULL
-                        REFERENCES pinned_searches(id) ON DELETE CASCADE,
-                    thread_id TEXT NOT NULL,
-                    account_id TEXT NOT NULL,
-                    PRIMARY KEY (pinned_search_id, thread_id, account_id)
-                );",
-            )
-            .map_err(|e| format!("create pinned_searches tables: {e}"))?;
-
-        // Ensure contact management columns exist (idempotent).
-        for alter in &[
-            "ALTER TABLE contacts ADD COLUMN phone TEXT",
-            "ALTER TABLE contacts ADD COLUMN company TEXT",
-            "ALTER TABLE contacts ADD COLUMN email2 TEXT",
-            "ALTER TABLE contacts ADD COLUMN account_id TEXT",
-        ] {
-            let _ = write_conn.execute_batch(alter);
-        }
-
-        // Ensure contact_groups tables exist.
-        write_conn
-            .execute_batch(
-                "CREATE TABLE IF NOT EXISTS contact_groups (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-                    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-                );
-                CREATE TABLE IF NOT EXISTS contact_group_members (
-                    group_id TEXT NOT NULL
-                        REFERENCES contact_groups(id) ON DELETE CASCADE,
-                    member_type TEXT NOT NULL CHECK (member_type IN ('email', 'group')),
-                    member_value TEXT NOT NULL,
-                    PRIMARY KEY (group_id, member_type, member_value)
-                );",
-            )
-            .map_err(|e| format!("create contact_groups tables: {e}"))?;
+        // Schema for pinned_searches, contact_groups, and contact extended
+        // columns is now managed by core migration 64 (and earlier migrations
+        // for contact_groups). No app-layer DDL needed.
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),

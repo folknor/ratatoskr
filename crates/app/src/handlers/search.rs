@@ -1,10 +1,13 @@
 use std::sync::Arc;
 
 use iced::Task;
+use ratatoskr_smart_folder::analyze_cursor_context;
 
 use crate::db::{self, Thread};
 use crate::ui::sidebar::truncate_query;
-use crate::ui::thread_list::ThreadListMode;
+use crate::ui::thread_list::{
+    ThreadListMessage, ThreadListMode, TypeaheadItem,
+};
 use crate::{App, Message};
 
 // ── Search handling ────────────────────────────────────
@@ -15,6 +18,7 @@ impl App {
         self.thread_list.search_query.clone_from(&self.search_query);
         if self.search_query.trim().is_empty() {
             self.search_debounce_deadline = None;
+            self.thread_list.typeahead.visible = false;
             if self.thread_list.mode == ThreadListMode::Search {
                 self.clear_pinned_search_context();
                 self.nav_generation += 1;
@@ -26,6 +30,11 @@ impl App {
                 iced::time::Instant::now()
                     + std::time::Duration::from_millis(150),
             );
+
+            // Check for dynamic typeahead operators and trigger DB queries.
+            if let Some(typeahead_task) = self.maybe_trigger_typeahead_query() {
+                return typeahead_task;
+            }
         }
         Task::none()
     }
@@ -112,6 +121,119 @@ impl App {
 
     pub(crate) fn handle_focus_search_bar(&self) -> Task<Message> {
         iced::widget::operation::focus::<Message>("search-bar".to_string())
+    }
+
+    /// Analyze the current query for dynamic typeahead operators and
+    /// dispatch a DB query if needed.
+    fn maybe_trigger_typeahead_query(&mut self) -> Option<Task<Message>> {
+        let cursor_pos = self.search_query.len();
+        let ctx = analyze_cursor_context(&self.search_query, cursor_pos);
+
+        let ratatoskr_smart_folder::CursorContext::InsideOperator {
+            ref operator,
+            ref partial_value,
+            ..
+        } = ctx
+        else {
+            return None;
+        };
+
+        match operator.as_str() {
+            "from" | "to" => {
+                let db = Arc::clone(&self.db);
+                let partial = partial_value.clone();
+                Some(Task::perform(
+                    async move {
+                        db.search_autocomplete(partial, 10).await
+                    },
+                    |result| {
+                        let items = match result {
+                            Ok(contacts) => contacts
+                                .into_iter()
+                                .map(|c| TypeaheadItem {
+                                    label: c
+                                        .display_name
+                                        .clone()
+                                        .unwrap_or_else(|| c.email.clone()),
+                                    detail: Some(c.email.clone()),
+                                    insert_value: c.email,
+                                })
+                                .collect(),
+                            Err(_) => Vec::new(),
+                        };
+                        Message::ThreadList(
+                            ThreadListMessage::TypeaheadItemsLoaded(items),
+                        )
+                    },
+                ))
+            }
+            "account" => {
+                let db = Arc::clone(&self.db);
+                let partial = partial_value.to_ascii_lowercase();
+                Some(Task::perform(
+                    async move { db.get_accounts().await },
+                    move |result| {
+                        let items = match result {
+                            Ok(accounts) => accounts
+                                .into_iter()
+                                .filter(|a| {
+                                    partial.is_empty()
+                                        || a.email
+                                            .to_ascii_lowercase()
+                                            .contains(&partial)
+                                        || a.display_name
+                                            .as_ref()
+                                            .is_some_and(|n| {
+                                                n.to_ascii_lowercase()
+                                                    .contains(&partial)
+                                            })
+                                        || a.account_name
+                                            .as_ref()
+                                            .is_some_and(|n| {
+                                                n.to_ascii_lowercase()
+                                                    .contains(&partial)
+                                            })
+                                })
+                                .map(|a| {
+                                    let label = a
+                                        .account_name
+                                        .or(a.display_name)
+                                        .unwrap_or_else(|| a.email.clone());
+                                    TypeaheadItem {
+                                        label,
+                                        detail: Some(a.email.clone()),
+                                        insert_value: a.email,
+                                    }
+                                })
+                                .collect(),
+                            Err(_) => Vec::new(),
+                        };
+                        Message::ThreadList(
+                            ThreadListMessage::TypeaheadItemsLoaded(items),
+                        )
+                    },
+                ))
+            }
+            "label" | "folder" => {
+                let db = Arc::clone(&self.db);
+                let partial = partial_value.to_ascii_lowercase();
+                // Get labels from all accounts (since we don't have easy
+                // per-account scoping in the search bar context).
+                Some(Task::perform(
+                    async move { db.search_labels_for_typeahead(partial).await },
+                    |result| {
+                        let items = match result {
+                            Ok(labels) => labels,
+                            Err(_) => Vec::new(),
+                        };
+                        Message::ThreadList(
+                            ThreadListMessage::TypeaheadItemsLoaded(items),
+                        )
+                    },
+                ))
+            }
+            _ => None,
+        }
     }
 }
 

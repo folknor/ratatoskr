@@ -1,4 +1,8 @@
-use rusqlite::params;
+use ratatoskr_core::db::queries_extra::calendars::{
+    create_calendar_event_sync, delete_calendar_event_sync,
+    get_calendar_event_sync, load_calendar_events_for_view_sync,
+    update_calendar_event_sync,
+};
 
 use super::connection::Db;
 use super::types::*;
@@ -10,29 +14,17 @@ impl Db {
         event_id: String,
     ) -> Result<Option<CalendarEvent>, String> {
         self.with_conn(move |conn| {
-            let result = conn.query_row(
-                "SELECT id, summary, description, location,
-                        start_time, end_time, is_all_day, calendar_id
-                 FROM calendar_events WHERE id = ?1",
-                params![event_id],
-                |row| {
-                    Ok(CalendarEvent {
-                        id: row.get("id")?,
-                        summary: row.get("summary")?,
-                        description: row.get("description")?,
-                        location: row.get("location")?,
-                        start_time: row.get("start_time")?,
-                        end_time: row.get("end_time")?,
-                        is_all_day: row.get::<_, i64>("is_all_day")? != 0,
-                        calendar_id: row.get("calendar_id")?,
-                    })
-                },
-            );
-            match result {
-                Ok(event) => Ok(Some(event)),
-                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-                Err(e) => Err(e.to_string()),
-            }
+            let core_event = get_calendar_event_sync(conn, &event_id)?;
+            Ok(core_event.map(|ev| CalendarEvent {
+                id: ev.id,
+                summary: ev.summary,
+                description: ev.description,
+                location: ev.location,
+                start_time: ev.start_time,
+                end_time: ev.end_time,
+                is_all_day: ev.is_all_day != 0,
+                calendar_id: ev.calendar_id,
+            }))
         })
         .await
     }
@@ -51,27 +43,17 @@ impl Db {
         calendar_id: Option<String>,
     ) -> Result<String, String> {
         self.with_write_conn(move |conn| {
-            let id = uuid::Uuid::new_v4().to_string();
-            conn.execute(
-                "INSERT INTO calendar_events
-                    (id, account_id, google_event_id, summary, description,
-                     location, start_time, end_time, is_all_day, status,
-                     calendar_id)
-                 VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, ?8, 'confirmed', ?9)",
-                params![
-                    id,
-                    account_id,
-                    title,
-                    description,
-                    location,
-                    start_time,
-                    end_time,
-                    is_all_day as i64,
-                    calendar_id,
-                ],
+            create_calendar_event_sync(
+                conn,
+                &account_id,
+                &title,
+                &description,
+                &location,
+                start_time,
+                end_time,
+                is_all_day,
+                calendar_id.as_deref(),
             )
-            .map_err(|e| e.to_string())?;
-            Ok(id)
         })
         .await
     }
@@ -90,25 +72,17 @@ impl Db {
         calendar_id: Option<String>,
     ) -> Result<(), String> {
         self.with_write_conn(move |conn| {
-            conn.execute(
-                "UPDATE calendar_events SET
-                    summary = ?2, description = ?3, location = ?4,
-                    start_time = ?5, end_time = ?6, is_all_day = ?7,
-                    calendar_id = ?8, updated_at = unixepoch()
-                 WHERE id = ?1",
-                params![
-                    event_id,
-                    title,
-                    description,
-                    location,
-                    start_time,
-                    end_time,
-                    is_all_day as i64,
-                    calendar_id,
-                ],
+            update_calendar_event_sync(
+                conn,
+                &event_id,
+                &title,
+                &description,
+                &location,
+                start_time,
+                end_time,
+                is_all_day,
+                calendar_id.as_deref(),
             )
-            .map_err(|e| e.to_string())?;
-            Ok(())
         })
         .await
     }
@@ -118,34 +92,19 @@ impl Db {
         &self,
     ) -> Result<Vec<crate::ui::calendar_time_grid::TimeGridEvent>, String> {
         self.with_conn(|conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT e.id, e.summary, e.start_time, e.end_time,
-                            e.is_all_day, COALESCE(c.color, '#3498db') AS color,
-                            c.display_name AS calendar_name
-                     FROM calendar_events e
-                     LEFT JOIN calendars c
-                       ON c.account_id = e.account_id AND c.id = e.calendar_id
-                     ORDER BY e.start_time ASC",
-                )
-                .map_err(|e| e.to_string())?;
-            let rows = stmt
-                .query_map([], |row| {
-                    Ok(crate::ui::calendar_time_grid::TimeGridEvent {
-                        id: row.get::<_, String>("id")?,
-                        title: row.get::<_, Option<String>>("summary")?
-                            .unwrap_or_default(),
-                        start_time: row.get("start_time")?,
-                        end_time: row.get("end_time")?,
-                        all_day: row.get::<_, i64>("is_all_day")? != 0,
-                        color: row.get::<_, Option<String>>("color")?
-                            .unwrap_or_else(|| "#3498db".to_string()),
-                        calendar_name: row.get("calendar_name")?,
-                    })
+            let core_events = load_calendar_events_for_view_sync(conn)?;
+            Ok(core_events
+                .into_iter()
+                .map(|ev| crate::ui::calendar_time_grid::TimeGridEvent {
+                    id: ev.id,
+                    title: ev.title,
+                    start_time: ev.start_time,
+                    end_time: ev.end_time,
+                    all_day: ev.all_day,
+                    color: ev.color,
+                    calendar_name: ev.calendar_name,
                 })
-                .map_err(|e| e.to_string())?;
-            rows.collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())
+                .collect())
         })
         .await
     }
@@ -156,12 +115,7 @@ impl Db {
         event_id: String,
     ) -> Result<(), String> {
         self.with_write_conn(move |conn| {
-            conn.execute(
-                "DELETE FROM calendar_events WHERE id = ?1",
-                params![event_id],
-            )
-            .map_err(|e| e.to_string())?;
-            Ok(())
+            delete_calendar_event_sync(conn, &event_id)
         })
         .await
     }

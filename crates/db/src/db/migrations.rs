@@ -1375,6 +1375,32 @@ static MIGRATIONS: &[Migration] = &[
             INSERT OR IGNORE INTO settings (key, value) VALUES ('calendar_default_view', 'month');
         "#,
     },
+    Migration {
+        version: 64,
+        description: "Contact extended fields and pinned searches tables",
+        sql: r#"
+            ALTER TABLE contacts ADD COLUMN phone TEXT;
+            ALTER TABLE contacts ADD COLUMN company TEXT;
+            ALTER TABLE contacts ADD COLUMN email2 TEXT;
+            ALTER TABLE contacts ADD COLUMN account_id TEXT;
+
+            CREATE TABLE IF NOT EXISTS pinned_searches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                query TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_pinned_searches_query
+                ON pinned_searches(query);
+            CREATE TABLE IF NOT EXISTS pinned_search_threads (
+                pinned_search_id INTEGER NOT NULL
+                    REFERENCES pinned_searches(id) ON DELETE CASCADE,
+                thread_id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                PRIMARY KEY (pinned_search_id, thread_id, account_id)
+            );
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks

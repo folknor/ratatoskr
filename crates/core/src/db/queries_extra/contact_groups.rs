@@ -220,6 +220,152 @@ pub async fn db_expand_contact_group(
     .await
 }
 
+// ── Synchronous group helpers (for app-layer settings UI) ──
+
+/// A group entry for the settings UI.
+#[derive(Debug, Clone)]
+pub struct GroupSettingsEntry {
+    pub id: String,
+    pub name: String,
+    pub member_count: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Load groups with optional name filter (synchronous).
+pub fn load_groups_for_settings_sync(
+    conn: &rusqlite::Connection,
+    filter: &str,
+) -> Result<Vec<GroupSettingsEntry>, String> {
+    let trimmed = filter.trim();
+    let pattern = format!("%{trimmed}%");
+
+    let sql = if trimmed.is_empty() {
+        "SELECT g.id, g.name, g.created_at, g.updated_at,
+                (SELECT COUNT(*) FROM contact_group_members m
+                 WHERE m.group_id = g.id) AS member_count
+         FROM contact_groups g
+         ORDER BY g.updated_at DESC
+         LIMIT 100"
+    } else {
+        "SELECT g.id, g.name, g.created_at, g.updated_at,
+                (SELECT COUNT(*) FROM contact_group_members m
+                 WHERE m.group_id = g.id) AS member_count
+         FROM contact_groups g
+         WHERE g.name LIKE ?1
+         ORDER BY g.updated_at DESC
+         LIMIT 100"
+    };
+
+    let db_params: &[&dyn rusqlite::types::ToSql] = if trimmed.is_empty() {
+        &[]
+    } else {
+        &[&pattern]
+    };
+
+    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(db_params, |row| {
+            Ok(GroupSettingsEntry {
+                id: row.get("id")?,
+                name: row.get("name")?,
+                member_count: row.get("member_count")?,
+                created_at: row.get("created_at")?,
+                updated_at: row.get("updated_at")?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+/// Load member emails for a group (synchronous).
+pub fn load_group_member_emails_sync(
+    conn: &rusqlite::Connection,
+    group_id: &str,
+) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT member_value FROM contact_group_members
+             WHERE group_id = ?1 AND member_type = 'email'
+             ORDER BY member_value ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![group_id], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+/// Save (upsert) a group and replace all members (synchronous).
+pub fn save_group_sync(
+    conn: &rusqlite::Connection,
+    entry: &GroupSettingsEntry,
+    member_emails: &[String],
+) -> Result<(), String> {
+    let now = chrono::Utc::now().timestamp();
+    conn.execute(
+        "INSERT INTO contact_groups (id, name, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?3)
+         ON CONFLICT(id) DO UPDATE SET
+             name = excluded.name,
+             updated_at = excluded.updated_at",
+        params![entry.id, entry.name, now],
+    )
+    .map_err(|e| e.to_string())?;
+
+    // Replace all members
+    conn.execute(
+        "DELETE FROM contact_group_members WHERE group_id = ?1",
+        params![entry.id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let mut stmt = conn
+        .prepare(
+            "INSERT INTO contact_group_members
+             (group_id, member_type, member_value)
+             VALUES (?1, 'email', ?2)",
+        )
+        .map_err(|e| e.to_string())?;
+
+    for email in member_emails {
+        stmt.execute(params![entry.id, email])
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Delete a group and clean up inbound refs (synchronous).
+pub fn delete_group_sync(
+    conn: &rusqlite::Connection,
+    group_id: &str,
+) -> Result<(), String> {
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("begin tx: {e}"))?;
+
+    // Remove inbound nested-group references from other groups
+    tx.execute(
+        "DELETE FROM contact_group_members \
+         WHERE member_type = 'group' AND member_value = ?1",
+        params![group_id],
+    )
+    .map_err(|e| format!("delete inbound refs: {e}"))?;
+
+    // Delete the group itself (CASCADE removes owned members)
+    tx.execute(
+        "DELETE FROM contact_groups WHERE id = ?1",
+        params![group_id],
+    )
+    .map_err(|e| format!("delete group: {e}"))?;
+
+    tx.commit().map_err(|e| format!("commit tx: {e}"))?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 use iced::Task;
 
 use crate::command_dispatch::{self, KeyEventMessage};
+use crate::ui::thread_list::{ThreadListMessage, TypeaheadDirection};
 use crate::{App, Message, PendingChord};
 use ratatoskr_command_palette::{Chord, CommandId, ResolveResult};
 
@@ -40,8 +41,37 @@ impl App {
             return self.handle_palette_key(&key);
         }
 
-        // 2. If a text input or other widget captured the event, skip
-        //    (unless it's a modifier-chord like Ctrl+K)
+        // 2a. If typeahead is visible, intercept arrow keys and Tab/Enter/Escape.
+        if self.thread_list.typeahead.visible {
+            match &key {
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => {
+                    return self.update(Message::ThreadList(
+                        ThreadListMessage::TypeaheadNavigate(TypeaheadDirection::Up),
+                    ));
+                }
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => {
+                    return self.update(Message::ThreadList(
+                        ThreadListMessage::TypeaheadNavigate(TypeaheadDirection::Down),
+                    ));
+                }
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab) => {
+                    // Tab accepts the selected typeahead item.
+                    let idx = self.thread_list.typeahead.selected;
+                    return self.update(Message::ThreadList(
+                        ThreadListMessage::TypeaheadSelect(idx),
+                    ));
+                }
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
+                    return self.update(Message::ThreadList(
+                        ThreadListMessage::TypeaheadDismiss,
+                    ));
+                }
+                _ => {}
+            }
+        }
+
+        // 2b. If a text input or other widget captured the event, skip
+        //     (unless it's a modifier-chord like Ctrl+K)
         if status == iced::event::Status::Captured
             && !command_dispatch::has_command_modifier(&modifiers)
         {

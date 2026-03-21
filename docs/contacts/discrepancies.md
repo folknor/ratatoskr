@@ -133,7 +133,7 @@ Audit date: 2026-03-21 (updated). Covers `problem-statement.md`, `import-spec.md
 
 ### f. Core CRUD bypassed
 
-**Yes -- the app crate has its own raw SQL for contact operations.** `crates/app/src/db/contacts.rs` contains autocomplete search, contact/group CRUD, all writing raw SQL directly. Meanwhile, `crates/core/src/db/queries_extra/contacts.rs` and `contact_groups.rs` have parallel sets. This violates the core crate boundary principle.
+**Resolved for CRUD operations.** Contact save/delete, group save/delete, and settings list queries now delegate to synchronous core functions in `crates/core/src/db/queries_extra/contacts.rs` (`save_contact_sync`, `delete_contact_sync`, `load_contacts_for_settings_sync`) and `contact_groups.rs` (`save_group_sync`, `delete_group_sync`, `load_groups_for_settings_sync`, `load_group_member_emails_sync`). The app `db/contacts.rs` uses type aliases (`ContactEntry = ContactSettingsEntry`, `GroupEntry = GroupSettingsEntry`) for backward compatibility. Autocomplete search remains in the app crate since it combines contacts + seen_addresses + groups in an app-specific union query.
 
 ### g. Dead code
 
