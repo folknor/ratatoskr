@@ -67,18 +67,15 @@ These patterns appeared across 6-8+ specs and should be adopted as foundational 
 
 ---
 
-- [ ] **Vendor iced_drop for drag-and-drop**
+- [ ] **Vendor iced_drop for drag-and-drop** *(partially addressed 2026-03-21)*
 
-  Add iced_drop (623 lines, zero external dependencies beyond iced) as a vendored crate in the workspace. This is the only "steal the code" repo from the survey — everything else is "steal the pattern."
+  Account card drag-to-reorder in settings is implemented via a custom `DragState` struct (grip handle, Y-axis drag threshold, index swap) without using iced_drop. This is a manual implementation in `crates/app/src/ui/settings/types.rs` / `update.rs` / `row_widgets.rs`.
 
-  **The library**: iced_drop provides a `Droppable<Message>` widget wrapper that makes any iced element draggable, with drop zone detection via widget `Id`s. Features: visual feedback during drag (cursor change, optional overlay rendering, optional source hiding), configurable drag threshold, drag-axis constraints, nested droppables. The entire library is 623 lines with no dependencies beyond `iced_core`, `iced_widget`, and optionally `iced_runtime`.
+  iced_drop itself is NOT vendored. The custom `DragState` approach works for the simple list-reorder case but does NOT generalize to cross-container drops (compose token field movement, label drag-to-file, calendar event dragging).
 
-  **The `Operation` trait pattern** (`research/iced_drop/src/widget/operation/drop.rs` lines 10-86): This is arguably more valuable than the drag-and-drop itself. iced_drop defines structs implementing `Operation<T>` that traverse the widget tree to find drop zones by `Id` and collect their bounds. The pattern generalizes to any tree query: finding the focused widget, collecting all widgets of a type, swapping state between two widgets. The chained operations example (`research/iced_drop/examples/todo/src/operation.rs`) shows `FindTargets` → `Chain(SwapModify)` for finding two widget states and modifying them in sequence.
-
-  **Where needed**:
+  **Remaining use cases** (still need iced_drop or similar):
   - **Thread reordering** (drag threads to reorder in thread list) — `docs/main-layout/problem-statement.md`
   - **Label drag-to-file** (drag thread onto sidebar label) — `docs/sidebar/problem-statement.md`
-  - **Account reordering** (drag accounts in settings) — `docs/accounts/problem-statement.md`
   - **Compose token DnD** (drag recipient between To/Cc/Bcc) — `docs/contacts/problem-statement.md`
   - **Group editor member DnD** (drag contacts from list to member grid) — `docs/contacts/problem-statement.md`
   - **Calendar event dragging** (drag events between time slots / days) — `docs/calendar/problem-statement.md`
@@ -87,10 +84,6 @@ These patterns appeared across 6-8+ specs and should be adopted as foundational 
   **Vendoring vs dependency**: Vendor into `crates/iced-drop/` rather than depending on the crate directly. Reasons: (1) we use Halloy's iced fork, so the iced version must match exactly; (2) we'll likely need to modify the library for calendar-specific needs (continuous position mapping instead of discrete zone detection); (3) 623 lines is small enough to own.
 
   **Gap for calendar**: iced_drop handles discrete drop zones (which zone did I land in?). The calendar time grid needs continuous position mapping (pixel offset → time). The library's zone-finding `Operation` needs augmentation with proportional time calculation from cursor Y position within the zone.
-
-  **Interaction with other items**: The Component trait determines which component handles drop events. The overlay positioning (from shadcn-rs) interacts with drag overlay rendering.
-
-  **Reference**: `research/iced_drop/src/widget/droppable.rs` (main widget), `research/iced_drop/src/widget/operation/drop.rs` (Operation trait), `research/iced_drop/examples/todo/` (complete example with chained operations).
 
 ---
 
@@ -254,9 +247,13 @@ Deferred items from code review. Grouped by feature area.
 
 ### Emoji Picker (b15cd89)
 
-- [ ] **Recent/frequent emoji section and skin tone selection** — TODO.md (below) says the picker needs these. Neither is implemented.
+- [x] **Emoji picker widget implemented** — Done (2026-03-21 round 5). `crates/app/src/ui/emoji_picker.rs` provides a searchable, categorized emoji grid with 8 categories (Smileys, People, Nature, Food, Activities, Travel, Objects, Symbols). Reusable view function.
 
-- [ ] **Flags emoji category** — Most emoji pickers include country/flag emoji. Not included in the static table.
+- [ ] **Recent/frequent emoji section** — Picker has no persistence for recently used emoji. No JSON file for recency tracking.
+
+- [ ] **Skin tone selection** — No skin tone support. All emoji render with default yellow tone.
+
+- [ ] **Flags emoji category** — Most emoji pickers include country/flag emoji. Not included in the static table (8 categories, not 10).
 
 ## Spec-vs-Code Audit (2026-03-20, updated 2026-03-21)
 
@@ -397,7 +394,7 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 
 - [x] **App-local DB shim used instead of core's `get_thread_detail()`** — Done (2026-03-21 multi-agent session). App now uses `db::threads::load_thread_detail()` which calls core's `get_thread_detail()`. Provides body text from BodyStore, ownership detection, collapsed summaries, resolved label colors, persisted attachment collapse state.
 - [ ] **Calendar and pinned search CRUD bypass core** — Raw SQL in `connection.rs` for `create/update/delete_calendar_event`, pinned search table creation, contact table alterations. App-level schema management.
-- [ ] **Phase 3 interaction flow entirely deferred** — Keyboard shortcuts (j/k, Enter, Escape), auto-advance after archive/trash, multi-select (Shift/Ctrl+click), inline reply composer, context-dependent shortcut dispatch via `FocusedRegion`.
+- [ ] **Phase 3 interaction flow partially done** — Keyboard shortcuts (j/k, Enter, Escape) implemented via command palette dispatch. Multi-select (Shift/Ctrl+click) NOT implemented — `EmailSelectAll` command returns `None` (stubbed). Auto-advance after archive/trash NOT implemented. Inline reply composer NOT started. Context-dependent shortcut dispatch via `FocusedRegion` partially wired.
 - [x] **No real message body rendering** — Done (2026-03-21 multi-agent session). HTML rendering via DOM-to-widget pipeline in `html_render.rs`. Complexity heuristic for fallback to plain text. CID images, link clicks, table rendering still pending.
 - [ ] **No scroll virtualization** — Thread list renders all cards in `column![]` inside `scrollable`. Fixed `THREAD_CARD_HEIGHT` exists for future virtualization.
 - [ ] **Right sidebar still placeholder** — Shows static "Calendar placeholder", "No pinned items" text. Calendar built as separate full-page mode instead.
@@ -409,7 +406,7 @@ Gaps found comparing current code against implementation specs. Grouped by featu
 
 - [x] **Phase 2 (message view) mostly complete but missing fields** — Done (2026-03-21 multi-agent session). All fields now present: `cc_addresses`, `raw_source`, `rendering_mode`, `scroll_offset`, `error_banner`, position tracking (`x`, `y`), `overflow_menu_open`, `remote_content_loaded`.
 - [x] **Phases 3-6 not started** — Done (2026-03-21 multi-agent session). Phase 3: `RenderingMode` enum + toggle UI. Phase 4: Overflow menu with Archive/Delete/Print/Save As (stubs). Phase 5: Session restore with `session.json`. Phase 6: Save As (.eml/.txt) to downloads dir (no file picker).
-- [ ] **Compose window is a UI shell** — Partially improved (2026-03-21 multi-agent session). Added: discard confirmation dialog, formatting toolbar buttons (stubs), attribution line, cc_addresses in Reply All. Still missing: actual sending (stub), draft persistence, auto-save, attachments, rich text (uses `text_editor`), signature insertion.
+- [ ] **Compose window is a UI shell** — Partially improved (2026-03-21 multi-agent session). Added: discard confirmation dialog, formatting toolbar buttons (stubs), attribution line, cc_addresses in Reply All. Still missing: actual sending (stub), draft persistence, auto-save, attachments (rfd not yet a dependency), rich text (uses `text_editor`), signature insertion, link insertion dialog, draft_dirty tracking.
 - [x] **Status bar incorrectly appears in pop-out windows** — Done (2026-03-21 multi-agent session). Status bar no longer appears in pop-out windows.
 - [ ] **Body/attachment loads bypass core** — `Db::load_message_body()` and `Db::load_message_attachments()` are raw SQL in app crate.
 
@@ -469,11 +466,25 @@ Gaps found comparing current code against implementation specs. Grouped by featu
   - `Db::get_thread_messages()` and `Db::get_thread_attachments()` in `connection.rs` — replaced by `load_thread_detail`
   - `group_by_thread()` duplicate — search crate is canonical, pipeline delegates to it
 
+### Round 5 Additions (2026-03-21)
+
+- [x] **CalDAV calendar sync** — `crates/calendar/src/caldav/` provides CalDAV client (PROPFIND, REPORT, event fetch/create/update/delete), hand-rolled iCalendar parser in `caldav/ical.rs`, ctag-based incremental sync in `sync.rs`. Calendar schema in migration 19 (not 65 as initially reported). No separate `caldav_event_map` table — uses existing `calendar_events` with `etag`/`ical_data`/`uid`/`remote_event_id` columns. All three calendar providers (Google, Graph, CalDAV) now have sync implementations.
+
+- [x] **Emoji picker base widget** — `crates/app/src/ui/emoji_picker.rs` with 8 categories, keyword search, reusable view function. Missing: skin tones, flags category, recent emoji persistence (see Review Findings above).
+
+- [x] **Account card drag-to-reorder** — Custom `DragState` in settings (grip handle, Y-axis threshold, index swap). Does NOT use iced_drop. Works for single-list reorder only.
+
+- [ ] **Multi-select + auto-advance** — NOT implemented despite being claimed. `EmailSelectAll` command returns `None` (stubbed at line 394 of `command_dispatch.rs`). No Ctrl+click toggle, no Shift+click range, no selection count in header, no auto-advance after destructive actions.
+
+- [ ] **Compose UI gaps** — rfd file picker NOT added (comment in `handlers/pop_out.rs` says "rfd is not yet a dependency"). No link insertion dialog. No `draft_dirty` tracking. No `save_compose_draft` auto-save.
+
+- [ ] **Compose token field DnD** — NOT implemented. Drag-and-drop between To/Cc/Bcc fields not wired.
+
 ## UI Specs Needed
 
 - [ ] **Design Signatures UI** — Signature management lives in Settings. Needs spec for: creating/editing/deleting signatures, per-account default signature assignment, rich text editing (or HTML), signature insertion behavior in compose (new, reply, forward).
 
-- [ ] **Design Emoji Picker** — Shared widget used in compose, calendar event descriptions, contact notes, and anywhere text input supports emoji. Needs spec for: searchable grid, categories/tabs, recent/frequent section, skin tone selection. Separate doc at `docs/emoji-picker/problem-statement.md`.
+- [x] **Design Emoji Picker** — Done (2026-03-21 round 5). Base widget implemented in `crates/app/src/ui/emoji_picker.rs` with searchable grid and 8 category tabs. Remaining gaps (recent/frequent section, skin tone selection, flags category) tracked above in Review Findings.
 
 ## Contacts Surface
 

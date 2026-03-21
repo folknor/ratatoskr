@@ -59,7 +59,7 @@ Prioritized implementation plan for Ratatoskr features.
 
 | Task | Spec | Status |
 |------|------|--------|
-| Contacts autocomplete + token input | `docs/contacts/autocomplete-implementation-spec.md` | Substantially complete (2026-03-21). Token input widget, RFC 5322 paste parser, autocomplete dropdown, arrow key nav, right-click context menu, group/GAL search, recency ranking, N+1 fix, account selector, delete confirmation. Missing: drag-and-drop between fields, GAL caching, keyboard interception for dropdown. |
+| Contacts autocomplete + token input | `docs/contacts/autocomplete-implementation-spec.md` | Substantially complete (2026-03-21). Token input widget, RFC 5322 paste parser, autocomplete dropdown, arrow key nav, right-click context menu, group/GAL search, recency ranking, N+1 fix, account selector, delete confirmation. Missing: drag-and-drop between To/Cc/Bcc fields (not wired), GAL caching, keyboard interception for dropdown. |
 | Search app integration (slices 5-6) | `docs/search/app-integration-spec.md` | Substantially complete (2026-03-21). Unified pipeline wired (Tantivy+SQL fallback), multi-value from/to, debounce, generational tracking, dead code cleanup, `delete_all_pinned_searches`, smart folder token migration. Missing: typeahead (Phase 3), "Search here" (Phase 4), smart folder graduation. |
 
 ### Tier 3 — Compose / Advanced Surfaces
@@ -76,7 +76,7 @@ Prioritized implementation plan for Ratatoskr features.
 | Task | Spec | Status |
 |------|------|--------|
 | Contacts management + import | Not yet written | Not started |
-| Emoji picker | Not yet written | Not started |
+| Emoji picker | Not yet written | Base widget done (2026-03-21). 8-category searchable grid in `crates/app/src/ui/emoji_picker.rs`. Missing: skin tones, flags category, recent emoji persistence. |
 | Read receipts (outgoing) | No spec needed | Not started |
 
 ### Tier 5 — Calendar
@@ -86,22 +86,23 @@ Prioritized implementation plan for Ratatoskr features.
 | Layer 1: Data model + mode switcher | No spec (product doc) | Done ✅ |
 | Layer 2: Month view + mini-month | No spec (product doc) | Done ✅ |
 | Layer 3: Day/Week/Work Week time grid | No spec (product doc) | Done ✅ |
-| Layer 4: Event CRUD + popover/modal | Not started | |
-| Layer 5: Provider sync (Google/Graph/CalDAV) | Not started | |
+| Layer 4: Event CRUD + popover/modal | No spec (product doc) | Done ✅ |
+| Layer 5: Provider sync (Google/Graph/CalDAV) | No spec (product doc) | Done ✅ — Google Calendar API, Microsoft Graph, and CalDAV all wired. CalDAV client in `crates/calendar/src/caldav/` (PROPFIND, REPORT, iCalendar parsing, ctag-based incremental sync). |
 
 **Deferred calendar review items (tracked, not blocking):**
 - `calendar_default_view` setting seeded in DB but never read — `CalendarState::new()` hardcodes Month. Should read from settings table at boot.
-- New v63 schema fields (`title`, `timezone`, `recurrence_rule`, `organizer_name`, `rsvp_status`, `created_at` on events; `sort_order`, `is_default`, `provider_id` on calendars) not surfaced through `DbCalendarEvent`/`DbCalendar` types. Follow-on layers will need these in the canonical types.
+- New v63 schema fields (`title`, `timezone`, `recurrence_rule`, `organizer_name`, `rsvp_status`, `created_at` on events; `sort_order`, `is_default`, `provider_id` on calendars) not surfaced through `DbCalendarEvent`/`DbCalendar` types. Layer 4/5 may have partially addressed this — needs verification.
 - `SELECT *` in some calendar queries — should use explicit column lists to avoid breakage if columns are added/reordered.
 - Missing FK constraints on `calendar_attendees`/`calendar_reminders` → `calendar_events`. Orphaned rows possible if events deleted without cleanup. `db_delete_calendar_event` doesn't cascade.
 - `mix()` made pub speculatively in theme.rs — revert if not used externally.
 - Unicode arrows (◀/▶) in mini-month nav — should use icon:: helpers for consistency.
 - O(n²) overlap computation in `set_total_columns()` — compares every event pair. Fine for typical day counts (<20 events) but should have a comment or TODO for future optimization.
-- Full event cloning per view rebuild in `events_for_date()` — manually clones every field (no Clone derive). Currently moot with empty event sets but will matter when real provider data arrives.
+- Full event cloning per view rebuild in `events_for_date()` — manually clones every field (no Clone derive). Now relevant with real provider data from sync.
 - `TimeGridConfig` rebuilt unnecessarily for Month view — the Month branch in `rebuild_view_data()` builds a throwaway day view config that's never rendered. Wasteful, if harmless.
 - No scroll-to-now/working-hours — time grid renders 0–24 from midnight with no auto-scroll to current time or business hours.
-- No recurrence icon on event blocks — spec requires 🔁 indicator for recurring events, but `TimeGridEvent` has no `is_recurring` field yet.
+- No recurrence icon on event blocks — spec requires indicator for recurring events, but `TimeGridEvent` has no `is_recurring` field yet.
 - Weekend columns not narrower in week view — spec notes this is common but says "often" not "must."
+- CalDAV iCalendar parsing is hand-rolled (not `calcard` crate) — works for standard events but may miss edge cases in complex RRULE/VTIMEZONE data.
 
 ## Spec Status
 
@@ -111,7 +112,7 @@ Prioritized implementation plan for Ratatoskr features.
 |------|-----|-------------|
 | Command palette app integration | `docs/command-palette/app-integration-spec.md` | Core infra solid (Slices 1-4). `NavigateToLabel` wired end-to-end. `provider_kind`/`current_view` fixed. Chord indicator added. Snooze presets implemented. Recency sort wired. Palette not componentized. 4 commands return None (`NavMsgNext/Prev`, `EmailSelectAll/FromHere`). |
 | Sidebar | `docs/sidebar/implementation-spec.md` | Phases 1A-1E + Phase 2 complete. Best cross-cutting compliance. Spam/All Mail wired. O(n^2) fixed. Dead code cleaned. Relative dates. Chevron styling. Minor: `CycleAccount` parent arm dead, `NavigationTarget` still deferred. |
-| Accounts | `docs/accounts/implementation-spec.md` | Wizard substantially complete. Real discovery wired, OAuth flow, protocol selection, credential validation, core CRUD for creation, account editor in settings, `AccountHealth` enum, account deletion, duplicate detection. Missing: re-auth flow, drag reorder, sidebar Phase 6 (color dots). |
+| Accounts | `docs/accounts/implementation-spec.md` | Wizard substantially complete. Real discovery wired, OAuth flow, protocol selection, credential validation, core CRUD for creation, account editor in settings, `AccountHealth` enum, account deletion, duplicate detection, drag-to-reorder (custom DragState). Missing: re-auth flow, sidebar Phase 6 (color dots). |
 | Status bar | `docs/status-bar/implementation-spec.md` | Scaffold + pipelines wired. `IcedProgressReporter` + `SyncEvent` types implemented. Idle fixed height. Settings toggle wired. Generational tracking. Not in pop-outs. Remaining: connect sync orchestrator, wire confirmations to email actions. |
 | Contacts autocomplete | `docs/contacts/autocomplete-implementation-spec.md` | Token input + autocomplete dropdown + compose wiring complete. Paste parser, arrow keys, right-click menu, group/GAL search, recency ranking, N+1 fix, account selector, delete confirmation. App-level CRUD bypasses core. Import crate missing. |
 | Search app integration | `docs/search/app-integration-spec.md` | Backend + app integration (Slices 1-5) complete. Unified pipeline wired. Smart folder token migration done. Missing: typeahead (Phase 3), "Search here" (Phase 4), smart folder graduation. |
@@ -119,7 +120,7 @@ Prioritized implementation plan for Ratatoskr features.
 | Signatures | `docs/signatures/implementation-spec.md` | Phases 1-3, 5 substantially complete. DbSignature extended (7 cols), html_to_plain_text, transactional defaults (raw SQL, not core CRUD), async loading, delete confirmation, active_signature_id, finalize_compose. Missing: rich text editor, Phase 4 account switching. |
 | Pinned searches | `docs/search/pinned-searches-implementation-spec.md` | Substantially complete. `delete_all_pinned_searches` added. Relative dates. Auto-expiry. Missing: staleness label, graduation to smart folder. |
 | Pop-out message view | `docs/pop-out-windows/message-view-implementation-spec.md` | Phases 1-6 substantially complete. RenderingMode toggle, overflow menu, session restore, Save As, cc_addresses, error banner, per-window generation. Missing: file picker, HTML rendering, Archive/Delete wiring. Compose enhanced (discard confirm, attribution line). |
-| Main layout | `docs/main-layout/iced-implementation-spec.md` | Core structure matches. Core's `get_thread_detail()` wired (body store, ownership, label colors, attachment persistence). HTML rendering pipeline (DOM-to-widget). Thread list keyboard nav. Search scope indicator. Per-message Reply/ReplyAll/Forward. Phase 3 partially implemented (keyboard nav done, multi-select/auto-advance deferred). |
+| Main layout | `docs/main-layout/iced-implementation-spec.md` | Core structure matches. Core's `get_thread_detail()` wired (body store, ownership, label colors, attachment persistence). HTML rendering pipeline (DOM-to-widget). Thread list keyboard nav. Search scope indicator. Per-message Reply/ReplyAll/Forward. Phase 3: keyboard nav done; multi-select NOT done (`EmailSelectAll` stubbed, no Ctrl/Shift+click); auto-advance NOT done. |
 
 ## Dependency Graph
 
@@ -159,10 +160,14 @@ Tier 3 — SUBSTANTIALLY COMPLETE (2026-03-21):
 
 Tier 4:
   Contacts Management + Import (depends on: Contacts Autocomplete ✅)
-  Emoji Picker (independent)
+  Emoji Picker ✅ (base widget done 2026-03-21: 8 categories, search. Missing: skin tones, flags, recents)
 
-Tier 5:
-  Calendar Layers 1-3 ✅ (depends on: Tier 1 shell being solid ✅)
+Tier 5 — COMPLETE (2026-03-21):
+  Calendar Layers 1-5 ✅ (depends on: Tier 1 shell being solid ✅)
+    Layer 4: Event CRUD with detail/editor/delete overlays ✅
+    Layer 5: Provider sync — Google Calendar API ✅, Microsoft Graph ✅, CalDAV ✅
+    CalDAV client: PROPFIND/REPORT, iCalendar parsing, ctag-based incremental sync
+    Account card drag-to-reorder in settings ✅ (custom DragState, not iced_drop)
 
 Main Layout (cross-cutting, 2026-03-21):
   Core's get_thread_detail() wired ✅
@@ -170,13 +175,14 @@ Main Layout (cross-cutting, 2026-03-21):
   Thread list keyboard nav ✅
   Search scope indicator ✅
   Per-message Reply/ReplyAll/Forward ✅
+  Multi-select — NOT done (EmailSelectAll stubbed, no Ctrl/Shift+click, no auto-advance)
 ```
 
 ## Cross-Cutting Concerns
 
 *(Verified by full 10-feature audit 2026-03-21. Detailed reports in `docs/<feature>/discrepancies.md`.)*
 
-- **Core CRUD bypass (partially resolved):** Accounts now use `create_account_sync()` from core for creation. Signatures extracted to `handlers/signatures.rs` with transactional default-clearing semantics — but still raw SQL, not core CRUD function calls. Thread detail now wired through core's `get_thread_detail()`. Contacts, calendar events, pinned searches, and message body loading for pop-outs still bypass core. Sidebar remains at zero core bypass.
+- **Core CRUD bypass (partially resolved):** Accounts now use `create_account_sync()` from core for creation. Signatures extracted to `handlers/signatures.rs` with transactional default-clearing semantics — but still raw SQL, not core CRUD function calls. Thread detail now wired through core's `get_thread_detail()`. Calendar events now have core CRUD via `crates/core/src/db/queries_extra/calendars.rs` (upsert with etag/ical_data/uid). Calendar sync uses core's `DbState`. Contacts, pinned searches, and message body loading for pop-outs still bypass core. Sidebar remains at zero core bypass.
 - **Writable DB connection:** Multiple features need local-state writes (pinned searches, attachment collapse, session restore, keybinding overrides, account metadata). The first feature to land should establish the `local_conn` pattern. This is a cross-cutting architecture decision, not owned by any single spec.
 - **NavigationTarget enum:** Still deferred. `selected_label: Option<String>` remains the flat marker for universal folders, smart folders, and account labels. The command palette spec introduced this but it was never implemented.
 - **Generational load tracking:** Well-implemented throughout — three counters in App (`nav_generation`, `thread_generation`, `search_generation`) plus `option_load_generation` on `PaletteState`, `pop_out_generation` for pop-out windows, `sync_generations` map on status bar, `search_generation` on `AutocompleteState` for contacts. Previous gaps resolved: status bar has per-account generational tracking, signatures load async, pop-out windows use per-window generation. Remaining: calendar event loading.
