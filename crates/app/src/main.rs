@@ -209,6 +209,8 @@ pub enum Message {
     // Account management
     AddAccount(AddAccountMessage),
     OpenAddAccount,
+    AccountDeleted(Result<(), String>),
+    AccountUpdated(Result<(), String>),
     ReloadSignatures,
 
     // Pop-out windows
@@ -905,6 +907,24 @@ impl App {
 
             // Account management
             Message::AddAccount(msg) => self.handle_add_account(msg),
+            Message::AccountDeleted(Ok(())) | Message::AccountUpdated(Ok(())) => {
+                // Reload accounts after delete or update
+                let db = Arc::clone(&self.db);
+                self.nav_generation += 1;
+                let load_gen = self.nav_generation;
+                Task::perform(
+                    async move { (load_gen, load_accounts(db).await) },
+                    |(g, result)| Message::AccountsLoaded(g, result),
+                )
+            }
+            Message::AccountDeleted(Err(e)) => {
+                eprintln!("Failed to delete account: {e}");
+                Task::none()
+            }
+            Message::AccountUpdated(Err(e)) => {
+                eprintln!("Failed to update account: {e}");
+                Task::none()
+            }
             Message::OpenAddAccount => {
                 let used_colors = self.sidebar.accounts.iter()
                     .filter_map(|a| a.account_color.clone())
@@ -1875,6 +1895,12 @@ impl App {
                 self.show_settings = false;
                 Task::none()
             }
+            SettingsEvent::DeleteAccount(account_id) => {
+                self.handle_delete_account(account_id)
+            }
+            SettingsEvent::SaveAccountChanges { account_id, params } => {
+                self.handle_save_account_changes(account_id, params)
+            }
             SettingsEvent::SaveSignature(req) => {
                 let db = Arc::clone(&self.db);
                 Task::perform(
@@ -2059,6 +2085,89 @@ impl App {
             }
         }
     }
+
+    fn handle_delete_account(&mut self, account_id: String) -> Task<Message> {
+        // If this was the selected account, revert to All Accounts
+        if let Some(idx) = self.sidebar.selected_account {
+            if self.sidebar.accounts.get(idx).is_some_and(|a| a.id == account_id) {
+                self.sidebar.selected_account = None;
+            }
+        }
+
+        let db = Arc::clone(&self.db);
+        Task::perform(
+            async move {
+                db.with_write_conn(move |conn| {
+                    conn.execute(
+                        "DELETE FROM accounts WHERE id = ?1",
+                        rusqlite::params![account_id],
+                    )
+                    .map_err(|e| e.to_string())?;
+                    Ok(())
+                })
+                .await
+            },
+            Message::AccountDeleted,
+        )
+    }
+
+    fn handle_save_account_changes(
+        &mut self,
+        account_id: String,
+        params: ratatoskr_core::db::queries_extra::UpdateAccountParams,
+    ) -> Task<Message> {
+        let db = Arc::clone(&self.db);
+        Task::perform(
+            async move {
+                db.with_write_conn(move |conn| {
+                    let mut sets: Vec<(&str, Box<dyn rusqlite::types::ToSql>)> =
+                        Vec::new();
+                    if let Some(v) = params.account_name {
+                        sets.push(("account_name", Box::new(v)));
+                    }
+                    if let Some(v) = params.display_name {
+                        sets.push(("display_name", Box::new(v)));
+                    }
+                    if let Some(v) = params.account_color {
+                        sets.push(("account_color", Box::new(v)));
+                    }
+                    if let Some(v) = params.caldav_url {
+                        sets.push(("caldav_url", Box::new(v)));
+                    }
+                    if let Some(v) = params.caldav_username {
+                        sets.push(("caldav_username", Box::new(v)));
+                    }
+                    if let Some(v) = params.caldav_password {
+                        sets.push(("caldav_password", Box::new(v)));
+                    }
+                    if sets.is_empty() {
+                        return Ok(());
+                    }
+                    // Manual dynamic update since we can't use DbState here
+                    let mut placeholders = Vec::new();
+                    let mut param_vals: Vec<Box<dyn rusqlite::types::ToSql>> =
+                        Vec::new();
+                    for (i, (col, val)) in sets.into_iter().enumerate() {
+                        placeholders.push(format!("{col} = ?{}", i + 1));
+                        param_vals.push(val);
+                    }
+                    let id_idx = param_vals.len() + 1;
+                    param_vals.push(Box::new(account_id));
+                    let sql = format!(
+                        "UPDATE accounts SET {} WHERE id = ?{id_idx}",
+                        placeholders.join(", ")
+                    );
+                    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                        param_vals.iter().map(AsRef::as_ref).collect();
+                    conn.execute(&sql, param_refs.as_slice())
+                        .map_err(|e| e.to_string())?;
+                    Ok(())
+                })
+                .await
+            },
+            Message::AccountUpdated,
+        )
+    }
 }
 
 // ── Helper methods ─────────────────────────────────────
@@ -2166,6 +2275,7 @@ impl App {
                 account_color: a.account_color.clone(),
                 display_name: a.display_name.clone(),
                 last_sync_at: a.last_sync_at,
+                health: ui::settings::compute_health(a.last_sync_at, None, true),
             })
             .collect();
         // Load signatures for the settings UI

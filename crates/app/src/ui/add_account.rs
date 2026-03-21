@@ -15,6 +15,13 @@ use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
 
+use ratatoskr_core::db::queries_extra::{
+    CreateAccountParams, account_exists_by_email_sync, create_account_sync,
+};
+use ratatoskr_core::discovery::types::{
+    AuthMethod, DiscoveredConfig, DiscoverySource, Protocol, ProtocolOption, Security,
+};
+
 // ── Step enum ────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,6 +118,20 @@ pub struct AccountIdentity {
     pub selected_color_index: Option<usize>,
 }
 
+// ── OAuth success ────────────────────────────────────────
+
+/// Successful OAuth result carrying the tokens and user info.
+#[derive(Debug, Clone)]
+pub struct OAuthSuccess {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub token_expires_at: Option<i64>,
+    pub user_email: String,
+    pub user_name: String,
+    pub oauth_provider: String,
+    pub oauth_client_id: String,
+}
+
 // ── Messages ─────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -120,7 +141,9 @@ pub enum AddAccountMessage {
     SubmitEmail,
 
     // Step 2: Discovery result
-    DiscoveryComplete(u64, Result<(), String>),
+    DiscoveryComplete(u64, Result<DiscoveredConfig, String>),
+    SelectProtocol(usize),
+    ConfirmProtocol,
 
     // Manual config
     ManualImapHostChanged(String),
@@ -131,7 +154,9 @@ pub enum AddAccountMessage {
 
     // Step 3: Authentication
     // OAuth
+    OAuthComplete(u64, Result<OAuthSuccess, String>),
     CancelOAuth,
+    RetryOAuth,
 
     // Password
     UsernameChanged(String),
@@ -147,6 +172,7 @@ pub enum AddAccountMessage {
     AuthSmtpPortChanged(String),
     AuthSmtpSecurityChanged(SecurityOption),
     SubmitCredentials,
+    ValidationComplete(u64, Result<(), String>),
 
     // Step 4: Identity
     AccountNameChanged(String),
@@ -159,6 +185,7 @@ pub enum AddAccountMessage {
     // General
     Cancel,
     Back,
+    DismissError,
 }
 
 /// Events emitted to App.
@@ -178,8 +205,16 @@ pub struct AddAccountWizard {
     pub email: String,
     pub error: Option<String>,
     pub generation: u64,
+    // Discovery result
+    pub discovery: Option<DiscoveredConfig>,
+    pub selected_option: Option<usize>,
     // Auth state
     pub auth_state: AuthState,
+    // OAuth result (stored when OAuth completes for account creation)
+    pub oauth_success: Option<OAuthSuccess>,
+    // Provider determined from discovery/selection
+    pub resolved_provider: String,
+    pub resolved_auth_method: String,
     // Identity
     pub identity: AccountIdentity,
     /// Colors already assigned to existing accounts (hex strings).
@@ -212,7 +247,12 @@ impl AddAccountWizard {
             email: String::new(),
             error: None,
             generation: 0,
+            discovery: None,
+            selected_option: None,
             auth_state: AuthState::default(),
+            oauth_success: None,
+            resolved_provider: "imap".to_string(),
+            resolved_auth_method: "password".to_string(),
             identity: AccountIdentity {
                 name: String::new(),
                 selected_color_index: Some(first_unused),
@@ -253,29 +293,56 @@ impl Component for AddAccountWizard {
             AddAccountMessage::DiscoveryComplete(g, _) if g != self.generation => {
                 (Task::none(), None)
             }
-            AddAccountMessage::DiscoveryComplete(_, Ok(())) => {
-                // Discovery succeeded — go to password auth for now
-                // TODO: Wire real discovery to determine OAuth vs password
-                self.prefill_from_email();
+            AddAccountMessage::DiscoveryComplete(_, Ok(config)) => {
+                self.handle_discovery_result(config)
+            }
+            AddAccountMessage::DiscoveryComplete(_, Err(e)) => {
+                // Duplicate account errors go back to email input.
+                // Discovery failures go to manual configuration.
+                if e.contains("already configured") || e.contains("Database error") {
+                    self.error = Some(e);
+                    self.step = AddAccountStep::EmailInput;
+                } else {
+                    self.error = Some(format!(
+                        "We couldn't auto-detect your mail server. {e}"
+                    ));
+                    self.step = AddAccountStep::ManualConfiguration;
+                }
+                (Task::none(), None)
+            }
+            AddAccountMessage::SelectProtocol(idx) => {
+                self.selected_option = Some(idx);
+                (Task::none(), None)
+            }
+            AddAccountMessage::ConfirmProtocol => self.handle_confirm_protocol(),
+            AddAccountMessage::SubmitManualConfig => self.handle_submit_manual_config(),
+            AddAccountMessage::SubmitCredentials => self.handle_submit_credentials(),
+            AddAccountMessage::ValidationComplete(g, _) if g != self.generation => {
+                (Task::none(), None)
+            }
+            AddAccountMessage::ValidationComplete(_, Ok(())) => {
+                self.prefill_identity_name();
+                self.step = AddAccountStep::Identity;
+                self.error = None;
+                (Task::none(), None)
+            }
+            AddAccountMessage::ValidationComplete(_, Err(e)) => {
+                self.error = Some(e);
                 self.step = AddAccountStep::PasswordAuth;
                 (Task::none(), None)
             }
-            AddAccountMessage::DiscoveryComplete(_, Err(e)) => {
-                self.error = Some(format!(
-                    "We couldn't auto-detect your mail server. {e}"
-                ));
-                self.step = AddAccountStep::ManualConfiguration;
+            AddAccountMessage::OAuthComplete(g, _) if g != self.generation => {
                 (Task::none(), None)
             }
-            AddAccountMessage::SubmitManualConfig => {
-                self.handle_submit_manual_config()
+            AddAccountMessage::OAuthComplete(_, Ok(success)) => {
+                self.handle_oauth_success(success)
             }
-            AddAccountMessage::SubmitCredentials => {
-                self.handle_submit_credentials()
+            AddAccountMessage::OAuthComplete(_, Err(e)) => {
+                self.error = Some(e);
+                (Task::none(), None)
             }
-            AddAccountMessage::SubmitIdentity => {
-                self.handle_submit_identity()
-            }
+            AddAccountMessage::RetryOAuth => self.handle_retry_oauth(),
+            AddAccountMessage::SubmitIdentity => self.handle_submit_identity(),
             AddAccountMessage::AccountCreated(g, _) if g != self.generation => {
                 (Task::none(), None)
             }
@@ -294,6 +361,10 @@ impl Component for AddAccountWizard {
                 self.handle_back();
                 (Task::none(), None)
             }
+            AddAccountMessage::DismissError => {
+                self.error = None;
+                (Task::none(), None)
+            }
             _ => {
                 self.handle_field_update(message);
                 (Task::none(), None)
@@ -305,7 +376,7 @@ impl Component for AddAccountWizard {
         match self.step {
             AddAccountStep::EmailInput => self.view_email_input(),
             AddAccountStep::Discovering => view_discovering(),
-            AddAccountStep::ProtocolSelection => view_protocol_selection(),
+            AddAccountStep::ProtocolSelection => self.view_protocol_selection(),
             AddAccountStep::ManualConfiguration => self.view_manual_config(),
             AddAccountStep::OAuthWaiting => self.view_oauth_waiting(),
             AddAccountStep::PasswordAuth => self.view_password_auth(),
@@ -327,24 +398,220 @@ impl AddAccountWizard {
             self.error = Some("Please enter a valid email address.".to_string());
             return (Task::none(), None);
         }
-        self.email = email;
+        self.email = email.clone();
         self.step = AddAccountStep::Discovering;
         self.error = None;
         self.generation += 1;
         let generation = self.generation;
+        let db = Arc::clone(&self.db);
 
-        // TODO: Wire real discovery via ratatoskr_core::discovery::discover().
-        // For now, simulate discovery completing after a short delay by
-        // immediately returning success — the state machine structure is
-        // correct and the real discovery call can be dropped in later.
         let task = Task::perform(
             async move {
-                // Placeholder: real discovery would run here
-                (generation, Ok(()))
+                // Duplicate check — run synchronously inside spawn_blocking
+                let email_for_dup = email.clone();
+                let dup = db.with_conn(move |conn| {
+                    account_exists_by_email_sync(conn, &email_for_dup)
+                }).await;
+                match dup {
+                    Ok(true) => {
+                        return (
+                            generation,
+                            Err("This account is already configured.".to_string()),
+                        );
+                    }
+                    Err(e) => {
+                        return (generation, Err(format!("Database error: {e}")));
+                    }
+                    Ok(false) => {}
+                }
+
+                // Run real discovery with 15s timeout
+                let result = ratatoskr_core::discovery::discover(&email).await;
+                (generation, result)
             },
             |(g, result)| AddAccountMessage::DiscoveryComplete(g, result),
         );
         (task, None)
+    }
+
+    fn handle_discovery_result(
+        &mut self,
+        config: DiscoveredConfig,
+    ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
+        if config.options.is_empty() {
+            self.error = Some(
+                "We couldn't auto-detect your mail server.".to_string(),
+            );
+            self.step = AddAccountStep::ManualConfiguration;
+            return (Task::none(), None);
+        }
+
+        self.discovery = Some(config.clone());
+
+        // Auto-proceed when exactly one high-confidence option
+        let auto_proceed = config.options.len() == 1
+            && config.options[0].source.is_high_confidence();
+
+        if auto_proceed {
+            self.selected_option = Some(0);
+            return self.proceed_to_auth(&config.options[0]);
+        }
+
+        // Multiple options or lower confidence: show selection
+        self.selected_option = Some(0);
+        self.step = AddAccountStep::ProtocolSelection;
+        (Task::none(), None)
+    }
+
+    fn handle_confirm_protocol(
+        &mut self,
+    ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
+        let config = match &self.discovery {
+            Some(c) => c.clone(),
+            None => return (Task::none(), None),
+        };
+        let idx = self.selected_option.unwrap_or(0);
+        let Some(option) = config.options.get(idx) else {
+            return (Task::none(), None);
+        };
+        self.proceed_to_auth(option)
+    }
+
+    fn proceed_to_auth(
+        &mut self,
+        option: &ProtocolOption,
+    ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
+        // Set the provider string for account creation
+        self.resolved_provider = protocol_to_db_provider(&option.protocol);
+
+        match &option.auth.method {
+            AuthMethod::OAuth2 {
+                provider_id,
+                auth_url,
+                token_url,
+                scopes,
+                use_pkce,
+            } => {
+                self.resolved_auth_method = "oauth".to_string();
+                self.step = AddAccountStep::OAuthWaiting;
+                self.error = None;
+                self.generation += 1;
+                let generation = self.generation;
+
+                let request = ratatoskr_core::oauth::OAuthProviderAuthorizationRequest {
+                    provider_id: provider_id.clone(),
+                    auth_url: auth_url.clone(),
+                    token_url: token_url.clone(),
+                    scopes: scopes.clone(),
+                    user_info_url: None,
+                    use_pkce: *use_pkce,
+                    client_id: resolve_client_id(provider_id),
+                    client_secret: None,
+                };
+
+                let provider_id_clone = provider_id.clone();
+                let client_id_clone = resolve_client_id(provider_id);
+
+                let task = Task::perform(
+                    async move {
+                        let provider =
+                            ratatoskr_core::oauth::GenericOAuthProvider::from_request(request);
+                        let open_url = |url: &str| -> Result<(), String> {
+                            open_browser_url(url)
+                        };
+                        let result = ratatoskr_core::oauth::authorize_with_provider(
+                            &provider, &open_url,
+                        )
+                        .await;
+                        let mapped = result.map(|bundle| OAuthSuccess {
+                            access_token: bundle.tokens.access_token,
+                            refresh_token: bundle.tokens.refresh_token,
+                            token_expires_at: Some(
+                                chrono::Utc::now().timestamp()
+                                    + bundle.tokens.expires_in as i64,
+                            ),
+                            user_email: bundle.user_info.email,
+                            user_name: bundle.user_info.name,
+                            oauth_provider: provider_id_clone,
+                            oauth_client_id: client_id_clone,
+                        });
+                        (generation, mapped)
+                    },
+                    |(g, result)| AddAccountMessage::OAuthComplete(g, result),
+                );
+                (task, None)
+            }
+
+            AuthMethod::Password => {
+                self.resolved_auth_method = "password".to_string();
+                self.prefill_auth_from_option(option);
+                self.step = AddAccountStep::PasswordAuth;
+                self.error = None;
+                (Task::none(), None)
+            }
+
+            AuthMethod::OAuth2Unsupported { provider_domain } => {
+                self.resolved_auth_method = "password".to_string();
+                self.prefill_auth_from_option(option);
+                self.step = AddAccountStep::PasswordAuth;
+                self.error = Some(format!(
+                    "This provider requires an app-specific password. \
+                     Check {provider_domain} for setup instructions."
+                ));
+                (Task::none(), None)
+            }
+        }
+    }
+
+    fn prefill_auth_from_option(&mut self, option: &ProtocolOption) {
+        if let Protocol::Imap {
+            ref incoming,
+            ref outgoing,
+        } = option.protocol
+        {
+            self.auth_state.imap_host = incoming.hostname.clone();
+            self.auth_state.imap_port = incoming.port.to_string();
+            self.auth_state.imap_security = match incoming.security {
+                Security::Tls => SecurityOption::Tls,
+                Security::StartTls => SecurityOption::StartTls,
+                Security::None => SecurityOption::None,
+            };
+            self.auth_state.smtp_host = outgoing.hostname.clone();
+            self.auth_state.smtp_port = outgoing.port.to_string();
+            self.auth_state.smtp_security = match outgoing.security {
+                Security::Tls => SecurityOption::Tls,
+                Security::StartTls => SecurityOption::StartTls,
+                Security::None => SecurityOption::None,
+            };
+            self.auth_state.username = self.email.clone();
+        }
+    }
+
+    fn handle_oauth_success(
+        &mut self,
+        success: OAuthSuccess,
+    ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
+        self.oauth_success = Some(success);
+        self.prefill_identity_name();
+        self.step = AddAccountStep::Identity;
+        self.error = None;
+        (Task::none(), None)
+    }
+
+    fn handle_retry_oauth(
+        &mut self,
+    ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
+        // Re-run the OAuth flow using the stored discovery config
+        let config = match &self.discovery {
+            Some(c) => c.clone(),
+            None => return (Task::none(), None),
+        };
+        let idx = self.selected_option.unwrap_or(0);
+        let Some(option) = config.options.get(idx) else {
+            return (Task::none(), None);
+        };
+        self.error = None;
+        self.proceed_to_auth(option)
     }
 
     fn handle_submit_manual_config(
@@ -352,6 +619,8 @@ impl AddAccountWizard {
     ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
         // Copy manual config fields to auth state and proceed to password auth
         self.prefill_from_email();
+        self.resolved_provider = "imap".to_string();
+        self.resolved_auth_method = "password".to_string();
         self.step = AddAccountStep::PasswordAuth;
         self.error = None;
         (Task::none(), None)
@@ -368,12 +637,36 @@ impl AddAccountWizard {
             self.error = Some("Password is required.".to_string());
             return (Task::none(), None);
         }
-        // TODO: Wire credential validation (test IMAP connection).
-        // For now, skip validation and go straight to identity step.
-        self.prefill_identity_name();
-        self.step = AddAccountStep::Identity;
+
+        // Wire credential validation — test IMAP connection
+        self.step = AddAccountStep::Validating;
         self.error = None;
-        (Task::none(), None)
+        self.generation += 1;
+        let generation = self.generation;
+
+        let host = self.auth_state.imap_host.clone();
+        let port_str = self.auth_state.imap_port.clone();
+        let security = self.auth_state.imap_security;
+        let username = self.auth_state.username.clone();
+        let password = self.auth_state.password.clone();
+        let accept_invalid_certs = self.auth_state.accept_invalid_certs;
+
+        let task = Task::perform(
+            async move {
+                let result = validate_imap_connection(
+                    &host,
+                    &port_str,
+                    security,
+                    &username,
+                    &password,
+                    accept_invalid_certs,
+                )
+                .await;
+                (generation, result)
+            },
+            |(g, result)| AddAccountMessage::ValidationComplete(g, result),
+        );
+        (task, None)
     }
 
     fn handle_submit_identity(
@@ -388,74 +681,102 @@ impl AddAccountWizard {
         self.generation += 1;
         let generation = self.generation;
 
-        // Build the account creation params
-        let color = self.selected_color_hex();
-        let account_name = self.identity.name.trim().to_string();
-        let email = self.email.clone();
-        let auth = self.auth_state.clone();
+        let create_params = self.build_create_params();
         let db = Arc::clone(&self.db);
 
         let task = Task::perform(
             async move {
-                let account_id = uuid::Uuid::new_v4().to_string();
-                let aid = account_id.clone();
-                db.with_write_conn(move |conn| {
-                    // SMTP credentials: separate if the user toggled the
-                    // checkbox, otherwise same as IMAP.
-                    let (smtp_user, smtp_pass) = if auth.use_separate_smtp_credentials {
-                        (
-                            Some(auth.smtp_username.clone()),
-                            Some(auth.smtp_password.clone()),
-                        )
-                    } else {
-                        (None, None)
-                    };
-
-                    conn.execute(
-                        "INSERT INTO accounts (
-                            id, email, display_name, provider, auth_method,
-                            imap_host, imap_port, imap_security,
-                            imap_username, imap_password,
-                            smtp_host, smtp_port, smtp_security,
-                            smtp_username, smtp_password,
-                            accept_invalid_certs,
-                            account_name, account_color
-                        ) VALUES (
-                            ?1, ?2, NULL, 'imap', 'password',
-                            ?3, ?4, ?5, ?6, ?7,
-                            ?8, ?9, ?10, ?11, ?12,
-                            ?13, ?14, ?15
-                        )",
-                        rusqlite::params![
-                            aid,
-                            email,
-                            auth.imap_host,
-                            auth.imap_port,
-                            auth.imap_security.to_db_string(),
-                            auth.username,
-                            auth.password,
-                            auth.smtp_host,
-                            auth.smtp_port,
-                            auth.smtp_security.to_db_string(),
-                            smtp_user,
-                            smtp_pass,
-                            if auth.accept_invalid_certs { 1 } else { 0 },
-                            account_name,
-                            color,
-                        ],
-                    )
-                    .map_err(|e| format!("Failed to create account: {e}"))?;
-                    Ok(aid)
-                })
-                .await
-                .map(|id| (generation, Ok(id)))
-                .unwrap_or_else(|e| (generation, Err(e)))
+                let result = db
+                    .with_write_conn(move |conn| {
+                        create_account_sync(conn, create_params)
+                    })
+                    .await;
+                match result {
+                    Ok(id) => (generation, Ok(id)),
+                    Err(e) => (generation, Err(e)),
+                }
             },
             |(g, result): (u64, Result<String, String>)| {
                 AddAccountMessage::AccountCreated(g, result)
             },
         );
         (task, None)
+    }
+
+    fn build_create_params(&self) -> CreateAccountParams {
+        let color = self.selected_color_hex();
+        let account_name = self.identity.name.trim().to_string();
+
+        // SMTP credentials: separate if the user toggled the checkbox
+        let (smtp_user, smtp_pass) = if self.auth_state.use_separate_smtp_credentials {
+            (
+                Some(self.auth_state.smtp_username.clone()),
+                Some(self.auth_state.smtp_password.clone()),
+            )
+        } else {
+            (None, None)
+        };
+
+        // Build params based on auth method (password vs OAuth)
+        if let Some(ref oauth) = self.oauth_success {
+            CreateAccountParams {
+                email: self.email.clone(),
+                provider: self.resolved_provider.clone(),
+                display_name: Some(oauth.user_name.clone()),
+                account_name,
+                account_color: color,
+                auth_method: self.resolved_auth_method.clone(),
+                access_token: Some(oauth.access_token.clone()),
+                refresh_token: oauth.refresh_token.clone(),
+                token_expires_at: oauth.token_expires_at,
+                oauth_provider: Some(oauth.oauth_provider.clone()),
+                oauth_client_id: Some(oauth.oauth_client_id.clone()),
+                imap_host: None,
+                imap_port: None,
+                imap_security: None,
+                imap_username: None,
+                imap_password: None,
+                smtp_host: None,
+                smtp_port: None,
+                smtp_security: None,
+                smtp_username: None,
+                smtp_password: None,
+                jmap_url: None,
+                accept_invalid_certs: false,
+            }
+        } else {
+            let imap_port = self.auth_state.imap_port.parse::<i64>().ok();
+            let smtp_port = self.auth_state.smtp_port.parse::<i64>().ok();
+            CreateAccountParams {
+                email: self.email.clone(),
+                provider: self.resolved_provider.clone(),
+                display_name: None,
+                account_name,
+                account_color: color,
+                auth_method: self.resolved_auth_method.clone(),
+                access_token: None,
+                refresh_token: None,
+                token_expires_at: None,
+                oauth_provider: None,
+                oauth_client_id: None,
+                imap_host: Some(self.auth_state.imap_host.clone()),
+                imap_port,
+                imap_security: Some(
+                    self.auth_state.imap_security.to_db_string().to_string(),
+                ),
+                imap_username: Some(self.auth_state.username.clone()),
+                imap_password: Some(self.auth_state.password.clone()),
+                smtp_host: Some(self.auth_state.smtp_host.clone()),
+                smtp_port,
+                smtp_security: Some(
+                    self.auth_state.smtp_security.to_db_string().to_string(),
+                ),
+                smtp_username: smtp_user,
+                smtp_password: smtp_pass,
+                jmap_url: None,
+                accept_invalid_certs: self.auth_state.accept_invalid_certs,
+            }
+        }
     }
 
     fn handle_back(&mut self) {
@@ -465,7 +786,12 @@ impl AddAccountWizard {
                 self.error = None;
             }
             AddAccountStep::Identity => {
-                self.step = AddAccountStep::PasswordAuth;
+                // Go back to auth step, depending on method
+                if self.oauth_success.is_some() {
+                    self.step = AddAccountStep::OAuthWaiting;
+                } else {
+                    self.step = AddAccountStep::PasswordAuth;
+                }
                 self.error = None;
             }
             AddAccountStep::ProtocolSelection => {
@@ -564,6 +890,133 @@ fn titlecase(s: &str) -> String {
     }
 }
 
+// ── Protocol helpers ─────────────────────────────────────
+
+fn protocol_to_db_provider(protocol: &Protocol) -> String {
+    match protocol {
+        Protocol::GmailApi => "gmail_api".to_string(),
+        Protocol::MicrosoftGraph => "graph".to_string(),
+        Protocol::Jmap { .. } => "jmap".to_string(),
+        Protocol::Imap { .. } => "imap".to_string(),
+    }
+}
+
+fn protocol_display_name(protocol: &Protocol, provider_name: Option<&str>) -> String {
+    match (protocol, provider_name) {
+        (_, Some(name)) => name.to_string(),
+        (Protocol::GmailApi, _) => "Gmail".to_string(),
+        (Protocol::MicrosoftGraph, _) => "Microsoft 365".to_string(),
+        (Protocol::Jmap { .. }, _) => "JMAP".to_string(),
+        (Protocol::Imap { .. }, _) => "IMAP".to_string(),
+    }
+}
+
+fn protocol_detail(protocol: &Protocol) -> String {
+    match protocol {
+        Protocol::GmailApi => "Gmail API (recommended)".to_string(),
+        Protocol::MicrosoftGraph => "Microsoft Graph API".to_string(),
+        Protocol::Jmap { session_url } => format!("JMAP: {session_url}"),
+        Protocol::Imap { incoming, outgoing } => {
+            format!(
+                "IMAP: {}:{} / SMTP: {}:{}",
+                incoming.hostname, incoming.port, outgoing.hostname, outgoing.port
+            )
+        }
+    }
+}
+
+fn source_display(source: &DiscoverySource) -> &str {
+    match source {
+        DiscoverySource::Registry => "Known provider",
+        DiscoverySource::AutoconfigXml { .. } => "Auto-detected",
+        DiscoverySource::MxLookup { .. } => "MX lookup",
+        DiscoverySource::JmapWellKnown => "JMAP discovery",
+        DiscoverySource::PortProbe => "Port scan",
+    }
+}
+
+fn resolve_client_id(provider_id: &str) -> String {
+    match provider_id {
+        "microsoft" | "microsoft_graph" => {
+            ratatoskr_core::oauth::MICROSOFT_DEFAULT_CLIENT_ID.to_string()
+        }
+        // For Google, the client_id is typically embedded in the app.
+        // If not available, the OAuth flow will use the discovery registry value.
+        _ => String::new(),
+    }
+}
+
+fn open_browser_url(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(url)
+            .spawn()
+            .map_err(|e| format!("Failed to open browser: {e}"))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(url)
+            .spawn()
+            .map_err(|e| format!("Failed to open browser: {e}"))?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/c", "start", url])
+            .spawn()
+            .map_err(|e| format!("Failed to open browser: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Test IMAP connection to validate credentials.
+async fn validate_imap_connection(
+    host: &str,
+    port_str: &str,
+    security: SecurityOption,
+    username: &str,
+    password: &str,
+    accept_invalid_certs: bool,
+) -> Result<(), String> {
+    let port: u16 = port_str
+        .parse()
+        .map_err(|_| "Invalid port number".to_string())?;
+
+    let security_str = security.to_db_string().to_string();
+
+    let config = ratatoskr_core::imap::types::ImapConfig {
+        host: host.to_string(),
+        port,
+        security: security_str,
+        username: username.to_string(),
+        password: password.to_string(),
+        auth_method: "password".to_string(),
+        accept_invalid_certs,
+    };
+
+    // Connect and immediately close — we just want to verify credentials
+    let session = ratatoskr_core::imap::connection::connect(&config).await?;
+    drop(session);
+    Ok(())
+}
+
+// ── DiscoverySource extension ────────────────────────────
+
+trait HighConfidence {
+    fn is_high_confidence(&self) -> bool;
+}
+
+impl HighConfidence for DiscoverySource {
+    fn is_high_confidence(&self) -> bool {
+        matches!(
+            self,
+            DiscoverySource::Registry | DiscoverySource::JmapWellKnown
+        )
+    }
+}
+
 // ── View: Email Input ────────────────────────────────────
 
 impl AddAccountWizard {
@@ -649,28 +1102,96 @@ fn view_discovering<'a>() -> Element<'a, AddAccountMessage> {
     .into()
 }
 
-// ── View: Protocol Selection (placeholder) ───────────────
+// ── View: Protocol Selection ─────────────────────────────
 
-fn view_protocol_selection<'a>() -> Element<'a, AddAccountMessage> {
-    // TODO: Render discovered protocol options as selectable cards.
-    // For now this step is skipped — discovery goes straight to auth.
-    column![
-        text("Choose your email provider")
-            .size(TEXT_HEADING)
-            .style(text::base)
-            .font(iced::Font {
-                weight: iced::font::Weight::Bold,
-                ..font::text()
-            }),
-        Space::new().height(SPACE_MD),
-        text("Protocol selection coming soon.")
-            .size(TEXT_LG)
-            .style(text::secondary),
-        Space::new().height(SPACE_LG),
-        ghost_button("Cancel", AddAccountMessage::Cancel),
+impl AddAccountWizard {
+    fn view_protocol_selection(&self) -> Element<'_, AddAccountMessage> {
+        let config = match &self.discovery {
+            Some(c) => c,
+            None => return column![].into(),
+        };
+
+        let mut col = column![
+            text("Choose your email provider")
+                .size(TEXT_HEADING)
+                .style(text::base)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..font::text(),
+                }),
+            Space::new().height(SPACE_XS),
+            text(&self.email).size(TEXT_LG).style(text::secondary),
+        ]
+        .spacing(SPACE_XS)
+        .width(Length::Fill);
+
+        col = col.push(Space::new().height(SPACE_MD));
+
+        for (i, option) in config.options.iter().enumerate() {
+            let selected = self.selected_option == Some(i);
+            col = col.push(protocol_card_view(option, i, selected));
+        }
+
+        col = col.push(Space::new().height(SPACE_MD));
+        col = col.push(primary_button(
+            "Continue",
+            AddAccountMessage::ConfirmProtocol,
+        ));
+        col = col.push(ghost_button("Back", AddAccountMessage::Back));
+
+        col.into()
+    }
+}
+
+fn protocol_card_view<'a>(
+    option: &ProtocolOption,
+    index: usize,
+    selected: bool,
+) -> Element<'a, AddAccountMessage> {
+    let name = protocol_display_name(
+        &option.protocol,
+        option.provider_name.as_deref(),
+    );
+    let detail = protocol_detail(&option.protocol);
+    let source_label = source_display(&option.source);
+
+    let content = row![
+        container(
+            column![
+                text(name)
+                    .size(TEXT_LG)
+                    .style(text::base)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..font::text()
+                    }),
+                text(detail).size(TEXT_SM).style(text::secondary),
+            ]
+            .spacing(SPACE_XXXS),
+        )
+        .width(Length::Fill)
+        .align_y(Alignment::Center),
+        container(text(source_label).size(TEXT_XS).style(text::secondary))
+            .align_y(Alignment::Center),
     ]
-    .spacing(SPACE_XS)
-    .align_x(Alignment::Center)
+    .spacing(SPACE_SM)
+    .align_y(Alignment::Center);
+
+    let style = if selected {
+        theme::ButtonClass::Chip { active: true }
+    } else {
+        theme::ButtonClass::Action
+    };
+
+    button(
+        container(content)
+            .padding(PAD_CARD)
+            .width(Length::Fill)
+            .height(PROTOCOL_CARD_HEIGHT),
+    )
+    .on_press(AddAccountMessage::SelectProtocol(index))
+    .padding(0)
+    .style(style.style())
     .width(Length::Fill)
     .into()
 }
@@ -754,6 +1275,8 @@ impl AddAccountWizard {
         if let Some(ref err) = self.error {
             col = col.push(Space::new().height(SPACE_SM));
             col = col.push(text(err.as_str()).size(TEXT_SM).style(text::danger));
+            col = col.push(Space::new().height(SPACE_SM));
+            col = col.push(primary_button("Retry", AddAccountMessage::RetryOAuth));
         }
 
         col = col.push(Space::new().height(SPACE_LG));
@@ -1051,25 +1574,33 @@ impl<M> iced::widget::canvas::Program<M> for SwatchPainter {
 
         // Draw a small check for already-used colors
         if self.used {
-            let check_color = iced::Color::WHITE;
-            let check = iced::widget::canvas::path::Path::new(|b| {
-                let cx = bounds.width / 2.0;
-                let cy = bounds.height / 2.0;
-                let s = radius * 0.35;
-                b.move_to(iced::Point::new(cx - s * 0.5, cy));
-                b.line_to(iced::Point::new(cx - s * 0.1, cy + s * 0.4));
-                b.line_to(iced::Point::new(cx + s * 0.5, cy - s * 0.3));
-            });
-            frame.stroke(
-                &check,
-                iced::widget::canvas::Stroke::default()
-                    .with_color(check_color)
-                    .with_width(2.0),
-            );
+            draw_check_mark(&mut frame, bounds, radius);
         }
 
         vec![frame.into_geometry()]
     }
+}
+
+fn draw_check_mark(
+    frame: &mut iced::widget::canvas::Frame<iced::Renderer>,
+    bounds: iced::Rectangle,
+    radius: f32,
+) {
+    let check_color = iced::Color::WHITE;
+    let check = iced::widget::canvas::path::Path::new(|b| {
+        let cx = bounds.width / 2.0;
+        let cy = bounds.height / 2.0;
+        let s = radius * 0.35;
+        b.move_to(iced::Point::new(cx - s * 0.5, cy));
+        b.line_to(iced::Point::new(cx - s * 0.1, cy + s * 0.4));
+        b.line_to(iced::Point::new(cx + s * 0.5, cy - s * 0.3));
+    });
+    frame.stroke(
+        &check,
+        iced::widget::canvas::Stroke::default()
+            .with_color(check_color)
+            .with_width(2.0),
+    );
 }
 
 // ── Shared view helpers ──────────────────────────────────

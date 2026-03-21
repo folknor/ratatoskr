@@ -46,6 +46,7 @@ pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
     let main_content: Element<'_, SettingsMessage> = if show_overlay {
         let overlay_content = match state.overlay {
             Some(SettingsOverlay::CreateFilter) => create_filter_overlay(),
+            Some(SettingsOverlay::AccountEditor) => account_editor_overlay(state),
             Some(SettingsOverlay::EditSignature { .. }) => signature_editor_overlay(state),
             Some(SettingsOverlay::EditContact { .. }) => contact_editor_overlay(state),
             Some(SettingsOverlay::EditGroup { .. }) => group_editor_overlay(state),
@@ -587,6 +588,282 @@ fn create_filter_overlay<'a>() -> Element<'a, SettingsMessage> {
     ]));
 
     col.into()
+}
+
+// ── Account editor overlay ───────────────────────────────
+
+fn account_editor_overlay(state: &Settings) -> Element<'_, SettingsMessage> {
+    let editor = match &state.editing_account {
+        Some(e) => e,
+        None => return column![].into(),
+    };
+
+    let mut col = column![]
+        .spacing(SPACE_LG)
+        .width(Length::Fill)
+        .max_width(SETTINGS_CONTENT_MAX_WIDTH);
+
+    col = col.push(
+        text("Edit Account")
+            .size(TEXT_HEADING)
+            .style(text::base)
+            .font(iced::Font {
+                weight: iced::font::Weight::Bold,
+                ..crate::font::text()
+            }),
+    );
+
+    col = col.push(
+        text(&editor.account_email)
+            .size(TEXT_LG)
+            .style(text::secondary),
+    );
+
+    // Account name
+    col = col.push(account_editor_name_section(editor));
+
+    // Display name
+    col = col.push(section(
+        "Display Name",
+        vec![container(
+            column![
+                text("Display Name").size(TEXT_SM).style(text::secondary),
+                text_input("Your Name", &editor.display_name)
+                    .on_input(SettingsMessage::DisplayNameEditorChanged)
+                    .size(TEXT_LG)
+                    .padding(PAD_INPUT)
+                    .style(theme::TextInputClass::Settings.style()),
+            ]
+            .spacing(SPACE_XXXS)
+            .width(Length::Fill),
+        )
+        .padding(PAD_SETTINGS_ROW)
+        .width(Length::Fill)
+        .into()],
+    ));
+
+    // Account color
+    col = col.push(account_editor_color_section(state, editor));
+
+    // CalDAV settings
+    col = col.push(account_editor_caldav_section(editor));
+
+    // Re-authenticate action
+    col = col.push(section("Authentication", vec![
+        action_row(
+            "Re-authenticate",
+            Some("Sign in again to refresh credentials"),
+            None,
+            ActionKind::InApp,
+            SettingsMessage::ReauthenticateAccount(editor.account_id.clone()),
+        ),
+    ]));
+
+    // Delete section
+    col = col.push(account_editor_delete_section(editor));
+
+    // Save button
+    if editor.dirty {
+        col = col.push(
+            button(
+                container(
+                    text("Save Changes")
+                        .size(TEXT_LG)
+                        .color(theme::ON_AVATAR),
+                )
+                .center_x(Length::Fill),
+            )
+            .on_press(SettingsMessage::SaveAccountEditor)
+            .padding(PAD_BUTTON)
+            .style(theme::ButtonClass::Primary.style())
+            .width(Length::Fill),
+        );
+    }
+
+    col.into()
+}
+
+fn account_editor_name_section(
+    editor: &AccountEditor,
+) -> Element<'_, SettingsMessage> {
+    section(
+        "Account Name",
+        vec![container(
+            column![
+                text("Account Name").size(TEXT_SM).style(text::secondary),
+                text_input("e.g. Work", &editor.account_name)
+                    .on_input(SettingsMessage::AccountNameEditorChanged)
+                    .size(TEXT_LG)
+                    .padding(PAD_INPUT)
+                    .style(theme::TextInputClass::Settings.style()),
+            ]
+            .spacing(SPACE_XXXS)
+            .width(Length::Fill),
+        )
+        .padding(PAD_SETTINGS_ROW)
+        .width(Length::Fill)
+        .into()],
+    )
+}
+
+fn account_editor_color_section<'a>(
+    state: &'a Settings,
+    editor: &'a AccountEditor,
+) -> Element<'a, SettingsMessage> {
+    let presets = ratatoskr_label_colors::category_colors::all_presets();
+    let used_colors: Vec<String> = state
+        .managed_accounts
+        .iter()
+        .filter(|a| a.id != editor.account_id)
+        .filter_map(|a| a.account_color.clone())
+        .collect();
+
+    let mut grid = column![].spacing(SPACE_XS);
+    let mut current_row = row![].spacing(SPACE_XS);
+
+    for (i, &(_name, bg_hex, _fg_hex)) in presets.iter().enumerate() {
+        let is_selected = editor.account_color_index == Some(i);
+        let is_used = used_colors.iter().any(|c| c == bg_hex);
+        let color = crate::ui::theme::hex_to_color(bg_hex);
+
+        let swatch = widgets::color_dot_sized(color, COLOR_SWATCH_SIZE);
+
+        let style = if is_selected {
+            theme::ButtonClass::Chip { active: true }
+        } else if is_used {
+            theme::ButtonClass::BareTransparent
+        } else {
+            theme::ButtonClass::BareTransparent
+        };
+
+        let swatch_btn = button(swatch)
+            .on_press(SettingsMessage::AccountColorEditorChanged(i))
+            .padding(2)
+            .style(style.style());
+
+        current_row = current_row.push(swatch_btn);
+
+        if (i + 1) % COLOR_PALETTE_COLUMNS == 0 {
+            grid = grid.push(current_row);
+            current_row = row![].spacing(SPACE_XS);
+        }
+    }
+
+    if presets.len() % COLOR_PALETTE_COLUMNS != 0 {
+        grid = grid.push(current_row);
+    }
+
+    section(
+        "Account Color",
+        vec![container(grid)
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill)
+            .into()],
+    )
+}
+
+fn account_editor_caldav_section(
+    editor: &AccountEditor,
+) -> Element<'_, SettingsMessage> {
+    let fields = column![
+        column![
+            text("CalDAV URL").size(TEXT_SM).style(text::secondary),
+            text_input("https://", &editor.caldav_url)
+                .on_input(SettingsMessage::CaldavUrlChanged)
+                .size(TEXT_LG)
+                .padding(PAD_INPUT)
+                .style(theme::TextInputClass::Settings.style()),
+        ]
+        .spacing(SPACE_XXXS)
+        .width(Length::Fill),
+        column![
+            text("Username").size(TEXT_SM).style(text::secondary),
+            text_input("", &editor.caldav_username)
+                .on_input(SettingsMessage::CaldavUsernameChanged)
+                .size(TEXT_LG)
+                .padding(PAD_INPUT)
+                .style(theme::TextInputClass::Settings.style()),
+        ]
+        .spacing(SPACE_XXXS)
+        .width(Length::Fill),
+        column![
+            text("Password").size(TEXT_SM).style(text::secondary),
+            text_input("", &editor.caldav_password)
+                .on_input(SettingsMessage::CaldavPasswordChanged)
+                .size(TEXT_LG)
+                .padding(PAD_INPUT)
+                .style(theme::TextInputClass::Settings.style()),
+        ]
+        .spacing(SPACE_XXXS)
+        .width(Length::Fill),
+    ]
+    .spacing(SPACE_SM);
+
+    section(
+        "Calendar (CalDAV)",
+        vec![container(fields)
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill)
+            .into()],
+    )
+}
+
+fn account_editor_delete_section(
+    editor: &AccountEditor,
+) -> Element<'_, SettingsMessage> {
+    if editor.show_delete_confirmation {
+        section(
+            "Danger Zone",
+            vec![container(
+                column![
+                    text("Are you sure you want to delete this account?")
+                        .size(TEXT_LG)
+                        .style(text::danger),
+                    text("All data for this account will be permanently removed.")
+                        .size(TEXT_SM)
+                        .style(text::secondary),
+                    Space::new().height(SPACE_SM),
+                    row![
+                        button(
+                            text("Delete Account")
+                                .size(TEXT_LG)
+                                .style(text::danger),
+                        )
+                        .on_press(SettingsMessage::DeleteAccountConfirmed(
+                            editor.account_id.clone(),
+                        ))
+                        .padding(PAD_BUTTON)
+                        .style(
+                            theme::ButtonClass::ExperimentSemantic { variant: 2 }
+                                .style(),
+                        ),
+                        Space::new().width(SPACE_SM),
+                        button(
+                            text("Cancel").size(TEXT_LG).style(text::secondary),
+                        )
+                        .on_press(SettingsMessage::DeleteAccountCancelled)
+                        .padding(PAD_BUTTON)
+                        .style(theme::ButtonClass::Ghost.style()),
+                    ],
+                ]
+                .spacing(SPACE_XS),
+            )
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill)
+            .into()],
+        )
+    } else {
+        section(
+            "Danger Zone",
+            vec![action_row(
+                "Delete Account",
+                Some("Remove this account and all its data"),
+                None,
+                ActionKind::InApp,
+                SettingsMessage::DeleteAccountRequested(editor.account_id.clone()),
+            )],
+        )
+    }
 }
 
 // ── Signature list section ───────────────────────────────
@@ -1572,24 +1849,53 @@ fn account_card(account: &ManagedAccount) -> Element<'_, SettingsMessage> {
         .width(Length::Fill),
     );
 
+    let health_dot = health_indicator(account.health);
+
     let right = column![
         text(provider_label).size(TEXT_SM).style(text::secondary),
-        text(sync_label).size(TEXT_XS).style(text::secondary),
+        row![
+            text(sync_label).size(TEXT_XS).style(text::secondary),
+            Space::new().width(SPACE_XS),
+            health_dot,
+        ]
+        .align_y(Alignment::Center),
     ]
     .spacing(SPACE_XXXS)
     .align_x(Alignment::End);
 
-    let content = row![left, right,]
-        .spacing(SPACE_SM)
-        .align_y(Alignment::Center);
+    let content = row![
+        left,
+        right,
+        container(icon::chevron_right().size(ICON_XL).style(text::secondary))
+            .align_y(Alignment::Center),
+    ]
+    .spacing(SPACE_SM)
+    .align_y(Alignment::Center);
 
-    // TODO: AccountCardClicked for slide-in editor (Phase 5b)
-    container(content)
-        .padding(PAD_SETTINGS_ROW)
-        .width(Length::Fill)
-        .height(SETTINGS_TOGGLE_ROW_HEIGHT)
-        .align_y(Alignment::Center)
-        .into()
+    let id = account.id.clone();
+    button(
+        container(content)
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill)
+            .height(SETTINGS_TOGGLE_ROW_HEIGHT)
+            .align_y(Alignment::Center),
+    )
+    .on_press(SettingsMessage::AccountCardClicked(id))
+    .padding(0)
+    .style(theme::ButtonClass::Action.style())
+    .width(Length::Fill)
+    .into()
+}
+
+/// A tiny colored dot indicating account health.
+fn health_indicator(health: AccountHealth) -> Element<'_, SettingsMessage> {
+    let color = match health {
+        AccountHealth::Healthy => iced::Color::from_rgb(0.2, 0.8, 0.3),
+        AccountHealth::Warning => iced::Color::from_rgb(1.0, 0.75, 0.0),
+        AccountHealth::Error => iced::Color::from_rgb(0.9, 0.2, 0.2),
+        AccountHealth::Disabled => iced::Color::from_rgb(0.5, 0.5, 0.5),
+    };
+    widgets::color_dot(color)
 }
 
 fn format_provider_label(provider: &str) -> String {
