@@ -425,6 +425,7 @@ fn query_thread_labels(
             account_id: lr.account_id,
             name: lr.name.clone(),
             label_type: None,
+            label_kind: "container".to_string(),
             color_bg: lr.color_bg,
             color_fg: lr.color_fg,
             visible: true,

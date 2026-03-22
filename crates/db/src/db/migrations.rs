@@ -1412,6 +1412,23 @@ static MIGRATIONS: &[Migration] = &[
             CREATE INDEX IF NOT EXISTS idx_gal_cache_email ON gal_cache(email);
         "#,
     },
+    Migration {
+        version: 67,
+        description: "Labels unification Phase 1: label_kind column + color overrides table",
+        sql: r#"
+            ALTER TABLE labels ADD COLUMN label_kind TEXT NOT NULL DEFAULT 'container';
+
+            -- Gmail user labels and Exchange user labels are tags, not containers.
+            -- The `type` column stores "system" or "user" from the provider.
+            UPDATE labels SET label_kind = 'tag' WHERE type = 'user';
+
+            -- Local-only table for user color overrides, keyed by normalized label name.
+            CREATE TABLE IF NOT EXISTS label_color_overrides (
+                label_name TEXT NOT NULL PRIMARY KEY COLLATE NOCASE,
+                color_bg TEXT NOT NULL
+            );
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks

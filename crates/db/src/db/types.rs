@@ -124,6 +124,9 @@ pub struct DbLabel {
     pub name: String,
     #[serde(rename = "type")]
     pub label_type: Option<String>,
+    /// Whether this label is a container (folder/mailbox) or a tag (category/keyword).
+    /// Values: "container" or "tag".
+    pub label_kind: String,
     pub color_bg: Option<String>,
     pub color_fg: Option<String>,
     pub visible: bool,

@@ -80,6 +80,7 @@ impl_from_row!(DbLabel {
     account_id,
     name,
     label_type as "type",
+    label_kind,
     color_bg,
     color_fg,
     bool visible,
