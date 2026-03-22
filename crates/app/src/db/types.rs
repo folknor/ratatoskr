@@ -26,6 +26,40 @@ pub struct Account {
     pub sort_order: i64,
 }
 
+/// A shared/delegated mailbox discovered via Autodiscover.
+#[derive(Debug, Clone)]
+pub struct SharedMailbox {
+    /// The SMTP address of the shared mailbox (e.g., "support@contoso.com").
+    pub mailbox_id: String,
+    /// Display name from Autodiscover or admin config.
+    pub display_name: Option<String>,
+    /// The parent account ID (the user's personal account).
+    pub account_id: String,
+    /// Whether sync is enabled for this shared mailbox.
+    pub is_sync_enabled: bool,
+    /// Last successful sync timestamp.
+    pub last_synced_at: Option<i64>,
+    /// Last sync error, if any.
+    pub sync_error: Option<String>,
+}
+
+/// A pinned public folder for sidebar display.
+#[derive(Debug, Clone)]
+pub struct PinnedPublicFolder {
+    /// The EWS FolderId or IMAP folder path.
+    pub folder_id: String,
+    /// Display name for the sidebar.
+    pub display_name: String,
+    /// The parent account ID.
+    pub account_id: String,
+    /// Whether offline sync is enabled for this pin.
+    pub sync_enabled: bool,
+    /// Sidebar ordering position.
+    pub position: i64,
+    /// Unread count (from last hierarchy fetch).
+    pub unread_count: i64,
+}
+
 #[derive(Debug, Clone)]
 pub struct Thread {
     pub id: String,

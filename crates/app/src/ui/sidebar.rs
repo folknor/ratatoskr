@@ -4,7 +4,7 @@ use iced::widget::{button, column, container, mouse_area, row, scrollable, text,
 use iced::{Alignment, Element, Length, Task};
 
 use crate::component::Component;
-use crate::db::{Account, PinnedSearch};
+use crate::db::{Account, PinnedPublicFolder, PinnedSearch, SharedMailbox};
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
@@ -37,6 +37,10 @@ pub enum SidebarMessage {
     SearchHere(String),
     /// Click a smart folder — execute its query via the unified search pipeline.
     SelectSmartFolder { id: String, query: String },
+    /// Select a shared/delegated mailbox in the scope dropdown.
+    SelectSharedMailbox(String),
+    /// Select a pinned public folder.
+    SelectPublicFolder(String),
 }
 
 /// Events the sidebar emits upward to the App.
@@ -57,6 +61,10 @@ pub enum SidebarEvent {
     SearchHere { query_prefix: String },
     /// Smart folder selected — execute its query via the unified search pipeline.
     SmartFolderSelected { id: String, query: String },
+    /// Shared mailbox selected in scope dropdown.
+    SharedMailboxSelected(String),
+    /// Pinned public folder selected.
+    PublicFolderSelected(String),
 }
 
 // ── Sidebar layout constants ─────────────────────────────
@@ -80,6 +88,12 @@ pub struct Sidebar {
     pub pinned_searches: Vec<PinnedSearch>,
     /// Currently selected pinned search, set by parent App.
     pub active_pinned_search: Option<i64>,
+    /// Shared/delegated mailboxes discovered via Autodiscover.
+    pub shared_mailboxes: Vec<SharedMailbox>,
+    /// Pinned public folders.
+    pub pinned_public_folders: Vec<PinnedPublicFolder>,
+    /// Currently selected shared mailbox (by mailbox_id), if any.
+    pub selected_shared_mailbox: Option<String>,
     /// Whether the app is in calendar mode. Set by the parent App.
     pub in_calendar_mode: bool,
     /// Active calendar view, kept in sync by the parent App for the header view switcher.
@@ -99,6 +113,9 @@ impl Sidebar {
             collapsed_folders: HashSet::new(),
             pinned_searches: Vec::new(),
             active_pinned_search: None,
+            shared_mailboxes: Vec::new(),
+            pinned_public_folders: Vec::new(),
+            selected_shared_mailbox: None,
             in_calendar_mode: false,
             calendar_active_view: None,
         }
@@ -197,6 +214,16 @@ impl Component for Sidebar {
                 self.selected_label = Some(id.clone());
                 (Task::none(), Some(SidebarEvent::SmartFolderSelected { id, query }))
             }
+            SidebarMessage::SelectSharedMailbox(mailbox_id) => {
+                self.selected_shared_mailbox = Some(mailbox_id.clone());
+                self.selected_account = None;
+                self.selected_label = None;
+                self.scope_dropdown_open = false;
+                (Task::none(), Some(SidebarEvent::SharedMailboxSelected(mailbox_id)))
+            }
+            SidebarMessage::SelectPublicFolder(folder_id) => {
+                (Task::none(), Some(SidebarEvent::PublicFolderSelected(folder_id)))
+            }
         }
     }
 
@@ -276,6 +303,12 @@ impl Component for Sidebar {
             col = col.push(labels(self));
         }
 
+        // Pinned public folders (if any)
+        if !self.pinned_public_folders.is_empty() {
+            col = col.push(widgets::section_break::<SidebarMessage>());
+            col = col.push(pinned_public_folders_section(self));
+        }
+
         container(
             column![
                 scrollable(col).spacing(SCROLLBAR_SPACING).height(Length::Fill),
@@ -332,6 +365,26 @@ fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
             label: name,
             selected: sidebar.selected_account == Some(idx),
             on_press: SidebarMessage::SelectAccount(idx),
+        });
+    }
+
+    // Shared/delegated mailboxes
+    for sm in &sidebar.shared_mailboxes {
+        let name = sm
+            .display_name
+            .as_deref()
+            .unwrap_or(&sm.mailbox_id);
+        let selected = sidebar
+            .selected_shared_mailbox
+            .as_deref()
+            == Some(&sm.mailbox_id);
+        entries.push(DropdownEntry {
+            icon: DropdownIcon::Icon('\u{e1a4}'), // users icon
+            label: name,
+            selected,
+            on_press: SidebarMessage::SelectSharedMailbox(
+                sm.mailbox_id.clone(),
+            ),
         });
     }
 
@@ -458,6 +511,69 @@ fn labels(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
         SidebarMessage::ToggleLabelsSection,
         children,
     )
+}
+
+// ── Pinned public folders ────────────────────────────────
+
+fn pinned_public_folders_section(
+    sidebar: &Sidebar,
+) -> Element<'_, SidebarMessage> {
+    let items: Vec<Element<'_, SidebarMessage>> = sidebar
+        .pinned_public_folders
+        .iter()
+        .map(|pf| {
+            let active = false; // TODO: track active public folder selection
+            let label = &pf.display_name;
+            let count = pf.unread_count;
+
+            let mut row_content = row![
+                icon::folder().size(ICON_SM).style(text::secondary),
+                text(label)
+                    .size(TEXT_SM)
+                    .style(if active { text::primary } else { text::base }),
+            ]
+            .spacing(SPACE_XS)
+            .align_y(Alignment::Center)
+            .width(Length::Fill);
+
+            if count > 0 {
+                row_content = row_content.push(
+                    text(format!("{count}"))
+                        .size(TEXT_XS)
+                        .style(text::secondary),
+                );
+            }
+
+            let style = if active {
+                theme::ButtonClass::Nav { active: true }.style()
+            } else {
+                theme::ButtonClass::Nav { active: false }.style()
+            };
+
+            button(
+                container(row_content)
+                    .padding(PAD_NAV_ITEM)
+                    .width(Length::Fill),
+            )
+            .on_press(SidebarMessage::SelectPublicFolder(
+                pf.folder_id.clone(),
+            ))
+            .padding(0)
+            .width(Length::Fill)
+            .style(style)
+            .into()
+        })
+        .collect();
+
+    let header = text("PUBLIC FOLDERS")
+        .size(TEXT_XS)
+        .style(text::secondary);
+
+    let mut col = column![header].spacing(SPACE_XXXS);
+    for item in items {
+        col = col.push(item);
+    }
+    col.into()
 }
 
 // ── Pinned searches ─────────────────────────────────────

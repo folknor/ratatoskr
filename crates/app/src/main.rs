@@ -259,6 +259,10 @@ pub enum Message {
     // Undo
     Undo,
 
+    // Shared mailboxes & public folders
+    SharedMailboxesLoaded(Result<Vec<db::SharedMailbox>, String>),
+    PinnedPublicFoldersLoaded(Result<Vec<db::PinnedPublicFolder>, String>),
+
     // GAL (organization directory) cache
     GalRefreshTick,
     GalCacheRefreshed(Result<usize, String>),
@@ -344,6 +348,8 @@ impl App {
         let db = Arc::clone(DB.get().expect("DB not initialized"));
         let db_ref = Arc::clone(&db);
         let db_ref2 = Arc::clone(&db);
+        let db_ref3 = Arc::clone(&db);
+        let db_ref4 = Arc::clone(&db);
         let data_dir = APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
         let window = window_state::WindowState::load(data_dir);
 
@@ -458,6 +464,16 @@ impl App {
             Task::perform(
                 async move { db_ref2.list_pinned_searches().await },
                 Message::PinnedSearchesLoaded,
+            ),
+            // Load shared mailboxes for sidebar
+            Task::perform(
+                async move { db_ref3.get_shared_mailboxes().await },
+                Message::SharedMailboxesLoaded,
+            ),
+            // Load pinned public folders for sidebar
+            Task::perform(
+                async move { db_ref4.get_pinned_public_folders().await },
+                Message::PinnedPublicFoldersLoaded,
             ),
             // Initial GAL cache population (deferred — provider clients
             // aren't available at boot; the first GalRefreshTick will
@@ -944,6 +960,22 @@ impl App {
                     self.status_bar
                         .show_confirmation(format!("Undone: {desc}"));
                 }
+                Task::none()
+            }
+            Message::SharedMailboxesLoaded(Ok(mailboxes)) => {
+                self.sidebar.shared_mailboxes = mailboxes;
+                Task::none()
+            }
+            Message::SharedMailboxesLoaded(Err(e)) => {
+                log::warn!("Failed to load shared mailboxes: {e}");
+                Task::none()
+            }
+            Message::PinnedPublicFoldersLoaded(Ok(pins)) => {
+                self.sidebar.pinned_public_folders = pins;
+                Task::none()
+            }
+            Message::PinnedPublicFoldersLoaded(Err(e)) => {
+                log::warn!("Failed to load pinned public folders: {e}");
                 Task::none()
             }
             Message::GalRefreshTick => {

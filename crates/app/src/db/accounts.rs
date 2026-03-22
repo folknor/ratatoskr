@@ -39,6 +39,97 @@ impl Db {
         .await
     }
 
+    /// Load all shared mailboxes for sidebar display, across all accounts.
+    pub async fn get_shared_mailboxes(&self) -> Result<Vec<SharedMailbox>, String> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT s.mailbox_id, s.display_name, s.account_id,
+                            s.is_sync_enabled, s.last_synced_at, s.sync_error
+                     FROM shared_mailbox_sync_state s
+                     JOIN accounts a ON s.account_id = a.id
+                     WHERE a.is_active = 1
+                     ORDER BY a.sort_order ASC, s.display_name ASC",
+                )
+                .map_err(|e| e.to_string())?;
+
+            stmt.query_map([], |row| {
+                Ok(SharedMailbox {
+                    mailbox_id: row.get("mailbox_id")?,
+                    display_name: row.get("display_name")?,
+                    account_id: row.get("account_id")?,
+                    is_sync_enabled: row.get::<_, i64>("is_sync_enabled")? != 0,
+                    last_synced_at: row.get("last_synced_at")?,
+                    sync_error: row.get("sync_error")?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+        })
+        .await
+    }
+
+    /// Load pinned public folders for sidebar display, across all accounts.
+    pub async fn get_pinned_public_folders(
+        &self,
+    ) -> Result<Vec<PinnedPublicFolder>, String> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT p.folder_id, p.display_name, p.account_id,
+                            p.sync_enabled, p.position,
+                            COALESCE(f.unread_count, 0) AS unread_count
+                     FROM public_folder_pins p
+                     LEFT JOIN public_folders f
+                       ON p.folder_id = f.id AND p.account_id = f.account_id
+                     JOIN accounts a ON p.account_id = a.id
+                     WHERE a.is_active = 1
+                     ORDER BY p.position ASC",
+                )
+                .map_err(|e| e.to_string())?;
+
+            stmt.query_map([], |row| {
+                Ok(PinnedPublicFolder {
+                    folder_id: row.get("folder_id")?,
+                    display_name: row.get("display_name")?,
+                    account_id: row.get("account_id")?,
+                    sync_enabled: row.get::<_, i64>("sync_enabled")? != 0,
+                    position: row.get("position")?,
+                    unread_count: row.get("unread_count")?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+        })
+        .await
+    }
+
+    /// Persist a discovered shared mailbox (from Autodiscover).
+    /// Inserts or updates the shared_mailbox_sync_state row.
+    /// Auto-enables sync for newly discovered mailboxes.
+    pub async fn upsert_shared_mailbox(
+        &self,
+        account_id: String,
+        mailbox_id: String,
+        display_name: Option<String>,
+    ) -> Result<(), String> {
+        self.with_write_conn(move |conn| {
+            conn.execute(
+                "INSERT INTO shared_mailbox_sync_state
+                    (account_id, mailbox_id, display_name, is_sync_enabled)
+                 VALUES (?1, ?2, ?3, 1)
+                 ON CONFLICT (account_id, mailbox_id)
+                 DO UPDATE SET display_name = COALESCE(excluded.display_name, display_name)",
+                params![account_id, mailbox_id, display_name],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })
+        .await
+    }
+
     pub async fn get_labels(
         &self,
         account_id: String,
