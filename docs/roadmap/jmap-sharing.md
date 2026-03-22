@@ -1,7 +1,7 @@
 # JMAP Sharing (RFC 9670)
 
 **Tier**: 2 — Enhances JMAP provider parity
-**Status**: 🟡 **Phases 1-3 done** — `jmap-client` fork has full RFC 9670 support. Phase 1 (Session discovery + revocation), Phase 2 (shared account sync with independent state tokens), and Phase 3 (`myRights` persisted as 9 INTEGER columns on labels, surfaced in `NavigationFolder`) are wired. Remaining phases (4-6) not started.
+**Status**: 🟢 **All 6 phases implemented** — Full JMAP Sharing pipeline: Session discovery + revocation (Phase 1), shared account sync with independent state tokens (Phase 2), `myRights` persistence (Phase 3), subscription management (Phase 4), ShareNotification polling (Phase 5), principal-based identity resolution (Phase 6). Remaining: UI-side integration (app crate) for rights gating, subscription toggle, and compose identity auto-selection.
 
 ---
 
