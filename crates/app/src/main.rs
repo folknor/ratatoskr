@@ -1148,6 +1148,9 @@ impl App {
             SidebarEvent::SearchHere { query_prefix } => {
                 self.update(Message::SearchHere(query_prefix))
             }
+            SidebarEvent::SmartFolderSelected { id, query } => {
+                self.handle_smart_folder_selected(id, query)
+            }
             SidebarEvent::PinnedSearchRefreshed(id) => {
                 self.update(Message::RefreshPinnedSearch(id))
             }

@@ -35,6 +35,8 @@ pub enum SidebarMessage {
     SetCalendarView(super::calendar::CalendarView),
     /// Right-click "Search here" on a label/folder.
     SearchHere(String),
+    /// Click a smart folder — execute its query via the unified search pipeline.
+    SelectSmartFolder { id: String, query: String },
 }
 
 /// Events the sidebar emits upward to the App.
@@ -53,6 +55,8 @@ pub enum SidebarEvent {
     CalendarViewChanged(super::calendar::CalendarView),
     /// "Search here" — prefill search bar with a scope query prefix.
     SearchHere { query_prefix: String },
+    /// Smart folder selected — execute its query via the unified search pipeline.
+    SmartFolderSelected { id: String, query: String },
 }
 
 // ── Sidebar layout constants ─────────────────────────────
@@ -188,6 +192,10 @@ impl Component for Sidebar {
             }
             SidebarMessage::SearchHere(query_prefix) => {
                 (Task::none(), Some(SidebarEvent::SearchHere { query_prefix }))
+            }
+            SidebarMessage::SelectSmartFolder { id, query } => {
+                self.selected_label = Some(id.clone());
+                (Task::none(), Some(SidebarEvent::SmartFolderSelected { id, query }))
             }
         }
     }
@@ -397,13 +405,21 @@ fn smart_folders(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
         .iter()
         .filter(|f| matches!(f.folder_kind, FolderKind::SmartFolder))
         .map(|f| {
+            let on_press = if let Some(ref query) = f.query {
+                SidebarMessage::SelectSmartFolder {
+                    id: f.id.clone(),
+                    query: query.clone(),
+                }
+            } else {
+                SidebarMessage::SelectLabel(Some(f.id.clone()))
+            };
             widgets::nav_button(
                 None,
                 &f.name,
                 sidebar.selected_label.as_deref() == Some(&f.id),
                 widgets::NavSize::Compact,
                 Some(f.unread_count),
-                SidebarMessage::SelectLabel(Some(f.id.clone())),
+                on_press,
             )
         })
         .collect();

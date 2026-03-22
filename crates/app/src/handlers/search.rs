@@ -143,6 +143,34 @@ impl App {
         iced::widget::operation::focus::<Message>("search-bar".to_string())
     }
 
+    /// Handle smart folder selection from the sidebar — fill the search bar
+    /// and execute the query via the unified search pipeline.
+    pub(crate) fn handle_smart_folder_selected(
+        &mut self,
+        _id: String,
+        query: String,
+    ) -> Task<Message> {
+        self.search_query.set_text(query.clone());
+        self.thread_list.search_query = query;
+
+        if self.thread_list.mode == ThreadListMode::Folder {
+            self.was_in_folder_view = true;
+        }
+
+        self.search_generation += 1;
+        let generation = self.search_generation;
+        let db = Arc::clone(&self.db);
+
+        let search_query = self.search_query.text().to_string();
+        Task::perform(
+            async move {
+                let result = execute_search(db, search_query).await;
+                (generation, result)
+            },
+            |(g, result)| Message::SearchResultsLoaded(g, result),
+        )
+    }
+
     /// Dispatch an async typeahead query based on operator type.
     fn dispatch_typeahead_query(
         &self,

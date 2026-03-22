@@ -46,6 +46,8 @@ pub struct NavigationFolder {
     pub parent_id: Option<String>,
     /// Tag vs Folder semantics. Only meaningful for `AccountLabel` items.
     pub label_semantics: Option<LabelSemantics>,
+    /// Query string for smart folders. `None` for regular labels/folders.
+    pub query: Option<String>,
 }
 
 /// The complete navigation state returned to the frontend.
@@ -152,6 +154,7 @@ fn build_universal_folders(
                 account_id: None,
                 parent_id: None,
                 label_semantics: None,
+                query: None,
             }
         })
         .collect();
@@ -189,6 +192,7 @@ fn build_smart_folders(
                 account_id: sf.account_id,
                 parent_id: None,
                 label_semantics: None,
+                query: Some(sf.query),
             }
         })
         .collect())
@@ -249,6 +253,7 @@ fn build_account_labels(
                 account_id: Some(label.account_id),
                 parent_id,
                 label_semantics: Some(semantics.clone()),
+                query: None,
             }
         })
         .collect())
