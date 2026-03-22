@@ -1866,7 +1866,8 @@ impl App {
         let sig_task = handlers::signatures::load_signatures_async(&self.db)
             .map(Message::SignatureOp);
         let sync_task = self.sync_all_accounts();
-        Task::batch([self.load_navigation_and_threads(), sig_task, sync_task])
+        let push_task = self.start_jmap_push();
+        Task::batch([self.load_navigation_and_threads(), sig_task, sync_task, push_task])
     }
 
     fn view_first_launch_modal<'a>(

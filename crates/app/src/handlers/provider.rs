@@ -145,4 +145,81 @@ impl App {
         }
         Task::batch(tasks)
     }
+
+    /// Start JMAP push notification managers for all JMAP accounts.
+    /// Call after accounts are loaded and encryption key is available.
+    pub(crate) fn start_jmap_push(&mut self) -> Task<Message> {
+        let Some(encryption_key) = self.encryption_key else {
+            return Task::none();
+        };
+
+        let jmap_accounts: Vec<(String, String)> = self
+            .sidebar
+            .accounts
+            .iter()
+            .filter(|a| a.provider == "jmap")
+            .map(|a| (a.id.clone(), a.email.clone()))
+            .collect();
+
+        if jmap_accounts.is_empty() {
+            return Task::none();
+        }
+
+        let db = Arc::clone(&self.db);
+        let mut tasks = Vec::new();
+
+        for (account_id, email) in jmap_accounts {
+            let db = Arc::clone(&db);
+            let aid = account_id.clone();
+
+            tasks.push(Task::perform(
+                async move {
+                    let core_db = ratatoskr_core::db::DbState::from_arc(db.write_conn_arc());
+                    let client = ratatoskr_jmap::client::JmapClient::from_account(
+                        &core_db,
+                        &account_id,
+                        &encryption_key,
+                    )
+                    .await?;
+
+                    let (tx, mut rx) = ratatoskr_jmap::push::create_push_channel();
+                    let _manager = ratatoskr_jmap::push::start_push(
+                        &client,
+                        &account_id,
+                        &core_db,
+                        tx,
+                    )
+                    .await?;
+
+                    // Wait for the first state change, then return the account_id
+                    // to trigger a sync. The push manager runs in its own tokio task
+                    // and will continue sending changes through the channel.
+                    log::info!("[JMAP Push] Listening for changes on {email}");
+                    if let Some(change) = rx.recv().await {
+                        log::info!(
+                            "[JMAP Push] State change for {email}: {} data types changed",
+                            change.changed.len()
+                        );
+                    }
+
+                    Ok::<String, String>(aid)
+                },
+                |result| match result {
+                    Ok(account_id) => {
+                        log::info!("[JMAP Push] Triggering sync for {account_id}");
+                        Message::SyncComplete(
+                            account_id,
+                            Ok(()), // The push itself succeeded; sync will follow via SyncTick
+                        )
+                    }
+                    Err(e) => {
+                        log::warn!("[JMAP Push] Failed to start: {e}");
+                        Message::Noop
+                    }
+                },
+            ));
+        }
+
+        Task::batch(tasks)
+    }
 }
