@@ -2,7 +2,7 @@
 //!
 //! - **Local contacts** (`source = 'user'`): save immediately on edit, no
 //!   explicit Save button needed.
-//! - **Synced contacts** (`source` is `'google'`, `'graph'`, `'carddav'`):
+//! - **Synced contacts** (`source` is `'google'`, `'graph'`, `'carddav'`, `'jmap'`):
 //!   edits are held locally until the user clicks an explicit Save button,
 //!   which triggers a provider write-back. Display name is always a local-only
 //!   override (sets `display_name_overridden = 1`).
@@ -30,7 +30,7 @@ pub struct ContactUpdate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContactSource {
     Local,
-    Synced(String), // the provider source: "google", "graph", "carddav"
+    Synced(String), // the provider source: "google", "graph", "carddav", "jmap"
 }
 
 /// The result of a synced contact write-back attempt.

@@ -62,7 +62,7 @@ pub async fn db_update_contact(
             "UPDATE contacts SET \
                display_name = ?1, \
                display_name_overridden = CASE \
-                 WHEN source IN ('graph', 'google', 'carddav') THEN 1 \
+                 WHEN source IN ('graph', 'google', 'carddav', 'jmap') THEN 1 \
                  ELSE display_name_overridden \
                END, \
                updated_at = unixepoch() \

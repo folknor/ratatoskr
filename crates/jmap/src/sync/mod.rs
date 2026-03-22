@@ -137,6 +137,19 @@ pub async fn jmap_initial_sync(
         .await?;
 
     log::info!("[JMAP] Initial sync complete for account {account_id}: {fetched} messages synced");
+
+    // Phase 3: Contacts sync
+    match super::contacts_sync::jmap_contacts_initial_sync(client, account_id, db).await {
+        Ok(count) => log::info!("[JMAP] Initial contacts sync: {count} contacts for account {account_id}"),
+        Err(e) => log::warn!("[JMAP] Contacts initial sync failed for account {account_id}: {e}"),
+    }
+
+    // Phase 4: Calendar sync
+    match super::calendar_sync::sync_calendars(client, account_id, db).await {
+        Ok(()) => log::info!("[JMAP] Initial calendar sync complete for account {account_id}"),
+        Err(e) => log::warn!("[JMAP] Calendar initial sync failed for account {account_id}: {e}"),
+    }
+
     emit_progress(&ctx, "done", fetched, total_u64);
 
     Ok(())
@@ -274,6 +287,16 @@ pub async fn jmap_delta_sync(
 
     // Save updated states
     save_sync_state(db, account_id, "Email", &since_state).await?;
+
+    // 3. Contacts delta sync
+    match super::contacts_sync::jmap_contacts_delta_sync(client, account_id, db).await {
+        Ok(count) => {
+            if count > 0 {
+                log::info!("[JMAP] Contacts delta sync: {count} affected for account {account_id}");
+            }
+        }
+        Err(e) => log::warn!("[JMAP] Contacts delta sync failed for account {account_id}: {e}"),
+    }
 
     log::info!(
         "[JMAP] Delta sync complete for account {account_id}: {} new inbox, {} threads affected",

@@ -122,7 +122,7 @@ pub async fn merge_contacts(
 fn source_priority(source: &str) -> u8 {
     match source {
         "user" => 0,
-        "google" | "graph" | "carddav" => 1,
+        "google" | "graph" | "carddav" | "jmap" => 1,
         _ => 2,
     }
 }

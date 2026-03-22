@@ -1,4 +1,6 @@
+pub mod calendar_sync;
 pub mod client;
+pub mod contacts_sync;
 pub mod helpers;
 pub mod mailbox_mapper;
 pub mod ops;
