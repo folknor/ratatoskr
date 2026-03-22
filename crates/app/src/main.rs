@@ -1694,6 +1694,20 @@ impl App {
             log::debug!("Thread selected: {}", t.id);
         }
         self.reading_pane.set_thread(thread);
+
+        // Set search highlight terms when in search mode
+        if self.thread_list.mode == ui::thread_list::ThreadListMode::Search {
+            let query = self.search_query.text().to_string();
+            let parsed = ratatoskr_smart_folder::parse_query(&query);
+            self.reading_pane.search_highlight_terms = parsed
+                .free_text
+                .split_whitespace()
+                .map(String::from)
+                .collect();
+        } else {
+            self.reading_pane.search_highlight_terms.clear();
+        }
+
         self.thread_generation += 1;
         if let Some(thread) = thread {
             let account_id = thread.account_id.clone();

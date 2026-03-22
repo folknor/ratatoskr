@@ -71,6 +71,8 @@ pub struct ReadingPane {
     pub date_display: DateDisplay,
     /// The currently viewed thread (set by App when a thread is selected).
     current_thread: Option<ThreadRef>,
+    /// Search terms to highlight in message bodies. Empty when not in search mode.
+    pub search_highlight_terms: Vec<String>,
 }
 
 /// Minimal reference to the currently selected thread for display purposes.
@@ -94,6 +96,7 @@ impl ReadingPane {
             attachment_collapse_cache: HashMap::new(),
             date_display: DateDisplay::RelativeOffset,
             current_thread: None,
+            search_highlight_terms: Vec::new(),
         }
     }
 
@@ -126,18 +129,35 @@ impl ReadingPane {
     /// 2. Most recent message (index 0) is expanded
     /// 3. First message in thread (last index) is expanded
     /// 4. Own messages are collapsed (unless rule 1-3 applies)
+    /// 5. When search terms are present, messages containing any term are expanded
     pub fn apply_message_expansion(&mut self, messages: &[ThreadMessage]) {
         let len = messages.len();
         let mut expanded = vec![false; len];
 
-        for (i, msg) in messages.iter().enumerate() {
-            // Rules 1-3: unread, most recent, or initial message
-            if !msg.is_read || i == 0 || i == len - 1 {
-                expanded[i] = true;
+        if !self.search_highlight_terms.is_empty() {
+            // Search mode: expand messages that contain any search term
+            for (i, msg) in messages.iter().enumerate() {
+                if message_matches_search_terms(msg, &self.search_highlight_terms) {
+                    expanded[i] = true;
+                }
             }
-            // Rule 4: own messages default to collapsed
-            if msg.is_own_message && msg.is_read && i != 0 && i != len - 1 {
-                expanded[i] = false;
+            // Always expand first and last if nothing matched
+            if !expanded.iter().any(|&e| e) && len > 0 {
+                expanded[0] = true;
+                if len > 1 {
+                    expanded[len - 1] = true;
+                }
+            }
+        } else {
+            for (i, msg) in messages.iter().enumerate() {
+                // Rules 1-3: unread, most recent, or initial message
+                if !msg.is_read || i == 0 || i == len - 1 {
+                    expanded[i] = true;
+                }
+                // Rule 4: own messages default to collapsed
+                if msg.is_own_message && msg.is_read && i != 0 && i != len - 1 {
+                    expanded[i] = false;
+                }
             }
         }
 
@@ -498,6 +518,22 @@ fn thread_header<'a>(
     .into()
 }
 
+/// Check if a message's content matches any of the search terms (case-insensitive).
+fn message_matches_search_terms(msg: &ThreadMessage, terms: &[String]) -> bool {
+    let check = |field: &Option<String>| {
+        field.as_deref().is_some_and(|text| {
+            let lower = text.to_lowercase();
+            terms.iter().any(|t| lower.contains(&t.to_lowercase()))
+        })
+    };
+    check(&msg.body_text)
+        || check(&msg.body_html)
+        || check(&msg.subject)
+        || check(&msg.from_name)
+        || check(&msg.from_address)
+        || check(&msg.snippet)
+}
+
 fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
     let messages_pad = Padding::from([0.0, SPACE_LG]);
     let first_message_date = pane.thread_messages.last().and_then(|m| m.date);
@@ -511,6 +547,7 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
                 i,
                 pane.date_display,
                 first_message_date,
+                &pane.search_highlight_terms,
                 ReadingPaneMessage::ToggleMessageExpanded,
                 ReadingPaneMessage::PopOut,
                 ReadingPaneMessage::Reply,
