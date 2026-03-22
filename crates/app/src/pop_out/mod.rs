@@ -9,6 +9,8 @@ pub use message_view::{MessageViewMessage, MessageViewState};
 pub enum PopOutWindow {
     MessageView(MessageViewState),
     Compose(ComposeState),
+    /// Calendar pop-out — full calendar UI in a separate window.
+    Calendar,
 }
 
 /// Messages internal to pop-out windows.
@@ -16,4 +18,6 @@ pub enum PopOutWindow {
 pub enum PopOutMessage {
     MessageView(MessageViewMessage),
     Compose(ComposeMessage),
+    /// Calendar pop-out messages are routed through CalendarMessage.
+    Calendar(crate::ui::calendar::CalendarMessage),
 }

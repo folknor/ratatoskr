@@ -496,6 +496,7 @@ fn dispatch_other(id: CommandId) -> Option<Message> {
         CommandId::CalendarViewMonth => Some(Message::SetCalendarView(crate::ui::calendar::CalendarView::Month)),
         CommandId::CalendarToday => Some(Message::CalendarToday),
         CommandId::CalendarCreateEvent => Some(Message::Calendar(crate::ui::calendar::CalendarMessage::CreateEvent)),
+        CommandId::CalendarPopOut => Some(Message::Calendar(crate::ui::calendar::CalendarMessage::PopOutCalendar)),
         CommandId::AppSearch => Some(Message::FocusSearch),
         CommandId::AppAskAi => None,
         CommandId::AppHelp => Some(Message::ShowHelp),

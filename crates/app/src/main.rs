@@ -452,6 +452,7 @@ impl App {
                 format!("{subject} \u{2014} {sender}")
             }
             Some(PopOutWindow::Compose(state)) => state.window_title(),
+            Some(PopOutWindow::Calendar) => "Ratatoskr \u{2014} Calendar".to_string(),
             None => "Ratatoskr".to_string(),
         }
     }
@@ -691,6 +692,7 @@ impl App {
                             state.width = size.width;
                             state.height = size.height;
                         }
+                        Some(PopOutWindow::Calendar) => {}
                         None => {}
                     }
                 }
@@ -905,6 +907,10 @@ impl App {
                 }
                 PopOutWindow::Compose(state) => {
                     pop_out::compose::view_compose_window(window_id, state)
+                }
+                PopOutWindow::Calendar => {
+                    ui::calendar::calendar_layout(&self.calendar)
+                        .map(Message::Calendar)
                 }
             };
         }
@@ -1212,7 +1218,42 @@ impl App {
                     original_subject: self.current_subject(),
                 })
             }
+            ReadingPaneEvent::EditContact { email } => {
+                // Open the contact editor in settings for this email.
+                // Find or create the contact, then open settings with editor.
+                self.open_contact_editor_for_email(email)
+            }
         }
+    }
+
+    /// Open the contact editor in settings for a specific email address.
+    /// Navigates to Settings > People and opens the editor, creating a
+    /// new local contact if none exists for that email.
+    fn open_contact_editor_for_email(&mut self, email: String) -> Task<Message> {
+        use crate::ui::settings::SettingsMessage;
+
+        // Open settings and switch to People tab
+        self.show_settings = true;
+        self.settings.active_tab = crate::ui::settings::types::Tab::People;
+
+        // Look up existing contact or create new editor state
+        let found = self.settings.contacts.iter().find(|c| {
+            c.email.eq_ignore_ascii_case(&email)
+        });
+
+        if let Some(contact) = found {
+            let id = contact.id.clone();
+            self.settings.open_contact_editor(&id);
+        } else {
+            // Create a new editor pre-populated with the email
+            self.settings.open_new_contact_editor();
+            if let Some(ref mut editor) = self.settings.contact_editor {
+                editor.email = email;
+            }
+        }
+
+        // Load contacts for the settings view
+        self.handle_load_contacts(self.settings.contact_filter.clone())
     }
 
     /// Get the subject of the currently selected thread.
@@ -1771,6 +1812,8 @@ impl App {
         if matches!(self.pop_out_windows.get(&id), Some(PopOutWindow::Compose(_))) {
             self.composer_is_open = false;
         }
+        // Calendar pop-out closing — calendar becomes available in main window again.
+        // (No state change needed — mode toggle just works.)
         self.pop_out_windows.remove(&id);
         iced::window::close(id)
     }

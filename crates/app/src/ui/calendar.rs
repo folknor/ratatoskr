@@ -449,6 +449,8 @@ pub enum CalendarMessage {
     EventLoaded(Result<CalendarEventData, String>),
     /// Calendar events loaded from DB for view rendering.
     EventsLoaded(Result<Vec<calendar_time_grid::TimeGridEvent>, String>),
+    /// Pop out the calendar into a separate window.
+    PopOutCalendar,
     /// Toggle visibility of a calendar (checkbox in sidebar).
     ToggleCalendarVisibility(String, bool),
     /// Calendars loaded from DB for sidebar list.
@@ -1348,6 +1350,14 @@ fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMessage> {
     .padding(PAD_ICON_BTN)
     .style(theme::ButtonClass::Ghost.style());
 
+    // Pop-out button
+    let pop_out_btn = button(
+        text("\u{2197}").size(TEXT_SM).style(text::secondary),
+    )
+    .on_press(CalendarMessage::PopOutCalendar)
+    .padding(PAD_ICON_BTN)
+    .style(theme::ButtonClass::Ghost.style());
+
     // Calendar list with visibility toggles
     let mut calendar_list_col = column![
         text("Calendars")
@@ -1399,7 +1409,7 @@ fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMessage> {
         Space::new().height(SPACE_XS),
         view_switcher,
         Space::new().height(SPACE_XXS),
-        row![today_btn, new_event_btn].spacing(SPACE_XXS),
+        row![today_btn, new_event_btn, pop_out_btn].spacing(SPACE_XXS),
         Space::new().height(SPACE_SM),
         calendar_list,
     ]

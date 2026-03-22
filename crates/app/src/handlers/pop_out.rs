@@ -692,7 +692,7 @@ impl App {
                         y: state.y,
                     })
                 }
-                PopOutWindow::Compose(_) => None,
+                PopOutWindow::Compose(_) | PopOutWindow::Calendar => None,
             })
             .collect();
 

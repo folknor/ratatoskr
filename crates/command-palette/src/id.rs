@@ -75,6 +75,7 @@ pub enum CommandId {
     CalendarViewMonth,
     CalendarToday,
     CalendarCreateEvent,
+    CalendarPopOut,
 
     // App
     AppSearch,

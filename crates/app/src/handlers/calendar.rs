@@ -211,6 +211,28 @@ impl App {
                 }
                 Task::none()
             }
+            CalendarMessage::PopOutCalendar => {
+                // Check if a calendar pop-out already exists.
+                let existing = self.pop_out_windows.values().any(|w| {
+                    matches!(w, crate::pop_out::PopOutWindow::Calendar)
+                });
+                if existing {
+                    // Bring existing pop-out to foreground.
+                    // (iced doesn't have a bring-to-front API, so this is a no-op for now)
+                    return Task::none();
+                }
+                // Open new calendar pop-out window.
+                let settings = iced::window::Settings {
+                    size: iced::Size::new(1024.0, 768.0),
+                    ..Default::default()
+                };
+                let (id, open_task) = iced::window::open(settings);
+                self.pop_out_windows.insert(id, crate::pop_out::PopOutWindow::Calendar);
+                // Switch main window back to mail mode.
+                self.app_mode = crate::AppMode::Mail;
+                self.sidebar.in_calendar_mode = false;
+                open_task.discard()
+            }
             CalendarMessage::EventsLoaded(result) => {
                 match result {
                     Ok(events) => {

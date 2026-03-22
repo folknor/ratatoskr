@@ -714,6 +714,14 @@ fn register_calendar(out: &mut Vec<CommandDescriptor>) {
         always,
         &["new event", "add event"],
     ));
+    out.push(desc_kw(
+        CommandId::CalendarPopOut,
+        "Pop Out Calendar",
+        "Calendar",
+        None,
+        always,
+        &["separate window", "multi monitor", "detach calendar"],
+    ));
 }
 
 fn register_smart_folders(out: &mut Vec<CommandDescriptor>) {
