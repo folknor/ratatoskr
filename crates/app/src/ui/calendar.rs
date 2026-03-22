@@ -49,14 +49,18 @@ impl CalendarView {
 pub enum CalendarOverlay {
     /// No overlay.
     None,
-    /// Viewing event details (read-only).
+    /// Quick-glance event popover (~300px compact card).
     EventDetail { event: CalendarEventData },
+    /// Full event detail modal (two-panel: 70% detail + 30% day view).
+    EventFullModal { event: CalendarEventData },
     /// Editing or creating an event.
     EventEditor {
         /// The event being edited. Fields are mutated as the user types.
         event: CalendarEventData,
         /// Whether this is a new event (true) or editing existing (false).
         is_new: bool,
+        /// Snapshot of the event at editor open time, for dirty detection.
+        original_title: String,
     },
     /// Delete confirmation dialog.
     ConfirmDelete {
@@ -384,6 +388,11 @@ pub enum EventField {
     EndHour(String),
     EndMinute(String),
     AllDay(bool),
+    CalendarId(Option<String>),
+    Timezone(Option<String>),
+    Availability(Option<String>),
+    Visibility(Option<String>),
+    RecurrenceRule(Option<String>),
 }
 
 /// Identifies a text field in the event editor for undo/redo.
@@ -400,6 +409,8 @@ pub enum CalendarMessage {
     SelectDate(NaiveDate),
     /// A time slot was clicked in day/week views (for event creation pre-fill).
     SelectSlot(NaiveDate, u32),
+    /// A time slot was double-clicked — open event creation dialog.
+    DoubleClickSlot(NaiveDate, u32),
     /// Switch the active calendar view.
     SetView(CalendarView),
     /// Navigate mini-month backward.
@@ -412,6 +423,8 @@ pub enum CalendarMessage {
     EventClicked(String),
     /// Close any open overlay.
     CloseOverlay,
+    /// Expand the popover to a full modal.
+    ExpandToFullModal,
     /// Open the event editor. `None` = create new event.
     OpenEventEditor(Option<CalendarEventData>),
     /// A field in the event editor changed.
@@ -459,9 +472,12 @@ pub fn calendar_layout(state: &CalendarState) -> Element<'_, CalendarMessage> {
     match &state.overlay {
         CalendarOverlay::None => base.into(),
         CalendarOverlay::EventDetail { event } => {
-            overlay_stack(base.into(), event_detail_card(event))
+            popover_stack(base.into(), event_detail_popover(event))
         }
-        CalendarOverlay::EventEditor { event, is_new } => {
+        CalendarOverlay::EventFullModal { event } => {
+            overlay_stack(base.into(), event_full_modal(event, state))
+        }
+        CalendarOverlay::EventEditor { event, is_new, .. } => {
             overlay_stack(base.into(), event_editor_card(event, *is_new))
         }
         CalendarOverlay::ConfirmDelete { event_id, title } => {
@@ -471,6 +487,33 @@ pub fn calendar_layout(state: &CalendarState) -> Element<'_, CalendarMessage> {
             )
         }
     }
+}
+
+/// Wrap a base layout with a lightweight popover (click-away backdrop, right-aligned).
+fn popover_stack<'a>(
+    base: Element<'a, CalendarMessage>,
+    card: Element<'a, CalendarMessage>,
+) -> Element<'a, CalendarMessage> {
+    let backdrop = mouse_area(
+        container("")
+            .width(Length::Fill)
+            .height(Length::Fill),
+    )
+    .on_press(CalendarMessage::CloseOverlay);
+
+    // Position the popover toward the right side of the view.
+    let positioned = container(
+        container(card)
+            .align_y(Alignment::Center)
+            .max_width(320.0),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(Alignment::End)
+    .align_y(Alignment::Center)
+    .padding(iced::Padding::from([SPACE_LG, SPACE_LG]));
+
+    iced::widget::stack![base, backdrop, positioned].into()
 }
 
 /// Wrap a base layout with a modal overlay (backdrop + centered card).
@@ -497,16 +540,30 @@ fn overlay_stack<'a>(
 
 // ── Event detail card ──────────────────────────────────
 
-/// Read-only event detail popover (rendered as a centered modal).
-fn event_detail_card(event: &CalendarEventData) -> Element<'_, CalendarMessage> {
+/// Compact event detail popover (~300px, quick glance).
+fn event_detail_popover(event: &CalendarEventData) -> Element<'_, CalendarMessage> {
     let mut content = column![].spacing(SPACE_SM);
 
-    // Title row with expand/edit button
+    // Title row with ↗ expand-to-modal button
     let title_text = if event.title.is_empty() {
         "(Untitled event)"
     } else {
         &event.title
     };
+    let expand_btn = button(
+        text("\u{2197}").size(TEXT_MD),
+    )
+    .on_press(CalendarMessage::ExpandToFullModal)
+    .padding(PAD_ICON_BTN)
+    .style(theme::ButtonClass::Ghost.style());
+
+    let close_btn = button(
+        text("\u{2715}").size(TEXT_SM),
+    )
+    .on_press(CalendarMessage::CloseOverlay)
+    .padding(PAD_ICON_BTN)
+    .style(theme::ButtonClass::Ghost.style());
+
     let title_row = row![
         container(
             text(title_text)
@@ -514,6 +571,8 @@ fn event_detail_card(event: &CalendarEventData) -> Element<'_, CalendarMessage> 
                 .font(crate::font::text_semibold()),
         )
         .width(Length::Fill),
+        expand_btn,
+        close_btn,
     ]
     .align_y(Alignment::Center);
     content = content.push(title_row);
@@ -657,9 +716,270 @@ fn event_detail_card(event: &CalendarEventData) -> Element<'_, CalendarMessage> 
         .height(Length::Shrink);
 
     container(scrollable_content)
-        .width(Length::Fixed(CALENDAR_OVERLAY_WIDTH))
+        .width(Length::Fixed(300.0))
         .max_height(CALENDAR_OVERLAY_MAX_HEIGHT)
         .padding(PAD_CARD)
+        .style(theme::ContainerClass::Elevated.style())
+        .into()
+}
+
+// ── Event full modal ─────────────────────────────────
+
+/// Full event detail modal (two-panel: ~70% detail + ~30% mini day view).
+fn event_full_modal<'a>(
+    event: &'a CalendarEventData,
+    state: &'a CalendarState,
+) -> Element<'a, CalendarMessage> {
+    // ── Left panel: full event details ──
+    let mut detail = column![].spacing(SPACE_SM);
+
+    // Close button row
+    let close_btn = button(text("\u{2715}").size(TEXT_SM))
+        .on_press(CalendarMessage::CloseOverlay)
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::Ghost.style());
+
+    // Calendar name + color
+    if let Some(ref cal_name) = event.calendar_name {
+        let color_dot = if let Some(ref hex) = event.color {
+            text("\u{25CF}").size(TEXT_MD).color(parse_hex_color(hex))
+        } else {
+            text("\u{25CF}").size(TEXT_MD)
+        };
+        detail = detail.push(
+            row![color_dot, text(cal_name).size(TEXT_SM).style(text::secondary)]
+                .spacing(SPACE_XXS)
+                .align_y(Alignment::Center),
+        );
+    }
+
+    // Title
+    let title_text = if event.title.is_empty() { "(Untitled event)" } else { &event.title };
+    detail = detail.push(
+        text(title_text).size(TEXT_HEADING).font(crate::font::text_semibold()),
+    );
+
+    // Date and time
+    let date_str = format!(
+        "{}, {} {}, {}",
+        weekday_short(event.start_date.weekday()),
+        month_short(event.start_date.month()),
+        event.start_date.day(),
+        event.start_date.year(),
+    );
+    let time_str = format_event_time_range(event);
+    let datetime_label = if event.all_day {
+        format!("{date_str} \u{2014} All day")
+    } else {
+        format!("{date_str}  {time_str}")
+    };
+    let mut datetime_row = row![
+        text(datetime_label).size(TEXT_MD).style(text::secondary),
+    ].spacing(SPACE_SM).align_y(Alignment::Center);
+
+    // Timezone
+    if let Some(ref tz) = event.timezone {
+        if !tz.is_empty() {
+            datetime_row = datetime_row.push(
+                text(tz).size(TEXT_SM).style(theme::TextClass::Muted.style()),
+            );
+        }
+    }
+    detail = detail.push(datetime_row);
+
+    // Recurrence
+    if let Some(ref rrule) = event.recurrence_rule {
+        detail = detail.push(
+            row![
+                text("\u{1F501}").size(TEXT_SM),
+                text(format_recurrence_rule(rrule)).size(TEXT_SM).style(text::secondary),
+            ].spacing(SPACE_XXS).align_y(Alignment::Center),
+        );
+    }
+
+    // Location (clickable if URL)
+    if !event.location.is_empty() {
+        let loc_text = if event.location.starts_with("http://") || event.location.starts_with("https://") {
+            text(&event.location).size(TEXT_MD).style(text::primary)
+        } else {
+            text(&event.location).size(TEXT_MD).style(text::secondary)
+        };
+        detail = detail.push(loc_text);
+    }
+
+    // Organizer
+    if let Some(ref name) = event.organizer_name {
+        if !name.is_empty() {
+            detail = detail.push(
+                text(format!("Organizer: {name}")).size(TEXT_SM).style(text::secondary),
+            );
+        }
+    } else if let Some(ref email) = event.organizer_email {
+        if !email.is_empty() {
+            detail = detail.push(
+                text(format!("Organizer: {email}")).size(TEXT_SM).style(text::secondary),
+            );
+        }
+    }
+
+    // Attendees
+    if !event.attendees.is_empty() {
+        detail = detail.push(
+            text("Attendees:").size(TEXT_SM).font(crate::font::text_semibold()),
+        );
+        for att in &event.attendees {
+            let icon = match att.rsvp_status.as_str() {
+                "accepted" => "\u{2713}",
+                "declined" => "\u{2717}",
+                "tentative" => "~",
+                _ => "?",
+            };
+            let display = att.name.as_deref().unwrap_or(&att.email);
+            let suffix = if att.is_organizer { " (organizer)" } else { "" };
+            detail = detail.push(
+                text(format!("  {icon} {display}{suffix}")).size(TEXT_SM).style(text::secondary),
+            );
+        }
+    }
+
+    // Description (full, not truncated)
+    if !event.description.is_empty() {
+        detail = detail.push(Space::new().height(SPACE_XXS));
+        detail = detail.push(
+            text(&event.description).size(TEXT_SM).style(text::secondary),
+        );
+    }
+
+    // Reminders
+    if !event.reminders.is_empty() {
+        let reminder_text = event.reminders.iter()
+            .map(|r| format_reminder(r.minutes_before))
+            .collect::<Vec<_>>()
+            .join(", ");
+        detail = detail.push(
+            text(format!("Reminders: {reminder_text}")).size(TEXT_SM).style(text::secondary),
+        );
+    }
+
+    // RSVP status
+    if let Some(ref status) = event.rsvp_status {
+        let display = match status.as_str() {
+            "accepted" => "Accepted",
+            "declined" => "Declined",
+            "tentative" => "Tentative",
+            "needs-action" => "No response",
+            _ => status.as_str(),
+        };
+        detail = detail.push(
+            text(format!("Your RSVP: {display}"))
+                .size(TEXT_SM)
+                .font(crate::font::text_semibold())
+                .style(text::secondary),
+        );
+    }
+
+    // Action buttons
+    detail = detail.push(Space::new().height(SPACE_XS));
+    let edit_btn = button(text("Edit").size(TEXT_SM))
+        .on_press(CalendarMessage::OpenEventEditor(Some(event.clone())))
+        .padding(PAD_BUTTON)
+        .style(theme::ButtonClass::Ghost.style());
+
+    let mut action_row = row![edit_btn].spacing(SPACE_XS);
+    if let Some(ref id) = event.id {
+        action_row = action_row.push(
+            button(text("Delete").size(TEXT_SM))
+                .on_press(CalendarMessage::ConfirmDeleteEvent(id.clone(), event.title.clone()))
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Ghost.style()),
+        );
+    }
+    detail = detail.push(action_row);
+
+    let detail_scroll = scrollable(detail).height(Length::Fill);
+
+    // ── Right panel: mini day view showing conflicts ──
+    let day_events = calendar_time_grid::events_for_date(
+        &state.events,
+        event.start_date,
+    );
+
+    let day_label = format!(
+        "{}, {} {}",
+        weekday_short(event.start_date.weekday()),
+        month_short(event.start_date.month()),
+        event.start_date.day(),
+    );
+
+    let mut day_col = column![
+        text(day_label).size(TEXT_SM).font(crate::font::text_semibold()),
+        Space::new().height(SPACE_XS),
+    ].spacing(SPACE_XXXS);
+
+    if day_events.is_empty() {
+        day_col = day_col.push(
+            text("No other events").size(TEXT_XS).style(theme::TextClass::Muted.style()),
+        );
+    } else {
+        for ev in day_events {
+            let time_str = if ev.all_day {
+                "All day".to_string()
+            } else {
+                let start = chrono::DateTime::from_timestamp(ev.start_time, 0)
+                    .map(|dt| dt.with_timezone(&chrono::Local));
+                let end = chrono::DateTime::from_timestamp(ev.end_time, 0)
+                    .map(|dt| dt.with_timezone(&chrono::Local));
+                match (start, end) {
+                    (Some(s), Some(e)) => format!("{} \u{2013} {}", s.format("%H:%M"), e.format("%H:%M")),
+                    _ => String::new(),
+                }
+            };
+            let is_current = event.id.as_deref() == Some(ev.id.as_str());
+            let ev_color = parse_hex_color(&ev.color);
+            let dot = text("\u{25CF}").size(TEXT_XS).color(ev_color);
+            let title_style: fn(&iced::Theme) -> text::Style = if is_current {
+                text::primary
+            } else {
+                text::base
+            };
+            let ev_row = column![
+                row![dot, text(ev.title).size(TEXT_XS).style(title_style)]
+                    .spacing(SPACE_XXS).align_y(Alignment::Center),
+                text(time_str).size(8.0).style(theme::TextClass::Muted.style()),
+            ].spacing(0);
+            day_col = day_col.push(ev_row);
+        }
+    }
+
+    let right_panel = container(
+        scrollable(day_col),
+    )
+    .width(Length::FillPortion(3))
+    .height(Length::Fill)
+    .padding(PAD_CARD)
+    .style(theme::ContainerClass::Sidebar.style());
+
+    // ── Assemble two-panel layout ──
+    let header = row![
+        Space::new().width(Length::Fill),
+        close_btn,
+    ].width(Length::Fill);
+
+    let left_panel = container(
+        column![header, detail_scroll].spacing(SPACE_XXS),
+    )
+    .width(Length::FillPortion(7))
+    .height(Length::Fill)
+    .padding(PAD_CARD);
+
+    let two_panel = row![left_panel, right_panel]
+        .height(Length::Fill);
+
+    container(two_panel)
+        .width(Length::FillPortion(4))
+        .max_width(1200.0)
+        .height(Length::Fill)
+        .padding(iced::Padding::from([SPACE_LG, 0.0]))
         .style(theme::ContainerClass::Elevated.style())
         .into()
 }
@@ -675,12 +995,35 @@ fn event_editor_card(
 
     let mut content = column![].spacing(SPACE_SM);
 
-    // Heading
+    // Heading + close button
+    let close_btn = button(text("\u{2715}").size(TEXT_SM))
+        .on_press(CalendarMessage::CloseOverlay)
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::Ghost.style());
     content = content.push(
-        text(heading)
-            .size(TEXT_HEADING)
-            .font(crate::font::text_semibold()),
+        row![
+            text(heading).size(TEXT_HEADING).font(crate::font::text_semibold()),
+            Space::new().width(Length::Fill),
+            close_btn,
+        ].align_y(Alignment::Center),
     );
+
+    // Calendar selector (spec: first field)
+    // Uses the calendars from state — but since we only have the event data here,
+    // show the current calendar name or a text input for calendar_id.
+    if let Some(ref cal_name) = event.calendar_name {
+        content = content.push(form_field(
+            "Calendar",
+            row![
+                if let Some(ref hex) = event.color {
+                    text("\u{25CF}").size(TEXT_MD).color(parse_hex_color(hex))
+                } else {
+                    text("\u{25CF}").size(TEXT_MD)
+                },
+                text(cal_name).size(TEXT_MD),
+            ].spacing(SPACE_XXS).align_y(Alignment::Center).into(),
+        ));
+    }
 
     // Title
     content = content.push(form_field(
@@ -746,6 +1089,93 @@ fn event_editor_card(
             .size(TEXT_MD)
             .into(),
     ));
+
+    // Timezone
+    let tz_display = event.timezone.as_deref().unwrap_or("Local");
+    let tz_input = text_input("Timezone (e.g. Europe/Oslo)", tz_display)
+        .on_input(|s| {
+            let tz = if s.is_empty() { None } else { Some(s) };
+            CalendarMessage::EventFieldChanged(EventField::Timezone(tz))
+        })
+        .padding(PAD_INPUT)
+        .size(TEXT_SM);
+    content = content.push(form_field("Timezone", tz_input.into()));
+
+    // Availability dropdown (free / busy / tentative / out of office)
+    let avail = event.availability.as_deref().unwrap_or("busy");
+    let avail_options = ["busy", "free", "tentative", "oof"];
+    let mut avail_row = row![].spacing(SPACE_XXS);
+    for opt in &avail_options {
+        let is_active = avail == *opt;
+        let label = match *opt {
+            "busy" => "Busy",
+            "free" => "Free",
+            "tentative" => "Tentative",
+            "oof" => "OOO",
+            _ => opt,
+        };
+        avail_row = avail_row.push(
+            button(text(label).size(TEXT_XS).style(
+                if is_active { text::primary } else { text::secondary },
+            ))
+            .on_press(CalendarMessage::EventFieldChanged(
+                EventField::Availability(Some((*opt).to_string())),
+            ))
+            .padding(PAD_ICON_BTN)
+            .style(if is_active {
+                theme::ButtonClass::Nav { active: true }.style()
+            } else {
+                theme::ButtonClass::Ghost.style()
+            }),
+        );
+    }
+    content = content.push(form_field("Availability", avail_row.into()));
+
+    // Visibility (public / private)
+    let vis = event.visibility.as_deref().unwrap_or("default");
+    let vis_options = ["default", "public", "private"];
+    let mut vis_row = row![].spacing(SPACE_XXS);
+    for opt in &vis_options {
+        let is_active = vis == *opt;
+        let label = match *opt {
+            "default" => "Default",
+            "public" => "Public",
+            "private" => "Private",
+            _ => opt,
+        };
+        vis_row = vis_row.push(
+            button(text(label).size(TEXT_XS).style(
+                if is_active { text::primary } else { text::secondary },
+            ))
+            .on_press(CalendarMessage::EventFieldChanged(
+                EventField::Visibility(Some((*opt).to_string())),
+            ))
+            .padding(PAD_ICON_BTN)
+            .style(if is_active {
+                theme::ButtonClass::Nav { active: true }.style()
+            } else {
+                theme::ButtonClass::Ghost.style()
+            }),
+        );
+    }
+    content = content.push(form_field("Visibility", vis_row.into()));
+
+    // Recurrence (basic toggle + text display)
+    let has_recurrence = event.recurrence_rule.is_some();
+    let recurrence_label = if has_recurrence {
+        format!("Recurring: {}", format_recurrence_rule(
+            event.recurrence_rule.as_deref().unwrap_or(""),
+        ))
+    } else {
+        "Not recurring".to_string()
+    };
+    let recurrence_toggle = button(text(recurrence_label).size(TEXT_SM))
+        .on_press(CalendarMessage::EventFieldChanged(EventField::RecurrenceRule(
+            if has_recurrence { None } else { Some("RRULE:FREQ=WEEKLY".to_string()) },
+        )))
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::Ghost.style());
+    content = content.push(form_field("Recurrence", recurrence_toggle.into()));
 
     // Action buttons
     let save_btn = button(text("Save").size(TEXT_SM))

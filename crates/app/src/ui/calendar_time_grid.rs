@@ -760,7 +760,7 @@ fn event_minutes(
 }
 
 /// Filter events to those occurring on a specific date.
-fn events_for_date(events: &[TimeGridEvent], date: NaiveDate) -> Vec<TimeGridEvent> {
+pub fn events_for_date(events: &[TimeGridEvent], date: NaiveDate) -> Vec<TimeGridEvent> {
     events
         .iter()
         .filter(|e| {

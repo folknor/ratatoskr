@@ -43,6 +43,17 @@ impl App {
                 self.calendar.rebuild_view_data();
                 Task::none()
             }
+            CalendarMessage::DoubleClickSlot(date, hour) => {
+                // Double-click opens event creation dialog with time pre-filled.
+                let event = CalendarEventData::new_at(date, hour);
+                self.calendar.reset_editor_undo(&event);
+                self.calendar.overlay = CalendarOverlay::EventEditor {
+                    event,
+                    is_new: true,
+                    original_title: String::new(),
+                };
+                Task::none()
+            }
             CalendarMessage::EventClicked(event_id) => {
                 let db = Arc::clone(&self.db);
                 let eid = event_id.clone();
@@ -88,7 +99,28 @@ impl App {
                 Task::none()
             }
             CalendarMessage::CloseOverlay => {
+                // Check for unsaved changes in the editor.
+                if let CalendarOverlay::EventEditor { ref event, ref original_title, .. } = self.calendar.overlay {
+                    if event.title != *original_title
+                        || !event.description.is_empty()
+                        || !event.location.is_empty()
+                    {
+                        // Has changes — show confirmation.
+                        self.calendar.overlay = CalendarOverlay::ConfirmDelete {
+                            event_id: "__discard__".to_string(),
+                            title: "Discard unsaved changes?".to_string(),
+                        };
+                        return Task::none();
+                    }
+                }
                 self.calendar.overlay = CalendarOverlay::None;
+                Task::none()
+            }
+            CalendarMessage::ExpandToFullModal => {
+                if let CalendarOverlay::EventDetail { event } = &self.calendar.overlay {
+                    let event = event.clone();
+                    self.calendar.overlay = CalendarOverlay::EventFullModal { event };
+                }
                 Task::none()
             }
             CalendarMessage::OpenEventEditor(data) => {
@@ -104,8 +136,9 @@ impl App {
                     }
                 };
                 self.calendar.reset_editor_undo(&event);
+                let original_title = event.title.clone();
                 self.calendar.overlay =
-                    CalendarOverlay::EventEditor { event, is_new };
+                    CalendarOverlay::EventEditor { event, is_new, original_title };
                 Task::none()
             }
             CalendarMessage::CreateEvent => {
@@ -116,6 +149,7 @@ impl App {
                 self.calendar.overlay = CalendarOverlay::EventEditor {
                     event,
                     is_new: true,
+                    original_title: String::new(),
                 };
                 Task::none()
             }
@@ -152,6 +186,11 @@ impl App {
                 Task::none()
             }
             CalendarMessage::DeleteEvent(event_id) => {
+                // Handle discard-unsaved-changes sentinel.
+                if event_id == "__discard__" {
+                    self.calendar.overlay = CalendarOverlay::None;
+                    return Task::none();
+                }
                 let db = Arc::clone(&self.db);
                 self.calendar.overlay = CalendarOverlay::None;
                 Task::perform(
@@ -233,6 +272,11 @@ impl App {
                 EventField::EndHour(s) => event.end_hour = s,
                 EventField::EndMinute(s) => event.end_minute = s,
                 EventField::AllDay(b) => event.all_day = b,
+                EventField::CalendarId(id) => event.calendar_id = id,
+                EventField::Timezone(tz) => event.timezone = tz,
+                EventField::Availability(a) => event.availability = a,
+                EventField::Visibility(v) => event.visibility = v,
+                EventField::RecurrenceRule(r) => event.recurrence_rule = r,
             }
         }
     }
