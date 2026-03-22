@@ -303,6 +303,15 @@ impl Component for Sidebar {
             col = col.push(labels(self));
         }
 
+        // Tags section (section 4) — always visible, all accounts
+        let has_tags = self.nav_state.as_ref().is_some_and(|ns| {
+            ns.folders.iter().any(|f| matches!(f.folder_kind, FolderKind::AccountTag))
+        });
+        if has_tags {
+            col = col.push(widgets::section_break::<SidebarMessage>());
+            col = col.push(tags_section(self));
+        }
+
         // Pinned public folders (if any)
         if !self.pinned_public_folders.is_empty() {
             col = col.push(widgets::section_break::<SidebarMessage>());
@@ -986,4 +995,36 @@ fn quote_if_needed(s: &str) -> String {
     } else {
         s.to_string()
     }
+}
+
+// ── Tags section (section 4) ────────────────────────────
+
+fn tags_section(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
+    let folders = sidebar
+        .nav_state
+        .as_ref()
+        .map(|ns| &ns.folders[..])
+        .unwrap_or(&[]);
+
+    let children: Vec<Element<'_, SidebarMessage>> = folders
+        .iter()
+        .filter(|f| matches!(f.folder_kind, FolderKind::AccountTag))
+        .map(|f| {
+            widgets::nav_button(
+                None,
+                &f.name,
+                sidebar.selected_label.as_deref() == Some(&f.id),
+                widgets::NavSize::Compact,
+                Some(f.unread_count),
+                SidebarMessage::SelectLabel(Some(f.id.clone())),
+            )
+        })
+        .collect();
+
+    widgets::collapsible_section(
+        "LABELS",
+        sidebar.labels_expanded,
+        SidebarMessage::ToggleLabelsSection,
+        children,
+    )
 }

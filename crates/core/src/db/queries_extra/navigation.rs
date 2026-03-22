@@ -20,8 +20,11 @@ pub enum FolderKind {
     Universal,
     /// A user-defined smart folder backed by a saved query.
     SmartFolder,
-    /// A provider label/folder specific to one account.
+    /// A provider label/folder specific to one account (container semantics).
     AccountLabel,
+    /// A tag-type label — Exchange category, IMAP keyword, JMAP keyword,
+    /// or Gmail user label (tag semantics, shown in section 4).
+    AccountTag,
 }
 
 /// Whether a navigation item is a non-exclusive tag or an exclusive folder.
@@ -92,6 +95,12 @@ pub fn get_navigation_state(
             e
         })?);
     }
+
+    // Tags (section 4) are always loaded from all accounts, regardless of scope.
+    folders.extend(build_all_account_tags(conn).map_err(|e| {
+        log::error!("Failed to build account tags: {e}");
+        e
+    })?);
 
     log::debug!("Navigation state built: {} folders", folders.len());
     Ok(NavigationState {
@@ -245,10 +254,16 @@ fn build_account_labels(
                 !system_ids.contains(&pid.as_str())
             });
 
+            let kind = if label.label_kind == "tag" {
+                FolderKind::AccountTag
+            } else {
+                FolderKind::AccountLabel
+            };
+
             NavigationFolder {
                 id: label.id,
                 name: label.name,
-                folder_kind: FolderKind::AccountLabel,
+                folder_kind: kind,
                 unread_count,
                 account_id: Some(label.account_id),
                 parent_id,
@@ -257,6 +272,46 @@ fn build_account_labels(
             }
         })
         .collect())
+}
+
+/// Load all tag-type labels from all accounts, grouped by normalized name.
+///
+/// Returns one NavigationFolder per unique normalized label name, with
+/// an aggregated unread count across all accounts that have that label.
+fn build_all_account_tags(
+    conn: &Connection,
+) -> Result<Vec<NavigationFolder>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT l.name,
+                    COALESCE(SUM(CASE WHEN t.is_read = 0 THEN 1 ELSE 0 END), 0) AS unread_count
+             FROM labels l
+             LEFT JOIN thread_labels tl ON l.id = tl.label_id AND l.account_id = tl.account_id
+             LEFT JOIN threads t ON tl.thread_id = t.id AND tl.account_id = t.account_id
+             WHERE l.label_kind = 'tag'
+               AND l.visible = 1
+             GROUP BY LOWER(TRIM(l.name))
+             ORDER BY l.name COLLATE NOCASE ASC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    stmt.query_map([], |row| {
+        let name: String = row.get("name")?;
+        let unread_count: i64 = row.get("unread_count")?;
+        Ok(NavigationFolder {
+            id: format!("tag:{}", name.to_lowercase().trim()),
+            name,
+            folder_kind: FolderKind::AccountTag,
+            unread_count,
+            account_id: None, // cross-account
+            parent_id: None,
+            label_semantics: Some(LabelSemantics::Tag),
+            query: None,
+        })
+    })
+    .map_err(|e| e.to_string())?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())
 }
 
 /// Determine label semantics based on the email provider.
