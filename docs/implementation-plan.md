@@ -131,13 +131,13 @@ Prioritized implementation plan for Ratatoskr features.
 
 ```
 Tier 1 — COMPLETE:
-  Command Palette 6a-6d ✅ (NavigateToLabel, chord indicator, snooze presets, recency sort, provider_kind/current_view fixed)
+  Command Palette 6a-6e + Slice 5 ✅ (NavigateToLabel, chord indicator, snooze presets, recency sort, keybinding persistence, undo tokens, usage persistence, NavMsgNext/Prev wired, SelectFromHere wired)
   Sidebar 1A-1D ✅ (Spam/AllMail, O(n²) fix, relative dates, dead code cleanup)
   Accounts 0-7 ✅ (real discovery, OAuth, protocol selection, core CRUD for creation, account editor, health enum, deletion, duplicate detection, drag-to-reorder)
   Status Bar scaffold ✅ (IcedProgressReporter, SyncEvent types, idle height fix, settings toggle — sync orchestrator NOT connected)
 
   Remaining (lower priority):
-    Command Palette 6e-6f (persistence, keybinding UI)
+    Command Palette 6f (keybinding management UI — deferred past V1)
     Sidebar Phase 2 — satisfied (no actions to strip)
 
 Tier 2 — SUBSTANTIALLY COMPLETE (2026-03-22):
@@ -212,7 +212,7 @@ Main Layout (cross-cutting, 2026-03-21):
 - **Component trait:** Seven components extracted: Sidebar (`sidebar.rs:103`), ThreadList (`thread_list.rs:295`), ReadingPane (`reading_pane.rs:163`), Settings (`settings/update.rs:15`), StatusBar (`status_bar.rs:462`), AddAccountWizard (`add_account.rs:350`), Palette (`palette.rs:307`). Compose, calendar, and pop-out windows are not componentized.
 - **Token-to-Catalog theming:** Very clean — zero inline style closures across all UI files. Previous palette exceptions resolved (now uses `TextClass` variants).
 - **Subscription orchestration:** Infrastructure solid. Active subscriptions: keyboard listener, chord timeout, search debounce, status bar cycling, settings animation. `IcedProgressReporter` + `SyncEvent` + `create_sync_progress_channel()` exist (`status_bar.rs:143-166`) but sync orchestrator never calls them. Compose auto-save timer still missing.
-- **Dead code accumulation:** Partially reduced. Key remaining items: `load_thread_detail` bridge (`db/threads.rs:109-134`), `init_body_store` (`db/threads.rs:328-333`), core signature CRUD functions (unused by app), `SidebarEvent::CycleAccount` (`sidebar.rs:43`, parent handler at `main.rs:898`), `PendingChord.started` (`main.rs:143`), `prepare_move_up/down` (`widget/cursor.rs:413,463`), `save_session_state` / `restore_pop_out_windows` / `SessionState::load` (`handlers/pop_out.rs:473,508`, `pop_out/session.rs:40`), `body_html` on `MessageViewState` (populated but never rendered). **Resolved (2026-03-22):** `dispatch_autocomplete_search` and `should_trigger_autocomplete` are now wired. `RecipientField`, `AUTOCOMPLETE_MAX_HEIGHT`, `AUTOCOMPLETE_ROW_HEIGHT` are now used.
+- **Dead code accumulation:** Partially reduced. Key remaining items: `load_thread_detail` bridge (`db/threads.rs:109-134`), `init_body_store` (`db/threads.rs:328-333`), core signature CRUD functions (unused by app), `SidebarEvent::CycleAccount` (`sidebar.rs:43`, parent handler at `main.rs:898`), `prepare_move_up/down` (`widget/cursor.rs:413,463`), `save_session_state` / `restore_pop_out_windows` / `SessionState::load` (`handlers/pop_out.rs:473,508`, `pop_out/session.rs:40`), `body_html` on `MessageViewState` (populated but never rendered). **Resolved (2026-03-22):** `dispatch_autocomplete_search` and `should_trigger_autocomplete` are now wired. `RecipientField`, `AUTOCOMPLETE_MAX_HEIGHT`, `AUTOCOMPLETE_ROW_HEIGHT` are now used. `PendingChord.started` removed.
 - **Editor** is complete (all 5 phases, 652 tests). Signatures and compose are now unblocked. With contacts autocomplete now wired (2026-03-22), the editor enables the full compose workflow.
 - **Pop-out windows** are deliberately split into compose (heavy dependencies) and message-view (mostly independent, but Phase 1 is shared infrastructure). Phase 1 is complete. Message view has UI scaffold but session persistence is dead code and HTML rendering falls back to plain text. Compose enhanced with discard confirmation, token input recipients, formatting toolbar stubs, cc_addresses — still no sending, drafts, auto-save, attachments, or rich text.
 - **Contacts (2026-03-22 — substantially complete):** Autocomplete fully wired end-to-end (all 6 spec phases). Token input widget with drag detection, context menu (Delete/Expand group/Move to field), Bcc nudge and bulk paste banners. RFC 5322 paste parser wired. GAL cache table + autocomplete search integration (directory fetch awaits provider clients). Group creation from import. Styled pills on contact cards. Distinct local-vs-synced save behavior. Inline contact editing from reading pane. Provider write-back dispatch (JMAP complete, Google/Graph scaffolded). Remaining: GAL directory API calls, CardDAV PUT, XLSX import (deferred).
