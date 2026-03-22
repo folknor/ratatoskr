@@ -526,3 +526,52 @@ pub async fn disable_shared_mailbox_sync(
     })
     .await
 }
+
+/// Disable sync for a shared mailbox and record an error message.
+pub async fn disable_shared_mailbox_sync_with_error(
+    db: &DbState,
+    account_id: &str,
+    mailbox_id: &str,
+    error: &str,
+) -> Result<(), String> {
+    let aid = account_id.to_string();
+    let mid = mailbox_id.to_string();
+    let err = error.to_string();
+
+    db.with_conn(move |conn| {
+        conn.execute(
+            "UPDATE shared_mailbox_sync_state \
+             SET is_sync_enabled = 0, sync_error = ?3 \
+             WHERE account_id = ?1 AND mailbox_id = ?2",
+            rusqlite::params![aid, mid, err],
+        )
+        .map_err(|e| format!("disable shared mailbox sync with error: {e}"))?;
+        Ok(())
+    })
+    .await
+}
+
+/// Get all shared mailbox IDs for an account (enabled and disabled).
+///
+/// Used to detect revoked access — compare against currently-available
+/// shared accounts to find entries that should be disabled.
+pub async fn get_all_shared_mailbox_ids(
+    db: &DbState,
+    account_id: &str,
+) -> Result<Vec<String>, String> {
+    let aid = account_id.to_string();
+
+    db.with_conn(move |conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT mailbox_id FROM shared_mailbox_sync_state \
+                 WHERE account_id = ?1",
+            )
+            .map_err(|e| format!("prepare: {e}"))?;
+        stmt.query_map(rusqlite::params![aid], |row| row.get(0))
+            .map_err(|e| format!("query: {e}"))?
+            .collect::<Result<Vec<String>, _>>()
+            .map_err(|e| format!("collect: {e}"))
+    })
+    .await
+}

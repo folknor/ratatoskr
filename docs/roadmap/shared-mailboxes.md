@@ -87,7 +87,7 @@ A user may have Full Access but not Send As (can read but not impersonate), or S
 ### Remaining
 
 - **Gmail delegation**: Account-level delegation is not implementable via public Gmail API (cannot discover inbound delegation; accessing delegated mailbox requires domain-wide delegation or internal session mechanisms). Documented as a known limitation. Send-As aliases work.
-- **JMAP Sharing (RFC 9670)**: In progress (being implemented separately).
+- **JMAP Sharing (RFC 9670)**: Phase 1 done — shared account discovery from JMAP Session wired into initial and delta sync (`jmap/src/sync/mod.rs`). Revoked access detection included. See `docs/roadmap/jmap-sharing.md` for full plan.
 - **App-level shared mailbox selection handler**: `SharedMailboxSelected` event is emitted but the App doesn't yet load threads for the selected shared mailbox. Needs navigation state scoping.
 - **Compose identity auto-selection**: When replying from shared mailbox context, auto-set From to shared mailbox address. `send_as_shared_mailbox()` and `send_on_behalf_of()` APIs exist.
 - **Configurable sync depth per shared mailbox**: Currently hardcoded to 30 days initial lookback. No per-mailbox sync depth setting.
@@ -343,5 +343,5 @@ Neither `async-imap` nor `imap-codec` support ACL. Custom implementation via raw
 | Thread loading on shared mailbox selection | Medium | Critical for UX | P0 | Not started (App handler for SharedMailboxSelected) |
 | Send identity auto-selection | Medium | Critical for UX | P0 | Not started |
 | Per-mailbox sync depth config | Medium | High for scale | P1 | Not started |
-| JMAP Sharing (RFC 9670) | Medium-High | Medium | P2 | In progress (separate implementation) |
+| JMAP Sharing (RFC 9670) | Medium-High | Medium | P2 | Phase 1 done (Session discovery + revocation). See `docs/roadmap/jmap-sharing.md`. |
 | Gmail delegation | Blocked | Low | P3 | Blocked (API limitation) |

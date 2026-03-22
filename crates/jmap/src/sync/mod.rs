@@ -138,13 +138,16 @@ pub async fn jmap_initial_sync(
 
     log::info!("[JMAP] Initial sync complete for account {account_id}: {fetched} messages synced");
 
-    // Phase 3: Contacts sync
+    // Phase 3: Shared account discovery from JMAP Session
+    discover_shared_accounts(client, account_id, db).await;
+
+    // Phase 4: Contacts sync
     match super::contacts_sync::jmap_contacts_initial_sync(client, account_id, db).await {
         Ok(count) => log::info!("[JMAP] Initial contacts sync: {count} contacts for account {account_id}"),
         Err(e) => log::warn!("[JMAP] Contacts initial sync failed for account {account_id}: {e}"),
     }
 
-    // Phase 4: Calendar sync
+    // Phase 5: Calendar sync
     match super::calendar_sync::sync_calendars(client, account_id, db).await {
         Ok(()) => log::info!("[JMAP] Initial calendar sync complete for account {account_id}"),
         Err(e) => log::warn!("[JMAP] Calendar initial sync failed for account {account_id}: {e}"),
@@ -295,7 +298,10 @@ pub async fn jmap_delta_sync(
     // Save updated states
     save_sync_state(db, account_id, "Email", &since_state).await?;
 
-    // 3. Contacts delta sync
+    // 3. Shared account discovery (re-check Session on every delta sync)
+    discover_shared_accounts(client, account_id, db).await;
+
+    // 4. Contacts delta sync
     match super::contacts_sync::jmap_contacts_delta_sync(client, account_id, db).await {
         Ok(count) => {
             if count > 0 {
@@ -305,7 +311,7 @@ pub async fn jmap_delta_sync(
         Err(e) => log::warn!("[JMAP] Contacts delta sync failed for account {account_id}: {e}"),
     }
 
-    // 4. Calendar delta sync
+    // 5. Calendar delta sync
     match super::calendar_sync::sync_calendars(client, account_id, db).await {
         Ok(()) => log::debug!("[JMAP] Calendar delta sync complete for account {account_id}"),
         Err(e) => log::warn!("[JMAP] Calendar delta sync failed for account {account_id}: {e}"),
@@ -444,4 +450,100 @@ pub(crate) fn emit_progress(ctx: &SyncCtx<'_>, phase: &str, current: u64, total:
         total,
         None,
     );
+}
+
+// ---------------------------------------------------------------------------
+// Shared account discovery (JMAP Sharing — Phase 1)
+// ---------------------------------------------------------------------------
+
+/// Discover shared accounts from the JMAP Session and persist them.
+///
+/// The JMAP Session's `accounts` map (RFC 8620) includes every account the
+/// authenticated user has access to. Accounts with `is_personal == false` are
+/// shared/delegated mailboxes. This function:
+///
+/// 1. Enables sync for any newly-discovered shared accounts.
+/// 2. Disables sync (with error) for previously-known shared accounts that
+///    are no longer in the Session (access revoked server-side).
+///
+/// Does not fail the overall sync — discovery errors are logged and skipped.
+pub(crate) async fn discover_shared_accounts(
+    client: &JmapClient,
+    account_id: &str,
+    db: &DbState,
+) {
+    let session = client.inner().session();
+
+    // Collect non-personal accounts from the Session.
+    let mut session_shared_ids: Vec<(String, String)> = Vec::new();
+    for jmap_account_id in session.accounts() {
+        let Some(account) = session.account(jmap_account_id) else {
+            continue;
+        };
+        if account.is_personal() {
+            continue;
+        }
+        session_shared_ids.push((
+            jmap_account_id.clone(),
+            account.name().to_string(),
+        ));
+    }
+
+    // Enable sync for newly-discovered shared accounts.
+    for (jmap_id, display_name) in &session_shared_ids {
+        let dn = if display_name.is_empty() {
+            None
+        } else {
+            Some(display_name.as_str())
+        };
+        if let Err(e) =
+            sync_state::enable_shared_mailbox_sync(db, account_id, jmap_id, dn).await
+        {
+            log::warn!(
+                "[JMAP] Failed to enable shared account {jmap_id} for {account_id}: {e}"
+            );
+        }
+    }
+
+    // Detect revoked access: shared accounts we knew about but are no longer
+    // in the Session.
+    let known_ids = match sync_state::get_all_shared_mailbox_ids(db, account_id).await {
+        Ok(ids) => ids,
+        Err(e) => {
+            log::warn!("[JMAP] Failed to load known shared mailboxes for {account_id}: {e}");
+            return;
+        }
+    };
+
+    let session_id_set: std::collections::HashSet<&str> = session_shared_ids
+        .iter()
+        .map(|(id, _)| id.as_str())
+        .collect();
+
+    for known_id in &known_ids {
+        if !session_id_set.contains(known_id.as_str()) {
+            log::info!(
+                "[JMAP] Shared account {known_id} no longer in Session for {account_id} — disabling"
+            );
+            if let Err(e) = sync_state::disable_shared_mailbox_sync_with_error(
+                db,
+                account_id,
+                known_id,
+                "Access revoked — account no longer in JMAP Session",
+            )
+            .await
+            {
+                log::warn!(
+                    "[JMAP] Failed to disable revoked shared account {known_id}: {e}"
+                );
+            }
+        }
+    }
+
+    if !session_shared_ids.is_empty() {
+        log::info!(
+            "[JMAP] Discovered {} shared account(s) for {account_id}",
+            session_shared_ids.len()
+        );
+    }
 }
