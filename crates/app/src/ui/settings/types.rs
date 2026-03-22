@@ -220,6 +220,8 @@ pub enum SettingsEvent {
     },
     /// Request the App to persist reordered account sort orders.
     ReorderAccounts(Vec<(String, i64)>),
+    /// Request the App to open the re-auth wizard for an account.
+    ReauthenticateAccount(String),
 }
 
 /// Overlays that slide in from the right, covering the settings content.

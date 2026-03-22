@@ -75,6 +75,77 @@ impl SecurityOption {
     }
 }
 
+// ── Manual provider ──────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManualProvider {
+    Gmail,
+    Microsoft365,
+    Jmap,
+    Imap,
+}
+
+impl ManualProvider {
+    const ALL: &[ManualProvider] = &[
+        ManualProvider::Gmail,
+        ManualProvider::Microsoft365,
+        ManualProvider::Jmap,
+        ManualProvider::Imap,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Gmail => "Gmail",
+            Self::Microsoft365 => "Microsoft 365",
+            Self::Jmap => "JMAP",
+            Self::Imap => "IMAP",
+        }
+    }
+
+    fn to_provider_string(self) -> &'static str {
+        match self {
+            Self::Gmail => "gmail_api",
+            Self::Microsoft365 => "graph",
+            Self::Jmap => "jmap",
+            Self::Imap => "imap",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManualAuthMethod {
+    OAuth,
+    Password,
+}
+
+impl ManualAuthMethod {
+    fn label(self) -> &'static str {
+        match self {
+            Self::OAuth => "OAuth",
+            Self::Password => "Password",
+        }
+    }
+}
+
+// ── Manual config state ─────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct ManualConfig {
+    pub selected_provider: Option<ManualProvider>,
+    pub jmap_url: String,
+    pub auth_method: ManualAuthMethod,
+}
+
+impl Default for ManualConfig {
+    fn default() -> Self {
+        Self {
+            selected_provider: None,
+            jmap_url: String::new(),
+            auth_method: ManualAuthMethod::OAuth,
+        }
+    }
+}
+
 // ── Auth state ───────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -148,10 +219,15 @@ pub enum AddAccountMessage {
     ConfirmProtocol,
 
     // Manual config
+    SelectManualProvider(ManualProvider),
     ManualImapHostChanged(String),
     ManualImapPortChanged(String),
+    ManualImapSecurityChanged(SecurityOption),
     ManualSmtpHostChanged(String),
     ManualSmtpPortChanged(String),
+    ManualSmtpSecurityChanged(SecurityOption),
+    ManualJmapUrlChanged(String),
+    ManualAuthMethodChanged(ManualAuthMethod),
     SubmitManualConfig,
 
     // Step 3: Authentication
@@ -215,6 +291,8 @@ pub struct AddAccountWizard {
     // Discovery result
     pub discovery: Option<DiscoveredConfig>,
     pub selected_option: Option<usize>,
+    // Manual configuration state (used when discovery fails)
+    pub manual_config: ManualConfig,
     // Auth state
     pub auth_state: AuthState,
     // OAuth result (stored when OAuth completes for account creation)
@@ -320,6 +398,7 @@ impl AddAccountWizard {
             generation: 0,
             discovery: None,
             selected_option: None,
+            manual_config: ManualConfig::default(),
             auth_state: AuthState::default(),
             oauth_success: None,
             resolved_provider: "imap".to_string(),
@@ -862,13 +941,68 @@ impl AddAccountWizard {
     fn handle_submit_manual_config(
         &mut self,
     ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
-        // Copy manual config fields to auth state and proceed to password auth
+        let Some(provider) = self.manual_config.selected_provider else {
+            self.error = Some("Please select a provider type.".to_string());
+            return (Task::none(), None);
+        };
+
         self.prefill_from_email();
-        self.resolved_provider = "imap".to_string();
-        self.resolved_auth_method = "password".to_string();
-        self.step = AddAccountStep::PasswordAuth;
+        self.resolved_provider = provider.to_provider_string().to_string();
         self.error = None;
-        (Task::none(), None)
+
+        match provider {
+            ManualProvider::Gmail | ManualProvider::Microsoft365 => {
+                // OAuth providers — look up OAuth config from the registry
+                let provider_id = match provider {
+                    ManualProvider::Gmail => "google",
+                    ManualProvider::Microsoft365 => "microsoft",
+                    _ => unreachable!(),
+                };
+                match self.manual_config.auth_method {
+                    ManualAuthMethod::OAuth => {
+                        self.resolved_auth_method = "oauth".to_string();
+                        let task = self.start_reauth_oauth(
+                            Some(provider_id),
+                            None,
+                        );
+                        (task, None)
+                    }
+                    ManualAuthMethod::Password => {
+                        self.resolved_auth_method = "password".to_string();
+                        self.step = AddAccountStep::PasswordAuth;
+                        (Task::none(), None)
+                    }
+                }
+            }
+            ManualProvider::Jmap => {
+                if self.manual_config.jmap_url.trim().is_empty() {
+                    self.error = Some("Please enter a JMAP session URL.".to_string());
+                    return (Task::none(), None);
+                }
+                match self.manual_config.auth_method {
+                    ManualAuthMethod::OAuth => {
+                        self.resolved_auth_method = "oauth".to_string();
+                        self.step = AddAccountStep::OAuthWaiting;
+                        self.error = Some(
+                            "JMAP OAuth is not yet supported for manual configuration. \
+                             Please use password authentication.".to_string()
+                        );
+                        self.step = AddAccountStep::ManualConfiguration;
+                        (Task::none(), None)
+                    }
+                    ManualAuthMethod::Password => {
+                        self.resolved_auth_method = "password".to_string();
+                        self.step = AddAccountStep::PasswordAuth;
+                        (Task::none(), None)
+                    }
+                }
+            }
+            ManualProvider::Imap => {
+                self.resolved_auth_method = "password".to_string();
+                self.step = AddAccountStep::PasswordAuth;
+                (Task::none(), None)
+            }
+        }
     }
 
     fn handle_submit_credentials(
@@ -1087,17 +1221,32 @@ impl AddAccountWizard {
             AddAccountMessage::AuthSmtpSecurityChanged(v) => {
                 self.auth_state.smtp_security = v;
             }
+            AddAccountMessage::SelectManualProvider(provider) => {
+                self.manual_config.selected_provider = Some(provider);
+            }
             AddAccountMessage::ManualImapHostChanged(v) => {
                 self.auth_state.imap_host = v;
             }
             AddAccountMessage::ManualImapPortChanged(v) => {
                 self.auth_state.imap_port = v;
             }
+            AddAccountMessage::ManualImapSecurityChanged(v) => {
+                self.auth_state.imap_security = v;
+            }
             AddAccountMessage::ManualSmtpHostChanged(v) => {
                 self.auth_state.smtp_host = v;
             }
             AddAccountMessage::ManualSmtpPortChanged(v) => {
                 self.auth_state.smtp_port = v;
+            }
+            AddAccountMessage::ManualSmtpSecurityChanged(v) => {
+                self.auth_state.smtp_security = v;
+            }
+            AddAccountMessage::ManualJmapUrlChanged(v) => {
+                self.manual_config.jmap_url = v;
+            }
+            AddAccountMessage::ManualAuthMethodChanged(v) => {
+                self.manual_config.auth_method = v;
             }
             AddAccountMessage::AccountNameChanged(v) => self.identity.name = v,
             AddAccountMessage::SelectColor(i) => {
@@ -1343,7 +1492,7 @@ fn view_discovering<'a>() -> Element<'a, AddAccountMessage> {
             .size(TEXT_LG)
             .style(text::secondary),
         Space::new().height(SPACE_MD),
-        text("Please wait...").size(TEXT_SM).style(text::secondary),
+        widgets::spinner(24.0),
         Space::new().height(SPACE_LG),
         ghost_button("Cancel", AddAccountMessage::Cancel),
     ]
@@ -1430,9 +1579,9 @@ fn protocol_card_view(
     .align_y(Alignment::Center);
 
     let style = if selected {
-        theme::ButtonClass::Chip { active: true }
+        theme::ButtonClass::ProtocolCardSelected
     } else {
-        theme::ButtonClass::Action
+        theme::ButtonClass::ProtocolCard
     };
 
     button(
@@ -1468,31 +1617,138 @@ impl AddAccountWizard {
             col = col.push(text(err.as_str()).size(TEXT_SM).style(text::danger));
         }
 
-        col = col.push(text("Incoming (IMAP)").size(TEXT_XL).style(text::base));
-        col = col.push(server_port_row(
-            "imap.example.com",
-            &self.auth_state.imap_host,
-            "993",
-            &self.auth_state.imap_port,
-            AddAccountMessage::ManualImapHostChanged,
-            AddAccountMessage::ManualImapPortChanged,
-        ));
+        // Provider type selection
+        col = col.push(text("Provider").size(TEXT_SM).style(text::secondary));
+        let mut provider_row = row![].spacing(SPACE_XS);
+        for &p in ManualProvider::ALL {
+            let selected = self.manual_config.selected_provider == Some(p);
+            let style = if selected {
+                theme::ButtonClass::ProtocolCardSelected
+            } else {
+                theme::ButtonClass::ProtocolCard
+            };
+            provider_row = provider_row.push(
+                button(
+                    container(text(p.label()).size(TEXT_LG).style(text::base))
+                        .padding(PAD_CARD)
+                        .center_x(Length::Fill),
+                )
+                .on_press(AddAccountMessage::SelectManualProvider(p))
+                .padding(0)
+                .style(style.style())
+                .width(Length::FillPortion(1)),
+            );
+        }
+        col = col.push(provider_row);
 
-        col = col.push(text("Outgoing (SMTP)").size(TEXT_XL).style(text::base));
-        col = col.push(server_port_row(
-            "smtp.example.com",
-            &self.auth_state.smtp_host,
-            "587",
-            &self.auth_state.smtp_port,
-            AddAccountMessage::ManualSmtpHostChanged,
-            AddAccountMessage::ManualSmtpPortChanged,
-        ));
+        // Show fields based on selected provider
+        match self.manual_config.selected_provider {
+            Some(ManualProvider::Imap) => {
+                col = col.push(Space::new().height(SPACE_XS));
+                col = col.push(text("Incoming (IMAP)").size(TEXT_XL).style(text::base));
+                col = col.push(server_port_row(
+                    "imap.example.com",
+                    &self.auth_state.imap_host,
+                    "993",
+                    &self.auth_state.imap_port,
+                    AddAccountMessage::ManualImapHostChanged,
+                    AddAccountMessage::ManualImapPortChanged,
+                ));
+                col = col.push(security_selector(
+                    self.auth_state.imap_security,
+                    AddAccountMessage::ManualImapSecurityChanged,
+                ));
+
+                col = col.push(text("Outgoing (SMTP)").size(TEXT_XL).style(text::base));
+                col = col.push(server_port_row(
+                    "smtp.example.com",
+                    &self.auth_state.smtp_host,
+                    "587",
+                    &self.auth_state.smtp_port,
+                    AddAccountMessage::ManualSmtpHostChanged,
+                    AddAccountMessage::ManualSmtpPortChanged,
+                ));
+                col = col.push(security_selector(
+                    self.auth_state.smtp_security,
+                    AddAccountMessage::ManualSmtpSecurityChanged,
+                ));
+            }
+            Some(ManualProvider::Jmap) => {
+                col = col.push(Space::new().height(SPACE_XS));
+                col = col.push(
+                    column![
+                        text("JMAP Session URL").size(TEXT_SM).style(text::secondary),
+                        text_input("https://jmap.example.com/.well-known/jmap", &self.manual_config.jmap_url)
+                            .on_input(AddAccountMessage::ManualJmapUrlChanged)
+                            .size(TEXT_LG)
+                            .padding(PAD_INPUT)
+                            .style(theme::TextInputClass::Settings.style())
+                            .width(Length::Fill),
+                    ]
+                    .spacing(SPACE_XXXS),
+                );
+
+                // Auth method selector
+                col = col.push(text("Authentication").size(TEXT_SM).style(text::secondary));
+                col = col.push(auth_method_selector(
+                    self.manual_config.auth_method,
+                ));
+            }
+            Some(ManualProvider::Gmail) | Some(ManualProvider::Microsoft365) => {
+                col = col.push(Space::new().height(SPACE_XS));
+                // Auth method selector
+                col = col.push(text("Authentication").size(TEXT_SM).style(text::secondary));
+                col = col.push(auth_method_selector(
+                    self.manual_config.auth_method,
+                ));
+
+                // If password auth, show IMAP/SMTP fields
+                if self.manual_config.auth_method == ManualAuthMethod::Password {
+                    col = col.push(text("Incoming (IMAP)").size(TEXT_XL).style(text::base));
+                    col = col.push(server_port_row(
+                        "imap.example.com",
+                        &self.auth_state.imap_host,
+                        "993",
+                        &self.auth_state.imap_port,
+                        AddAccountMessage::ManualImapHostChanged,
+                        AddAccountMessage::ManualImapPortChanged,
+                    ));
+                    col = col.push(security_selector(
+                        self.auth_state.imap_security,
+                        AddAccountMessage::ManualImapSecurityChanged,
+                    ));
+
+                    col = col.push(text("Outgoing (SMTP)").size(TEXT_XL).style(text::base));
+                    col = col.push(server_port_row(
+                        "smtp.example.com",
+                        &self.auth_state.smtp_host,
+                        "587",
+                        &self.auth_state.smtp_port,
+                        AddAccountMessage::ManualSmtpHostChanged,
+                        AddAccountMessage::ManualSmtpPortChanged,
+                    ));
+                    col = col.push(security_selector(
+                        self.auth_state.smtp_security,
+                        AddAccountMessage::ManualSmtpSecurityChanged,
+                    ));
+                }
+            }
+            None => {
+                col = col.push(
+                    text("Select a provider type above to continue.")
+                        .size(TEXT_SM)
+                        .style(text::secondary),
+                );
+            }
+        }
 
         col = col.push(Space::new().height(SPACE_SM));
-        col = col.push(primary_button(
-            "Continue",
-            AddAccountMessage::SubmitManualConfig,
-        ));
+        if self.manual_config.selected_provider.is_some() {
+            col = col.push(primary_button(
+                "Continue",
+                AddAccountMessage::SubmitManualConfig,
+            ));
+        }
         col = col.push(ghost_button("Back", AddAccountMessage::Back));
 
         scrollable(col).spacing(SCROLLBAR_SPACING).into()
@@ -1698,6 +1954,8 @@ fn view_validating<'a>() -> Element<'a, AddAccountMessage> {
             .size(TEXT_LG)
             .style(text::secondary),
         Space::new().height(SPACE_MD),
+        widgets::spinner(24.0),
+        Space::new().height(SPACE_SM),
         text("Connecting to your mail server...")
             .size(TEXT_SM)
             .style(text::secondary),
@@ -1754,7 +2012,7 @@ fn view_creating<'a>() -> Element<'a, AddAccountMessage> {
             .size(TEXT_LG)
             .style(text::secondary),
         Space::new().height(SPACE_MD),
-        text("Please wait...").size(TEXT_SM).style(text::secondary),
+        widgets::spinner(24.0),
     ]
     .spacing(SPACE_XS)
     .align_x(Alignment::Center)
@@ -1877,6 +2135,35 @@ fn security_selector<'a>(
             SecurityOption::None,
             Some(current),
             on_change,
+        )
+        .size(RADIO_SIZE)
+        .text_size(TEXT_LG)
+        .spacing(SPACE_XXS)
+        .style(theme::RadioClass::Settings.style()),
+    ]
+    .spacing(SPACE_MD)
+    .into()
+}
+
+fn auth_method_selector(
+    current: ManualAuthMethod,
+) -> Element<'static, AddAccountMessage> {
+    row![
+        iced::widget::radio(
+            ManualAuthMethod::OAuth.label(),
+            ManualAuthMethod::OAuth,
+            Some(current),
+            AddAccountMessage::ManualAuthMethodChanged,
+        )
+        .size(RADIO_SIZE)
+        .text_size(TEXT_LG)
+        .spacing(SPACE_XXS)
+        .style(theme::RadioClass::Settings.style()),
+        iced::widget::radio(
+            ManualAuthMethod::Password.label(),
+            ManualAuthMethod::Password,
+            Some(current),
+            AddAccountMessage::ManualAuthMethodChanged,
         )
         .size(RADIO_SIZE)
         .text_size(TEXT_LG)

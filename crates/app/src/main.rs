@@ -1349,6 +1349,9 @@ impl App {
             SettingsEvent::ReorderAccounts(orders) => {
                 self.handle_reorder_accounts(orders)
             }
+            SettingsEvent::ReauthenticateAccount(account_id) => {
+                self.handle_open_reauth_wizard(account_id)
+            }
         }
     }
 
@@ -1579,7 +1582,7 @@ impl App {
                 account_color: a.account_color.clone(),
                 display_name: a.display_name.clone(),
                 last_sync_at: a.last_sync_at,
-                health: ui::settings::compute_health(a.last_sync_at, None, true),
+                health: ui::settings::compute_health(a.last_sync_at, a.token_expires_at, a.is_active),
             })
             .collect();
         self.sidebar.selected_account = Some(0);

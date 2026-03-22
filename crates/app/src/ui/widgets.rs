@@ -394,6 +394,8 @@ pub enum DropdownIcon<'a> {
     Avatar(&'a str),
     /// Renders an icon glyph from a codepoint char.
     Icon(char),
+    /// Renders a filled color dot.
+    ColorDot(Color),
 }
 
 impl DropdownIcon<'_> {
@@ -404,6 +406,7 @@ impl DropdownIcon<'_> {
                 .size(ICON_XL)
                 .style(text::secondary)
                 .into(),
+            DropdownIcon::ColorDot(color) => color_dot_sized(color, size),
         }
     }
 }
@@ -1601,7 +1604,7 @@ pub fn color_palette_grid<'a, M: Clone + 'a>(
         .height(COLOR_SWATCH_SIZE);
 
         let style = if is_selected {
-            theme::ButtonClass::Chip { active: true }
+            theme::ButtonClass::ColorSwatchSelected
         } else {
             theme::ButtonClass::BareTransparent
         };
@@ -1624,4 +1627,75 @@ pub fn color_palette_grid<'a, M: Clone + 'a>(
     }
 
     grid.into()
+}
+
+// ── Spinner ──────────────────────────────────────────────
+
+/// A simple spinning arc indicator.
+///
+/// Uses the frame's cache invalidation to animate. The spinner re-renders
+/// on every frame while visible because the canvas `Program` always
+/// returns `canvas::Action::request_redraw()`.
+pub fn spinner<'a, M: 'a>(size: f32) -> Element<'a, M> {
+    Canvas::new(SpinnerPainter {
+        start: std::time::Instant::now(),
+    })
+    .width(size)
+    .height(size)
+    .into()
+}
+
+struct SpinnerPainter {
+    start: std::time::Instant,
+}
+
+impl<M> canvas::Program<M> for SpinnerPainter {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry<Renderer>> {
+        let palette = theme.palette();
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let center = frame.center();
+        let radius = bounds.width.min(bounds.height) / 2.0 - 2.0;
+
+        let elapsed = self.start.elapsed().as_secs_f32();
+        let start_angle = elapsed * 4.0; // rotations per second
+        let sweep = std::f32::consts::FRAC_PI_2 * 3.0; // 270 degrees
+
+        let path = canvas::path::Builder::new();
+        let mut builder = canvas::path::Builder::new();
+        builder.arc(canvas::path::Arc {
+            center,
+            radius,
+            start_angle: iced::Radians(start_angle),
+            end_angle: iced::Radians(start_angle + sweep),
+        });
+        let arc_path = builder.build();
+
+        frame.stroke(
+            &arc_path,
+            canvas::Stroke::default()
+                .with_color(palette.primary.base.color)
+                .with_width(2.5),
+        );
+        drop(path);
+
+        vec![frame.into_geometry()]
+    }
+
+    fn mouse_interaction(
+        &self,
+        _state: &Self::State,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> mouse::Interaction {
+        mouse::Interaction::default()
+    }
 }

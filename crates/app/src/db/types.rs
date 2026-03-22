@@ -21,6 +21,8 @@ pub struct Account {
     pub account_name: Option<String>,
     pub account_color: Option<String>,
     pub last_sync_at: Option<i64>,
+    pub token_expires_at: Option<i64>,
+    pub is_active: bool,
     pub sort_order: i64,
 }
 

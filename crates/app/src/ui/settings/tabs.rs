@@ -716,7 +716,6 @@ fn account_editor_color_section<'a>(
     state: &'a Settings,
     editor: &'a AccountEditor,
 ) -> Element<'a, SettingsMessage> {
-    let presets = ratatoskr_label_colors::category_colors::all_presets();
     let used_colors: Vec<String> = state
         .managed_accounts
         .iter()
@@ -724,40 +723,11 @@ fn account_editor_color_section<'a>(
         .filter_map(|a| a.account_color.clone())
         .collect();
 
-    let mut grid = column![].spacing(SPACE_XS);
-    let mut current_row = row![].spacing(SPACE_XS);
-
-    for (i, &(_name, bg_hex, _fg_hex)) in presets.iter().enumerate() {
-        let is_selected = editor.account_color_index == Some(i);
-        let is_used = used_colors.iter().any(|c| c == bg_hex);
-        let color = crate::ui::theme::hex_to_color(bg_hex);
-
-        let swatch = widgets::color_dot_sized(color, COLOR_SWATCH_SIZE);
-
-        let style = if is_selected {
-            theme::ButtonClass::Chip { active: true }
-        } else if is_used {
-            theme::ButtonClass::BareTransparent
-        } else {
-            theme::ButtonClass::BareTransparent
-        };
-
-        let swatch_btn = button(swatch)
-            .on_press(SettingsMessage::AccountColorEditorChanged(i))
-            .padding(2)
-            .style(style.style());
-
-        current_row = current_row.push(swatch_btn);
-
-        if (i + 1) % COLOR_PALETTE_COLUMNS == 0 {
-            grid = grid.push(current_row);
-            current_row = row![].spacing(SPACE_XS);
-        }
-    }
-
-    if presets.len() % COLOR_PALETTE_COLUMNS != 0 {
-        grid = grid.push(current_row);
-    }
+    let grid = widgets::color_palette_grid(
+        editor.account_color_index,
+        &used_colors,
+        SettingsMessage::AccountColorEditorChanged,
+    );
 
     section(
         "Account Color",

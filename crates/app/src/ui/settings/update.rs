@@ -87,9 +87,8 @@ impl Component for Settings {
                 }
                 return (Task::none(), None);
             }
-            SettingsMessage::ReauthenticateAccount(_id) => {
-                // TODO: Wire to re-auth flow (Phase 7)
-                return (Task::none(), None);
+            SettingsMessage::ReauthenticateAccount(id) => {
+                return (Task::none(), Some(SettingsEvent::ReauthenticateAccount(id)));
             }
             SettingsMessage::SignatureEditorSave => {
                 return self.handle_signature_save();

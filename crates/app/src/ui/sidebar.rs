@@ -249,8 +249,14 @@ fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
         match sidebar.selected_account {
             Some(idx) if sidebar.accounts.get(idx).is_some() => {
                 let acc = &sidebar.accounts[idx];
-                let name = acc.display_name.as_deref().unwrap_or(&acc.email);
-                (DropdownIcon::Avatar(name), name)
+                let name = acc.account_name.as_deref()
+                    .or(acc.display_name.as_deref())
+                    .unwrap_or(&acc.email);
+                let icon = match acc.account_color.as_deref() {
+                    Some(hex) => DropdownIcon::ColorDot(theme::hex_to_color(hex)),
+                    None => DropdownIcon::Avatar(name),
+                };
+                (icon, name)
             }
             _ => (DropdownIcon::Icon(icon::INBOX_CODEPOINT), "All Accounts"),
         };
@@ -265,9 +271,15 @@ fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
     });
 
     for (idx, acc) in sidebar.accounts.iter().enumerate() {
-        let name = acc.display_name.as_deref().unwrap_or(&acc.email);
+        let name = acc.account_name.as_deref()
+            .or(acc.display_name.as_deref())
+            .unwrap_or(&acc.email);
+        let icon = match acc.account_color.as_deref() {
+            Some(hex) => DropdownIcon::ColorDot(theme::hex_to_color(hex)),
+            None => DropdownIcon::Avatar(name),
+        };
         entries.push(DropdownEntry {
-            icon: DropdownIcon::Avatar(name),
+            icon,
             label: name,
             selected: sidebar.selected_account == Some(idx),
             on_press: SidebarMessage::SelectAccount(idx),

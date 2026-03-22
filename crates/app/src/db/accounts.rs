@@ -11,8 +11,9 @@ impl Db {
                 .prepare(
                     "SELECT id, email, display_name, provider,
                             account_name, account_color, last_sync_at,
+                            token_expires_at, is_active,
                             COALESCE(sort_order, 0) AS sort_order
-                     FROM accounts WHERE is_active = 1
+                     FROM accounts
                      ORDER BY sort_order ASC, created_at ASC",
                 )
                 .map_err(|e| e.to_string())?;
@@ -26,6 +27,8 @@ impl Db {
                     account_name: row.get("account_name")?,
                     account_color: row.get("account_color")?,
                     last_sync_at: row.get("last_sync_at")?,
+                    token_expires_at: row.get("token_expires_at")?,
+                    is_active: row.get::<_, i64>("is_active")? != 0,
                     sort_order: row.get("sort_order")?,
                 })
             })

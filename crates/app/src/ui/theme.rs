@@ -171,6 +171,12 @@ pub enum ButtonClass {
     Chip { active: bool },
     /// Pinned search card in the sidebar.
     PinnedSearch { active: bool },
+    /// Protocol selection card (normal).
+    ProtocolCard,
+    /// Protocol selection card (selected, primary border).
+    ProtocolCardSelected,
+    /// Color swatch with selection ring.
+    ColorSwatchSelected,
     /// Experimental numbered variant.
     Experiment { variant: usize },
     /// Experimental semantic variant (success/warning/danger).
@@ -202,6 +208,9 @@ impl ButtonClass {
             Self::PinnedSearch { active } => {
                 style_pinned_search_button(theme, status, active)
             }
+            Self::ProtocolCard => style_protocol_card_button(theme, status, false),
+            Self::ProtocolCardSelected => style_protocol_card_button(theme, status, true),
+            Self::ColorSwatchSelected => style_color_swatch_selected_button(theme, status),
             Self::Experiment { variant } => style_exp_btn(theme, status, variant),
             Self::ExperimentSemantic { variant } => {
                 style_exp_semantic_btn(theme, status, variant)
@@ -691,6 +700,65 @@ fn style_pinned_search_button(
             },
             ..Default::default()
         },
+    }
+}
+
+// ── Protocol card + color swatch button styles ──────────
+
+fn style_protocol_card_button(
+    theme: &Theme,
+    status: button::Status,
+    selected: bool,
+) -> button::Style {
+    let p = theme.palette();
+    let bg_base = p.background.base.color;
+    let pri = p.primary.base.color;
+    let is_hovered = matches!(status, button::Status::Hovered);
+
+    let border_color = if selected {
+        pri
+    } else if is_hovered {
+        mix(bg_base, p.background.base.text, 0.2)
+    } else {
+        mix(bg_base, p.background.base.text, 0.1)
+    };
+
+    let background = if selected {
+        Some(mix(bg_base, pri, 0.08).into())
+    } else if is_hovered {
+        Some(mix(bg_base, p.background.base.text, 0.04).into())
+    } else {
+        Some(bg_base.into())
+    };
+
+    button::Style {
+        background,
+        text_color: p.background.base.text,
+        border: iced::Border {
+            color: border_color,
+            width: if selected { 2.0 } else { 1.0 },
+            radius: 8.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn style_color_swatch_selected_button(
+    theme: &Theme,
+    _status: button::Status,
+) -> button::Style {
+    let p = theme.palette();
+    let pri = p.primary.base.color;
+
+    button::Style {
+        background: None,
+        text_color: p.background.base.text,
+        border: iced::Border {
+            color: pri,
+            width: 2.0,
+            radius: 6.0.into(),
+        },
+        ..Default::default()
     }
 }
 
