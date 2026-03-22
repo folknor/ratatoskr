@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use iced::widget::{button, column, container, mouse_area, pick_list, row, scrollable, text, text_input, Space};
-use iced::{Alignment, Element, Length};
+use iced::{Alignment, Element, Length, Point};
 use ratatoskr_rich_text_editor::{
     rich_text_editor, Action as RteAction, EditAction, EditorState, InlineStyle,
 };
@@ -176,6 +176,57 @@ pub enum ComposeMessage {
     FilesSelected(Vec<ComposeAttachment>),
     /// Remove an attachment by index.
     RemoveAttachment(usize),
+    // ── Context menu ──
+    /// Show the token context menu at a given position.
+    ShowTokenContextMenu {
+        field: RecipientField,
+        token_id: TokenId,
+        position: Point,
+    },
+    /// Dismiss the token context menu.
+    DismissContextMenu,
+    /// Delete a token from a specific field via context menu.
+    ContextMenuDelete {
+        field: RecipientField,
+        token_id: TokenId,
+    },
+    /// Move a token to a different recipient field.
+    ContextMenuMoveTo {
+        token_id: TokenId,
+        from: RecipientField,
+        to_field: RecipientField,
+    },
+    /// Expand a group token into individual member tokens.
+    /// The expansion result arrives via `GroupExpanded`.
+    ContextMenuExpandGroup {
+        field: RecipientField,
+        token_id: TokenId,
+    },
+    /// Group expansion results arrived from the database.
+    GroupExpanded {
+        field: RecipientField,
+        token_id: TokenId,
+        members: Result<Vec<(String, Option<String>)>, String>,
+    },
+    // ── Drag and drop ──
+    /// A token drag was initiated (passed threshold).
+    DragStarted {
+        field: RecipientField,
+        token_id: TokenId,
+    },
+    /// Mouse moved while dragging.
+    DragMove(Point),
+    /// Mouse released — drop the token.
+    DragEnd(Point),
+    /// Cancel the drag.
+    DragCancel,
+    // ── Banners ──
+    /// Bcc nudge: move group to Bcc.
+    BccNudgeAccept(TokenId),
+    /// Bcc nudge: dismiss.
+    BccNudgeDismiss(TokenId),
+    /// Bulk paste: dismiss.
+    BulkPasteDismiss,
     // ── Link dialog ──
     /// Toggle the link insertion overlay.
     ToggleLinkDialog,
@@ -185,6 +236,12 @@ pub enum ComposeMessage {
     LinkTextChanged(String),
     /// Confirm link insertion.
     LinkInsert,
+    // ── Signature ──
+    /// Signature resolved for the current From account.
+    SignatureResolved {
+        signature_id: Option<String>,
+        signature_html: Option<String>,
+    },
 }
 
 // ── Autocomplete state ──────────────────────────────────
@@ -221,6 +278,34 @@ impl AutocompleteState {
             active_field: RecipientField::To,
         }
     }
+}
+
+/// Active drag state for a token being moved between fields.
+pub struct ComposeTokenDrag {
+    pub token_id: TokenId,
+    pub source_field: RecipientField,
+    pub label: String,
+    pub current_position: Point,
+}
+
+/// A Bcc nudge banner shown when a group token is added to To or Cc.
+pub struct BccNudgeBanner {
+    pub group_name: String,
+    pub token_id: TokenId,
+    pub source_field: RecipientField,
+}
+
+/// A bulk paste banner shown when 10+ addresses are pasted.
+pub struct BulkPasteBanner {
+    pub count: usize,
+}
+
+/// State for the right-click context menu on a token.
+pub struct TokenContextMenuState {
+    pub token_id: TokenId,
+    pub field: RecipientField,
+    pub position: Point,
+    pub is_group: bool,
 }
 
 // ── State ───────────────────────────────────────────────
@@ -266,6 +351,16 @@ pub struct ComposeState {
     // Attachments
     pub attachments: Vec<ComposeAttachment>,
 
+    // Context menu
+    pub context_menu: Option<TokenContextMenuState>,
+
+    // Drag and drop
+    pub drag: Option<ComposeTokenDrag>,
+
+    // Banners
+    pub bcc_nudges: Vec<BccNudgeBanner>,
+    pub bulk_paste_banner: Option<BulkPasteBanner>,
+
     // Link dialog
     pub link_dialog_open: bool,
     pub link_url: String,
@@ -274,6 +369,10 @@ pub struct ComposeState {
     // Window geometry
     pub width: f32,
     pub height: f32,
+
+    // Signature tracking
+    pub active_signature_id: Option<String>,
+    pub signature_separator_index: Option<usize>,
 
     // Draft auto-save
     pub draft_dirty: bool,
@@ -302,10 +401,16 @@ impl ComposeState {
             status: None,
             discard_confirm_open: false,
             autocomplete: AutocompleteState::new(),
+            context_menu: None,
+            drag: None,
+            bcc_nudges: Vec::new(),
+            bulk_paste_banner: None,
             attachments: Vec::new(),
             link_dialog_open: false,
             link_url: String::new(),
             link_text: String::new(),
+            active_signature_id: None,
+            signature_separator_index: None,
             width: COMPOSE_DEFAULT_WIDTH,
             height: COMPOSE_DEFAULT_HEIGHT,
             draft_dirty: false,
@@ -436,40 +541,13 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
         ComposeMessage::ShowCc => state.show_cc = true,
         ComposeMessage::ShowBcc => state.show_bcc = true,
         ComposeMessage::ToTokenInput(inner) => {
-            if let TokenInputMessage::TextChanged(ref t) = inner {
-                state.autocomplete.query = t.clone();
-                state.autocomplete.active_field = RecipientField::To;
-            }
-            handle_token_input_message(
-                &mut state.to,
-                inner,
-                &mut state.selected_to_token,
-            );
-            state.draft_dirty = true;
+            handle_recipient_token_input(state, RecipientField::To, inner);
         }
         ComposeMessage::CcTokenInput(inner) => {
-            if let TokenInputMessage::TextChanged(ref t) = inner {
-                state.autocomplete.query = t.clone();
-                state.autocomplete.active_field = RecipientField::Cc;
-            }
-            handle_token_input_message(
-                &mut state.cc,
-                inner,
-                &mut state.selected_cc_token,
-            );
-            state.draft_dirty = true;
+            handle_recipient_token_input(state, RecipientField::Cc, inner);
         }
         ComposeMessage::BccTokenInput(inner) => {
-            if let TokenInputMessage::TextChanged(ref t) = inner {
-                state.autocomplete.query = t.clone();
-                state.autocomplete.active_field = RecipientField::Bcc;
-            }
-            handle_token_input_message(
-                &mut state.bcc,
-                inner,
-                &mut state.selected_bcc_token,
-            );
-            state.draft_dirty = true;
+            handle_recipient_token_input(state, RecipientField::Bcc, inner);
         }
         ComposeMessage::Send => {
             // V1: validate and show stub status
@@ -551,6 +629,160 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
         ComposeMessage::AutocompleteDismiss => {
             state.autocomplete.results.clear();
             state.autocomplete.highlighted = None;
+        }
+        // Context menu actions
+        ComposeMessage::ShowTokenContextMenu { field, token_id, position } => {
+            let is_group = match field {
+                RecipientField::To => &state.to,
+                RecipientField::Cc => &state.cc,
+                RecipientField::Bcc => &state.bcc,
+            }
+            .tokens
+            .iter()
+            .any(|t| t.id == token_id && t.is_group);
+            state.context_menu = Some(TokenContextMenuState {
+                token_id,
+                field,
+                position,
+                is_group,
+            });
+        }
+        ComposeMessage::DismissContextMenu => {
+            state.context_menu = None;
+        }
+        ComposeMessage::ContextMenuDelete { field, token_id } => {
+            let tokens = match field {
+                RecipientField::To => &mut state.to.tokens,
+                RecipientField::Cc => &mut state.cc.tokens,
+                RecipientField::Bcc => &mut state.bcc.tokens,
+            };
+            tokens.retain(|t| t.id != token_id);
+            state.context_menu = None;
+            state.draft_dirty = true;
+        }
+        ComposeMessage::ContextMenuMoveTo { token_id, from, to_field } => {
+            let source_tokens = match from {
+                RecipientField::To => &mut state.to.tokens,
+                RecipientField::Cc => &mut state.cc.tokens,
+                RecipientField::Bcc => &mut state.bcc.tokens,
+            };
+            if let Some(pos) = source_tokens.iter().position(|t| t.id == token_id) {
+                let mut token = source_tokens.remove(pos);
+                let target = match to_field {
+                    RecipientField::To => &mut state.to,
+                    RecipientField::Cc => &mut state.cc,
+                    RecipientField::Bcc => &mut state.bcc,
+                };
+                token.id = target.next_token_id();
+                target.tokens.push(token);
+                // Show the target field if hidden
+                match to_field {
+                    RecipientField::Cc => state.show_cc = true,
+                    RecipientField::Bcc => state.show_bcc = true,
+                    RecipientField::To => {}
+                }
+            }
+            state.context_menu = None;
+            state.draft_dirty = true;
+        }
+        ComposeMessage::ContextMenuExpandGroup { .. } => {
+            // Group expansion requires DB access — handled by pop_out.rs
+            state.context_menu = None;
+        }
+        ComposeMessage::GroupExpanded { field, token_id, members } => {
+            if let Ok(member_list) = members {
+                let tokens = match field {
+                    RecipientField::To => &mut state.to,
+                    RecipientField::Cc => &mut state.cc,
+                    RecipientField::Bcc => &mut state.bcc,
+                };
+                // Remove the group token
+                tokens.tokens.retain(|t| t.id != token_id);
+                // Add individual member tokens
+                for (email, display_name) in member_list {
+                    let label = display_name
+                        .as_deref()
+                        .filter(|n| !n.is_empty())
+                        .unwrap_or(&email)
+                        .to_string();
+                    let id = tokens.next_token_id();
+                    tokens.tokens.push(token_input::Token {
+                        id,
+                        email,
+                        label,
+                        is_group: false,
+                        group_id: None,
+                        member_count: None,
+                    });
+                }
+                state.draft_dirty = true;
+            }
+        }
+        // Drag and drop
+        ComposeMessage::DragStarted { field, token_id } => {
+            let label = match field {
+                RecipientField::To => &state.to,
+                RecipientField::Cc => &state.cc,
+                RecipientField::Bcc => &state.bcc,
+            }
+            .tokens
+            .iter()
+            .find(|t| t.id == token_id)
+            .map(|t| t.label.clone())
+            .unwrap_or_default();
+            state.drag = Some(ComposeTokenDrag {
+                token_id,
+                source_field: field,
+                label,
+                current_position: Point::ORIGIN,
+            });
+        }
+        ComposeMessage::DragMove(pos) => {
+            if let Some(ref mut drag) = state.drag {
+                drag.current_position = pos;
+            }
+        }
+        ComposeMessage::DragEnd(_pos) => {
+            // Drop detection would require knowing field bounds at runtime.
+            // For now, just cancel — the context menu "Move to" is the
+            // primary cross-field move mechanism. Full visual DnD with
+            // hit-testing requires storing field bounds from the view pass.
+            state.drag = None;
+        }
+        ComposeMessage::DragCancel => {
+            state.drag = None;
+        }
+        // Bcc nudge banner
+        ComposeMessage::BccNudgeAccept(token_id) => {
+            // Find which field has this token (To or Cc) and move to Bcc
+            let source = if state.to.tokens.iter().any(|t| t.id == token_id) {
+                Some(RecipientField::To)
+            } else if state.cc.tokens.iter().any(|t| t.id == token_id) {
+                Some(RecipientField::Cc)
+            } else {
+                None
+            };
+            if let Some(from) = source {
+                let source_tokens = match from {
+                    RecipientField::To => &mut state.to.tokens,
+                    RecipientField::Cc => &mut state.cc.tokens,
+                    RecipientField::Bcc => &mut state.bcc.tokens,
+                };
+                if let Some(pos) = source_tokens.iter().position(|t| t.id == token_id) {
+                    let mut token = source_tokens.remove(pos);
+                    token.id = state.bcc.next_token_id();
+                    state.bcc.tokens.push(token);
+                    state.show_bcc = true;
+                }
+            }
+            state.bcc_nudges.retain(|n| n.token_id != token_id);
+            state.draft_dirty = true;
+        }
+        ComposeMessage::BccNudgeDismiss(token_id) => {
+            state.bcc_nudges.retain(|n| n.token_id != token_id);
+        }
+        ComposeMessage::BulkPasteDismiss => {
+            state.bulk_paste_banner = None;
         }
         // Formatting toolbar — emit ToggleInlineStyle to the rich text editor
         ComposeMessage::FormatBold => {
@@ -644,6 +876,190 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                 state.attachments.remove(idx);
             }
         }
+        ComposeMessage::SignatureResolved {
+            signature_id,
+            signature_html,
+        } => {
+            use ratatoskr_rich_text_editor::compose::replace_signature;
+
+            let old_sep = state.signature_separator_index.unwrap_or(
+                state.body.document.block_count(),
+            );
+            let new_sep = replace_signature(
+                &mut state.body.document,
+                old_sep,
+                state.signature_separator_index,
+                signature_html.as_deref(),
+            );
+            state.signature_separator_index = new_sep;
+            state.active_signature_id = signature_id;
+            state.draft_dirty = true;
+        }
+    }
+}
+
+/// Handle a token input message for a specific recipient field.
+/// Intercepts autocomplete keyboard events before delegating to the
+/// generic token input handler.
+fn handle_recipient_token_input(
+    state: &mut ComposeState,
+    field: RecipientField,
+    inner: TokenInputMessage,
+) {
+    // Intercept autocomplete keyboard events
+    match &inner {
+        TokenInputMessage::AutocompleteDown => {
+            let len = state.autocomplete.results.len();
+            if len > 0 {
+                let next = state
+                    .autocomplete
+                    .highlighted
+                    .map_or(0, |h| (h + 1).min(len - 1));
+                state.autocomplete.highlighted = Some(next);
+            }
+            return;
+        }
+        TokenInputMessage::AutocompleteUp => {
+            if let Some(h) = state.autocomplete.highlighted {
+                state.autocomplete.highlighted = Some(h.saturating_sub(1));
+            }
+            return;
+        }
+        TokenInputMessage::AutocompleteAccept => {
+            let idx = state.autocomplete.highlighted.unwrap_or(0);
+            if let Some(match_entry) =
+                state.autocomplete.results.get(idx).cloned()
+            {
+                let label = match_entry
+                    .display_name
+                    .as_deref()
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or(&match_entry.email)
+                    .to_string();
+                let target = match state.autocomplete.active_field {
+                    RecipientField::To => &mut state.to,
+                    RecipientField::Cc => &mut state.cc,
+                    RecipientField::Bcc => &mut state.bcc,
+                };
+                let id = target.next_token_id();
+                let is_group = match_entry.is_group;
+                let token_label = label.clone();
+                target.tokens.push(token_input::Token {
+                    id,
+                    email: match_entry.email,
+                    label,
+                    is_group,
+                    group_id: match_entry.group_id,
+                    member_count: match_entry.member_count,
+                });
+                target.text.clear();
+                state.autocomplete.results.clear();
+                state.autocomplete.highlighted = None;
+                state.autocomplete.query.clear();
+                state.draft_dirty = true;
+
+                // Bcc nudge: suggest moving group to Bcc if added to To/Cc
+                let active = state.autocomplete.active_field;
+                if is_group
+                    && (active == RecipientField::To
+                        || active == RecipientField::Cc)
+                {
+                    state.bcc_nudges.push(BccNudgeBanner {
+                        group_name: token_label,
+                        token_id: id,
+                        source_field: active,
+                    });
+                }
+            }
+            return;
+        }
+        TokenInputMessage::AutocompleteDismissKey => {
+            state.autocomplete.results.clear();
+            state.autocomplete.highlighted = None;
+            return;
+        }
+        TokenInputMessage::DragStarted(token_id) => {
+            let tid = *token_id;
+            let label = match field {
+                RecipientField::To => &state.to,
+                RecipientField::Cc => &state.cc,
+                RecipientField::Bcc => &state.bcc,
+            }
+            .tokens
+            .iter()
+            .find(|t| t.id == tid)
+            .map(|t| t.label.clone())
+            .unwrap_or_default();
+            state.drag = Some(ComposeTokenDrag {
+                token_id: tid,
+                source_field: field,
+                label,
+                current_position: Point::ORIGIN,
+            });
+            return;
+        }
+        TokenInputMessage::TokenContextMenu(token_id, position) => {
+            let tid = *token_id;
+            let pos = *position;
+            let is_group = match field {
+                RecipientField::To => &state.to,
+                RecipientField::Cc => &state.cc,
+                RecipientField::Bcc => &state.bcc,
+            }
+            .tokens
+            .iter()
+            .any(|t| t.id == tid && t.is_group);
+
+            state.context_menu = Some(TokenContextMenuState {
+                token_id: tid,
+                field,
+                position: pos,
+                is_group,
+            });
+            return;
+        }
+        _ => {}
+    }
+
+    // Track which field is active for autocomplete
+    if let TokenInputMessage::TextChanged(ref t) = inner {
+        state.autocomplete.query = t.clone();
+        state.autocomplete.active_field = field;
+    }
+
+    // Track token count before paste to detect bulk paste
+    let is_paste = matches!(&inner, TokenInputMessage::Paste(_));
+    let tokens_before = if is_paste {
+        match field {
+            RecipientField::To => state.to.tokens.len(),
+            RecipientField::Cc => state.cc.tokens.len(),
+            RecipientField::Bcc => state.bcc.tokens.len(),
+        }
+    } else {
+        0
+    };
+
+    let (value, selected) = match field {
+        RecipientField::To => (&mut state.to, &mut state.selected_to_token),
+        RecipientField::Cc => (&mut state.cc, &mut state.selected_cc_token),
+        RecipientField::Bcc => {
+            (&mut state.bcc, &mut state.selected_bcc_token)
+        }
+    };
+    handle_token_input_message(value, inner, selected);
+    state.draft_dirty = true;
+
+    // Bulk paste banner: show if 10+ addresses were added by paste
+    if is_paste {
+        let tokens_after = match field {
+            RecipientField::To => state.to.tokens.len(),
+            RecipientField::Cc => state.cc.tokens.len(),
+            RecipientField::Bcc => state.bcc.tokens.len(),
+        };
+        let added = tokens_after.saturating_sub(tokens_before);
+        if added >= 10 {
+            state.bulk_paste_banner = Some(BulkPasteBanner { count: added });
+        }
     }
 }
 
@@ -682,9 +1098,18 @@ fn handle_token_input_message(
             }
         }
         TokenInputMessage::Focused | TokenInputMessage::Blurred => {}
-        TokenInputMessage::TokenContextMenu(_, _) => {}
+        TokenInputMessage::TokenContextMenu(_, _) => {
+            // Handled at the compose level via handle_recipient_token_input
+        }
         TokenInputMessage::ArrowSelectToken(_) => {}
         TokenInputMessage::ArrowToText => {}
+        // Autocomplete keyboard events are handled at the compose level,
+        // not here — they should never reach this function.
+        TokenInputMessage::AutocompleteDown
+        | TokenInputMessage::AutocompleteUp
+        | TokenInputMessage::AutocompleteAccept
+        | TokenInputMessage::AutocompleteDismissKey
+        | TokenInputMessage::DragStarted(_) => {}
         TokenInputMessage::Paste(content) => {
             // Use RFC 5322 parser for proper name + email extraction
             let parsed = crate::ui::token_input_parse::parse_pasted_addresses(&content);
@@ -721,12 +1146,24 @@ pub fn view_compose_window<'a>(
 
     let mut content = column![
         header,
-        widgets::divider(),
-        toolbar,
-        widgets::divider(),
-        body,
     ]
     .spacing(SPACE_0);
+
+    // Bcc nudge banners
+    for nudge in &state.bcc_nudges {
+        content = content.push(bcc_nudge_banner(window_id, nudge));
+    }
+
+    // Bulk paste banner
+    if let Some(ref banner) = state.bulk_paste_banner {
+        content = content.push(bulk_paste_banner_view(window_id, banner));
+    }
+
+    content = content
+        .push(widgets::divider())
+        .push(toolbar)
+        .push(widgets::divider())
+        .push(body);
 
     // Attachment list (between body and footer)
     if !state.attachments.is_empty() {
@@ -736,6 +1173,11 @@ pub fn view_compose_window<'a>(
 
     content = content.push(widgets::divider());
     content = content.push(footer);
+
+    // Token context menu overlay
+    if let Some(ref ctx) = state.context_menu {
+        content = content.push(token_context_menu(window_id, ctx));
+    }
 
     // Discard confirmation overlay
     if state.discard_confirm_open {
@@ -888,10 +1330,13 @@ fn build_to_row<'a>(
     window_id: iced::window::Id,
     state: &'a ComposeState,
 ) -> Element<'a, Message> {
+    let ac_open = state.autocomplete.active_field == RecipientField::To
+        && !state.autocomplete.results.is_empty();
     build_recipient_row_inner(
         "To",
         &state.to,
         state.selected_to_token,
+        ac_open,
         window_id,
         "Add recipients...",
         ComposeMessage::ToTokenInput,
@@ -902,10 +1347,13 @@ fn build_cc_row<'a>(
     window_id: iced::window::Id,
     state: &'a ComposeState,
 ) -> Element<'a, Message> {
+    let ac_open = state.autocomplete.active_field == RecipientField::Cc
+        && !state.autocomplete.results.is_empty();
     build_recipient_row_inner(
         "Cc",
         &state.cc,
         state.selected_cc_token,
+        ac_open,
         window_id,
         "Add Cc...",
         ComposeMessage::CcTokenInput,
@@ -916,10 +1364,13 @@ fn build_bcc_row<'a>(
     window_id: iced::window::Id,
     state: &'a ComposeState,
 ) -> Element<'a, Message> {
+    let ac_open = state.autocomplete.active_field == RecipientField::Bcc
+        && !state.autocomplete.results.is_empty();
     build_recipient_row_inner(
         "Bcc",
         &state.bcc,
         state.selected_bcc_token,
+        ac_open,
         window_id,
         "Add Bcc...",
         ComposeMessage::BccTokenInput,
@@ -930,6 +1381,7 @@ fn build_recipient_row_inner<'a>(
     label: &'a str,
     value: &'a TokenInputValue,
     selected: Option<TokenId>,
+    autocomplete_open: bool,
     window_id: iced::window::Id,
     placeholder: &'a str,
     wrap: fn(TokenInputMessage) -> ComposeMessage,
@@ -939,6 +1391,7 @@ fn build_recipient_row_inner<'a>(
         &value.text,
         placeholder,
         selected,
+        autocomplete_open,
         move |msg| Message::PopOut(window_id, PopOutMessage::Compose(wrap(msg))),
     );
 
@@ -1079,6 +1532,163 @@ fn compose_footer<'a>(
     container(footer_row)
         .padding(PAD_CONTENT)
         .width(Length::Fill)
+        .into()
+}
+
+// ── Bcc nudge banner ────────────────────────────────────
+
+fn bcc_nudge_banner<'a>(
+    window_id: iced::window::Id,
+    nudge: &BccNudgeBanner,
+) -> Element<'a, Message> {
+    let tid = nudge.token_id;
+    let label = format!(
+        "\u{2139} \"{}\" is a group. Move to Bcc to hide member addresses?",
+        nudge.group_name,
+    );
+
+    let move_btn = button(text("Move").size(TEXT_SM).font(font::text_semibold()))
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::BccNudgeAccept(tid)),
+        ))
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::Primary.style());
+
+    let dismiss_btn = button(text("Dismiss").size(TEXT_SM))
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::BccNudgeDismiss(tid)),
+        ))
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::Ghost.style());
+
+    container(
+        row![
+            text(label).size(TEXT_SM).width(Length::Fill),
+            move_btn,
+            dismiss_btn,
+        ]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center),
+    )
+    .padding(PAD_CONTENT)
+    .width(Length::Fill)
+    .style(theme::ContainerClass::Elevated.style())
+    .into()
+}
+
+// ── Bulk paste banner ───────────────────────────────────
+
+fn bulk_paste_banner_view<'a>(
+    window_id: iced::window::Id,
+    banner: &BulkPasteBanner,
+) -> Element<'a, Message> {
+    let label = format!(
+        "\u{2139} {} addresses pasted. Save as a contact group?",
+        banner.count,
+    );
+
+    let dismiss_btn = button(text("Dismiss").size(TEXT_SM))
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::BulkPasteDismiss),
+        ))
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::Ghost.style());
+
+    container(
+        row![
+            text(label).size(TEXT_SM).width(Length::Fill),
+            dismiss_btn,
+        ]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center),
+    )
+    .padding(PAD_CONTENT)
+    .width(Length::Fill)
+    .style(theme::ContainerClass::Elevated.style())
+    .into()
+}
+
+// ── Token context menu ──────────────────────────────────
+
+fn token_context_menu<'a>(
+    window_id: iced::window::Id,
+    ctx: &TokenContextMenuState,
+) -> Element<'a, Message> {
+    let mk = |label: &'a str, msg: ComposeMessage| {
+        button(text(label).size(TEXT_SM))
+            .on_press(Message::PopOut(
+                window_id,
+                PopOutMessage::Compose(msg),
+            ))
+            .width(Length::Fill)
+            .padding(PAD_INPUT)
+            .style(theme::ButtonClass::Ghost.style())
+    };
+
+    let field = ctx.field;
+    let token_id = ctx.token_id;
+
+    let mut items = column![].spacing(SPACE_0);
+
+    items = items.push(mk(
+        "Delete",
+        ComposeMessage::ContextMenuDelete { field, token_id },
+    ));
+
+    // Expand group (only for group tokens)
+    if ctx.is_group {
+        items = items.push(mk(
+            "Expand group",
+            ComposeMessage::ContextMenuExpandGroup { field, token_id },
+        ));
+    }
+
+    // Move to other fields
+    if field != RecipientField::To {
+        items = items.push(mk(
+            "Move to To",
+            ComposeMessage::ContextMenuMoveTo {
+                token_id,
+                from: field,
+                to_field: RecipientField::To,
+            },
+        ));
+    }
+    if field != RecipientField::Cc {
+        items = items.push(mk(
+            "Move to Cc",
+            ComposeMessage::ContextMenuMoveTo {
+                token_id,
+                from: field,
+                to_field: RecipientField::Cc,
+            },
+        ));
+    }
+    if field != RecipientField::Bcc {
+        items = items.push(mk(
+            "Move to Bcc",
+            ComposeMessage::ContextMenuMoveTo {
+                token_id,
+                from: field,
+                to_field: RecipientField::Bcc,
+            },
+        ));
+    }
+
+    let menu = container(items)
+        .padding(PAD_DROPDOWN)
+        .style(theme::ContainerClass::Elevated.style())
+        .width(180.0);
+
+    // Wrap in a mouse_area to dismiss when clicking outside
+    mouse_area(menu)
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::DismissContextMenu),
+        ))
         .into()
 }
 

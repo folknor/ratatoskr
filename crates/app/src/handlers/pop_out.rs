@@ -42,6 +42,7 @@ impl App {
         window_id: iced::window::Id,
         pop_out_msg: PopOutMessage,
     ) -> Task<Message> {
+        let db = Arc::clone(&self.db);
         let Some(window) = self.pop_out_windows.get_mut(&window_id) else {
             return Task::none();
         };
@@ -73,6 +74,66 @@ impl App {
                     MessageViewMessage::SetRenderingMode(RenderingMode::Source),
                 ),
             ) => self.handle_set_source_mode(window_id),
+            // Archive — remove from inbox via label manipulation
+            (
+                PopOutWindow::MessageView(state),
+                PopOutMessage::MessageView(MessageViewMessage::Archive),
+            ) => {
+                let account_id = state.account_id.clone();
+                let thread_id = state.thread_id.clone();
+                let db = Arc::clone(&self.db);
+                state.overflow_menu_open = false;
+                Task::perform(
+                    async move {
+                        db.with_write_conn(move |conn| {
+                            ratatoskr_core::db::queries::remove_thread_label(
+                                conn,
+                                account_id,
+                                thread_id,
+                                "INBOX".to_string(),
+                            )
+                        })
+                        .await
+                    },
+                    move |_| Message::PopOut(
+                        window_id,
+                        PopOutMessage::MessageView(MessageViewMessage::Noop),
+                    ),
+                )
+            }
+            // Delete — move to trash
+            (
+                PopOutWindow::MessageView(state),
+                PopOutMessage::MessageView(MessageViewMessage::Delete),
+            ) => {
+                let account_id = state.account_id.clone();
+                let thread_id = state.thread_id.clone();
+                let db = Arc::clone(&self.db);
+                state.overflow_menu_open = false;
+                Task::perform(
+                    async move {
+                        db.with_write_conn(move |conn| {
+                            ratatoskr_core::db::queries::add_thread_label(
+                                conn,
+                                account_id.clone(),
+                                thread_id.clone(),
+                                "TRASH".to_string(),
+                            )?;
+                            ratatoskr_core::db::queries::remove_thread_label(
+                                conn,
+                                account_id,
+                                thread_id,
+                                "INBOX".to_string(),
+                            )
+                        })
+                        .await
+                    },
+                    move |_| Message::PopOut(
+                        window_id,
+                        PopOutMessage::MessageView(MessageViewMessage::Noop),
+                    ),
+                )
+            }
             // All other message view messages
             (PopOutWindow::MessageView(state), PopOutMessage::MessageView(_)) => {
                 let PopOutMessage::MessageView(msg) = pop_out_msg else {
@@ -109,13 +170,77 @@ impl App {
                 PopOutWindow::Compose(_),
                 PopOutMessage::Compose(ComposeMessage::AttachFiles),
             ) => handle_compose_attach_files(window_id),
+            // Compose expand group — needs DB access
+            (
+                PopOutWindow::Compose(state),
+                PopOutMessage::Compose(ComposeMessage::ContextMenuExpandGroup {
+                    ..
+                }),
+            ) => {
+                let PopOutMessage::Compose(ComposeMessage::ContextMenuExpandGroup {
+                    field,
+                    token_id,
+                }) = pop_out_msg
+                else {
+                    return Task::none();
+                };
+                // Find the group_id from the token
+                let group_id = {
+                    let tokens = match field {
+                        crate::pop_out::compose::RecipientField::To => {
+                            &state.to.tokens
+                        }
+                        crate::pop_out::compose::RecipientField::Cc => {
+                            &state.cc.tokens
+                        }
+                        crate::pop_out::compose::RecipientField::Bcc => {
+                            &state.bcc.tokens
+                        }
+                    };
+                    tokens
+                        .iter()
+                        .find(|t| t.id == token_id)
+                        .and_then(|t| t.group_id.clone())
+                };
+                let Some(gid) = group_id else {
+                    return Task::none();
+                };
+                let db_clone = Arc::clone(&db);
+                Task::perform(
+                    async move {
+                        db_clone
+                            .expand_contact_group(gid)
+                            .await
+                    },
+                    move |result| {
+                        Message::PopOut(
+                            window_id,
+                            PopOutMessage::Compose(
+                                ComposeMessage::GroupExpanded {
+                                    field,
+                                    token_id,
+                                    members: result,
+                                },
+                            ),
+                        )
+                    },
+                )
+            }
             // All other compose messages
             (PopOutWindow::Compose(state), PopOutMessage::Compose(_)) => {
                 let PopOutMessage::Compose(msg) = pop_out_msg else {
                     return Task::none();
                 };
+                let trigger_autocomplete =
+                    crate::handlers::contacts::should_trigger_autocomplete(&msg);
                 crate::pop_out::compose::update_compose(state, msg);
-                Task::none()
+                if trigger_autocomplete {
+                    crate::handlers::contacts::dispatch_autocomplete_search(
+                        &db, window_id, state,
+                    )
+                } else {
+                    Task::none()
+                }
             }
             _ => Task::none(),
         }
@@ -654,7 +779,7 @@ fn sanitize_filename(subject: &str) -> String {
     }
 }
 
-/// Open a file picker and save the message as .eml or .txt.
+/// Open a native file picker and save the message as .eml or .txt.
 async fn save_message_dialog(
     db: Arc<Db>,
     account_id: String,
@@ -663,28 +788,42 @@ async fn save_message_dialog(
 ) -> Result<(), String> {
     let safe_name = sanitize_filename(&subject);
 
-    // Build a simple save dialog using std::fs since rfd is not yet a dependency.
-    // When rfd is added, this will use AsyncFileDialog.
-    // For now, fall back to writing to the user's home directory with a prompt-free approach.
-    let home = dirs::download_dir()
-        .or_else(dirs::home_dir)
-        .ok_or_else(|| "Could not determine download directory".to_string())?;
+    let file_handle = rfd::AsyncFileDialog::new()
+        .set_title("Save Message As")
+        .set_file_name(format!("{safe_name}.eml"))
+        .add_filter("Email Message (.eml)", &["eml"])
+        .add_filter("Plain Text (.txt)", &["txt"])
+        .save_file()
+        .await;
 
-    let eml_path = home.join(format!("{safe_name}.eml"));
-    let raw = db
-        .load_raw_source(account_id.clone(), message_id.clone())
-        .await?;
-    std::fs::write(&eml_path, raw.as_bytes())
-        .map_err(|e| format!("Write failed: {e}"))?;
+    let Some(handle) = file_handle else {
+        return Ok(()); // user cancelled
+    };
 
-    // Also write .txt version
-    let txt_path = home.join(format!("{safe_name}.txt"));
-    let (body_text, _body_html) = db
-        .load_message_body(account_id, message_id)
-        .await?;
-    let txt_content = body_text.unwrap_or_default();
-    std::fs::write(&txt_path, txt_content.as_bytes())
-        .map_err(|e| format!("Write failed: {e}"))?;
+    let path = handle.path().to_path_buf();
+    let extension = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("eml");
+
+    match extension {
+        "txt" => {
+            let (body_text, _body_html) = db
+                .load_message_body(account_id, message_id)
+                .await?;
+            let txt_content = body_text.unwrap_or_default();
+            std::fs::write(&path, txt_content.as_bytes())
+                .map_err(|e| format!("Write failed: {e}"))?;
+        }
+        _ => {
+            // Default to .eml
+            let raw = db
+                .load_raw_source(account_id, message_id)
+                .await?;
+            std::fs::write(&path, raw.as_bytes())
+                .map_err(|e| format!("Write failed: {e}"))?;
+        }
+    }
 
     Ok(())
 }
@@ -981,20 +1120,6 @@ impl App {
         // (sets state.from_account to the new account).
         crate::pop_out::compose::update_compose(state, msg);
 
-        // ── Signature swap dispatch ─────────────────────
-        // TODO(signature-switching): ComposeState needs `active_signature_id: Option<String>`
-        // and `signature_separator_index: Option<usize>` fields to track the current
-        // signature position in the document. These must be added to compose.rs
-        // (owned by another agent) before the full swap can work.
-        //
-        // Once those fields exist, the flow is:
-        // 1. Read `state.active_signature_id` (the old signature).
-        // 2. Call `db_resolve_signature_for_compose(db, new_account_id, from_email, is_reply)`
-        //    to get the new account's default signature.
-        // 3. On result, call `replace_signature()` from `ratatoskr_rich_text_editor::compose`
-        //    to swap the old signature for the new one in the document.
-        // 4. Update `state.active_signature_id` and `state.signature_separator_index`.
-
         let Some(ref account) = state.from_account else {
             return Task::none();
         };
@@ -1009,29 +1134,35 @@ impl App {
 
         let db = Arc::clone(&self.db);
 
-        // Dispatch the signature resolution task. The result is currently
-        // logged but not applied, because ComposeState lacks the fields
-        // needed to track and replace signatures (see TODO above).
         Task::perform(
             async move {
-                // The app Db wrapper uses rusqlite directly; we need to call
-                // the core query. Build a DbState from the app's connection.
-                // TODO(signature-switching): Wire this to ratatoskr_core::db::queries_extra::compose::db_resolve_signature_for_compose
-                // once the result can be routed back to update ComposeState.
-                // For now, log the intent.
-                let _ = (db, account_id, from_email, is_reply);
-                log::debug!(
-                    "Signature resolution dispatched (not yet applied — \
-                     ComposeState needs active_signature_id / \
-                     signature_separator_index fields)"
-                );
-                Ok::<(), String>(())
+                let core_db =
+                    ratatoskr_core::db::DbState::from_arc(db.conn_arc());
+                let sig = ratatoskr_core::db::queries_extra::db_resolve_signature_for_compose(
+                    &core_db,
+                    account_id,
+                    from_email,
+                    is_reply,
+                )
+                .await?;
+                Ok::<_, String>(sig)
             },
             move |result| {
-                if let Err(e) = result {
-                    log::error!("Signature resolution failed: {e}");
-                }
-                Message::Noop
+                let (sig_id, sig_html) = match result {
+                    Ok(Some(sig)) => (Some(sig.id), Some(sig.body_html)),
+                    Ok(None) => (None, None),
+                    Err(e) => {
+                        log::error!("Signature resolution failed: {e}");
+                        (None, None)
+                    }
+                };
+                Message::PopOut(
+                    window_id,
+                    PopOutMessage::Compose(ComposeMessage::SignatureResolved {
+                        signature_id: sig_id,
+                        signature_html: sig_html,
+                    }),
+                )
             },
         )
     }

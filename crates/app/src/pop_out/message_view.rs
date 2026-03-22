@@ -86,7 +86,6 @@ pub struct MessageViewState {
 
     // ── Window-local state ──
     pub rendering_mode: RenderingMode,
-    pub scroll_offset: f32,
     pub overflow_menu_open: bool,
     pub remote_content_loaded: bool,
     pub error_banner: Option<String>,
@@ -120,7 +119,7 @@ impl MessageViewState {
             raw_source: None,
             attachments: Vec::new(),
             rendering_mode: RenderingMode::default(),
-            scroll_offset: 0.0,
+
             overflow_menu_open: false,
             remote_content_loaded: false,
             error_banner: None,
@@ -153,7 +152,7 @@ impl MessageViewState {
             raw_source: None,
             attachments: Vec::new(),
             rendering_mode: RenderingMode::default(),
-            scroll_offset: 0.0,
+
             overflow_menu_open: false,
             remote_content_loaded: false,
             error_banner: None,
