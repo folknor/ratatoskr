@@ -1278,6 +1278,9 @@ impl App {
             SidebarEvent::PinnedSearchRefreshed(id) => {
                 self.update(Message::RefreshPinnedSearch(id))
             }
+            SidebarEvent::SharedMailboxSelected(_) | SidebarEvent::PublicFolderSelected(_) => {
+                Task::none()
+            }
         }
     }
 

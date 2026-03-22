@@ -198,7 +198,7 @@ impl ReadingPane {
         let idx = self.focused_message?;
         self.thread_messages
             .get(idx)
-            .and_then(|m| m.message_id.clone())
+            .map(|m| m.id.clone())
     }
 }
 

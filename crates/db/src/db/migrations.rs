@@ -1483,8 +1483,45 @@ fn split_statements(sql: &str) -> Vec<&str> {
     let len = bytes.len();
     let mut start = 0;
     let mut depth: u32 = 0;
+    let mut i = 0;
 
-    for i in 0..len {
+    while i < len {
+        // Skip -- line comments (everything until newline)
+        if i + 1 < len && bytes[i] == b'-' && bytes[i + 1] == b'-' {
+            while i < len && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+
+        // Skip /* block comments */ (may span multiple lines)
+        if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+            i += 2;
+            while i + 1 < len && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                i += 1;
+            }
+            i += 2; // skip closing */
+            continue;
+        }
+
+        // Skip single-quoted string literals (handle '' escapes)
+        if bytes[i] == b'\'' {
+            i += 1;
+            while i < len {
+                if bytes[i] == b'\'' {
+                    if i + 1 < len && bytes[i + 1] == b'\'' {
+                        i += 2; // escaped quote
+                    } else {
+                        break;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            i += 1; // skip closing quote
+            continue;
+        }
+
         // Check for BEGIN keyword at word boundary
         if i + 5 <= len
             && &ubytes[i..i + 5] == b"BEGIN"
@@ -1510,6 +1547,8 @@ fn split_statements(sql: &str) -> Vec<&str> {
             }
             start = i + 1;
         }
+
+        i += 1;
     }
 
     let trimmed = sql[start..].trim();
@@ -1710,6 +1749,38 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) AS max_ver FROM _migrations", [], |row| row.get("max_ver"))
             .expect("query");
-        assert_eq!(max_ver, 66);
+        let expected = MIGRATIONS.last().expect("at least one migration").version;
+        assert_eq!(max_ver, expected);
+    }
+
+    #[test]
+    fn split_skips_semicolons_in_line_comments() {
+        let sql = r#"
+            ALTER TABLE t ADD COLUMN c TEXT;
+            -- NULL c = primary; non-NULL = shared.
+            CREATE INDEX idx ON t(c);
+        "#;
+        let stmts = split_statements(sql);
+        assert_eq!(stmts.len(), 2);
+        assert!(stmts[0].starts_with("ALTER"));
+        assert!(stmts[1].starts_with("-- NULL"));
+    }
+
+    #[test]
+    fn split_skips_semicolons_in_block_comments() {
+        let sql = "SELECT 1; /* a; b; c */ SELECT 2;";
+        let stmts = split_statements(sql);
+        assert_eq!(stmts.len(), 2);
+        assert_eq!(stmts[0], "SELECT 1");
+        assert!(stmts[1].contains("SELECT 2"));
+    }
+
+    #[test]
+    fn split_skips_semicolons_in_string_literals() {
+        let sql = "INSERT INTO t VALUES('a;b'); SELECT 1;";
+        let stmts = split_statements(sql);
+        assert_eq!(stmts.len(), 2);
+        assert!(stmts[0].contains("'a;b'"));
+        assert_eq!(stmts[1], "SELECT 1");
     }
 }
