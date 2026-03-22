@@ -14,23 +14,76 @@
 
 - [ ] **Per-pane minimum resize limits** — Clamp ratios on both drag and window resize.
 
-- [ ] **Keybinding management UI (6f)** — Settings panel for rebinding. See https://nyaa.place/blog/libadwaita-1-8/
+- [ ] **Keybinding management UI (Slice 6f)** — Settings panel for viewing, searching, and rebinding shortcuts. Backend ready (override persistence, conflict detection, set/unbind/reset APIs). See `docs/command-palette/app-integration-spec.md` § Slice 6f.
 
 - [ ] **`prepare_move_up/down` in editor** — Tested infrastructure, not called from widget. Wire or remove.
 
 - [ ] **Restore OS-based theme and 1.0 scale** *(Deferred until 1.0)* — Revert to `"System"` theme, persist user prefs.
 
+## Roadmap Features — Remaining Work
+
+Features with backend complete but UI or integration work remaining. Each references its roadmap spec.
+
+### Categories — `docs/roadmap/categories.md`
+
+Backend complete (all 4 providers sync, 25-preset color model, ProviderOps apply/remove). Remaining:
+
+- [ ] **Category picker UI** — Color palette grid widget exists (`widgets.rs::color_palette_grid`). Need a picker overlay that lists account categories with colors, triggered from reading pane or command palette.
+- [ ] **Category badges on messages/threads** — Display category names with colors on thread list cards and expanded message headers. Data available via `message_categories` join table.
+- [ ] **Apply/Remove Category commands** — `CommandId::EmailAddLabel` and `EmailRemoveLabel` exist but route to label operations. Need parallel `ApplyCategory`/`RemoveCategory` commands, or reuse the label commands with a category-aware resolver.
+- [ ] **IMAP keyword write-back** — `apply_category`/`remove_category` on IMAP provider use `set_keyword_if_supported()` but need verification that write-back survives PERMANENTFLAGS restrictions gracefully.
+
+### Tracking Blocking — `docs/roadmap/tracking-blocking.md`
+
+Sanitization pipeline, MDN detection, tracking pixel detection, URL cleaning all done. Remaining:
+
+- [ ] **Read receipt prompt UI** — `read_receipt_policy` table and `mdn.rs` policy resolution exist. Need UI prompt when opening a message with `mdn_requested=true`: "Send read receipt?" with per-sender/per-account policy options (ask/always/never).
+- [ ] **Read receipt policy management in Settings** — Settings panel for configuring default MDN policy per account and per-sender overrides.
+- [ ] **Remote image strip in sanitizer** — `sanitize_html_body()` pipeline exists but does not strip remote `<img src>` unless allowlisted. Need to integrate with `image_allowlist` table check during sanitization. Currently remote images are blocked at render time, not at sanitization time.
+- [ ] **Link tracking visual indicators** — `detect_tracking_pixels_in_html()` detects trackers but results aren't surfaced in the UI. Show indicators on tracked links in rendered email.
+- [ ] **AMP HTML blocking** — Strip `<html amp4email>` / AMP-specific markup during sanitization.
+
+### Cloud Attachments — `docs/roadmap/cloud-attachments.md`
+
+OneDrive and Google Drive upload both implemented. Remaining:
+
+- [ ] **Incoming cloud link detection** — URL pattern matching for OneDrive (`1drv.ms`, `sharepoint.com`) and Google Drive (`drive.google.com`, `docs.google.com`) links in message bodies. Display as rich attachment cards instead of plain links.
+- [ ] **Compose UI for cloud attachment flow** — Size threshold detection in compose, prompt to upload to cloud, upload progress indicator, insert link into message body. Orchestration logic exists in `core/cloud_attachments.rs`.
+- [ ] **Offline upload queue** — Queue uploads when offline, retry when connectivity returns.
+- [ ] **JMAP/IMAP graceful degradation** — For accounts without cloud storage, show "file too large" warning with size info. No upload capability.
+- [ ] **`cloud_attachments` DB table** — Track uploaded cloud attachments (provider, file ID, sharing link, size, upload timestamp) for display and cleanup.
+
+### Public Folders — `docs/roadmap/public-folders.md`
+
+EWS SOAP client, autodiscover routing, offline sync, IMAP NAMESPACE public folders, DB schema all done. Remaining:
+
+- [ ] **UI integration** — Public folder browser in sidebar (collapsible tree), message display from public folder threads, compose reply-to-public-folder. Exchange-only feature.
+
+### Shared Mailboxes — `docs/roadmap/shared-mailboxes.md`
+
+Exchange Graph read/write/sync isolation and IMAP ACL/NAMESPACE done. Remaining:
+
+- [ ] **Gmail delegation support** — Gmail delegation API for reading/sending from delegated accounts. Requires `gmail.settings.sharing` scope.
+- [ ] **JMAP Sharing support** — JMAP `ShareNotification` and `Principal` types for shared mailbox access. Blocked on server support maturity.
+- [ ] **Shared mailbox UI** — Sidebar section or scope dropdown entries for shared/delegated mailboxes. Account-switcher integration.
+
+### IMAP CONDSTORE/QRESYNC — `docs/roadmap/imap-condstore-qresync.md`
+
+Phases 1-2 complete. Phase 3 blocked on upstream.
+
+- [ ] **QRESYNC VANISHED parsing** — Blocked on `async-imap` upstream (Issue #130). UID-based deletion detection works as workaround.
+
 ## Blocked / External
 
 - [ ] **Ship a default Microsoft OAuth client ID** — Manual Azure AD registration task.
 - [ ] **JMAP for Calendars** — Blocked on `jmap-client` upstream (Issue #3). CalDAV covers this.
-- [ ] **QRESYNC VANISHED parsing** — Blocked on `async-imap` upstream (Issue #130).
+- [ ] **QRESYNC VANISHED parsing** — Blocked on `async-imap` upstream (Issue #130). See above.
 
 ## Remaining Enhancements (HTML rendering)
 
 The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML. Remaining:
 - [ ] CID image loading from inline image store
-- [ ] Remote image loading with user consent
+- [ ] Remote image loading with user consent (integrates with tracking-blocking allowlist)
 - [ ] Clickable links (`LinkClicked(url)` message)
 - [ ] Table rendering (table-for-layout is the hardest)
 - [ ] Image caching (`HashMap<String, image::Handle>`)
@@ -38,7 +91,7 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML. Remaining
 ## Remaining Enhancements (other)
 
 - [ ] **iced_drop for cross-container DnD** — Custom DragState works for list reorder. iced_drop needed for: compose token DnD, label drag-to-file, calendar event dragging, attachment drag zones.
-- [ ] **Read receipts (outgoing)** — MDN support.
+- [ ] **Read receipts (outgoing)** — MDN support. See `docs/roadmap/tracking-blocking.md`.
 - [ ] **Inline image store eviction UI** — Settings control for store size (128 MB hardcoded).
 - [ ] **Compose auto-save subscription** — `iced::time::every(30s)` for compose windows with draft_dirty set. Infrastructure exists (`DRAFT_AUTO_SAVE_INTERVAL`, `has_dirty_compose_drafts`, `auto_save_compose_drafts`) but subscription not wired in `App::subscription()`.
 - [ ] **Provider push notifications** — IMAP IDLE, JMAP push, Graph webhooks, Gmail watch.
@@ -50,6 +103,9 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML. Remaining
 - [ ] **Signature: draft restoration with signature state** — Draft save does not persist `signature_separator_index` or `active_signature_id`. On draft reopen, signature position in the document is not reconstructed.
 - [ ] **Signature: per-account default dropdown in Account Settings** — Account editor overlay has no signature dropdown for selecting the default signature for an account.
 - [ ] **Signature: edit detection flag** — No dirty/edited tracking in `SignatureEditorState` for confirming unsaved changes on close.
+- [ ] **GAL directory API calls** — `gal_cache` table and autocomplete integration exist. Missing: actual Graph `/users` and Google Directory API calls to populate the cache. Awaits sync orchestrator providing provider client access. See `docs/contacts/problem-statement.md` § GAL Caching.
+- [ ] **CardDAV contact write-back** — CardDAV client supports PROPFIND/REPORT/GET but not PUT/DELETE. Need vCard generation + PUT method for pushing contact edits to CardDAV servers. See `docs/contacts/problem-statement.md`.
+- [ ] **Provider write-back HTTP calls** — `dispatch_provider_write_back()` scaffolded for Google/Graph (body builders + server info lookups exist). JMAP `ContactCard/set` fully implemented. Missing: actual HTTP dispatch for Google (`PATCH /v1/{resourceName}:updateContact`) and Graph (`PATCH /me/contacts/{id}`). Awaits provider client access from handlers.
 
 ## Cross-Cutting Architecture Patterns
 
