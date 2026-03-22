@@ -133,7 +133,100 @@ impl App {
             );
         }
 
+        // Dispatch label apply/remove locally (DB-only, provider sync picks up changes).
+        match action {
+            EmailAction::AddLabel { label_id } => {
+                return self.apply_label_to_selected_threads(&label_id);
+            }
+            EmailAction::RemoveLabel { label_id } => {
+                return self.remove_label_from_selected_threads(&label_id);
+            }
+            _ => {}
+        }
+
         Task::none()
+    }
+
+    /// Apply a label to all selected threads (local DB operation).
+    /// For tag-type labels, inserts thread_labels entries.
+    /// Provider write-back happens during the next sync cycle.
+    fn apply_label_to_selected_threads(&self, label_id: &str) -> Task<Message> {
+        let indices = self.thread_list.selected_indices();
+        let threads: Vec<(String, String)> = indices
+            .iter()
+            .filter_map(|&i| self.thread_list.threads.get(i))
+            .map(|t| (t.account_id.clone(), t.id.clone()))
+            .collect();
+
+        if threads.is_empty() {
+            return Task::none();
+        }
+
+        let db = std::sync::Arc::clone(&self.db);
+        let lid = label_id.to_string();
+
+        Task::perform(
+            async move {
+                db.with_write_conn(move |conn| {
+                    for (account_id, thread_id) in &threads {
+                        conn.execute(
+                            "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
+                             VALUES (?1, ?2, ?3)",
+                            rusqlite::params![account_id, thread_id, lid],
+                        )
+                        .map_err(|e| format!("apply label: {e}"))?;
+                    }
+                    Ok(())
+                })
+                .await
+            },
+            |result| {
+                if let Err(e) = result {
+                    log::error!("Failed to apply label: {e}");
+                }
+                Message::Noop
+            },
+        )
+    }
+
+    /// Remove a label from all selected threads (local DB operation).
+    fn remove_label_from_selected_threads(&self, label_id: &str) -> Task<Message> {
+        let indices = self.thread_list.selected_indices();
+        let threads: Vec<(String, String)> = indices
+            .iter()
+            .filter_map(|&i| self.thread_list.threads.get(i))
+            .map(|t| (t.account_id.clone(), t.id.clone()))
+            .collect();
+
+        if threads.is_empty() {
+            return Task::none();
+        }
+
+        let db = std::sync::Arc::clone(&self.db);
+        let lid = label_id.to_string();
+
+        Task::perform(
+            async move {
+                db.with_write_conn(move |conn| {
+                    for (account_id, thread_id) in &threads {
+                        conn.execute(
+                            "DELETE FROM thread_labels \
+                             WHERE account_id = ?1 AND thread_id = ?2 AND label_id = ?3",
+                            rusqlite::params![account_id, thread_id, lid],
+                        )
+                        .map_err(|e| format!("remove label: {e}"))?;
+                    }
+                    Ok(())
+                })
+                .await
+            },
+            |result| {
+                if let Err(e) = result {
+                    log::error!("Failed to remove label: {e}");
+                }
+                Message::Noop
+            },
+        )
     }
 }
 
