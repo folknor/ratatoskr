@@ -391,6 +391,9 @@ pub struct DbCalendar {
     pub ctag: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    pub sort_order: i64,
+    pub is_default: i64,
+    pub provider_id: Option<String>,
 }
 
 // ── Calendar Event ──────────────────────────────────────────
@@ -416,6 +419,14 @@ pub struct DbCalendarEvent {
     pub etag: Option<String>,
     pub ical_data: Option<String>,
     pub uid: Option<String>,
+    pub title: Option<String>,
+    pub timezone: Option<String>,
+    pub recurrence_rule: Option<String>,
+    pub organizer_name: Option<String>,
+    pub rsvp_status: Option<String>,
+    pub created_at: Option<i64>,
+    pub availability: Option<String>,
+    pub visibility: Option<String>,
 }
 
 // ── Calendar Attendee ──────────────────────────────────────

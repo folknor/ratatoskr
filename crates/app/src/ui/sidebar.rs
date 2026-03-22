@@ -31,6 +31,8 @@ pub enum SidebarMessage {
     DismissPinnedSearch(i64),
     RefreshPinnedSearch(i64),
     ToggleMode,
+    /// Set the calendar view from the sidebar header view switcher.
+    SetCalendarView(super::calendar::CalendarView),
     /// Right-click "Search here" on a label/folder.
     SearchHere(String),
 }
@@ -47,6 +49,8 @@ pub enum SidebarEvent {
     PinnedSearchDismissed(i64),
     PinnedSearchRefreshed(i64),
     ModeToggled,
+    /// Calendar view changed from sidebar header view switcher.
+    CalendarViewChanged(super::calendar::CalendarView),
     /// "Search here" — prefill search bar with a scope query prefix.
     SearchHere { query_prefix: String },
 }
@@ -74,6 +78,8 @@ pub struct Sidebar {
     pub active_pinned_search: Option<i64>,
     /// Whether the app is in calendar mode. Set by the parent App.
     pub in_calendar_mode: bool,
+    /// Active calendar view, kept in sync by the parent App for the header view switcher.
+    pub calendar_active_view: Option<super::calendar::CalendarView>,
 }
 
 impl Sidebar {
@@ -90,6 +96,7 @@ impl Sidebar {
             pinned_searches: Vec::new(),
             active_pinned_search: None,
             in_calendar_mode: false,
+            calendar_active_view: None,
         }
     }
 
@@ -175,6 +182,10 @@ impl Component for Sidebar {
             SidebarMessage::ToggleMode => {
                 (Task::none(), Some(SidebarEvent::ModeToggled))
             }
+            SidebarMessage::SetCalendarView(view) => {
+                self.calendar_active_view = Some(view);
+                (Task::none(), Some(SidebarEvent::CalendarViewChanged(view)))
+            }
             SidebarMessage::SearchHere(query_prefix) => {
                 (Task::none(), Some(SidebarEvent::SearchHere { query_prefix }))
             }
@@ -198,10 +209,40 @@ impl Component for Sidebar {
         .padding(SPACE_XS)
         .style(theme::ButtonClass::Ghost.style());
 
-        let header_row = row![mode_btn, scope_dropdown(self)]
-            .spacing(SPACE_XXS)
-            .align_y(Alignment::Center)
-            .width(Length::Fill);
+        let header_row = if self.in_calendar_mode {
+            // Calendar mode: show view switcher buttons right of mode toggle.
+            let views = [
+                (super::calendar::CalendarView::Day, "D"),
+                (super::calendar::CalendarView::WorkWeek, "WW"),
+                (super::calendar::CalendarView::Week, "W"),
+                (super::calendar::CalendarView::Month, "M"),
+            ];
+            let mut r = row![mode_btn].spacing(SPACE_XXS).align_y(Alignment::Center);
+            for (view, label) in views {
+                let is_active = self.calendar_active_view == Some(view);
+                let style = if is_active {
+                    theme::ButtonClass::Nav { active: true }.style()
+                } else {
+                    theme::ButtonClass::Ghost.style()
+                };
+                r = r.push(
+                    button(
+                        text(label)
+                            .size(TEXT_SM)
+                            .style(if is_active { text::primary } else { text::secondary }),
+                    )
+                    .on_press(SidebarMessage::SetCalendarView(view))
+                    .padding(PAD_ICON_BTN)
+                    .style(style),
+                );
+            }
+            r.width(Length::Fill)
+        } else {
+            row![mode_btn, scope_dropdown(self)]
+                .spacing(SPACE_XXS)
+                .align_y(Alignment::Center)
+                .width(Length::Fill)
+        };
 
         let mut col = column![
             header_row,

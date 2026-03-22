@@ -93,7 +93,8 @@ fn graph_event_to_dto(
         remote_event_id: event.remote_event_id,
         uid: event.uid,
         etag: event.etag,
-        summary: event.summary,
+        summary: event.summary.clone(),
+        title: event.summary,
         description: event.description,
         location: event.location,
         start_time: event.start_time,
@@ -104,6 +105,7 @@ fn graph_event_to_dto(
         attendees_json: event.attendees_json,
         html_link: event.html_link,
         ical_data: event.ical_data,
+        ..CalendarEventDto::default()
     })
 }
 

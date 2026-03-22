@@ -5,9 +5,11 @@
 //! and a main content area dispatched by the active view.
 //! Includes event detail popover and creation/editing overlays.
 
+use std::collections::HashSet;
+
 use chrono::{Datelike, Local, NaiveDate, Weekday};
 use iced::widget::{
-    button, column, container, mouse_area, row, scrollable, text, text_input, Space,
+    button, checkbox, column, container, mouse_area, row, scrollable, text, text_input, Space,
 };
 use iced::{Alignment, Element, Length};
 
@@ -70,6 +72,23 @@ pub enum CalendarOverlay {
 /// fighting the user on intermediate keystroke states (e.g., typing
 /// "12" would be parsed as "1" then "2" if parsed per-keystroke).
 /// Parsed to integers only on save.
+
+/// An attendee for display in event detail.
+#[derive(Debug, Clone)]
+pub struct AttendeeEntry {
+    pub email: String,
+    pub name: Option<String>,
+    pub rsvp_status: String,
+    pub is_organizer: bool,
+}
+
+/// A reminder for display in event detail.
+#[derive(Debug, Clone)]
+pub struct ReminderEntry {
+    pub minutes_before: i64,
+    pub method: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct CalendarEventData {
     /// DB row id. `None` for new events that haven't been saved.
@@ -84,6 +103,18 @@ pub struct CalendarEventData {
     pub location: String,
     pub description: String,
     pub calendar_id: Option<String>,
+    pub account_id: Option<String>,
+    pub timezone: Option<String>,
+    pub recurrence_rule: Option<String>,
+    pub organizer_name: Option<String>,
+    pub organizer_email: Option<String>,
+    pub rsvp_status: Option<String>,
+    pub availability: Option<String>,
+    pub visibility: Option<String>,
+    pub attendees: Vec<AttendeeEntry>,
+    pub reminders: Vec<ReminderEntry>,
+    pub calendar_name: Option<String>,
+    pub color: Option<String>,
 }
 
 impl CalendarEventData {
@@ -107,6 +138,18 @@ impl CalendarEventData {
             location: String::new(),
             description: String::new(),
             calendar_id: None,
+            account_id: None,
+            timezone: None,
+            recurrence_rule: None,
+            organizer_name: None,
+            organizer_email: None,
+            rsvp_status: None,
+            availability: None,
+            visibility: None,
+            attendees: Vec::new(),
+            reminders: Vec::new(),
+            calendar_name: None,
+            color: None,
         }
     }
 
@@ -129,6 +172,18 @@ impl CalendarEventData {
     pub fn end_minute_u32(&self) -> u32 {
         self.end_minute.parse().unwrap_or(0).min(59)
     }
+}
+
+// ── Calendar list entry ────────────────────────────────
+
+/// A calendar for the sidebar list with visibility toggle.
+#[derive(Debug, Clone)]
+pub struct CalendarListEntry {
+    pub id: String,
+    pub account_id: String,
+    pub display_name: String,
+    pub color: String,
+    pub is_visible: bool,
 }
 
 // ── Calendar state ─────────────────────────────────────
@@ -158,10 +213,19 @@ pub struct CalendarState {
     pub editor_undo_title: UndoableText,
     pub editor_undo_location: UndoableText,
     pub editor_undo_description: UndoableText,
+    /// All calendars across accounts (for sidebar list).
+    pub calendars: Vec<CalendarListEntry>,
+    /// Set of dates that have at least one event (for mini-month dots).
+    pub dates_with_events: HashSet<NaiveDate>,
 }
 
 impl CalendarState {
     pub fn new() -> Self {
+        Self::with_default_view(CalendarView::Month)
+    }
+
+    /// Create calendar state with a specific default view (read from settings).
+    pub fn with_default_view(default_view: CalendarView) -> Self {
         let today = Local::now().date_naive();
         let month_grid = calendar_month::build_month_grid(
             today.year(),
@@ -175,7 +239,7 @@ impl CalendarState {
         Self {
             selected_date: today,
             selected_hour: None,
-            active_view: CalendarView::Month,
+            active_view: default_view,
             mini_month_year: today.year(),
             mini_month_month: today.month(),
             week_start: Weekday::Mon,
@@ -186,6 +250,18 @@ impl CalendarState {
             editor_undo_title: UndoableText::new(),
             editor_undo_location: UndoableText::new(),
             editor_undo_description: UndoableText::new(),
+            calendars: Vec::new(),
+            dates_with_events: HashSet::new(),
+        }
+    }
+
+    /// Parse a view name string from the settings table.
+    pub fn parse_view_name(name: &str) -> CalendarView {
+        match name {
+            "day" => CalendarView::Day,
+            "work_week" => CalendarView::WorkWeek,
+            "week" => CalendarView::Week,
+            _ => CalendarView::Month,
         }
     }
 
@@ -232,6 +308,22 @@ impl CalendarState {
     pub fn rebuild_view_data(&mut self) {
         let events = &self.events;
         let today = Local::now().date_naive();
+
+        // Rebuild dates_with_events for mini-month dot indicators.
+        self.dates_with_events.clear();
+        for e in events {
+            if let Some(start_dt) = chrono::DateTime::from_timestamp(e.start_time, 0) {
+                let start_date = start_dt.with_timezone(&chrono::Local).date_naive();
+                let end_dt = chrono::DateTime::from_timestamp(e.end_time, 0)
+                    .map(|dt| dt.with_timezone(&chrono::Local).date_naive())
+                    .unwrap_or(start_date);
+                let mut d = start_date;
+                while d <= end_dt {
+                    self.dates_with_events.insert(d);
+                    d += chrono::Duration::days(1);
+                }
+            }
+        }
 
         // Convert to month events for the month grid.
         let month_events: Vec<calendar_month::MonthEvent> = events
@@ -344,6 +436,10 @@ pub enum CalendarMessage {
     EventLoaded(Result<CalendarEventData, String>),
     /// Calendar events loaded from DB for view rendering.
     EventsLoaded(Result<Vec<calendar_time_grid::TimeGridEvent>, String>),
+    /// Toggle visibility of a calendar (checkbox in sidebar).
+    ToggleCalendarVisibility(String, bool),
+    /// Calendars loaded from DB for sidebar list.
+    CalendarsLoaded(Result<Vec<CalendarListEntry>, String>),
 }
 
 // ── View ───────────────────────────────────────────────
@@ -439,12 +535,96 @@ fn event_detail_card(event: &CalendarEventData) -> Element<'_, CalendarMessage> 
         );
     }
 
+    // Recurrence (hidden if none)
+    if let Some(ref rrule) = event.recurrence_rule {
+        content = content.push(
+            row![
+                text("\u{1F501}").size(TEXT_SM),
+                text(format_recurrence_rule(rrule))
+                    .size(TEXT_SM)
+                    .style(text::secondary),
+            ]
+            .spacing(SPACE_XXS)
+            .align_y(Alignment::Center),
+        );
+    }
+
+    // Organizer (hidden if own event / empty)
+    if let Some(ref organizer) = event.organizer_name {
+        if !organizer.is_empty() {
+            content = content.push(
+                text(format!("Invited by {organizer}"))
+                    .size(TEXT_SM)
+                    .style(text::secondary),
+            );
+        }
+    } else if let Some(ref email) = event.organizer_email {
+        if !email.is_empty() {
+            content = content.push(
+                text(format!("Invited by {email}"))
+                    .size(TEXT_SM)
+                    .style(text::secondary),
+            );
+        }
+    }
+
+    // Attendees (hidden if empty)
+    if !event.attendees.is_empty() {
+        let mut attendee_col = column![].spacing(SPACE_XXXS);
+        for att in &event.attendees {
+            let status_icon = match att.rsvp_status.as_str() {
+                "accepted" => "\u{2713}",
+                "declined" => "\u{2717}",
+                "tentative" => "~",
+                _ => "?",
+            };
+            let display = att.name.as_deref().unwrap_or(&att.email);
+            let suffix = if att.is_organizer { " (organizer)" } else { "" };
+            attendee_col = attendee_col.push(
+                text(format!("{status_icon} {display}{suffix}"))
+                    .size(TEXT_SM)
+                    .style(text::secondary),
+            );
+        }
+        content = content.push(attendee_col);
+    }
+
     // Description (hidden if empty)
     if !event.description.is_empty() {
         content = content.push(
             text(&event.description)
                 .size(TEXT_SM)
                 .style(theme::TextClass::Muted.style()),
+        );
+    }
+
+    // Reminders (hidden if empty)
+    if !event.reminders.is_empty() {
+        let reminder_text = event.reminders.iter()
+            .map(|r| format_reminder(r.minutes_before))
+            .collect::<Vec<_>>()
+            .join(", ");
+        content = content.push(
+            text(format!("Reminders: {reminder_text}"))
+                .size(TEXT_SM)
+                .style(text::secondary),
+        );
+    }
+
+    // RSVP status + action buttons (context-dependent)
+    if let Some(ref status) = event.rsvp_status {
+        let status_display = match status.as_str() {
+            "accepted" => "Accepted",
+            "declined" => "Declined",
+            "tentative" => "Tentative",
+            "needs-action" => "No response",
+            _ => status.as_str(),
+        };
+        content = content.push(
+            text(format!("Your RSVP: {status_display}"))
+                .size(TEXT_SM)
+                .font(crate::font::text_semibold())
+                .style(text::secondary),
         );
     }
 
@@ -709,6 +889,7 @@ fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMessage> {
         Some(state.selected_date),
         today,
         state.week_start,
+        &state.dates_with_events,
         |d| CalendarMessage::SelectDate(d),
         CalendarMessage::PrevMonth,
         CalendarMessage::NextMonth,
@@ -737,13 +918,51 @@ fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMessage> {
     .padding(PAD_ICON_BTN)
     .style(theme::ButtonClass::Ghost.style());
 
-    // Calendar list placeholder
-    let calendar_list = container(
+    // Calendar list with visibility toggles
+    let mut calendar_list_col = column![
         text("Calendars")
-            .size(TEXT_SM)
+            .size(TEXT_XS)
+            .font(crate::font::text_semibold())
             .style(theme::TextClass::Muted.style()),
-    )
-    .padding(SPACE_XS);
+    ]
+    .spacing(SPACE_XXS);
+
+    if state.calendars.is_empty() {
+        calendar_list_col = calendar_list_col.push(
+            text("No calendars synced")
+                .size(TEXT_XS)
+                .style(theme::TextClass::Muted.style()),
+        );
+    } else {
+        for cal in &state.calendars {
+            let cal_id = cal.id.clone();
+            let is_visible = cal.is_visible;
+
+            // Color dot + name + checkbox
+            let color_dot = text("\u{25CF}")
+                .size(TEXT_SM)
+                .color(parse_hex_color(&cal.color));
+
+            let name = text(&cal.display_name)
+                .size(TEXT_XS)
+                .style(text::base);
+
+            let toggle = checkbox(is_visible)
+                .on_toggle(move |checked| {
+                    CalendarMessage::ToggleCalendarVisibility(cal_id.clone(), checked)
+                })
+                .size(12)
+                .spacing(0);
+
+            let cal_row = row![toggle, color_dot, name]
+                .spacing(SPACE_XXS)
+                .align_y(Alignment::Center);
+
+            calendar_list_col = calendar_list_col.push(cal_row);
+        }
+    }
+
+    let calendar_list = container(calendar_list_col).padding(SPACE_XS);
 
     let content = column![
         mini,
@@ -881,5 +1100,64 @@ fn month_short(month: u32) -> &'static str {
         11 => "Nov",
         12 => "Dec",
         _ => "???",
+    }
+}
+
+/// Format a recurrence rule for display.
+fn format_recurrence_rule(rrule: &str) -> String {
+    // Strip "RRULE:" prefix if present.
+    let rule = rrule.strip_prefix("RRULE:").unwrap_or(rrule);
+    // Basic human-readable parsing of common patterns.
+    let mut freq = "";
+    let mut interval = 1u32;
+    for part in rule.split(';') {
+        if let Some(val) = part.strip_prefix("FREQ=") {
+            freq = val;
+        }
+        if let Some(val) = part.strip_prefix("INTERVAL=") {
+            interval = val.parse().unwrap_or(1);
+        }
+    }
+    let freq_label = match freq {
+        "DAILY" => "day",
+        "WEEKLY" => "week",
+        "MONTHLY" => "month",
+        "YEARLY" => "year",
+        _ => return rule.to_string(),
+    };
+    if interval <= 1 {
+        format!("Every {freq_label}")
+    } else {
+        format!("Every {interval} {freq_label}s")
+    }
+}
+
+/// Format a reminder as human-readable text.
+fn format_reminder(minutes_before: i64) -> String {
+    if minutes_before <= 0 {
+        "At time of event".to_string()
+    } else if minutes_before < 60 {
+        format!("{minutes_before} min before")
+    } else if minutes_before < 1440 {
+        let hours = minutes_before / 60;
+        if hours == 1 { "1 hour before".to_string() }
+        else { format!("{hours} hours before") }
+    } else {
+        let days = minutes_before / 1440;
+        if days == 1 { "1 day before".to_string() }
+        else { format!("{days} days before") }
+    }
+}
+
+/// Parse a hex color string (e.g. "#4285f4") to an iced Color.
+fn parse_hex_color(hex: &str) -> iced::Color {
+    let hex = hex.trim_start_matches('#');
+    if hex.len() >= 6 {
+        let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(100);
+        let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(100);
+        let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(100);
+        iced::Color::from_rgb8(r, g, b)
+    } else {
+        iced::Color::from_rgb8(100, 100, 200)
     }
 }

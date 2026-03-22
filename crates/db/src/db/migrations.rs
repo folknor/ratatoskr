@@ -1386,6 +1386,14 @@ static MIGRATIONS: &[Migration] = &[
             ALTER TABLE contacts ADD COLUMN server_id TEXT;
         "#,
     },
+    Migration {
+        version: 65,
+        description: "Calendar events: availability and visibility columns",
+        sql: r#"
+            ALTER TABLE calendar_events ADD COLUMN availability TEXT;
+            ALTER TABLE calendar_events ADD COLUMN visibility TEXT;
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks

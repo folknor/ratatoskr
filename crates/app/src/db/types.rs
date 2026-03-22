@@ -105,6 +105,14 @@ pub struct CalendarEvent {
     pub end_time: i64,
     pub is_all_day: bool,
     pub calendar_id: Option<String>,
+    pub account_id: String,
+    pub timezone: Option<String>,
+    pub recurrence_rule: Option<String>,
+    pub organizer_name: Option<String>,
+    pub organizer_email: Option<String>,
+    pub rsvp_status: Option<String>,
+    pub availability: Option<String>,
+    pub visibility: Option<String>,
 }
 
 pub(crate) fn row_to_thread(row: &Row<'_>) -> rusqlite::Result<Thread> {

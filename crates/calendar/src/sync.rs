@@ -261,6 +261,9 @@ fn row_to_db_calendar(row: &Row<'_>) -> rusqlite::Result<DbCalendar> {
         ctag: row.get("ctag")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
+        sort_order: row.get("sort_order")?,
+        is_default: row.get("is_default")?,
+        provider_id: row.get("provider_id")?,
     })
 }
 
@@ -340,13 +343,19 @@ pub fn upsert_calendar_event(
 ) -> Result<(), String> {
     let id = uuid::Uuid::new_v4().to_string();
     tx.execute(
-        "INSERT INTO calendar_events (id, account_id, google_event_id, summary, description, location, start_time, end_time, is_all_day, status, organizer_email, attendees_json, html_link, calendar_id, remote_event_id, etag, ical_data, uid)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+        "INSERT INTO calendar_events (id, account_id, google_event_id, summary, description, \
+             location, start_time, end_time, is_all_day, status, organizer_email, attendees_json, \
+             html_link, calendar_id, remote_event_id, etag, ical_data, uid, title, timezone, \
+             recurrence_rule, organizer_name, rsvp_status, created_at, availability, visibility)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
+                 ?18, ?19, ?20, ?21, ?22, ?23, unixepoch(), ?24, ?25)
          ON CONFLICT(account_id, google_event_id) DO UPDATE SET
            summary = ?4, description = ?5, location = ?6, start_time = ?7, end_time = ?8,
            is_all_day = ?9, status = ?10, organizer_email = ?11, attendees_json = ?12,
            html_link = ?13, calendar_id = ?14, remote_event_id = ?15, etag = ?16,
-           ical_data = ?17, uid = ?18, updated_at = unixepoch()",
+           ical_data = ?17, uid = ?18, title = ?19, timezone = ?20, recurrence_rule = ?21,
+           organizer_name = ?22, rsvp_status = ?23, availability = ?24, visibility = ?25,
+           updated_at = unixepoch()",
         params![
             id,
             account_id,
@@ -366,6 +375,13 @@ pub fn upsert_calendar_event(
             event.etag,
             event.ical_data,
             event.uid,
+            event.title,
+            event.timezone,
+            event.recurrence_rule,
+            event.organizer_name,
+            event.rsvp_status,
+            event.availability,
+            event.visibility,
         ],
     )
     .map_err(|e| e.to_string())?;

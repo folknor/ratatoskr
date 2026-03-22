@@ -305,6 +305,7 @@ pub fn mini_month<'a, M: 'a + Clone>(
     selected_date: Option<NaiveDate>,
     today: NaiveDate,
     week_start: Weekday,
+    dates_with_events: &'a std::collections::HashSet<NaiveDate>,
     on_date_click: impl Fn(NaiveDate) -> M + 'a,
     on_prev_month: M,
     on_next_month: M,
@@ -391,20 +392,30 @@ pub fn mini_month<'a, M: 'a + Clone>(
                 crate::font::text()
             };
 
+            let has_events = dates_with_events.contains(&date);
             let label = text(num_str)
                 .size(TEXT_XS)
                 .style(text_style)
                 .font(font);
 
+            // Stack date number + optional event dot.
+            let cell_content: Element<'_, M> = if has_events && in_month {
+                let dot = container(text("\u{2022}").size(4.0).style(text::primary))
+                    .align_x(Alignment::Center);
+                column![label, dot].spacing(0).align_x(Alignment::Center).into()
+            } else {
+                label.into()
+            };
+
             let cell_container = if is_selected {
-                container(label)
+                container(cell_content)
                     .width(MINI_MONTH_CELL_SIZE)
                     .height(MINI_MONTH_CELL_SIZE)
                     .align_x(Alignment::Center)
                     .align_y(Alignment::Center)
                     .style(theme::ContainerClass::MiniMonthSelected.style())
             } else {
-                container(label)
+                container(cell_content)
                     .width(MINI_MONTH_CELL_SIZE)
                     .height(MINI_MONTH_CELL_SIZE)
                     .align_x(Alignment::Center)

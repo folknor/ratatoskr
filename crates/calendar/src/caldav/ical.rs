@@ -91,7 +91,8 @@ pub(super) fn parse_caldav_ical_event(
         remote_event_id: href.to_string(),
         uid,
         etag: None,
-        summary,
+        summary: summary.clone(),
+        title: summary,
         description,
         location,
         start_time,
@@ -109,6 +110,7 @@ pub(super) fn parse_caldav_ical_event(
         },
         html_link: None,
         ical_data: Some(ical_data.to_string()),
+        ..CalendarEventDto::default()
     })
 }
 

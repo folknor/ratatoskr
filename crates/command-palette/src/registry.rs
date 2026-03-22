@@ -678,6 +678,22 @@ fn register_calendar(out: &mut Vec<CommandDescriptor>) {
         always,
         &["switch mode", "mail", "calendar"],
     ));
+    out.push(desc_kw(
+        CommandId::SwitchToCalendar,
+        "Switch to Calendar",
+        "Calendar",
+        None,
+        always,
+        &["open calendar", "show calendar"],
+    ));
+    out.push(desc_kw(
+        CommandId::SwitchToMail,
+        "Switch to Mail",
+        "Mail",
+        Some(KeyBinding::cmd_or_ctrl('1')),
+        always,
+        &["open mail", "show mail", "inbox"],
+    ));
     out.push(desc(CommandId::CalendarViewDay, "Day View", "Calendar", None, always));
     out.push(desc(CommandId::CalendarViewWorkWeek, "Work Week View", "Calendar", None, always));
     out.push(desc(CommandId::CalendarViewWeek, "Week View", "Calendar", None, always));

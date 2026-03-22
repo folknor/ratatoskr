@@ -67,6 +67,8 @@ pub enum CommandId {
 
     // Calendar
     CalendarToggle,
+    SwitchToCalendar,
+    SwitchToMail,
     CalendarViewDay,
     CalendarViewWorkWeek,
     CalendarViewWeek,

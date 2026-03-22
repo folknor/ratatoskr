@@ -1,6 +1,6 @@
 use chrono::{Datelike, Local, NaiveDate};
-use iced::widget::{column, container, scrollable, text, Space};
-use iced::{Element, Length};
+use iced::widget::{button, column, container, scrollable, text, Space};
+use iced::{Element, Length, Padding};
 
 use crate::db::Thread;
 use crate::ui::calendar::{CalendarMessage, CalendarState};
@@ -50,6 +50,7 @@ fn calendar_section(cal: &CalendarState) -> Element<'_, Message> {
         Some(cal.selected_date),
         today,
         cal.week_start,
+        &cal.dates_with_events,
         |date| Message::Calendar(CalendarMessage::SelectDate(date)),
         Message::Calendar(CalendarMessage::PrevMonth),
         Message::Calendar(CalendarMessage::NextMonth),
@@ -90,7 +91,7 @@ fn agenda_section(cal: &CalendarState) -> Element<'_, Message> {
     .into()
 }
 
-/// A single agenda row: time range + title.
+/// A single agenda row: time range + title. Clicking opens the event detail.
 fn agenda_item(event: &crate::ui::calendar_time_grid::TimeGridEvent) -> Element<'_, Message> {
     let time_label = if event.all_day {
         "All day".to_string()
@@ -107,7 +108,15 @@ fn agenda_item(event: &crate::ui::calendar_time_grid::TimeGridEvent) -> Element<
         .style(text::base)
         .wrapping(text::Wrapping::None);
 
-    column![time_text, title_text].spacing(SPACE_XXXS).into()
+    let event_id = event.id.clone();
+    button(
+        column![time_text, title_text].spacing(SPACE_XXXS),
+    )
+    .on_press(Message::Calendar(CalendarMessage::EventClicked(event_id)))
+    .padding(Padding::from([SPACE_XXXS, 0.0]))
+    .width(Length::Fill)
+    .style(theme::ButtonClass::Ghost.style())
+    .into()
 }
 
 fn pinned_section(threads: &[Thread]) -> Element<'_, Message> {

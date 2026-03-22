@@ -488,6 +488,8 @@ fn dispatch_other(id: CommandId) -> Option<Message> {
         CommandId::ViewReadingPaneBottom => Some(Message::SetReadingPanePosition(ReadingPanePosition::Bottom)),
         CommandId::ViewReadingPaneHidden => Some(Message::SetReadingPanePosition(ReadingPanePosition::Hidden)),
         CommandId::CalendarToggle => Some(Message::ToggleAppMode),
+        CommandId::SwitchToCalendar => Some(Message::SetAppMode(crate::AppMode::Calendar)),
+        CommandId::SwitchToMail => Some(Message::SetAppMode(crate::AppMode::Mail)),
         CommandId::CalendarViewDay => Some(Message::SetCalendarView(crate::ui::calendar::CalendarView::Day)),
         CommandId::CalendarViewWorkWeek => Some(Message::SetCalendarView(crate::ui::calendar::CalendarView::WorkWeek)),
         CommandId::CalendarViewWeek => Some(Message::SetCalendarView(crate::ui::calendar::CalendarView::Week)),

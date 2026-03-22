@@ -265,6 +265,9 @@ impl_from_row!(DbCalendar {
     ctag,
     created_at,
     updated_at,
+    sort_order,
+    is_default,
+    provider_id,
 });
 
 // ── Calendar Event ──────────────────────────────────────────
@@ -289,6 +292,14 @@ impl_from_row!(DbCalendarEvent {
     etag,
     ical_data,
     uid,
+    title,
+    timezone,
+    recurrence_rule,
+    organizer_name,
+    rsvp_status,
+    created_at,
+    availability,
+    visibility,
 });
 
 // ── Calendar Attendee ──────────────────────────────────────

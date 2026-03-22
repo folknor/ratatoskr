@@ -5,7 +5,7 @@ use rusqlite::params;
 use crate::db::DbState;
 use crate::db::queries_extra::calendars::{
     db_delete_events_for_calendar, db_update_calendar_sync_token, db_upsert_calendar,
-    db_upsert_calendar_event,
+    db_upsert_calendar_event, UpsertCalendarEventParams,
 };
 
 use super::client::CalDavClient;
@@ -259,23 +259,29 @@ async fn upsert_parsed_event(
 
     db_upsert_calendar_event(
         db,
-        account_id.to_string(),
-        google_event_id.clone(),
-        event.summary.clone(),
-        event.description.clone(),
-        event.location.clone(),
-        start_time,
-        end_time,
-        event.is_all_day,
-        event.status.clone(),
-        event.organizer_email.clone(),
-        attendees_json,
-        None, // html_link — CalDAV doesn't have one
-        Some(calendar_id.to_string()),
-        Some(uri.to_string()),
-        Some(etag.to_string()),
-        Some(ical_data.to_string()),
-        event.uid.clone(),
+        UpsertCalendarEventParams {
+            account_id: account_id.to_string(),
+            google_event_id: google_event_id.clone(),
+            summary: event.summary.clone(),
+            description: event.description.clone(),
+            location: event.location.clone(),
+            start_time,
+            end_time,
+            is_all_day: event.is_all_day,
+            status: event.status.clone(),
+            organizer_email: event.organizer_email.clone(),
+            attendees_json,
+            html_link: None,
+            calendar_id: Some(calendar_id.to_string()),
+            remote_event_id: Some(uri.to_string()),
+            etag: Some(etag.to_string()),
+            ical_data: Some(ical_data.to_string()),
+            uid: event.uid.clone(),
+            title: event.summary.clone(),
+            recurrence_rule: event.rrule.clone(),
+            organizer_name: event.organizer_name.clone(),
+            ..UpsertCalendarEventParams::default()
+        },
     )
     .await?;
 

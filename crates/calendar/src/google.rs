@@ -49,6 +49,12 @@ struct GoogleCalendarEvent {
     i_cal_u_i_d: Option<String>,
     #[serde(default)]
     etag: Option<String>,
+    #[serde(default)]
+    recurrence: Option<Vec<String>>,
+    #[serde(default)]
+    visibility: Option<String>,
+    #[serde(default)]
+    transparency: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,12 +64,16 @@ struct GoogleCalendarDateTime {
     date_time: Option<String>,
     #[serde(default)]
     date: Option<String>,
+    #[serde(default)]
+    time_zone: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GoogleCalendarOrganizer {
     email: String,
+    #[serde(default, rename = "displayName")]
+    display_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -414,18 +424,34 @@ fn map_google_event(event: GoogleCalendarEvent) -> Result<CalendarEventDto, Stri
         return Err("Google Calendar event missing end".to_string());
     };
 
+    // Google uses "transparent" for free time, "opaque" for busy (default).
+    let availability = event.transparency.map(|t| {
+        if t == "transparent" { "free".to_string() } else { "busy".to_string() }
+    });
+
+    let recurrence_rule = event.recurrence.and_then(|rules| {
+        rules.into_iter().find(|r| r.starts_with("RRULE:"))
+    });
+
+    let organizer_name = event.organizer.as_ref().and_then(|o| o.display_name.clone());
+    let organizer_email = event.organizer.map(|o| o.email);
+
+    let timezone = event.start.time_zone.clone();
+
     Ok(CalendarEventDto {
         remote_event_id: event.id,
         uid: event.i_cal_u_i_d,
         etag: event.etag,
-        summary: event.summary,
+        summary: event.summary.clone(),
+        title: event.summary,
         description: event.description,
         location: event.location,
         start_time,
         end_time,
         is_all_day,
         status: event.status.unwrap_or_else(|| "confirmed".to_string()),
-        organizer_email: event.organizer.map(|value| value.email),
+        organizer_email,
+        organizer_name,
         attendees_json: event
             .attendees
             .map(|value| serde_json::to_string(&value))
@@ -433,5 +459,10 @@ fn map_google_event(event: GoogleCalendarEvent) -> Result<CalendarEventDto, Stri
             .map_err(|e| format!("Failed to serialize Google Calendar attendees: {e}"))?,
         html_link: event.html_link,
         ical_data: None,
+        recurrence_rule,
+        timezone,
+        availability,
+        visibility: event.visibility,
+        ..CalendarEventDto::default()
     })
 }

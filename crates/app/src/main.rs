@@ -229,6 +229,7 @@ pub enum Message {
     // Calendar
     Calendar(CalendarMessage),
     ToggleAppMode,
+    SetAppMode(AppMode),
     SetCalendarView(CalendarView),
     CalendarToday,
 
@@ -360,6 +361,15 @@ impl App {
 
         let session = pop_out::session::SessionState::load(data_dir);
 
+        let calendar_default_view = db.with_conn_sync(|conn| {
+            let view_name = conn.query_row(
+                "SELECT value FROM settings WHERE key = 'calendar_default_view'",
+                [],
+                |row| row.get::<_, String>(0),
+            ).unwrap_or_else(|_| "month".to_string());
+            Ok(CalendarState::parse_view_name(&view_name))
+        }).unwrap_or(CalendarView::Month);
+
         let mut app = Self {
             db,
             sidebar: Sidebar::new(),
@@ -372,7 +382,7 @@ impl App {
             status: "Loading...".to_string(),
             mode: appearance::Mode::Dark,
             app_mode: AppMode::Mail,
-            calendar: CalendarState::new(),
+            calendar: CalendarState::with_default_view(calendar_default_view),
             sidebar_width: window.sidebar_width,
             thread_list_width: window.thread_list_width,
             dragging: None,
@@ -689,6 +699,11 @@ impl App {
             Message::WindowMoved(id, point) => {
                 if id == self.main_window_id {
                     self.window.set_position(point);
+                } else if let Some(PopOutWindow::MessageView(state)) =
+                    self.pop_out_windows.get_mut(&id)
+                {
+                    state.x = Some(point.x);
+                    state.y = Some(point.y);
                 }
                 Task::none()
             }
@@ -778,11 +793,19 @@ impl App {
             // Calendar — delegated to handlers/calendar.rs
             Message::Calendar(cal_msg) => self.handle_calendar(cal_msg),
             Message::ToggleAppMode => {
-                self.app_mode = match self.app_mode {
+                let target = match self.app_mode {
                     AppMode::Mail => AppMode::Calendar,
                     AppMode::Calendar => AppMode::Mail,
                 };
+                self.update(Message::SetAppMode(target))
+            }
+            Message::SetAppMode(mode) => {
+                if self.app_mode == mode {
+                    return Task::none();
+                }
+                self.app_mode = mode;
                 self.sidebar.in_calendar_mode = self.app_mode == AppMode::Calendar;
+                self.sidebar.calendar_active_view = Some(self.calendar.active_view);
                 if self.app_mode == AppMode::Calendar {
                     return self.reload_calendar_events();
                 }
@@ -793,6 +816,7 @@ impl App {
                     self.app_mode = AppMode::Calendar;
                     self.sidebar.in_calendar_mode = true;
                 }
+                self.sidebar.calendar_active_view = Some(view);
                 self.update(Message::Calendar(CalendarMessage::SetView(view)))
             }
             Message::CalendarToday => {
@@ -1052,6 +1076,9 @@ impl App {
             }
             SidebarEvent::ModeToggled => {
                 self.update(Message::ToggleAppMode)
+            }
+            SidebarEvent::CalendarViewChanged(view) => {
+                self.update(Message::SetCalendarView(view))
             }
             SidebarEvent::SearchHere { query_prefix } => {
                 self.update(Message::SearchHere(query_prefix))

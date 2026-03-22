@@ -26,6 +26,17 @@ pub struct TimeGridEvent {
     /// Hex color string (e.g. "#4285f4").
     pub color: String,
     pub calendar_name: Option<String>,
+    pub location: Option<String>,
+    pub recurrence_rule: Option<String>,
+    pub calendar_id: Option<String>,
+    pub account_id: String,
+    pub organizer_name: Option<String>,
+    pub organizer_email: Option<String>,
+    pub rsvp_status: Option<String>,
+    pub description: Option<String>,
+    pub availability: Option<String>,
+    pub visibility: Option<String>,
+    pub timezone: Option<String>,
 }
 
 /// A single day column in the time grid.
@@ -614,6 +625,7 @@ fn event_block<'a, M: 'a + Clone>(
     let text_color = contrasting_text_color(bg_color);
 
     let time_str = format_event_time(event);
+    let is_recurring = event.recurrence_rule.is_some();
     let label_text = if time_str.is_empty() {
         event.title.clone()
     } else {
@@ -625,7 +637,19 @@ fn event_block<'a, M: 'a + Clone>(
         .color(text_color)
         .wrapping(text::Wrapping::None);
 
-    let inner = container(label)
+    let content_row: Element<'_, M> = if is_recurring {
+        row![
+            container(label).width(Length::Fill),
+            text("\u{1F501}").size(TEXT_XS).color(text_color),
+        ]
+        .spacing(SPACE_XXXS)
+        .align_y(Alignment::Center)
+        .into()
+    } else {
+        label.into()
+    };
+
+    let inner = container(content_row)
         .padding(Padding::from([SPACE_XXXS, SPACE_XXS]))
         .width(Length::Fill)
         .height(height)
@@ -752,15 +776,7 @@ fn events_for_date(events: &[TimeGridEvent], date: NaiveDate) -> Vec<TimeGridEve
                 _ => false,
             }
         })
-        .map(|e| TimeGridEvent {
-            id: e.id.clone(),
-            title: e.title.clone(),
-            start_time: e.start_time,
-            end_time: e.end_time,
-            all_day: e.all_day,
-            color: e.color.clone(),
-            calendar_name: e.calendar_name.clone(),
-        })
+        .cloned()
         .collect()
 }
 

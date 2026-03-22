@@ -18,7 +18,7 @@ pub struct CalendarInfoDto {
     pub is_primary: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CalendarEventDto {
     pub remote_event_id: String,
@@ -35,6 +35,20 @@ pub struct CalendarEventDto {
     pub attendees_json: Option<String>,
     pub html_link: Option<String>,
     pub ical_data: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub timezone: Option<String>,
+    #[serde(default)]
+    pub recurrence_rule: Option<String>,
+    #[serde(default)]
+    pub organizer_name: Option<String>,
+    #[serde(default)]
+    pub rsvp_status: Option<String>,
+    #[serde(default)]
+    pub availability: Option<String>,
+    #[serde(default)]
+    pub visibility: Option<String>,
 }
 
 /// Backward-compatible alias: `CalendarEventInput` was previously a separate

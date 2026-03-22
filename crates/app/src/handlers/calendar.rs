@@ -2,9 +2,11 @@ use std::sync::Arc;
 
 use chrono::{Datelike, NaiveDate, Timelike};
 use iced::Task;
+use ratatoskr_core::db::queries_extra::calendars::LocalCalendarEventParams;
 
 use crate::ui::calendar::{
-    CalendarEventData, CalendarMessage, CalendarOverlay, EventField, EventTextField,
+    AttendeeEntry, CalendarEventData, CalendarMessage, CalendarOverlay, EventField,
+    EventTextField, ReminderEntry,
 };
 use crate::{App, Message};
 
@@ -44,16 +46,32 @@ impl App {
             CalendarMessage::EventClicked(event_id) => {
                 let db = Arc::clone(&self.db);
                 let eid = event_id.clone();
+                // Also find the event in cached events for color/calendar_name.
+                let cached_event = self.calendar.events.iter().find(|e| e.id == eid).cloned();
                 Task::perform(
-                    async move { db.get_calendar_event(eid).await },
-                    move |result| {
-                        let mapped = match result {
-                            Ok(Some(ev)) => Ok(db_event_to_calendar_data(&ev)),
-                            Ok(None) => Err(format!("Event not found: {event_id}")),
-                            Err(e) => Err(e),
+                    async move {
+                        let ev = db.get_calendar_event(eid).await?;
+                        let Some(ev) = ev else {
+                            return Err(format!("Event not found: {event_id}"));
                         };
-                        Message::Calendar(CalendarMessage::EventLoaded(mapped))
+                        let attendees = db.get_event_attendees(
+                            ev.account_id.clone(),
+                            ev.id.clone(),
+                        ).await.unwrap_or_default();
+                        let reminders = db.get_event_reminders(
+                            ev.account_id.clone(),
+                            ev.id.clone(),
+                        ).await.unwrap_or_default();
+                        let mut data = db_event_to_calendar_data(&ev);
+                        data.attendees = attendees;
+                        data.reminders = reminders;
+                        if let Some(cached) = cached_event {
+                            data.calendar_name = cached.calendar_name;
+                            data.color = Some(cached.color);
+                        }
+                        Ok(data)
                     },
+                    |result| Message::Calendar(CalendarMessage::EventLoaded(result)),
                 )
             }
             CalendarMessage::EventLoaded(result) => {
@@ -167,6 +185,31 @@ impl App {
                 }
                 Task::none()
             }
+            CalendarMessage::ToggleCalendarVisibility(calendar_id, visible) => {
+                // Update local state immediately for responsiveness.
+                if let Some(cal) = self.calendar.calendars.iter_mut().find(|c| c.id == calendar_id) {
+                    cal.is_visible = visible;
+                }
+                // Persist to DB and reload events.
+                let db = Arc::clone(&self.db);
+                Task::perform(
+                    async move {
+                        db.set_calendar_visibility(calendar_id, visible).await
+                    },
+                    |_| Message::Calendar(CalendarMessage::EventSaved(Ok(()))),
+                )
+            }
+            CalendarMessage::CalendarsLoaded(result) => {
+                match result {
+                    Ok(calendars) => {
+                        self.calendar.calendars = calendars;
+                    }
+                    Err(e) => {
+                        log::error!("Failed to load calendars: {e}");
+                    }
+                }
+                Task::none()
+            }
         }
     }
 
@@ -256,44 +299,38 @@ impl App {
             event.end_minute_u32(),
         );
 
+        let account_id = event
+            .account_id
+            .clone()
+            .or_else(|| {
+                self.sidebar.accounts.first().map(|a| a.id.clone())
+            })
+            .unwrap_or_default();
+
+        let params = LocalCalendarEventParams {
+            account_id,
+            summary: event.title.clone(),
+            description: event.description.clone(),
+            location: event.location.clone(),
+            start_time: start_ts,
+            end_time: end_ts,
+            is_all_day: event.all_day,
+            calendar_id: event.calendar_id.clone(),
+            timezone: event.timezone.clone(),
+            recurrence_rule: event.recurrence_rule.clone(),
+            availability: event.availability.clone(),
+            visibility: event.visibility.clone(),
+        };
+
         if let Some(id) = event.id.clone() {
             Task::perform(
-                async move {
-                    db.update_calendar_event(
-                        id,
-                        event.title,
-                        event.description,
-                        event.location,
-                        start_ts,
-                        end_ts,
-                        event.all_day,
-                        event.calendar_id,
-                    )
-                    .await
-                },
+                async move { db.update_calendar_event(id, params).await },
                 |r| Message::Calendar(CalendarMessage::EventSaved(r)),
             )
         } else {
-            let account_id = self
-                .sidebar
-                .accounts
-                .first()
-                .map(|a| a.id.clone())
-                .unwrap_or_default();
             Task::perform(
                 async move {
-                    db.create_calendar_event(
-                        account_id,
-                        event.title,
-                        event.description,
-                        event.location,
-                        start_ts,
-                        end_ts,
-                        event.all_day,
-                        event.calendar_id,
-                    )
-                    .await
-                    .map(|_id| ())
+                    db.create_calendar_event(params).await.map(|_id| ())
                 },
                 |r| Message::Calendar(CalendarMessage::EventSaved(r)),
             )
@@ -303,10 +340,17 @@ impl App {
     /// Reload calendar events from DB and rebuild views.
     pub(crate) fn reload_calendar_events(&self) -> Task<Message> {
         let db = Arc::clone(&self.db);
-        Task::perform(
-            async move { db.load_calendar_events_for_view().await },
-            |r| Message::Calendar(CalendarMessage::EventsLoaded(r)),
-        )
+        let db2 = Arc::clone(&self.db);
+        Task::batch([
+            Task::perform(
+                async move { db.load_calendar_events_for_view().await },
+                |r| Message::Calendar(CalendarMessage::EventsLoaded(r)),
+            ),
+            Task::perform(
+                async move { db2.load_calendars_for_sidebar().await },
+                |r| Message::Calendar(CalendarMessage::CalendarsLoaded(r)),
+            ),
+        ])
     }
 }
 
@@ -341,6 +385,18 @@ fn db_event_to_calendar_data(ev: &crate::db::CalendarEvent) -> CalendarEventData
         location: ev.location.clone().unwrap_or_default(),
         description: ev.description.clone().unwrap_or_default(),
         calendar_id: ev.calendar_id.clone(),
+        account_id: Some(ev.account_id.clone()),
+        timezone: ev.timezone.clone(),
+        recurrence_rule: ev.recurrence_rule.clone(),
+        organizer_name: ev.organizer_name.clone(),
+        organizer_email: ev.organizer_email.clone(),
+        rsvp_status: ev.rsvp_status.clone(),
+        availability: ev.availability.clone(),
+        visibility: ev.visibility.clone(),
+        attendees: Vec::new(),
+        reminders: Vec::new(),
+        calendar_name: None,
+        color: None,
     }
 }
 

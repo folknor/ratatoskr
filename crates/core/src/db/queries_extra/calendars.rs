@@ -3,6 +3,28 @@ use super::super::types::{DbCalendar, DbCalendarAttendee, DbCalendarEvent, DbCal
 use crate::db::from_row::FromRow;
 use rusqlite::params;
 
+/// Explicit column list for `calendars` table queries.
+const CALENDAR_COLS: &str = "\
+    id, account_id, provider, remote_id, display_name, color, is_primary, \
+    is_visible, sync_token, ctag, created_at, updated_at, sort_order, \
+    is_default, provider_id";
+
+/// Explicit column list for `calendar_events` table queries.
+const EVENT_COLS: &str = "\
+    id, account_id, google_event_id, summary, description, location, \
+    start_time, end_time, is_all_day, status, organizer_email, attendees_json, \
+    html_link, updated_at, calendar_id, remote_event_id, etag, ical_data, uid, \
+    title, timezone, recurrence_rule, organizer_name, rsvp_status, created_at, \
+    availability, visibility";
+
+/// Explicit column list for `calendar_attendees` table queries.
+const ATTENDEE_COLS: &str = "\
+    event_id, account_id, email, name, rsvp_status, is_organizer";
+
+/// Explicit column list for `calendar_reminders` table queries.
+const REMINDER_COLS: &str = "\
+    id, event_id, account_id, minutes_before, method";
+
 pub async fn db_upsert_calendar(
     db: &DbState,
     account_id: String,
@@ -41,8 +63,8 @@ pub async fn db_get_calendars_for_account(
     db.with_conn(move |conn| {
         let mut stmt = conn
             .prepare(
-                "SELECT * FROM calendars WHERE account_id = ?1 \
-                     ORDER BY sort_order ASC, is_primary DESC, display_name ASC",
+                &format!("SELECT {CALENDAR_COLS} FROM calendars WHERE account_id = ?1 \
+                     ORDER BY sort_order ASC, is_primary DESC, display_name ASC"),
             )
             .map_err(|e| e.to_string())?;
         stmt.query_map(params![account_id], DbCalendar::from_row)
@@ -60,8 +82,8 @@ pub async fn db_get_visible_calendars(
     db.with_conn(move |conn| {
         let mut stmt = conn
             .prepare(
-                "SELECT * FROM calendars WHERE account_id = ?1 AND is_visible = 1 \
-                     ORDER BY sort_order ASC, is_primary DESC, display_name ASC",
+                &format!("SELECT {CALENDAR_COLS} FROM calendars WHERE account_id = ?1 AND is_visible = 1 \
+                     ORDER BY sort_order ASC, is_primary DESC, display_name ASC"),
             )
             .map_err(|e| e.to_string())?;
         stmt.query_map(params![account_id], DbCalendar::from_row)
@@ -126,7 +148,7 @@ pub async fn db_get_calendar_by_id(
 ) -> Result<Option<DbCalendar>, String> {
     db.with_conn(move |conn| {
         let result = conn.query_row(
-            "SELECT * FROM calendars WHERE id = ?1",
+            &format!("SELECT {CALENDAR_COLS} FROM calendars WHERE id = ?1"),
             params![calendar_id],
             DbCalendar::from_row,
         );
@@ -139,39 +161,62 @@ pub async fn db_get_calendar_by_id(
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Parameters for upserting a calendar event.
+#[derive(Debug, Clone, Default)]
+pub struct UpsertCalendarEventParams {
+    pub account_id: String,
+    pub google_event_id: String,
+    pub summary: Option<String>,
+    pub description: Option<String>,
+    pub location: Option<String>,
+    pub start_time: i64,
+    pub end_time: i64,
+    pub is_all_day: bool,
+    pub status: String,
+    pub organizer_email: Option<String>,
+    pub attendees_json: Option<String>,
+    pub html_link: Option<String>,
+    pub calendar_id: Option<String>,
+    pub remote_event_id: Option<String>,
+    pub etag: Option<String>,
+    pub ical_data: Option<String>,
+    pub uid: Option<String>,
+    pub title: Option<String>,
+    pub timezone: Option<String>,
+    pub recurrence_rule: Option<String>,
+    pub organizer_name: Option<String>,
+    pub rsvp_status: Option<String>,
+    pub availability: Option<String>,
+    pub visibility: Option<String>,
+}
+
 pub async fn db_upsert_calendar_event(
     db: &DbState,
-    account_id: String,
-    google_event_id: String,
-    summary: Option<String>,
-    description: Option<String>,
-    location: Option<String>,
-    start_time: i64,
-    end_time: i64,
-    is_all_day: bool,
-    status: String,
-    organizer_email: Option<String>,
-    attendees_json: Option<String>,
-    html_link: Option<String>,
-    calendar_id: Option<String>,
-    remote_event_id: Option<String>,
-    etag: Option<String>,
-    ical_data: Option<String>,
-    uid: Option<String>,
+    p: UpsertCalendarEventParams,
 ) -> Result<(), String> {
-    log::info!("Upserting calendar event: account_id={account_id}, google_event_id={google_event_id}");
+    log::info!("Upserting calendar event: account_id={}, google_event_id={}", p.account_id, p.google_event_id);
     db.with_conn(move |conn| {
         let id = uuid::Uuid::new_v4().to_string();
         conn.execute(
-            "INSERT INTO calendar_events (id, account_id, google_event_id, summary, description, location, start_time, end_time, is_all_day, status, organizer_email, attendees_json, html_link, calendar_id, remote_event_id, etag, ical_data, uid)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+            "INSERT INTO calendar_events (id, account_id, google_event_id, summary, description, \
+                 location, start_time, end_time, is_all_day, status, organizer_email, \
+                 attendees_json, html_link, calendar_id, remote_event_id, etag, ical_data, uid, \
+                 title, timezone, recurrence_rule, organizer_name, rsvp_status, created_at, \
+                 availability, visibility)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
+                         ?17, ?18, ?19, ?20, ?21, ?22, ?23, unixepoch(), ?24, ?25)
                  ON CONFLICT(account_id, google_event_id) DO UPDATE SET
                    summary = ?4, description = ?5, location = ?6, start_time = ?7, end_time = ?8,
                    is_all_day = ?9, status = ?10, organizer_email = ?11, attendees_json = ?12,
                    html_link = ?13, calendar_id = ?14, remote_event_id = ?15, etag = ?16,
-                   ical_data = ?17, uid = ?18, updated_at = unixepoch()",
-            params![id, account_id, google_event_id, summary, description, location, start_time, end_time, is_all_day as i64, status, organizer_email, attendees_json, html_link, calendar_id, remote_event_id, etag, ical_data, uid],
+                   ical_data = ?17, uid = ?18, title = ?19, timezone = ?20, recurrence_rule = ?21,
+                   organizer_name = ?22, rsvp_status = ?23, availability = ?24, visibility = ?25,
+                   updated_at = unixepoch()",
+            params![id, p.account_id, p.google_event_id, p.summary, p.description, p.location,
+                    p.start_time, p.end_time, p.is_all_day as i64, p.status, p.organizer_email,
+                    p.attendees_json, p.html_link, p.calendar_id, p.remote_event_id, p.etag,
+                    p.ical_data, p.uid, p.title, p.timezone, p.recurrence_rule, p.organizer_name,
+                    p.rsvp_status, p.availability, p.visibility],
         )
         .map_err(|e| {
             log::error!("Failed to upsert calendar event: {e}");
@@ -192,9 +237,9 @@ pub async fn db_get_calendar_events_in_range(
     db.with_conn(move |conn| {
         let mut stmt = conn
             .prepare(
-                "SELECT * FROM calendar_events \
+                &format!("SELECT {EVENT_COLS} FROM calendar_events \
                      WHERE account_id = ?1 AND start_time < ?3 AND end_time > ?2 \
-                     ORDER BY start_time ASC",
+                     ORDER BY start_time ASC"),
             )
             .map_err(|e| e.to_string())?;
         stmt.query_map(
@@ -226,7 +271,7 @@ pub async fn db_get_calendar_events_in_range_multi(
             .collect::<Vec<_>>()
             .join(", ");
         let sql = format!(
-            "SELECT * FROM calendar_events \
+            "SELECT {EVENT_COLS} FROM calendar_events \
                  WHERE account_id = ?1 AND start_time < ?3 AND end_time > ?2 \
                    AND (calendar_id IN ({placeholders}) OR calendar_id IS NULL) \
                  ORDER BY start_time ASC"
@@ -254,6 +299,19 @@ pub async fn db_delete_events_for_calendar(
     calendar_id: String,
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
+        // Cascade: delete attendees and reminders for all events in this calendar.
+        conn.execute(
+            "DELETE FROM calendar_attendees WHERE event_id IN \
+             (SELECT id FROM calendar_events WHERE calendar_id = ?1)",
+            params![calendar_id],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM calendar_reminders WHERE event_id IN \
+             (SELECT id FROM calendar_events WHERE calendar_id = ?1)",
+            params![calendar_id],
+        )
+        .map_err(|e| e.to_string())?;
         conn.execute(
             "DELETE FROM calendar_events WHERE calendar_id = ?1",
             params![calendar_id],
@@ -271,7 +329,7 @@ pub async fn db_get_event_by_remote_id(
 ) -> Result<Option<DbCalendarEvent>, String> {
     db.with_conn(move |conn| {
         let result = conn.query_row(
-            "SELECT * FROM calendar_events WHERE calendar_id = ?1 AND remote_event_id = ?2",
+            &format!("SELECT {EVENT_COLS} FROM calendar_events WHERE calendar_id = ?1 AND remote_event_id = ?2"),
             params![calendar_id, remote_event_id],
             DbCalendarEvent::from_row,
         );
@@ -290,6 +348,19 @@ pub async fn db_delete_event_by_remote_id(
     remote_event_id: String,
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
+        // Cascade: delete attendees and reminders before the event.
+        conn.execute(
+            "DELETE FROM calendar_attendees WHERE event_id IN \
+             (SELECT id FROM calendar_events WHERE calendar_id = ?1 AND remote_event_id = ?2)",
+            params![calendar_id, remote_event_id],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM calendar_reminders WHERE event_id IN \
+             (SELECT id FROM calendar_events WHERE calendar_id = ?1 AND remote_event_id = ?2)",
+            params![calendar_id, remote_event_id],
+        )
+        .map_err(|e| e.to_string())?;
         conn.execute(
             "DELETE FROM calendar_events WHERE calendar_id = ?1 AND remote_event_id = ?2",
             params![calendar_id, remote_event_id],
@@ -303,6 +374,17 @@ pub async fn db_delete_event_by_remote_id(
 pub async fn db_delete_calendar_event(db: &DbState, event_id: String) -> Result<(), String> {
     log::info!("Deleting calendar event: id={event_id}");
     db.with_conn(move |conn| {
+        // Cascade: delete attendees and reminders before the event.
+        conn.execute(
+            "DELETE FROM calendar_attendees WHERE event_id = ?1",
+            params![event_id],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM calendar_reminders WHERE event_id = ?1",
+            params![event_id],
+        )
+        .map_err(|e| e.to_string())?;
         conn.execute(
             "DELETE FROM calendar_events WHERE id = ?1",
             params![event_id],
@@ -326,9 +408,9 @@ pub async fn db_get_event_attendees(
     db.with_conn(move |conn| {
         let mut stmt = conn
             .prepare(
-                "SELECT * FROM calendar_attendees \
+                &format!("SELECT {ATTENDEE_COLS} FROM calendar_attendees \
                  WHERE account_id = ?1 AND event_id = ?2 \
-                 ORDER BY is_organizer DESC, email ASC",
+                 ORDER BY is_organizer DESC, email ASC"),
             )
             .map_err(|e| e.to_string())?;
         stmt.query_map(params![account_id, event_id], DbCalendarAttendee::from_row)
@@ -388,9 +470,9 @@ pub async fn db_get_event_reminders(
     db.with_conn(move |conn| {
         let mut stmt = conn
             .prepare(
-                "SELECT * FROM calendar_reminders \
+                &format!("SELECT {REMINDER_COLS} FROM calendar_reminders \
                  WHERE account_id = ?1 AND event_id = ?2 \
-                 ORDER BY minutes_before ASC",
+                 ORDER BY minutes_before ASC"),
             )
             .map_err(|e| e.to_string())?;
         stmt.query_map(params![account_id, event_id], DbCalendarReminder::from_row)
@@ -444,7 +526,7 @@ pub fn get_calendar_event_sync(
     event_id: &str,
 ) -> Result<Option<DbCalendarEvent>, String> {
     let result = conn.query_row(
-        "SELECT * FROM calendar_events WHERE id = ?1",
+        &format!("SELECT {EVENT_COLS} FROM calendar_events WHERE id = ?1"),
         params![event_id],
         DbCalendarEvent::from_row,
     );
@@ -455,36 +537,51 @@ pub fn get_calendar_event_sync(
     }
 }
 
+/// Parameters for creating/updating a local calendar event (synchronous).
+#[derive(Debug, Clone, Default)]
+pub struct LocalCalendarEventParams {
+    pub account_id: String,
+    pub summary: String,
+    pub description: String,
+    pub location: String,
+    pub start_time: i64,
+    pub end_time: i64,
+    pub is_all_day: bool,
+    pub calendar_id: Option<String>,
+    pub timezone: Option<String>,
+    pub recurrence_rule: Option<String>,
+    pub availability: Option<String>,
+    pub visibility: Option<String>,
+}
+
 /// Create a new local calendar event (synchronous). Returns the new event ID.
-#[allow(clippy::too_many_arguments)]
 pub fn create_calendar_event_sync(
     conn: &rusqlite::Connection,
-    account_id: &str,
-    summary: &str,
-    description: &str,
-    location: &str,
-    start_time: i64,
-    end_time: i64,
-    is_all_day: bool,
-    calendar_id: Option<&str>,
+    p: &LocalCalendarEventParams,
 ) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO calendar_events
             (id, account_id, google_event_id, summary, description,
              location, start_time, end_time, is_all_day, status,
-             calendar_id)
-         VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, ?8, 'confirmed', ?9)",
+             calendar_id, timezone, recurrence_rule, availability,
+             visibility, created_at)
+         VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, ?8, 'confirmed', ?9,
+                 ?10, ?11, ?12, ?13, unixepoch())",
         params![
             id,
-            account_id,
-            summary,
-            description,
-            location,
-            start_time,
-            end_time,
-            is_all_day as i64,
-            calendar_id,
+            p.account_id,
+            p.summary,
+            p.description,
+            p.location,
+            p.start_time,
+            p.end_time,
+            p.is_all_day as i64,
+            p.calendar_id,
+            p.timezone,
+            p.recurrence_rule,
+            p.availability,
+            p.visibility,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -492,44 +589,52 @@ pub fn create_calendar_event_sync(
 }
 
 /// Update an existing calendar event (synchronous).
-#[allow(clippy::too_many_arguments)]
 pub fn update_calendar_event_sync(
     conn: &rusqlite::Connection,
     event_id: &str,
-    summary: &str,
-    description: &str,
-    location: &str,
-    start_time: i64,
-    end_time: i64,
-    is_all_day: bool,
-    calendar_id: Option<&str>,
+    p: &LocalCalendarEventParams,
 ) -> Result<(), String> {
     conn.execute(
         "UPDATE calendar_events SET
             summary = ?2, description = ?3, location = ?4,
             start_time = ?5, end_time = ?6, is_all_day = ?7,
-            calendar_id = ?8, updated_at = unixepoch()
+            calendar_id = ?8, timezone = ?9, recurrence_rule = ?10,
+            availability = ?11, visibility = ?12, updated_at = unixepoch()
          WHERE id = ?1",
         params![
             event_id,
-            summary,
-            description,
-            location,
-            start_time,
-            end_time,
-            is_all_day as i64,
-            calendar_id,
+            p.summary,
+            p.description,
+            p.location,
+            p.start_time,
+            p.end_time,
+            p.is_all_day as i64,
+            p.calendar_id,
+            p.timezone,
+            p.recurrence_rule,
+            p.availability,
+            p.visibility,
         ],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
 }
 
-/// Delete a calendar event by id (synchronous).
+/// Delete a calendar event by id (synchronous), cascading to attendees and reminders.
 pub fn delete_calendar_event_sync(
     conn: &rusqlite::Connection,
     event_id: &str,
 ) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM calendar_attendees WHERE event_id = ?1",
+        params![event_id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM calendar_reminders WHERE event_id = ?1",
+        params![event_id],
+    )
+    .map_err(|e| e.to_string())?;
     conn.execute(
         "DELETE FROM calendar_events WHERE id = ?1",
         params![event_id],
@@ -548,6 +653,17 @@ pub struct CalendarViewEvent {
     pub all_day: bool,
     pub color: String,
     pub calendar_name: Option<String>,
+    pub location: Option<String>,
+    pub recurrence_rule: Option<String>,
+    pub calendar_id: Option<String>,
+    pub account_id: String,
+    pub organizer_name: Option<String>,
+    pub organizer_email: Option<String>,
+    pub rsvp_status: Option<String>,
+    pub description: Option<String>,
+    pub availability: Option<String>,
+    pub visibility: Option<String>,
+    pub timezone: Option<String>,
 }
 
 /// Load all calendar events with resolved calendar colors (synchronous).
@@ -556,9 +672,12 @@ pub fn load_calendar_events_for_view_sync(
 ) -> Result<Vec<CalendarViewEvent>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT e.id, e.summary, e.start_time, e.end_time,
+            "SELECT e.id, e.summary, e.title, e.start_time, e.end_time,
                     e.is_all_day, COALESCE(c.color, '#3498db') AS color,
-                    c.display_name AS calendar_name
+                    c.display_name AS calendar_name, e.location,
+                    e.recurrence_rule, e.calendar_id, e.account_id,
+                    e.organizer_name, e.organizer_email, e.rsvp_status,
+                    e.description, e.availability, e.visibility, e.timezone
              FROM calendar_events e
              LEFT JOIN calendars c
                ON c.account_id = e.account_id AND c.id = e.calendar_id
@@ -567,16 +686,30 @@ pub fn load_calendar_events_for_view_sync(
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
+            // Prefer `title` over `summary` (title is the v63 canonical field).
+            let title_v63: Option<String> = row.get("title")?;
+            let summary: Option<String> = row.get("summary")?;
+            let display_title = title_v63.or(summary).unwrap_or_default();
             Ok(CalendarViewEvent {
                 id: row.get::<_, String>("id")?,
-                title: row.get::<_, Option<String>>("summary")?
-                    .unwrap_or_default(),
+                title: display_title,
                 start_time: row.get("start_time")?,
                 end_time: row.get("end_time")?,
                 all_day: row.get::<_, i64>("is_all_day")? != 0,
                 color: row.get::<_, Option<String>>("color")?
                     .unwrap_or_else(|| "#3498db".to_string()),
                 calendar_name: row.get("calendar_name")?,
+                location: row.get("location")?,
+                recurrence_rule: row.get("recurrence_rule")?,
+                calendar_id: row.get("calendar_id")?,
+                account_id: row.get("account_id")?,
+                organizer_name: row.get("organizer_name")?,
+                organizer_email: row.get("organizer_email")?,
+                rsvp_status: row.get("rsvp_status")?,
+                description: row.get("description")?,
+                availability: row.get("availability")?,
+                visibility: row.get("visibility")?,
+                timezone: row.get("timezone")?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -592,8 +725,8 @@ pub async fn db_get_all_visible_calendars(
     db.with_conn(move |conn| {
         let mut stmt = conn
             .prepare(
-                "SELECT * FROM calendars WHERE is_visible = 1 \
-                 ORDER BY account_id, is_primary DESC, sort_order, display_name ASC",
+                &format!("SELECT {CALENDAR_COLS} FROM calendars WHERE is_visible = 1 \
+                 ORDER BY account_id, is_primary DESC, sort_order, display_name ASC"),
             )
             .map_err(|e| e.to_string())?;
         stmt.query_map([], DbCalendar::from_row)
