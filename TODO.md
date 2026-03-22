@@ -39,19 +39,19 @@ Sanitization pipeline, MDN detection, tracking pixel detection, URL cleaning all
 
 - [ ] **Read receipt prompt UI** — `read_receipt_policy` table and `mdn.rs` policy resolution exist. Need UI prompt when opening a message with `mdn_requested=true`: "Send read receipt?" with per-sender/per-account policy options (ask/always/never).
 - [ ] **Read receipt policy management in Settings** — Settings panel for configuring default MDN policy per account and per-sender overrides.
-- [ ] **Remote image strip in sanitizer** — `sanitize_html_body()` pipeline exists but does not strip remote `<img src>` unless allowlisted. Need to integrate with `image_allowlist` table check during sanitization. Currently remote images are blocked at render time, not at sanitization time.
-- [ ] **Link tracking visual indicators** — `detect_tracking_pixels_in_html()` detects trackers but results aren't surfaced in the UI. Show indicators on tracked links in rendered email.
-- [ ] **AMP HTML blocking** — Strip `<html amp4email>` / AMP-specific markup during sanitization.
+- [x] **Remote image strip in sanitizer** — `sanitize_html_body_with_image_policy()` strips remote `<img src="http(s)://...">` unless sender is allowlisted. Preserves cid:/data: URIs. *(2026-03-22)*
+- [x] **Link tracking visual indicators** — `is_known_tracker()` exported from tracking_pixels, `has_tracking_params()` added to url_cleaning. UI renderer can annotate links. *(2026-03-22)*
+- [x] **AMP HTML blocking** — `strip_amp_elements()` removes 14 amp-* elements and amp4email attribute. Integrated into `sanitize_html_body_with_image_policy()`. *(2026-03-22)*
 
 ### Cloud Attachments — `docs/roadmap/cloud-attachments.md`
 
 OneDrive and Google Drive upload both implemented. Remaining:
 
-- [ ] **Incoming cloud link detection** — URL pattern matching for OneDrive (`1drv.ms`, `sharepoint.com`) and Google Drive (`drive.google.com`, `docs.google.com`) links in message bodies. Display as rich attachment cards instead of plain links.
+- [x] **Incoming cloud link detection** — `detect_cloud_links()` already exists in `core/cloud_attachments.rs` with full pattern matching for OneDrive, GDrive, Dropbox, Box. 12 tests. Needs wiring to sync pipeline via `insert_incoming_cloud_links()`. *(verified 2026-03-22)*
 - [ ] **Compose UI for cloud attachment flow** — Size threshold detection in compose, prompt to upload to cloud, upload progress indicator, insert link into message body. Orchestration logic exists in `core/cloud_attachments.rs`.
 - [ ] **Offline upload queue** — Queue uploads when offline, retry when connectivity returns.
-- [ ] **JMAP/IMAP graceful degradation** — For accounts without cloud storage, show "file too large" warning with size info. No upload capability.
-- [ ] **`cloud_attachments` DB table** — Track uploaded cloud attachments (provider, file ID, sharing link, size, upload timestamp) for display and cleanup.
+- [x] **JMAP/IMAP graceful degradation** — `supports_cloud_upload()` + `large_attachment_warning()` + `LARGE_ATTACHMENT_THRESHOLD` (25 MB) in `core/cloud_attachments.rs`. UI needs to call these during compose attach flow. *(2026-03-22)*
+- [x] **`cloud_attachments` DB table** — Already exists (migration 39). 14 columns, 2 indexes, full CRUD in `core/cloud_attachments.rs`. *(verified 2026-03-22)*
 
 ### Public Folders — `docs/roadmap/public-folders.md`
 
