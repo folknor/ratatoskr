@@ -26,11 +26,11 @@ Features with backend complete but UI or integration work remaining. Each refere
 
 ### Labels Unification — `docs/labels-unification/problem-statement.md`
 
-Phases 1-5 complete (schema, Exchange/IMAP/JMAP sync, local dispatch, sidebar). Remaining:
+Phases 1-5 complete (schema, Exchange/IMAP/JMAP sync, local dispatch + provider write-back, sidebar). Remaining:
 
 - [ ] **Label pills in reading pane** — Display tag-type labels as colored pills on expanded message headers. Data now in `thread_labels` via unified sync.
 - [ ] **Label picker overlay** — Triggered from reading pane or command palette. Lists all available tag-type labels with colors for apply/remove.
-- [ ] **Provider write-back for label operations** — Local apply/remove works (Phase 4). Actual provider API calls (Exchange category set, IMAP STORE +FLAGS, JMAP keyword set) awaits provider client access from app layer.
+- [x] ~~**Provider write-back for label operations**~~ — Wired: apply/remove dispatches to provider APIs (apply_category/remove_category for tags, add_tag/remove_tag for containers). Best-effort, non-blocking.
 - [ ] **Phase 6: Deprecate old tables** — Drop `categories` and `message_categories` tables once all sync paths are verified on the unified system.
 - [ ] **IMAP PERMANENTFLAGS graceful degradation** — Verify keyword write-back survives server restrictions. UI should indicate when an IMAP account doesn't support custom keywords.
 
@@ -120,17 +120,15 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [ ] **Signature: draft restoration with signature state** — Draft save does not persist `signature_separator_index` or `active_signature_id`. On draft reopen, signature position in the document is not reconstructed.
 - [ ] **Signature: per-account default dropdown in Account Settings** — Account editor overlay has no signature dropdown for selecting the default signature for an account.
 - [x] ~~**Signature: edit detection flag**~~ — `dirty: bool` added to `SignatureEditorState`, set on name/body/default edits.
-- [ ] **GAL directory API calls** — `gal_cache` table and autocomplete integration exist. Missing: actual Graph `/users` and Google Directory API calls to populate the cache. Awaits sync orchestrator providing provider client access. See `docs/contacts/problem-statement.md` § GAL Caching.
+- [ ] **GAL directory API calls** — `gal_cache` table and autocomplete integration exist. Missing: actual Graph `/users` and Google Directory API calls to populate the cache. Provider client access now available via `handlers::provider::create_provider()`. See `docs/contacts/problem-statement.md` § GAL Caching.
 - [ ] **CardDAV contact write-back** — CardDAV client supports PROPFIND/REPORT/GET but not PUT/DELETE. Need vCard generation + PUT method for pushing contact edits to CardDAV servers. See `docs/contacts/problem-statement.md`.
-- [ ] **Provider write-back HTTP calls** — `dispatch_provider_write_back()` scaffolded for Google/Graph (body builders + server info lookups exist). JMAP `ContactCard/set` fully implemented. Missing: actual HTTP dispatch for Google (`PATCH /v1/{resourceName}:updateContact`) and Graph (`PATCH /me/contacts/{id}`). Awaits provider client access from handlers.
+- [ ] **Provider write-back HTTP calls** — `dispatch_provider_write_back()` scaffolded for Google/Graph (body builders + server info lookups exist). JMAP `ContactCard/set` fully implemented. Missing: actual HTTP dispatch for Google (`PATCH /v1/{resourceName}:updateContact`) and Graph (`PATCH /me/contacts/{id}`). Provider client access now available via `handlers::provider::create_provider()`.
 
 ## Cross-Cutting Architecture Patterns
 
 Living reference — follow these patterns as features are built. Keep until 1.0.
 
-- **Generational load tracking** — Applied to: nav, thread, search, palette, pop-out, sync, autocomplete, add-account wizard. Verified 2026-03-22. Gaps:
-  - Calendar event loading on date navigation (confirmed missing — race condition on rapid date changes)
-  - Search typeahead dynamic queries (`dispatch_typeahead_query` has no generation counter — stale suggestions possible on fast typing)
+- **Generational load tracking** — Applied to: nav, thread, search, palette, pop-out, sync, autocomplete, add-account wizard, calendar events, search typeahead. All verified and wired 2026-03-22. No known gaps.
 
 - **Component trait** — 7 components: Sidebar, ThreadList, ReadingPane, Settings, StatusBar, AddAccountWizard, Palette. All verified 2026-03-22. Non-components use free functions + App handler methods: Compose, Calendar, Pop-out windows. Conversion optional — current pattern works.
 

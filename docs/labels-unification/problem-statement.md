@@ -277,11 +277,13 @@ IMAP: `FlagChange` now carries `keywords: Vec<String>` extracted from `Flag::Cus
 
 JMAP: `sync_keyword_categories` upserts keywords as tag-type labels alongside the legacy categories writes.
 
-### Phase 4: Local label dispatch ✅
+### Phase 4: Label dispatch with provider write-back ✅
 
-`EmailAction::AddLabel`/`RemoveLabel` now perform actual DB operations — `thread_labels` INSERT/DELETE for all selected threads. Local-first (optimistic); provider write-back via sync.
+`EmailAction::AddLabel`/`RemoveLabel` performs:
+1. Local DB update (thread_labels INSERT/DELETE) for instant UI feedback
+2. Provider write-back (best-effort): creates provider client, looks up label_kind, dispatches `apply_category`/`remove_category` (tags) or `add_tag`/`remove_tag` (containers). Failures logged but don't block the local operation.
 
-Note: `apply_category()`/`remove_category()` not yet removed from ProviderOps — deferred until provider client access is available from the app layer for full write-back.
+Note: `apply_category()`/`remove_category()` not yet removed from ProviderOps as separate methods — they're now called by the unified label dispatch path alongside `add_tag`/`remove_tag`. Full consolidation deferred to Phase 6.
 
 ### Phase 5: Sidebar restructure ✅
 
