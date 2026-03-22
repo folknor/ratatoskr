@@ -14,15 +14,15 @@ Every feature gets a **local-only implementation** as the baseline. Provider-nat
 
 | Feature | Status | Exchange (Graph) | Gmail API | JMAP | IMAP | Local Fallback |
 |---|---|---|---|---|---|---|
-| [Categories](categories.md) | ⚠️ Partial (master list sync added) | Native (`categories`) | Labels (partial overlap) | `keywords` | IMAP keywords (limited) | Local-only labels+colors |
-| [Contacts](contacts.md) | ⚠️ Sync done (Google, Graph, CardDAV) | Native (`/me/contacts`) | People API | CardDAV | CardDAV | Local address book |
+| [Categories](categories.md) | ✅ Backend complete (missing: category picker UI) | Native (`categories`) | Labels (partial overlap) | `keywords` | IMAP keywords (limited) | Local-only labels+colors |
+| [Contacts](contacts.md) | ✅ Complete (all 8 phases) | Native (`/me/contacts`) | People API | CardDAV | CardDAV | Local address book |
 | Auto-collected contacts | ✅ Done | People API (ranked) | "Other Contacts" | Nothing | Nothing | `seen_addresses` table |
 | [@Mentions](mentions.md) | ✅ Done | Native (`mentions`) | Nothing | Nothing | Nothing | Local-only, no server flag |
 | [Reactions](reactions.md) | ✅ Done | Native (`reactions`) | Nothing | Nothing | Nothing | Local-only |
 | [Scheduled send](scheduled-send.md) | ✅ Done | Native (deferred delivery) | Native | `EmailSubmission.sendAt` | Nothing | Local timer + send-on-wake |
 | [Roaming signatures](signatures.md) | ✅ Done | Native (roaming settings) | Gmail API settings | Nothing | Nothing | Local-only signatures |
 | [Cloud attachments](cloud-attachments.md) | ⚠️ Partial (OneDrive done, Google Drive done) | OneDrive via Graph | Google Drive API | Nothing | Nothing | Local large-file warning only |
-| [Tracking blocking](tracking-blocking.md) | ✅ Done (sanitization pipeline added) | N/A (client-side) | N/A (client-side) | N/A (client-side) | N/A (client-side) | Fully local |
+| [Tracking blocking](tracking-blocking.md) | ⚠️ Mostly done (missing: UI for read receipt prompts, remote image strip in sanitizer) | N/A (client-side) | N/A (client-side) | N/A (client-side) | N/A (client-side) | Fully local |
 | [Shared mailboxes](shared-mailboxes.md) | ⚠️ Partial (Graph r/w + sync isolation done, IMAP ACL done) | Native (delegate access) | Native (delegation) | Shared via ACL | IMAP ACL (RFC 4314) | N/A — requires server support |
 | [Public folders](public-folders.md) | ⚠️ Partial (EWS client + schema done) | Native (legacy Exchange) | Nothing | Nothing | Nothing | N/A — Exchange-only concept |
 | [BIMI](bimi.md) | ✅ Done | N/A (DNS + headers) | N/A (DNS + headers) | N/A (DNS + headers) | N/A (DNS + headers) | Fully local |
@@ -59,9 +59,9 @@ Local schema: `seen_addresses` table with `email`, `display_name`, `last_seen`, 
 
 These are features enterprise users actively rely on daily. Missing any of these is a reason not to switch.
 
-- [Categories (Color Flags)](categories.md) — ✅ Done
-- [Contacts & Groups](contacts.md) — ⚠️ Sync done (Google People API, Graph, CardDAV, groups, photos). Missing: Google Groups (admin-only API limitation).
-- [Tracking Pixel / Read Receipt Blocking](tracking-blocking.md) — ✅ Done (sanitization pipeline, MDN, tracking pixels)
+- [Categories (Color Flags)](categories.md) — ✅ Backend complete. Missing: category picker UI, apply/remove from UI.
+- [Contacts & Groups](contacts.md) — ✅ Complete (all 8 phases). Missing: Google Groups (admin-only API limitation).
+- [Tracking Pixel / Read Receipt Blocking](tracking-blocking.md) — ⚠️ Mostly done. Missing: UI for read receipt prompts, remote image strip in sanitizer, link tracking indicators.
 - [Cloud Attachment Linking](cloud-attachments.md) — ⚠️ Partial (OneDrive + Google Drive upload/permissions done)
 - [IMAP CONDSTORE/QRESYNC](imap-condstore-qresync.md) — ⚠️ Phase 2 (CONDSTORE + deletion detection done, VANISHED parsing blocked on async-imap #130)
 - [Shared / Delegated Mailboxes](shared-mailboxes.md) — ⚠️ Partial (Graph read/write + sync isolation + IMAP ACL/NAMESPACE done)
