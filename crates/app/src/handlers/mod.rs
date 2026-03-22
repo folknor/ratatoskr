@@ -14,6 +14,7 @@ mod keyboard;
 mod navigation;
 mod palette;
 pub(crate) mod pop_out;
+pub(crate) mod provider;
 mod search;
 pub mod signatures;
 

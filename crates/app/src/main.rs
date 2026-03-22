@@ -341,6 +341,10 @@ struct App {
 
     /// Body store for loading decompressed message bodies via core.
     body_store: Option<ratatoskr_core::body_store::BodyStoreState>,
+    /// Inline image store for CID image resolution.
+    inline_image_store: Option<ratatoskr_stores::inline_image_store::InlineImageStoreState>,
+    /// Encryption key for decrypting provider credentials (OAuth tokens, passwords).
+    encryption_key: Option<[u8; 32]>,
 }
 
 impl App {
@@ -379,6 +383,22 @@ impl App {
             Ok(bs) => Some(bs),
             Err(e) => {
                 log::error!("Failed to init body store: {e}");
+                None
+            }
+        };
+
+        let inline_image_store = match ratatoskr_stores::inline_image_store::InlineImageStoreState::init(data_dir) {
+            Ok(store) => Some(store),
+            Err(e) => {
+                log::error!("Failed to init inline image store: {e}");
+                None
+            }
+        };
+
+        let encryption_key = match ratatoskr_provider_utils::crypto::load_encryption_key(data_dir) {
+            Ok(key) => Some(key),
+            Err(e) => {
+                log::error!("Failed to load encryption key: {e}");
                 None
             }
         };
@@ -449,6 +469,8 @@ impl App {
             sync_receiver,
             sync_reporter,
             body_store,
+            inline_image_store,
+            encryption_key,
         };
 
         // Restore pop-out windows from previous session
