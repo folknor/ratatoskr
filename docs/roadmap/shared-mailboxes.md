@@ -1,7 +1,7 @@
 # Shared / Delegated Mailboxes
 
 **Tier**: 1 — Blocks switching from Outlook
-**Status**: 🟡 **Partially implemented** — Exchange (Graph) shared mailbox read/write/sync and IMAP shared namespace discovery are implemented in the core crate. Gmail delegation and JMAP Sharing remain unimplemented.
+**Status**: 🟡 **Partially implemented** — Exchange (Graph) shared mailbox read/write/sync, Autodiscover discovery, and IMAP shared namespace discovery are implemented in core. Sidebar integration done (2026-03-22): shared mailboxes auto-populate in scope dropdown from Autodiscover results. JMAP Sharing in progress. Gmail delegation blocked (API limitation). Remaining: thread loading on shared mailbox selection, compose identity auto-selection, per-mailbox sync config.
 
 ---
 
@@ -76,11 +76,20 @@ A user may have Full Access but not Send As (can read but not impersonate), or S
 - DB schema (`db/src/db/migrations.rs`): migration v54 adds `namespace_type TEXT` column to `labels`, storing the IMAP namespace classification per folder.
 - Types (`imap/src/types.rs`): `NamespaceType` enum, `NamespaceEntry`, `NamespaceInfo` structs. `ImapFolder` has an optional `namespace_type` field.
 
+**Sidebar integration (2026-03-22):**
+- `SharedMailbox` type and `Db::get_shared_mailboxes()` query in app crate (`app/src/db/types.rs`, `app/src/db/accounts.rs`).
+- `Db::upsert_shared_mailbox()` for persisting Autodiscover results with auto-enable.
+- Shared mailboxes rendered in sidebar scope dropdown with users icon (`app/src/ui/sidebar.rs`).
+- `SidebarMessage::SelectSharedMailbox` / `SidebarEvent::SharedMailboxSelected` for selection.
+- Shared mailboxes loaded at boot from `shared_mailbox_sync_state` table.
+- When Autodiscover discovers shared mailboxes during Graph sync, they auto-populate in the sidebar.
+
 ### Remaining
 
 - **Gmail delegation**: Account-level delegation is not implementable via public Gmail API (cannot discover inbound delegation; accessing delegated mailbox requires domain-wide delegation or internal session mechanisms). Documented as a known limitation. Send-As aliases work.
-- **JMAP Sharing (RFC 9670)**: Not implemented. Low priority (Stalwart-only). `jmap-client` would need sharing-specific types.
-- **UI/UX for shared mailboxes**: No frontend implementation yet in the iced app (sidebar sections, per-mailbox unread counts, manual-add flow, identity auto-selection in compose).
+- **JMAP Sharing (RFC 9670)**: In progress (being implemented separately).
+- **App-level shared mailbox selection handler**: `SharedMailboxSelected` event is emitted but the App doesn't yet load threads for the selected shared mailbox. Needs navigation state scoping.
+- **Compose identity auto-selection**: When replying from shared mailbox context, auto-set From to shared mailbox address. `send_as_shared_mailbox()` and `send_on_behalf_of()` APIs exist.
 - **Configurable sync depth per shared mailbox**: Currently hardcoded to 30 days initial lookback. No per-mailbox sync depth setting.
 - **Notification routing**: Client-side per-delegate notification preferences not implemented.
 - **Sent Items routing configuration**: `saveToSentItems` behavior not yet configurable per shared mailbox.
@@ -330,8 +339,9 @@ Neither `async-imap` nor `imap-codec` support ACL. Custom implementation via raw
 | Autodiscover XML for auto-mapping | Medium | High for enterprise UX | P1 | **Done** |
 | Per-shared-mailbox delta sync | Medium | Critical | P0 | **Done** |
 | IMAP namespace/ACL discovery | Medium | Medium (Dovecot/Cyrus) | P2 | **Done** |
-| Manual-add shared mailbox UX | Low | Critical (baseline) | P0 | Not started (iced app UI work) |
-| Send identity auto-selection | Medium | Critical for UX | P0 | Not started (iced app UI work) |
+| Sidebar integration (scope dropdown) | Low | Critical (baseline) | P0 | **Done** (2026-03-22) — auto-populates from Autodiscover |
+| Thread loading on shared mailbox selection | Medium | Critical for UX | P0 | Not started (App handler for SharedMailboxSelected) |
+| Send identity auto-selection | Medium | Critical for UX | P0 | Not started |
 | Per-mailbox sync depth config | Medium | High for scale | P1 | Not started |
-| JMAP Sharing (RFC 9670) | Medium-High | Low (Stalwart only) | P3 | Not started |
+| JMAP Sharing (RFC 9670) | Medium-High | Medium | P2 | In progress (separate implementation) |
 | Gmail delegation | Blocked | Low | P3 | Blocked (API limitation) |

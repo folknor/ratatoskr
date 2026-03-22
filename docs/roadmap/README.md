@@ -23,8 +23,8 @@ Every feature gets a **local-only implementation** as the baseline. Provider-nat
 | [Roaming signatures](signatures.md) | ✅ Done | Native (roaming settings) | Gmail API settings | Nothing | Nothing | Local-only signatures |
 | [Cloud attachments](cloud-attachments.md) | ⚠️ Partial (OneDrive done, Google Drive done) | OneDrive via Graph | Google Drive API | Nothing | Nothing | Local large-file warning only |
 | [Tracking blocking](tracking-blocking.md) | ⚠️ Mostly done (remaining: read receipt prompt UI) | N/A (client-side) | N/A (client-side) | N/A (client-side) | N/A (client-side) | Fully local |
-| [Shared mailboxes](shared-mailboxes.md) | ⚠️ Partial (Graph r/w + sync isolation done, IMAP ACL done) | Native (delegate access) | Native (delegation) | Shared via ACL | IMAP ACL (RFC 4314) | N/A — requires server support |
-| [Public folders](public-folders.md) | ⚠️ Partial (EWS client + schema done) | Native (legacy Exchange) | Nothing | Nothing | Nothing | N/A — Exchange-only concept |
+| [Shared mailboxes](shared-mailboxes.md) | ⚠️ Partial (Graph sync + sidebar done, JMAP in progress) | Native (delegate access) | Native (delegation) | Shared via ACL | IMAP ACL (RFC 4314) | N/A — requires server support |
+| [Public folders](public-folders.md) | ⚠️ Partial (EWS client + sidebar pins done) | Native (legacy Exchange) | Nothing | Nothing | Nothing | N/A — Exchange-only concept |
 | [BIMI](bimi.md) | ✅ Done | N/A (DNS + headers) | N/A (DNS + headers) | N/A (DNS + headers) | N/A (DNS + headers) | Fully local |
 | [IMAP SPECIAL-USE](imap-special-use.md) | ✅ Done | N/A | N/A | N/A | Native | N/A |
 
@@ -64,8 +64,8 @@ These are features enterprise users actively rely on daily. Missing any of these
 - [Tracking Pixel / Read Receipt Blocking](tracking-blocking.md) — ⚠️ Mostly done. Remote image strip + AMP blocking + link tracking indicators all implemented (2026-03-22). Remaining: UI for read receipt prompts.
 - [Cloud Attachment Linking](cloud-attachments.md) — ⚠️ Partial (OneDrive + Google Drive upload/permissions done)
 - [IMAP CONDSTORE/QRESYNC](imap-condstore-qresync.md) — ⚠️ Phase 2 (CONDSTORE + deletion detection done, VANISHED parsing blocked on async-imap #130)
-- [Shared / Delegated Mailboxes](shared-mailboxes.md) — ⚠️ Partial (Graph read/write + sync isolation + IMAP ACL/NAMESPACE done)
-- [Public Folders](public-folders.md) — ⚠️ Partial (EWS SOAP client + DB schema done, autodiscover routing + offline sync remaining)
+- [Shared / Delegated Mailboxes](shared-mailboxes.md) — ⚠️ Partial (Graph sync + Autodiscover + sidebar integration done, JMAP Sharing in progress. Remaining: thread loading, compose identity, per-mailbox config)
+- [Public Folders](public-folders.md) — ⚠️ Partial (EWS client + offline sync + sidebar pins done. Remaining: thread loading, folder browser, reply/post wiring)
 
 ## Tier 2 — Keeps users from going back
 

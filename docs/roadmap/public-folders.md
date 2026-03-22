@@ -1,7 +1,7 @@
 # Public Folders
 
 **Tier**: 1 — Blocks switching from Outlook
-**Status**: 🟡 **In progress** — EWS SOAP client implemented in `crates/graph/src/ews/` (FindFolder, GetFolder, FindItem, GetItem, CreateItem), PR_REPLICA_LIST decoder done, EffectiveRights parsing done. Autodiscover routing implemented in `crates/graph/src/autodiscover.rs`. Offline sync for pinned folders implemented in `crates/graph/src/public_folder_sync.rs`. IMAP NAMESPACE public folders implemented in `crates/imap/src/public_folders.rs`. DB schema in place (`crates/db/`). Missing: UI integration.
+**Status**: 🟡 **In progress** — EWS SOAP client implemented in `crates/graph/src/ews/` (FindFolder, GetFolder, FindItem, GetItem, CreateItem), PR_REPLICA_LIST decoder done, EffectiveRights parsing done. Autodiscover routing implemented in `crates/graph/src/autodiscover.rs`. Offline sync for pinned folders implemented in `crates/graph/src/public_folder_sync.rs`. IMAP NAMESPACE public folders implemented in `crates/imap/src/public_folders.rs`. DB schema in place (`crates/db/`). **Sidebar integration done (2026-03-22)**: `PinnedPublicFolder` type, `Db::get_pinned_public_folders()` query, "PUBLIC FOLDERS" section in sidebar with folder icon + unread count, loaded at boot. Remaining: thread loading on public folder selection, public folder browser (lazy-load tree for browsing/pinning), reply/post wiring.
 
 ---
 
@@ -456,11 +456,11 @@ Public folders will exist in Exchange Online for years to come. Microsoft cannot
 | Autodiscover for public folder routing | Medium | Critical | P0 | ✅ Done — `crates/graph/src/autodiscover.rs` (~600 lines). `discover_public_folder_routing()` for hierarchy headers, `discover_content_mailbox()` for content routing, `construct_replica_smtp()` for GUID-to-SMTP. |
 | FindFolder hierarchy browsing (lazy-load) | Medium | Critical | P0 | 🟡 API ready — FindFolder operation implemented, `browse_public_folders()` in `crates/graph/src/public_folder_sync.rs`. DB caching via `public_folders` table. No lazy-load UI yet. |
 | FindItem for folder contents | Medium | Critical | P0 | ✅ Done — FindItem with paging implemented. `sync_pinned_public_folder()` and `sync_all_pinned_folders()` in `crates/graph/src/public_folder_sync.rs` handle sync loop with local storage in `public_folder_items` table. |
-| Pin/favorite folders to sidebar | Low | Critical for UX | P0 | 🟡 Backend done — `pin_public_folder()` / `unpin_public_folder()` in `crates/graph/src/public_folder_sync.rs`, `public_folder_pins` DB table. No sidebar UI yet. |
+| Pin/favorite folders to sidebar | Low | Critical for UX | P0 | ✅ Done — Backend: `pin_public_folder()` / `unpin_public_folder()`. Sidebar: "PUBLIC FOLDERS" section renders pinned folders with unread counts, loaded at boot (2026-03-22). |
 | Offline sync for pinned folders | Medium-High | High | P1 | ✅ Done — `crates/graph/src/public_folder_sync.rs` (~900 lines). Timestamp-based polling, deletion scan throttled to 1hr intervals, content routing cache in `public_folder_content_routing` table. |
 | Mail-enabled folder reply/forward | Medium | High | P1 | 🟡 API ready — CreateItem operation implemented. |
 | CreateItem (post to public folder) | Low | Medium | P2 | 🟡 API ready — CreateItem operation implemented. |
 | IMAP NAMESPACE discovery | Low | Low-Medium (self-hosted only) | P2 | ✅ Done — `crates/imap/src/public_folders.rs` (~800 lines). `discover_imap_public_folders()` uses NAMESPACE + LIST, `check_folder_rights()` uses MYRIGHTS (RFC 4314). |
 | IMAP shared namespace folder access | Low | Low-Medium | P2 | ✅ Done — `sync_imap_public_folder()` in `crates/imap/src/public_folders.rs`. Bridges to provider-agnostic `public_folders` DB table. |
 
-The backend critical path is complete: EWS client, Autodiscover routing, FindFolder browsing, FindItem sync, pin/unpin, offline sync, and IMAP NAMESPACE support are all implemented across `crates/graph/` and `crates/imap/`. The remaining work is UI integration in `crates/app/`: public folder browser panel, sidebar pins, and folder content views.
+The backend critical path is complete: EWS client, Autodiscover routing, FindFolder browsing, FindItem sync, pin/unpin, offline sync, and IMAP NAMESPACE support are all implemented across `crates/graph/` and `crates/imap/`. Sidebar pin rendering done (2026-03-22). The remaining work is: thread loading on public folder selection (App handler for `PublicFolderSelected`), public folder browser panel (lazy-load tree for browsing/pinning unpinned folders), and reply/post compose wiring.

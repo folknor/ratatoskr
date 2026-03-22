@@ -55,17 +55,23 @@ OneDrive and Google Drive upload both implemented. Remaining:
 
 ### Public Folders — `docs/roadmap/public-folders.md`
 
-EWS SOAP client, autodiscover routing, offline sync, IMAP NAMESPACE public folders, DB schema all done. Remaining:
+EWS SOAP client, autodiscover routing, offline sync, IMAP NAMESPACE public folders, DB schema all done. Sidebar pins done (2026-03-22). Remaining:
 
-- [ ] **UI integration** — Public folder browser in sidebar (collapsible tree), message display from public folder threads, compose reply-to-public-folder. Exchange-only feature.
+- [x] **Sidebar pin rendering** — "PUBLIC FOLDERS" section with folder icon, unread count, loaded at boot from `public_folder_pins`. *(2026-03-22)*
+- [ ] **Thread loading on selection** — App handler for `PublicFolderSelected` event to load threads from `public_folder_items` into thread list.
+- [ ] **Public folder browser** — Lazy-load tree widget for browsing the hierarchy and pinning folders. Uses existing `browse_public_folders()` API.
+- [ ] **Reply/post wiring** — Connect compose to `CreateItem` EWS operation for replies and posts to public folders.
 
 ### Shared Mailboxes — `docs/roadmap/shared-mailboxes.md`
 
-Exchange Graph read/write/sync isolation and IMAP ACL/NAMESPACE done. Remaining:
+Exchange Graph sync + Autodiscover + sidebar integration done. Remaining:
 
-- [ ] **Gmail delegation support** — Gmail delegation API for reading/sending from delegated accounts. Requires `gmail.settings.sharing` scope.
-- [ ] **JMAP Sharing support** — JMAP `ShareNotification` and `Principal` types for shared mailbox access. Blocked on server support maturity.
-- [ ] **Shared mailbox UI** — Sidebar section or scope dropdown entries for shared/delegated mailboxes. Account-switcher integration.
+- [x] **Sidebar scope dropdown** — Shared mailboxes auto-populate from Autodiscover results, rendered with users icon. *(2026-03-22)*
+- [ ] **Thread loading on selection** — App handler for `SharedMailboxSelected` event to load navigation and threads for the selected shared mailbox.
+- [ ] **Compose identity auto-selection** — When replying from shared mailbox context, auto-set From to shared mailbox address. `send_as_shared_mailbox()` and `send_on_behalf_of()` APIs exist.
+- [ ] **Gmail delegation support** — Blocked (API limitation). Send-As aliases work.
+- [x] **JMAP Sharing support** — In progress (separate implementation). *(2026-03-22)*
+- [ ] **Per-mailbox sync depth config** — Currently hardcoded to 30 days. No per-mailbox setting.
 
 ### IMAP CONDSTORE/QRESYNC — `docs/roadmap/imap-condstore-qresync.md`
 
